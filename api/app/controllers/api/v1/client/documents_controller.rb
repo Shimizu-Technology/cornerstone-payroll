@@ -15,11 +15,12 @@ module Api
 
           documents = documents.where(category: params[:category]) if params[:category].present?
           documents = documents.where(employee_id: params[:employee_id]) if params[:employee_id].present?
+          employee_linked_count = documents.where.not(employee_id: nil).count
           documents = bounded_page(documents)
 
           render json: {
             data: documents.map { |document| serialize_document(document) },
-            meta: bounded_page_meta(documents)
+            meta: bounded_page_meta(documents).merge(employee_linked_count: employee_linked_count)
           }
         end
 

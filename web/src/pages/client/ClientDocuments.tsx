@@ -8,12 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
+import { LoadMoreFooter } from '@/components/ui/load-more';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { PortalMessagesPanel } from '@/components/client-portal/PortalMessagesPanel';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
+import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import { clientDocumentsApi, clientEmployeesApi, clientPortalThreadsApi } from '@/services/api';
-import type { ClientDocument } from '@/services/api';
+import type { ClientDocument, ClientDocumentListMeta } from '@/services/api';
 import type { Employee } from '@/types';
 
 const documentCategories = [
@@ -43,6 +45,11 @@ function formatUploadSuccessMessage(count: number) {
 
 export function ClientDocuments() {
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
+  const [documentsMeta, setDocumentsMeta] = useState<ClientDocumentListMeta | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  // Bumped on every fresh load so a slow "load more" from before an upload or delete is dropped.
+  const listGeneration = useRef(0);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -67,16 +74,16 @@ export function ClientDocuments() {
     [employees]
   );
 
-  const employeeScopedDocuments = useMemo(
-    () => documents.filter((document) => document.employee_id).length,
-    [documents]
-  );
+  // Totals come from the server so they stay right when only the first page is loaded.
+  const totalDocuments = documentsMeta?.total_count ?? documents.length;
+  const employeeScopedDocuments = documentsMeta?.employee_linked_count ?? documents.filter((document) => document.employee_id).length;
   const selectedFiles = form.files;
   const selectedFileCount = selectedFiles.length;
   const totalSelectedFileSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
   const supportsSingleTitle = selectedFileCount <= 1;
 
   const load = useCallback(async () => {
+    listGeneration.current += 1;
     try {
       setLoading(true);
       setError(null);
@@ -85,6 +92,8 @@ export function ClientDocuments() {
         clientEmployeesApi.list({ per_page: 500, sort_by: 'name', sort_direction: 'asc' }),
       ]);
       setDocuments(documentsResponse.data);
+      setDocumentsMeta(documentsResponse.meta);
+      setLoadMoreError(null);
       setEmployees(employeesResponse.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents');
@@ -94,6 +103,24 @@ export function ClientDocuments() {
   }, [setError]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const loadMore = async () => {
+    if (!documentsMeta) return;
+    const generation = listGeneration.current;
+    try {
+      setLoadingMore(true);
+      setLoadMoreError(null);
+      const response = await clientDocumentsApi.list({ page: documentsMeta.current_page + 1 });
+      if (generation !== listGeneration.current) return;
+      setDocuments((current) => appendUniqueById(current, response.data));
+      setDocumentsMeta(response.meta);
+    } catch (err) {
+      if (generation !== listGeneration.current) return;
+      setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more documents');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleUpload = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -198,13 +225,13 @@ export function ClientDocuments() {
         <div className="grid gap-4 md:grid-cols-3">
           <MiniStat
             title="Stored in portal"
-            value={String(documents.length)}
+            value={totalDocuments.toLocaleString()}
             detail="Files available to your payroll team"
             icon={<ShieldCheck className="h-5 w-5" />}
           />
           <MiniStat
             title="Employee-linked"
-            value={String(employeeScopedDocuments)}
+            value={employeeScopedDocuments.toLocaleString()}
             detail="Attached to a specific employee record"
             icon={<Users className="h-5 w-5" />}
           />
@@ -467,6 +494,16 @@ export function ClientDocuments() {
                     </TableBody>
                   </Table>
                 </div>
+                <LoadMoreFooter
+                  className="mt-4"
+                  shown={documents.length}
+                  total={totalDocuments}
+                  noun="documents"
+                  hasMore={hasMorePages(documentsMeta)}
+                  loading={loadingMore}
+                  error={loadMoreError}
+                  onLoadMore={() => void loadMore()}
+                />
               </>
             )}
           </CardContent>

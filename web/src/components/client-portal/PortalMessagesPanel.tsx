@@ -6,13 +6,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { LoadMoreFooter } from '@/components/ui/load-more';
+import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { subscribeToClientPortalThreads } from '@/services/clientPortalCable';
-import type { ClientDocument, ClientPortalMessage, ClientPortalThread } from '@/services/api';
+import type { BoundedListMeta, ClientDocument, ClientPortalMessage, ClientPortalThread } from '@/services/api';
 
 type PortalThreadsApi = {
-  list: (params?: { status?: string }) => Promise<{ data: ClientPortalThread[] }>;
+  list: (params?: { status?: string; page?: number }) => Promise<{ data: ClientPortalThread[]; meta?: BoundedListMeta }>;
   get: (id: number) => Promise<{ data: ClientPortalThread }>;
   create: (data: { subject: string; body?: string; document_id?: number }) => Promise<{ data: ClientPortalThread }>;
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) => Promise<{ data: ClientPortalThread }>;
@@ -53,6 +55,12 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
 }) {
   const { user } = useAuth();
   const [threads, setThreads] = useState<ClientPortalThread[]>([]);
+  const [threadsMeta, setThreadsMeta] = useState<BoundedListMeta | null>(null);
+  // Rows that came from list pages. Conversations added live on top of those
+  // are not in meta.total_count yet, so they are added to the shown total.
+  const [serverThreadCount, setServerThreadCount] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedThread, setSelectedThread] = useState<ClientPortalThread | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,7 +89,11 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       setError(null);
       const response = await api.list();
       if (generation !== dataGeneration.current || unavailableRef.current) return;
-      setThreads(response.data.filter(thread => thread.company_id === companyId));
+      const companyThreads = response.data.filter(thread => thread.company_id === companyId);
+      setThreads(companyThreads);
+      setThreadsMeta(response.meta ?? null);
+      setServerThreadCount(companyThreads.length);
+      setLoadMoreError(null);
       setSelectedId((current) => current || response.data.find(thread => thread.company_id === companyId)?.id || null);
     } catch (err) {
       if (generation === dataGeneration.current && !unavailableRef.current) setError(err instanceof Error ? err.message : 'Failed to load messages');
@@ -93,6 +105,26 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   useEffect(() => {
     void loadThreads();
   }, [loadThreads, connectionAttempt]);
+
+  const loadMoreThreads = async () => {
+    if (!companyId || !threadsMeta || unavailableRef.current) return;
+    const generation = dataGeneration.current;
+    try {
+      setLoadingMore(true);
+      setLoadMoreError(null);
+      const response = await api.list({ page: threadsMeta.current_page + 1 });
+      if (generation !== dataGeneration.current || unavailableRef.current) return;
+      const pageThreads = response.data.filter(thread => thread.company_id === companyId);
+      const added = pageThreads.filter(thread => !threads.some(current => current.id === thread.id)).length;
+      setThreads((current) => appendUniqueById(current, pageThreads));
+      setServerThreadCount((count) => count + added);
+      setThreadsMeta(response.meta ?? null);
+    } catch (err) {
+      if (generation === dataGeneration.current) setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more conversations');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     if (!companyId) return;
@@ -128,6 +160,9 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
         setConnected(false);
         setLoading(false);
         setThreads([]);
+        setThreadsMeta(null);
+        setServerThreadCount(0);
+        setLoadMoreError(null);
         setSelectedId(null);
         setSelectedThread(null);
         setMobileConversationOpen(false);
@@ -327,6 +362,17 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
                     <p className="mt-1 text-xs text-neutral-400">{formatDateTime(thread.last_message_at || thread.created_at)}</p>
                   </button>
                 ))
+              )}
+              {!loading && (
+                <LoadMoreFooter
+                  shown={threads.length}
+                  total={(threadsMeta?.total_count ?? serverThreadCount) + Math.max(0, threads.length - serverThreadCount)}
+                  noun="conversations"
+                  hasMore={hasMorePages(threadsMeta)}
+                  loading={loadingMore}
+                  error={loadMoreError}
+                  onLoadMore={() => void loadMoreThreads()}
+                />
               )}
             </div>
           </div>

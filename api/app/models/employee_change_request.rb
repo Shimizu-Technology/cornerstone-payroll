@@ -62,7 +62,7 @@ class EmployeeChangeRequest < ApplicationRecord
   validates :requested_by, presence: true, on: :create
   validates :request_kind, inclusion: { in: %w[create update] }
 
-  scope :recent_first, -> { order(created_at: :desc) }
+  scope :recent_first, -> { order(created_at: :desc, id: :desc) }
   scope :for_company, ->(company_id) { where(company_id: company_id) }
 
   def sensitive_payload

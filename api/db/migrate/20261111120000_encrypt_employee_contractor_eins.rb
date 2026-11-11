@@ -5,6 +5,11 @@
 # this before or after the code switch never breaks reads. Rerun
 # `bin/rails employees:encrypt_contractor_eins` after deploy to sweep any value
 # an old process wrote while the deploy was in progress.
+#
+# Blank values become NULL, not ciphertext of "", so Employee.intake_incomplete, which checks the
+# raw column, keeps flagging business contractors with no EIN. Each rewrite only
+# applies while the column still holds the value that was read, so an EIN saved
+# by a running process during the migration is never overwritten.
 class EncryptEmployeeContractorEins < ActiveRecord::Migration[8.1]
   class MigrationEmployee < ActiveRecord::Base
     self.table_name = "employees"
@@ -17,7 +22,9 @@ class EncryptEmployeeContractorEins < ActiveRecord::Migration[8.1]
     MigrationEmployee.where.not(contractor_ein: nil).select(:id, :contractor_ein).find_each(batch_size: 100) do |employee|
       next if employee.encrypted_attribute?(:contractor_ein)
 
-      employee.update_columns(contractor_ein: employee.contractor_ein)
+      MigrationEmployee.where(id: employee.id)
+                       .where("contractor_ein = ?", employee.contractor_ein_before_type_cast)
+                       .update_all(contractor_ein: employee.contractor_ein.to_s.strip.presence)
     end
   end
 
@@ -27,7 +34,11 @@ class EncryptEmployeeContractorEins < ActiveRecord::Migration[8.1]
       next unless employee.encrypted_attribute?(:contractor_ein)
 
       plaintext = employee.contractor_ein
-      ActiveRecord::Encryption.without_encryption { employee.update_columns(contractor_ein: plaintext) }
+      ActiveRecord::Encryption.without_encryption do
+        MigrationEmployee.where(id: employee.id)
+                         .where("contractor_ein = ?", employee.contractor_ein_before_type_cast)
+                         .update_all(contractor_ein: plaintext)
+      end
     end
   end
 end

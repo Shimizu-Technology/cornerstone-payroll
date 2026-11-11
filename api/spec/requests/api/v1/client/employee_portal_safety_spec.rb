@@ -146,6 +146,16 @@ RSpec.describe "Client employee portal safety", type: :request do
       expect(response.parsed_body.fetch("data").size).to eq(1)
       expect(response.parsed_body.dig("meta", "total_pages")).to eq(2)
     end
+
+    [ "", "0", "-3", "abc" ].each do |value|
+      it "falls back to the default page size when per_page is #{value.inspect}" do
+        get "/api/v1/client/employees", params: { per_page: value }
+
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig("meta", "per_page")).to eq(Api::V1::Client::EmployeesController::DEFAULT_PER_PAGE)
+        expect(response.parsed_body.fetch("data").size).to eq(2)
+      end
+    end
   end
 
   describe "audit reliability" do
