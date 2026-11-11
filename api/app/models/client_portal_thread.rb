@@ -14,7 +14,7 @@ class ClientPortalThread < ApplicationRecord
   validates :subject, presence: true
   validates :status, inclusion: { in: STATUSES }
 
-  scope :recent_first, -> { order(Arel.sql("COALESCE(last_message_at, created_at) DESC")) }
+  scope :recent_first, -> { order(Arel.sql("COALESCE(client_portal_threads.last_message_at, client_portal_threads.created_at) DESC, client_portal_threads.id DESC")) }
   scope :open, -> { where(status: "open") }
 
   def resolved?

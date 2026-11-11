@@ -23,15 +23,15 @@ RSpec.describe "Api::V1::Client::PortalThreads", type: :request do
     expect(thread.reload.status).to eq("open")
   end
 
-  it "allows staff callers in the client namespace to update thread status" do
+  it "refuses staff callers in the client namespace; they resolve threads from the staff side" do
     allow_any_instance_of(Api::V1::Client::PortalThreadsController).to receive(:current_user).and_return(staff_user)
     thread = create(:client_portal_thread, company: company, created_by: client_user, status: "open")
 
     patch "/api/v1/client/portal_threads/#{thread.id}", params: { status: "resolved" }
 
-    expect(response).to have_http_status(:ok)
-    expect(thread.reload).to be_resolved
-    expect(thread.resolved_by).to eq(staff_user)
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to eq("Client portal access required")
+    expect(thread.reload.status).to eq("open")
   end
 
   it "returns the committed last message timestamp when creating a thread with an initial message" do

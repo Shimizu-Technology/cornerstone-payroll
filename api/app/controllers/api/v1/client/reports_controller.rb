@@ -4,6 +4,8 @@ module Api
   module V1
     module Client
       class ReportsController < Api::V1::Admin::ReportsController
+        include ClientPortalAccess
+
         skip_before_action :require_staff_access!
         before_action :require_client_portal_access!
         before_action :ensure_client_reportable_pay_period!, only: %i[
@@ -20,12 +22,6 @@ module Api
         end
 
         private
-
-        def require_client_portal_access!
-          return if current_user&.staff_member? || current_user&.client?
-
-          render json: { error: "Client portal access required" }, status: :forbidden
-        end
 
         def current_pay_period_summary
           pp = PayPeriod.reportable_committed

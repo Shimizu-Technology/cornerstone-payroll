@@ -4209,6 +4209,20 @@ export interface ClientEmployeeUpdateResponse {
   message?: string;
 }
 
+// Paging metadata from list endpoints capped by the API's BoundedListPagination.
+export interface BoundedListMeta {
+  current_page: number;
+  total_pages: number;
+  total_count: number;
+  per_page: number;
+}
+
+export interface ClientDocumentListMeta extends BoundedListMeta {
+  employee_linked_count: number;
+}
+
+export type BoundedListParams = { page?: number; per_page?: number };
+
 export interface ClientDocument {
   id: number;
   title: string;
@@ -4474,8 +4488,8 @@ export const employeeLoansApi = {
 };
 
 export const clientDocumentsApi = {
-  list: (params?: { category?: string; employee_id?: number }) =>
-    api.get<{ data: ClientDocument[] }>('/client/documents', params),
+  list: (params?: { category?: string; employee_id?: number } & BoundedListParams) =>
+    api.get<{ data: ClientDocument[]; meta: ClientDocumentListMeta }>('/client/documents', params),
   upload: (formData: FormData) =>
     api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData),
   preview: (id: number) =>
@@ -4492,8 +4506,8 @@ export const clientEmployeeDocumentRequirementsApi = {
 };
 
 export const clientPortalThreadsApi = {
-  list: (params?: { status?: string }) =>
-    api.get<{ data: ClientPortalThread[] }>('/client/portal_threads', params),
+  list: (params?: { status?: string } & BoundedListParams) =>
+    api.get<{ data: ClientPortalThread[]; meta: BoundedListMeta }>('/client/portal_threads', params),
   get: (id: number) =>
     api.get<{ data: ClientPortalThread }>(`/client/portal_threads/${id}`),
   create: (data: { subject: string; body?: string; document_id?: number }) =>
@@ -4538,8 +4552,8 @@ export const adminEmployeeDocumentRequirementsApi = {
 };
 
 export const adminPortalThreadsApi = {
-  list: (params?: { status?: string }) =>
-    api.get<{ data: ClientPortalThread[] }>('/admin/portal_threads', params),
+  list: (params?: { status?: string } & BoundedListParams) =>
+    api.get<{ data: ClientPortalThread[]; meta: BoundedListMeta }>('/admin/portal_threads', params),
   get: (id: number) =>
     api.get<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}`),
   create: (data: { subject: string; body?: string; document_id?: number }) =>
@@ -4553,8 +4567,8 @@ export const adminPortalThreadsApi = {
 };
 
 export const clientEmployeeChangeRequestsApi = {
-  list: (params?: { status?: string; search?: string }) =>
-    api.get<{ data: EmployeeChangeRequest[] }>('/client/employee_change_requests', params),
+  list: (params?: { status?: string; search?: string } & BoundedListParams) =>
+    api.get<{ data: EmployeeChangeRequest[]; meta: BoundedListMeta }>('/client/employee_change_requests', params),
   get: (id: number) =>
     api.get<{ data: EmployeeChangeRequest }>(`/client/employee_change_requests/${id}`),
 };

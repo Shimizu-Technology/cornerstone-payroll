@@ -3,6 +3,7 @@
 module ClientPortalThreadActions
   extend ActiveSupport::Concern
   include ExplicitCompanyAccess
+  include BoundedListPagination
 
   included do
     before_action :set_portal_thread, only: [ :show, :update, :mark_read ]
@@ -13,9 +14,11 @@ module ClientPortalThreadActions
                                 .includes(:created_by, :resolved_by, messages: [ :author, { client_document: [ :employee, :uploaded_by ] } ])
                                 .recent_first
     threads = threads.where(status: params[:status]) if params[:status].present?
+    threads = bounded_page(threads)
 
     render json: {
-      data: threads.map { |thread| portal_serializer.thread(thread) }
+      data: threads.map { |thread| portal_serializer.thread(thread) },
+      meta: bounded_page_meta(threads)
     }
   end
 
