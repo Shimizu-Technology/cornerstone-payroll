@@ -73,7 +73,8 @@ jobs:
         env:
           POOLER_DIR: ${{ runner.temp }}/pgbouncer
         run: |
-          sudo apt-get update && sudo apt-get install -y pgbouncer
+          "$GITHUB_WORKSPACE/.github/scripts/apt-refresh.sh"
+          sudo apt-get install -y pgbouncer
           mkdir -p "$POOLER_DIR"
           cat > "$POOLER_DIR/pgbouncer.ini" <<EOF
           [databases]
@@ -115,7 +116,10 @@ jobs:
         env:
           DEPLOYMENT_ENV: production
           VITE_DEPLOYMENT_ENV: production
-      - run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/apt-refresh.sh"
+          npx playwright install --with-deps chromium
       - run: npm run test:e2e:public
         env:
           VITE_AUTH_ENABLED: "false"
@@ -161,7 +165,10 @@ jobs:
         working-directory: api
       - run: npm ci
         working-directory: web
-      - run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/apt-refresh.sh"
+          npx playwright install --with-deps chromium
         working-directory: web
       - run: npm run test:e2e:release
         working-directory: web
