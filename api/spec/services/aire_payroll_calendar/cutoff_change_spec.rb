@@ -235,6 +235,63 @@ RSpec.describe AirePayrollCalendar::CutoffChange do
       expect(result.publication.payload).to include("cutoff_source" => "policy", "cutoff_at" => "2026-10-22T17:00:00+10:00")
     end
 
+    it "stops delivering the refused version it replaces" do
+      refused = change!(action: "change", cutoff_at: "2026-10-17T09:15:00+10:00", confirm: false).publication
+      # A 409 for a time still ahead keeps retrying, so it could still reach AIRE.
+      reject_delivery!(refused, "The payroll calendar changed concurrently", status: 409)
+      refused.update_columns(next_delivery_attempt_at: 1.minute.from_now)
+
+      replacement = change!(action: "change", cutoff_at: "2026-10-25T10:30:00+10:00", reason: "Try again", confirm: false).publication
+      expect(refused.reload).to have_attributes(next_delivery_attempt_at: nil, delivery_enqueued_until: nil,
+        last_error: "Superseded by schedule version #{replacement.schedule_version}")
+      expect(AirePayrollCalendarPublication.due_for_delivery(2.minutes.from_now)).to contain_exactly(replacement)
+    end
+
+    it "lets a new change supersede one whose only delivery came after its time and lost the response" do
+      expired = change!(action: "change", cutoff_at: "2026-10-17T09:15:00+10:00", confirm: false).publication
+      # The job ran late, and AIRE's answer never came back.
+      client = instance_double(TimeTracking::Client)
+      allow(client).to receive(:publish_payroll_calendar_period).and_raise(TimeTracking::Client::Error, "Could not securely reach AIRE")
+      travel_to(guam.local(2026, 10, 17, 9, 20))
+      AirePayrollCalendar::Delivery.new(publication_id: expired.id, client_factory: ->(*) { client }).call
+      expect(expired.reload).to have_attributes(delivery_status: "failed", delivery_attempts: 1, last_response_status: nil, next_delivery_attempt_at: nil)
+
+      state = AirePayrollCalendar::Presenter.call(pay_period.reload)
+      expect(state[:cutoff_delivery]).to include(state: "expired", schedule_version: 2, cutoff_at: "2026-10-17T09:15:00+10:00")
+      expect(state[:cutoff_control]).to include(available: true, unavailable_reason: nil)
+
+      result = change!(action: "change", cutoff_at: "2026-10-22T17:00:00+10:00", reason: "Keep the default", confirm: false)
+      expect(result.publication.schedule_version).to eq(3)
+      expect(result.override.previous_cutoff_at).to eq(policy_cutoff)
+      expect(expired.reload.last_error).to eq("Superseded by schedule version 3")
+    end
+
+    it "drops the delivery note once time tracking locked the period" do
+      refused = change!(action: "change", cutoff_at: "2026-10-17T09:15:00+10:00", confirm: false).publication
+      reject_delivery!(refused)
+      expect(AirePayrollCalendar::Presenter.call(pay_period.reload)[:cutoff_delivery]).to include(state: "rejected")
+
+      create(:time_tracking_import, :finalized_aire_batch, pay_period: pay_period, time_tracking_source: source)
+      expect(AirePayrollCalendar::Presenter.call(pay_period.reload)[:cutoff_delivery]).to be_nil
+    end
+
+    it "locks the pay period, then the source, before it reads what AIRE applied" do
+      statements = []
+      subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") { |*, payload| statements << payload[:sql] }
+      begin
+        change!(action: "change", cutoff_at: "2026-10-25T10:30:00+10:00", confirm: false)
+      ensure
+        ActiveSupport::Notifications.unsubscribe(subscriber)
+      end
+
+      pay_period_lock = statements.index { |sql| sql.match?(/FROM "pay_periods".*FOR UPDATE/m) }
+      source_lock = statements.index { |sql| sql.match?(/FROM "time_tracking_sources".*FOR UPDATE/m) }
+      first_publication_read = statements.index { |sql| sql.include?(%(FROM "aire_payroll_calendar_publications")) }
+      expect([ pay_period_lock, source_lock, first_publication_read ]).to all(be_present)
+      expect(pay_period_lock).to be < source_lock
+      expect(source_lock).to be < first_publication_read
+    end
+
     it "judges a passed lock time by the version AIRE applied" do
       change!(action: "change", cutoff_at: "2026-10-17T09:30:00+10:00")
       travel_to(guam.local(2026, 10, 17, 9, 31))

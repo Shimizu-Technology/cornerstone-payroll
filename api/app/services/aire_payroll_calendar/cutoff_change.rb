@@ -16,7 +16,11 @@ module AirePayrollCalendar
   # taken once the lock AIRE has applied is under MIN_LEAD away, so delivery
   # has time to reach AIRE before either time passes. While a newer version is
   # still being delivered, further changes wait for it; once AIRE refuses one,
-  # a new change supersedes it.
+  # or it expires undelivered, a new change supersedes it.
+  #
+  # Lock order: pay period, then time tracking source, then publications.
+  # Publisher takes the same order, and Delivery holds the source lock while it
+  # talks to AIRE, so the state read here can't change until this commits.
   class CutoffChange
     class Error < StandardError
       attr_reader :status
@@ -59,6 +63,7 @@ module AirePayrollCalendar
         source = calendar_period.time_tracking_source
         raise Error.new("This request does not belong to this pay period's time tracking source", status: :forbidden) if @source && @source.id != source.id
 
+        source.lock!
         contract = source.connector.calendar_contract(@pay_period)
         current = contract.payload
         applied = validate_state!(calendar_period, source, current)
@@ -175,7 +180,7 @@ module AirePayrollCalendar
         raise Error.new("AIRE locks this period in under 15 minutes, so its lock time can no longer change", status: :conflict)
       end
       undelivered = calendar_period.undelivered_publication
-      if undelivered && !undelivered.rejected?
+      if undelivered && !undelivered.supersedable?(@now)
         raise Error.new("The previous lock-time change is still being delivered to AIRE. Try again once AIRE confirms it.", status: :conflict)
       end
       raise Error, "It is too close to payday to change the lock time" if Contract.latest_override_at(@pay_period) <= @now
