@@ -143,5 +143,9 @@ class ClientDocument < ApplicationRecord
 
   def enqueue_scan
     ScanClientDocumentJob.perform_later(id) if scan_status == "pending"
+  rescue StandardError => e
+    # The upload transaction has committed. Keep the original and pending
+    # state for scanner recovery; never let enqueue failure trigger blob cleanup.
+    Rails.logger.error("Client document scan enqueue failed for #{id}: #{e.class}")
   end
 end
