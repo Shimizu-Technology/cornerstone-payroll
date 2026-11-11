@@ -97,7 +97,10 @@ class AirePayrollCalendarPublication < ApplicationRecord
   def rejection_message
     return unless rejected?
 
-    last_error.to_s.sub(/\A[\w:]+Error: /, "").presence
+    source_name = aire_payroll_calendar_period&.time_tracking_source&.name
+    message = last_error.to_s.sub(/\A[\w:]+Error: /, "")
+    message = message.delete_prefix("#{source_name}: ") if source_name
+    message.presence
   end
 
   private

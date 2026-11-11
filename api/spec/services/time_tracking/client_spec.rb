@@ -752,12 +752,12 @@ RSpec.describe TimeTracking::Client do
       expect(stub).to have_been_requested.once
     end
 
-    it "retains the response status without exposing a rejected JSON body" do
+    it "retains the response status without exposing a failed JSON body" do
       source = create(:time_tracking_source, source_type: "aire_services", base_url: "https://time.example.com")
       external_id = SecureRandom.uuid
       stub_request(:put, "https://time.example.com/api/v1/payroll/calendar_periods/#{external_id}")
         .to_return(
-          status: 409,
+          status: 500,
           body: { error: "secret source details" }.to_json,
           headers: { "Content-Type" => "application/json" }
         )
@@ -769,9 +769,23 @@ RSpec.describe TimeTracking::Client do
           idempotency_key: SecureRandom.uuid
         )
       end.to raise_error(TimeTracking::Client::Error) { |error|
-        expect(error.response_status).to eq(409)
-        expect(error.message).to include("HTTP 409")
+        expect(error.response_status).to eq(500)
+        expect(error.message).to include("HTTP 500")
         expect(error.message).not_to include("secret source details")
+      }
+    end
+
+    it "keeps AIRE's reason when it refuses a calendar publication" do
+      source = create(:time_tracking_source, source_type: "aire_services", base_url: "https://time.example.com", name: "AIRE")
+      external_id = SecureRandom.uuid
+      stub_request(:put, "https://time.example.com/api/v1/payroll/calendar_periods/#{external_id}")
+        .to_return(status: 422, body: { error: "cutoff_at must be in the future when published" }.to_json,
+          headers: { "Content-Type" => "application/json" })
+
+      expect do
+        client_for(source).publish_payroll_calendar_period(external_pay_period_id: external_id, payload: {}, idempotency_key: SecureRandom.uuid)
+      end.to raise_error(TimeTracking::Client::Error, "AIRE: cutoff_at must be in the future when published") { |error|
+        expect(error.response_status).to eq(422)
       }
     end
   end

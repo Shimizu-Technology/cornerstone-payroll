@@ -105,7 +105,10 @@ module TimeTracking
         validate_source: false,
         method: :put,
         body: payload,
-        headers: { "Idempotency-Key" => idempotency_key }
+        headers: { "Idempotency-Key" => idempotency_key },
+        # Admins see why AIRE refused a calendar (a lock time that arrived too
+        # late, say). Other failure bodies stay out of stored errors.
+        surface_remote_error: ->(status) { AirePayrollCalendarPublication::REJECTED_RESPONSE_STATUSES.include?(status) }
       )
     end
 
@@ -636,7 +639,8 @@ module TimeTracking
         read_timeout: read_timeout, total_response_timeout: total_response_timeout)
 
       unless response.is_a?(Net::HTTPSuccess)
-        message = surface_remote_error ? remote_error_message(response, body) : nil
+        surface = surface_remote_error.respond_to?(:call) ? surface_remote_error.call(response.code.to_i) : surface_remote_error
+        message = surface ? remote_error_message(response, body) : nil
         raise Error.new(message || "#{@source.name} returned HTTP #{response.code}", response_status: response.code.to_i)
       end
       content_type = response["Content-Type"].to_s.downcase
