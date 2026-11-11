@@ -362,6 +362,7 @@ module Api
             action: action,
             record_type: "employees",
             record_id: result.employee.id,
+            subject_name: result.employee.full_name,
             metadata: audit_metadata_for(result),
             ip_address: request.remote_ip,
             user_agent: request.user_agent

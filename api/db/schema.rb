@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_11_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -501,8 +501,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "idempotency_key", limit: 128
     t.index [ "author_id" ], name: "index_client_portal_messages_on_author_id"
     t.index [ "client_document_id" ], name: "index_client_portal_messages_on_client_document_id"
+    t.index [ "client_portal_thread_id", "author_id", "idempotency_key" ], name: "index_portal_messages_on_retry_key", unique: true
     t.index [ "client_portal_thread_id" ], name: "index_client_portal_messages_on_thread_id"
     t.index [ "company_id", "created_at" ], name: "index_client_portal_messages_on_company_created_at"
     t.index [ "company_id" ], name: "index_client_portal_messages_on_company_id"
@@ -520,6 +522,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.string "status", default: "open", null: false
     t.string "subject", null: false
     t.datetime "updated_at", null: false
+    t.bigint "read_baseline_message_id", default: 0, null: false
     t.index [ "company_id", "status", "last_message_at" ], name: "index_client_portal_threads_on_company_status_last_message"
     t.index [ "company_id" ], name: "index_client_portal_threads_on_company_id"
     t.index [ "created_by_id" ], name: "index_client_portal_threads_on_created_by_id"
@@ -3311,6 +3314,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.index [ "timecard_id" ], name: "index_punch_entries_on_timecard_id"
   end
 
+  create_table "portal_thread_read_receipts", force: :cascade do |t|
+    t.bigint "client_portal_thread_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "last_displayed_message_id", null: false
+    t.datetime "opened_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "client_portal_thread_id", "user_id" ], name: "index_portal_receipts_on_thread_user", unique: true
+    t.index [ "user_id" ], name: "index_portal_thread_read_receipts_on_user_id"
+  end
+
   create_table "prior_provider_history_drafts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -4667,4 +4681,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
   add_foreign_key "time_tracking_category_mappings", "companies"
   add_foreign_key "time_tracking_category_mappings", "time_tracking_sources"
   add_foreign_key "time_tracking_category_mappings", "users", column: "reviewed_by_id"
+  add_foreign_key "portal_thread_read_receipts", "client_portal_threads"
+  add_foreign_key "portal_thread_read_receipts", "users"
 end

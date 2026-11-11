@@ -4302,6 +4302,22 @@ export interface ClientPortalMessage {
   document?: ClientDocument | null;
 }
 
+export interface PortalActivityEvent {
+  id: number;
+  actor_name: string;
+  action: string;
+  subject_name: string;
+  headline: string;
+  created_at: string;
+  document_version?: number;
+}
+
+export interface PortalReadDisplay {
+  foreground: true;
+  display_token: string;
+  displayed_message_ids: number[];
+}
+
 export interface ClientPortalThread {
   id: number;
   company_id: number;
@@ -4318,6 +4334,7 @@ export interface ClientPortalThread {
   updated_at: string;
   latest_message?: ClientPortalMessage | null;
   messages?: ClientPortalMessage[];
+  display_token?: string;
 }
 
 export interface EmployeeChangeRequest {
@@ -4494,6 +4511,8 @@ export const clientDocumentsApi = {
     api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData),
   preview: (id: number) =>
     api.getBlobWithParams(`/client/documents/${id}/preview`),
+  opened: (id: number) => api.post<void>(`/client/documents/${id}/opened`),
+  activity: (id: number, page = 1) => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/client/documents/${id}/activity`, { page }),
   download: (id: number) =>
     api.getBlobWithParams(`/client/documents/${id}/download`),
   delete: (id: number) =>
@@ -4514,9 +4533,10 @@ export const clientPortalThreadsApi = {
     api.post<{ data: ClientPortalThread }>('/client/portal_threads', data),
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) =>
     api.patch<{ data: ClientPortalThread }>(`/client/portal_threads/${id}`, data),
-  markRead: (id: number) =>
-    api.post<{ data: ClientPortalThread }>(`/client/portal_threads/${id}/mark_read`),
-  createMessage: (threadId: number, data: { body?: string; document_id?: number }) =>
+  activity: (id: number, page = 1) => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/client/portal_threads/${id}/activity`, { page }),
+  markRead: (id: number, data: PortalReadDisplay) =>
+    api.post<{ data: ClientPortalThread }>(`/client/portal_threads/${id}/mark_read`, data),
+  createMessage: (threadId: number, data: { body?: string; document_id?: number; idempotency_key: string }) =>
     api.post<{ data: ClientPortalMessage }>(`/client/portal_threads/${threadId}/messages`, data),
 };
 
@@ -4527,6 +4547,8 @@ export const adminClientDocumentsApi = {
     api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData),
   preview: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/preview`),
+  opened: (id: number) => api.post<void>(`/admin/client_documents/${id}/opened`),
+  activity: (id: number, page = 1) => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/admin/client_documents/${id}/activity`, { page }),
   download: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/download`),
   delete: (id: number) =>
@@ -4560,9 +4582,10 @@ export const adminPortalThreadsApi = {
     api.post<{ data: ClientPortalThread }>('/admin/portal_threads', data),
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) =>
     api.patch<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}`, data),
-  markRead: (id: number) =>
-    api.post<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}/mark_read`),
-  createMessage: (threadId: number, data: { body?: string; document_id?: number }) =>
+  activity: (id: number, page = 1) => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/admin/portal_threads/${id}/activity`, { page }),
+  markRead: (id: number, data: PortalReadDisplay) =>
+    api.post<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}/mark_read`, data),
+  createMessage: (threadId: number, data: { body?: string; document_id?: number; idempotency_key: string }) =>
     api.post<{ data: ClientPortalMessage }>(`/admin/portal_threads/${threadId}/messages`, data),
 };
 
