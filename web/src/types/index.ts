@@ -767,7 +767,8 @@ export interface AireCutoffControl {
 
 /** A newer lock time Cornerstone published that AIRE hasn't applied: still on its way, or refused. */
 export interface AireCutoffDelivery {
-  state: 'pending' | 'rejected';
+  /** expired: it was first delivered after its time had passed, so AIRE couldn't apply it. */
+  state: 'pending' | 'rejected' | 'expired';
   schedule_version: number;
   cutoff_at: string;
   cutoff_source: 'policy' | 'override';
