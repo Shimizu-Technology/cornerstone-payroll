@@ -5,7 +5,8 @@ class PortalUploadCleanupJob < ApplicationJob
 
   def perform(cleanup_id = nil)
     scope = PortalUploadCleanup.where(completed_at: nil)
-    scope = cleanup_id ? scope.where(id: cleanup_id) : scope.limit(100)
+    # Fewest attempts first, so files that keep failing cannot starve newer ones.
+    scope = cleanup_id ? scope.where(id: cleanup_id) : scope.order(:attempts, :id).limit(100)
     scope.each do |cleanup|
       cleanup.with_lock do
         next if cleanup.completed_at

@@ -11,7 +11,7 @@ RSpec.describe ClientPortalThread, type: :model do
     message = create(:client_portal_message, company: company, client_portal_thread: thread, author: nil)
     users.each { |user| expect(thread.unread_for?(user)).to be(true) }
     [ users.first, users.third ].each do |user|
-      thread.mark_read_for!(user, last_displayed_message_id: message.id)
+      thread.mark_read_for!(user, displayed_message_ids: [ message.id ])
       expect(thread.unread_for?(user)).to be(false)
     end
     expect(thread.unread_for?(users.second)).to be(true)
@@ -33,11 +33,28 @@ RSpec.describe ClientPortalThread, type: :model do
     user = create(:user, company: company)
     first = create(:client_portal_message, company: company, client_portal_thread: thread)
     last = create(:client_portal_message, company: company, client_portal_thread: thread)
-    thread.mark_read_for!(user, last_displayed_message_id: last.id)
-    expect(thread.mark_read_for!(user, last_displayed_message_id: first.id)).to be(false)
+    thread.mark_read_for!(user, displayed_message_ids: [ first.id, last.id ])
+    expect(thread.mark_read_for!(user, displayed_message_ids: [ first.id ])).to be(false)
     expect(thread.read_cursor_for(user)).to eq(last.id)
     other = create(:client_portal_message)
-    expect { thread.mark_read_for!(user, last_displayed_message_id: other.id) }.to raise_error(ActiveRecord::RecordNotFound)
+    expect { thread.mark_read_for!(user, displayed_message_ids: [ other.id ]) }.to raise_error(ActiveRecord::RecordNotFound)
+  end
+
+  it "stops at an unshown message from someone else and passes over the user's own" do
+    user = create(:user, company: company)
+    unshown = create(:client_portal_message, company: company, client_portal_thread: thread)
+    shown = create(:client_portal_message, company: company, client_portal_thread: thread)
+    expect(thread.mark_read_for!(user, displayed_message_ids: [ shown.id ])).to be(false)
+    expect(thread.unread_for?(user)).to be(true)
+    expect(described_class.unread_count_for(user, company_id: company.id)).to eq(1)
+
+    own = create(:client_portal_message, company: company, client_portal_thread: thread, author: user)
+    later = create(:client_portal_message, company: company, client_portal_thread: thread)
+    expect(thread.mark_read_for!(user, displayed_message_ids: [ unshown.id, shown.id ])).to be(true)
+    expect(thread.read_cursor_for(user)).to eq(own.id)
+    expect(thread.unread_for?(user)).to be(true)
+    thread.mark_read_for!(user, displayed_message_ids: [ later.id ])
+    expect(thread.unread_for?(user)).to be(false)
   end
 end
 

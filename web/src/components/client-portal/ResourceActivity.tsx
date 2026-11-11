@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/button';
 import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import type { BoundedListMeta, PortalActivityEvent } from '@/services/api';
@@ -7,7 +7,7 @@ export type ResourceActivityApi = {
   activity: (id: number, page?: number) => Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>;
 };
 
-export function ResourceActivity({ id, api, revision }: { id: number; api: ResourceActivityApi; revision?: string | number }) {
+export function ResourceActivity({ id, api, revision }: { id: number; api: ResourceActivityApi; revision?: string | number }): ReactElement {
   const generation = useRef(0);
   const [expanded, setExpanded] = useState(false);
   const [events, setEvents] = useState<PortalActivityEvent[]>([]);

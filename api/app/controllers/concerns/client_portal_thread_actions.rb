@@ -113,7 +113,7 @@ module ClientPortalThreadActions
       recent = PortalActivity.feed(@thread).where(user_id: current_user.id, action: "client_portal_threads#opened")
         .where("created_at > ?", 30.seconds.ago).where("metadata->'displayed_message_ids' = ?::jsonb", ids.sort.to_json)
       record_audit!("client_portal_threads#opened", @thread, metadata) unless recent.exists?
-      if @thread.mark_read_for!(current_user, last_displayed_message_id: ids.max)
+      if @thread.mark_read_for!(current_user, displayed_message_ids: ids)
         record_audit!("client_portal_threads#mark_read", @thread, metadata)
       end
     end

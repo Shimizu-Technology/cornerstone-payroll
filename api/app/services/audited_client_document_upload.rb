@@ -8,10 +8,12 @@ class AuditedClientDocumentUpload
       yield result
     end
     result
-  rescue StandardError
+  rescue StandardError => original
+    # Any delete failure, including network errors, keeps a retry intent for
+    # that key, moves on to the rest, and leaves the original error to raise.
     result&.uploaded_keys&.each do |key|
       R2StorageService.new.delete(key)
-    rescue R2StorageService::UploadError => error
+    rescue StandardError => error
       begin
         PortalUploadCleanup.find_or_create_by!(company_id: company_id, file_key: key)
       rescue StandardError => persistence_error
@@ -19,6 +21,6 @@ class AuditedClientDocumentUpload
       end
       Rails.logger.error("Rolled back portal upload cleanup scheduled: #{error.class.name}")
     end
-    raise
+    raise original
   end
 end
