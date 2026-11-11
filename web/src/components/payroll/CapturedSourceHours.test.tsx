@@ -31,6 +31,14 @@ it('opens the exact entry and its recorded approval history on request', async (
   expect(api.read).toHaveBeenCalledWith(119, { page: 1 });
 });
 
+it('labels a source entry time tracking auto-approved, with no approver', async () => {
+  api.read.mockResolvedValue({ ...response, time_entries: [{ ...entry, approval: { actor: null, auto_approved: true, occurred_at: '2026-10-07T03:07:36Z', note: 'Auto-approved: ordinary shift' } }] });
+  render(<CapturedSourceHours item={item} payPeriod={payPeriod} />);
+  fireEvent.click(screen.getByText('Review source entry #1804'));
+  expect(await screen.findByText(/^approved · Oct 7, 2026.* · Auto-approved$/)).toBeTruthy();
+  expect(screen.queryByText('Auto-approved: ordinary shift')).toBeNull();
+});
+
 it('retains saved evidence when the source is unavailable and recovers on retry', async () => {
   api.read.mockRejectedValueOnce(new Error('Time tracking is unavailable'));
   render(<CapturedSourceHours item={item} payPeriod={payPeriod} />);

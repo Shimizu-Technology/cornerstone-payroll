@@ -950,7 +950,8 @@ export interface AirePayrollTimeEntry {
     payroll_exclusion_reasons?: string[];
     included_hours?: number;
   };
-  approval?: { actor?: { payroll_integration_id?: string; name: string } | null; occurred_at?: string | null; note?: string | null };
+  // auto_approved: AIRE's "Auto-approve ordinary shifts" approved it at clock-out; no person did.
+  approval?: { actor?: { payroll_integration_id?: string; name: string } | null; auto_approved?: boolean; occurred_at?: string | null; note?: string | null };
   overtime_approval?: { actor?: { payroll_integration_id?: string; name: string } | null; occurred_at?: string | null; note?: string | null };
   employee: {
     id?: string | null;
