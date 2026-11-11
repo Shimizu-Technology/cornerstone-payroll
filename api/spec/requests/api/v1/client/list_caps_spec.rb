@@ -91,8 +91,9 @@ RSpec.describe "Client portal list caps", type: :request do
   end
 
   describe "documents beyond the default page" do
+    let(:employee) { create(:employee, company: company) }
+
     before do
-      employee = create(:employee, company: company)
       now = Time.current
       rows = Array.new(BoundedListPagination::DEFAULT_LIST_PER_PAGE - 1) do |index|
         { company_id: company.id, uploaded_by_id: client_user.id, employee_id: employee.id, title: "Onboarding #{index}",
@@ -116,6 +117,23 @@ RSpec.describe "Client portal list caps", type: :request do
       expect(second_ids.size).to eq(2)
       expect(first_ids & second_ids).to be_empty
       expect(response.parsed_body.dig("meta", "employee_linked_count")).to eq(BoundedListPagination::DEFAULT_LIST_PER_PAGE - 1)
+    end
+
+    it "pages one employee's documents for the employee documents panel" do
+      create(:client_document, company: company, uploaded_by: client_user, employee: employee, title: "Oldest employee file",
+        created_at: 1.day.ago)
+      create(:client_document, company: company, uploaded_by: client_user, employee: employee, title: "Newest employee file",
+        created_at: 1.day.from_now)
+
+      get "/api/v1/client/documents", headers: headers, params: { employee_id: employee.id }
+      first_ids = response.parsed_body.fetch("data").map { |row| row.fetch("id") }
+      expect(first_ids.size).to eq(BoundedListPagination::DEFAULT_LIST_PER_PAGE)
+      expect(response.parsed_body.fetch("meta")).to include("total_count" => 201, "total_pages" => 2)
+
+      get "/api/v1/client/documents", headers: headers, params: { employee_id: employee.id, page: 2 }
+      second_page = response.parsed_body.fetch("data")
+      expect(second_page.map { |row| row.fetch("title") }).to eq([ "Oldest employee file" ])
+      expect(first_ids & second_page.map { |row| row.fetch("id") }).to be_empty
     end
   end
 end

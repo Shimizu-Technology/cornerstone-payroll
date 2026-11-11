@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "rails_helper"
-require Rails.root.join("db/migrate/20261111120000_encrypt_employee_contractor_eins")
 
 RSpec.describe "Employee contractor EIN encryption" do
   let(:company) { create(:company) }
@@ -47,25 +46,36 @@ RSpec.describe "Employee contractor EIN encryption" do
     expect(Employee.find(employee.id).contractor_ein).to eq("98-1111111")
   end
 
-  it "encrypts legacy rows in the migration, leaves encrypted rows alone, and reverses cleanly" do
+  it "has no migration that rewrites EINs while old processes may still be serving" do
+    expect(Dir[Rails.root.join("db/migrate/*contractor_ein*")]).to be_empty
+  end
+
+  it "encrypts legacy rows, leaves encrypted rows alone, and round-trips through decrypt idempotently" do
     legacy = create(:employee, :business_contractor, company: company)
     store_plaintext(legacy, "98-2222222")
     current = create(:employee, :business_contractor, company: company, contractor_ein: "98-3333333")
     current_ciphertext = raw_ein(current)
     individual = create(:employee, :contractor, company: company, contractor_ein: nil)
 
-    ActiveRecord::Migration.suppress_messages { EncryptEmployeeContractorEins.new.migrate(:up) }
-
+    expect(ContractorEinEncryption.backfill!).to eq(1)
+    expect(ContractorEinEncryption.backfill!).to eq(0)
     expect(raw_ein(legacy)).not_to include("2222222")
     expect(Employee.find(legacy.id).contractor_ein).to eq("98-2222222")
     expect(raw_ein(current)).to eq(current_ciphertext)
     expect(raw_ein(individual)).to be_nil
     expect(ContractorEinEncryption.plaintext_ids).to be_empty
 
-    ActiveRecord::Migration.suppress_messages { EncryptEmployeeContractorEins.new.migrate(:down) }
-
+    expect(ContractorEinEncryption.restore_plaintext!).to eq(2)
+    expect(ContractorEinEncryption.restore_plaintext!).to eq(0)
     expect(raw_ein(legacy)).to eq("98-2222222")
     expect(raw_ein(current)).to eq("98-3333333")
+    expect(raw_ein(individual)).to be_nil
+    expect(ContractorEinEncryption.encrypted_ids).to be_empty
+    expect(Employee.find(current.id).contractor_ein).to eq("98-3333333")
+
+    expect(ContractorEinEncryption.backfill!).to eq(2)
+    expect(raw_ein(current)).to eq(current_ciphertext)
+    expect(Employee.find(legacy.id).contractor_ein).to eq("98-2222222")
   end
 
   it "sweeps plaintext left by an old process with the rerunnable backfill" do
@@ -86,7 +96,7 @@ RSpec.describe "Employee contractor EIN encryption" do
     padded = create(:employee, :business_contractor, company: company)
     store_raw(padded, " \t")
 
-    ActiveRecord::Migration.suppress_messages { EncryptEmployeeContractorEins.new.migrate(:up) }
+    expect(ContractorEinEncryption.backfill!).to eq(2)
 
     expect(raw_ein(blank)).to be_nil
     expect(raw_ein(padded)).to be_nil
@@ -94,13 +104,16 @@ RSpec.describe "Employee contractor EIN encryption" do
     expect(ContractorEinEncryption.plaintext_ids).to be_empty
   end
 
-  it "turns blank EINs into NULL in the rerunnable backfill too" do
+  it "keeps blank EINs NULL through decrypt" do
     blank = create(:employee, :business_contractor, company: company)
     store_raw(blank, "  ")
+    present = create(:employee, :business_contractor, company: company, contractor_ein: "98-1313131")
 
+    expect(ContractorEinEncryption.restore_plaintext!).to eq(2)
+    expect(raw_ein(blank)).to be_nil
+    expect(raw_ein(present)).to eq("98-1313131")
     expect(ContractorEinEncryption.backfill!).to eq(1)
     expect(raw_ein(blank)).to be_nil
-    expect(ContractorEinEncryption.plaintext_ids).to be_empty
   end
 
   it "does not overwrite an EIN that changed after the backfill read it" do
@@ -114,6 +127,19 @@ RSpec.describe "Employee contractor EIN encryption" do
 
     expect(ContractorEinEncryption.backfill!).to eq(0)
     expect(Employee.find(employee.id).contractor_ein).to eq("98-9999999")
+  end
+
+  it "does not let decrypt overwrite an EIN that changed after it was read" do
+    employee = create(:employee, :business_contractor, company: company, contractor_ein: "98-8888888")
+    allow(ContractorEinEncryption).to receive(:stored_eins).and_wrap_original do |original|
+      stale = original.call.to_a
+      Employee.find(employee.id).update!(contractor_ein: "98-9999999")
+      stale.each
+    end
+
+    expect(ContractorEinEncryption.restore_plaintext!).to eq(0)
+    expect(Employee.find(employee.id).contractor_ein).to eq("98-9999999")
+    expect(raw_ein(employee)).not_to include("9999999")
   end
 
   it "fails the encrypted-data readiness gate until no plaintext EIN remains" do

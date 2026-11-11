@@ -127,9 +127,10 @@ class Employee < ApplicationRecord
   encrypts :bank_routing_number_encrypted
   encrypts :bank_account_number_encrypted
   # A business contractor's EIN is a tax identifier, protected like the SSN.
-  # Plaintext reads stay supported only while the in-place backfill
-  # (EncryptEmployeeContractorEins) rolls out; EncryptedDataReadiness fails
-  # until no plaintext EIN remains, after which this tolerance can be removed.
+  # Plaintext reads stay supported while the post-deploy backfill
+  # (ContractorEinEncryption, employees:encrypt_contractor_eins) rolls out;
+  # EncryptedDataReadiness fails until no plaintext EIN remains, after which
+  # this tolerance can be removed.
   encrypts :contractor_ein, deterministic: true, support_unencrypted_data: true
   normalizes :contractor_ein, with: ->(value) { value.to_s.strip.presence }
 
