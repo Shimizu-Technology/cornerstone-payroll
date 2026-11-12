@@ -76,17 +76,55 @@ describe('NotificationSettings', () => {
     expect(await screen.findByLabelText('Client messages')).toBeTruthy();
   });
 
-  it('keeps a choice made before a repeated load finishes', async () => {
-    let resolveSecond!: (value: { data: Settings }) => void;
-    mocks.get.mockResolvedValueOnce({ data: settings }).mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
-    // StrictMode runs the load effect twice, as in development.
+  it('shows a loading state until settings arrive', async () => {
+    let resolveLoad!: (value: { data: Settings }) => void;
+    mocks.get.mockImplementationOnce(() => new Promise((resolve) => { resolveLoad = resolve; }));
+    render(<NotificationSettings />);
+    expect(screen.getByText('Loading notification settings…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Save settings' })).toBeNull();
+    resolveLoad({ data: settings });
+    expect(await screen.findByRole('button', { name: 'Save settings' })).toBeTruthy();
+    expect(screen.queryByText('Loading notification settings…')).toBeNull();
+  });
+
+  it('shows empty recent alerts and an empty administrator list', async () => {
+    mocks.get.mockResolvedValue({ data: { ...settings, email_delivery_enabled: true, recent_alerts: [],
+      administration: { clients_without_recipients: [] } } });
+    render(<NotificationSettings />);
+    expect(await screen.findByText('No portal alerts yet.')).toBeTruthy();
+    expect(screen.getByText('Every client with recent portal activity has alert recipients.')).toBeTruthy();
+    expect(screen.queryByText(/Email delivery is off for now/)).toBeNull();
+  });
+
+  it('keeps choices after a failed save and saves them on retry', async () => {
+    mocks.update.mockRejectedValueOnce(new Error('Could not reach the server'));
+    render(<NotificationSettings />);
+    fireEvent.change(await screen.findByLabelText('Client messages'), { target: { value: 'digest' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(await screen.findByText('Could not reach the server')).toBeTruthy();
+    expect((screen.getByLabelText('Client messages') as HTMLSelectElement).value).toBe('digest');
+    expect(screen.getByRole('button', { name: 'Save settings' }).hasAttribute('disabled')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(await screen.findByText('Notification settings saved.')).toBeTruthy();
+    expect(mocks.update).toHaveBeenLastCalledWith({ client_messages: 'digest', employee_changes: 'digest' });
+    expect(screen.queryByText('Could not reach the server')).toBeNull();
+  });
+
+  it('keeps a successful save when an older load finishes afterwards', async () => {
+    let resolveFirst!: (value: { data: Settings }) => void;
+    mocks.get.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ data: settings });
+    // StrictMode starts the load twice, as in development.
     render(<StrictMode><NotificationSettings /></StrictMode>);
     fireEvent.change(await screen.findByLabelText('Employee change requests'), { target: { value: 'off' } });
-    expect(mocks.get).toHaveBeenCalledTimes(2);
-    resolveSecond({ data: settings });
-    await waitFor(() => expect(mocks.get.mock.results[1]).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(await screen.findByText('Notification settings saved.')).toBeTruthy();
+
+    resolveFirst({ data: settings }); // started before the save, finishes after it
     await new Promise((resolve) => setTimeout(resolve, 0));
+
     expect((screen.getByLabelText('Employee change requests') as HTMLSelectElement).value).toBe('off');
-    expect(screen.getByRole('button', { name: 'Save settings' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Save settings' }).hasAttribute('disabled')).toBe(true);
   });
 });

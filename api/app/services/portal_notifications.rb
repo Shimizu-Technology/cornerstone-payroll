@@ -4,7 +4,8 @@ require "digest"
 
 # Portal activity alerts. Events and their delivery ledger rows are written in
 # the caller's domain transaction; PortalNotifications::Dispatcher sends email
-# later. Real email stays off unless PORTAL_EMAIL_NOTIFICATIONS_ENABLED=true.
+# later. Real email stays off unless PORTAL_EMAIL_NOTIFICATIONS_ENABLED=true,
+# and rows recorded while it is off are created skipped, never pending.
 module PortalNotifications
   TIME_ZONE = "Pacific/Guam"
   DIGEST_HOUR = 7
@@ -127,12 +128,18 @@ module PortalNotifications
       mode = target.user ? Preferences.mode_for(target.user, event.category) : CATEGORIES.dig(event.category, :default_mode)
       attrs = { portal_notification_event: event, user: target.user, recipient_email: target.email,
                 recipient_key: target.key, company_id: event.company_id, channel: "email" }
-      if mode == "off"
-        PortalNotificationDelivery.create!(attrs.merge(delivery_mode: CATEGORIES.dig(event.category, :default_mode),
-          status: "skipped", skip_reason: "preference_off", deliver_after: event.occurred_at, completed_at: Time.current))
-      elsif coalesced?(event, target)
-        PortalNotificationDelivery.create!(attrs.merge(delivery_mode: mode, status: "skipped", skip_reason: "coalesced",
+      skipped = ->(reason, delivery_mode = mode) do
+        PortalNotificationDelivery.create!(attrs.merge(delivery_mode: delivery_mode, status: "skipped", skip_reason: reason,
           deliver_after: event.occurred_at, completed_at: Time.current))
+      end
+      # Rows recorded while email is off are final: enabling email later must
+      # never send activity that happened before it was turned on.
+      if !delivery_enabled?
+        skipped.call("email_delivery_disabled", mode == "off" ? CATEGORIES.dig(event.category, :default_mode) : mode)
+      elsif mode == "off"
+        skipped.call("preference_off", CATEGORIES.dig(event.category, :default_mode))
+      elsif coalesced?(event, target)
+        skipped.call("coalesced")
       else
         deliver_after = mode == "digest" ? next_digest_at(event.occurred_at) : event.occurred_at + BATCH_WINDOW
         PortalNotificationDelivery.create!(attrs.merge(delivery_mode: mode, status: "pending", deliver_after: deliver_after))

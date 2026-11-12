@@ -27,14 +27,34 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
     travel_to(time) { described_class.run! }
   end
 
-  it "keeps real email off by default and records the skip" do
+  it "keeps real email off by default and records the skip when the activity happens" do
     client_message!
-    expect(deliveries_for(staff).sole).to have_attributes(status: "pending", delivery_mode: "immediate")
+    expect(deliveries_for(staff).sole).to have_attributes(status: "skipped", skip_reason: "email_delivery_disabled", delivery_mode: "immediate")
 
     dispatch_at(3.minutes.from_now)
 
     expect(Resend::Emails).not_to have_received(:send)
     expect(deliveries_for(staff).sole).to have_attributes(status: "skipped", skip_reason: "email_delivery_disabled")
+  end
+
+  it "never sends activity recorded while email was off after email is turned on" do
+    list_portal_recipient!(company, email: "outside.owner@example.test")
+    client_message!
+    PortalNotifications.client_upload!(documents: [ create(:client_document, company: company) ], actor: client)
+    before_enabling = PortalNotificationDelivery.where(company: company).pluck(:id)
+    expect(PortalNotificationDelivery.where(id: before_enabling).pluck(:status).uniq).to eq([ "skipped" ])
+
+    with_portal_email do
+      dispatch_at(3.minutes.from_now)
+      dispatch_at(1.day.from_now)
+      expect(captured_portal_emails).to be_empty
+      expect(PortalNotificationDelivery.where(id: before_enabling).pluck(:skip_reason).uniq).to eq([ "email_delivery_disabled" ])
+
+      later_thread = create(:client_portal_thread, company: company, created_by: client, subject: "After enabling")
+      PortalNotifications.message_created!(create(:client_portal_message, client_portal_thread: later_thread, company: company, author: client))
+      dispatch_at(3.minutes.from_now)
+      expect(captured_portal_emails.map { |email| email[:to] }).to contain_exactly(staff.email, "outside.owner@example.test")
+    end
   end
 
   it "waits for the batch window, then sends one generic email for a burst of activity" do
@@ -204,6 +224,49 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
         described_class.run!
       end
       expect(captured_portal_emails.map { |email| email[:idempotency_key] }).to eq([ key, key ])
+    end
+  end
+
+  it "retries a lost-response batch with the same key and email after part of it is revoked" do
+    document = create(:client_document, company: company)
+    with_portal_email do
+      client_message!
+      PortalNotifications.client_upload!(documents: [ document ], actor: client)
+      attempts = []
+      allow(PortalNotifications::Transport).to receive(:deliver) do |payload, idempotency_key:|
+        attempts << [ payload, idempotency_key ]
+        raise Timeout::Error # the provider may have accepted it; the response was lost
+      end
+      dispatch_at(3.minutes.from_now)
+      expect(deliveries_for(staff).pluck(:status, :attempts).uniq).to eq([ [ "pending", 1 ] ])
+
+      document.update_columns(archived_at: Time.current)
+      allow(PortalNotifications::Transport).to receive(:deliver) do |payload, idempotency_key:|
+        attempts << [ payload, idempotency_key ]
+        { "id" => "provider-deduplicated" }
+      end
+      dispatch_at(10.minutes.from_now)
+
+      expect(attempts.size).to eq(2)
+      expect(attempts.last).to eq(attempts.first)
+      expect(attempts.last.first[:text]).to include("You have a new message or update in the portal.")
+      upload_row = deliveries_for(staff).joins(:portal_notification_event).find_by!(portal_notification_events: { event_type: "client_upload" })
+      message_row = deliveries_for(staff).joins(:portal_notification_event).find_by!(portal_notification_events: { event_type: "client_message" })
+      expect(upload_row).to have_attributes(status: "skipped", skip_reason: "resource_unavailable")
+      expect(message_row).to have_attributes(status: "sent", attempts: 2, batch_key: attempts.first.last)
+    end
+  end
+
+  it "does not send anything when every row of an attempted batch is revoked" do
+    with_portal_email do
+      client_message!
+      allow(PortalNotifications::Transport).to receive(:deliver).and_raise(Timeout::Error)
+      dispatch_at(3.minutes.from_now)
+      PortalNotificationRecipient.where(user: staff).delete_all
+      allow(PortalNotifications::Transport).to receive(:deliver).and_call_original
+      dispatch_at(10.minutes.from_now)
+      expect(captured_portal_emails).to be_empty
+      expect(deliveries_for(staff).sole).to have_attributes(status: "skipped", skip_reason: "recipient_removed")
     end
   end
 

@@ -61,7 +61,8 @@ RSpec.describe "Personal portal notification settings", :portal_notifications, t
     get path
     alerts = response.parsed_body.dig("data", "recent_alerts")
     expect(alerts.size).to eq(1)
-    expect(alerts.sole).to include("label" => "Client messages", "status" => "pending", "company_name" => "Settings Client")
+    expect(alerts.sole).to include("label" => "Client messages", "status" => "skipped", "skip_reason" => "email_delivery_disabled",
+      "company_name" => "Settings Client")
     expect(response.body).not_to include("Hidden subject", "Hidden body")
   end
 

@@ -24,51 +24,20 @@ module Api
           end
 
           skip_default_audit_log!
-          ineligible = false
           current_company.with_lock do
             revalidate_current_company_write_access!(capability: :manage_client_administration)
-            eligible_ids = PortalNotifications::Recipients.eligible_staff_for(current_company).map(&:id)
-            ineligible = (user_ids.uniq - eligible_ids).any?
-            raise ActiveRecord::Rollback if ineligible
-
-            changes = replace_recipients!(user_ids.uniq, emails)
-            if changes.values.any?(&:present?)
-              AuditLog.record!(user: current_user, company_id: current_company.id,
-                action: "portal_notification_recipients#update", record_type: "companies", record_id: current_company.id,
-                subject_name: current_company.name,
-                metadata: changes.merge(recipient_count: PortalNotificationRecipient.where(company_id: current_company.id).count))
-            end
+            PortalNotifications::RecipientListUpdate.call!(company: current_company, actor: current_user, user_ids: user_ids, emails: emails)
           end
-          return render_invalid("Only active staff who can view this client can receive its alerts") if ineligible
 
           render json: { data: payload }
+        rescue PortalNotifications::RecipientListUpdate::IneligibleRecipient
+          render_invalid("Only active staff who can view this client can receive its alerts")
         end
 
         private
 
         def render_invalid(message)
           render json: { error: message }, status: :unprocessable_entity
-        end
-
-        def replace_recipients!(user_ids, emails)
-          scope = PortalNotificationRecipient.where(company_id: current_company.id)
-          before_users = scope.users.pluck(:user_id)
-          before_emails = scope.extra_emails.pluck(:email)
-          scope.users.where.not(user_id: user_ids).delete_all
-          scope.extra_emails.where.not(email: emails).delete_all
-          (user_ids - before_users).each do |user_id|
-            PortalNotificationRecipient.create!(company_id: current_company.id, user_id: user_id, added_by: current_user)
-          end
-          (emails - before_emails).each do |email|
-            PortalNotificationRecipient.create!(company_id: current_company.id, email: email, added_by: current_user)
-          end
-          names = User.where(id: (user_ids + before_users).uniq).pluck(:id, :name).to_h
-          {
-            added_users: (user_ids - before_users).map { |id| { id: id, name: names[id] } },
-            removed_users: (before_users - user_ids).map { |id| { id: id, name: names[id] } },
-            added_emails: emails - before_emails,
-            removed_emails: before_emails - emails
-          }
         end
 
         def payload

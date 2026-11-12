@@ -35,23 +35,31 @@ module PortalNotifications
         .where("claimed_at IS NULL OR claimed_at < ?", now - CLAIM_TIMEOUT)
     end
 
-    # Rows interrupted after an earlier claim keep their batch key, so a retry
-    # of that same set reuses the provider idempotency key.
+    # A batch already attempted keeps its idempotency key and rebuilds the same
+    # email from every row in that attempt, even if some rows have since been
+    # skipped. If the provider accepted the earlier attempt but the response was
+    # lost, the retry is the identical request and is deduplicated, never a
+    # second email under a new key.
     def claim(recipient_key)
       PortalNotificationDelivery.transaction do
         rows = due_scope.where(recipient_key: recipient_key).order(:id).lock("FOR UPDATE SKIP LOCKED")
           .includes(:user, portal_notification_event: :subject).to_a
         kept = rows.reject { |row| skip_if_ineligible!(row) }
-        kept.group_by { |row| [ row.delivery_mode, row.batch_key ] }.map do |(mode, _previous_key), group|
+        kept.group_by { |row| [ row.delivery_mode, row.batch_key ] }.map do |(mode, previous_key), group|
           ids = group.map(&:id).sort
-          key = "portal-notification-#{Digest::SHA256.hexdigest("#{recipient_key}:#{mode}:#{ids.join(',')}")[0, 48]}"
+          key = previous_key || "portal-notification-#{Digest::SHA256.hexdigest("#{recipient_key}:#{mode}:#{ids.join(',')}")[0, 48]}"
+          events = previous_key ? attempted_events(previous_key) : group.map(&:event)
           PortalNotificationDelivery.where(id: ids).update_all(
             [ "attempts = attempts + 1, claimed_at = ?, batch_key = ?, updated_at = ?", now, key, now ])
           first = group.first
           { user: first.user, address: first.address, audience: first.event.audience, ids: ids, key: key, mode: mode,
-            events: group.map(&:event) }
+            events: events }
         end
       end
+    end
+
+    def attempted_events(batch_key)
+      PortalNotificationDelivery.where(batch_key: batch_key).order(:id).includes(:portal_notification_event).map(&:event)
     end
 
     def skip_if_ineligible!(row)

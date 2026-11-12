@@ -130,7 +130,9 @@ RSpec.describe "Portal activity notifications", :portal_notifications, type: :re
     it "alerts reviewers on submission and the requester on the decision" do
       act_as(client)
       allow_any_instance_of(ApplicationController).to receive(:current_company).and_return(company)
-      patch "/api/v1/client/employees/#{employee.id}", params: { employee: { pay_rate: 21.75 } }
+      with_portal_email do
+        patch "/api/v1/client/employees/#{employee.id}", params: { employee: { pay_rate: 21.75 } }
+      end
       expect(response).to have_http_status(:ok), response.body
 
       submitted = PortalNotificationEvent.find_by!(event_type: "employee_change_submitted")
@@ -144,6 +146,26 @@ RSpec.describe "Portal activity notifications", :portal_notifications, type: :re
       decided = PortalNotificationEvent.find_by!(event_type: "employee_change_decided")
       expect(decided.metadata).to include("decision" => "approved")
       expect(decided.deliveries.map(&:user)).to eq([ client ])
+    end
+
+    %w[approve reject].each do |decision|
+      it "keeps no #{decision} decision or alert when its audit write fails" do
+        request = create(:employee_change_request, company: company, employee: employee, requested_by: client,
+          proposed_changes: { pay_rate: 23.5 }, original_values: { pay_rate: 18.0 })
+        act_as(staff)
+        allow(AuditLog).to receive(:record!).and_call_original
+        allow(AuditLog).to receive(:record!).with(hash_including(action: "employee_change_requests##{decision}"))
+          .and_raise(ActiveRecord::RecordInvalid.new(AuditLog.new))
+
+        patch "/api/v1/admin/employee_change_requests/#{request.id}/#{decision}", params: { review_notes: "Synthetic review" }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(request.reload).to have_attributes(status: "pending", reviewed_by_id: nil, reviewed_at: nil)
+        expect(employee.reload.pay_rate.to_f).to eq(18.0)
+        expect(PortalNotificationEvent.where(event_type: "employee_change_decided")).to be_empty
+        expect(PortalNotificationDelivery.joins(:portal_notification_event)
+          .where(portal_notification_events: { event_type: "employee_change_decided" })).to be_empty
+      end
     end
   end
 end
