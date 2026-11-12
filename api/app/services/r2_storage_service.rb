@@ -102,7 +102,16 @@ class R2StorageService
       raise DownloadError, "Object exceeds #{max_bytes} byte download limit"
     end
 
-    download(key)
+    # Metadata can change between HEAD and GET. Enforce the bound on the
+    # streamed body too, before accumulating a replacement object's bytes.
+    bytes = +"".b
+    client.get_object(bucket: bucket_name, key: key) do |chunk|
+      if chunk.bytesize > max_bytes - bytes.bytesize
+        raise DownloadError, "Object exceeds #{max_bytes} byte download limit"
+      end
+      bytes << chunk
+    end
+    bytes
   rescue Aws::S3::Errors::NoSuchKey, Aws::S3::Errors::NotFound
     nil
   rescue Aws::S3::Errors::ServiceError => e

@@ -9,6 +9,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { FileRow, RevisionCard, StatusLine } from '@/components/payroll-submissions/PeriodParts';
 import { formatDate, formatGuam, statusVariant } from '@/lib/payrollSubmissionFormat';
 import { SubmissionForm } from '@/components/payroll-submissions/SubmissionForm';
+import { PortalImportAction } from '@/components/payroll-submissions/PortalImportAction';
 import { PeriodConversation } from '@/components/payroll-submissions/PeriodConversation';
 import { adminPayrollSubmissionsApi, clientPayrollSubmissionsApi, type PeriodDetail, type SubmissionDraft } from '@/services/payrollSubmissions';
 
@@ -168,6 +169,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
         <section aria-labelledby="period-status" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
           <div className="flex flex-wrap items-center gap-2"><h2 id="period-status" className="text-base font-semibold text-neutral-950">Status</h2><Badge variant={statusVariant(period.status)}>{period.status_label}</Badge>
             {audience === 'staff' && period.pay_period_id && <Link className="text-sm font-medium text-primary-800 underline" to={`/companies/${companyId || activeCompanyId}/pay-runs/${period.pay_period_id}`}>Open pay run</Link>}</div>
+          {current?.imported_at && <p className="text-sm font-semibold text-success-800">Imported revision {current.revision} · {formatGuam(current.imported_at)}</p>}
           <StatusLine status={period.status} />
           {period.history.length > 0 && <p className="text-sm text-neutral-700">{(() => { const last = period.history[period.history.length - 1]; return `${last.to_status_label} · ${last.actor_name} · ${formatGuam(last.created_at)}`; })()}</p>}
           {notice && <p role="status" className="rounded-lg bg-success-50 p-3 text-sm text-success-800">{notice}</p>}
@@ -176,6 +178,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
 
         {audience === 'staff' && <section aria-labelledby="staff-actions" className="rounded-xl border border-neutral-200 bg-white p-4">
           <h2 id="staff-actions" className="mb-3 text-base font-semibold text-neutral-950">Cornerstone actions</h2>
+          {current && <PortalImportAction key={current.id} period={period} onApplied={() => void load()} />}
           <StaffActions period={period} onDone={detail => { setNotice(null); accept(detail); }} />
         </section>}
 
