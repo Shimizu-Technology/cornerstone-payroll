@@ -4,7 +4,7 @@
 # freezes activity at a signed snapshot and seeks by (activity_at, kind, id),
 # so new messages cannot move a row across pages during a traversal.
 class ClientInboxQuery
-  KINDS = %w[message document employee_change].freeze
+  KINDS = %w[message document employee_change payroll_submission].freeze
   STATUSES = %w[all unread waiting handled].freeze
 
   def initialize(user:, params: {})
@@ -21,7 +21,7 @@ class ClientInboxQuery
   end
 
   def summary
-    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes FROM (#{to_sql(Time.current)}) inbox")
+    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind = 'payroll_submission' AND waiting) AS waiting_payroll FROM (#{to_sql(Time.current)}) inbox")
     row.transform_values(&:to_i)
   end
 
@@ -68,7 +68,7 @@ class ClientInboxQuery
     else
       scoped_companies.where(id: @user.company_assignments.active_access.where(client_management: true).select(:company_id)).select(:id).to_sql
     end
-    sql = sanitize(<<~SQL, @user.id, @user.created_at, @user.id, snapshot, @user.id, @user.created_at, snapshot, snapshot)
+    sql = sanitize(<<~SQL, @user.id, @user.created_at, @user.id, snapshot, @user.id, @user.created_at, snapshot, snapshot, @user.created_at, snapshot, @user.id, snapshot)
       SELECT t.id, t.company_id, 'message' AS kind, t.subject AS title,
         COALESCE(MAX(m.created_at), t.created_at) AS activity_at,
         COALESCE((SELECT COALESCE(x.author_name_snapshot, a.name, 'Former portal user') FROM client_portal_messages x LEFT JOIN users a ON a.id = x.author_id WHERE x.client_portal_thread_id = t.id AND x.created_at <= #{connection.quote(snapshot)} ORDER BY x.id DESC LIMIT 1), t.created_by_name_snapshot, creator.name, 'Former portal user') AS sender_name,
@@ -87,9 +87,26 @@ class ClientInboxQuery
         (d.reviewed_at IS NULL)
       FROM client_documents d LEFT JOIN users uploader ON uploader.id = d.uploaded_by_id
       WHERE d.company_id IN (#{ids}) AND d.shared_by_staff = FALSE AND d.archived_at IS NULL AND d.created_at <= ?
+        AND NOT EXISTS (SELECT 1 FROM payroll_submission_documents psd WHERE psd.client_document_id = d.id)
       UNION ALL
       SELECT e.id, e.company_id, 'employee_change', 'Employee change request', e.created_at, requester.name, FALSE, (e.status = #{EmployeeChangeRequest.statuses.fetch('pending')})
       FROM employee_change_requests e LEFT JOIN users requester ON requester.id = e.requested_by_id WHERE e.company_id IN (#{review_ids}) AND e.created_at <= ?
+      UNION ALL
+      SELECT p.id, p.company_id, 'payroll_submission',
+        'Payroll ' || CASE
+          WHEN EXTRACT(YEAR FROM p.start_date) <> EXTRACT(YEAR FROM p.end_date) THEN to_char(p.start_date, 'Mon FMDD, YYYY') || ' – ' || to_char(p.end_date, 'Mon FMDD, YYYY')
+          WHEN EXTRACT(MONTH FROM p.start_date) <> EXTRACT(MONTH FROM p.end_date) THEN to_char(p.start_date, 'Mon FMDD') || ' – ' || to_char(p.end_date, 'Mon FMDD, YYYY')
+          ELSE to_char(p.start_date, 'Mon FMDD') || '–' || to_char(p.end_date, 'FMDD, YYYY') END,
+        latest.created_at, COALESCE(actor.name, latest.actor_name_snapshot, 'Former portal user'),
+        (latest.created_at >= ? AND latest.id > COALESCE(r.last_seen_event_id, 0)),
+        (p.status IN ('submitted', 'approved', 'changes_requested'))
+      FROM payroll_submission_periods p
+      JOIN LATERAL (SELECT e.id, e.created_at, e.actor_id, e.actor_name_snapshot FROM payroll_submission_status_events e
+        WHERE e.payroll_submission_period_id = p.id AND e.actor_audience = 'client' AND e.created_at <= ?
+        ORDER BY e.id DESC LIMIT 1) latest ON TRUE
+      LEFT JOIN users actor ON actor.id = latest.actor_id
+      LEFT JOIN payroll_submission_period_read_receipts r ON r.payroll_submission_period_id = p.id AND r.user_id = ?
+      WHERE p.company_id IN (#{ids}) AND p.created_at <= ?
     SQL
     conditions = []
     conditions << sanitize("kind = ?", @params[:kind]) if @params[:kind].present?

@@ -79,6 +79,14 @@ Rails.application.routes.draw do
         resources :pay_periods, only: [ :index, :show ] do
           post :approve_review, on: :member
         end
+        resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
+          member do
+            post :submissions
+            post :decision
+            post :messages
+            get :activity
+          end
+        end
         resources :imported_pay_periods, only: [ :show ]
 
         namespace :reports do
@@ -254,6 +262,18 @@ Rails.application.routes.draw do
           end
         end
         resource :portal_notification_recipients, only: [ :show, :update ]
+        resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
+          member do
+            post :acknowledge
+            post :start_review
+            post :mark_paid
+            post :drafts
+            post "drafts/:draft_id/post", action: :post_draft, as: :post_draft
+            post :messages
+            post :seen
+            get :activity
+          end
+        end
         resources :portal_threads, only: [ :index, :show, :create, :update ] do
           get :unread_count, on: :collection
           member do

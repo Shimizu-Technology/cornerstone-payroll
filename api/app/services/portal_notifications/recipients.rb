@@ -51,7 +51,7 @@ module PortalNotifications
         subject = event.subject
         case subject
         when ClientDocument then !subject.archived? && (event.audience == "staff" || subject.visible_to_client?)
-        when ClientPortalThread, EmployeeChangeRequest then subject.company_id == event.company_id
+        when ClientPortalThread, EmployeeChangeRequest, PayrollSubmissionPeriod then subject.company_id == event.company_id
         else false
         end
       end

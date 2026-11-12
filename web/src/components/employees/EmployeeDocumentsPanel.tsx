@@ -40,6 +40,7 @@ const documentCategories = [
   { value: 'insurance', label: 'Insurance / Benefits' },
   { value: 'tax_notice', label: 'Tax Notice' },
   { value: 'payroll_source', label: 'Payroll Source' },
+  { value: 'payroll_review', label: 'Payroll Review Draft' },
   { value: 'misc', label: 'Miscellaneous' },
 ];
 
