@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { ArrowLeft, CheckCircle2, FileQuestion, MessageSquare, Plus, Wifi } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -57,7 +57,7 @@ function formatDateTime(value?: string | null) {
   return new Date(value).toLocaleString('en-US', { timeZone: 'Pacific/Guam' });
 }
 
-function upsertThread(threads: ClientPortalThread[], next: ClientPortalThread) {
+function upsertThread(threads: ClientPortalThread[], next: ClientPortalThread): ClientPortalThread[] {
   const exists = threads.some((thread) => thread.id === next.id);
   const merged = exists ? threads.map((thread) => (thread.id === next.id ? next : thread)) : [next, ...threads];
   return merged.sort((a, b) => {
@@ -78,7 +78,7 @@ function preview(message?: ClientPortalMessage | null): string {
   return stepLabel(message) || message.body || messageDocuments(message)[0]?.title || 'No message body';
 }
 
-export function PortalMessagesPanel(props: Props) {
+export function PortalMessagesPanel(props: Props): ReactElement {
   const { activeCompanyId, refreshCompanies } = useCompany();
   return <PortalMessagesContent key={activeCompanyId} {...props} companyId={activeCompanyId} refreshCompanies={refreshCompanies} />;
 }
@@ -86,7 +86,7 @@ export function PortalMessagesPanel(props: Props) {
 function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, audience = 'client', initialThreadId = null, audienceLabel, description, canResolve = false, companyId, refreshCompanies }: Props & {
   companyId: number | null;
   refreshCompanies: () => Promise<void>;
-}) {
+}): ReactElement {
   const panelRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   // Drafts belong to one person and one client.
@@ -95,9 +95,11 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
   const navigate = useNavigate();
   const filter = FILTERS.some(option => option.value === searchParams.get('conversations')) ? searchParams.get('conversations') || '' : '';
   const urlThreadId = Number(searchParams.get('thread_id')) || null;
+  // Only a deep link scrolls the panel into view, not later selections.
+  const deepLinkThreadId = useRef(initialThreadId);
   useEffect(() => {
-    if (initialThreadId) panelRef.current?.scrollIntoView?.({ block: 'start' });
-  }, [initialThreadId]);
+    if (deepLinkThreadId.current) panelRef.current?.scrollIntoView?.({ block: 'start' });
+  }, []);
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const unreadFetchVersion = useRef(0);
   const threadFetchVersions = useRef(new Map<number, number>());
@@ -149,7 +151,14 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
   const openConversation = useCallback((id: number): void => {
     setSelectedId(id);
     setMobileConversationOpen(true);
-    if (desktop) return;
+    if (desktop) {
+      // Keeps the selection in the URL for reloads and links, without a history entry.
+      if (Number(searchParams.get('thread_id')) === id) return;
+      const next = new URLSearchParams(searchParams);
+      next.set('thread_id', String(id));
+      setSearchParams(next, { replace: true });
+      return;
+    }
     listScroll.current = scrollContainer()?.scrollTop ?? window.scrollY;
     restoreListFocus.current = id;
     if (Number(searchParams.get('thread_id')) === id) return;
@@ -242,7 +251,33 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
     updateLiveNewThreadIds(ids => (ids.includes(thread.id) ? ids : [...ids, thread.id]));
   }, [updateLiveNewThreadIds]);
 
-  const listParams = useCallback((page?: number) => {
+  // Live updates and local changes respect the selected filter. A counted
+  // conversation that leaves the filter is taken out of the shown total.
+  const filterRef = useRef(filter);
+  useLayoutEffect(() => { filterRef.current = filter; }, [filter]);
+  const departedThreadIds = useRef(new Set<number>());
+  const [departedCount, setDepartedCount] = useState(0);
+  const applyListedThread = useCallback((thread: ClientPortalThread): void => {
+    const current = filterRef.current;
+    if (current && thread.status !== current) {
+      if (countedThreadIds.current.has(thread.id) && !departedThreadIds.current.has(thread.id)) {
+        departedThreadIds.current.add(thread.id);
+        setDepartedCount(departedThreadIds.current.size);
+      }
+      updateLiveNewThreadIds(ids => ids.filter(id => id !== thread.id));
+      setThreads(listed => listed.filter(item => item.id !== thread.id));
+      return;
+    }
+    if (departedThreadIds.current.delete(thread.id)) setDepartedCount(departedThreadIds.current.size);
+    noteLiveThread(thread);
+    setThreads(listed => upsertThread(listed, thread));
+  }, [noteLiveThread, updateLiveNewThreadIds]);
+  const clearDeparted = useCallback((): void => {
+    departedThreadIds.current = new Set();
+    setDepartedCount(0);
+  }, []);
+
+  const listParams = useCallback((page?: number): { status?: string; page?: number } | undefined => {
     const params: { status?: string; page?: number } = {};
     if (filter) params.status = filter;
     if (page) params.page = page;
@@ -261,8 +296,11 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
       const companyThreads = response.data.filter(thread => thread.company_id === companyId);
       setThreads(companyThreads);
       setThreadsMeta(response.meta ?? null);
-      applyPageUnreadCount(unreadRequestedAt, response.meta?.unread_count);
+      // The header always shows the all-conversations count.
+      if (!filter) applyPageUnreadCount(unreadRequestedAt, response.meta?.unread_count);
+      else void refreshUnreadCount();
       resetThreadCounts(companyThreads);
+      clearDeparted();
       setLoadMoreError(null);
       setSelectedId((current) => current || response.data.find(thread => thread.company_id === companyId)?.id || null);
     } catch (err) {
@@ -270,7 +308,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
     } finally {
       if (generation === dataGeneration.current && !unavailableRef.current) setLoading(false);
     }
-  }, [api, applyPageUnreadCount, companyId, listParams, resetThreadCounts, setError]);
+  }, [api, applyPageUnreadCount, clearDeparted, companyId, filter, listParams, refreshUnreadCount, resetThreadCounts, setError]);
 
   useEffect(() => {
     void loadThreads();
@@ -293,7 +331,8 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
       updateLiveNewThreadIds(ids => ids.filter(id => !nowCounted.has(id)));
       setThreads((current) => appendUniqueById(current, pageThreads));
       setThreadsMeta(response.meta ?? null);
-      applyPageUnreadCount(unreadRequestedAt, response.meta?.unread_count);
+      clearDeparted();
+      if (!filter) applyPageUnreadCount(unreadRequestedAt, response.meta?.unread_count);
     } catch (err) {
       if (generation === dataGeneration.current) setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more conversations');
     } finally {
@@ -313,8 +352,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
         const generation = dataGeneration.current;
         void fetchThread(thread.id).then(response => {
           if (!response || !active || generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
-          noteLiveThread(response.data);
-          setThreads(current => upsertThread(current, response.data));
+          applyListedThread(response.data);
           setSelectedThread(current => current?.id === thread.id ? response.data : current);
           void refreshUnreadCount();
         }).catch(() => setConnected(false));
@@ -352,7 +390,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
       active = false;
       unsubscribe?.();
     };
-  }, [companyId, connectionAttempt, loadThreads, noteLiveThread, resetThreadCounts, fetchThread, refreshUnreadCount]);
+  }, [companyId, connectionAttempt, loadThreads, applyListedThread, resetThreadCounts, fetchThread, refreshUnreadCount]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -365,14 +403,14 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
       .then((response) => {
         if (!response || !active || unavailableRef.current || response.data.company_id !== companyId) return;
         setSelectedThread(response.data);
-        setThreads((current) => upsertThread(current, response.data));
+        applyListedThread(response.data);
       })
       .catch((err) => { if (active && !unavailableRef.current) { setMobileConversationOpen(false); setError(err instanceof Error ? err.message : 'Failed to load conversation'); } });
 
     return () => {
       active = false;
     };
-  }, [fetchThread, companyId, selectedId, setError]);
+  }, [applyListedThread, fetchThread, companyId, selectedId, setError]);
 
   // After a send, show the newest message without animated scrolling.
   useEffect(() => {
@@ -414,8 +452,8 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
     if (!response || generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
     scrollToEnd.current = true;
     setSelectedThread(current => (current?.id === id ? response.data : current));
-    setThreads((current) => upsertThread(current, response.data));
-  }, [companyId, fetchThread]);
+    applyListedThread(response.data);
+  }, [applyListedThread, companyId, fetchThread]);
 
   const createThread = async ({ subject, body, document_ids, idempotency_key }: ComposerSend): Promise<void> => {
     if (unavailableRef.current) throw new Error('This client is unavailable.');
@@ -423,8 +461,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
     const generation = dataGeneration.current;
     const response = await api.create({ subject: subject || 'Portal message', body: body || undefined, document_ids: document_ids.length ? document_ids : undefined, idempotency_key });
     if (generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
-    noteLiveThread(response.data);
-    setThreads((current) => upsertThread(current, response.data));
+    applyListedThread(response.data);
     setSelectedThread(response.data);
     setNewFormOpen(false);
     openConversation(response.data.id);
@@ -453,7 +490,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
       const response = await api.update(selectedThread.id, { status });
       if (generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
       setSelectedThread(response.data);
-      setThreads((current) => upsertThread(current, response.data));
+      applyListedThread(response.data);
     } catch (err) {
       if (generation === dataGeneration.current && !unavailableRef.current) setError(err instanceof Error ? err.message : 'Failed to update conversation status');
     }
@@ -563,7 +600,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
               {!loading && (
                 <LoadMoreFooter
                   shown={threads.length}
-                  total={threadsMeta ? threadsMeta.total_count + liveNewThreadIds.length : threads.length}
+                  total={threadsMeta ? Math.max(threads.length, threadsMeta.total_count + liveNewThreadIds.length - departedCount) : threads.length}
                   noun="conversations"
                   hasMore={hasMorePages(threadsMeta)}
                   loading={loadingMore}
@@ -634,8 +671,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
       {staff && requestOpen && (
         <RequestFileDialog open onOpenChange={open => { if (!open) setRequestOpen(null); }} threadId={requestOpen.threadId} threadSubject={requestOpen.subject}
           onCreated={thread => {
-            noteLiveThread(thread);
-            setThreads(current => upsertThread(current, thread));
+            applyListedThread(thread);
             setSelectedThread(thread);
             scrollToEnd.current = true;
             openConversation(thread.id);
@@ -652,7 +688,7 @@ function MessageBubble({ message, documents, documentsApi, audience, draftScope,
   audience: 'client' | 'staff';
   draftScope: string;
   onChanged: () => Promise<void>;
-}) {
+}): ReactElement {
   const fromStaff = message.author_audience === 'staff';
   const step = stepLabel(message);
   return (
