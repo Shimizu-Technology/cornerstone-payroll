@@ -27,6 +27,7 @@ module ClientPortalMessageActions
         PortalActivity.record!(user: current_user, record: message, action: "client_portal_messages#create",
           metadata: PortalActivity.message_metadata(message),
           ip_address: request.remote_ip, user_agent: request.user_agent)
+        PortalNotifications.message_created!(message)
       end
     end
     skip_default_audit_log!

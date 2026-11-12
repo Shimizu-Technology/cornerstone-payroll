@@ -10,6 +10,9 @@ class User < ApplicationRecord
   belongs_to :company
   belongs_to :invited_by, class_name: "User", optional: true
   has_many :portal_thread_read_receipts, dependent: :delete_all
+  has_many :portal_notification_deliveries, dependent: :delete_all
+  has_many :portal_notification_preferences, dependent: :delete_all
+  has_many :portal_notification_recipients, dependent: :delete_all
   has_many :user_sessions, dependent: :destroy
   has_many :audit_logs, dependent: :nullify
   has_many :user_invitations, foreign_key: :invited_by_id, dependent: :nullify

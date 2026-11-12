@@ -58,3 +58,10 @@ production:
     class: ClientDocumentScanRecoveryJob
     queue: default
     schedule: every 5 minutes
+
+  # Records portal alert outcomes. Email sends only when
+  # PORTAL_EMAIL_NOTIFICATIONS_ENABLED=true; otherwise due rows are skipped.
+  dispatch_portal_notifications:
+    class: PortalNotificationDispatchJob
+    queue: default
+    schedule: every minute

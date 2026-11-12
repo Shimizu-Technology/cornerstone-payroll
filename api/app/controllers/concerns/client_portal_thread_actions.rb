@@ -59,6 +59,7 @@ module ClientPortalThreadActions
       record_audit!("client_portal_threads#create", created_thread, { subject: created_thread.subject })
       if initial_message
         record_audit!("client_portal_messages#create", initial_message, PortalActivity.message_metadata(initial_message))
+        PortalNotifications.message_created!(initial_message)
       end
     end
 
