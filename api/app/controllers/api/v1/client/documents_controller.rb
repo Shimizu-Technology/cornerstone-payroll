@@ -4,7 +4,14 @@ module Api
   module V1
     module Client
       class DocumentsController < BaseController
-        before_action :set_document, only: [ :download, :preview ]
+        include PortalDocumentTracking
+        include ClientDocumentUploadRateLimit
+        rescue_from ClientDocumentScanner::Blocked do |error|
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+        before_action :private_document_response!, only: [ :download, :preview ]
+
+        before_action :set_document, only: [ :download, :preview, :opened, :activity ]
         before_action :set_owned_document, only: [ :destroy ]
 
         def index
@@ -15,53 +22,61 @@ module Api
 
           documents = documents.where(category: params[:category]) if params[:category].present?
           documents = documents.where(employee_id: params[:employee_id]) if params[:employee_id].present?
+          documents = documents.attachable if ActiveModel::Type::Boolean.new.cast(params[:attachable])
+          if params[:search].present?
+            term = "%#{ClientDocument.sanitize_sql_like(params[:search].to_s.first(200))}%"
+            documents = documents.where("title ILIKE :term OR file_name ILIKE :term", term: term)
+          end
+          employee_linked_count = documents.where.not(employee_id: nil).count
+          documents = bounded_page(documents)
 
           render json: {
-            data: documents.map { |document| serialize_document(document) }
+            data: documents.map { |document| serialize_document(document) },
+            meta: bounded_page_meta(documents).merge(employee_linked_count: employee_linked_count)
           }
         end
 
         def create
-          result = ClientDocumentUploadService.new(
-            company_id: current_company_id,
-            current_user: current_user,
+          result = AuditedClientDocumentUpload.call(
+            company_id: current_company_id, current_user: current_user,
             params: params.merge(visible_to_client: true)
-          ).upload!
-          documents = result.documents
+          ) do |uploaded|
+            next if uploaded.replayed
 
-          documents.each do |document|
-            enqueue_preview_generation(document)
-            AuditLog.record!(
-              user: current_user,
-              company_id: current_company_id,
-              action: "client_documents#create",
-              record_type: "client_documents",
-              record_id: document.id,
-              metadata: { title: document.title, category: document.category },
-              ip_address: request.remote_ip,
-              user_agent: request.user_agent
-            )
+            uploaded.documents.each do |document|
+              PortalActivity.record!(user: current_user, record: document, action: "client_documents#create",
+                metadata: PortalActivity.document_metadata(document),
+                ip_address: request.remote_ip, user_agent: request.user_agent)
+            end
+            audit_requirement_received!(uploaded.document_requirement) if uploaded.document_requirement
+            # Files uploaded in the message composer alert staff once, with the message.
+            PortalNotifications.client_upload!(documents: uploaded.documents, actor: current_user) unless for_message?
           end
-          audit_requirement_received!(result.document_requirement) if result.document_requirement
+          documents = result.documents
+          documents.each { |document| enqueue_preview_generation(document) } unless result.replayed
 
           render json: {
             data: documents.map { |document| serialize_document(document) },
             message: documents.count == 1 ? "Document uploaded successfully" : "#{documents.count} documents uploaded successfully"
-          }, status: :created
+          }, status: result.replayed ? :ok : :created
+        rescue ClientDocumentUploadService::RetryConflict => e
+          render json: { error: e.message }, status: :conflict
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Employee not found" }, status: :not_found
         rescue ActiveRecord::RecordInvalid => e
-          render json: { error: "Validation failed", details: e.record.errors.messages }, status: :unprocessable_entity
+          render json: { error: "Please check the selected files", details: e.record.errors.messages }, status: :unprocessable_entity
         rescue R2StorageService::UploadError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def download
+          @document.ensure_usable_for!(:download)
           data = R2StorageService.new.download(@document.file_key)
           return render json: { error: "File not found" }, status: :not_found unless data
 
+          audit_portal_document!("portal_documents#download")
           send_data data,
             filename: @document.download_filename,
             type: @document.content_type,
@@ -69,10 +84,12 @@ module Api
         end
 
         def preview
+          @document.ensure_usable_for!(:preview)
           ensure_generated_preview!(@document)
           data, content_type, filename = preview_payload_for(@document)
           return render json: { error: public_preview_error(@document) }, status: :unprocessable_entity unless data
 
+          audit_portal_document!("portal_documents#preview")
           send_data data,
             filename: filename,
             type: content_type,
@@ -80,33 +97,33 @@ module Api
         end
 
         def destroy
-          file_keys = [ @document.preview_file_key, @document.file_key ].compact
-
-          @document.destroy!
-          AuditLog.record!(
-            user: current_user,
-            company_id: current_company_id,
-            action: "client_documents#destroy",
-            record_type: "client_documents",
-            record_id: @document.id,
-            metadata: { title: @document.title, category: @document.category },
-            ip_address: request.remote_ip,
-            user_agent: request.user_agent
-          )
-          cleanup_storage_keys(file_keys)
-          head :no_content
-        rescue ActiveRecord::RecordNotDestroyed
-          raise unless readiness_evidence?(@document)
-
-          render json: {
-            error: "This file is linked to retained employee-readiness evidence and cannot be deleted. Upload a replacement when needed."
-          }, status: :unprocessable_entity
+          file_keys = nil
+          disposition = nil
+          @document.with_lock do
+            file_keys = [ @document.preview_file_key, @document.file_key ].compact
+            disposition = @document.archive_or_destroy!(actor: current_user)
+            PortalActivity.record!(user: current_user, record: @document,
+              action: "client_documents##{disposition == :archived ? 'archive' : 'destroy'}",
+              metadata: PortalActivity.document_metadata(@document),
+              ip_address: request.remote_ip, user_agent: request.user_agent)
+          end
+          if disposition == :archived
+            render json: { data: serialize_document(@document), message: "File archived. It is kept with the messages or evidence that reference it." }
+          else
+            cleanup_storage_keys(file_keys)
+            head :no_content
+          end
         end
 
         private
 
-        def readiness_evidence?(document)
-          document.employee_document_requirements.exists? || document.employee_document_requirement_events.exists?
+        def for_message?
+          ActiveModel::Type::Boolean.new.cast(params[:for_message])
+        end
+
+        def private_document_response!
+          response.set_header("Cache-Control", "private, no-store")
+          response.set_header("X-Content-Type-Options", "nosniff")
         end
 
         def set_document
@@ -143,6 +160,9 @@ module Api
             visible_to_client: document.visible_to_client,
             shared_by_staff: document.shared_by_staff,
             created_at: document.created_at,
+            archived_at: document.archived_at,
+            archived_by_id: document.archived_by_id,
+            scan_status: document.scan_status,
             preview_status: document.preview_status,
             preview_available: document.preview_available?,
             preview_generated_at: document.preview_generated_at,
@@ -203,7 +223,8 @@ module Api
             action: "employee_document_requirements#receive",
             record_type: "employee_document_requirements",
             record_id: requirement.id,
-            metadata: { employee_id: requirement.employee_id, requirement_type: requirement.requirement_type },
+            subject_name: requirement.employee.full_name,
+            metadata: { employee_id: requirement.employee_id, employee_name: requirement.employee.full_name, requirement_type: requirement.requirement_type },
             ip_address: request.remote_ip,
             user_agent: request.user_agent
           )

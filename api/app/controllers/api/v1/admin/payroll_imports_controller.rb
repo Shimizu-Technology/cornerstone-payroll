@@ -5,6 +5,7 @@ module Api
     module Admin
       class PayrollImportsController < BaseController
         before_action :set_pay_period
+        around_action :with_import_lock, only: %i[preview apply resolve_portal_source]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/supplemental_template
         def supplemental_template
@@ -35,16 +36,7 @@ module Api
             return render json: { error: "There is no current MoSa import waiting for review." }, status: :not_found
           end
 
-          preview_data = preview_from_source_package(source_package)
-          preview_data[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(
-            import_record.raw_data.to_h.fetch("tips_paid_out_from_tips", false)
-          )
-          render json: {
-            import_id: import_record.id,
-            preview: preview_data,
-            source_package: source_package_json(source_package),
-            duplicate: false
-          }
+          render json: preview_response(import_record, { session: source_package, duplicate: false })
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/preview_import
@@ -53,6 +45,8 @@ module Api
           unless @pay_period.can_edit?
             return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
           end
+
+          return preview_portal_submission if params[:submission_id].present?
 
           pdf_file = params[:pdf_file]
           excel_file = params[:excel_file]
@@ -82,40 +76,8 @@ module Api
               }, status: :unprocessable_entity
             end
 
-            preview_data = preview_from_source_package(source_package)
-            tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips])
-            preview_data[:tips_paid_out_from_tips] = tips_paid_out_from_tips
-
-            # Persist preview for later apply
-            import_record = PayrollImportRecord.find_or_initialize_by(payroll_intake_session: source_package)
-            import_record.assign_attributes(
-              pay_period: @pay_period,
-              status: "previewed",
-              pdf_filename: pdf_file.original_filename,
-              excel_filename: excel_file&.original_filename,
-              raw_data: {
-                pdf_count: preview_data[:pdf_count],
-                excel_count: preview_data[:excel_count],
-                tips_paid_out_from_tips: tips_paid_out_from_tips,
-                unmatched_excel_names: preview_data[:unmatched_excel_names],
-                duplicate_employee_matches: preview_data[:duplicate_employee_matches],
-                low_confidence_matches: preview_data[:low_confidence_matches],
-                package_id: source_package.package_id,
-                package_revision: source_package.package_revision,
-                package_schema_version: source_package.package_schema_version,
-                source_document_count: source_package.documents.length
-              },
-              matched_data: preview_data[:matched],
-              unmatched_pdf_names: preview_data[:unmatched_pdf_names]
-            )
-            import_record.save!
-
-            render json: {
-              import_id: import_record.id,
-              preview: preview_data,
-              source_package: source_package_json(source_package),
-              duplicate: package_result[:duplicate]
-            }
+            import_record = persist_preview(package_result, pdf_file, excel_file)
+            render json: preview_response(import_record, package_result)
           rescue PayrollIntake::PreviewService::ReplacementRequiredError => e
             render json: {
               error: e.message,
@@ -142,6 +104,19 @@ module Api
           end
 
           begin
+            import_record.lock!
+            raise ArgumentError, "This import was already applied. Reopen the current review." unless import_record.status == "previewed"
+            raise ArgumentError, "Unapprove this pay run before applying an import" if @pay_period.approved?
+            selection = import_record.submission_imports.find_by(id: params[:portal_source_id])
+            if import_record.submission_imports.exists? && !selection
+              raise ArgumentError, "Reopen the portal submission in import review to confirm its source revision"
+            end
+            if selection
+              selection.period.lock!
+              selection.validate_current!
+            elsif @pay_period.pending_portal_submission?
+              raise ArgumentError, "Open the pending portal revision in import review or record a source disposition first"
+            end
             source_package = import_record.payroll_intake_session
             unless source_package
               return render json: { error: "This preview predates verified source retention. Preview the files again before applying." }, status: :unprocessable_entity
@@ -196,7 +171,11 @@ module Api
             )
             results = { success: [], skipped: [], errors: [] }
             applied = false
-            ActiveRecord::Base.transaction do
+            ActiveRecord::Base.transaction(requires_new: true) do
+              # This selection resolves the pending-source gate only inside the
+              # same transaction as successful calculation/apply. Any failure
+              # rolls it back along with every payroll row and status event.
+              selection&.update!(applied_at: Time.current)
               if matched_data.any?
                 service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
                 results = service.apply!(matched: matched_data, force_overwrite: force_overwrite, tips_paid_out_from_tips: tips_paid_out_from_tips)
@@ -225,6 +204,18 @@ module Api
               source_package.mark_reviewed!(actor: current_user) if source_package.status == "previewed"
               source_package.mark_applied!(actor: current_user)
               @pay_period.clear_intake_stale! if @pay_period.intake_stale_session_id == source_package.id
+              if selection
+                period = selection.period
+                # Keep Imported tied to the actual selected revision; choosing
+                # an old source does not label the newer files as imported.
+                period.transition!("import", actor: current_user,
+                  submission: selection.payroll_submission, note: "Imported revision #{selection.payroll_submission.revision} into payroll review.")
+                PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#import",
+                  metadata: { submission_id: selection.payroll_submission_id, current_submission_id: selection.current_submission_id,
+                    superseded_reason: selection.superseded_reason, import_id: import_record.id, source_package_id: source_package.id })
+                PortalNotifications.payroll_period!("payroll_submission_imported", period: period, actor: current_user,
+                  dedupe: "import:#{import_record.id}", metadata: { submission_id: selection.payroll_submission_id, revision: selection.payroll_submission.revision })
+              end
               applied = true
             end
 
@@ -250,7 +241,122 @@ module Api
           end
         end
 
+        def resolve_portal_source
+          skip_default_audit_log!
+          period = PayrollSubmissionPeriod.lock.find_by!(company_id: @pay_period.company_id, start_date: @pay_period.start_date, end_date: @pay_period.end_date)
+          unless period.pay_period_id == @pay_period.id
+            return render json: { error: "This portal period is not linked to this pay run. Open it in import review for its matching regular run first." }, status: :unprocessable_entity
+          end
+          source = period.submissions.first
+          reason = params[:reason].to_s.strip
+          unless source && source.id.to_s == params[:submission_id].to_s && reason.present? && reason.length <= 2000
+            return render json: { error: "Choose the current portal revision and explain why it will not be imported (up to 2,000 characters)." }, status: :unprocessable_entity
+          end
+          period.transition!("resolve_source", actor: current_user, submission: source, note: reason)
+          PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#resolve_source",
+            metadata: { submission_id: source.id, revision: source.revision, reason: reason })
+          render json: { resolved_submission_id: source.id }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Portal period not found" }, status: :not_found
+        end
+
         private
+
+        def preview_portal_submission
+          skip_default_audit_log!
+          PayrollSubmissions::ImportBridge.new(pay_period: @pay_period, actor: current_user, submission_id: params[:submission_id],
+            superseded_reason: params[:superseded_reason], supersedes_package_id: params[:supersedes_package_id],
+            supersession_reason: params[:supersession_reason]).call do |result, submission, current, reason, files|
+            record = persist_preview(result, files.first, files.second)
+            selection = record.submission_imports.find_or_create_by!(payroll_submission: submission, current_submission: current) do |link|
+              link.selected_by = current_user
+              link.superseded_reason = reason
+            end
+            PayrollSubmissions::Audit.record!(actor: current_user, period: submission.period, action: "payroll_submissions#open_import",
+              metadata: { submission_id: submission.id, revision: submission.revision, current_submission_id: current.id,
+                superseded_reason: reason, import_id: record.id, duplicate: result[:duplicate] })
+            render json: preview_response(record, result, selection: selection)
+          end
+        rescue PayrollIntake::PreviewService::ReplacementRequiredError => e
+          render json: { error: e.message, details: { replacement_required: true, current_package: replacement_package_json(e.current_session) } }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Portal submission not found for this company and period" }, status: :not_found
+        rescue StandardError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def persist_preview(package_result, pdf_file, excel_file)
+          source_package = package_result.fetch(:session)
+          unless source_package.applyable?
+            raise ArgumentError, "This source package was already applied or superseded. Review a corrected current source."
+          end
+          preview_data = preview_from_source_package(source_package)
+          tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips])
+          preview_data[:tips_paid_out_from_tips] = tips_paid_out_from_tips
+
+          # Persist preview for later apply
+          import_record = PayrollImportRecord.find_or_initialize_by(payroll_intake_session: source_package)
+          return import_record if import_record.persisted? && package_result[:duplicate]
+          import_record.assign_attributes(
+            pay_period: @pay_period,
+            status: "previewed",
+            pdf_filename: pdf_file.original_filename,
+            excel_filename: excel_file&.original_filename,
+            raw_data: {
+              pdf_count: preview_data[:pdf_count],
+              excel_count: preview_data[:excel_count],
+              tips_paid_out_from_tips: tips_paid_out_from_tips,
+              unmatched_excel_names: preview_data[:unmatched_excel_names],
+              duplicate_employee_matches: preview_data[:duplicate_employee_matches],
+              low_confidence_matches: preview_data[:low_confidence_matches],
+              package_id: source_package.package_id,
+              package_revision: source_package.package_revision,
+              package_schema_version: source_package.package_schema_version,
+              source_document_count: source_package.documents.length
+            },
+            matched_data: preview_data[:matched],
+            unmatched_pdf_names: preview_data[:unmatched_pdf_names]
+          )
+          import_record.save!
+
+          import_record
+        end
+
+        def preview_response(import_record, package_result, selection: nil)
+          source_package = package_result.fetch(:session)
+          preview = preview_from_source_package(source_package)
+          preview[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(import_record.raw_data.to_h["tips_paid_out_from_tips"])
+          selection ||= import_record.submission_imports.order(id: :desc).first
+          {
+            import_id: import_record.id, preview: preview, source_package: source_package_json(source_package),
+            duplicate: package_result[:duplicate], portal_source: portal_source_json(selection)
+          }
+        end
+
+        def portal_source_json(selection)
+          return unless selection
+
+          submission = selection.payroll_submission
+          names = Employee.where(company_id: @pay_period.company_id).pluck(:id, :first_name, :last_name).to_h { |id, first, last| [ id, [ first, last ].join(" ") ] }
+          {
+            selection_id: selection.id, submission_id: submission.id, revision: submission.revision,
+            period_id: submission.payroll_submission_period_id, current: submission.id == submission.period.current_submission&.id,
+            superseded_reason: selection.superseded_reason, notes: submission.notes, changes_link_url: submission.changes_link_url,
+            no_changes: submission.no_changes,
+            changes: submission.change_rows.map { |row| row.merge("label" => PayrollSubmissions::ChangeRows::LABELS[row["kind"]],
+              "employee_name" => names[row["employee_id"]], "employee_names" => Array(row["employee_ids"]).filter_map { |id| names[id] }) }
+          }
+        end
+
+        def with_import_lock
+          ApplicationRecord.transaction do
+            Company.lock.find(@pay_period.company_id)
+            @pay_period.lock!
+            revalidate_current_company_write_access!
+            yield
+          end
+        end
+
 
         def preview_from_source_package(source_package)
           evidence = source_package.evidence_snapshot.to_h

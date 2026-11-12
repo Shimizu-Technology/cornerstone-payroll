@@ -258,8 +258,8 @@ class ApiClient {
     });
   }
 
-  async postForm<T>(endpoint: string, formData: FormData): Promise<T> {
-    const initiatingCompanyId = this.activeCompanyId;
+  async postForm<T>(endpoint: string, formData: FormData, options: Pick<RequestOptions, 'companyId'> = {}): Promise<T> {
+    const initiatingCompanyId = options.companyId !== undefined ? options.companyId : this.activeCompanyId;
     const financeHeaders = this.financeHeaders(endpoint);
     const token = await this.resolveAuthToken();
     const headers: HeadersInit = { ...financeHeaders };
@@ -1585,6 +1585,10 @@ export const payPeriodsApi = {
     if (replacement?.reason) formData.append('supersession_reason', replacement.reason);
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
   },
+  previewPortalSubmission: (id: number, submissionId: number, options: { superseded_reason?: string; supersedes_package_id?: string; supersession_reason?: string; tips_paid_out_from_tips?: boolean } = {}): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, { submission_id: submissionId, ...options }),
+  resolvePortalSource: (id: number, submissionId: number, reason: string): Promise<{ resolved_submission_id: number }> =>
+    api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
   currentImport: (id: number): Promise<ImportPreviewResponse> =>
     api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
   applyImport: (
@@ -1599,6 +1603,7 @@ export const payPeriodsApi = {
         target_pay_period_id?: number | null;
       }>;
       acknowledge_low_confidence_matches?: boolean;
+      portal_source_id?: number;
       force_overwrite?: boolean;
     },
   ): Promise<ImportApplyResponse> =>
@@ -2103,6 +2108,11 @@ export interface MosaSourceRow {
 }
 
 export interface ImportPreviewResponse {
+  portal_source?: {
+    selection_id: number; submission_id: number; revision: number; period_id: number; current: boolean;
+    superseded_reason?: string; notes?: string; changes_link_url?: string; no_changes: boolean;
+    changes: import('./payrollSubmissions').ChangeRow[];
+  } | null;
   import_id: number;
   duplicate?: boolean;
   source_package: {
@@ -4218,7 +4228,23 @@ export interface ClientEmployeeUpdateResponse {
   message?: string;
 }
 
+// Paging metadata from list endpoints capped by the API's BoundedListPagination.
+export interface BoundedListMeta {
+  current_page: number;
+  total_pages: number;
+  total_count: number;
+  per_page: number;
+}
+
+export interface ClientDocumentListMeta extends BoundedListMeta {
+  employee_linked_count: number;
+}
+
+export type BoundedListParams = { page?: number; per_page?: number };
+
 export interface ClientDocument {
+  reviewed_at?: string | null;
+  reviewed_by_id?: number | null;
   id: number;
   title: string;
   category: string;
@@ -4233,6 +4259,9 @@ export interface ClientDocument {
   visible_to_client: boolean;
   shared_by_staff: boolean;
   created_at: string;
+  archived_at?: string | null;
+  archived_by_id?: number | null;
+  scan_status?: 'not_scanned' | 'pending' | 'clean' | 'infected' | 'error';
   preview_status: 'pending' | 'processing' | 'ready' | 'failed' | 'not_required';
   preview_available: boolean;
   preview_generated_at?: string | null;
@@ -4286,15 +4315,64 @@ export interface EmployeeDocumentReadinessResponse {
   };
 }
 
+export type ClientPortalMessageKind = 'message' | 'file_request' | 'file_response' | 'file_request_accepted' | 'file_request_asked_again' | 'file_request_withdrawn';
+export type PortalFileRequestStatus = 'requested' | 'responded' | 'accepted' | 'withdrawn';
+
+export interface PortalFileRequest {
+  id: number;
+  thread_id: number;
+  title: string;
+  category: string;
+  employee_id?: number | null;
+  employee_name?: string | null;
+  payroll_submission_period_id?: number | null;
+  payroll_submission_period_label?: string | null;
+  due_on?: string | null;
+  status: PortalFileRequestStatus;
+  status_label: string;
+  requested_by_name?: string | null;
+  request_message_id?: number | null;
+  last_response_message_id?: number | null;
+  responded_by_name?: string | null;
+  responded_at?: string | null;
+  resolved_by_name?: string | null;
+  resolved_at?: string | null;
+  created_at: string;
+  lock_version: number;
+}
+
 export interface ClientPortalMessage {
   id: number;
   thread_id: number;
+  kind?: ClientPortalMessageKind;
   body?: string | null;
   author_id?: number | null;
   author_name?: string | null;
   author_role?: string | null;
+  author_audience?: 'client' | 'staff' | 'unknown';
   created_at: string;
+  /** The first attachment, kept for older readers. */
   document?: ClientDocument | null;
+  documents?: ClientDocument[];
+  file_request?: PortalFileRequest | null;
+}
+
+export type PortalMessagePayload = { body?: string; document_ids?: number[]; idempotency_key: string };
+export type PortalFileRequestStep = { data: PortalFileRequest; message: ClientPortalMessage };
+
+export interface PortalActivityEvent {
+  id: number;
+  actor_name: string;
+  action: string;
+  subject_name: string;
+  headline: string;
+  created_at: string;
+}
+
+export interface PortalReadDisplay {
+  foreground: true;
+  display_token: string;
+  displayed_message_ids: number[];
 }
 
 export interface ClientPortalThread {
@@ -4313,6 +4391,8 @@ export interface ClientPortalThread {
   updated_at: string;
   latest_message?: ClientPortalMessage | null;
   messages?: ClientPortalMessage[];
+  display_token?: string;
+  open_file_request_count?: number;
 }
 
 export interface EmployeeChangeRequest {
@@ -4483,16 +4563,18 @@ export const employeeLoansApi = {
 };
 
 export const clientDocumentsApi = {
-  list: (params?: { category?: string; employee_id?: number }) =>
-    api.get<{ data: ClientDocument[] }>('/client/documents', params),
-  upload: (formData: FormData) =>
-    api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData),
+  list: (params?: { category?: string; employee_id?: number; search?: string; attachable?: boolean } & BoundedListParams) =>
+    api.get<{ data: ClientDocument[]; meta: ClientDocumentListMeta }>('/client/documents', params),
+  upload: (formData: FormData, companyId?: number) =>
+    api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData, { companyId }),
   preview: (id: number) =>
     api.getBlobWithParams(`/client/documents/${id}/preview`),
+  opened: (id: number): Promise<void> => api.post<void>(`/client/documents/${id}/opened`),
+  activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/client/documents/${id}/activity`, { page }),
   download: (id: number) =>
     api.getBlobWithParams(`/client/documents/${id}/download`),
   delete: (id: number) =>
-    api.delete<void>(`/client/documents/${id}`),
+    api.delete<{ data: ClientDocument; message: string } | undefined>(`/client/documents/${id}`),
 };
 
 export const clientEmployeeDocumentRequirementsApi = {
@@ -4501,31 +4583,39 @@ export const clientEmployeeDocumentRequirementsApi = {
 };
 
 export const clientPortalThreadsApi = {
-  list: (params?: { status?: string }) =>
-    api.get<{ data: ClientPortalThread[] }>('/client/portal_threads', params),
+  unreadCount: (): Promise<{ data: { unread_count: number } }> => api.get<{ data: { unread_count: number } }>('/client/portal_threads/unread_count'),
+  list: (params?: { status?: string } & BoundedListParams) =>
+    api.get<{ data: ClientPortalThread[]; meta: BoundedListMeta }>('/client/portal_threads', params),
   get: (id: number) =>
     api.get<{ data: ClientPortalThread }>(`/client/portal_threads/${id}`),
-  create: (data: { subject: string; body?: string; document_id?: number }) =>
+  create: (data: { subject: string; body?: string; document_id?: number; document_ids?: number[]; idempotency_key: string }) =>
     api.post<{ data: ClientPortalThread }>('/client/portal_threads', data),
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) =>
     api.patch<{ data: ClientPortalThread }>(`/client/portal_threads/${id}`, data),
-  markRead: (id: number) =>
-    api.post<{ data: ClientPortalThread }>(`/client/portal_threads/${id}/mark_read`),
-  createMessage: (threadId: number, data: { body?: string; document_id?: number }) =>
+  activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/client/portal_threads/${id}/activity`, { page }),
+  markRead: (id: number, data: PortalReadDisplay): Promise<{ data: ClientPortalThread }> =>
+    api.post<{ data: ClientPortalThread }>(`/client/portal_threads/${id}/mark_read`, data),
+  createMessage: (threadId: number, data: { body?: string; document_id?: number; document_ids?: number[]; idempotency_key: string }): Promise<{ data: ClientPortalMessage }> =>
     api.post<{ data: ClientPortalMessage }>(`/client/portal_threads/${threadId}/messages`, data),
 };
 
 export const adminClientDocumentsApi = {
-  list: (params?: { category?: string; employee_id?: number; uploaded_by_id?: number }) =>
-    api.get<{ data: ClientDocument[] }>('/admin/client_documents', params),
-  upload: (formData: FormData) =>
-    api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData),
+  list: (params?: { category?: string; employee_id?: number; uploaded_by_id?: number; search?: string; attachable?: boolean } & BoundedListParams) =>
+    api.get<{ data: ClientDocument[]; meta: BoundedListMeta & { employee_linked_count?: number; unique_uploaders_count?: number } }>('/admin/client_documents', params),
+  get: (id: number) => api.get<{ data: ClientDocument }>(`/admin/client_documents/${id}`),
+  review: (id: number) => api.post<{ data: ClientDocument }>(`/admin/client_documents/${id}/review`),
+  upload: (formData: FormData, companyId?: number) =>
+    api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData, { companyId }),
   preview: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/preview`),
+  opened: (id: number): Promise<void> => api.post<void>(`/admin/client_documents/${id}/opened`),
+  activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/admin/client_documents/${id}/activity`, { page }),
   download: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/download`),
+  unarchive: (id: number) =>
+    api.post<{ data: ClientDocument; message: string }>(`/admin/client_documents/${id}/unarchive`),
   delete: (id: number) =>
-    api.delete<void>(`/admin/client_documents/${id}`),
+    api.delete<{ data: ClientDocument; message: string } | undefined>(`/admin/client_documents/${id}`),
 };
 
 export const adminEmployeeDocumentRequirementsApi = {
@@ -4547,23 +4637,46 @@ export const adminEmployeeDocumentRequirementsApi = {
 };
 
 export const adminPortalThreadsApi = {
-  list: (params?: { status?: string }) =>
-    api.get<{ data: ClientPortalThread[] }>('/admin/portal_threads', params),
+  unreadCount: (): Promise<{ data: { unread_count: number } }> => api.get<{ data: { unread_count: number } }>('/admin/portal_threads/unread_count'),
+  list: (params?: { status?: string } & BoundedListParams) =>
+    api.get<{ data: ClientPortalThread[]; meta: BoundedListMeta }>('/admin/portal_threads', params),
   get: (id: number) =>
     api.get<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}`),
-  create: (data: { subject: string; body?: string; document_id?: number }) =>
+  create: (data: { subject: string; body?: string; document_id?: number; document_ids?: number[]; idempotency_key: string }) =>
     api.post<{ data: ClientPortalThread }>('/admin/portal_threads', data),
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) =>
     api.patch<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}`, data),
-  markRead: (id: number) =>
-    api.post<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}/mark_read`),
-  createMessage: (threadId: number, data: { body?: string; document_id?: number }) =>
+  activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/admin/portal_threads/${id}/activity`, { page }),
+  markRead: (id: number, data: PortalReadDisplay): Promise<{ data: ClientPortalThread }> =>
+    api.post<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}/mark_read`, data),
+  createMessage: (threadId: number, data: { body?: string; document_id?: number; document_ids?: number[]; idempotency_key: string }): Promise<{ data: ClientPortalMessage }> =>
     api.post<{ data: ClientPortalMessage }>(`/admin/portal_threads/${threadId}/messages`, data),
 };
 
+export const clientPortalFileRequestsApi = {
+  respond: (id: number, data: PortalMessagePayload): Promise<PortalFileRequestStep> =>
+    api.post<PortalFileRequestStep>(`/client/portal_file_requests/${id}/respond`, data),
+};
+
+export type NewPortalFileRequest = {
+  title: string; category: string; employee_id?: number; payroll_submission_period_ref?: string; due_on?: string;
+  body?: string; thread_id?: number; idempotency_key: string;
+};
+
+export const adminPortalFileRequestsApi = {
+  create: (data: NewPortalFileRequest): Promise<{ data: PortalFileRequest; thread: ClientPortalThread }> =>
+    api.post<{ data: PortalFileRequest; thread: ClientPortalThread }>('/admin/portal_file_requests', data),
+  accept: (id: number, data: { response_message_id: number; body?: string; idempotency_key: string }): Promise<PortalFileRequestStep> =>
+    api.post<PortalFileRequestStep>(`/admin/portal_file_requests/${id}/accept`, data),
+  askAgain: (id: number, data: { response_message_id: number; body: string; idempotency_key: string }): Promise<PortalFileRequestStep> =>
+    api.post<PortalFileRequestStep>(`/admin/portal_file_requests/${id}/ask_again`, data),
+  withdraw: (id: number, data: { body?: string; idempotency_key: string }): Promise<PortalFileRequestStep> =>
+    api.post<PortalFileRequestStep>(`/admin/portal_file_requests/${id}/withdraw`, data),
+};
+
 export const clientEmployeeChangeRequestsApi = {
-  list: (params?: { status?: string; search?: string }) =>
-    api.get<{ data: EmployeeChangeRequest[] }>('/client/employee_change_requests', params),
+  list: (params?: { status?: string; search?: string } & BoundedListParams) =>
+    api.get<{ data: EmployeeChangeRequest[]; meta: BoundedListMeta }>('/client/employee_change_requests', params),
   get: (id: number) =>
     api.get<{ data: EmployeeChangeRequest }>(`/client/employee_change_requests/${id}`),
 };

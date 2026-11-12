@@ -73,4 +73,27 @@ RSpec.describe R2StorageService do
 
     expect { described_class.new }.to raise_error(StagingOutboundPolicy::ConfigurationError, /STAGING_STORAGE_BUCKET/)
   end
+
+  it "bounds the streamed remote body when it grows after metadata inspection" do
+    service = described_class.new
+    client = instance_double(Aws::S3::Client)
+    allow(service).to receive(:configured?).and_return(true)
+    allow(service).to receive(:client).and_return(client)
+    allow(service).to receive(:bucket_name).and_return("synthetic-bucket")
+    allow(client).to receive(:head_object).and_return(double(content_length: 4))
+    allow(client).to receive(:get_object).and_yield("1234").and_yield("5")
+    expect { service.download_with_limit("synthetic-key", max_bytes: 4) }
+      .to raise_error(R2StorageService::DownloadError, /exceeds 4 byte/)
+  end
+
+  it "allows a streamed remote body exactly at the size boundary" do
+    service = described_class.new
+    client = instance_double(Aws::S3::Client)
+    allow(service).to receive(:configured?).and_return(true)
+    allow(service).to receive(:client).and_return(client)
+    allow(service).to receive(:bucket_name).and_return("synthetic-bucket")
+    allow(client).to receive(:head_object).and_return(double(content_length: 4))
+    allow(client).to receive(:get_object).and_yield("12").and_yield("34")
+    expect(service.download_with_limit("synthetic-key", max_bytes: 4)).to eq("1234")
+  end
 end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class EmployeeChangeRequest < ApplicationRecord
+  include PortalInboxUpdates
   IDENTIFIER_KEYS = %i[ssn ssn_encrypted contractor_ein].freeze
   PERMITTED_EMPLOYEE_UPDATE_KEYS = %i[
     first_name
@@ -62,7 +63,7 @@ class EmployeeChangeRequest < ApplicationRecord
   validates :requested_by, presence: true, on: :create
   validates :request_kind, inclusion: { in: %w[create update] }
 
-  scope :recent_first, -> { order(created_at: :desc) }
+  scope :recent_first, -> { order(created_at: :desc, id: :desc) }
   scope :for_company, ->(company_id) { where(company_id: company_id) }
 
   def sensitive_payload
@@ -94,6 +95,7 @@ class EmployeeChangeRequest < ApplicationRecord
         review_notes: review_notes,
         reviewed_at: Time.current
       )
+      PortalNotifications.employee_change_decided!(self, actor: actor)
     end
   end
 
@@ -107,6 +109,7 @@ class EmployeeChangeRequest < ApplicationRecord
         review_notes: review_notes,
         reviewed_at: Time.current
       )
+      PortalNotifications.employee_change_decided!(self, actor: actor)
     end
   end
 
@@ -134,6 +137,11 @@ class EmployeeChangeRequest < ApplicationRecord
     wage_rates = attrs.delete(:wage_rates)
     validate_supported_change_keys!(attrs.keys)
     safe_attrs = attrs.slice(*PERMITTED_EMPLOYEE_UPDATE_KEYS)
+    # Requests submitted before the portal stopped sending contractor defaults
+    # for W-2 workers may still carry them; never save them onto a W-2 worker.
+    unless (safe_attrs[:employment_type].presence || employee.employment_type).to_s == "contractor"
+      safe_attrs = safe_attrs.except(*Employee::CONTRACTOR_ONLY_ATTRIBUTES)
+    end
     validate_department_scope!(safe_attrs)
 
     election_received = safe_attrs.delete(:w4_election_received)

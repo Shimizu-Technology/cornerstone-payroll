@@ -6,10 +6,11 @@ class PayrollIntakeDocument < ApplicationRecord
   VERIFICATION_STATUSES = %w[verified failed legacy_unverified].freeze
   IMMUTABLE_SOURCE_FIELDS = %w[
     payroll_intake_session_id document_type source_role position filename content_type
-    storage_reference text_content byte_size sha256
+    storage_reference text_content byte_size sha256 payroll_submission_document_id
   ].freeze
 
   belongs_to :payroll_intake_session, inverse_of: :documents
+  belongs_to :payroll_submission_document, optional: true
 
   validates :document_type, inclusion: { in: DOCUMENT_TYPES }
   validates :source_role, inclusion: { in: SOURCE_ROLES }
@@ -18,6 +19,7 @@ class PayrollIntakeDocument < ApplicationRecord
             numericality: { only_integer: true, greater_than_or_equal_to: 0 },
             uniqueness: { scope: :payroll_intake_session_id }
   validates :storage_reference, uniqueness: true, allow_nil: true
+  validate :portal_source_matches_package
   validate :has_content_or_reference
   validate :verified_source_has_fingerprint
   validate :source_identity_immutable, on: :update
@@ -38,6 +40,16 @@ class PayrollIntakeDocument < ApplicationRecord
     R2StorageService.new.delete(storage_reference)
   rescue StandardError => e
     Rails.logger.error("Payroll source document #{id} storage purge failed: #{e.class}: #{e.message}")
+  end
+
+  def portal_source_matches_package
+    return unless payroll_submission_document
+
+    source = payroll_submission_document
+    period = source.submission.period
+    return if source.company_id == company.id && period.start_date == pay_period.start_date && period.end_date == pay_period.end_date && source.sha256 == sha256
+
+    errors.add(:payroll_submission_document, "must match this package's company, period and fingerprint")
   end
 
   def has_content_or_reference

@@ -1,3 +1,4 @@
+import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FileUp, ShieldCheck, Trash2, UploadCloud, Users, X } from 'lucide-react';
@@ -8,16 +9,19 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
+import { LoadMoreFooter } from '@/components/ui/load-more';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { PortalMessagesPanel } from '@/components/client-portal/PortalMessagesPanel';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
+import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import { clientDocumentsApi, clientEmployeesApi, clientPortalThreadsApi } from '@/services/api';
-import type { ClientDocument } from '@/services/api';
+import type { ClientDocument, ClientDocumentListMeta } from '@/services/api';
 import type { Employee } from '@/types';
 
 const documentCategories = [
   { value: 'payroll_source', label: 'Payroll Source' },
+  { value: 'payroll_review', label: 'Payroll Review Draft' },
   { value: 'employee_onboarding', label: 'W-4 / W-9 / Onboarding' },
   { value: 'tax_notice', label: 'Tax Notice' },
   { value: 'direct_deposit', label: 'Direct Deposit' },
@@ -26,7 +30,7 @@ const documentCategories = [
   { value: 'misc', label: 'Miscellaneous' },
 ];
 const ACCEPTED_UPLOAD_TYPES = '.pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx';
-const MAX_UPLOAD_NOTE = 'Accepted: PDF, Office docs, spreadsheets, text files, and common images up to 25 MB.';
+const MAX_UPLOAD_NOTE = 'Accepted: PDF, Office docs, spreadsheets, text files, and common images up to 25 MB each. Select multiple files; larger selections upload in smaller groups. Macros are not supported.';
 
 function categoryLabel(value: string) {
   return documentCategories.find((category) => category.value === value)?.label || value;
@@ -37,15 +41,17 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function formatUploadSuccessMessage(count: number) {
-  return count === 1 ? 'Document uploaded successfully' : `${count} documents uploaded successfully`;
-}
-
 export function ClientDocuments() {
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
+  const [documentsMeta, setDocumentsMeta] = useState<ClientDocumentListMeta | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  // Bumped on every fresh load so a slow "load more" from before an upload or delete is dropped.
+  const listGeneration = useRef(0);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -67,16 +73,16 @@ export function ClientDocuments() {
     [employees]
   );
 
-  const employeeScopedDocuments = useMemo(
-    () => documents.filter((document) => document.employee_id).length,
-    [documents]
-  );
+  // Totals come from the server so they stay right when only the first page is loaded.
+  const totalDocuments = documentsMeta?.total_count ?? documents.length;
+  const employeeScopedDocuments = documentsMeta?.employee_linked_count ?? documents.filter((document) => document.employee_id).length;
   const selectedFiles = form.files;
   const selectedFileCount = selectedFiles.length;
   const totalSelectedFileSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
   const supportsSingleTitle = selectedFileCount <= 1;
 
   const load = useCallback(async () => {
+    listGeneration.current += 1;
     try {
       setLoading(true);
       setError(null);
@@ -85,6 +91,8 @@ export function ClientDocuments() {
         clientEmployeesApi.list({ per_page: 500, sort_by: 'name', sort_direction: 'asc' }),
       ]);
       setDocuments(documentsResponse.data);
+      setDocumentsMeta(documentsResponse.meta);
+      setLoadMoreError(null);
       setEmployees(employeesResponse.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load documents');
@@ -94,6 +102,24 @@ export function ClientDocuments() {
   }, [setError]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const loadMore = async () => {
+    if (!documentsMeta) return;
+    const generation = listGeneration.current;
+    try {
+      setLoadingMore(true);
+      setLoadMoreError(null);
+      const response = await clientDocumentsApi.list({ page: documentsMeta.current_page + 1 });
+      if (generation !== listGeneration.current) return;
+      setDocuments((current) => appendUniqueById(current, response.data));
+      setDocumentsMeta(response.meta);
+    } catch (err) {
+      if (generation !== listGeneration.current) return;
+      setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more documents');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleUpload = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -106,23 +132,27 @@ export function ClientDocuments() {
       setUploading(true);
       setError(null);
       setSuccess(null);
-      const payload = new FormData();
-      selectedFiles.forEach((file) => payload.append('files[]', file));
-      if (supportsSingleTitle && form.title.trim()) {
-        payload.append('title', form.title.trim());
-      }
-      payload.append('category', form.category);
-      if (form.employee_id) payload.append('employee_id', form.employee_id);
-      if (form.notes.trim()) payload.append('notes', form.notes.trim());
-      const response = await clientDocumentsApi.upload(payload);
-      setForm({ title: '', category: 'misc', employee_id: '', notes: '', files: [] });
+      const result = await uploadDocumentBatches(selectedFiles, {
+        ...(supportsSingleTitle && form.title.trim() ? { title: form.title.trim() } : {}),
+        category: form.category,
+        ...(form.employee_id ? { employee_id: form.employee_id } : {}),
+        ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
+      }, clientDocumentsApi.upload,
+        (completed, total) => setUploadProgress(`Uploading ${completed} of ${total} files…`));
+      setForm((current) => result.failures.length
+        ? { ...current, files: result.failures.map((failure) => failure.file) }
+        : { title: '', category: 'misc', employee_id: '', notes: '', files: [] });
       if (fileInputRef.current) fileInputRef.current.value = '';
-      setSuccess(response.message || formatUploadSuccessMessage(selectedFileCount));
-      await load();
+      if (result.uploaded.length) {
+        setSuccess(result.uploaded.length === 1 ? 'Document uploaded successfully' : `${result.uploaded.length} documents uploaded successfully`);
+        await load();
+      }
+      if (result.failures.length) setError(result.failures.map((failure) => `${failure.file.name}: ${failure.message}`).join('\n'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload document');
     } finally {
       setUploading(false);
+      setUploadProgress('');
     }
   };
 
@@ -162,12 +192,12 @@ export function ClientDocuments() {
   };
 
   const handleDelete = async (document: ClientDocument) => {
-    if (!window.confirm(`Delete "${document.title}"?`)) return;
+    if (!window.confirm(`Delete "${document.title}"? Files used in messages or evidence will be archived and kept.`)) return;
 
     try {
       setError(null);
-      await clientDocumentsApi.delete(document.id);
-      setSuccess('Document deleted');
+      const result = await clientDocumentsApi.delete(document.id);
+      setSuccess(result?.message || 'Document deleted');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete document');
@@ -198,13 +228,13 @@ export function ClientDocuments() {
         <div className="grid gap-4 md:grid-cols-3">
           <MiniStat
             title="Stored in portal"
-            value={String(documents.length)}
+            value={totalDocuments.toLocaleString()}
             detail="Files available to your payroll team"
             icon={<ShieldCheck className="h-5 w-5" />}
           />
           <MiniStat
             title="Employee-linked"
-            value={String(employeeScopedDocuments)}
+            value={employeeScopedDocuments.toLocaleString()}
             detail="Attached to a specific employee record"
             icon={<Users className="h-5 w-5" />}
           />
@@ -225,6 +255,7 @@ export function ClientDocuments() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleUpload} className="grid gap-5 md:grid-cols-2">
+              <fieldset disabled={uploading} className="col-span-full grid min-w-0 gap-5 md:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">Title</label>
                 <Input
@@ -355,12 +386,16 @@ export function ClientDocuments() {
                   {uploading ? `Uploading ${selectedFileCount || ''} file${selectedFileCount === 1 ? '' : 's'}...` : 'Upload Document'}
                 </Button>
               </div>
+              {uploading && <p role="status" aria-live="polite" className="text-sm text-neutral-600">{uploadProgress}</p>}
+              </fieldset>
             </form>
           </CardContent>
         </Card>
 
         <PortalMessagesPanel
           api={clientPortalThreadsApi}
+          documentsApi={clientDocumentsApi}
+          audience="client"
           documents={documents}
           audienceLabel="to your payroll team"
           description="Ask questions, send corrections, and tie follow-up notes to uploaded files."
@@ -395,6 +430,7 @@ export function ClientDocuments() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-semibold text-neutral-950">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="mt-1 truncate text-sm text-neutral-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Category" value={categoryLabel(document.category)} />
@@ -403,15 +439,15 @@ export function ClientDocuments() {
                             <MobileField label="Uploaded" value={new Date(document.created_at).toLocaleDateString()} />
                           </div>
                           <MobileCardActions>
-                            <Button variant="outline" size="sm" onClick={() => void handlePreview(document)}>
+                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>
                               <Eye className="mr-2 h-4 w-4" />
                               Preview
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => void handleDownload(document)}>
+                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handleDownload(document)}>
                               <Download className="mr-2 h-4 w-4" />
                               Download
                             </Button>
-                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(document)}>
+                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
                             </Button>
@@ -439,6 +475,7 @@ export function ClientDocuments() {
                       <TableCell>
                         <div>
                           <p className="font-medium text-gray-900">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="text-xs text-gray-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                         </div>
                       </TableCell>
@@ -448,15 +485,15 @@ export function ClientDocuments() {
                       <TableCell>{new Date(document.created_at).toLocaleString()}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => void handlePreview(document)}>
+                          <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>
                             <Eye className="mr-2 h-4 w-4" />
                             Preview
                           </Button>
-                          <Button variant="outline" size="sm" onClick={() => void handleDownload(document)}>
+                          <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handleDownload(document)}>
                             <Download className="mr-2 h-4 w-4" />
                             Download
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(document)}>
+                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
                           </Button>
@@ -467,6 +504,16 @@ export function ClientDocuments() {
                     </TableBody>
                   </Table>
                 </div>
+                <LoadMoreFooter
+                  className="mt-4"
+                  shown={documents.length}
+                  total={totalDocuments}
+                  noun="documents"
+                  hasMore={hasMorePages(documentsMeta)}
+                  loading={loadingMore}
+                  error={loadMoreError}
+                  onLoadMore={() => void loadMore()}
+                />
               </>
             )}
           </CardContent>
@@ -474,6 +521,7 @@ export function ClientDocuments() {
       </div>
 
       <DocumentPreviewModal
+          activityApi={clientDocumentsApi}
         open={previewOpen}
         onOpenChange={(open) => {
           setPreviewOpen(open);

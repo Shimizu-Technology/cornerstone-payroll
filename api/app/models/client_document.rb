@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 class ClientDocument < ApplicationRecord
+  include PortalInboxUpdates
   MAX_FILE_SIZE = 25.megabytes
   CATEGORIES = %w[
     payroll_source
+    payroll_review
     employee_onboarding
     tax_notice
     filing_evidence
@@ -27,60 +29,103 @@ class ClientDocument < ApplicationRecord
   ].freeze
   ORIGINAL_INLINE_PREVIEW_EXTENSIONS = %w[pdf png jpg jpeg webp].freeze
   GENERATED_PREVIEW_EXTENSIONS = %w[doc docx xls xlsx csv txt].freeze
+  SCAN_STATUSES = %w[not_scanned pending clean infected error].freeze
   PREVIEW_STATUSES = %w[pending processing ready failed not_required].freeze
 
+  belongs_to :reviewed_by, class_name: "User", optional: true
+  has_many :read_receipts, class_name: "PortalDocumentReadReceipt", dependent: :delete_all
+  belongs_to :archived_by, class_name: "User", optional: true
   belongs_to :company
   belongs_to :employee, optional: true
   belongs_to :uploaded_by, class_name: "User", optional: true
-  has_many :client_portal_messages, dependent: :nullify
+  has_many :client_portal_messages, dependent: :restrict_with_error
+  has_many :portal_message_attachments, dependent: :restrict_with_error
   has_many :employee_document_requirements, dependent: :restrict_with_error
   has_many :employee_document_requirement_events, dependent: :restrict_with_error
   has_many :payroll_filing_events, foreign_key: :evidence_document_id, dependent: :restrict_with_error
+  has_many :payroll_submission_documents, dependent: :restrict_with_error
 
   validates :title, :category, :file_name, :file_key, :content_type, presence: true
   validates :uploaded_by, presence: true, on: :create
   validates :category, inclusion: { in: CATEGORIES }
   validates :file_size, numericality: { greater_than: 0 }
+  validates :scan_status, inclusion: { in: SCAN_STATUSES }
   validates :preview_status, inclusion: { in: PREVIEW_STATUSES }
 
-  scope :recent_first, -> { order(created_at: :desc) }
+  before_destroy :protect_retained_evidence, prepend: true
+  after_create_commit :enqueue_scan
+
+  scope :active, -> { where(archived_at: nil) }
+  scope :recent_first, -> { order(created_at: :desc, id: :desc) }
   scope :client_visible, -> { where(visible_to_client: true) }
+  # Files a person may attach to a message: shared with the client, not
+  # archived and not held back by the safety check.
+  scope :attachable, -> { active.client_visible.where.not(scan_status: ClientDocumentScanner::BLOCKED_STATUSES) }
 
   def self.detected_content_type(file)
-    detected = file.content_type.presence
-    detected ||= Marcel::MimeType.for(file.tempfile, name: file.original_filename)
-    detected.presence || "application/octet-stream"
-  rescue StandardError
-    file.content_type.presence || "application/octet-stream"
+    ClientDocumentFileValidator.new(file).validate!
   end
 
   def self.upload_validation_errors(file)
-    errors = []
     return [ "is required" ] unless file.present?
 
-    if file.size.to_i <= 0
-      errors << "must not be empty"
+    ClientDocumentFileValidator.new(file).validate!
+    []
+  rescue ClientDocumentFileValidator::InvalidFile => e
+    [ e.message ]
+  end
+
+  def archived?
+    archived_at.present?
+  end
+
+  def retained_evidence?
+    archived? || client_portal_messages.exists? || portal_message_attachments.exists? || employee_document_requirements.exists? ||
+      employee_document_requirement_events.exists? || payroll_filing_events.exists? ||
+      payroll_submission_documents.exists? || payroll_submission_draft?
+  end
+
+  # Raised instead of archiving a file the client still needs for review.
+  class SharedForReview < StandardError; end
+
+  def payroll_submission_draft?
+    payroll_drafts_using_file.exists?
+  end
+
+  # A posted draft is what the client approves. Archiving would hide it from
+  # them while the period still shows it, so posted draft files stay usable.
+  def posted_payroll_draft?
+    payroll_drafts_using_file.posted.exists?
+  end
+
+  def ensure_usable_for!(purpose, staff_read: false)
+    if archived? && !(staff_read && %i[download preview].include?(purpose))
+      raise ClientDocumentScanner::Blocked, "This file has been archived. Contact Cornerstone if you need it."
     end
 
-    if file.size.to_i > MAX_FILE_SIZE
-      errors << "must be 25 MB or smaller"
-    end
+    ClientDocumentScanner.ensure_allowed!(self, purpose: purpose)
+  end
 
-    extension = File.extname(file.original_filename.to_s).delete(".").downcase
-    unless ALLOWED_EXTENSIONS.include?(extension)
-      errors << "must be one of: #{ALLOWED_EXTENSIONS.join(', ')}"
-    end
+  def archive_or_destroy!(actor:)
+    with_lock do
+      if posted_payroll_draft?
+        raise SharedForReview, "This file is part of a draft shared with the client for review. Post a corrected draft instead of removing it."
+      end
 
-    content_type = detected_content_type(file)
-    unless ALLOWED_CONTENT_TYPES.include?(content_type)
-      errors << "content type #{content_type} is not supported"
+      if retained_evidence?
+        update!(archived_at: Time.current, archived_by: actor) unless archived?
+        :archived
+      else
+        destroy!
+        :deleted
+      end
     end
-
-    errors
   end
 
   def download_filename
-    file_name.presence || "#{title.parameterize.presence || 'document'}.bin"
+    name = file_name.to_s.tr("\\", "/").split("/").last.to_s
+    name = name.gsub(/[[:cntrl:]\u202A-\u202E\u2066-\u2069]/, "").strip
+    name.presence || "document.bin"
   end
 
   def preview_ready?
@@ -95,8 +140,8 @@ class ClientDocument < ApplicationRecord
     ORIGINAL_INLINE_PREVIEW_EXTENSIONS.include?(file_extension)
   end
 
-  def preview_available?
-    preview_ready? || preview_served_from_original?
+  def preview_available?(staff_read: false)
+    (staff_read || !archived?) && (preview_ready? || preview_served_from_original?)
   end
 
   def preview_filename
@@ -115,5 +160,25 @@ class ClientDocument < ApplicationRecord
     return "pending" if GENERATED_PREVIEW_EXTENSIONS.include?(extension)
 
     "failed"
+  end
+  private
+
+  def payroll_drafts_using_file
+    PayrollSubmissionDraft.where(company_id: company_id).where("paycheck_document_id = :id OR direct_deposit_document_id = :id", id: id)
+  end
+
+  def protect_retained_evidence
+    return unless retained_evidence?
+
+    errors.add(:base, "This file is retained evidence. Archive it instead of deleting it.")
+    throw :abort
+  end
+
+  def enqueue_scan
+    ScanClientDocumentJob.perform_later(id) if scan_status == "pending"
+  rescue StandardError => e
+    # The upload transaction has committed. Keep the original and pending
+    # state for scanner recovery; never let enqueue failure trigger blob cleanup.
+    Rails.logger.error("Client document scan enqueue failed for #{id}: #{e.class}")
   end
 end

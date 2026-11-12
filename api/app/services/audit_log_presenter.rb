@@ -23,6 +23,42 @@ class AuditLogPresenter
   }.freeze
   VERBS = {
     "authentication#signed_in" => "signed in",
+    "client_documents#create" => "uploaded",
+    "admin_client_documents#create" => "uploaded",
+    "client_documents#destroy" => "deleted",
+    "admin_client_documents#destroy" => "deleted",
+    "portal_documents#reviewed" => "reviewed",
+    "portal_documents#opened" => "opened",
+    "portal_documents#preview" => "previewed",
+    "portal_documents#download" => "downloaded",
+    "client_documents#archive" => "archived",
+    "admin_client_documents#archive" => "archived",
+    "admin_client_documents#unarchive" => "unarchived",
+    "client_portal_threads#create" => "started conversation",
+    "client_portal_threads#opened" => "opened conversation",
+    "client_portal_threads#mark_read" => "marked read",
+    "client_portal_threads#resolved" => "resolved conversation",
+    "client_portal_threads#reopened" => "reopened conversation",
+    "client_portal_threads#update" => "updated conversation",
+    "client_portal_messages#create" => "sent a message in",
+    "portal_file_requests#create" => "requested a file in",
+    "portal_file_requests#respond" => "sent a requested file in",
+    "portal_file_requests#accept" => "accepted a requested file in",
+    "portal_file_requests#ask_again" => "asked again for a file in",
+    "portal_file_requests#withdraw" => "withdrew a file request in",
+    "payroll_submissions#create" => "sent payroll files for",
+    "payroll_submission_periods#acknowledge" => "confirmed receipt of payroll files for",
+    "payroll_submissions#open_import" => "opened payroll files in import review for",
+    "payroll_submission_periods#import" => "imported payroll files for",
+    "payroll_submission_periods#resolve_source" => "recorded a source disposition for",
+    "payroll_submission_periods#start_review" => "started reviewing",
+    "payroll_submission_periods#approve" => "approved the draft for",
+    "payroll_submission_periods#request_changes" => "requested a change to the draft for",
+    "payroll_submission_periods#mark_paid" => "marked paid",
+    "payroll_submission_drafts#create" => "saved a staff-only draft for",
+    "payroll_submission_drafts#post" => "posted a draft for review for",
+    "notification_settings#update" => "updated email alert settings for",
+    "portal_notification_recipients#update" => "updated portal alert recipients for",
     "employees#create" => "added",
     "employees#update" => "updated",
     "employees#destroy" => "terminated",
@@ -139,7 +175,7 @@ class AuditLogPresenter
   end
 
   def record_subject
-    log.subject_name.presence || resolved_pay_period_subject || fallback_subject
+    log.subject_name.presence || (log.metadata || {})["title"].presence || (log.metadata || {})["employee_name"].presence || (log.metadata || {})["subject"].presence || resolved_pay_period_subject || fallback_subject
   end
 
   def resolved_pay_period_subject

@@ -11,6 +11,10 @@ import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 
+const ClientInbox = lazy(() => import('@/pages/ClientInbox').then(module => ({ default: module.ClientInbox })));
+const ClientMessages = lazy(() => import('@/pages/client/ClientMessages').then(module => ({ default: module.ClientMessages })));
+const PayrollPeriodsList = lazy(() => import('@/pages/payroll-submissions/PayrollPeriodsList').then(module => ({ default: module.PayrollPeriodsList })));
+const PayrollPeriodPage = lazy(() => import('@/pages/payroll-submissions/PayrollPeriodPage').then(module => ({ default: module.PayrollPeriodPage })));
 const Dashboard = lazy(() => import('@/pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const EmployeeList = lazy(() => import('@/pages/employees/EmployeeList').then((module) => ({ default: module.EmployeeList })));
 const EmployeeForm = lazy(() => import('@/pages/employees/EmployeeForm').then((module) => ({ default: module.EmployeeForm })));
@@ -31,6 +35,7 @@ const ClientDocuments = lazy(() => import('@/pages/client/ClientDocuments').then
 const ClientChangeRequests = lazy(() => import('@/pages/client/ClientChangeRequests').then((module) => ({ default: module.ClientChangeRequests })));
 const Form500Page = lazy(() => import('@/pages/Form500Page').then((module) => ({ default: module.Form500Page })));
 const AdminClientDocumentsPage = lazy(() => import('@/pages/AdminClientDocumentsPage').then((module) => ({ default: module.AdminClientDocumentsPage })));
+const AdminClientMessagesPage = lazy(() => import('@/pages/AdminClientMessagesPage').then((module) => ({ default: module.AdminClientMessagesPage })));
 const AdminEmployeeChangeRequestsPage = lazy(() => import('@/pages/AdminEmployeeChangeRequestsPage').then((module) => ({ default: module.AdminEmployeeChangeRequestsPage })));
 const TaxConfigs = lazy(() => import('@/pages/TaxConfigs'));
 const Users = lazy(() => import('@/pages/Users').then((module) => ({ default: module.Users })));
@@ -51,6 +56,7 @@ const PayrollReminders = lazy(() => import('@/pages/PayrollReminders'));
 const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').then((module) => ({ default: module.TimeTrackingSources })));
 const AireHistoryApproval = lazy(() => import('@/pages/AireHistoryApproval').then((module) => ({ default: module.AireHistoryApproval })));
 const AireAccountConnection = lazy(() => import('@/pages/AireAccountConnection').then((module) => ({ default: module.AireAccountConnection })));
+const NotificationSettings = lazy(() => import('@/pages/NotificationSettings').then((module) => ({ default: module.NotificationSettings })));
 const PayScheduleSettings = lazy(() => import('@/pages/PayScheduleSettings').then((module) => ({ default: module.PayScheduleSettings })));
 const PriorProviderHistory = lazy(() => import('@/pages/PriorProviderHistory').then(module => ({ default: module.PriorProviderHistory })));
 const HistoricalPayroll = lazy(() => import('@/pages/HistoricalPayroll').then((module) => ({ default: module.HistoricalPayroll })));
@@ -317,6 +323,11 @@ function AppRoutes() {
         }
       >
         <Route path="/app" element={isClient ? <ClientDashboard /> : <Dashboard />} />
+        <Route path="/app/client-inbox" element={<StaffOnlyRoute><ClientInbox /></StaffOnlyRoute>} />
+        <Route path="/messages" element={<ClientOnlyRoute><ClientMessages /></ClientOnlyRoute>} />
+        <Route path="/payroll-files" element={<ClientOnlyRoute><PayrollPeriodsList audience="client" /></ClientOnlyRoute>} />
+        <Route path="/payroll-files/:ref" element={<ClientOnlyRoute><PayrollPeriodPage audience="client" /></ClientOnlyRoute>} />
+        <Route path="/app/notifications" element={<NotificationSettings />} />
         <Route path="/app/aire-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/time-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/aire-history-approval" element={<CapabilityRoute capability="payroll_operations"><AireHistoryApproval /></CapabilityRoute>} />
@@ -327,6 +338,11 @@ function AppRoutes() {
         <Route path="pay-periods" element={<LegacyCompanyRedirect destination="pay-runs" />} />
         <Route path="pay-periods/:id" element={<LegacyCompanyRedirect destination="pay-run" clientMode={isClient} />} />
         <Route path="companies/:companyId" element={<CompanyScopedRoute />}>
+          <Route path="client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
+          <Route path="client-messages" element={<StaffOnlyRoute><AdminClientMessagesPage /></StaffOnlyRoute>} />
+          <Route path="payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />
+          <Route path="payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
+          <Route path="client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
           <Route path="employees" element={<EmployeeList />} />
           <Route path="employees/new" element={<EmployeeForm />} />
           <Route path="employees/:id/edit" element={<EmployeeForm />} />
@@ -360,6 +376,9 @@ function AppRoutes() {
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AuditHistoryRoute><AuditLogs /></AuditHistoryRoute>} />
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
+        <Route path="settings/client-messages" element={<StaffOnlyRoute><AdminClientMessagesPage /></StaffOnlyRoute>} />
+        <Route path="settings/payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />
+        <Route path="settings/payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
         <Route path="settings/client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
         <Route path="check-settings" element={<CapabilityRoute capability="use_printer_profiles"><CheckSettingsPage /></CapabilityRoute>} />
         <Route path="payroll-reminders" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><PayrollReminders /></CapabilityRoute>} />

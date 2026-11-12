@@ -6,17 +6,13 @@ module Api
       class BaseController < ApplicationController
         include Auditable
         include ExplicitCompanyAccess
+        include ClientPortalAccess
+        include BoundedListPagination
 
         before_action :require_client_portal_access!
         before_action :enforce_company_access!
 
         private
-
-        def require_client_portal_access!
-          return if current_user&.staff_member? || current_user&.client?
-
-          render json: { error: "Client portal access required" }, status: :forbidden
-        end
 
         def enforce_company_access!
           return if current_user.nil?

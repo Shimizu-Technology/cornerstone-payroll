@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { MemoryRouter } from 'react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { EmployeeChangeRequest } from '@/services/api';
@@ -36,7 +37,7 @@ it('keeps the newest selected request when detail responses finish out of order'
     .mockImplementationOnce(() => new Promise((resolve) => { resolveBob = resolve; }))
     .mockImplementationOnce(() => new Promise((resolve) => { resolveAliceAgain = resolve; }));
 
-  render(<AdminEmployeeChangeRequestsPage />);
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
   await screen.findByText('Request #1');
   fireEvent.click(screen.getByRole('button', { name: /Bob Santos/ }));
   fireEvent.click(screen.getByRole('button', { name: /Alice Reyes/ }));
@@ -56,7 +57,7 @@ it('ignores the previous filter response after the status changes', async () => 
     .mockResolvedValueOnce({ data: [approved] });
   apiMocks.get.mockResolvedValue({ data: approved });
 
-  render(<AdminEmployeeChangeRequestsPage />);
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
   await waitFor(() => expect(apiMocks.list).toHaveBeenCalledWith({ status: 'pending' }));
   fireEvent.change(screen.getByRole('combobox'), { target: { value: 'approved' } });
   await waitFor(() => expect(apiMocks.list).toHaveBeenCalledTimes(2));
@@ -77,7 +78,7 @@ it('refreshes the current filter when approval finishes after a filter change', 
   apiMocks.get.mockImplementation((id: number) => Promise.resolve({ data: id === pending.id ? pending : approved }));
   apiMocks.approve.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveApproval = resolve; }));
 
-  render(<AdminEmployeeChangeRequestsPage />);
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
   await screen.findByText('Request #1');
   fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
   await waitFor(() => expect(apiMocks.approve).toHaveBeenCalledOnce());
@@ -89,4 +90,31 @@ it('refreshes the current filter when approval finishes after a filter change', 
   expect(apiMocks.list.mock.calls.map(([params]) => params?.status)).toEqual(['pending', 'approved', 'approved']);
   expect(screen.getByText('Request #3')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Alice Reyes/ })).toBeNull();
+});
+
+it('consumes the inbox deep link once so a new status filter selects its own request', async () => {
+  vi.clearAllMocks();
+  const pending = request(1, 'Alice Reyes', 'Pending notes');
+  const approved = request(3, 'Cara Chen', 'Approved notes', 'approved');
+  apiMocks.list.mockImplementation(({ status }: { status: string }) => Promise.resolve({ data: status === 'pending' ? [pending] : [approved] }));
+  apiMocks.get.mockImplementation((id: number) => Promise.resolve({ data: id === 1 ? pending : approved }));
+  render(<MemoryRouter initialEntries={['/companies/1/client-change-requests?request_id=1']}><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
+  await screen.findByText('Request #1');
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'approved' } });
+  await screen.findByText('Request #3');
+  expect(apiMocks.get.mock.calls.map(([id]) => id)).toEqual([1, 3]);
+  expect(screen.queryByText('Request #1')).toBeNull();
+});
+
+it.each(['approved', 'rejected'] as const)('shows a handled %s deep link in its initial all-status list', async status => {
+  vi.clearAllMocks();
+  const handled = request(8, 'Handled employee', 'Handled notes', status);
+  apiMocks.list.mockImplementation(({ status: filter }: { status?: string }) => Promise.resolve({ data: filter === 'pending' ? [] : [handled] }));
+  apiMocks.get.mockResolvedValue({ data: handled });
+  render(<MemoryRouter initialEntries={['/companies/1/client-change-requests?request_id=8']}><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
+  await screen.findByText('Request #8');
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(screen.getByRole('button', { name: /Handled employee/ })).toBeTruthy();
+  expect(screen.queryByText('No requests found.')).toBeNull();
+  expect(apiMocks.list).toHaveBeenCalledWith({ status: undefined });
 });

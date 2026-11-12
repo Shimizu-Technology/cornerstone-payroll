@@ -209,6 +209,7 @@ export function EmployeeForm() {
   const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration', loadedEmployee?.company_id ?? activeCompanyId) && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [initialSsn, setInitialSsn] = useState('');
   const [storedSsnLastFour, setStoredSsnLastFour] = useState<string | null>(null);
+  const [storedEinLastFour, setStoredEinLastFour] = useState<string | null>(null);
   const [initialEmploymentType, setInitialEmploymentType] = useState<EmploymentType>('hourly');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [payItemPending, setPayItemPending] = useState(false);
@@ -324,7 +325,8 @@ export function EmployeeForm() {
         employer_roth_match_rate: toNumberOrZero(employee.employer_roth_match_rate),
         department_id: employee.department_id ?? undefined,
         business_name: employee.business_name || '',
-        contractor_ein: employee.contractor_ein || '',
+        // Clients only receive the EIN's last four; a blank field keeps the saved EIN.
+        contractor_ein: isClient ? '' : (employee.contractor_ein || ''),
         contractor_type: employee.contractor_type || 'individual',
         contractor_pay_type: employee.contractor_pay_type || 'flat_fee',
         w9_on_file: toBoolean(employee.w9_on_file),
@@ -338,6 +340,7 @@ export function EmployeeForm() {
       setForm(normalizeEmployeeMonetaryFields(nextForm));
       setInitialSsn(loadedSsn);
       setStoredSsnLastFour(employee.ssn_last_four || null);
+      setStoredEinLastFour(isClient ? (employee.contractor_ein_last_four || null) : null);
       setInitialEmploymentType(employee.employment_type);
       setW4ChangeReason('');
       setW4ElectionReceived(false);
@@ -760,7 +763,8 @@ export function EmployeeForm() {
     if (hireDateError) newErrors.hire_date = [hireDateError];
     if (form.employment_type === 'contractor' && form.contractor_type === 'business') {
       if (!form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
-      if (!form.contractor_ein?.trim() && !allowsUnverifiedBlank('contractor_ein')) {
+      const storedEinCanRemain = isClient && isEditing && Boolean(storedEinLastFour);
+      if (!form.contractor_ein?.trim() && !storedEinCanRemain && !allowsUnverifiedBlank('contractor_ein')) {
         newErrors.contractor_ein = ['EIN is required'];
       } else if (form.contractor_ein?.trim() && !/^\d{2}-\d{7}$/.test(form.contractor_ein)) {
         newErrors.contractor_ein = ['EIN must be in format XX-XXXXXXX'];
@@ -841,6 +845,20 @@ export function EmployeeForm() {
           : {}),
         ...(form.employment_type === 'contractor' && form.contractor_type === 'business'
           ? { ssn: undefined, ssn_confirmation: undefined }
+          : {}),
+        // Contractor settings don't apply to W-2 workers; sending their form
+        // defaults would turn into no-op payroll change requests.
+        ...(form.employment_type !== 'contractor'
+          ? {
+              business_name: undefined,
+              contractor_ein: undefined,
+              contractor_type: undefined,
+              contractor_pay_type: undefined,
+              w9_on_file: undefined,
+            }
+          : {}),
+        ...(isClient && !form.contractor_ein?.trim()
+          ? { contractor_ein: undefined }
           : {}),
         pay_rate: supportsMultipleHourlyRates
           ? (primaryRate ? roundCurrencyValue(Number(primaryRate.rate) || 0) : roundCurrencyValue(form.pay_rate))
@@ -1771,12 +1789,17 @@ export function EmployeeForm() {
                     </label>
                     <Input id="employee-field-15"
                       name="contractor_ein"
-                      required={!allowsUnverifiedBlank('contractor_ein')}
+                      required={!allowsUnverifiedBlank('contractor_ein') && !(isClient && storedEinLastFour && !form.contractor_ein)}
                       value={form.contractor_ein || ''}
                       onChange={(e) => handleChange('contractor_ein', formatEIN(e.target.value))}
-                      placeholder="XX-XXXXXXX"
+                      placeholder={isClient && storedEinLastFour ? `Saved ending in ${storedEinLastFour} — enter replacement` : 'XX-XXXXXXX'}
                       error={getFieldError('contractor_ein')}
                     />
+                    {isClient && storedEinLastFour && !form.contractor_ein && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Saved EIN ending in {storedEinLastFour}. Enter the full number only to submit a replacement for approval.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}

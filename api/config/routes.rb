@@ -41,6 +41,7 @@ Rails.application.routes.draw do
       # Auth - current user info (Clerk JWT verified in ApplicationController)
       get "auth/me", to: "auth#me"
       post "cable_ticket", to: "cable_tickets#create"
+      resource :notification_settings, only: [ :show, :update ]
       get "companies", to: "companies#index"
 
       resources :form_500s, only: [] do
@@ -62,17 +63,32 @@ Rails.application.routes.draw do
           member do
             get :download
             get :preview
+            post :opened
+            get :activity
           end
         end
         resources :portal_threads, only: [ :index, :show, :create, :update ] do
+          get :unread_count, on: :collection
           member do
             post :mark_read
+            get :activity
           end
           resources :messages, only: [ :create ], controller: :portal_messages
+        end
+        resources :portal_file_requests, only: [] do
+          post :respond, on: :member
         end
         resources :employee_change_requests, only: [ :index, :show ]
         resources :pay_periods, only: [ :index, :show ] do
           post :approve_review, on: :member
+        end
+        resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
+          member do
+            post :submissions
+            post :decision
+            post :messages
+            get :activity
+          end
         end
         resources :imported_pay_periods, only: [ :show ]
 
@@ -94,6 +110,8 @@ Rails.application.routes.draw do
       end
 
       namespace :admin do
+        get "client_inbox", to: "client_inbox#index"
+        get "client_inbox/counts", to: "client_inbox#counts"
         patch "employees/:id/intake_exception", to: "employees#review_intake_exception"
         resource :employee_intake_settings, only: [ :show, :update ]
         resource :pay_schedule_settings, only: [ :show, :update ]
@@ -236,17 +254,43 @@ Rails.application.routes.draw do
             patch :reject
           end
         end
-        resources :client_documents, only: [ :index, :create, :destroy ] do
+        resources :client_documents, only: [ :index, :show, :create, :destroy ] do
           member do
+            post :review
             get :download
             get :preview
+            post :opened
+            get :activity
+            post :unarchive
+          end
+        end
+        resource :portal_notification_recipients, only: [ :show, :update ]
+        resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
+          member do
+            post :acknowledge
+            post :start_review
+            post :mark_paid
+            post :drafts
+            post "drafts/:draft_id/post", action: :post_draft, as: :post_draft
+            post :messages
+            post :seen
+            get :activity
           end
         end
         resources :portal_threads, only: [ :index, :show, :create, :update ] do
+          get :unread_count, on: :collection
           member do
             post :mark_read
+            get :activity
           end
           resources :messages, only: [ :create ], controller: :portal_messages
+        end
+        resources :portal_file_requests, only: [ :create ] do
+          member do
+            post :accept
+            post :ask_again
+            post :withdraw
+          end
         end
         resources :user_invitations, only: [ :create ]
 
@@ -396,6 +440,7 @@ Rails.application.routes.draw do
             # Payroll import (MoSa Revel PDF + Excel)
             get :supplemental_template, to: "payroll_imports#supplemental_template"
             get :current_import, to: "payroll_imports#current"
+            post :resolve_portal_source, to: "payroll_imports#resolve_portal_source"
             post :preview_import, to: "payroll_imports#preview"
             post :apply_import, to: "payroll_imports#apply"
             # Timecard OCR CSV import

@@ -15,6 +15,15 @@ class Company < ApplicationRecord
     "backup_snapshot" => "Backup snapshot"
   }.freeze
 
+  before_destroy :protect_retained_portal_documents, prepend: true
+
+  def protect_retained_portal_documents
+    return unless client_documents.any?(&:retained_evidence?)
+
+    errors.add(:base, "This company has retained portal files and cannot be deleted. Archive its files instead.")
+    throw :abort
+  end
+
   belongs_to :organization
   belongs_to :active_printer_profile, class_name: "PrinterProfile", optional: true
   belongs_to :migration_source_company, class_name: "Company", optional: true
@@ -65,6 +74,9 @@ class Company < ApplicationRecord
   has_many :employee_loans, dependent: :destroy
   has_many :employee_w4_elections, dependent: :restrict_with_error
   has_many :client_documents, dependent: :destroy
+  # Deleting events cascades their delivery rows in the database.
+  has_many :portal_notification_events, dependent: :delete_all
+  has_many :portal_notification_recipients, dependent: :delete_all
   has_many :employee_document_requirements, dependent: :restrict_with_error
   has_many :employee_document_requirement_events, dependent: :restrict_with_error
   has_many :employee_change_requests, dependent: :destroy
