@@ -75,6 +75,9 @@ Rails.application.routes.draw do
           end
           resources :messages, only: [ :create ], controller: :portal_messages
         end
+        resources :portal_file_requests, only: [] do
+          post :respond, on: :member
+        end
         resources :employee_change_requests, only: [ :index, :show ]
         resources :pay_periods, only: [ :index, :show ] do
           post :approve_review, on: :member
@@ -281,6 +284,13 @@ Rails.application.routes.draw do
             get :activity
           end
           resources :messages, only: [ :create ], controller: :portal_messages
+        end
+        resources :portal_file_requests, only: [ :create ] do
+          member do
+            post :accept
+            post :ask_again
+            post :withdraw
+          end
         end
         resources :user_invitations, only: [ :create ]
 

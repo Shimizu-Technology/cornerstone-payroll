@@ -53,7 +53,11 @@ module PortalNotifications
     "payroll_submission_sent" => { category: "payroll_submissions" },
     "payroll_draft_decided" => { category: "payroll_submissions" },
     "payroll_submission_acknowledged" => { category: "payroll_updates" },
-    "payroll_draft_posted" => { category: "payroll_updates" }
+    "payroll_draft_posted" => { category: "payroll_updates" },
+    # File requests ride the conversation alerts, one alert per unread burst.
+    "file_requested" => { category: "portal_replies", message: true },
+    "file_request_reviewed" => { category: "portal_replies", message: true },
+    "file_request_responded" => { category: "client_messages", message: true }
   }.freeze
 
   class << self
@@ -71,7 +75,16 @@ module PortalNotifications
       record!(event_type: event_type, company: message.company, actor: author, subject: message.client_portal_thread,
         dedupe_key: "#{event_type}:message:#{message.id}", occurred_at: message.created_at,
         metadata: { message_id: message.id, thread_id: message.client_portal_thread_id,
-                    attachment_count: message.client_document_id ? 1 : 0 })
+                    attachment_count: message.attachment_ids.size })
+    end
+
+    # A typed request step replaces the generic message alert for its message.
+    def file_request_step!(event_type, request:, message:)
+      record!(event_type: event_type, company: request.company, actor: message.author, subject: request.client_portal_thread,
+        dedupe_key: "#{event_type}:message:#{message.id}", occurred_at: message.created_at,
+        metadata: { file_request_id: request.id, message_id: message.id, thread_id: request.client_portal_thread_id,
+                    status: request.status, attachment_count: message.attachment_ids.size,
+                    payroll_submission_period_id: request.payroll_submission_period_id }.compact)
     end
 
     def client_upload!(documents:, actor:)

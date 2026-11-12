@@ -17,6 +17,8 @@ module PortalNotifications
     EXTRA_ADDRESS_FOOTER_LINE = "Replies to this email are not monitored. " \
       "Contact Cornerstone to change who receives these alerts."
 
+    FILE_REQUEST_EVENTS = %w[file_requested file_request_responded file_request_reviewed].freeze
+
     attr_reader :subject, :lines, :link, :footer
 
     def initialize(audience:, delivery_mode:, events:, app_user: true)
@@ -64,6 +66,10 @@ module PortalNotifications
     # The dispatcher batches only events that share a destination, so every
     # email's link reaches all the work it mentions.
     def self.destination_group(event)
+      # Keyed on the event, not its shared category: a file request is
+      # answered or reviewed where the request card is.
+      return :file_requests if FILE_REQUEST_EVENTS.include?(event.event_type)
+
       case event.category
       when "payroll_submissions", "payroll_updates" then :payroll
       when "employee_changes", "employee_change_decisions" then :changes
@@ -81,7 +87,8 @@ module PortalNotifications
       groups = events.map { |event| self.class.destination_group(event) }.uniq
       group = groups.one? ? groups.first : :general
       case [ audience == "staff", group ]
-      when [ true, :payroll ] then "/app/client-inbox"
+      when [ true, :payroll ], [ true, :file_requests ] then "/app/client-inbox"
+      when [ false, :file_requests ] then "/messages"
       when [ false, :payroll ] then "/payroll-files"
       when [ true, :changes ] then "/settings/client-change-requests"
       when [ false, :changes ] then "/change-requests"

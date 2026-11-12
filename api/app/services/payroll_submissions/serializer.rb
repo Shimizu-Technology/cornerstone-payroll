@@ -38,6 +38,7 @@ module PayrollSubmissions
       payload = summary(entry).merge(
         schedule_note: schedule_note,
         thread_id: record&.client_portal_thread_id,
+        file_requests: record ? file_requests(record) : [],
         submissions: [], drafts: [], history: [],
         allowed_actions: allowed_actions(entry)
       )
@@ -64,7 +65,7 @@ module PayrollSubmissions
         actions << "start_review" if %w[received changes_requested].include?(status)
         actions << "post_draft" if PayrollSubmissionPeriod::EVENTS["post_draft"][:from].include?(status)
         actions << "save_draft" unless status == "paid"
-        actions << "mark_paid" if %w[draft_ready approved].include?(status)
+        actions << "mark_paid" if %w[draft_ready approved].include?(status) && !record&.outstanding_file_requests&.exists?
         actions << "message"
         actions
       else
@@ -77,6 +78,12 @@ module PayrollSubmissions
     end
 
     private
+
+    # Requests for this period, newest first. Both sides see their state.
+    def file_requests(record)
+      record.file_requests.includes(:employee, :requested_by, :responded_by, :resolved_by, :payroll_submission_period)
+        .order(created_at: :desc, id: :desc).map { |request| @documents.file_request(request) }
+    end
 
     def submission(submission, current:, employee_names:)
       {
