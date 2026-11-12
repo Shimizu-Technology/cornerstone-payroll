@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Sidebar } from './Sidebar';
 const actor = vi.hoisted(() => ({ allowed: true, delegated: false, selectedId: 7 }));
+vi.mock('@/hooks/usePortalCounts', () => ({ usePortalCounts: () => null }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({
   user: { role: 'accountant', name: 'Assigned accountant', email: 'accountant@example.test' },
   isAccountant: true, signOut: vi.fn(),
@@ -45,4 +46,11 @@ describe('Account menu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open account menu' }));
     expect(screen.getByRole('link', { name: 'Notifications' }).getAttribute('href')).toBe('/app/notifications');
   });
+});
+
+
+it('highlights only Client Inbox when visiting its route', () => {
+  render(<MemoryRouter initialEntries={['/app/client-inbox']}><Sidebar /></MemoryRouter>);
+  expect(screen.getByRole('link', { name: 'Dashboard' }).getAttribute('aria-current')).toBeNull();
+  expect(screen.getByRole('link', { name: 'Client Inbox' }).getAttribute('aria-current')).toBe('page');
 });

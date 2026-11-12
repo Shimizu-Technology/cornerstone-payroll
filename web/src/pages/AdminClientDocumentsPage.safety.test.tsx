@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
+import { MemoryRouter } from 'react-router';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AdminClientDocumentsPage } from './AdminClientDocumentsPage';
 import type { ClientDocument } from '@/services/api';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), employees: vi.fn(), upload: vi.fn(), delete: vi.fn(), unarchive: vi.fn(), capabilities: [] as string[], recipientCount: 0 }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), preview: vi.fn(), review: vi.fn(), list: vi.fn(), employees: vi.fn(), upload: vi.fn(), delete: vi.fn(), unarchive: vi.fn(), capabilities: [] as string[], recipientCount: 0 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { role: 'admin' }, isLoading: false }) }));
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({ activeCompany: { id: 1, client_capabilities: mocks.capabilities }, activeCompanyId: 1, loading: false }),
@@ -21,10 +22,11 @@ vi.mock('@/components/client-portal/PortalAlertRecipientsPanel', async () => {
 });
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/client-portal/PortalMessagesPanel', () => ({ PortalMessagesPanel: () => null }));
-vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: () => null }));
+vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) => open ? <button onClick={() => onOpenChange(false)}>Close preview</button> : null }));
+vi.mock('@/lib/documentPreview', () => ({ prepareDocumentPreview: vi.fn().mockResolvedValue({ kind: 'unsupported' }) }));
 vi.mock('@/services/api', () => ({
   getActiveCompanyId: () => 1,
-  adminClientDocumentsApi: { list: mocks.list, upload: mocks.upload, delete: mocks.delete, unarchive: mocks.unarchive },
+  adminClientDocumentsApi: { get: mocks.get, preview: mocks.preview, review: mocks.review, list: mocks.list, upload: mocks.upload, delete: mocks.delete, unarchive: mocks.unarchive },
   employeesApi: { list: mocks.employees }, adminPortalThreadsApi: {},
 }));
 const document = { id: 1, title: 'Payroll hours', file_name: 'hours.csv', category: 'payroll_source', created_at: '2026-11-11T00:00:00Z', file_size: 100, uploaded_by_id: 1, visible_to_client: true } as ClientDocument;
@@ -40,7 +42,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 it('keeps the chosen upload and shows its plain server error', async () => {
   const user = userEvent.setup();
   mocks.upload.mockRejectedValue(new Error('File notice.pdf does not match its file extension. Please export it again.'));
-  const { container } = render(<AdminClientDocumentsPage />);
+  const { container } = render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
   await screen.findAllByText('Payroll hours');
   await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement, new File(['synthetic'], 'notice.pdf', { type: 'application/pdf' }));
   await user.click(screen.getByRole('button', { name: 'Share Document' }));
@@ -52,7 +54,7 @@ it('keeps archived evidence readable and offers staff unarchive', async () => {
   const user = userEvent.setup();
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   mocks.delete.mockResolvedValue({ message: 'File archived. It is kept with its messages.' });
-  render(<AdminClientDocumentsPage />);
+  render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
   await screen.findAllByText('Payroll hours');
   mocks.list.mockResolvedValue({ data: [{ ...document, archived_at: '2026-11-11T00:00:00Z' }] });
   await user.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
@@ -73,7 +75,7 @@ it('uploads 30 images in three sequential requests and shows progress', async ()
   let finishFirst!: (value: unknown) => void;
   mocks.upload.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }))
     .mockResolvedValue({ data: [], message: 'Shared' });
-  const { container } = render(<AdminClientDocumentsPage />);
+  const { container } = render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
   await screen.findAllByText('Payroll hours');
   const files = Array.from({ length: 30 }, (_, i) => new File(['image'], `timesheet-${i}.jpg`, { type: 'image/jpeg' }));
   await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement, files);
@@ -95,7 +97,7 @@ it('reports the failed filename and retains only that file after a mixed batch',
     if (files.some((file) => file.name === 'bad.jpg')) throw Object.assign(new Error('File does not match its extension.'), { status: 422 });
     return { data: [] };
   });
-  const { container } = render(<AdminClientDocumentsPage />);
+  const { container } = render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
   await screen.findAllByText('Payroll hours');
   await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement,
     [new File(['good'], 'good.jpg', { type: 'image/jpeg' }), new File(['bad'], 'bad.jpg', { type: 'image/jpeg' })]);
@@ -113,7 +115,7 @@ it.each([false, true])('resets metadata only after complete success (failure: %s
     if (fails) throw new Error('Please retry');
     return { data: [] };
   });
-  const { container } = render(<AdminClientDocumentsPage />);
+  const { container } = render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
   await screen.findAllByText('Payroll hours');
   const title = screen.getByPlaceholderText('Optional document title') as HTMLInputElement;
   const notes = screen.getByPlaceholderText('Optional note shown with the document') as HTMLTextAreaElement;
@@ -138,14 +140,14 @@ it.each([false, true])('resets metadata only after complete success (failure: %s
 });
 
 it('shows alert recipients and the no-recipient warning only to client administrators', async () => {
-  const { unmount } = render(<AdminClientDocumentsPage />);
+  const { unmount } = render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
   await screen.findAllByText('Payroll hours');
   expect(screen.queryByLabelText('Portal alert recipients')).toBeNull();
   expect(screen.queryByText('No one receives portal alerts for this client.')).toBeNull();
   unmount();
 
   mocks.capabilities = ['manage_client_administration'];
-  render(<AdminClientDocumentsPage />);
+  render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
   expect(await screen.findByLabelText('Portal alert recipients')).toBeTruthy();
   expect(await screen.findByText('No one receives portal alerts for this client.')).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Choose alert recipients' }).getAttribute('href')).toBe('#portal-alert-recipients');
@@ -154,7 +156,21 @@ it('shows alert recipients and the no-recipient warning only to client administr
 it('hides the warning once the client has recipients', async () => {
   mocks.capabilities = ['manage_client_administration'];
   mocks.recipientCount = 2;
-  render(<AdminClientDocumentsPage />);
+  render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
   expect(await screen.findByLabelText('Portal alert recipients')).toBeTruthy();
   expect(screen.queryByText('No one receives portal alerts for this client.')).toBeNull();
+});
+
+
+it('keeps the exact inbox document review action available after closing its preview', async () => {
+  const user = userEvent.setup();
+  mocks.get.mockResolvedValue({ data: document });
+  mocks.preview.mockResolvedValue({ blob: new Blob(['synthetic']) });
+  mocks.review.mockResolvedValue({ data: { ...document, reviewed_at: '2026-11-12T00:00:00Z' } });
+  render(<MemoryRouter initialEntries={['/companies/1/client-documents?document_id=1&inbox=%2Fapp%2Fclient-inbox']}><AdminClientDocumentsPage /></MemoryRouter>);
+  await user.click(await screen.findByRole('button', { name: 'Close preview' }));
+  await user.click(screen.getByRole('button', { name: 'Mark reviewed' }));
+  expect(await screen.findByText('Reviewed by staff')).toBeTruthy();
+  expect(mocks.review).toHaveBeenCalledWith(1);
+  expect((screen.getByRole('button', { name: 'Mark reviewed' }) as HTMLButtonElement).disabled).toBe(true);
 });

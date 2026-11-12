@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class ClientDocument < ApplicationRecord
+  include PortalInboxUpdates
   MAX_FILE_SIZE = 25.megabytes
   CATEGORIES = %w[
     payroll_source
@@ -30,6 +31,8 @@ class ClientDocument < ApplicationRecord
   SCAN_STATUSES = %w[not_scanned pending clean infected error].freeze
   PREVIEW_STATUSES = %w[pending processing ready failed not_required].freeze
 
+  belongs_to :reviewed_by, class_name: "User", optional: true
+  has_many :read_receipts, class_name: "PortalDocumentReadReceipt", dependent: :delete_all
   belongs_to :archived_by, class_name: "User", optional: true
   belongs_to :company
   belongs_to :employee, optional: true

@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { LoadMoreFooter } from '@/components/ui/load-more';
 import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
+import { InboxReturnLink } from './InboxReturnLink';
 import { ResourceActivity, type ResourceActivityApi } from './ResourceActivity';
 import { useDisplayedMessages } from './useDisplayedMessages';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -30,6 +31,8 @@ type Props = {
   audienceLabel: string;
   description: string;
   canResolve?: boolean;
+  initialThreadId?: number | null;
+  searchDocuments?: (search: string) => Promise<{ data: ClientDocument[] }>;
 };
 
 function formatDateTime(value?: string | null) {
@@ -43,7 +46,7 @@ function upsertThread(threads: ClientPortalThread[], next: ClientPortalThread) {
   return merged.sort((a, b) => {
     const aTime = new Date(a.last_message_at || a.created_at).getTime();
     const bTime = new Date(b.last_message_at || b.created_at).getTime();
-    return bTime - aTime;
+    return bTime - aTime || b.id - a.id;
   });
 }
 
@@ -52,10 +55,26 @@ export function PortalMessagesPanel(props: Props) {
   return <PortalMessagesContent key={activeCompanyId} {...props} companyId={activeCompanyId} refreshCompanies={refreshCompanies} />;
 }
 
-function PortalMessagesContent({ api, documents, audienceLabel, description, canResolve = false, companyId, refreshCompanies }: Props & {
+function PortalMessagesContent({ api, documents, searchDocuments, initialThreadId = null, audienceLabel, description, canResolve = false, companyId, refreshCompanies }: Props & {
   companyId: number | null;
   refreshCompanies: () => Promise<void>;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [documentSearch, setDocumentSearch] = useState('');
+  const [searchedDocuments, setSearchedDocuments] = useState<ClientDocument[]>([]);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!searchDocuments) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      setSearchError(null);
+      searchDocuments(documentSearch).then(response => { if (active) setSearchedDocuments(current => [...current.filter(doc => selectedDocumentIds.current.has(doc.id)), ...response.data]); }).catch(() => { if (active) setSearchError('Could not search files. Try again.'); });
+    }, 250);
+    return () => { active = false; clearTimeout(timer); };
+  }, [searchDocuments, documentSearch]);
+  useEffect(() => {
+    if (initialThreadId) panelRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [initialThreadId]);
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const unreadFetchVersion = useRef(0);
   const threadFetchVersions = useRef(new Map<number, number>());
@@ -75,7 +94,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   const liveNewThreadIdsRef = useRef<number[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(initialThreadId);
   const [selectedThread, setSelectedThread] = useState<ClientPortalThread | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -88,7 +107,11 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   const dataGeneration = useRef(0);
   const [newThread, setNewThread] = useState({ subject: '', body: '', document_id: '' });
   const [reply, setReply] = useState({ body: '', document_id: '' });
-  const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
+  const [mobileConversationOpen, setMobileConversationOpen] = useState(Boolean(initialThreadId));
+
+  const selectedDocumentIds = useRef(new Set<number>());
+  selectedDocumentIds.current = new Set([Number(newThread.document_id), Number(reply.document_id)]);
+  const availableDocuments = useMemo(() => [...new Map([...documents, ...searchedDocuments].map(doc => [doc.id, doc])).values()], [documents, searchedDocuments]);
 
   const [desktop, setDesktop] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
   useEffect(() => {
@@ -122,16 +145,17 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     if (unavailableRef.current) return;
     setThreads(current => current.map(thread => thread.id === id ? { ...thread, unread: response.data.unread } : thread));
     await refreshUnreadCount();
+    window.dispatchEvent(new Event('portal-work-changed'));
   }, [api, refreshUnreadCount]);
   const messagesContainer = useDisplayedMessages(selectedThread, !unavailable && (desktop || mobileConversationOpen), markDisplayed);
 
   const documentOptions = useMemo(
-    () => documents.filter((document) => !document.archived_at && !selectedThread?.messages?.some(message => message.document?.id === document.id && message.document.archived_at)).map((document) => ({
+    () => availableDocuments.filter((document) => document.visible_to_client && (!documentSearch || `${document.title} ${document.file_name}`.toLowerCase().includes(documentSearch.toLowerCase()) || selectedDocumentIds.current.has(document.id)) && !document.archived_at && !selectedThread?.messages?.some(message => message.document?.id === document.id && message.document.archived_at)).map((document) => ({
       value: String(document.id),
       disabled: ['pending', 'infected', 'error'].includes(document.scan_status || ''),
       label: `${document.title} (${document.file_name})${['pending', 'infected', 'error'].includes(document.scan_status || '') ? ' — Safety check unavailable' : ''}`,
     })),
-    [documents, selectedThread]
+    [availableDocuments, selectedThread, documentSearch]
   );
 
   const attachmentAvailable = (id: string): boolean => !id || documentOptions.some(option => option.value === id && !option.disabled);
@@ -373,6 +397,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       retryKey.current = null;
       setReply({ body: '', document_id: '' });
       if (generation !== dataGeneration.current || unavailableRef.current) return;
+      window.dispatchEvent(new Event('portal-work-changed'));
       const response = await fetchThread(selectedThread.id);
       if (!response || generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
       setReply({ body: '', document_id: '' });
@@ -414,8 +439,9 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   };
 
   return (
-    <Card>
+    <div ref={panelRef} className="scroll-mt-40"><Card>
       <CardHeader>
+        {initialThreadId && <InboxReturnLink />}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle>Portal Messages <span className="text-sm font-normal text-neutral-500">{unreadCount === null ? null : `${unreadCount} unread`}</span></CardTitle>
@@ -427,6 +453,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
           </div>
         </div>
       </CardHeader>
+      {searchDocuments && <div className="px-6 pb-4"><Input label="Find a file to attach" value={documentSearch} onChange={e => setDocumentSearch(e.target.value)} placeholder="Search older files by title or filename" />{searchError && <p role="alert" className="mt-2 text-sm text-danger-700">{searchError}</p>}</div>}
       <CardContent>
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
@@ -566,7 +593,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
           </div>
         </div>
       </CardContent>
-    </Card>
+    </Card></div>
   );
 }
 

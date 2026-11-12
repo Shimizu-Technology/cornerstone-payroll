@@ -12,6 +12,7 @@ type PortalCableCallbacks = {
   onConnected?: () => void;
   onError?: () => void;
   onUnavailable?: () => void;
+  onInboxChanged?: () => void;
 };
 
 function cableUrl(ticket: string) {
@@ -23,7 +24,7 @@ function cableUrl(ticket: string) {
   return url.toString();
 }
 
-export async function subscribeToClientPortalThreads(companyId: number, callbacks: PortalCableCallbacks) {
+export async function subscribeToClientPortalThreads(companyId: number, callbacks: PortalCableCallbacks, channelName = 'ClientPortalThreadChannel') {
   let consumer: Cable | undefined;
   let channel: Channel | undefined;
   let stopped = false;
@@ -75,13 +76,14 @@ export async function subscribeToClientPortalThreads(companyId: number, callback
       disconnectCurrent();
       consumer = createConsumer(cableUrl(ticket));
       channel = consumer.subscriptions.create(
-        { channel: 'ClientPortalThreadChannel' },
+        { channel: channelName },
         {
           connected() {
             if (!stopped && generation === connectionGeneration) callbacks.onConnected?.();
           },
           received(payload: PortalCablePayload) {
             if (stopped || generation !== connectionGeneration) return;
+            if (channelName === 'ClientInboxChannel') { callbacks.onInboxChanged?.(); return; }
             if (payload.thread.company_id !== companyId) {
               stopUnavailable(generation);
               return;

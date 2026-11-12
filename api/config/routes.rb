@@ -99,6 +99,8 @@ Rails.application.routes.draw do
       end
 
       namespace :admin do
+        get "client_inbox", to: "client_inbox#index"
+        get "client_inbox/counts", to: "client_inbox#counts"
         patch "employees/:id/intake_exception", to: "employees#review_intake_exception"
         resource :employee_intake_settings, only: [ :show, :update ]
         resource :pay_schedule_settings, only: [ :show, :update ]
@@ -241,8 +243,9 @@ Rails.application.routes.draw do
             patch :reject
           end
         end
-        resources :client_documents, only: [ :index, :create, :destroy ] do
+        resources :client_documents, only: [ :index, :show, :create, :destroy ] do
           member do
+            post :review
             get :download
             get :preview
             post :opened

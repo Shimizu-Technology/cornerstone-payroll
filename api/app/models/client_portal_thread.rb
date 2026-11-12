@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class ClientPortalThread < ApplicationRecord
+  include PortalInboxUpdates
   STATUSES = %w[open resolved].freeze
 
   belongs_to :company

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { MemoryRouter } from 'react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { EmployeeChangeRequest } from '@/services/api';
@@ -36,7 +37,7 @@ it('keeps the newest selected request when detail responses finish out of order'
     .mockImplementationOnce(() => new Promise((resolve) => { resolveBob = resolve; }))
     .mockImplementationOnce(() => new Promise((resolve) => { resolveAliceAgain = resolve; }));
 
-  render(<AdminEmployeeChangeRequestsPage />);
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
   await screen.findByText('Request #1');
   fireEvent.click(screen.getByRole('button', { name: /Bob Santos/ }));
   fireEvent.click(screen.getByRole('button', { name: /Alice Reyes/ }));
@@ -56,7 +57,7 @@ it('ignores the previous filter response after the status changes', async () => 
     .mockResolvedValueOnce({ data: [approved] });
   apiMocks.get.mockResolvedValue({ data: approved });
 
-  render(<AdminEmployeeChangeRequestsPage />);
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
   await waitFor(() => expect(apiMocks.list).toHaveBeenCalledWith({ status: 'pending' }));
   fireEvent.change(screen.getByRole('combobox'), { target: { value: 'approved' } });
   await waitFor(() => expect(apiMocks.list).toHaveBeenCalledTimes(2));
@@ -77,7 +78,7 @@ it('refreshes the current filter when approval finishes after a filter change', 
   apiMocks.get.mockImplementation((id: number) => Promise.resolve({ data: id === pending.id ? pending : approved }));
   apiMocks.approve.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveApproval = resolve; }));
 
-  render(<AdminEmployeeChangeRequestsPage />);
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
   await screen.findByText('Request #1');
   fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
   await waitFor(() => expect(apiMocks.approve).toHaveBeenCalledOnce());

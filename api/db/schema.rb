@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_12_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_12_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -485,6 +485,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_090000) do
     t.string "scan_status", default: "not_scanned", null: false
     t.datetime "archived_at"
     t.bigint "archived_by_id"
+    t.bigint "reviewed_by_id"
+    t.datetime "reviewed_at"
     t.index [ "archived_by_id" ], name: "index_client_documents_on_archived_by_id"
     t.index [ "company_id", "category" ], name: "index_client_documents_on_company_id_and_category"
     t.index [ "company_id", "created_at" ], name: "index_client_documents_on_company_id_and_created_at"
@@ -494,6 +496,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_090000) do
     t.index [ "employee_id" ], name: "index_client_documents_on_employee_id"
     t.index [ "file_key" ], name: "index_client_documents_on_file_key", unique: true
     t.index [ "id", "company_id" ], name: "idx_client_documents_readiness_tenant_key", unique: true
+    t.index [ "reviewed_by_id" ], name: "index_client_documents_on_reviewed_by_id"
     t.index [ "uploaded_by_id" ], name: "index_client_documents_on_uploaded_by_id"
     t.check_constraint "scan_status::text = ANY (ARRAY['not_scanned'::character varying, 'pending'::character varying, 'clean'::character varying, 'infected'::character varying, 'error'::character varying]::text[])", name: "client_document_scan_status"
   end
@@ -3270,6 +3273,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_090000) do
     t.check_constraint "source::text = ANY (ARRAY['schedule'::character varying::text, 'import'::character varying::text, 'manual'::character varying::text, 'correction_reference'::character varying::text, 'production_backfill'::character varying::text])", name: "payroll_time_allocations_source_check"
   end
 
+  create_table "portal_document_read_receipts", force: :cascade do |t|
+    t.bigint "client_document_id", null: false
+    t.bigint "user_id", null: false
+    t.datetime "opened_at", null: false
+    t.index [ "client_document_id", "user_id" ], name: "idx_portal_document_reads_unique", unique: true
+    t.index [ "client_document_id" ], name: "index_portal_document_read_receipts_on_client_document_id"
+    t.index [ "user_id" ], name: "index_portal_document_read_receipts_on_user_id"
+  end
+
   create_table "portal_notification_deliveries", force: :cascade do |t|
     t.bigint "portal_notification_event_id", null: false
     t.bigint "user_id"
@@ -4790,4 +4802,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_090000) do
   add_foreign_key "time_tracking_category_mappings", "users", column: "reviewed_by_id"
   add_foreign_key "portal_thread_read_receipts", "client_portal_threads"
   add_foreign_key "portal_thread_read_receipts", "users"
+  add_foreign_key "client_documents", "users", column: "reviewed_by_id"
+  add_foreign_key "portal_document_read_receipts", "client_documents"
+  add_foreign_key "portal_document_read_receipts", "users"
 end

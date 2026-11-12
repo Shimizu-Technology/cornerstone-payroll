@@ -40,6 +40,8 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
+const searchPortalDocuments = (search: string) => clientDocumentsApi.list({ search, per_page: 25 });
+
 export function ClientDocuments() {
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [documentsMeta, setDocumentsMeta] = useState<ClientDocumentListMeta | null>(null);
@@ -393,6 +395,7 @@ export function ClientDocuments() {
 
         <PortalMessagesPanel
           api={clientPortalThreadsApi}
+          searchDocuments={searchPortalDocuments}
           documents={documents}
           audienceLabel="to your payroll team"
           description="Ask questions, send corrections, and tie follow-up notes to uploaded files."
