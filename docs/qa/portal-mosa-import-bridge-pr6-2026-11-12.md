@@ -130,3 +130,62 @@ Correction gates at code commit 7f59191e: **66 focused examples, 0 failures**;
 **RuboCop 1,798 files clean**; **Brakeman 0 errors / 0 warnings**. The owned
 schema-loaded correction DB, QA servers/tab, temporary storage and task-created
 node_modules were cleaned. No merge, deployment or reviewer command was issued.
+
+## Round 2 review corrections (November 13)
+
+Code commit `77b4cbf95de945985da4c02070ec8d06fa746e5d` addresses all 11
+verified first-review findings. Linked pending evidence is found by run ID even
+after date edits; duplicate regular runs cannot escape same-date pending source
+review. An unlinked period can be claimed only by the catalog's eligible regular
+run under the existing locks. Source dispositions require the addressed linked
+run, and import writes revalidate staff access after company/run locking.
+
+Import and disposition preserve the client draft/approval/payment status.
+`EVENTS` now declares that explicitly, and both controller actions use the model
+transition recorder. Regressions retain `draft_ready`, `approved` and `paid`,
+including status-change time/actor, with matching history from/to statuses.
+Payroll approval, commit, stale selection and rollback gates remain intact.
+Reopened reviews identify newer revisions; evidence links retain the explicit
+company workspace; superseded-source and disposition reasons stay independent.
+
+CI on the starting head `01c29662` had completed successfully (Quality run
+43223890854, backend/frontend/browser passed). Its CodeRabbit check was rate
+limited, which does not establish review coverage. The new-head CI/review remains
+lead-owned after push; no reviewer commands, merge or deployment are authorized.
+
+Serial local gates on an owned `db:schema:load` database:
+
+- Focused backend: **235 examples, 0 failures**.
+- Full backend: **6,635 examples, 0 failures, 4 existing transaction-pooler
+  cases pending**, 17m20s. Local pooler URLs were not configured.
+- RuboCop: **1,798 files, no offenses**. Brakeman: **0 errors / 0 warnings**.
+- `npm ci`: passed, audit 0 vulnerabilities. Single-worker frontend tests:
+  **167 files / 1,676 tests passed**. Typecheck and lint passed.
+- Production-configured build passed with `DEPLOYMENT_ENV=production
+  VITE_DEPLOYMENT_ENV=production`; existing large-chunk advisory only.
+- Impeccable 4.6.0 returned `[]` for each of the four changed UI files.
+
+Required agent-executed browser acceptance: **2 passed, 0 failed/blocked/not
+run**. At 1280×900, a synthetic client sent revision 1 with a Revel PDF and $99
+wage checklist; staff acknowledged, opened retained import review, reviewed and
+applied; the client reload displayed **Imported revision 1**. Before apply there
+were zero payroll items. The default Noop left the file `not_scanned`. The
+390×844 check verified the read-only checklist, retained company link, employee
+card and client Imported status. Page/dialog fit their widths; the review uses
+vertical scrolling on the phone. No physical-phone or Safari acceptance is
+claimed.
+
+T3 preview completed submission/acknowledgment/initial review. Repeated screenshot
+attempts returned `Preview automation snapshot timed out after 15000ms`, so QA
+continued in a task-owned native Chrome tab (CUA browser host was unavailable).
+Reopening reused the retained preview; apply occurred once at 1280. DevTools
+responsive controls confirmed exact dimensions; exported screenshots have 2×
+pixel dimensions. All task tabs and the owned DevTools window were closed.
+
+Saved outcome: 40 regular + 2 OT, profile $10, gross $430, net $397.10; employee
+master remains $10. Original/snapshot/intake hashes match with independent keys.
+One import Activity/notification and three skipped email deliveries were saved.
+The portal status stays Received while displaying Imported evidence. Evidence,
+logs and review resolution records are in `output/payroll-portal-pr6-20261113/round2/`.
+No schema/migration changes were made in this correction; PR #451 integration
+and any rebase remain lead-owned.
