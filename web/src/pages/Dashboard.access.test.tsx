@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Dashboard } from './Dashboard';
 
 const mocks = vi.hoisted(() => ({ company: {} as Record<string, unknown>, dashboard: vi.fn() }));
+vi.mock('@/hooks/usePortalCounts', () => ({ usePortalCounts: () => null }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 11, activeCompany: mocks.company }) }));
 vi.mock('@/services/api', () => ({ reportsApi: { dashboard: mocks.dashboard } }));
 vi.mock('@/components/layout/Header', () => ({ Header: ({ actions }: { actions: React.ReactNode }) => <div>{actions}</div> }));

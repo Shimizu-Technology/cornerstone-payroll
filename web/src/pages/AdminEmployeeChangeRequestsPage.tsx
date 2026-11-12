@@ -1,3 +1,5 @@
+import { useSearchParams } from 'react-router';
+import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -13,12 +15,15 @@ import { adminEmployeeChangeRequestsApi } from '@/services/api';
 import type { EmployeeChangeRequest } from '@/services/api';
 
 export function AdminEmployeeChangeRequestsPage() {
+  const [searchParams] = useSearchParams();
+  const deepRequestId = Number(searchParams.get('request_id')) || null;
+  const pendingDeepSelection = useRef(deepRequestId);
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
   const canReview = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [requests, setRequests] = useState<EmployeeChangeRequest[]>([]);
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
-  const [status, setStatus] = useState('pending');
+  const [status, setStatus] = useState(() => deepRequestId ? '' : 'pending');
   const [reviewNotes, setReviewNotes] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -27,6 +32,11 @@ export function AdminEmployeeChangeRequestsPage() {
   const currentStatusRef = useRef(status);
   const listRequestIdRef = useRef(0);
   const detailRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    pendingDeepSelection.current = deepRequestId;
+    if (deepRequestId) { currentStatusRef.current = ''; setStatus(''); }
+  }, [deepRequestId]);
 
   const invalidateRequests = useCallback(() => {
     ++listRequestIdRef.current;
@@ -63,8 +73,10 @@ export function AdminEmployeeChangeRequestsPage() {
       const response = await adminEmployeeChangeRequestsApi.list({ status: requestedStatus || undefined });
       if (!isCurrentRequest()) return;
       setRequests(response.data);
-      if (response.data[0]) {
-        await selectRequest(response.data[0].id);
+      const selectedId = pendingDeepSelection.current || response.data[0]?.id;
+      pendingDeepSelection.current = null;
+      if (selectedId) {
+        await selectRequest(selectedId);
       }
     } catch (err) {
       if (isCurrentRequest()) {
@@ -78,7 +90,7 @@ export function AdminEmployeeChangeRequestsPage() {
   useEffect(() => {
     void load();
     return invalidateRequests;
-  }, [status, load, invalidateRequests]);
+  }, [status, load, invalidateRequests, deepRequestId]);
 
   const updateRequest = async (action: 'approve' | 'reject') => {
     if (!selected || !canReview) return;
@@ -103,10 +115,12 @@ export function AdminEmployeeChangeRequestsPage() {
       <Header title="Client Change Requests" description="Review and approve payroll-sensitive client-submitted changes." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+        <InboxReturnLink />
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         <div className="max-w-xs">
           <Select value={status} onChange={(e) => {
+            pendingDeepSelection.current = null;
             currentStatusRef.current = e.target.value;
             invalidateRequests();
             setSelected(null);

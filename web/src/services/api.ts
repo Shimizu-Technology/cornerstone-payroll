@@ -4224,6 +4224,8 @@ export interface ClientDocumentListMeta extends BoundedListMeta {
 export type BoundedListParams = { page?: number; per_page?: number };
 
 export interface ClientDocument {
+  reviewed_at?: string | null;
+  reviewed_by_id?: number | null;
   id: number;
   title: string;
   category: string;
@@ -4507,7 +4509,7 @@ export const employeeLoansApi = {
 };
 
 export const clientDocumentsApi = {
-  list: (params?: { category?: string; employee_id?: number } & BoundedListParams) =>
+  list: (params?: { category?: string; employee_id?: number; search?: string } & BoundedListParams) =>
     api.get<{ data: ClientDocument[]; meta: ClientDocumentListMeta }>('/client/documents', params),
   upload: (formData: FormData, companyId?: number) =>
     api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData, { companyId }),
@@ -4544,8 +4546,10 @@ export const clientPortalThreadsApi = {
 };
 
 export const adminClientDocumentsApi = {
-  list: (params?: { category?: string; employee_id?: number; uploaded_by_id?: number }) =>
-    api.get<{ data: ClientDocument[] }>('/admin/client_documents', params),
+  list: (params?: { category?: string; employee_id?: number; uploaded_by_id?: number; search?: string } & BoundedListParams) =>
+    api.get<{ data: ClientDocument[]; meta: BoundedListMeta & { employee_linked_count?: number; unique_uploaders_count?: number } }>('/admin/client_documents', params),
+  get: (id: number) => api.get<{ data: ClientDocument }>(`/admin/client_documents/${id}`),
+  review: (id: number) => api.post<{ data: ClientDocument }>(`/admin/client_documents/${id}/review`),
   upload: (formData: FormData, companyId?: number) =>
     api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData, { companyId }),
   preview: (id: number) =>

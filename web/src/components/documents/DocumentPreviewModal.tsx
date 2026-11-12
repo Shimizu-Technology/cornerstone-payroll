@@ -38,7 +38,7 @@ export function DocumentPreviewModal({
     const record = () => {
       if (recorded || window.document.visibilityState !== 'visible' || !window.document.hasFocus()) return;
       recorded = true;
-      void activityApi.opened(document.id).catch(() => { recorded = false; });
+      void activityApi.opened(document.id).then(() => window.dispatchEvent(new Event('portal-work-changed'))).catch(() => { recorded = false; });
     };
     record();
     window.addEventListener('focus', record);

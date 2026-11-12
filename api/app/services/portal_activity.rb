@@ -2,7 +2,7 @@
 
 # One vocabulary and deliberately small public projection for both audiences.
 class PortalActivity
-  DOCUMENT_ACTIONS = %w[client_documents#create admin_client_documents#create client_documents#destroy admin_client_documents#destroy portal_documents#opened portal_documents#preview portal_documents#download client_documents#archive admin_client_documents#archive admin_client_documents#unarchive].freeze
+  DOCUMENT_ACTIONS = %w[portal_documents#reviewed client_documents#create admin_client_documents#create client_documents#destroy admin_client_documents#destroy portal_documents#opened portal_documents#preview portal_documents#download client_documents#archive admin_client_documents#archive admin_client_documents#unarchive].freeze
   THREAD_ACTIONS = %w[client_portal_threads#create client_portal_threads#update client_portal_threads#resolved client_portal_threads#reopened client_portal_threads#opened client_portal_threads#mark_read client_portal_messages#create].freeze
 
   def self.document_metadata(document)

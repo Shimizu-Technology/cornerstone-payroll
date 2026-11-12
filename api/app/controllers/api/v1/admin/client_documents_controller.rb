@@ -11,20 +11,43 @@ module Api
         end
         before_action :private_document_response!, only: [ :download, :preview ]
 
-        before_action :set_document, only: [ :download, :preview, :destroy, :unarchive, :opened, :activity ]
+        before_action :set_document, only: [ :show, :review, :download, :preview, :destroy, :unarchive, :opened, :activity ]
 
         def index
           documents = ClientDocument.where(company_id: current_company_id)
                                     .includes(:employee, :uploaded_by)
                                     .recent_first
 
+          if params[:search].present?
+            term = "%#{ClientDocument.sanitize_sql_like(params[:search].to_s.first(200))}%"
+            documents = documents.where("title ILIKE :term OR file_name ILIKE :term", term: term)
+          end
           documents = documents.where(category: params[:category]) if params[:category].present?
           documents = documents.where(employee_id: params[:employee_id]) if params[:employee_id].present?
           documents = documents.where(uploaded_by_id: params[:uploaded_by_id]) if params[:uploaded_by_id].present?
 
-          render json: {
-            data: documents.map { |document| serialize_document(document) }
-          }
+          stats = { employee_linked_count: documents.where.not(employee_id: nil).count,
+                    unique_uploaders_count: documents.unscope(:order).distinct.count(:uploaded_by_id) }
+          documents = bounded_page(documents)
+          render json: { data: documents.map { |document| serialize_document(document) }, meta: bounded_page_meta(documents).merge(stats) }
+        end
+
+        def show
+          render json: { data: serialize_document(@document) }
+        end
+
+        def review
+          @document.with_lock do
+            revalidate_current_company_write_access!
+            unless @document.reviewed_at
+              @document.ensure_usable_for!(:preview)
+              @document.update!(reviewed_at: Time.current, reviewed_by: current_user)
+              PortalActivity.record!(user: current_user, record: @document, action: "portal_documents#reviewed",
+                metadata: PortalActivity.document_metadata(@document), ip_address: request.remote_ip, user_agent: request.user_agent)
+            end
+          end
+          skip_default_audit_log!
+          render json: { data: serialize_document(@document) }
         end
 
         def create
@@ -142,6 +165,8 @@ module Api
             visible_to_client: document.visible_to_client,
             shared_by_staff: document.shared_by_staff,
             created_at: document.created_at,
+            reviewed_at: document.reviewed_at,
+            reviewed_by_id: document.reviewed_by_id,
             archived_at: document.archived_at,
             archived_by_id: document.archived_by_id,
             scan_status: document.scan_status,

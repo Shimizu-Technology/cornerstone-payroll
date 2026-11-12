@@ -22,6 +22,10 @@ module Api
 
           documents = documents.where(category: params[:category]) if params[:category].present?
           documents = documents.where(employee_id: params[:employee_id]) if params[:employee_id].present?
+          if params[:search].present?
+            term = "%#{ClientDocument.sanitize_sql_like(params[:search].to_s.first(200))}%"
+            documents = documents.where("title ILIKE :term OR file_name ILIKE :term", term: term)
+          end
           employee_linked_count = documents.where.not(employee_id: nil).count
           documents = bounded_page(documents)
 

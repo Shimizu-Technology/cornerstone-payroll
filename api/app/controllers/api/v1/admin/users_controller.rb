@@ -163,6 +163,8 @@ module Api
             record_user_audit!("deleted", @user, before_values: before_values, after_values: {})
           end
           head :no_content
+        rescue ActiveRecord::RecordNotDestroyed, ActiveRecord::InvalidForeignKey
+          render json: { error: "This user has retained records, including portal review history, and cannot be deleted. Deactivate the account to preserve its history." }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/users/:id/resend_invitation
