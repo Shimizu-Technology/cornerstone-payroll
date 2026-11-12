@@ -6,7 +6,16 @@ import { clientPortalThreadsApi } from '@/services/api';
 import { subscribeToClientPortalThreads } from '@/services/clientPortalCable';
 import { clientInboxApi, type InboxCounts } from '@/services/clientInbox';
 
-export function usePortalCounts() {
+let pendingSignal: ReturnType<typeof setTimeout> | undefined;
+function notifyInboxConsumers(): void {
+  if (pendingSignal) return;
+  pendingSignal = setTimeout(() => {
+    pendingSignal = undefined;
+    window.dispatchEvent(new Event('portal-work-changed'));
+  }, 50);
+}
+
+export function usePortalCounts(): InboxCounts | null {
   const { user } = useAuth();
   const { activeCompanyId } = useCompany();
   const location = useLocation();
@@ -28,15 +37,17 @@ export function usePortalCounts() {
         if (active && version === request) setCounts({ identity, data });
       } catch { if (active && version === request) setCounts(null); }
     };
+    let pendingRefresh: ReturnType<typeof setTimeout> | undefined;
+    const scheduleRefresh = () => { clearTimeout(pendingRefresh); pendingRefresh = setTimeout(() => void refresh(), 100); };
     void refresh();
     let unsubscribe: (() => void) | undefined;
     if (activeCompanyId) void subscribeToClientPortalThreads(activeCompanyId, {
-      onThread: () => { void refresh(); },
-      onInboxChanged: () => window.dispatchEvent(new Event('portal-work-changed')),
+      onThread: scheduleRefresh,
+      onInboxChanged: notifyInboxConsumers,
       onConnected: () => { void refresh(); },
     }, role === 'client' ? 'ClientPortalThreadChannel' : 'ClientInboxChannel').then(cleanup => { if (active) unsubscribe = cleanup; else cleanup(); });
     const timer = window.setInterval(() => void refresh(), 60_000);
-    const onRefresh = () => void refresh();
+    const onRefresh = scheduleRefresh;
     window.addEventListener('focus', onRefresh);
     window.addEventListener('portal-work-changed', onRefresh);
     document.addEventListener('visibilitychange', onRefresh);
@@ -44,6 +55,7 @@ export function usePortalCounts() {
       active = false;
       unsubscribe?.();
       clearInterval(timer);
+      clearTimeout(pendingRefresh);
       window.removeEventListener('focus', onRefresh);
       window.removeEventListener('portal-work-changed', onRefresh);
       document.removeEventListener('visibilitychange', onRefresh);

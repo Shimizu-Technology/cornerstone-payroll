@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { Link, MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Layout } from './Layout';
 
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, name: 'Synthetic client', active: true }, activeCompanyId: 1 }) }));
+const scope = vi.hoisted(() => ({ organization: 1, company: 1 }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, name: 'Synthetic client', active: true }, activeCompanyId: scope.company, activeOrganizationId: scope.organization }) }));
 vi.mock('./CommandPalette', () => ({ CommandPalette: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Command palette"><input autoFocus aria-label="Command search" /></div> : null }));
 vi.mock('./Sidebar', () => ({ Sidebar: ({ onNavigate, onOpenCommandPalette }: { onNavigate?: () => void; onOpenCommandPalette?: () => void }) => <nav><Link to="/employees" onClick={onNavigate}>Employees</Link><button>Client settings</button><button onClick={onOpenCommandPalette}>Command menu</button></nav> }));
-beforeEach(() => { vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function (this: HTMLElement) { return this.parentElement; }); });
+beforeEach(() => { scope.organization = 1; scope.company = 1; vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function (this: HTMLElement) { return this.parentElement; }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 function view(): React.ReactElement {
@@ -62,4 +64,20 @@ it('opens the command menu after the drawer releases its focus and inert backgro
   const search = await screen.findByRole('textbox', { name: 'Command search' });
   expect(document.activeElement).toBe(search);
   expect(search.closest('[inert]')).toBeNull();
+});
+
+it('retains the global inbox across client switches but remounts it across organizations', () => {
+  function InboxDraft(): React.ReactElement {
+    const [draft, setDraft] = useState('');
+    return <input aria-label="Inbox draft" value={draft} onChange={event => setDraft(event.target.value)} />;
+  }
+  const scopedView = () => <MemoryRouter initialEntries={['/app/client-inbox']}><Routes><Route element={<Layout />}><Route path="/app/client-inbox" element={<InboxDraft />} /></Route></Routes></MemoryRouter>;
+  const result = render(scopedView());
+  fireEvent.change(screen.getByLabelText('Inbox draft'), { target: { value: 'Retained filters' } });
+  scope.company = 2;
+  result.rerender(scopedView());
+  expect((screen.getByLabelText('Inbox draft') as HTMLInputElement).value).toBe('Retained filters');
+  scope.organization = 2;
+  result.rerender(scopedView());
+  expect((screen.getByLabelText('Inbox draft') as HTMLInputElement).value).toBe('');
 });

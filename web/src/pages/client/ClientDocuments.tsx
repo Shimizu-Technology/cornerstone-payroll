@@ -40,7 +40,7 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-const searchPortalDocuments = (search: string) => clientDocumentsApi.list({ search, per_page: 25 });
+const searchPortalDocuments = (search: string): ReturnType<typeof clientDocumentsApi.list> => clientDocumentsApi.list({ search, per_page: 25 });
 
 export function ClientDocuments() {
   const [documents, setDocuments] = useState<ClientDocument[]>([]);

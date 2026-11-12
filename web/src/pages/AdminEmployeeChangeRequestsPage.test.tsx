@@ -91,3 +91,17 @@ it('refreshes the current filter when approval finishes after a filter change', 
   expect(screen.getByText('Request #3')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Alice Reyes/ })).toBeNull();
 });
+
+it('consumes the inbox deep link once so a new status filter selects its own request', async () => {
+  vi.clearAllMocks();
+  const pending = request(1, 'Alice Reyes', 'Pending notes');
+  const approved = request(3, 'Cara Chen', 'Approved notes', 'approved');
+  apiMocks.list.mockImplementation(({ status }: { status: string }) => Promise.resolve({ data: status === 'pending' ? [pending] : [approved] }));
+  apiMocks.get.mockImplementation((id: number) => Promise.resolve({ data: id === 1 ? pending : approved }));
+  render(<MemoryRouter initialEntries={['/companies/1/client-change-requests?request_id=1']}><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
+  await screen.findByText('Request #1');
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'approved' } });
+  await screen.findByText('Request #3');
+  expect(apiMocks.get.mock.calls.map(([id]) => id)).toEqual([1, 3]);
+  expect(screen.queryByText('Request #1')).toBeNull();
+});

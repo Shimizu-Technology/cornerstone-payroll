@@ -202,7 +202,7 @@ export function Layout() {
               isSwitchingCompany ? 'opacity-55' : 'opacity-100'
             }`}
           >
-            <div key={location.pathname === '/app/client-inbox' ? 'client-inbox' : financePage ? `finance:${activeOrganizationId ?? 'no-organization'}` : displayedCompanyId ?? 'no-company'} className="min-h-full">
+            <div key={location.pathname === '/app/client-inbox' ? `client-inbox:${activeOrganizationId ?? 'no-organization'}` : financePage ? `finance:${activeOrganizationId ?? 'no-organization'}` : displayedCompanyId ?? 'no-company'} className="min-h-full">
               {outlet ?? <Outlet />}
             </div>
           </div>

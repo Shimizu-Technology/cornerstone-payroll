@@ -43,6 +43,17 @@ RSpec.describe "Inbox document receipts and search", type: :request do
     expect(document.reload.reviewed_at).to be_nil
   end
 
+  it "returns a deliberate retention error when deleting a document reviewer" do
+    admin = create(:user, organization: org, company: company, role: :org_admin, platform_owner: false)
+    allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(admin)
+    document.update!(reviewed_by: staff, reviewed_at: Time.current)
+    delete "/api/v1/admin/users/#{staff.id}"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("Deactivate", "review history")
+    expect(User.exists?(staff.id)).to be(true)
+    expect(document.reload.reviewed_by_id).to eq(staff.id)
+  end
+
   it "bounds document search, finds an older file and supports authorized exact lookup" do
     old = create(:client_document, company: company, title: "Prior year notice", created_at: 1.year.ago)
     3.times { create(:client_document, company: company) }

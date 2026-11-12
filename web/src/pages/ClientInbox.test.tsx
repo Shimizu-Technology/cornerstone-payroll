@@ -16,6 +16,7 @@ function Destination() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  HTMLElement.prototype.scrollTo = vi.fn(function (this: HTMLElement, options?: ScrollToOptions | number, y?: number) { this.scrollTop = typeof options === 'number' ? y || 0 : options?.top || 0; });
   mocks.list.mockResolvedValue({ data: [row('message')], meta: { next_cursor: null } });
   mocks.counts.mockResolvedValue({ data: { unread_count: 310, unread_messages: 210, unread_documents: 100, waiting_count: 320 } });
   mocks.switchCompany.mockReturnValue(true);
@@ -51,4 +52,39 @@ it('refreshes live work without duplicate rows and drops newly inaccessible comp
   await act(async () => { window.dispatchEvent(new Event('portal-work-changed')); });
   await screen.findByText('No portal work matches these filters.');
   expect(screen.queryByText('message item 1')).toBeNull();
+});
+
+it('refreshes every loaded page atomically and preserves scroll during a live burst', async () => {
+  const meta = (next: string | null) => ({ next_cursor: next });
+  mocks.list.mockImplementation(({ cursor }) => Promise.resolve(cursor ? { data: [row('document', 2)], meta: meta(null) } : { data: [row('message')], meta: meta('page2') }));
+  render(<MemoryRouter initialEntries={['/app/client-inbox?client=2']}><main><ClientInbox /></main></MemoryRouter>);
+  await screen.findByText('message item 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+  await screen.findByText('document item 2');
+  const main = screen.getByRole('main');
+  main.scrollTop = 700;
+  fireEvent.scroll(main);
+  const before = mocks.list.mock.calls.length;
+  mocks.list.mockImplementation(({ cursor }) => Promise.resolve(cursor ? { data: [row('document', 2)], meta: meta(null) } : { data: [row('message', 3), row('message')], meta: meta('fresh-page2') }));
+  act(() => { for (let n = 0; n < 5; n++) window.dispatchEvent(new Event('portal-work-changed')); });
+  await screen.findByText('message item 3');
+  expect(screen.getByText('document item 2')).toBeTruthy();
+  expect(screen.getAllByText('message item 1')).toHaveLength(1);
+  expect(mocks.list.mock.calls.length - before).toBe(2);
+  expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'fresh-page2' }));
+  expect(main.scrollTop).toBe(700);
+});
+
+it('removes an obsolete pagination cursor after a failed first-page refresh', async () => {
+  mocks.list.mockResolvedValueOnce({ data: [row('message')], meta: { next_cursor: 'obsolete' } });
+  render(<MemoryRouter initialEntries={['/app/client-inbox?kind=document']}><ClientInbox /></MemoryRouter>);
+  await screen.findByText('message item 1');
+  mocks.list.mockRejectedValueOnce(new Error('Access changed'));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull();
+  expect(screen.queryByText('message item 1')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await screen.findByText('message item 1');
+  expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: undefined }));
 });

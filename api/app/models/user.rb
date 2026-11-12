@@ -24,6 +24,7 @@ class User < ApplicationRecord
   has_many :selected_printer_profiles, through: :user_printer_profile_selections, source: :printer_profile
   has_many :created_printer_profiles, class_name: "PrinterProfile", foreign_key: :created_by_id, dependent: :nullify
   has_many :updated_printer_profiles, class_name: "PrinterProfile", foreign_key: :updated_by_id, dependent: :nullify
+  has_many :reviewed_client_documents, class_name: "ClientDocument", foreign_key: :reviewed_by_id, dependent: :restrict_with_error
   has_many :uploaded_client_documents, class_name: "ClientDocument", foreign_key: :uploaded_by_id, dependent: :nullify
   has_many :requested_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :requested_by_id, dependent: :nullify
   has_many :reviewed_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :reviewed_by_id, dependent: :nullify

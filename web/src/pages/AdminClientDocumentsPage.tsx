@@ -72,11 +72,17 @@ export function AdminClientDocumentsPage() {
   const [searchParams] = useSearchParams();
   const deepDocumentId = Number(searchParams.get('document_id')) || null;
   const pageRef = useRef<HTMLDivElement>(null);
+  const deepDocumentIdRef = useRef(deepDocumentId);
+  deepDocumentIdRef.current = deepDocumentId;
   const [search, setSearch] = useState('');
   const [documentMeta, setDocumentMeta] = useState<(BoundedListMeta & { employee_linked_count?: number; unique_uploaders_count?: number }) | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const loadVersion = useRef(0);
-  const invalidateList = useCallback(() => { ++loadVersion.current; }, []);
+  const firstPageReady = useRef(false);
+  const invalidateList = useCallback(() => { ++loadVersion.current; firstPageReady.current = false; }, []);
+  const previewVersion = useRef(0);
+  const invalidatePreview = useCallback(() => { ++previewVersion.current; }, []);
+  useEffect(() => invalidatePreview, [invalidatePreview]);
   const { activeCompany, activeCompanyId } = useCompany();
   const canAdministerClient = useSelectedCompanyCapability('manage_client_administration');
   const [alertRecipientCount, setAlertRecipientCount] = useState<number | null>(null);
@@ -106,6 +112,8 @@ export function AdminClientDocumentsPage() {
   });
 
   const load = useCallback(async (page = 1) => {
+    if (page > 1 && !firstPageReady.current) return;
+    if (page === 1) { firstPageReady.current = false; setDocumentMeta(null); }
     const version = ++loadVersion.current;
     try {
       if (page === 1) setLoading(true); else setLoadingMore(true);
@@ -113,7 +121,8 @@ export function AdminClientDocumentsPage() {
       const response = await adminClientDocumentsApi.list({ category, search, page, per_page: 50 });
       if (version !== loadVersion.current) return;
       setDocuments(current => page === 1 ? response.data : appendUniqueById(current, response.data));
-      setMessageDocuments(response.data.filter(document => document.visible_to_client));
+      setMessageDocuments(current => page === 1 ? response.data.filter(document => document.visible_to_client) : appendUniqueById(current, response.data.filter(document => document.visible_to_client)));
+      firstPageReady.current = true;
       setDocumentMeta(response.meta);
     } catch (err) {
       if (version === loadVersion.current) setError(err instanceof Error ? err.message : 'Failed to load client documents');
@@ -123,6 +132,8 @@ export function AdminClientDocumentsPage() {
   }, [category, search, setError]);
 
   useEffect(() => {
+    setDocumentMeta(null);
+    setLoading(true);
     const timer = setTimeout(() => void load(), 250);
     return () => { clearTimeout(timer); invalidateList(); };
   }, [load, invalidateList]);
@@ -214,7 +225,8 @@ export function AdminClientDocumentsPage() {
     URL.revokeObjectURL(url);
   };
 
-  const previewDocumentFile = async (document: ClientDocument) => {
+  const previewDocumentFile = useCallback(async (document: ClientDocument): Promise<void> => {
+    const request = ++previewVersion.current;
     try {
       setError(null);
       setPreviewDocument(document);
@@ -222,35 +234,44 @@ export function AdminClientDocumentsPage() {
       setPreviewLoading(true);
       setPreviewPayload(null);
       const file = await adminClientDocumentsApi.preview(document.id);
-      setPreviewPayload(await prepareDocumentPreview(document, file.blob));
+      if (request !== previewVersion.current) return;
+      const payload = await prepareDocumentPreview(document, file.blob);
+      if (request === previewVersion.current) setPreviewPayload(payload);
+      else if (payload.objectUrl) URL.revokeObjectURL(payload.objectUrl);
     } catch (err) {
+      if (request !== previewVersion.current) return;
       setError(err instanceof Error ? err.message : 'Failed to preview client document');
       setPreviewOpen(false);
       setPreviewDocument(null);
     } finally {
-      setPreviewLoading(false);
+      if (request === previewVersion.current) setPreviewLoading(false);
     }
-  };
+  }, [setError]);
 
   useEffect(() => {
     if (!deepDocumentId) return;
     pageRef.current?.closest('main')?.scrollTo({ top: 0, behavior: 'instant' });
     let active = true;
+    const lookup = ++previewVersion.current;
     void adminClientDocumentsApi.get(deepDocumentId).then(response => {
-      if (active) {
-        setInboxDocument(response.data);
-        setPreviewDocument(response.data);
-        setPreviewOpen(true);
-        setPreviewLoading(true);
-        void adminClientDocumentsApi.preview(response.data.id).then(async file => {
-          const payload = await prepareDocumentPreview(response.data, file.blob);
-          if (active) setPreviewPayload(payload);
-          else if (payload.objectUrl) URL.revokeObjectURL(payload.objectUrl);
-        }).catch(error => { if (active) setError(error instanceof Error ? error.message : 'Could not preview file'); }).finally(() => { if (active) setPreviewLoading(false); });
-      }
+      if (!active) return;
+      setInboxDocument(response.data);
+      if (lookup === previewVersion.current) void previewDocumentFile(response.data);
     }).catch(error => { if (active) setError(error instanceof Error ? error.message : 'File is unavailable'); });
-    return () => { active = false; };
-  }, [deepDocumentId, setError]);
+    return () => { active = false; invalidatePreview(); };
+  }, [deepDocumentId, invalidatePreview, previewDocumentFile, setError]);
+
+  const reviewInboxDocument = async (): Promise<void> => {
+    if (!inboxDocument) return;
+    const id = inboxDocument.id;
+    try {
+      const response = await adminClientDocumentsApi.review(id);
+      setInboxDocument(current => current?.id === id && deepDocumentIdRef.current === id ? response.data : current);
+      window.dispatchEvent(new Event('portal-work-changed'));
+    } catch (error) {
+      if (deepDocumentIdRef.current === id) setError(error instanceof Error ? error.message : 'Could not mark reviewed');
+    }
+  };
 
   const unarchiveDocument = async (document: ClientDocument): Promise<void> => {
     setError(null);
@@ -282,7 +303,7 @@ export function AdminClientDocumentsPage() {
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         <InboxReturnLink />
-        {inboxDocument && inboxDocument.id === deepDocumentId && <Card><CardContent className="space-y-3 pt-5"><h2 className="break-words font-semibold">{inboxDocument.title}</h2><p className="text-sm text-neutral-600">{inboxDocument.reviewed_at ? 'Reviewed by staff' : 'Waiting on staff review'}</p><Button disabled={Boolean(inboxDocument.reviewed_at)} onClick={() => { void adminClientDocumentsApi.review(inboxDocument.id).then(response => { setInboxDocument(response.data); window.dispatchEvent(new Event('portal-work-changed')); }).catch(error => setError(error instanceof Error ? error.message : 'Could not mark reviewed')); }}>Mark reviewed</Button></CardContent></Card>}
+        {inboxDocument && inboxDocument.id === deepDocumentId && <Card><CardContent className="space-y-3 pt-5"><h2 className="break-words font-semibold">{inboxDocument.title}</h2><p className="text-sm text-neutral-600">{inboxDocument.reviewed_at ? 'Reviewed by staff' : 'Waiting on staff review'}</p><Button disabled={Boolean(inboxDocument.reviewed_at)} onClick={() => void reviewInboxDocument()}>Mark reviewed</Button></CardContent></Card>}
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {success && <ActionFeedback tone="success" message={success} />}
         {canAdministerClient && alertRecipientCount === 0 && (
@@ -300,7 +321,7 @@ export function AdminClientDocumentsPage() {
         </div>
 
         <div className="w-full sm:max-w-xs">
-          <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+          <Select value={category} onChange={(e) => { invalidateList(); setDocumentMeta(null); setCategory(e.target.value); }}>
             {documentCategories.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -418,7 +439,7 @@ export function AdminClientDocumentsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Input label="Search files" value={search} onChange={e => setSearch(e.target.value)} placeholder="Find older files by title or filename" />
+            <Input label="Search files" value={search} onChange={e => { invalidateList(); setDocumentMeta(null); setSearch(e.target.value); }} placeholder="Find older files by title or filename" />
             {loading ? (
               <div className="py-12 text-center text-sm text-gray-500">Loading client documents...</div>
             ) : documents.length === 0 ? (
@@ -536,13 +557,15 @@ export function AdminClientDocumentsPage() {
         )}
       </div>
 
-      {documentMeta && documentMeta.current_page < documentMeta.total_pages && <div className="px-4 pb-6 sm:px-6"><LoadMoreFooter shown={documents.length} total={documentMeta.total_count} noun="files" hasMore loading={loadingMore} onLoadMore={() => void load(documentMeta.current_page + 1)} /></div>}
+      {!loading && documentMeta && documentMeta.current_page < documentMeta.total_pages && <div className="px-4 pb-6 sm:px-6"><LoadMoreFooter shown={documents.length} total={documentMeta.total_count} noun="files" hasMore loading={loadingMore || loading} onLoadMore={() => void load(documentMeta.current_page + 1)} /></div>}
       <DocumentPreviewModal
           activityApi={adminClientDocumentsApi}
         open={previewOpen}
         onOpenChange={(open) => {
           setPreviewOpen(open);
           if (!open) {
+            invalidatePreview();
+            setPreviewLoading(false);
             setPreviewDocument(null);
             setPreviewPayload(null);
           }

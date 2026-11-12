@@ -2,6 +2,9 @@
 
 class ClientPortalThread < ApplicationRecord
   include PortalInboxUpdates
+  attr_readonly :created_by_audience, :created_by_name_snapshot
+  before_validation :snapshot_creator_origin, on: :create
+  validates :created_by_audience, inclusion: { in: %w[client staff unknown] }
   STATUSES = %w[open resolved].freeze
 
   belongs_to :company
@@ -82,6 +85,11 @@ class ClientPortalThread < ApplicationRecord
   end
 
   private
+
+  def snapshot_creator_origin
+    self.created_by_audience = created_by&.client? ? "client" : created_by&.staff_member? ? "staff" : "unknown"
+    self.created_by_name_snapshot = created_by&.name
+  end
 
   def staff_user?(user)
     self.class.staff_user?(user)

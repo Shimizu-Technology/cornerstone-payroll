@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { MemoryRouter } from 'react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi, type Mock } from 'vitest';
 import type { ComponentProps } from 'react';
@@ -323,4 +324,34 @@ it('finds an older file through server search and keeps the chosen attachment wh
   fireEvent.change(screen.getByLabelText('Find a file to attach'), { target: { value: 'Another' } });
   await waitFor(() => expect(search).toHaveBeenLastCalledWith('Another'));
   expect(replySelect.value).toBe('77');
+});
+
+it('recovers the phone conversation list when the exact inbox thread is unavailable', async () => {
+  window.matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  api.list.mockResolvedValue({ data: [thread(2, 'Accessible conversation')] });
+  api.get.mockRejectedValueOnce(new Error('Conversation is unavailable'));
+  render(<MemoryRouter><PortalMessagesPanel api={api} documents={[]} initialThreadId={99} audienceLabel="client" description="Client messages" /></MemoryRouter>);
+  await screen.findByText('Conversation is unavailable');
+  const subject = screen.getByPlaceholderText('Subject');
+  expect(subject.closest('.min-w-0.space-y-4')?.classList.contains('hidden')).toBe(false);
+  api.get.mockResolvedValue({ data: thread(2, 'Accessible conversation') });
+  fireEvent.click(screen.getByRole('button', { name: /Accessible conversation/ }));
+  await screen.findByPlaceholderText('Reply client');
+});
+
+it('retains a selected attachment across a fresh library page with server search enabled', async () => {
+  const file = { id: 77, title: 'Chosen library file', file_name: 'chosen.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValue({ data: [] });
+  api.list.mockResolvedValue({ data: [thread(2, 'Payroll files')] });
+  api.get.mockResolvedValue({ data: thread(2, 'Payroll files') });
+  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
+  const result = render(view([file]));
+  await screen.findByPlaceholderText('Reply client');
+  const select = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
+  fireEvent.change(select, { target: { value: '77' } });
+  result.rerender(view([]));
+  expect(select.value).toBe('77');
+  // Fresh safety information still wins over the retained selection.
+  result.rerender(view([{ ...file, archived_at: '2026-11-12T00:00:00Z' }]));
+  await waitFor(() => expect(select.value).toBe(''));
 });
