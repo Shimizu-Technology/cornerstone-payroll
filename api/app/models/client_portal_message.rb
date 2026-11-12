@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class ClientPortalMessage < ApplicationRecord
+  include PortalInboxUpdates
+  attr_readonly :author_audience, :author_name_snapshot
+  before_validation :snapshot_author_origin, on: :create
+  validates :author_audience, inclusion: { in: %w[client staff unknown] }
   belongs_to :client_portal_thread, inverse_of: :messages
   belongs_to :company
   belongs_to :author, class_name: "User", optional: true
@@ -17,6 +21,11 @@ class ClientPortalMessage < ApplicationRecord
   after_create_commit :broadcast_thread
 
   private
+
+  def snapshot_author_origin
+    self.author_audience = author&.client? ? "client" : author&.staff_member? ? "staff" : "unknown"
+    self.author_name_snapshot = author&.name
+  end
 
   def thread_and_document_belong_to_company
     if client_portal_thread&.company_id != company_id

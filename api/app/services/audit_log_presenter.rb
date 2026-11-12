@@ -27,6 +27,7 @@ class AuditLogPresenter
     "admin_client_documents#create" => "uploaded",
     "client_documents#destroy" => "deleted",
     "admin_client_documents#destroy" => "deleted",
+    "portal_documents#reviewed" => "reviewed",
     "portal_documents#opened" => "opened",
     "portal_documents#preview" => "previewed",
     "portal_documents#download" => "downloaded",

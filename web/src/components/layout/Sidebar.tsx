@@ -1,3 +1,4 @@
+import { usePortalCounts } from '@/hooks/usePortalCounts';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router';
@@ -47,6 +48,7 @@ interface NavItem {
   name: string;
   href: string;
   icon: React.ReactNode;
+  count?: number;
 }
 
 interface SidebarProps {
@@ -59,6 +61,7 @@ interface SidebarProps {
 
 const clientNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Client Inbox', href: '/app/client-inbox', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
@@ -69,6 +72,7 @@ const clientNavigation: NavItem[] = [
 
 const portalNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Messages', href: '/messages', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
@@ -172,8 +176,9 @@ function CollapsedNavLink({
       <NavLink
         ref={anchorRef}
         to={item.href}
+        end={item.href === '/app'}
         onClick={onNavigate}
-        aria-label={item.name}
+        aria-label={item.count ? `${item.name}, ${item.count} ${item.href === '/messages' ? 'unread' : 'waiting on staff'}` : item.name}
         onMouseEnter={() => setTooltipVisible(true)}
         onMouseLeave={() => setTooltipVisible(false)}
         onFocus={() => setTooltipVisible(true)}
@@ -194,6 +199,7 @@ function CollapsedNavLink({
       >
         {item.icon}
         {!collapsed && <span>{item.name}</span>}
+        {!!item.count && <span className={cn('rounded-full bg-primary-100 px-2 py-0.5 text-xs font-bold tabular-nums text-primary-900', collapsed ? 'absolute -right-1 -top-1' : 'ml-auto')}>{item.count > 99 ? '99+' : item.count}</span>}
       </NavLink>
       {collapsed && <FloatingTooltip anchorRef={anchorRef} label={item.name} visible={tooltipVisible} />}
     </>
@@ -239,6 +245,7 @@ function formatRoleLabel(role?: string): string {
 }
 
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
+  const counts = usePortalCounts();
   const { user, isAccountant, hasCapability, signOut } = useAuth();
   const { activeCompany, activeCompanyId, canViewClientManagement } = useCompany();
   const navigate = useNavigate();
@@ -264,6 +271,8 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     return true;
   });
   const primaryNavigation = (isClient ? portalNavigation : clientNavigation).map((item): NavItem => {
+    if (item.href === '/messages') return { ...item, count: counts?.unread_count };
+    if (item.href === '/app/client-inbox') return { ...item, count: counts?.waiting_count };
     if (!activeCompanyId) return item;
     if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
     if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };

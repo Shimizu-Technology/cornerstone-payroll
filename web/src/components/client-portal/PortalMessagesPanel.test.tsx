@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { MemoryRouter } from 'react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi, type Mock } from 'vitest';
 import type { ComponentProps } from 'react';
@@ -188,7 +189,7 @@ it('ignores an earlier broadcast fetch that finishes after a newer one', async (
 });
 
 it('keeps a named file-archived tombstone and excludes archived files from attachment choices', async () => {
-  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: '2026-11-11T00:00:00Z' } as import('@/services/api').ClientDocument;
+  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', visible_to_client: true, archived_at: '2026-11-11T00:00:00Z' } as import('@/services/api').ClientDocument;
   const conversation = { ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document: archived }] } as ClientPortalThread;
   api.list.mockResolvedValue({ data: [conversation] });
   api.get.mockResolvedValue({ data: conversation });
@@ -199,7 +200,7 @@ it('keeps a named file-archived tombstone and excludes archived files from attac
 });
 
 it.each(['archived', 'pending', 'infected', 'error', 'removed'])('clears both attachment selections when a document becomes %s', async (state) => {
-  const document = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const document = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
   const conversation = thread(2, 'Payroll files');
   api.list.mockResolvedValue({ data: [conversation] });
   api.get.mockResolvedValue({ data: conversation });
@@ -231,7 +232,7 @@ it.each(['archived', 'pending', 'infected', 'error', 'removed'])('clears both at
 });
 
 it('keeps the thread response archive tombstone when the document list is stale', async () => {
-  const stale = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: null } as import('@/services/api').ClientDocument;
+  const stale = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', visible_to_client: true, archived_at: null } as import('@/services/api').ClientDocument;
   const conversation = { ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document: { ...stale, archived_at: '2026-11-12T00:00:00Z' } }] } as ClientPortalThread;
   api.list.mockResolvedValue({ data: [conversation] });
   api.get.mockResolvedValue({ data: conversation });
@@ -241,7 +242,7 @@ it('keeps the thread response archive tombstone when the document list is stale'
 });
 
 it('re-reads the open conversation after unarchive so the restored file can be attached again', async () => {
-  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: '2026-11-12T00:00:00Z' } as import('@/services/api').ClientDocument;
+  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', visible_to_client: true, archived_at: '2026-11-12T00:00:00Z' } as import('@/services/api').ClientDocument;
   const restored = { ...archived, archived_at: null };
   const messageWith = (document: typeof archived) => ({ ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document }] } as ClientPortalThread);
   api.list.mockResolvedValue({ data: [messageWith(archived)] });
@@ -305,4 +306,104 @@ it('keeps a newer badge count when an older Load more page finishes last', async
   await act(async () => finishPage({ data: [{ ...thread(2, 'Older conversation'), id: 1 }], meta: meta(2) }));
   await screen.findByText('Older conversation');
   expect(screen.getByText('0 unread')).toBeTruthy();
+});
+
+
+it('finds an older file through server search and keeps the chosen attachment while searching again', async () => {
+  const older = { id: 77, title: 'Older notice', file_name: 'old.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValue({ data: [] });
+  api.list.mockResolvedValue({ data: [thread(2, 'Payroll files')] });
+  api.get.mockResolvedValue({ data: thread(2, 'Payroll files') });
+  render(<PortalMessagesPanel api={api} documents={[]} searchDocuments={search} audienceLabel="client" description="Client messages" />);
+  await screen.findByPlaceholderText('Reply client');
+  search.mockResolvedValueOnce({ data: [older] });
+  fireEvent.change(screen.getByLabelText('Find a file to attach'), { target: { value: 'Older' } });
+  await screen.findAllByRole('option', { name: 'Older notice (old.pdf)' });
+  const replySelect = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
+  fireEvent.change(replySelect, { target: { value: '77' } });
+  fireEvent.change(screen.getByLabelText('Find a file to attach'), { target: { value: 'Another' } });
+  await waitFor(() => expect(search).toHaveBeenLastCalledWith('Another'));
+  expect(replySelect.value).toBe('77');
+});
+
+it('recovers the phone conversation list when the exact inbox thread is unavailable', async () => {
+  window.matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  api.list.mockResolvedValue({ data: [thread(2, 'Accessible conversation')] });
+  api.get.mockRejectedValueOnce(new Error('Conversation is unavailable'));
+  render(<MemoryRouter><PortalMessagesPanel api={api} documents={[]} initialThreadId={99} audienceLabel="client" description="Client messages" /></MemoryRouter>);
+  await screen.findByText('Conversation is unavailable');
+  const subject = screen.getByPlaceholderText('Subject');
+  expect(subject.closest('.min-w-0.space-y-4')?.classList.contains('hidden')).toBe(false);
+  api.get.mockResolvedValue({ data: thread(2, 'Accessible conversation') });
+  fireEvent.click(screen.getByRole('button', { name: /Accessible conversation/ }));
+  await screen.findByPlaceholderText('Reply client');
+});
+
+it('retains a selected attachment across a fresh library page with server search enabled', async () => {
+  const file = { id: 77, title: 'Chosen library file', file_name: 'chosen.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValue({ data: [] });
+  api.list.mockResolvedValue({ data: [thread(2, 'Payroll files')] });
+  api.get.mockResolvedValue({ data: thread(2, 'Payroll files') });
+  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
+  const result = render(view([file]));
+  await screen.findByPlaceholderText('Reply client');
+  const select = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
+  fireEvent.change(select, { target: { value: '77' } });
+  result.rerender(view([]));
+  expect(select.value).toBe('77');
+  // Fresh safety information still wins over the retained selection.
+  result.rerender(view([{ ...file, archived_at: '2026-11-12T00:00:00Z' }]));
+  await waitFor(() => expect(select.value).toBe(''));
+});
+
+it.each(['archived', 'infected'] as const)('retires a stale searched selection when the refreshed library says %s', async state => {
+  const file = { id: 77, title: 'Searched notice', file_name: 'search.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  let resolveRefresh!: (value: { data: typeof file[] }) => void;
+  const search = vi.fn().mockResolvedValueOnce({ data: [file] }).mockImplementation(() => new Promise(resolve => { resolveRefresh = resolve; }));
+  api.list.mockResolvedValue({ data: [thread(2, 'Payroll files')] });
+  api.get.mockResolvedValue({ data: thread(2, 'Payroll files') });
+  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
+  const initial: typeof file[] = [];
+  const result = render(view(initial));
+  await screen.findByPlaceholderText('Reply client');
+  await screen.findAllByRole('option', { name: 'Searched notice (search.pdf)' });
+  const select = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
+  fireEvent.change(select, { target: { value: '77' } });
+  expect(select.value).toBe('77');
+  const unsafe: typeof file = { ...file, ...(state === 'archived' ? { archived_at: '2026-11-12T00:00:00Z' } : { scan_status: 'infected' }) };
+  result.rerender(view([unsafe]));
+  await waitFor(() => expect(select.value).toBe(''));
+  await waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+  await act(async () => resolveRefresh({ data: [unsafe] }));
+  expect(select.value).toBe('');
+});
+
+it('lets a newer search override an unchanged older library copy', async () => {
+  const file = { id: 77, title: 'Notice', file_name: 'notice.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValue({ data: [{ ...file, scan_status: 'infected' }] });
+  render(<PortalMessagesPanel api={api} documents={[file]} searchDocuments={search} audienceLabel="client" description="Client messages" />);
+  await screen.findAllByRole('option', { name: /Notice.*Safety check unavailable/ });
+  expect((screen.getByRole('option', { name: /Notice.*Safety check unavailable/ }) as HTMLOptionElement).disabled).toBe(true);
+});
+
+it('does not resurrect an invalidated search copy if the library changes again before search completes', async () => {
+  const file = { id: 77, title: 'Searched notice', file_name: 'search.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValueOnce({ data: [file] }).mockImplementation(() => new Promise(() => {}));
+  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
+  const result = render(view([]));
+  await screen.findByRole('option', { name: 'Searched notice (search.pdf)' });
+  result.rerender(view([{ ...file, archived_at: '2026-11-12T00:00:00Z' }]));
+  expect(screen.queryByRole('option', { name: 'Searched notice (search.pdf)' })).toBeNull();
+  result.rerender(view([]));
+  expect(screen.queryByRole('option', { name: 'Searched notice (search.pdf)' })).toBeNull();
+});
+
+it('keeps newer search safety state when a page append retains the same older library object', async () => {
+  const file = { id: 77, title: 'Notice', file_name: 'notice.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValueOnce({ data: [{ ...file, scan_status: 'infected' }] }).mockImplementation(() => new Promise(() => {}));
+  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
+  const result = render(view([file]));
+  await screen.findByRole('option', { name: /Notice.*Safety check unavailable/ });
+  result.rerender(view([file, { ...file, id: 78, title: 'Page two file' }]));
+  expect((screen.getByRole('option', { name: /Notice.*Safety check unavailable/ }) as HTMLOptionElement).disabled).toBe(true);
 });
