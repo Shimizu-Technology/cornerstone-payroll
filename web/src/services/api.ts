@@ -1578,8 +1578,8 @@ export const payPeriodsApi = {
   },
   previewPortalSubmission: (id: number, submissionId: number, options: { superseded_reason?: string; supersedes_package_id?: string; supersession_reason?: string; tips_paid_out_from_tips?: boolean } = {}): Promise<ImportPreviewResponse> =>
     api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, { submission_id: submissionId, ...options }),
-  resolvePortalSource: (id: number, submissionId: number, reason: string) =>
-    api.post(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
+  resolvePortalSource: (id: number, submissionId: number, reason: string): Promise<{ resolved_submission_id: number }> =>
+    api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
   currentImport: (id: number): Promise<ImportPreviewResponse> =>
     api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
   applyImport: (

@@ -33,6 +33,7 @@ interface ImportModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   payPeriodId: number;
+  companyId: number;
   onSourcePreviewed?: () => void;
   onImportComplete: (payPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => void;
 }
@@ -40,7 +41,7 @@ interface ImportModalProps {
 type Step = 'upload' | 'preview' | 'applying' | 'done';
 type EditableSourceRow = MosaSourceRow;
 
-export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, onSourcePreviewed, onImportComplete }: ImportModalProps) {
+export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, onSourcePreviewed, onImportComplete }: ImportModalProps) {
   const [step, setStep] = useState<Step>(initialPreview ? 'preview' : 'upload');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [excelFile, setExcelFile] = useState<File | null>(null);
@@ -297,7 +298,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, o
 
         {previewData?.portal_source && <section aria-label="Portal change checklist" className="min-w-0 space-y-2 rounded-lg border border-primary-200 bg-primary-50 p-4">
           <h3 className="font-semibold">Portal revision {previewData.portal_source.revision} · staff checklist</h3>
-          <Link className="inline-flex min-h-11 items-center text-sm underline" to={`/settings/payroll-submissions/${previewData.portal_source.period_id}`}>Open retained portal submission</Link>
+          <Link className="inline-flex min-h-11 items-center text-sm underline" to={`/companies/${companyId}/payroll-submissions/${previewData.portal_source.period_id}`}>Open retained portal submission</Link>
           <p className="text-sm">Read-only instructions. These rows are not applied to payroll or employee records. Review and handle them separately before finalizing payroll.</p>
           {!previewData.portal_source.current && <p className="text-sm font-semibold">Superseded source chosen: {previewData.portal_source.superseded_reason}</p>}
           {previewData.portal_source.no_changes && <p className="text-sm">No changes this period.</p>}

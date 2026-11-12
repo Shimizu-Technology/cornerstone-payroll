@@ -208,10 +208,8 @@ module Api
                 period = selection.period
                 # Keep Imported tied to the actual selected revision; choosing
                 # an old source does not label the newer files as imported.
-                from = period.status
-                period.status_events.create!(company_id: period.company_id, event: "import", from_status: from, to_status: from,
-                  actor: current_user, actor_audience: "staff", actor_name_snapshot: current_user.name,
-                  payroll_submission: selection.payroll_submission, note: "Imported revision #{selection.payroll_submission.revision} into payroll review.")
+                period.transition!("import", actor: current_user,
+                  submission: selection.payroll_submission, note: "Imported revision #{selection.payroll_submission.revision} into payroll review.")
                 PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#import",
                   metadata: { submission_id: selection.payroll_submission_id, current_submission_id: selection.current_submission_id,
                     superseded_reason: selection.superseded_reason, import_id: import_record.id, source_package_id: source_package.id })
@@ -246,13 +244,15 @@ module Api
         def resolve_portal_source
           skip_default_audit_log!
           period = PayrollSubmissionPeriod.lock.find_by!(company_id: @pay_period.company_id, start_date: @pay_period.start_date, end_date: @pay_period.end_date)
+          unless period.pay_period_id == @pay_period.id
+            return render json: { error: "This portal period is not linked to this pay run. Open it in import review for its matching regular run first." }, status: :unprocessable_entity
+          end
           source = period.submissions.first
           reason = params[:reason].to_s.strip
           unless source && source.id.to_s == params[:submission_id].to_s && reason.present? && reason.length <= 2000
             return render json: { error: "Choose the current portal revision and explain why it will not be imported (up to 2,000 characters)." }, status: :unprocessable_entity
           end
-          period.status_events.create!(company_id: period.company_id, event: "resolve_source", from_status: period.status, to_status: period.status,
-            actor: current_user, actor_audience: "staff", actor_name_snapshot: current_user.name, payroll_submission: source, note: reason)
+          period.transition!("resolve_source", actor: current_user, submission: source, note: reason)
           PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#resolve_source",
             metadata: { submission_id: source.id, revision: source.revision, reason: reason })
           render json: { resolved_submission_id: source.id }
@@ -340,7 +340,7 @@ module Api
           names = Employee.where(company_id: @pay_period.company_id).pluck(:id, :first_name, :last_name).to_h { |id, first, last| [ id, [ first, last ].join(" ") ] }
           {
             selection_id: selection.id, submission_id: submission.id, revision: submission.revision,
-            period_id: submission.payroll_submission_period_id, current: submission.id == selection.current_submission_id,
+            period_id: submission.payroll_submission_period_id, current: submission.id == submission.period.current_submission&.id,
             superseded_reason: selection.superseded_reason, notes: submission.notes, changes_link_url: submission.changes_link_url,
             no_changes: submission.no_changes,
             changes: submission.change_rows.map { |row| row.merge("label" => PayrollSubmissions::ChangeRows::LABELS[row["kind"]],
@@ -352,6 +352,7 @@ module Api
           ApplicationRecord.transaction do
             Company.lock.find(@pay_period.company_id)
             @pay_period.lock!
+            revalidate_current_company_write_access!
             yield
           end
         end

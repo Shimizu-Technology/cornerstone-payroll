@@ -29,7 +29,14 @@ module PayrollSubmissions
         if period.pay_period_id && period.pay_period_id != @run.id
           raise ArgumentError, "This portal period is linked to another pay run"
         end
-        period.update!(pay_period: @run) unless period.pay_period_id
+        unless period.pay_period_id
+          catalog = Catalog.new(company: @run.company)
+          eligible = catalog.live_pay_period(catalog.resolve(period.id))
+          unless eligible&.id == @run.id
+            raise ArgumentError, "Only the matching regular pay run offered by the portal can claim this period"
+          end
+          period.update!(pay_period: @run)
+        end
         submission = period.submissions.find(@submission_id)
         current = period.submissions.first
         if submission != current && @superseded_reason.blank?
