@@ -30,6 +30,7 @@ class Form1099NecPdfGenerator
   end
 
   def generate
+    PdfUnicodeFont.ensure_printable!(report.dig(:payer, :name), label: "Payer")
     (report[:reportable_contractors] || []).each do |contractor|
       PdfUnicodeFont.ensure_printable!(contractor[:name], label: "Contractor")
       PdfUnicodeFont.ensure_printable!(contractor[:business_name], label: "Contractor business")

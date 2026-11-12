@@ -117,6 +117,12 @@ RSpec.describe "PDF generators with accented and non-Latin names" do
 
     expect { W2GuPdfGenerator.new({ employees: [ { employee_name: "王小明" } ] }).generate }
       .to raise_error(PdfUnicodeFont::UnprintableName, /Employee "王小明"/)
+    expect { W2GuPdfGenerator.new({ employees: [ { employee_name: "Kim Lee", employee_address: "1-2 東京都" } ] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Employee address "1-2 東京都"/)
+    expect { W2GuPdfGenerator.new({ employer: { name: "王商事" }, employees: [] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Employer "王商事"/)
+    expect { Form1099NecPdfGenerator.new({ payer: { name: "王商事" }, reportable_contractors: [] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Payer "王商事"/)
     expect { Form1099NecPdfGenerator.new({ reportable_contractors: [ { name: "Kim", business_name: "김 Trading" } ] }).generate }
       .to raise_error(PdfUnicodeFont::UnprintableName, /Contractor business "김 Trading"/)
   end
