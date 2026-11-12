@@ -178,7 +178,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
 
         {audience === 'staff' && <section aria-labelledby="staff-actions" className="rounded-xl border border-neutral-200 bg-white p-4">
           <h2 id="staff-actions" className="mb-3 text-base font-semibold text-neutral-950">Cornerstone actions</h2>
-          {current && <PortalImportAction key={current.id} period={period} onApplied={() => void load()} />}
+          {current && (companyId || activeCompanyId) && <PortalImportAction key={current.id} period={period} companyId={Number(companyId || activeCompanyId)} onApplied={() => void load()} />}
           <StaffActions period={period} onDone={detail => { setNotice(null); accept(detail); }} />
         </section>}
 

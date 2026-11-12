@@ -12,7 +12,7 @@ const period = { pay_period_id: 9, submissions: [{ id: 20, revision: 2, current:
 
 it('opens the current retained revision straight in the existing import modal', async () => {
   mocks.preview.mockResolvedValue({ import_id: 30, portal_source: { selection_id: 1, revision: 2 } });
-  render(<PortalImportAction period={period} onApplied={vi.fn()} />);
+  render(<PortalImportAction period={period} companyId={7} onApplied={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: 'Open in import review' }));
   expect(await screen.findByRole('dialog')).toBeTruthy();
   expect(mocks.preview).toHaveBeenCalledWith(9, 20, expect.objectContaining({ tips_paid_out_from_tips: false }));
@@ -21,7 +21,7 @@ it('opens the current retained revision straight in the existing import modal', 
 
 it('requires an explicit reason to select a superseded revision', async () => {
   mocks.preview.mockResolvedValue({ import_id: 30, portal_source: { selection_id: 1, revision: 1 } });
-  render(<PortalImportAction period={period} onApplied={vi.fn()} />);
+  render(<PortalImportAction period={period} companyId={7} onApplied={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('Source revision'), { target: { value: '10' } });
   expect((screen.getByRole('button', { name: 'Open in import review' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(screen.getByLabelText('Why use this superseded revision?'), { target: { value: 'Client confirmed revision 2 has wrong dates' } });
@@ -32,7 +32,7 @@ it('requires an explicit reason to select a superseded revision', async () => {
 it('preserves the existing replacement confirmation/reason contract without file transfer', async () => {
   mocks.preview.mockRejectedValueOnce(new ApiError('Confirm replacement', 422, { replacement_required: true, current_package: { package_id: 'retained-package' } } as never))
     .mockResolvedValueOnce({ import_id: 31, portal_source: { selection_id: 2, revision: 2 } });
-  render(<PortalImportAction period={period} onApplied={vi.fn()} />);
+  render(<PortalImportAction period={period} companyId={7} onApplied={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: 'Open in import review' }));
   expect(await screen.findByRole('alert')).toBeTruthy();
   fireEvent.click(screen.getByLabelText('Replace the current retained import package'));
@@ -45,10 +45,37 @@ it('preserves the existing replacement confirmation/reason contract without file
 it('records a reason against the current revision when staff disposition a wrong-period source', async () => {
   mocks.resolve.mockResolvedValue({ resolved_submission_id: 20 });
   const done = vi.fn();
-  render(<PortalImportAction period={period} onApplied={done} />);
+  render(<PortalImportAction period={period} companyId={7} onApplied={done} />);
   fireEvent.click(screen.getByRole('button', { name: 'Record source disposition' }));
   fireEvent.change(screen.getByLabelText('Why will the current revision not be imported?'), { target: { value: 'Wrong period; client will resend' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save disposition of current revision' }));
   await waitFor(() => expect(done).toHaveBeenCalled());
   expect(mocks.resolve).toHaveBeenCalledWith(9, 20, 'Wrong period; client will resend');
+});
+
+
+it('keeps superseded selection and current disposition reasons independent in both directions', async () => {
+  mocks.resolve.mockResolvedValue({ resolved_submission_id: 20 });
+  mocks.preview.mockResolvedValue({ import_id: 30, portal_source: { selection_id: 1, revision: 1 } });
+  render(<PortalImportAction period={period} companyId={7} onApplied={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('Source revision'), { target: { value: '10' } });
+  fireEvent.change(screen.getByLabelText('Why use this superseded revision?'), { target: { value: 'Use old hours confirmed by client' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Record source disposition' }));
+  const save = screen.getByRole('button', { name: 'Save disposition of current revision' }) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
+  expect((screen.getByLabelText('Why will the current revision not be imported?') as HTMLTextAreaElement).value).toBe('');
+  fireEvent.change(screen.getByLabelText('Why will the current revision not be imported?'), { target: { value: 'New revision has wrong dates' } });
+  fireEvent.click(save);
+  await waitFor(() => expect(mocks.resolve).toHaveBeenCalledWith(9, 20, 'New revision has wrong dates'));
+  fireEvent.click(screen.getByRole('button', { name: 'Open in import review' }));
+  await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith(9, 10, expect.objectContaining({ superseded_reason: 'Use old hours confirmed by client' })));
+});
+
+it('does not use a disposition reason to enable a superseded source', () => {
+  render(<PortalImportAction period={period} companyId={7} onApplied={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Record source disposition' }));
+  fireEvent.change(screen.getByLabelText('Why will the current revision not be imported?'), { target: { value: 'Current files have wrong dates' } });
+  fireEvent.change(screen.getByLabelText('Source revision'), { target: { value: '10' } });
+  expect((screen.getByRole('button', { name: 'Open in import review' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText('Why use this superseded revision?') as HTMLTextAreaElement).value).toBe('');
 });

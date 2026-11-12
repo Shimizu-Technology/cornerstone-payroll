@@ -195,7 +195,7 @@ module PayrollSubmissions
     end
 
     def offerable_pay_periods
-      PayPeriod.where(company_id: @company.id, cycle: "regular", run_purpose: "regular", correction_status: nil, test_workspace_role: nil)
+      PayPeriod.portal_submission_runs.where(company_id: @company.id)
     end
   end
 end

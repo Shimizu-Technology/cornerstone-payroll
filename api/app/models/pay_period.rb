@@ -329,6 +329,7 @@ class PayPeriod < ApplicationRecord
   }
   # Cycle scopes
   scope :regular_cycle, -> { where(cycle: "regular") }
+  scope :portal_submission_runs, -> { where(cycle: "regular", run_purpose: "regular", correction_status: nil, test_workspace_role: nil) }
   scope :supplemental_cycle, -> { where(cycle: "supplemental") }
 
   # CPR-71: correction scopes
@@ -392,8 +393,16 @@ class PayPeriod < ApplicationRecord
   end
 
   def pending_portal_submission?
-    portal = PayrollSubmissionPeriod.find_by(company_id: company_id, start_date: start_date, end_date: end_date)
-    portal && (portal.pay_period_id.nil? || portal.pay_period_id == id) && portal.pending_source_review?
+    periods = PayrollSubmissionPeriod.where(company_id: company_id)
+    linked = periods.find_by(pay_period_id: id) if persisted?
+    return true if linked&.pending_source_review?
+
+    # A duplicate regular run cannot escape another run's pending same-date
+    # source. Linked evidence remains authoritative even after run date edits.
+    matching = periods.where(start_date: start_date, end_date: end_date)
+    eligible = cycle == "regular" && run_purpose == "regular" && correction_status.nil? && test_workspace_role.nil?
+    matching = matching.where(pay_period_id: nil) unless eligible
+    matching.any?(&:pending_source_review?)
   end
 
   def intake_stale?

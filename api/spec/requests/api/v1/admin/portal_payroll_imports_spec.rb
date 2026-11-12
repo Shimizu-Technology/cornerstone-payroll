@@ -237,6 +237,41 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(response).to have_http_status(:ok), response.body
   end
 
+  it "marks a reopened review non-current after a newer portal revision arrives" do
+    old = revision
+    data = preview(old)
+    revision(rev: 2)
+    get "#{url}/current_import"
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("portal_source", "submission_id")).to eq(old.id)
+    expect(response.parsed_body.dig("portal_source", "current")).to be(false)
+    expect(old.submission_imports.sole.current_submission_id).to eq(old.id)
+    apply(data)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(run.payroll_items).to be_empty
+  end
+
+  %w[draft_ready approved paid].each do |status|
+    %w[import resolve_source].each do |event|
+      it "records #{event} as status-preserving evidence for a #{status} portal period" do
+        source = revision
+        changed_at = 1.day.ago.change(usec: 0)
+        period.update!(status: status, status_changed_at: changed_at, status_changed_by: staff)
+        if event == "import"
+          data = preview(source)
+          apply(data)
+        else
+          post "#{url}/resolve_portal_source", params: { submission_id: source.id, reason: "Retain as supporting evidence only" }, as: :json
+        end
+        expect(response).to have_http_status(:ok), response.body
+        expect(period.reload).to have_attributes(status: status, status_changed_at: changed_at, status_changed_by: staff)
+        expect(PayrollSubmissionPeriod::EVENTS.fetch(event)[:to]).to eq(:unchanged)
+        expect(period.status_events.last).to have_attributes(event: event, from_status: status, to_status: status)
+        expect(run.reload.pending_portal_submission?).to be(false)
+      end
+    end
+  end
+
   %w[approved committed].each do |status|
     it "blocks portal preview and apply into a #{status} run" do
       source = revision
@@ -253,6 +288,10 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
 
   it "blocks calculation, approval and commit for a pending source and supports an explicit audited disposition" do
     source = revision
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    expect { post "#{url}/run_payroll", as: :json }.not_to change(PayrollItem, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to match(/pending portal revision/)
     expect(run.update(status: "calculated")).to be(false)
     service = PayPeriodLifecycleService.new(pay_period: run.reload, actor: staff)
     expect { service.approve! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /pending portal revision/)
@@ -263,6 +302,97 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(period.status_events.last.event).to eq("resolve_source")
     revision(rev: 2)
     expect(run.pending_portal_submission?).to be(true)
+  end
+
+  it "keeps a linked pending revision gated after the run dates change" do
+    revision
+    run.update!(start_date: run.start_date + 1, end_date: run.end_date + 1)
+    expect(run.reload.pending_portal_submission?).to be(true)
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    expect { post "#{url}/run_payroll", as: :json }.not_to change(PayrollItem, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to match(/pending portal revision/)
+    service = PayPeriodLifecycleService.new(pay_period: run.reload, actor: staff)
+    expect { service.approve! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /pending portal revision/)
+    expect { service.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /pending portal revision/)
+  end
+
+  it "blocks a second same-date regular run from calculation, approval and commit" do
+    revision
+    duplicate = create(:pay_period, company: company, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    expect { post "/api/v1/admin/pay_periods/#{duplicate.id}/run_payroll", as: :json }.not_to change(PayrollItem, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to match(/pending portal revision/)
+    expect(duplicate.update(status: "calculated")).to be(false)
+    service = PayPeriodLifecycleService.new(pay_period: duplicate.reload, actor: staff)
+    expect { service.approve! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /pending portal revision/)
+    expect { service.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /pending portal revision/)
+  end
+
+  it "lets only the catalog's eligible regular run claim an unlinked period" do
+    source = revision
+    period.update!(pay_period: nil)
+    supplemental = create(:pay_period, company: company, cycle: "supplemental", corrects_pay_period: run,
+      start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    expect(PayrollIntake::PreviewService).not_to receive(:new)
+    post "/api/v1/admin/pay_periods/#{supplemental.id}/preview_import", params: { submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to match(/matching regular pay run/)
+    expect(period.reload.pay_period_id).to be_nil
+    duplicate = create(:pay_period, company: company, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    preview(source)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(period.reload.pay_period_id).to be_nil
+    expect(run.pending_portal_submission?).to be(true)
+    expect(duplicate.pending_portal_submission?).to be(true)
+  end
+
+  it "claims an unlinked matching period for the catalog's regular run and refuses a second claimant" do
+    source = revision
+    period.update!(pay_period: nil)
+    preview(source)
+    expect(response).to have_http_status(:ok), response.body
+    expect(period.reload.pay_period_id).to eq(run.id)
+    duplicate = create(:pay_period, company: company, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    post "/api/v1/admin/pay_periods/#{duplicate.id}/preview_import", params: { submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to match(/linked to another/)
+    expect(period.reload.pay_period_id).to eq(run.id)
+  end
+
+  it "rejects dispositions through another same-date run without clearing the linked run's pending source" do
+    source = revision
+    duplicate = create(:pay_period, company: company, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    expect do
+      post "/api/v1/admin/pay_periods/#{duplicate.id}/resolve_portal_source", params: { submission_id: source.id, reason: "Wrong run" }, as: :json
+    end.not_to change(PayrollSubmissionStatusEvent, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(run.reload.pending_portal_submission?).to be(true)
+    expect(PayrollSubmissions::Audit.feed(period).where(action: "payroll_submission_periods#resolve_source")).to be_empty
+  end
+
+  %w[preview_import apply_import resolve_portal_source].each do |action|
+    it "rechecks write access after the financial locks before #{action}" do
+      source = revision
+      data = preview(source) if action == "apply_import"
+      allow_any_instance_of(PayPeriod).to receive(:lock!).and_wrap_original do |method, *args|
+        result = method.call(*args)
+        User.where(id: staff.id).update_all(active: false)
+        result
+      end
+      params = case action
+      when "preview_import" then { submission_id: source.id }
+      when "apply_import" then { import_id: data.fetch("import_id"), portal_source_id: data.dig("portal_source", "selection_id") }
+      else { submission_id: source.id, reason: "Not used" }
+      end
+      post "#{url}/#{action}", params: params, as: :json
+      expect(response).to have_http_status(:forbidden), response.body
+      expect(response.parsed_body["code"]).to eq("company_context_unavailable")
+      expect(run.payroll_items).to be_empty
+      expect(period.status_events.where(event: %w[import resolve_source])).to be_empty
+      expect(source.submission_imports.where.not(applied_at: nil)).to be_empty
+    end
   end
 
   it "invalidates stale calculation at preview while keeping the correction itself non-mutating" do
