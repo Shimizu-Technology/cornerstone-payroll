@@ -29,6 +29,12 @@ RSpec.describe TaxSummaryPdfGenerator do
 
   subject(:generator) { described_class.new(report_data) }
 
+  it "prints an accented company name" do
+    report_data[:meta][:company_name] = "Hagåtña Café Nguyễn"
+
+    expect(unicode_pdf_text(generator.generate)).to include("Hagåtña Café Nguyễn")
+  end
+
   describe "#generate" do
     it "returns a binary String" do
       result = generator.generate

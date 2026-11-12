@@ -23,7 +23,7 @@ class PayrollSummaryByEmployeePdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [ 30, 10, 36, 10 ])
+    pdf = PdfUnicodeFont.document(page_size: "LETTER", page_layout: :landscape, margin: [ 30, 10, 36, 10 ])
     render_header(pdf)
     data.review_warnings.map { |warning| warning[:message] }.uniq.each do |message|
       pdf.text "Review required: #{message}", size: 10

@@ -26,7 +26,7 @@ class TabularReportPdfGenerator
   attr_reader :filename
 
   def generate
-    pdf = Prawn::Document.new(
+    pdf = PdfUnicodeFont.document(
       page_size: "LETTER",
       page_layout: @landscape ? :landscape : :portrait,
       margin: [ 34, 28, 48, 28 ]

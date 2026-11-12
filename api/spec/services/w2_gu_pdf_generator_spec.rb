@@ -54,6 +54,17 @@ RSpec.describe W2GuPdfGenerator do
 
   subject(:generator) { described_class.new(report_data) }
 
+  it "prints accented and non-Latin employee names and employers" do
+    template = report_data[:employees].first
+    report_data[:employer][:name] = "Mañibusan Ştefănescu Enterprises"
+    report_data[:employees] = UnicodePdfNames::WORKERS.each_with_index.map do |worker, index|
+      template.deep_dup.merge(employee_id: index + 1, employee_name: "#{worker[:first_name]} #{worker[:last_name]}")
+    end
+
+    text = unicode_pdf_text(generator.generate)
+    expect(text).to include("Mañibusan Ştefănescu Enterprises", *UnicodePdfNames::TOKENS)
+  end
+
   describe "#generate" do
     it "includes employee address in the preparation PDF and keeps SSNs masked" do
       require "pdf/reader"

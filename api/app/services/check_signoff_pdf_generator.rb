@@ -18,7 +18,7 @@ class CheckSignoffPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(
+    pdf = PdfUnicodeFont.document(
       page_size: "LETTER",
       page_layout: :landscape,
       margin: [ 36, 40, 36, 40 ]

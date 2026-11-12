@@ -20,7 +20,7 @@ class GeneralTransmittalPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [ 42, 46, 42, 46 ])
+    pdf = PdfUnicodeFont.document(page_size: "LETTER", page_layout: :portrait, margin: [ 42, 46, 42, 46 ])
     render_header(pdf)
     render_summary(pdf)
     render_items(pdf)
