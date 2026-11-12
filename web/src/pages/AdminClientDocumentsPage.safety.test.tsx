@@ -5,7 +5,20 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AdminClientDocumentsPage } from './AdminClientDocumentsPage';
 import type { ClientDocument } from '@/services/api';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), employees: vi.fn(), upload: vi.fn(), delete: vi.fn(), unarchive: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), employees: vi.fn(), upload: vi.fn(), delete: vi.fn(), unarchive: vi.fn(), capabilities: [] as string[], recipientCount: 0 }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { role: 'admin' }, isLoading: false }) }));
+vi.mock('@/contexts/CompanyContext', () => ({
+  useCompany: () => ({ activeCompany: { id: 1, client_capabilities: mocks.capabilities }, activeCompanyId: 1, loading: false }),
+}));
+vi.mock('@/components/client-portal/PortalAlertRecipientsPanel', async () => {
+  const { useEffect } = await import('react');
+  return {
+    PortalAlertRecipientsPanel: ({ onRecipientCountChange }: { onRecipientCountChange?: (count: number) => void }) => {
+      useEffect(() => { onRecipientCountChange?.(mocks.recipientCount); }, [onRecipientCountChange]);
+      return <section aria-label="Portal alert recipients" />;
+    },
+  };
+});
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/client-portal/PortalMessagesPanel', () => ({ PortalMessagesPanel: () => null }));
 vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: () => null }));
@@ -17,6 +30,8 @@ vi.mock('@/services/api', () => ({
 const document = { id: 1, title: 'Payroll hours', file_name: 'hours.csv', category: 'payroll_source', created_at: '2026-11-11T00:00:00Z', file_size: 100, uploaded_by_id: 1, visible_to_client: true } as ClientDocument;
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.capabilities = [];
+  mocks.recipientCount = 0;
   mocks.list.mockResolvedValue({ data: [document] });
   mocks.employees.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
 });
@@ -120,4 +135,26 @@ it.each([false, true])('resets metadata only after complete success (failure: %s
   expect(selects[1].value).toBe(fails ? '7' : '');
   if (visibility) expect(visibility.checked).toBe(!fails);
   expect(screen.queryByText('test.pdf') !== null).toBe(fails);
+});
+
+it('shows alert recipients and the no-recipient warning only to client administrators', async () => {
+  const { unmount } = render(<AdminClientDocumentsPage />);
+  await screen.findAllByText('Payroll hours');
+  expect(screen.queryByLabelText('Portal alert recipients')).toBeNull();
+  expect(screen.queryByText('No one receives portal alerts for this client.')).toBeNull();
+  unmount();
+
+  mocks.capabilities = ['manage_client_administration'];
+  render(<AdminClientDocumentsPage />);
+  expect(await screen.findByLabelText('Portal alert recipients')).toBeTruthy();
+  expect(await screen.findByText('No one receives portal alerts for this client.')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Choose alert recipients' }).getAttribute('href')).toBe('#portal-alert-recipients');
+});
+
+it('hides the warning once the client has recipients', async () => {
+  mocks.capabilities = ['manage_client_administration'];
+  mocks.recipientCount = 2;
+  render(<AdminClientDocumentsPage />);
+  expect(await screen.findByLabelText('Portal alert recipients')).toBeTruthy();
+  expect(screen.queryByText('No one receives portal alerts for this client.')).toBeNull();
 });

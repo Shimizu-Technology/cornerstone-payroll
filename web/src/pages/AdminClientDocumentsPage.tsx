@@ -12,6 +12,10 @@ import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { PortalMessagesPanel } from '@/components/client-portal/PortalMessagesPanel';
+import { PortalAlertRecipientsPanel } from '@/components/client-portal/PortalAlertRecipientsPanel';
+import { useCompany } from '@/contexts/CompanyContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
 import { adminClientDocumentsApi, adminPortalThreadsApi, employeesApi } from '@/services/api';
 import type { ClientDocument } from '@/services/api';
@@ -58,6 +62,9 @@ async function loadAllEmployees() {
 }
 
 export function AdminClientDocumentsPage() {
+  const { activeCompany, activeCompanyId } = useCompany();
+  const canAdministerClient = useSelectedCompanyCapability('manage_client_administration');
+  const [alertRecipientCount, setAlertRecipientCount] = useState<number | null>(null);
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [messageDocuments, setMessageDocuments] = useState<ClientDocument[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -242,6 +249,12 @@ export function AdminClientDocumentsPage() {
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {success && <ActionFeedback tone="success" message={success} />}
+        {canAdministerClient && alertRecipientCount === 0 && (
+          <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950">
+            <span className="font-semibold">No one receives portal alerts for this client.</span>{' '}
+            <a className="font-semibold underline" href="#portal-alert-recipients">Choose alert recipients</a>
+          </div>
+        )}
 
         <div className="grid gap-4 md:grid-cols-4">
           <MiniStat title="Visible uploads" value={String(totalFiles)} detail="Current files in this company view" icon={<FolderOpen className="h-5 w-5" />} />
@@ -473,6 +486,15 @@ export function AdminClientDocumentsPage() {
             )}
           </CardContent>
         </Card>
+
+        {canAdministerClient && activeCompanyId && (
+          <PortalAlertRecipientsPanel
+            key={activeCompanyId}
+            companyId={activeCompanyId}
+            readOnly={!canWriteCompany(activeCompany, 'manage_client_administration')}
+            onRecipientCountChange={setAlertRecipientCount}
+          />
+        )}
       </div>
 
       <DocumentPreviewModal

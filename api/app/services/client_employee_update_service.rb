@@ -345,7 +345,7 @@ class ClientEmployeeUpdateService
     proposed_visible, proposed_protected = protect_identifiers(approval_attrs)
     original_visible, original_protected = protect_identifiers(original_values)
 
-    EmployeeChangeRequest.create!(
+    change_request = EmployeeChangeRequest.create!(
       company: company,
       employee: employee,
       requested_by: requested_by,
@@ -361,6 +361,8 @@ class ClientEmployeeUpdateService
         "Client submitted a new worker's payroll details for approval." :
         "Client submitted payroll-sensitive employee changes for approval."
     )
+    PortalNotifications.employee_change_submitted!(change_request)
+    change_request
   rescue ActiveRecord::RecordNotUnique
     employee.errors.add(:base, "A payroll-sensitive change request is already pending for this employee")
     raise ActiveRecord::RecordInvalid, employee

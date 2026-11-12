@@ -23,18 +23,22 @@ module Api
         end
 
         def approve
-          @change_request.apply!(actor: current_user, review_notes: params[:review_notes])
+          # The decision, its portal notification and this audit record commit
+          # together, so an audit failure keeps none of them.
+          EmployeeChangeRequest.transaction do
+            @change_request.apply!(actor: current_user, review_notes: params[:review_notes])
 
-          AuditLog.record!(
-            user: current_user,
-            company_id: current_company_id,
-            action: "employee_change_requests#approve",
-            record_type: "employee_change_requests",
-            record_id: @change_request.id,
-            metadata: { employee_id: @change_request.employee_id },
-            ip_address: request.remote_ip,
-            user_agent: request.user_agent
-          )
+            AuditLog.record!(
+              user: current_user,
+              company_id: current_company_id,
+              action: "employee_change_requests#approve",
+              record_type: "employee_change_requests",
+              record_id: @change_request.id,
+              metadata: { employee_id: @change_request.employee_id },
+              ip_address: request.remote_ip,
+              user_agent: request.user_agent
+            )
+          end
 
           render json: { data: serialize_change_request(@change_request.reload, include_payloads: true) }
         rescue ActiveRecord::RecordInvalid => e
@@ -42,18 +46,22 @@ module Api
         end
 
         def reject
-          @change_request.reject!(actor: current_user, review_notes: params[:review_notes].to_s)
+          # The decision, its portal notification and this audit record commit
+          # together, so an audit failure keeps none of them.
+          EmployeeChangeRequest.transaction do
+            @change_request.reject!(actor: current_user, review_notes: params[:review_notes].to_s)
 
-          AuditLog.record!(
-            user: current_user,
-            company_id: current_company_id,
-            action: "employee_change_requests#reject",
-            record_type: "employee_change_requests",
-            record_id: @change_request.id,
-            metadata: { employee_id: @change_request.employee_id },
-            ip_address: request.remote_ip,
-            user_agent: request.user_agent
-          )
+            AuditLog.record!(
+              user: current_user,
+              company_id: current_company_id,
+              action: "employee_change_requests#reject",
+              record_type: "employee_change_requests",
+              record_id: @change_request.id,
+              metadata: { employee_id: @change_request.employee_id },
+              ip_address: request.remote_ip,
+              user_agent: request.user_agent
+            )
+          end
 
           render json: { data: serialize_change_request(@change_request.reload, include_payloads: true) }
         rescue ActiveRecord::RecordInvalid => e
