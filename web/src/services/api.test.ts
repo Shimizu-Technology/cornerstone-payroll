@@ -448,7 +448,7 @@ describe('API failure feedback across request types', () => {
     await expect(apiClient.get('/test')).rejects.toBe(aborted);
   });
   it('shows the server explanation when a PDF download cannot be built', async () => {
-    const message = "We couldn't create this PDF, and nothing was changed. Try again.";
+    const message = "We couldn't create this PDF. Try again.";
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: message, code: 'pdf_generation_failed' }), { status: 500 }));
     await expect(apiClient.getBlobWithParams('/client/reports/payroll_register_pdf', { pay_period_id: 4 }))
       .rejects.toMatchObject({ status: 500, message });

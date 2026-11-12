@@ -30,6 +30,7 @@ class W2GuPdfGenerator
   end
 
   def generate
+    (report[:employees] || []).each { |emp| PdfUnicodeFont.ensure_printable!(emp[:employee_name], label: "Employee") }
     pdf = PdfUnicodeFont.document(page_size: "LETTER", margin: [ 36, 36, 50, 36 ])
     render_document(pdf)
   end

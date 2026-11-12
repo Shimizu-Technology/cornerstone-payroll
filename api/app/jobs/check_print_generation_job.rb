@@ -41,6 +41,12 @@ class CheckPrintGenerationJob < ApplicationJob
       message: e.message,
       job_id: job_id
     )
+  rescue PdfUnicodeFont::UnprintableName => e
+    generation&.fail_safely!(
+      code: "unprintable_name",
+      message: "#{e.message} No checks were marked printed.",
+      job_id: job_id
+    )
   rescue StandardError => e
     Rails.logger.error(
       "[CheckPrintGenerationJob] generation=#{generation_id} #{e.class}: #{e.message}"

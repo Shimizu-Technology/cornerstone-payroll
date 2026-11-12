@@ -30,6 +30,10 @@ class Form1099NecPdfGenerator
   end
 
   def generate
+    (report[:reportable_contractors] || []).each do |contractor|
+      PdfUnicodeFont.ensure_printable!(contractor[:name], label: "Contractor")
+      PdfUnicodeFont.ensure_printable!(contractor[:business_name], label: "Contractor business")
+    end
     pdf = PdfUnicodeFont.document(page_size: "LETTER", margin: [ 36, 40, 50, 40 ])
 
     render_header(pdf)

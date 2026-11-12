@@ -85,6 +85,7 @@ class NonEmployeeCheckGenerator
   def stub2_y;  top_check? ? 0                    : SECTION_HEIGHT;    end
 
   def render_document(voided: false)
+    PdfUnicodeFont.ensure_printable!(check.payable_to, label: "Payee")
     PdfUnicodeFont.document(
       page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|

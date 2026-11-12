@@ -95,6 +95,7 @@ class FirstHawaiianFourUpCheckGenerator
 
   def generate
     raise ArgumentError, "No check entries to render" if entries.empty?
+    entries.each { |entry| PdfUnicodeFont.ensure_printable!(entry.payee, label: "Payee") }
 
     PdfUnicodeFont.document(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
       draw_entries(pdf)

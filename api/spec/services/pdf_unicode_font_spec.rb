@@ -54,6 +54,12 @@ RSpec.describe PdfUnicodeFont do
     expect(pdf.render).to start_with("%PDF")
   end
 
+  it "lists only the characters the font has no glyph for" do
+    expect(described_class.unprintable_characters("Wiśniewska Nguyễn Шевченко Keʻala")).to be_empty
+    expect(described_class.unprintable_characters("王小明 Kim 王")).to eq(%w[王 小 明])
+    expect(described_class.unprintable_characters(nil)).to be_empty
+  end
+
   it "is used by every generator that draws text" do
     # The staging label overlay and the logo validator draw no text.
     allowed = %w[pdf_unicode_font.rb staging_artifact_label.rb invoice_logo_storage_service.rb]

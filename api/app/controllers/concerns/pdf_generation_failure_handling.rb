@@ -6,7 +6,7 @@
 module PdfGenerationFailureHandling
   extend ActiveSupport::Concern
 
-  MESSAGE = "We couldn't create this PDF, and nothing was changed. Try again. " \
+  MESSAGE = "We couldn't create this PDF. Try again. " \
             "If it keeps failing, use the Excel or CSV version where one is offered " \
             "and contact support with the name of the document."
 
@@ -19,6 +19,9 @@ module PdfGenerationFailureHandling
 
   included do
     rescue_from(*PdfGenerationFailureHandling.prawn_errors, with: :render_pdf_generation_failure)
+    rescue_from(PdfUnicodeFont::UnprintableName) do |error|
+      render json: { error: error.message, code: "unprintable_name" }, status: :unprocessable_entity
+    end
   end
 
   private
