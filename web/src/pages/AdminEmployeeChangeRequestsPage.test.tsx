@@ -105,3 +105,16 @@ it('consumes the inbox deep link once so a new status filter selects its own req
   expect(apiMocks.get.mock.calls.map(([id]) => id)).toEqual([1, 3]);
   expect(screen.queryByText('Request #1')).toBeNull();
 });
+
+it.each(['approved', 'rejected'] as const)('shows a handled %s deep link in its initial all-status list', async status => {
+  vi.clearAllMocks();
+  const handled = request(8, 'Handled employee', 'Handled notes', status);
+  apiMocks.list.mockImplementation(({ status: filter }: { status?: string }) => Promise.resolve({ data: filter === 'pending' ? [] : [handled] }));
+  apiMocks.get.mockResolvedValue({ data: handled });
+  render(<MemoryRouter initialEntries={['/companies/1/client-change-requests?request_id=8']}><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
+  await screen.findByText('Request #8');
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(screen.getByRole('button', { name: /Handled employee/ })).toBeTruthy();
+  expect(screen.queryByText('No requests found.')).toBeNull();
+  expect(apiMocks.list).toHaveBeenCalledWith({ status: undefined });
+});

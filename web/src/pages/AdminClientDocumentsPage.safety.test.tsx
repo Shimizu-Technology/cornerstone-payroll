@@ -234,3 +234,13 @@ it('blocks stale pagination while a new first-page document search is pending', 
   expect(screen.queryByText('Payroll hours')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Load more files' })).toBeNull();
 });
+
+it('clears previous file results when the new search fails', async () => {
+  mocks.list.mockResolvedValueOnce({ data: [document] }).mockRejectedValueOnce(new Error('Search unavailable'));
+  render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
+  await screen.findAllByText('Payroll hours');
+  fireEvent.change(screen.getByPlaceholderText('Find older files by title or filename'), { target: { value: 'Different files' } });
+  await screen.findByText('Search unavailable');
+  expect(screen.queryByText('Payroll hours')).toBeNull();
+  expect(screen.getByText('No client uploads found')).toBeTruthy();
+});

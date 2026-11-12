@@ -88,3 +88,34 @@ it('removes an obsolete pagination cursor after a failed first-page refresh', as
   await screen.findByText('message item 1');
   expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: undefined }));
 });
+
+it('stops automatic scroll restoration after a page failure and retries that cursor only on request', async () => {
+  let short = false;
+  let failPage!: (error: Error) => void;
+  mocks.list.mockImplementation(({ cursor }) => {
+    if (cursor === 'restore3') return new Promise((_resolve, reject) => { failPage = reject; });
+    if (cursor === 'fresh2') return Promise.resolve({ data: [row('message', 4)], meta: { next_cursor: 'restore3' } });
+    if (cursor) return Promise.resolve({ data: [row('message', 2)], meta: { next_cursor: 'old3' } });
+    return Promise.resolve({ data: [row('message', short ? 3 : 1)], meta: { next_cursor: short ? 'fresh2' : 'old2' } });
+  });
+  render(<MemoryRouter initialEntries={['/app/client-inbox?client=2&status=all']}><main><ClientInbox /></main></MemoryRouter>);
+  await screen.findByText('message item 1');
+  const main = screen.getByRole('main');
+  Object.defineProperty(main, 'scrollHeight', { configurable: true, get: () => short ? 500 : 3000 });
+  Object.defineProperty(main, 'clientHeight', { configurable: true, value: 500 });
+  fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+  await screen.findByText('message item 2');
+  main.scrollTop = 1400;
+  fireEvent.scroll(main);
+  short = true;
+  act(() => window.dispatchEvent(new Event('portal-work-changed')));
+  await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'restore3' })));
+  await act(async () => failPage(new Error('Page temporarily unavailable')));
+  await screen.findByRole('alert');
+  expect(mocks.list).toHaveBeenCalledTimes(5);
+  expect(screen.getByText('message item 3')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Load more' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(mocks.list).toHaveBeenCalledTimes(6);
+  expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'restore3' }));
+});

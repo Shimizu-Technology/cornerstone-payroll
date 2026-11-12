@@ -355,3 +355,55 @@ it('retains a selected attachment across a fresh library page with server search
   result.rerender(view([{ ...file, archived_at: '2026-11-12T00:00:00Z' }]));
   await waitFor(() => expect(select.value).toBe(''));
 });
+
+it.each(['archived', 'infected'] as const)('retires a stale searched selection when the refreshed library says %s', async state => {
+  const file = { id: 77, title: 'Searched notice', file_name: 'search.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  let resolveRefresh!: (value: { data: typeof file[] }) => void;
+  const search = vi.fn().mockResolvedValueOnce({ data: [file] }).mockImplementation(() => new Promise(resolve => { resolveRefresh = resolve; }));
+  api.list.mockResolvedValue({ data: [thread(2, 'Payroll files')] });
+  api.get.mockResolvedValue({ data: thread(2, 'Payroll files') });
+  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
+  const initial: typeof file[] = [];
+  const result = render(view(initial));
+  await screen.findByPlaceholderText('Reply client');
+  await screen.findAllByRole('option', { name: 'Searched notice (search.pdf)' });
+  const select = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
+  fireEvent.change(select, { target: { value: '77' } });
+  expect(select.value).toBe('77');
+  const unsafe: typeof file = { ...file, ...(state === 'archived' ? { archived_at: '2026-11-12T00:00:00Z' } : { scan_status: 'infected' }) };
+  result.rerender(view([unsafe]));
+  await waitFor(() => expect(select.value).toBe(''));
+  await waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+  await act(async () => resolveRefresh({ data: [unsafe] }));
+  expect(select.value).toBe('');
+});
+
+it('lets a newer search override an unchanged older library copy', async () => {
+  const file = { id: 77, title: 'Notice', file_name: 'notice.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValue({ data: [{ ...file, scan_status: 'infected' }] });
+  render(<PortalMessagesPanel api={api} documents={[file]} searchDocuments={search} audienceLabel="client" description="Client messages" />);
+  await screen.findAllByRole('option', { name: /Notice.*Safety check unavailable/ });
+  expect((screen.getByRole('option', { name: /Notice.*Safety check unavailable/ }) as HTMLOptionElement).disabled).toBe(true);
+});
+
+it('does not resurrect an invalidated search copy if the library changes again before search completes', async () => {
+  const file = { id: 77, title: 'Searched notice', file_name: 'search.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValueOnce({ data: [file] }).mockImplementation(() => new Promise(() => {}));
+  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
+  const result = render(view([]));
+  await screen.findByRole('option', { name: 'Searched notice (search.pdf)' });
+  result.rerender(view([{ ...file, archived_at: '2026-11-12T00:00:00Z' }]));
+  expect(screen.queryByRole('option', { name: 'Searched notice (search.pdf)' })).toBeNull();
+  result.rerender(view([]));
+  expect(screen.queryByRole('option', { name: 'Searched notice (search.pdf)' })).toBeNull();
+});
+
+it('keeps newer search safety state when a page append retains the same older library object', async () => {
+  const file = { id: 77, title: 'Notice', file_name: 'notice.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValueOnce({ data: [{ ...file, scan_status: 'infected' }] }).mockImplementation(() => new Promise(() => {}));
+  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
+  const result = render(view([file]));
+  await screen.findByRole('option', { name: /Notice.*Safety check unavailable/ });
+  result.rerender(view([file, { ...file, id: 78, title: 'Page two file' }]));
+  expect((screen.getByRole('option', { name: /Notice.*Safety check unavailable/ }) as HTMLOptionElement).disabled).toBe(true);
+});

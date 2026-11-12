@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CheckCircle2, MessageSquare, Paperclip, Send, Wifi } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -50,6 +50,13 @@ function upsertThread(threads: ClientPortalThread[], next: ClientPortalThread) {
   });
 }
 
+// Appended pages retain their existing objects. Only newly returned library
+// records supersede an earlier search copy of the same file.
+function refreshedDocumentIds(previous: ClientDocument[], current: ClientDocument[]): Set<number> {
+  const prior = new Map(previous.map(document => [document.id, document]));
+  return new Set(current.filter(document => prior.get(document.id) !== document).map(document => document.id));
+}
+
 export function PortalMessagesPanel(props: Props) {
   const { activeCompanyId, refreshCompanies } = useCompany();
   return <PortalMessagesContent key={activeCompanyId} {...props} companyId={activeCompanyId} refreshCompanies={refreshCompanies} />;
@@ -61,17 +68,29 @@ function PortalMessagesContent({ api, documents, searchDocuments, initialThreadI
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [documentSearch, setDocumentSearch] = useState('');
-  const [searchedDocuments, setSearchedDocuments] = useState<ClientDocument[]>([]);
+  const [searchedResult, setSearchedResult] = useState<{ library: ClientDocument[]; data: ClientDocument[] }>({ library: documents, data: [] });
+  const searchedDocuments = useMemo(() => {
+    if (searchedResult.library === documents) return searchedResult.data;
+    const refreshedIds = refreshedDocumentIds(searchedResult.library, documents);
+    return searchedResult.data.filter(document => !refreshedIds.has(document.id));
+  }, [searchedResult, documents]);
+  useLayoutEffect(() => {
+    setSearchedResult(current => {
+      if (current.library === documents) return current;
+      const refreshedIds = refreshedDocumentIds(current.library, documents);
+      return { library: documents, data: current.data.filter(document => !refreshedIds.has(document.id)) };
+    });
+  }, [documents]);
   const [searchError, setSearchError] = useState<string | null>(null);
   useEffect(() => {
     if (!searchDocuments) return;
     let active = true;
     const timer = setTimeout(() => {
       setSearchError(null);
-      searchDocuments(documentSearch).then(response => { if (active) setSearchedDocuments(current => [...current.filter(doc => selectedDocumentIds.current.has(doc.id)), ...response.data]); }).catch(() => { if (active) setSearchError('Could not search files. Try again.'); });
+      searchDocuments(documentSearch).then(response => { if (active) setSearchedResult({ library: documents, data: response.data }); }).catch(() => { if (active) setSearchError('Could not search files. Try again.'); });
     }, 250);
     return () => { active = false; clearTimeout(timer); };
-  }, [searchDocuments, documentSearch]);
+  }, [searchDocuments, documentSearch, documents]);
   useEffect(() => {
     if (initialThreadId) panelRef.current?.scrollIntoView?.({ block: 'start' });
   }, [initialThreadId]);
@@ -111,13 +130,11 @@ function PortalMessagesContent({ api, documents, searchDocuments, initialThreadI
   const [replyAttachment, setReplyAttachment] = useState<ClientDocument | null>(null);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(Boolean(initialThreadId));
 
-  const selectedDocumentIds = useRef(new Set<number>());
-  selectedDocumentIds.current = new Set([Number(newThread.document_id), Number(reply.document_id)]);
+  const selectedDocumentIds = useMemo(() => new Set([Number(newThread.document_id), Number(reply.document_id)]), [newThread.document_id, reply.document_id]);
   const availableDocuments = useMemo(() => {
-    const selectedIds = new Set([Number(newThread.document_id), Number(reply.document_id)]);
-    const retained = searchDocuments ? [newThreadAttachment, replyAttachment].filter((doc): doc is ClientDocument => doc !== null && selectedIds.has(doc.id)) : [];
+    const retained = searchDocuments ? [newThreadAttachment, replyAttachment].filter((doc): doc is ClientDocument => doc !== null && selectedDocumentIds.has(doc.id)) : [];
     return [...new Map([...retained, ...documents, ...searchedDocuments].map(doc => [doc.id, doc])).values()];
-  }, [documents, searchedDocuments, searchDocuments, newThreadAttachment, replyAttachment, newThread.document_id, reply.document_id]);
+  }, [documents, searchedDocuments, searchDocuments, newThreadAttachment, replyAttachment, selectedDocumentIds]);
 
   const [desktop, setDesktop] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
   useEffect(() => {
@@ -156,12 +173,12 @@ function PortalMessagesContent({ api, documents, searchDocuments, initialThreadI
   const messagesContainer = useDisplayedMessages(selectedThread, !unavailable && (desktop || mobileConversationOpen), markDisplayed);
 
   const documentOptions = useMemo(
-    () => availableDocuments.filter((document) => document.visible_to_client && (!documentSearch || `${document.title} ${document.file_name}`.toLowerCase().includes(documentSearch.toLowerCase()) || selectedDocumentIds.current.has(document.id)) && !document.archived_at && !selectedThread?.messages?.some(message => message.document?.id === document.id && message.document.archived_at)).map((document) => ({
+    () => availableDocuments.filter((document) => document.visible_to_client && (!documentSearch || `${document.title} ${document.file_name}`.toLowerCase().includes(documentSearch.toLowerCase()) || selectedDocumentIds.has(document.id)) && !document.archived_at && !selectedThread?.messages?.some(message => message.document?.id === document.id && message.document.archived_at)).map((document) => ({
       value: String(document.id),
       disabled: ['pending', 'infected', 'error'].includes(document.scan_status || ''),
       label: `${document.title} (${document.file_name})${['pending', 'infected', 'error'].includes(document.scan_status || '') ? ' — Safety check unavailable' : ''}`,
     })),
-    [availableDocuments, selectedThread, documentSearch]
+    [availableDocuments, selectedThread, documentSearch, selectedDocumentIds]
   );
 
   const attachmentAvailable = (id: string): boolean => !id || documentOptions.some(option => option.value === id && !option.disabled);
