@@ -487,6 +487,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
     t.bigint "archived_by_id"
     t.bigint "reviewed_by_id"
     t.datetime "reviewed_at"
+    t.string "upload_idempotency_key", limit: 128
+    t.string "upload_request_fingerprint", limit: 64
+    t.integer "upload_position"
+    t.boolean "uploaded_for_message", default: false, null: false
     t.index [ "archived_by_id" ], name: "index_client_documents_on_archived_by_id"
     t.index [ "company_id", "category" ], name: "index_client_documents_on_company_id_and_category"
     t.index [ "company_id", "created_at" ], name: "index_client_documents_on_company_id_and_created_at"
@@ -498,6 +502,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
     t.index [ "id", "company_id" ], name: "idx_client_documents_readiness_tenant_key", unique: true
     t.index [ "reviewed_by_id" ], name: "index_client_documents_on_reviewed_by_id"
     t.index [ "uploaded_by_id" ], name: "index_client_documents_on_uploaded_by_id"
+    t.index [ "company_id", "uploaded_by_id", "upload_idempotency_key", "upload_position" ], name: "idx_client_documents_upload_retry_key", unique: true, where: "(upload_idempotency_key IS NOT NULL)"
     t.check_constraint "scan_status::text = ANY (ARRAY['not_scanned'::character varying, 'pending'::character varying, 'clean'::character varying, 'infected'::character varying, 'error'::character varying]::text[])", name: "client_document_scan_status"
   end
 
@@ -518,7 +523,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
     t.index [ "company_id" ], name: "index_client_portal_messages_on_company_id"
     t.string "author_audience", default: "unknown", null: false
     t.string "author_name_snapshot"
+    t.string "kind", default: "message", null: false
+    t.bigint "portal_file_request_id"
+    t.index [ "id", "company_id" ], name: "idx_client_portal_messages_tenant_key", unique: true
+    t.index [ "portal_file_request_id" ], name: "idx_client_portal_messages_file_request", where: "(portal_file_request_id IS NOT NULL)"
     t.check_constraint "author_audience::text = ANY (ARRAY['client'::character varying, 'staff'::character varying, 'unknown'::character varying]::text[])", name: "portal_message_author_audience"
+    t.check_constraint "(kind::text = 'message'::text) = (portal_file_request_id IS NULL)", name: "portal_message_kind_request"
+    t.check_constraint "kind::text = ANY (ARRAY['message'::character varying, 'file_request'::character varying, 'file_response'::character varying, 'file_request_accepted'::character varying, 'file_request_asked_again'::character varying, 'file_request_withdrawn'::character varying]::text[])", name: "portal_message_kind"
   end
 
   create_table "client_portal_threads", force: :cascade do |t|
@@ -3436,6 +3447,52 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
     t.index [ "user_id" ], name: "index_portal_document_read_receipts_on_user_id"
   end
 
+  create_table "portal_file_requests", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "client_portal_thread_id", null: false
+    t.bigint "requested_by_id"
+    t.string "requested_by_name_snapshot"
+    t.string "title", limit: 200, null: false
+    t.string "category", null: false
+    t.bigint "employee_id"
+    t.bigint "payroll_submission_period_id"
+    t.date "due_on"
+    t.string "status", default: "requested", null: false
+    t.bigint "request_message_id"
+    t.bigint "last_response_message_id"
+    t.bigint "responded_by_id"
+    t.datetime "responded_at"
+    t.bigint "resolved_by_id"
+    t.datetime "resolved_at"
+    t.string "idempotency_key", limit: 128
+    t.string "request_fingerprint", limit: 64
+    t.integer "lock_version", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "client_portal_thread_id", "status" ], name: "idx_portal_file_requests_thread"
+    t.index [ "company_id", "requested_by_id", "idempotency_key" ], name: "idx_portal_file_requests_retry_key", unique: true, where: "(idempotency_key IS NOT NULL)"
+    t.index [ "company_id", "status", "updated_at" ], name: "idx_portal_file_requests_company_status"
+    t.index [ "company_id" ], name: "index_portal_file_requests_on_company_id"
+    t.index [ "employee_id" ], name: "index_portal_file_requests_on_employee_id"
+    t.index [ "id", "company_id" ], name: "idx_portal_file_requests_tenant_key", unique: true
+    t.index [ "payroll_submission_period_id", "status" ], name: "idx_portal_file_requests_period", where: "(payroll_submission_period_id IS NOT NULL)"
+    t.index [ "requested_by_id" ], name: "index_portal_file_requests_on_requested_by_id"
+    t.index [ "resolved_by_id" ], name: "index_portal_file_requests_on_resolved_by_id"
+    t.index [ "responded_by_id" ], name: "index_portal_file_requests_on_responded_by_id"
+    t.check_constraint "(status::text = ANY (ARRAY['accepted'::character varying, 'withdrawn'::character varying]::text[])) = (resolved_at IS NOT NULL)", name: "portal_file_requests_resolved_state"
+    t.check_constraint "status::text = ANY (ARRAY['requested'::character varying, 'responded'::character varying, 'accepted'::character varying, 'withdrawn'::character varying]::text[])", name: "portal_file_requests_status"
+  end
+
+  create_table "portal_message_attachments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "client_portal_message_id", null: false
+    t.bigint "client_document_id", null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.index [ "client_document_id" ], name: "idx_portal_message_attachments_document"
+    t.index [ "client_portal_message_id", "client_document_id" ], name: "idx_portal_message_attachments_once", unique: true
+  end
+
   create_table "portal_notification_deliveries", force: :cascade do |t|
     t.bigint "portal_notification_event_id", null: false
     t.bigint "user_id"
@@ -4457,6 +4514,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
   add_foreign_key "client_portal_messages", "client_portal_threads"
   add_foreign_key "client_portal_messages", "companies"
   add_foreign_key "client_portal_messages", "users", column: "author_id", on_delete: :nullify
+  add_foreign_key "client_portal_messages", "portal_file_requests", column: [ "portal_file_request_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_client_portal_messages_file_request_tenant"
   add_foreign_key "client_portal_threads", "companies"
   add_foreign_key "client_portal_threads", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "client_portal_threads", "users", column: "resolved_by_id", on_delete: :nullify
@@ -4843,6 +4901,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
   add_foreign_key "payroll_time_allocations", "daily_time_records"
   add_foreign_key "payroll_time_allocations", "employees"
   add_foreign_key "payroll_time_allocations", "payroll_items"
+  add_foreign_key "portal_file_requests", "client_portal_messages", column: [ "last_response_message_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_response_message_tenant"
+  add_foreign_key "portal_file_requests", "client_portal_messages", column: [ "request_message_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_request_message_tenant"
+  add_foreign_key "portal_file_requests", "client_portal_threads", column: [ "client_portal_thread_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_thread_tenant"
+  add_foreign_key "portal_file_requests", "companies"
+  add_foreign_key "portal_file_requests", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_employee_tenant"
+  add_foreign_key "portal_file_requests", "payroll_submission_periods", column: [ "payroll_submission_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_period_tenant"
+  add_foreign_key "portal_file_requests", "users", column: "requested_by_id"
+  add_foreign_key "portal_file_requests", "users", column: "resolved_by_id"
+  add_foreign_key "portal_file_requests", "users", column: "responded_by_id"
+  add_foreign_key "portal_message_attachments", "client_documents", column: [ "client_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_message_attachments_document_tenant"
+  add_foreign_key "portal_message_attachments", "client_portal_messages", column: [ "client_portal_message_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_message_attachments_message_tenant"
+  add_foreign_key "portal_message_attachments", "companies"
   add_foreign_key "portal_notification_deliveries", "companies", on_delete: :cascade
   add_foreign_key "portal_notification_deliveries", "portal_notification_events", on_delete: :cascade
   add_foreign_key "portal_notification_deliveries", "users", on_delete: :cascade

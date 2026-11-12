@@ -36,7 +36,7 @@ it('shows server-wide counts and only switches company when opening a row', asyn
   fireEvent.click(screen.getByRole('button', { name: /message item 1/ }));
   expect(mocks.switchCompany).toHaveBeenCalledWith(2);
   const destination = screen.getByTestId('destination').textContent!;
-  expect(destination).toContain('/companies/2/client-documents?');
+  expect(destination).toContain('/companies/2/client-messages?');
   expect(new URLSearchParams(destination.split('?')[1]).get('thread_id')).toBe('1');
   expect(new URLSearchParams(destination.split('?')[1]).get('inbox')).toContain('/app/client-inbox?');
 });
