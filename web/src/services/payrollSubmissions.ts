@@ -1,5 +1,5 @@
 import api, { adminClientDocumentsApi, adminPortalThreadsApi, clientDocumentsApi, clientEmployeesApi, clientPortalThreadsApi, employeesApi } from './api';
-import type { ClientDocument, ClientPortalMessage } from './api';
+import type { ClientDocument, ClientPortalMessage, PortalFileRequest } from './api';
 import type { PaginationMeta } from '@/types';
 
 export type SubmissionStatus = 'waiting_for_files' | 'submitted' | 'received' | 'in_review' | 'draft_ready' | 'approved' | 'changes_requested' | 'paid';
@@ -52,7 +52,7 @@ export type PeriodSummary = {
 };
 export type PeriodAction = 'submit' | 'approve' | 'request_changes' | 'message' | 'acknowledge' | 'start_review' | 'post_draft' | 'save_draft' | 'mark_paid';
 export type PeriodDetail = PeriodSummary & {
-  schedule_note: string; thread_id: number | null; allowed_actions: PeriodAction[];
+  schedule_note: string; thread_id: number | null; allowed_actions: PeriodAction[]; file_requests?: PortalFileRequest[];
   submissions: SubmissionRevision[]; drafts: SubmissionDraft[]; history: SubmissionHistoryEvent[];
 };
 export type PickerEmployee = { id: number; name: string };

@@ -39,6 +39,7 @@ class ClientDocument < ApplicationRecord
   belongs_to :employee, optional: true
   belongs_to :uploaded_by, class_name: "User", optional: true
   has_many :client_portal_messages, dependent: :restrict_with_error
+  has_many :portal_message_attachments, dependent: :restrict_with_error
   has_many :employee_document_requirements, dependent: :restrict_with_error
   has_many :employee_document_requirement_events, dependent: :restrict_with_error
   has_many :payroll_filing_events, foreign_key: :evidence_document_id, dependent: :restrict_with_error
@@ -57,6 +58,9 @@ class ClientDocument < ApplicationRecord
   scope :active, -> { where(archived_at: nil) }
   scope :recent_first, -> { order(created_at: :desc, id: :desc) }
   scope :client_visible, -> { where(visible_to_client: true) }
+  # Files a person may attach to a message: shared with the client, not
+  # archived and not held back by the safety check.
+  scope :attachable, -> { active.client_visible.where.not(scan_status: ClientDocumentScanner::BLOCKED_STATUSES) }
 
   def self.detected_content_type(file)
     ClientDocumentFileValidator.new(file).validate!
@@ -76,7 +80,7 @@ class ClientDocument < ApplicationRecord
   end
 
   def retained_evidence?
-    archived? || client_portal_messages.exists? || employee_document_requirements.exists? ||
+    archived? || client_portal_messages.exists? || portal_message_attachments.exists? || employee_document_requirements.exists? ||
       employee_document_requirement_events.exists? || payroll_filing_events.exists? ||
       payroll_submission_documents.exists? || payroll_submission_draft?
   end

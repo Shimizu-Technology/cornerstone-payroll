@@ -35,6 +35,7 @@ const ClientDocuments = lazy(() => import('@/pages/client/ClientDocuments').then
 const ClientChangeRequests = lazy(() => import('@/pages/client/ClientChangeRequests').then((module) => ({ default: module.ClientChangeRequests })));
 const Form500Page = lazy(() => import('@/pages/Form500Page').then((module) => ({ default: module.Form500Page })));
 const AdminClientDocumentsPage = lazy(() => import('@/pages/AdminClientDocumentsPage').then((module) => ({ default: module.AdminClientDocumentsPage })));
+const AdminClientMessagesPage = lazy(() => import('@/pages/AdminClientMessagesPage').then((module) => ({ default: module.AdminClientMessagesPage })));
 const AdminEmployeeChangeRequestsPage = lazy(() => import('@/pages/AdminEmployeeChangeRequestsPage').then((module) => ({ default: module.AdminEmployeeChangeRequestsPage })));
 const TaxConfigs = lazy(() => import('@/pages/TaxConfigs'));
 const Users = lazy(() => import('@/pages/Users').then((module) => ({ default: module.Users })));
@@ -338,6 +339,7 @@ function AppRoutes() {
         <Route path="pay-periods/:id" element={<LegacyCompanyRedirect destination="pay-run" clientMode={isClient} />} />
         <Route path="companies/:companyId" element={<CompanyScopedRoute />}>
           <Route path="client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
+          <Route path="client-messages" element={<StaffOnlyRoute><AdminClientMessagesPage /></StaffOnlyRoute>} />
           <Route path="payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />
           <Route path="payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
           <Route path="client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
@@ -374,6 +376,7 @@ function AppRoutes() {
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AuditHistoryRoute><AuditLogs /></AuditHistoryRoute>} />
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
+        <Route path="settings/client-messages" element={<StaffOnlyRoute><AdminClientMessagesPage /></StaffOnlyRoute>} />
         <Route path="settings/payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />
         <Route path="settings/payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
         <Route path="settings/client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />

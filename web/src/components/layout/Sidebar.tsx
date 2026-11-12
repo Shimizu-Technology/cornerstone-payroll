@@ -34,6 +34,7 @@ import {
   UserCircle,
   ArchiveRestore,
   Route,
+  MessagesSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
@@ -115,6 +116,7 @@ const CLIENT_MANAGEMENT_PATH = '/settings/clients';
 
 const portalAdminNavigation: NavItem[] = [
   { name: 'Pay Period Files', href: '/settings/payroll-submissions', icon: <FileSpreadsheet className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Client Messages', href: '/settings/client-messages', icon: <MessagesSquare className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Documents', href: '/settings/client-documents', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Changes', href: '/settings/client-change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
 ];

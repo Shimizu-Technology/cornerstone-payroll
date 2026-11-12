@@ -46,6 +46,13 @@ class PayrollSubmissionPeriod < ApplicationRecord
   has_many :drafts, -> { order(revision: :desc) }, class_name: "PayrollSubmissionDraft", inverse_of: :period, dependent: :restrict_with_error
   has_many :status_events, -> { order(:id) }, class_name: "PayrollSubmissionStatusEvent", inverse_of: :period, dependent: :restrict_with_error
   has_many :read_receipts, class_name: "PayrollSubmissionPeriodReadReceipt", dependent: :delete_all
+  has_many :file_requests, class_name: "PortalFileRequest", dependent: :restrict_with_error
+
+  # A requested file that is still missing, or sent but not yet accepted,
+  # keeps the period from being marked complete.
+  def outstanding_file_requests
+    file_requests.outstanding
+  end
 
   validates :start_date, :end_date, presence: true
   validates :status, inclusion: { in: STATUSES }
