@@ -206,7 +206,9 @@ class CheckGenerator
   # Main render
   # -----------------------------------------------------------------------
   def render_document(voided: false, rehearsal_preview: false)
-    Prawn::Document.new(
+    PdfUnicodeFont.ensure_printable!(employee.full_name, label: "Employee")
+    PdfUnicodeFont.ensure_printable!(employee.full_address, label: "Employee address")
+    PdfUnicodeFont.document(
       page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
       draw_perforations(pdf)
@@ -697,7 +699,7 @@ class CheckGenerator
   # Alignment test
   # -----------------------------------------------------------------------
   def render_alignment_test
-    Prawn::Document.new(
+    PdfUnicodeFont.document(
       page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
       draw_perforations(pdf)

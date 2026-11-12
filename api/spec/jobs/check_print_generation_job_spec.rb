@@ -110,6 +110,18 @@ RSpec.describe CheckPrintGenerationJob do
     expect(stored).to be_empty
   end
 
+  it "names the payee to fix when a check can't print the name" do
+    generation = create_generation
+    service = instance_double(CheckPrintRunGenerationService)
+    allow(CheckPrintRunGenerationService).to receive(:new).and_return(service)
+    allow(service).to receive(:call).and_raise(PdfUnicodeFont::UnprintableName.new("Employee", "王小明", %w[王 小 明]))
+
+    described_class.perform_now(generation.id)
+
+    expect(generation.reload).to have_attributes(status: "failed", error_code: "unprintable_name")
+    expect(generation.error_message).to include("王小明", "Latin letters", "No checks were marked printed.")
+  end
+
   it "does not classify an internal argument error as a source change" do
     generation = create_generation
     service = instance_double(CheckPrintRunGenerationService)

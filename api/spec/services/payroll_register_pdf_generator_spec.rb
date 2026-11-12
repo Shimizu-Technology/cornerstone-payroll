@@ -87,6 +87,17 @@ RSpec.describe PayrollRegisterPdfGenerator do
   subject(:generator) { described_class.new(report_data) }
 
   describe "#generate" do
+    it "prints accented and non-Latin employee names" do
+      template = report_data[:employees].first
+      report_data[:employees] = UnicodePdfNames::WORKERS.each_with_index.map do |worker, index|
+        template.deep_dup.merge(employee_id: index + 1, employee_name: "#{worker[:first_name]} #{worker[:last_name]}")
+      end
+      report_data[:meta][:company_name] = "Hagåtña Café"
+
+      text = unicode_pdf_text(generator.generate)
+      expect(text).to include(*UnicodePdfNames::TOKENS)
+    end
+
     it "groups currency with thousands separators" do
       report_data[:employees].first[:payroll_field_entries].first[:amount] = 1216.35
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")

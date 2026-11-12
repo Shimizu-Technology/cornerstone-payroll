@@ -621,6 +621,14 @@ module QuarterlyComplianceOfficialForms
     end
 
     def generate
+      employee_pages.flatten.each do |row|
+        PdfUnicodeFont.ensure_printable!(row[:name], label: "Employee")
+        record = filing_employees[row[:employee_id].to_i]
+        next unless record
+
+        address = [ record.address_line1, record.address_line2, record.city, record.state ].compact_blank.join("\n")
+        PdfUnicodeFont.ensure_printable!(address, label: "Employee address")
+      end
       super(page_count: employee_pages.length)
     end
 

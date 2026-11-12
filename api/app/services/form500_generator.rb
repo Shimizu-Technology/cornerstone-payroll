@@ -191,7 +191,7 @@ class Form500Generator
   end
 
   def build_overlay_pdf
-    pdf = Prawn::Document.new(page_size: "LETTER", margin: 0)
+    pdf = PdfUnicodeFont.document(page_size: "LETTER", margin: 0)
     pdf.font("Helvetica")
 
     3.times do |copy_index|
