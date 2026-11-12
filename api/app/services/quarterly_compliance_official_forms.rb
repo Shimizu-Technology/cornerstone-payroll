@@ -621,6 +621,7 @@ module QuarterlyComplianceOfficialForms
     end
 
     def generate
+      employee_pages.flatten.each { |employee| PdfUnicodeFont.ensure_printable!(employee[:name], label: "Employee") }
       super(page_count: employee_pages.length)
     end
 
