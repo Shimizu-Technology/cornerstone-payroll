@@ -34,15 +34,21 @@ export function FilePickerDialog({ open, onOpenChange, api, selectedIds, maxSele
     setPicked(new Map());
   }, [open]);
 
+  // The search the shown results belong to. A changed search hides Load
+  // more until its first page arrives, and retires any page in flight.
+  const resultsTerm = useRef('');
   useEffect(() => {
     if (!open) return;
     const request = ++version.current;
+    setHasMore(false);
+    const term = search.trim();
     const timer = setTimeout(() => {
       setLoading(true);
       setError(null);
-      api.list({ search: search.trim() || undefined, attachable: true, page: 1, per_page: PAGE_SIZE })
+      api.list({ search: term || undefined, attachable: true, page: 1, per_page: PAGE_SIZE })
         .then(response => {
           if (request !== version.current) return;
+          resultsTerm.current = term;
           setResults(response.data);
           setPage(1);
           setHasMore((response.meta?.total_pages ?? 1) > 1);
@@ -58,7 +64,7 @@ export function FilePickerDialog({ open, onOpenChange, api, selectedIds, maxSele
     setLoading(true);
     setError(null);
     try {
-      const response = await api.list({ search: search.trim() || undefined, attachable: true, page: page + 1, per_page: PAGE_SIZE });
+      const response = await api.list({ search: resultsTerm.current || undefined, attachable: true, page: page + 1, per_page: PAGE_SIZE });
       if (request !== version.current) return;
       setResults(current => [...current, ...response.data.filter(row => !current.some(existing => existing.id === row.id))]);
       setPage(page + 1);

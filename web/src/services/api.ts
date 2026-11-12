@@ -4635,7 +4635,7 @@ export const adminPortalThreadsApi = {
 };
 
 export const clientPortalFileRequestsApi = {
-  respond: (id: number, data: PortalMessagePayload) =>
+  respond: (id: number, data: PortalMessagePayload): Promise<PortalFileRequestStep> =>
     api.post<PortalFileRequestStep>(`/client/portal_file_requests/${id}/respond`, data),
 };
 
@@ -4645,13 +4645,13 @@ export type NewPortalFileRequest = {
 };
 
 export const adminPortalFileRequestsApi = {
-  create: (data: NewPortalFileRequest) =>
+  create: (data: NewPortalFileRequest): Promise<{ data: PortalFileRequest; thread: ClientPortalThread }> =>
     api.post<{ data: PortalFileRequest; thread: ClientPortalThread }>('/admin/portal_file_requests', data),
-  accept: (id: number, data: { response_message_id: number; body?: string; idempotency_key: string }) =>
+  accept: (id: number, data: { response_message_id: number; body?: string; idempotency_key: string }): Promise<PortalFileRequestStep> =>
     api.post<PortalFileRequestStep>(`/admin/portal_file_requests/${id}/accept`, data),
-  askAgain: (id: number, data: { response_message_id: number; body: string; idempotency_key: string }) =>
+  askAgain: (id: number, data: { response_message_id: number; body: string; idempotency_key: string }): Promise<PortalFileRequestStep> =>
     api.post<PortalFileRequestStep>(`/admin/portal_file_requests/${id}/ask_again`, data),
-  withdraw: (id: number, data: { body?: string; idempotency_key: string }) =>
+  withdraw: (id: number, data: { body?: string; idempotency_key: string }): Promise<PortalFileRequestStep> =>
     api.post<PortalFileRequestStep>(`/admin/portal_file_requests/${id}/withdraw`, data),
 };
 

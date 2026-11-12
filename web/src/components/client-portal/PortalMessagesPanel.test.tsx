@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi, type Mock } from 'vitest';
 import type { ComponentProps, ReactElement } from 'react';
 import type { ClientPortalThread } from '@/services/api';
 import { PortalMessagesPanel } from './PortalMessagesPanel';
 import { clearAllDrafts } from './messageDrafts';
+import type { PortalDocumentsApi } from './portalFiles';
 
 type Callbacks = { onConnected: () => void; onUnavailable: () => void; onError: () => void; onThread: (value: { thread: ClientPortalThread }) => void };
 const mocks = vi.hoisted(() => ({ company: 2, refresh: vi.fn(), subscribe: vi.fn(), callbacks: [] as Callbacks[] }));
@@ -16,8 +17,8 @@ vi.mock('@/services/clientPortalCable', () => ({ subscribeToClientPortalThreads:
 const thread = (companyId: number, subject: string) => ({ id: companyId, company_id: companyId, subject, status: 'open', created_at: '2026-10-12T00:00:00Z', updated_at: '2026-10-12T00:00:00Z', unread: false, messages: [] } as ClientPortalThread);
 type ThreadsApi = ComponentProps<typeof PortalMessagesPanel>['api'];
 let api: { [Key in keyof ThreadsApi]: Mock<ThreadsApi[Key]> };
-const routed = (node: ReactElement) => <MemoryRouter>{node}</MemoryRouter>;
-const view = () => routed(<PortalMessagesPanel api={api} documents={[]} audienceLabel="client" description="Client messages" />);
+const routed = (node: ReactElement): ReactElement => <MemoryRouter>{node}</MemoryRouter>;
+const view = (): ReactElement => routed(<PortalMessagesPanel api={api} documents={[]} audienceLabel="client" description="Client messages" />);
 
 beforeEach(() => {
   window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() });
@@ -293,14 +294,15 @@ it('recovers the phone conversation list when the exact inbox thread is unavaila
 });
 
 
-const doc = (id: number, title: string, extra: Partial<import('@/services/api').ClientDocument> = {}) => ({ id, title, file_name: `${title}.pdf`, file_size: 2048, content_type: 'application/pdf', visible_to_client: true, scan_status: 'not_scanned', preview_available: true, created_at: '2026-11-12T00:00:00Z', ...extra }) as import('@/services/api').ClientDocument;
-const documentsApi = () => ({
-  list: vi.fn().mockResolvedValue({ data: [], meta: { total_pages: 1 } }),
-  upload: vi.fn(),
-  preview: vi.fn().mockResolvedValue({ blob: new Blob(['%PDF'], { type: 'application/pdf' }) }),
-  download: vi.fn().mockResolvedValue({ blob: new Blob(['%PDF'], { type: 'application/pdf' }), filename: 'hours.pdf' }),
-  opened: vi.fn().mockResolvedValue(undefined),
-  activity: vi.fn().mockResolvedValue({ data: [], meta: {} }),
+const doc = (id: number, title: string, extra: Partial<import('@/services/api').ClientDocument> = {}): import('@/services/api').ClientDocument => ({ id, title, file_name: `${title}.pdf`, file_size: 2048, content_type: 'application/pdf', visible_to_client: true, scan_status: 'not_scanned', preview_available: true, created_at: '2026-11-12T00:00:00Z', ...extra }) as import('@/services/api').ClientDocument;
+type DocumentsApiMock = { [Key in keyof PortalDocumentsApi]: Mock<PortalDocumentsApi[Key]> };
+const documentsApi = (): DocumentsApiMock => ({
+  list: vi.fn<PortalDocumentsApi['list']>().mockResolvedValue({ data: [], meta: { total_pages: 1 } }),
+  upload: vi.fn<PortalDocumentsApi['upload']>(),
+  preview: vi.fn<PortalDocumentsApi['preview']>().mockResolvedValue({ blob: new Blob(['%PDF'], { type: 'application/pdf' }) }),
+  download: vi.fn<PortalDocumentsApi['download']>().mockResolvedValue({ blob: new Blob(['%PDF'], { type: 'application/pdf' }), filename: 'hours.pdf' }),
+  opened: vi.fn<PortalDocumentsApi['opened']>().mockResolvedValue(undefined),
+  activity: vi.fn<PortalDocumentsApi['activity']>().mockResolvedValue({ data: [], meta: { current_page: 1, total_pages: 1, total_count: 0, per_page: 25 } as import('@/services/api').BoundedListMeta }),
 });
 
 it('uploads a device file once and reuses both retry keys when the send fails', async () => {
@@ -432,4 +434,99 @@ it('lets the client answer a file request with an upload, scoped to the requeste
   expect(form.get('employee_id')).toBe('8');
   expect(container).toBeTruthy();
   respond.mockRestore();
+});
+
+it('keeps the selected conversation in the URL on desktop without adding history', async () => {
+  const first = { ...thread(2, 'First desk'), id: 31 };
+  const second = { ...thread(2, 'Second desk'), id: 32 };
+  api.list.mockResolvedValue({ data: [first, second] });
+  api.get.mockImplementation(id => Promise.resolve({ data: id === 31 ? first : second }));
+  let location = '';
+  const Probe = (): null => { location = useLocation().search; return null; };
+  render(<MemoryRouter initialEntries={['/messages']}><PortalMessagesPanel api={api} documents={[]} audienceLabel="client" description="Client messages" /><Probe /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: /Second desk/ }));
+  await waitFor(() => expect(location).toBe('?thread_id=32'));
+});
+
+it('drops a live update that leaves the selected filter, and keeps the header on the all-conversations count', async () => {
+  const listed = { ...thread(2, 'Resolved topic'), id: 41, status: 'resolved' as const };
+  api.list.mockResolvedValue({ data: [listed], meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 25, unread_count: 0 } });
+  api.unreadCount.mockResolvedValue({ data: { unread_count: 4 } });
+  api.get.mockResolvedValue({ data: listed });
+  render(<MemoryRouter initialEntries={['/messages?conversations=resolved']}><PortalMessagesPanel api={api} documents={[]} audienceLabel="client" description="Client messages" /></MemoryRouter>);
+  await waitFor(() => expect(api.list).toHaveBeenCalledWith({ status: 'resolved' }));
+  expect(await screen.findByText('4 unread')).toBeTruthy();
+  await waitFor(() => expect(mocks.callbacks).toHaveLength(1));
+  const reopened = { ...listed, status: 'open' as const };
+  api.get.mockResolvedValue({ data: reopened });
+  await act(async () => mocks.callbacks[0].onThread({ thread: reopened }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /Resolved topic/ })).toBeNull());
+  expect(screen.getByText('4 unread')).toBeTruthy();
+});
+
+it('ignores Load more from an old search while a new search is waiting for its first page', async () => {
+  const files = documentsApi();
+  files.list.mockImplementation(params => Promise.resolve(params?.search === 'new'
+    ? { data: [doc(60, 'New match')], meta: { total_pages: 1 } }
+    : { data: [doc(50, params?.page === 2 ? 'Old page two' : 'Old match')], meta: { total_pages: 2 } }));
+  const current = thread(2, 'Hours');
+  api.list.mockResolvedValue({ data: [current] }); api.get.mockResolvedValue({ data: current });
+  render(routed(<PortalMessagesPanel api={api} documents={[]} documentsApi={files} audienceLabel="client" description="Client messages" />));
+  await screen.findByPlaceholderText('Reply client');
+  const pickers = screen.getAllByRole('button', { name: 'Choose existing file' });
+  fireEvent.click(pickers[pickers.length - 1]);
+  expect(await screen.findByRole('button', { name: 'Load more files' })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Search files'), { target: { value: 'new' } });
+  // Pagination for the old search is gone as soon as the search changes.
+  expect(screen.queryByRole('button', { name: 'Load more files' })).toBeNull();
+  expect(await screen.findByRole('checkbox', { name: /New match/ })).toBeTruthy();
+  expect(screen.queryByText('Old page two')).toBeNull();
+  expect(files.list).not.toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
+});
+
+it.each(['pending', 'infected', 'error'] as const)('offers no preview or download for a %s file', async status => {
+  const conversation = { ...thread(2, 'Files'), messages: [{ id: 1, thread_id: 2, kind: 'message', body: 'File', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', documents: [doc(7, 'Scan', { scan_status: status })] }] } as ClientPortalThread;
+  api.list.mockResolvedValue({ data: [conversation] }); api.get.mockResolvedValue({ data: conversation });
+  render(routed(<PortalMessagesPanel api={api} documents={[]} documentsApi={documentsApi()} audienceLabel="client" description="Client messages" />));
+  expect(await screen.findByText(status === 'pending' ? 'Safety check in progress' : /^Not available:/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Download Scan.pdf' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Preview Scan.pdf' })).toBeNull();
+});
+
+it('discards a preview that finishes after the preview was closed', async () => {
+  const files = documentsApi();
+  let finish!: (value: { blob: Blob }) => void;
+  files.preview.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const revoke = vi.fn(); const create = vi.fn().mockReturnValue('blob:late');
+  Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
+  const conversation = { ...thread(2, 'Files'), messages: [{ id: 1, thread_id: 2, kind: 'message', body: 'File', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', documents: [doc(8, 'Week')] }] } as ClientPortalThread;
+  api.list.mockResolvedValue({ data: [conversation] }); api.get.mockResolvedValue({ data: conversation });
+  render(routed(<PortalMessagesPanel api={api} documents={[]} documentsApi={files} audienceLabel="client" description="Client messages" />));
+  fireEvent.click(await screen.findByRole('button', { name: 'Preview Week.pdf' }));
+  await screen.findByRole('dialog');
+  fireEvent.keyDown(document.activeElement || document.body, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  await act(async () => finish({ blob: new Blob(['%PDF'], { type: 'application/pdf' }) }));
+  expect(create).toHaveBeenCalledOnce();
+  expect(revoke).toHaveBeenCalledWith('blob:late');
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('lets staff cancel asking again without sending that note with an acceptance, and reports a failed refresh after saving', async () => {
+  const request = { id: 3, thread_id: 2, title: 'Timesheet', category: 'payroll_source', status: 'responded', status_label: 'File sent, waiting for Cornerstone', last_response_message_id: 9, created_at: '2026-11-12T00:00:00Z', lock_version: 0 } as import('@/services/api').PortalFileRequest;
+  const conversation = { ...thread(2, 'Hours'), messages: [{ id: 1, thread_id: 2, kind: 'file_request', author_name: 'Dafne', author_audience: 'staff', created_at: '2026-11-11T00:00:00Z', file_request: request }] } as ClientPortalThread;
+  api.list.mockResolvedValue({ data: [conversation] }); api.get.mockResolvedValue({ data: conversation });
+  const services = await import('@/services/api');
+  const accept = vi.spyOn(services.adminPortalFileRequestsApi, 'accept').mockResolvedValue({ data: { ...request, status: 'accepted', status_label: 'Accepted' }, message: { id: 10, thread_id: 2, created_at: '2026-11-12T00:00:00Z' } });
+  render(routed(<PortalMessagesPanel api={api} documents={[]} documentsApi={documentsApi()} audience="staff" audienceLabel="to the client" description="Client messages" />));
+  fireEvent.click(await screen.findByRole('button', { name: 'Ask again' }));
+  fireEvent.change(screen.getByLabelText('What is still needed?'), { target: { value: 'Wrong week' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  api.get.mockRejectedValueOnce(new Error('offline'));
+  fireEvent.click(screen.getByRole('button', { name: 'Accept file' }));
+  await waitFor(() => expect(accept).toHaveBeenCalledOnce());
+  expect(accept.mock.calls[0][1]).toEqual(expect.objectContaining({ response_message_id: 9, body: undefined }));
+  expect(await screen.findByText(/Saved\. The conversation could not refresh/)).toBeTruthy();
+  expect(screen.queryByText('That did not save. Try again.')).toBeNull();
+  accept.mockRestore();
 });

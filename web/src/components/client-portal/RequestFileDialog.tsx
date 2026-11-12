@@ -80,13 +80,15 @@ export function RequestFileDialog({ open, onOpenChange, threadId, threadSubject,
     : threadId ? `It will go in “${threadSubject || 'this conversation'}”.` : 'It will start a new conversation.';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // While a request is being created the dialog stays open, so its retry
+    // key survives a lost response and a resend cannot make a duplicate.
+    <Dialog open={open} onOpenChange={next => { if (!busy) onOpenChange(next); }}>
       <DialogContent className="max-h-[min(90vh,90dvh)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Request a file</DialogTitle>
           <DialogDescription>The client sees the request, uploads the file in it, and you accept it or ask again. {destination}</DialogDescription>
         </DialogHeader>
-        <form onSubmit={event => void submit(event)} className="space-y-3">
+        <form onSubmit={event => void submit(event)} className="space-y-4">
           <Input label="File needed" value={form.title} onChange={event => set('title', event.target.value)} maxLength={200} placeholder="For example: Riley’s paper timesheet" required />
           <label className="block text-xs font-medium text-neutral-600">Type of file
             <Select value={form.category} onChange={event => set('category', event.target.value)}>
@@ -112,7 +114,7 @@ export function RequestFileDialog({ open, onOpenChange, threadId, threadSubject,
           {loadError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger-700"><span>{loadError}</span><Button type="button" size="sm" variant="outline" onClick={() => setLoadAttempt(value => value + 1)}>Try again</Button></div>}
           {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={busy}>{busy ? 'Sending…' : 'Send request'}</Button>
           </DialogFooter>
         </form>

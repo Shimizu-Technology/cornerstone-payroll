@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useRef, useState, type ReactElement } from 'react';
 import { Download, Eye, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
@@ -21,7 +21,13 @@ function AttachmentRow({ document, api }: { document: ClientDocument; api: Porta
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const archived = Boolean(document.archived_at);
-  const checking = document.scan_status === 'pending';
+  // Every status the document API refuses to serve.
+  const blockedNote = document.scan_status === 'pending' ? 'Safety check in progress'
+    : document.scan_status === 'infected' ? 'Not available: this file did not pass the safety check'
+    : document.scan_status === 'error' ? 'Not available: the safety check could not be completed'
+    : null;
+  // Closing the preview retires its request; a late result is discarded.
+  const previewRequest = useRef(0);
 
   const download = async (): Promise<void> => {
     try {
@@ -34,14 +40,21 @@ function AttachmentRow({ document, api }: { document: ClientDocument; api: Porta
     }
   };
   const preview = async (): Promise<void> => {
+    const request = ++previewRequest.current;
     try {
       setError(null); setPreviewOpen(true); setLoading(true); setPayload(null);
       const file = await api.preview(document.id);
-      setPayload(await prepareDocumentPreview(document, file.blob));
+      const prepared = await prepareDocumentPreview(document, file.blob);
+      if (request !== previewRequest.current) {
+        if (prepared.objectUrl) URL.revokeObjectURL(prepared.objectUrl);
+        return;
+      }
+      setPayload(prepared);
     } catch (err) {
+      if (request !== previewRequest.current) return;
       setPreviewOpen(false);
       setError(err instanceof Error ? err.message : 'Preview failed. Check your connection and try again.');
-    } finally { setLoading(false); }
+    } finally { if (request === previewRequest.current) setLoading(false); }
   };
 
   return (
@@ -55,11 +68,11 @@ function AttachmentRow({ document, api }: { document: ClientDocument; api: Porta
               {[!archived && document.file_name !== document.title ? document.file_name : null, fileTypeLabel(document.file_name), formatFileSize(document.file_size)].filter(Boolean).join(' · ')}
             </span>
             {archived && <span className="block text-xs text-neutral-700">Kept with this message as a record. Ask Cornerstone if you need it.</span>}
-            {checking && <span className="block text-xs text-neutral-700">Safety check in progress</span>}
+            {blockedNote && <span className="block text-xs text-neutral-700">{blockedNote}</span>}
             {error && <span role="alert" className="block text-xs text-danger-700">{error}</span>}
           </span>
         </span>
-        {!archived && !checking && (
+        {!archived && !blockedNote && (
           <span className="flex shrink-0 gap-2">
             {document.preview_available && (
               <Button type="button" size="sm" variant="outline" onClick={() => void preview()} aria-label={`Preview ${document.file_name}`}>
@@ -72,7 +85,7 @@ function AttachmentRow({ document, api }: { document: ClientDocument; api: Porta
           </span>
         )}
       </div>
-      <DocumentPreviewModal open={previewOpen} onOpenChange={(open) => { setPreviewOpen(open); if (!open) setPayload(null); }}
+      <DocumentPreviewModal open={previewOpen} onOpenChange={(open) => { setPreviewOpen(open); if (!open) { previewRequest.current += 1; setLoading(false); setPayload(null); } }}
         document={previewOpen ? document : null} payload={payload} loading={loading} onDownload={() => void download()} activityApi={api} />
     </li>
   );
