@@ -318,5 +318,4 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     end.to raise_error(ArgumentError, /MoSa import review/)
     expect(run.payroll_items.count).to eq(0)
   end
-
 end
