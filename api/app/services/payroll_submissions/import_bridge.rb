@@ -71,10 +71,10 @@ module PayrollSubmissions
 
     def upload_for!(link)
       document = link.client_document
-      unless document.company_id == @run.company_id && document.visible_to_client && document.scan_status == "clean" && !document.archived?
-        raise ArgumentError, "Portal source must be visible, unarchived and pass its file scan before import"
+      unless document.company_id == @run.company_id && document.visible_to_client && !document.archived?
+        raise ArgumentError, "Portal source must be visible and unarchived before import"
       end
-      ClientDocumentScanner.ensure_allowed!(document, purpose: :intake)
+      document.ensure_usable_for!(:intake)
       size = link.file_size_snapshot.to_i
       raise ArgumentError, "Portal attachment exceeds #{MAX_FILE_BYTES} bytes" if size > MAX_FILE_BYTES
       bytes = R2StorageService.new.download_with_limit(document.file_key, max_bytes: MAX_FILE_BYTES)
