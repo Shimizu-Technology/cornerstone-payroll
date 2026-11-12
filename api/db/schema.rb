@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_11_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_12_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3270,6 +3270,82 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_130000) do
     t.check_constraint "source::text = ANY (ARRAY['schedule'::character varying::text, 'import'::character varying::text, 'manual'::character varying::text, 'correction_reference'::character varying::text, 'production_backfill'::character varying::text])", name: "payroll_time_allocations_source_check"
   end
 
+  create_table "portal_notification_deliveries", force: :cascade do |t|
+    t.bigint "portal_notification_event_id", null: false
+    t.bigint "user_id"
+    t.string "recipient_email"
+    t.string "recipient_key", null: false
+    t.bigint "company_id", null: false
+    t.string "channel", default: "email", null: false
+    t.string "delivery_mode", null: false
+    t.string "status", default: "pending", null: false
+    t.datetime "deliver_after", null: false
+    t.datetime "next_attempt_at"
+    t.datetime "claimed_at"
+    t.integer "attempts", default: 0, null: false
+    t.string "batch_key"
+    t.string "skip_reason"
+    t.string "last_error_class"
+    t.string "provider_message_id"
+    t.datetime "sent_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "batch_key" ], name: "index_portal_notification_deliveries_on_batch_key"
+    t.index [ "company_id" ], name: "index_portal_notification_deliveries_on_company_id"
+    t.index [ "deliver_after", "recipient_key" ], name: "idx_portal_notification_deliveries_due", where: "((status)::text = 'pending'::text)"
+    t.index [ "portal_notification_event_id", "channel", "recipient_key" ], name: "idx_portal_notification_deliveries_once", unique: true
+    t.index [ "portal_notification_event_id" ], name: "idx_portal_notification_deliveries_event"
+    t.index [ "user_id", "created_at" ], name: "index_portal_notification_deliveries_on_user_id_and_created_at"
+  end
+
+  create_table "portal_notification_events", force: :cascade do |t|
+    t.bigint "organization_id", null: false
+    t.bigint "company_id", null: false
+    t.bigint "actor_id"
+    t.string "event_type", null: false
+    t.string "category", null: false
+    t.string "subject_type", null: false
+    t.bigint "subject_id", null: false
+    t.string "dedupe_key", null: false
+    t.string "recipient_status", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "occurred_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "actor_id" ], name: "index_portal_notification_events_on_actor_id"
+    t.index [ "company_id" ], name: "index_portal_notification_events_on_company_id"
+    t.index [ "dedupe_key" ], name: "index_portal_notification_events_on_dedupe_key", unique: true
+    t.index [ "organization_id", "recipient_status", "occurred_at" ], name: "idx_portal_notification_events_recipient_warning"
+    t.index [ "organization_id" ], name: "index_portal_notification_events_on_organization_id"
+    t.index [ "subject_type", "subject_id" ], name: "idx_portal_notification_events_subject"
+  end
+
+  create_table "portal_notification_preferences", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "category", null: false
+    t.string "delivery_mode", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "user_id", "category" ], name: "index_portal_notification_preferences_on_user_id_and_category", unique: true
+    t.index [ "user_id" ], name: "index_portal_notification_preferences_on_user_id"
+  end
+
+  create_table "portal_notification_recipients", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id"
+    t.string "email"
+    t.bigint "added_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "added_by_id" ], name: "index_portal_notification_recipients_on_added_by_id"
+    t.index [ "company_id", "email" ], name: "idx_portal_notification_recipients_email", unique: true, where: "(email IS NOT NULL)"
+    t.index [ "company_id", "user_id" ], name: "idx_portal_notification_recipients_user", unique: true, where: "(user_id IS NOT NULL)"
+    t.index [ "company_id" ], name: "index_portal_notification_recipients_on_company_id"
+    t.index [ "user_id" ], name: "index_portal_notification_recipients_on_user_id"
+    t.check_constraint "(user_id IS NULL) <> (email IS NULL)", name: "portal_notification_recipients_one_target"
+  end
+
   create_table "printer_profiles", force: :cascade do |t|
     t.datetime "archived_at"
     t.jsonb "check_layout_config", default: {}, null: false
@@ -4576,6 +4652,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_130000) do
   add_foreign_key "payroll_time_allocations", "daily_time_records"
   add_foreign_key "payroll_time_allocations", "employees"
   add_foreign_key "payroll_time_allocations", "payroll_items"
+  add_foreign_key "portal_notification_deliveries", "companies", on_delete: :cascade
+  add_foreign_key "portal_notification_deliveries", "portal_notification_events", on_delete: :cascade
+  add_foreign_key "portal_notification_deliveries", "users", on_delete: :cascade
+  add_foreign_key "portal_notification_events", "companies", on_delete: :cascade
+  add_foreign_key "portal_notification_events", "organizations", on_delete: :cascade
+  add_foreign_key "portal_notification_events", "users", column: "actor_id", on_delete: :nullify
+  add_foreign_key "portal_notification_preferences", "users", on_delete: :cascade
+  add_foreign_key "portal_notification_recipients", "companies", on_delete: :cascade
+  add_foreign_key "portal_notification_recipients", "users", column: "added_by_id", on_delete: :nullify
+  add_foreign_key "portal_notification_recipients", "users", on_delete: :cascade
   add_foreign_key "printer_profiles", "organizations"
   add_foreign_key "printer_profiles", "printer_profiles", column: "source_profile_id", on_delete: :nullify
   add_foreign_key "printer_profiles", "users", column: "created_by_id", on_delete: :nullify

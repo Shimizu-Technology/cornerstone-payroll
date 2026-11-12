@@ -94,6 +94,7 @@ class EmployeeChangeRequest < ApplicationRecord
         review_notes: review_notes,
         reviewed_at: Time.current
       )
+      PortalNotifications.employee_change_decided!(self, actor: actor)
     end
   end
 
@@ -107,6 +108,7 @@ class EmployeeChangeRequest < ApplicationRecord
         review_notes: review_notes,
         reviewed_at: Time.current
       )
+      PortalNotifications.employee_change_decided!(self, actor: actor)
     end
   end
 

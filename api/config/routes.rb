@@ -41,6 +41,7 @@ Rails.application.routes.draw do
       # Auth - current user info (Clerk JWT verified in ApplicationController)
       get "auth/me", to: "auth#me"
       post "cable_ticket", to: "cable_tickets#create"
+      resource :notification_settings, only: [ :show, :update ]
       get "companies", to: "companies#index"
 
       resources :form_500s, only: [] do
@@ -249,6 +250,7 @@ Rails.application.routes.draw do
             post :unarchive
           end
         end
+        resource :portal_notification_recipients, only: [ :show, :update ]
         resources :portal_threads, only: [ :index, :show, :create, :update ] do
           get :unread_count, on: :collection
           member do

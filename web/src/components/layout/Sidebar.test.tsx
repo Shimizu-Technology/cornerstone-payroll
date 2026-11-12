@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Sidebar } from './Sidebar';
@@ -37,4 +37,12 @@ describe('Accountant personal connection navigation', () => {
     expect(screen.queryByRole('link', { name: 'Pay Schedule' })).toBeNull();
   });
 
+});
+
+describe('Account menu', () => {
+  it('links to personal notification settings', () => {
+    render(<MemoryRouter><Sidebar /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Open account menu' }));
+    expect(screen.getByRole('link', { name: 'Notifications' }).getAttribute('href')).toBe('/app/notifications');
+  });
 });

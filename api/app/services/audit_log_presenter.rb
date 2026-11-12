@@ -40,6 +40,8 @@ class AuditLogPresenter
     "client_portal_threads#reopened" => "reopened conversation",
     "client_portal_threads#update" => "updated conversation",
     "client_portal_messages#create" => "sent a message in",
+    "notification_settings#update" => "updated email alert settings for",
+    "portal_notification_recipients#update" => "updated portal alert recipients for",
     "employees#create" => "added",
     "employees#update" => "updated",
     "employees#destroy" => "terminated",
