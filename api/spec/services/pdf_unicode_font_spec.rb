@@ -59,7 +59,13 @@ RSpec.describe PdfUnicodeFont do
     expect(described_class.unprintable_characters("王小明 Kim 王")).to eq(%w[王 小 明])
     expect(described_class.unprintable_characters(nil)).to be_empty
     expect(described_class.unprintable_characters("Taro\u3000Yamada")).to eq([ "\u3000" ])
-    expect(described_class.unprintable_characters("12 Chalan\nHagåtña\tGU")).to be_empty
+    expect(described_class.unprintable_characters("12 Chalan\nHagåtña, GU\r\n")).to be_empty
+    expect(described_class.unprintable_characters("Ana\tCruz")).to eq([ "\t" ])
+  end
+
+  it "names invisible characters by code point" do
+    expect { described_class.ensure_printable!("Ana\uFEFFCruz", label: "Employee") }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /\(U\+FEFF\)/)
   end
 
   it "is used by every generator that draws text" do

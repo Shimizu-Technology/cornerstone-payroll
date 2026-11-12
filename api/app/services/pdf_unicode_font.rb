@@ -41,7 +41,14 @@ module PdfUnicodeFont
   class UnprintableName < StandardError
     def initialize(label, name, characters)
       super("#{label} \"#{name.to_s.squish}\" has characters checks and tax forms can't print " \
-            "(#{characters.join(' ')}). Change it to Latin letters, then try again.")
+            "(#{characters.map { |char| visible(char) }.join(' ')}). Change it to Latin letters, then try again.")
+    end
+
+    private
+
+    # Invisible characters are named by code point so the operator can find them.
+    def visible(char)
+      char.match?(/[\p{L}\p{M}\p{N}\p{P}\p{S}]/) ? char : format("U+%04X", char.ord)
     end
   end
 
@@ -73,11 +80,12 @@ module PdfUnicodeFont
     pdf
   end
 
-  # Prawn lays these out itself; every other character needs a real glyph.
-  LAYOUT_CHARACTERS = [ " ", "\n", "\r", "\t" ].freeze
-
+  # Multi-line values are checked line by line, since line breaks are layout
+  # rather than glyphs. Any other character without a glyph, including a tab,
+  # prints as a box.
   def unprintable_characters(text)
-    text.to_s.each_char.reject { |char| LAYOUT_CHARACTERS.include?(char) || printable_codepoints.include?(char.ord) }.uniq
+    text.to_s.each_line.flat_map { |line| line.chomp.each_char.to_a }
+      .reject { |char| char == " " || printable_codepoints.include?(char.ord) }.uniq
   end
 
   def ensure_printable!(name, label:)
