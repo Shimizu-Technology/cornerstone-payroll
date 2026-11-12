@@ -123,9 +123,9 @@ module PayrollSubmissions
     def coerce(type, value)
       text = value.to_s.strip
       case type
-      when :hours then decimal(text, max: 1000, required: true)
-      when :money then decimal(text, max: 10_000_000, required: true)
-      when :optional_money then text.empty? ? nil : decimal(text, max: 10_000_000, required: true)
+      when :hours then decimal(text, max: 1000, required: true, money: false)
+      when :money then decimal(text, max: 10_000_000, required: true, money: true)
+      when :optional_money then text.empty? ? nil : decimal(text, max: 10_000_000, required: true, money: true)
       when :basis then BASES.include?(text) ? text : :invalid
       when :wage_unit then WAGE_UNITS.include?(text) ? text : :invalid
       when :deduction_action then DEDUCTION_ACTIONS.include?(text) ? text : :invalid
@@ -139,12 +139,15 @@ module PayrollSubmissions
       :invalid
     end
 
-    def decimal(text, max:, required:)
+    # Money is stored as "1200.00"; hours as "6.5" or "35".
+    def decimal(text, max:, required:, money:)
       return :invalid if text.empty? && required
       return :invalid unless text.match?(/\A\d{1,9}(\.\d{1,2})?\z/)
 
       number = BigDecimal(text)
-      number.positive? && number <= max ? number.to_s("F") : :invalid
+      return :invalid unless number.positive? && number <= max
+
+      money ? format("%.2f", number) : number.to_s("F").delete_suffix(".0")
     end
 
     def integer(value)
