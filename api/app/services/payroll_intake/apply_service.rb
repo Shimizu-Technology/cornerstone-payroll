@@ -25,6 +25,11 @@ module PayrollIntake
         Company.lock.find(company.id)
         pay_period.with_lock do
           raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
+          if pay_period.pending_portal_submission? ||
+            PayrollImportRecord.where(payroll_intake_session_id: session.id).joins(:submission_imports).exists? ||
+            session.documents.where.not(payroll_submission_document_id: nil).exists?
+            raise ArgumentError, "Review portal sources through the MoSa import review before applying"
+          end
 
           excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 

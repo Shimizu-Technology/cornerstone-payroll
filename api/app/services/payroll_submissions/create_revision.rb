@@ -49,6 +49,9 @@ module PayrollSubmissions
       submission = nil
       outcome = :created
       PayrollSubmissionPeriod.transaction do
+        @company.lock!
+        run = @catalog.live_pay_period(@entry)
+        run&.lock!
         period = @catalog.materialize!(@entry)
         period.lock!
         if key && (existing = period.submissions.find_by(submitted_by_id: @actor.id, idempotency_key: key))

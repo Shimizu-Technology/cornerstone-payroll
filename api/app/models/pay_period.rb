@@ -135,8 +135,16 @@ class PayPeriod < ApplicationRecord
   validates :corrects_pay_period_id,
             presence: true,
             if: :supplemental?
+  validate :portal_source_review_complete
   validate :late_hours_import_complete
   validate :verified_tax_year_for_finalization
+
+  def portal_source_review_complete
+    return unless persisted? && will_save_change_to_status? && status.in?(%w[calculated approved committed])
+    return unless pending_portal_submission?
+
+    errors.add(:base, "Review the pending portal revision: import it or record a source disposition before calculation, approval or commit")
+  end
 
   def late_hours_import_complete
     return unless will_save_change_to_status? && status.in?(%w[calculated approved committed])
@@ -321,6 +329,7 @@ class PayPeriod < ApplicationRecord
   }
   # Cycle scopes
   scope :regular_cycle, -> { where(cycle: "regular") }
+  scope :portal_submission_runs, -> { where(cycle: "regular", run_purpose: "regular", correction_status: nil, test_workspace_role: nil) }
   scope :supplemental_cycle, -> { where(cycle: "supplemental") }
 
   # CPR-71: correction scopes
@@ -381,6 +390,19 @@ class PayPeriod < ApplicationRecord
 
   def can_edit?
     !committed? && !voided? && !training_baseline? && !retired_history?
+  end
+
+  def pending_portal_submission?
+    periods = PayrollSubmissionPeriod.where(company_id: company_id)
+    linked = periods.find_by(pay_period_id: id) if persisted?
+    return true if linked&.pending_source_review?
+
+    # A duplicate regular run cannot escape another run's pending same-date
+    # source. Linked evidence remains authoritative even after run date edits.
+    matching = periods.where(start_date: start_date, end_date: end_date)
+    eligible = cycle == "regular" && run_purpose == "regular" && correction_status.nil? && test_workspace_role.nil?
+    matching = matching.where(pay_period_id: nil) unless eligible
+    matching.any?(&:pending_source_review?)
   end
 
   def intake_stale?

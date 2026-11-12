@@ -10,6 +10,9 @@ class PayrollSubmission < ApplicationRecord
   has_many :submission_documents, -> { order(:position, :id) }, class_name: "PayrollSubmissionDocument",
     inverse_of: :submission, dependent: :restrict_with_error
 
+  has_many :submission_imports, class_name: "PayrollSubmissionImport", dependent: :restrict_with_error
+  has_many :payroll_imports, through: :submission_imports
+
   validates :revision, numericality: { only_integer: true, greater_than: 0 }
   validates :submitted_at, :content_fingerprint, :request_fingerprint, presence: true
   validates :idempotency_key, length: { maximum: 128 }, allow_nil: true

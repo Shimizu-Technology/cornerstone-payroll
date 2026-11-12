@@ -1576,6 +1576,10 @@ export const payPeriodsApi = {
     if (replacement?.reason) formData.append('supersession_reason', replacement.reason);
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
   },
+  previewPortalSubmission: (id: number, submissionId: number, options: { superseded_reason?: string; supersedes_package_id?: string; supersession_reason?: string; tips_paid_out_from_tips?: boolean } = {}): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, { submission_id: submissionId, ...options }),
+  resolvePortalSource: (id: number, submissionId: number, reason: string): Promise<{ resolved_submission_id: number }> =>
+    api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
   currentImport: (id: number): Promise<ImportPreviewResponse> =>
     api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
   applyImport: (
@@ -1590,6 +1594,7 @@ export const payPeriodsApi = {
         target_pay_period_id?: number | null;
       }>;
       acknowledge_low_confidence_matches?: boolean;
+      portal_source_id?: number;
       force_overwrite?: boolean;
     },
   ): Promise<ImportApplyResponse> =>
@@ -2094,6 +2099,11 @@ export interface MosaSourceRow {
 }
 
 export interface ImportPreviewResponse {
+  portal_source?: {
+    selection_id: number; submission_id: number; revision: number; period_id: number; current: boolean;
+    superseded_reason?: string; notes?: string; changes_link_url?: string; no_changes: boolean;
+    changes: import('./payrollSubmissions').ChangeRow[];
+  } | null;
   import_id: number;
   duplicate?: boolean;
   source_package: {
