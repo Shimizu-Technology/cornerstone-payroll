@@ -24,3 +24,14 @@ No horizontal overflow at 390. There were no page errors.
 ## Not covered
 
 Real Clerk sign-in and Cable revocation, native phone keyboards, Safari, and real email delivery (email stays off).
+
+## Retest after the first review (Nov 13, 2026)
+
+All six cases were rerun at 1280 and 390 on `fd33f185`, from a fresh seed and a reset between widths, and all passed. The retest exercised the review changes:
+
+- the conversation is now kept in the URL on desktop;
+- live updates respect the filter;
+- the request dialog cannot be dismissed while a request is being created;
+- composer uploads are flagged `uploaded_for_message`, and library files are not.
+
+Email stayed off: all four deliveries were skipped as `email_delivery_disabled`.
