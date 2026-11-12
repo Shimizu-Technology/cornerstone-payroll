@@ -16,8 +16,9 @@ read-only. The client submission itself never changes payroll or employee data.
 - Owned local Rails test database built with `db:schema:load`; no seeds.
 - Actual React UI and Rails endpoints through a local Vite proxy. Synthetic
   client/staff identities use the existing test-only identity header.
-- Local private storage; a controlled synthetic scanner returns clean. Production
-  malware scanning, Clerk, Cable delivery and remote R2 are not certified here.
+- Initial QA used local private storage and a controlled synthetic scanner. The
+  default-Noop correction rerun is recorded below. Clerk, Cable delivery and
+  remote R2 are not certified here.
 - Synthetic #433 Revel fixture: Avery Example, 40 regular hours, 2 overtime hours;
   source PDF gross deliberately differs from payroll. Employee master rate $10.
 - Two ended periods: October 5–18 and October 19–November 1, 2026. Each width uses
@@ -47,7 +48,8 @@ six required viewport dimensions passed.
 
 The focused suite covers full-period date mismatch, exactly 8 MiB and one byte
 over, missing/duplicate roles, supporting attachments, changed retained bytes,
-unscanned/pending/infected/error files, tenant/period isolation, retry deduplication,
+Noop not_scanned files, pending/infected/error refusal, enforcing-adapter
+policy, tenant/period isolation, retry deduplication,
 identical-file reuse across revisions, superseded selection with audited reason,
 a newer revision before apply, approved/committed runs, pending-source
 calculation/approval/commit gates, explicit source disposition, stale calculation,
@@ -63,7 +65,7 @@ request and PostgreSQL concurrency tests. Real production files, payroll cutover
 reconciliation, approval/commit of live payroll and real email delivery are
 outside this task.
 
-## Serial engineering gates
+## Initial implementation engineering gates (head 944384ac)
 
 - Focused backend: **106 examples, 0 failures**.
 - Full RSpec: **6,615 examples, 0 failures, 4 pending**, in 18m04s. The four
@@ -82,12 +84,14 @@ outside this task.
   Existing large-chunk build warnings remain advisory.
 - Impeccable 4.6.0 advisory scan: **no findings** across the four changed UI files.
 
-## Rollout and retention
+## Shared safety policy and retention
 
-New uploads currently use `ClientDocumentScanner::Noop`, whose initial state is
-`not_scanned`. The bridge intentionally requires `clean` and the configured
-scanner's intake permission. A working scanner/clean-result path is a rollout
-dependency; this PR does not claim to supply or verify it.
+Uses the portal's shared intake safety gate (no scanner configured per Leon's Nov 12 decision; infected/error/pending always blocked).
+
+The bridge calls `document.ensure_usable_for!(:intake)`. No scan status is
+hard-coded in the bridge. An enforcing adapter can require clean files through
+the same shared gate. Checksum, byte-size, visibility, tenant, revision,
+review/apply and retention gates remain unchanged.
 
 The new migration only adds a provenance table and nullable intake-document FK.
 Source revision/file retention stays independent of intake storage ownership.
@@ -99,3 +103,30 @@ Local evidence: `output/payroll-portal-pr6-20261113/` under the Shimizu Technolo
 root contains desktop/phone review and Imported screenshots, source-hash and
 saved-payroll `outcomes.json`, reproducible synthetic fixture scripts and the
 handoff.
+
+## Default-Noop correction acceptance (lead instruction, November 12)
+
+The core 1280×900 browser flow was rerun using the unmodified default
+ClientDocumentScanner::Noop: synthetic client submits a Revel PDF, staff
+acknowledge, open the existing import review and apply, then the client reloads
+and sees Imported. SQL confirms the retained portal document is not_scanned;
+no scanner override was loaded. Original/intake bytes and snapshot hashes match,
+with independent storage keys. The saved outcome is 40 regular/2 OT hours,
+profile $10, gross $430 and net $397.10. One Activity/import notification event
+was recorded; all three email deliveries are skipped.
+
+The 390×844 check inspected the review's employee card and the client Imported
+status. Page width stayed 390; dialog client/scroll width stayed 358. Both
+required correction scenarios passed. No frontend source files changed in this
+correction, so the conditional frontend gates were not rerun.
+
+The focused regression suite additionally imports not_scanned PDF/workbook
+sources under Noop, refuses infected/error/pending before parsing, and tests an
+enforcing adapter that rejects all non-clean statuses while allowing clean.
+The final correction gate counts are recorded in the handoff.
+
+Correction gates at code commit 7f59191e: **66 focused examples, 0 failures**;
+**6,620 full-suite examples, 0 failures, 4 existing pooler cases pending**;
+**RuboCop 1,798 files clean**; **Brakeman 0 errors / 0 warnings**. The owned
+schema-loaded correction DB, QA servers/tab, temporary storage and task-created
+node_modules were cleaned. No merge, deployment or reviewer command was issued.
