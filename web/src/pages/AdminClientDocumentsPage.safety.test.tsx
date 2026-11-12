@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { MemoryRouter } from 'react-router';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter, useNavigate } from 'react-router';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AdminClientDocumentsPage } from './AdminClientDocumentsPage';
 import type { ClientDocument } from '@/services/api';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), preview: vi.fn(), review: vi.fn(), list: vi.fn(), employees: vi.fn(), upload: vi.fn(), delete: vi.fn(), unarchive: vi.fn(), capabilities: [] as string[], recipientCount: 0 }));
+const mocks = vi.hoisted(() => ({ prepare: vi.fn(), get: vi.fn(), preview: vi.fn(), review: vi.fn(), list: vi.fn(), employees: vi.fn(), upload: vi.fn(), delete: vi.fn(), unarchive: vi.fn(), capabilities: [] as string[], recipientCount: 0 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { role: 'admin' }, isLoading: false }) }));
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({ activeCompany: { id: 1, client_capabilities: mocks.capabilities }, activeCompanyId: 1, loading: false }),
@@ -22,8 +22,8 @@ vi.mock('@/components/client-portal/PortalAlertRecipientsPanel', async () => {
 });
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/client-portal/PortalMessagesPanel', () => ({ PortalMessagesPanel: () => null }));
-vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) => open ? <button onClick={() => onOpenChange(false)}>Close preview</button> : null }));
-vi.mock('@/lib/documentPreview', () => ({ prepareDocumentPreview: vi.fn().mockResolvedValue({ kind: 'unsupported' }) }));
+vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: ({ open, onOpenChange, document, payload }: { open: boolean; onOpenChange: (open: boolean) => void; document: ClientDocument | null; payload: { message?: string } | null }) => open ? <section aria-label="Preview"><output>{document?.title}: {payload?.message}</output><button onClick={() => onOpenChange(false)}>Close preview</button></section> : null }));
+vi.mock('@/lib/documentPreview', () => ({ prepareDocumentPreview: mocks.prepare }));
 vi.mock('@/services/api', () => ({
   getActiveCompanyId: () => 1,
   adminClientDocumentsApi: { get: mocks.get, preview: mocks.preview, review: mocks.review, list: mocks.list, upload: mocks.upload, delete: mocks.delete, unarchive: mocks.unarchive },
@@ -32,6 +32,8 @@ vi.mock('@/services/api', () => ({
 const document = { id: 1, title: 'Payroll hours', file_name: 'hours.csv', category: 'payroll_source', created_at: '2026-11-11T00:00:00Z', file_size: 100, uploaded_by_id: 1, visible_to_client: true } as ClientDocument;
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.prepare.mockResolvedValue({ kind: 'unsupported' });
+  mocks.preview.mockResolvedValue({ blob: new Blob(['synthetic']) });
   mocks.capabilities = [];
   mocks.recipientCount = 0;
   mocks.list.mockResolvedValue({ data: [document] });
@@ -173,4 +175,62 @@ it('keeps the exact inbox document review action available after closing its pre
   expect(await screen.findByText('Reviewed by staff')).toBeTruthy();
   expect(mocks.review).toHaveBeenCalledWith(1);
   expect((screen.getByRole('button', { name: 'Mark reviewed' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('keeps the newest manual preview when an inbox preview finishes later', async () => {
+  let finishOld!: (value: { kind: string; message: string; objectUrl: string }) => void;
+  const second = { ...document, id: 2, title: 'Second file' };
+  mocks.get.mockResolvedValue({ data: document });
+  mocks.list.mockResolvedValue({ data: [document, second] });
+  mocks.prepare.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }))
+    .mockResolvedValue({ kind: 'unsupported', message: 'Second payload' });
+  render(<MemoryRouter initialEntries={['/companies/1/client-documents?document_id=1']}><AdminClientDocumentsPage /></MemoryRouter>);
+  await waitFor(() => expect(mocks.prepare).toHaveBeenCalledOnce());
+  await screen.findAllByText('Second file');
+  const row = screen.getAllByText('Second file').find(node => node.closest('tr'))!.closest('tr')!;
+  fireEvent.click(row.querySelector('button')!);
+  await screen.findByText('Second file: Second payload');
+  const revoke = vi.spyOn(URL, 'revokeObjectURL');
+  await act(async () => finishOld({ kind: 'image', message: 'Old payload', objectUrl: 'blob:old-preview' }));
+  expect(screen.getByText('Second file: Second payload')).toBeTruthy();
+  expect(screen.queryByText(/Old payload/)).toBeNull();
+  expect(revoke).toHaveBeenCalledWith('blob:old-preview');
+});
+
+function NextDocument(): React.ReactElement {
+  const navigate = useNavigate();
+  return <button onClick={() => navigate('/companies/1/client-documents?document_id=2')}>Open second inbox file</button>;
+}
+
+it('does not let a late review of the previous inbox file replace the new one', async () => {
+  const second = { ...document, id: 2, title: 'Second inbox file' };
+  let finish!: (value: { data: ClientDocument }) => void;
+  mocks.get.mockImplementation((id: number) => Promise.resolve({ data: id === 1 ? document : second }));
+  mocks.review.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  render(<MemoryRouter initialEntries={['/companies/1/client-documents?document_id=1']}><NextDocument /><AdminClientDocumentsPage /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Mark reviewed' }));
+  await waitFor(() => expect(mocks.review).toHaveBeenCalledWith(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Open second inbox file' }));
+  await screen.findByRole('heading', { name: 'Second inbox file' });
+  await act(async () => finish({ data: { ...document, reviewed_at: '2026-11-12T00:00:00Z' } }));
+  expect(screen.getByRole('heading', { name: 'Second inbox file' })).toBeTruthy();
+  expect(screen.getByText('Waiting on staff review')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Mark reviewed' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('blocks stale pagination while a new first-page document search is pending', async () => {
+  const meta = { current_page: 1, per_page: 50, total_pages: 2, total_count: 51 };
+  mocks.list.mockResolvedValueOnce({ data: [document], meta });
+  let finish!: (value: { data: ClientDocument[]; meta: typeof meta }) => void;
+  mocks.list.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
+  await screen.findByRole('button', { name: 'Load more files' });
+  fireEvent.change(screen.getByPlaceholderText('Find older files by title or filename'), { target: { value: 'Second' } });
+  expect(screen.queryByRole('button', { name: 'Load more files' })).toBeNull();
+  await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+  expect(mocks.list.mock.calls.map(([params]) => params.page)).toEqual([1, 1]);
+  await act(async () => finish({ data: [{ ...document, id: 2, title: 'Second file' }], meta: { ...meta, total_count: 1, total_pages: 1 } }));
+  await screen.findAllByText('Second file');
+  expect(screen.queryByText('Payroll hours')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Load more files' })).toBeNull();
 });

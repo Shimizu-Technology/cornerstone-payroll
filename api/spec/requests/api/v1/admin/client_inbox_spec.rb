@@ -108,6 +108,27 @@ RSpec.describe "Staff Client Inbox", type: :request do
     expect(rows(status: "waiting").map { |r| r["id"] }).to eq([ thread.id ])
   end
 
+  it "shows subject-only client conversations as waiting work without inventing unread messages" do
+    thread = create(:client_portal_thread, company: company, created_by: client, subject: "Subject only")
+    create(:client_portal_thread, company: company, created_by: staff, subject: "Staff-only draft")
+    expect(rows(status: "waiting").map { |r| r["id"] }).to eq([ thread.id ])
+    get "/api/v1/admin/client_inbox/counts"
+    expect(response.parsed_body["data"]).to include("unread_count" => 0, "waiting_count" => 1)
+    thread.update!(status: "resolved", resolved_at: Time.current, resolved_by: staff)
+    expect(rows(status: "waiting")).to be_empty
+  end
+
+  it "retains client work and sender identity after the author changes role or is deleted" do
+    original_name = client.name
+    thread = message_for(company)
+    client.update!(role: "accountant")
+    expect(rows(status: "waiting").first).to include("id" => thread.id, "unread" => true, "sender_name" => original_name)
+    client.destroy!
+    expect(rows(status: "waiting").first).to include("id" => thread.id, "unread" => true, "sender_name" => original_name)
+    expect(thread.messages.first.reload.author_id).to be_nil
+    expect(thread.messages.first.author_audience).to eq("client")
+  end
+
   it "preserves microsecond cursor precision across pages" do
     threads = 4.times.map { message_for(company) }
     base = 1.minute.ago.change(usec: 100_000)

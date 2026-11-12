@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -10,12 +10,12 @@ import { clientInboxApi, mergeInboxRows, type InboxCounts, type InboxRow } from 
 
 const labels = { message: 'Message', document: 'Client upload', employee_change: 'Employee change' };
 const scrollPositions = new Map<string, number>();
-export function ClientInbox() {
+export function ClientInbox(): ReactElement {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { companies, switchCompany } = useCompany();
+  const { companies, switchCompany, activeOrganizationId } = useCompany();
   const [rows, setRows] = useState<InboxRow[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [counts, setCounts] = useState<InboxCounts | null>(null);
@@ -23,29 +23,47 @@ export function ClientInbox() {
   const [error, setError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(true);
   const version = useRef(0);
+  const loadedPages = useRef(1);
   const invalidateRequests = useCallback(() => { ++version.current; }, []);
   const container = useRef<HTMLDivElement>(null);
-  const scrollKey = `${user?.id}:${location.pathname}${location.search}`;
+  const scrollKey = `${user?.id}:${activeOrganizationId}:${location.pathname}${location.search}`;
   const filterKey = params.toString();
   const getScroll = () => container.current?.closest('main');
-  const load = useCallback(async (next?: string) => {
+  const load = useCallback(async (next?: string, preserveWindow = false): Promise<void> => {
     const request = ++version.current;
     const filters = { company_id: Number(new URLSearchParams(filterKey).get('client')) || undefined, kind: new URLSearchParams(filterKey).get('kind') || undefined, status: new URLSearchParams(filterKey).get('status') || 'waiting' };
+    const pageLimit = preserveWindow ? loadedPages.current : 1;
     setBusy(true);
     setError(null);
     try {
-      const response = await clientInboxApi.list({ ...filters, cursor: next });
+      let response = await clientInboxApi.list({ ...filters, cursor: next });
+      let incoming = response.data;
+      let pages = 1;
+      while (!next && pages < pageLimit && response.meta.next_cursor) {
+        if (version.current !== request) return;
+        response = await clientInboxApi.list({ ...filters, cursor: response.meta.next_cursor });
+        incoming = mergeInboxRows(incoming, response.data);
+        pages += 1;
+      }
       const summary = await clientInboxApi.counts({ ...filters, status: 'all' });
       if (version.current !== request) return;
-      setRows(current => mergeInboxRows(next ? current : [], response.data));
+      if (preserveWindow) {
+        scrollPositions.set(scrollKey, container.current?.closest('main')?.scrollTop || 0);
+        setRestoring(true);
+      }
+      setRows(current => mergeInboxRows(next ? current : [], incoming));
+      loadedPages.current = next ? loadedPages.current + 1 : pages;
       setCursor(response.meta.next_cursor);
       setCounts(summary.data);
     } catch (err) {
-      if (version.current === request) { setError(err instanceof Error ? err.message : 'Could not load inbox'); if (!next) { setRows([]); setCounts(null); } }
+      if (version.current === request) {
+        setError(err instanceof Error ? err.message : 'Could not load inbox');
+        if (!next) { setRows([]); setCounts(null); setCursor(null); loadedPages.current = 1; }
+      }
     } finally { if (version.current === request) setBusy(false); }
-  }, [filterKey]);
+  }, [filterKey, scrollKey]);
   useEffect(() => {
-    setRows([]); setCursor(null); setRestoring(true);
+    setRows([]); setCursor(null); setRestoring(true); loadedPages.current = 1;
     void load();
     return invalidateRequests;
   }, [load, invalidateRequests]);
@@ -64,19 +82,24 @@ export function ClientInbox() {
     return () => main?.removeEventListener('scroll', save);
   }, [scrollKey, restoring]);
   useEffect(() => {
-    const refresh = () => { if (document.visibilityState !== 'hidden') void load(); };
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      if (document.visibilityState === 'hidden') return;
+      clearTimeout(pending);
+      pending = setTimeout(() => void load(undefined, true), 100);
+    };
     const timer = setInterval(refresh, 60_000);
     window.addEventListener('focus', refresh);
     window.addEventListener('portal-work-changed', refresh);
     document.addEventListener('visibilitychange', refresh);
-    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('portal-work-changed', refresh); document.removeEventListener('visibilitychange', refresh); };
+    return () => { clearInterval(timer); clearTimeout(pending); window.removeEventListener('focus', refresh); window.removeEventListener('portal-work-changed', refresh); document.removeEventListener('visibilitychange', refresh); };
   }, [load]);
-  const filter = (key: string, value: string) => {
+  const filter = (key: string, value: string): void => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value); else next.delete(key);
     setParams(next);
   };
-  const open = (row: InboxRow) => {
+  const open = (row: InboxRow): void => {
     if (!switchCompany(row.company_id)) return;
     scrollPositions.set(scrollKey, getScroll()?.scrollTop || 0);
     const target = new URLSearchParams({ inbox: location.pathname + location.search });
@@ -92,7 +115,7 @@ export function ClientInbox() {
         <label className="text-sm font-medium">Kind<Select value={params.get('kind') || ''} onChange={e => filter('kind', e.target.value)}><option value="">All kinds</option><option value="message">Messages</option><option value="document">Client uploads</option><option value="employee_change">Employee changes</option></Select></label>
         <label className="text-sm font-medium">Status<Select value={params.get('status') || 'waiting'} onChange={e => filter('status', e.target.value)}><option value="waiting">Waiting on staff</option><option value="unread">Unread</option><option value="all">All activity</option><option value="handled">Handled</option></Select></label>
       </div>
-      <div className="flex items-center justify-between gap-3"><p className="text-sm text-neutral-600">Most recent client activity first</p><Button variant="outline" disabled={busy} onClick={() => void load()}>Refresh</Button></div>
+      <div className="flex items-center justify-between gap-3"><p className="text-sm text-neutral-600">Most recent client activity first</p><Button variant="outline" disabled={busy} onClick={() => void load(undefined, true)}>Refresh</Button></div>
       {error && <div role="alert" className="rounded-lg border border-danger-200 p-4"><p>{error}</p><Button variant="outline" onClick={() => void load()}>Retry</Button></div>}
       {!busy && !error && !rows.length && <p className="rounded-lg border border-neutral-200 bg-white p-6 text-neutral-600">No portal work matches these filters.</p>}
       <ul className="divide-y divide-neutral-200 rounded-xl border border-neutral-200 bg-white">{rows.map(row => <li key={row.key}><button type="button" onClick={() => open(row)} className="flex w-full flex-col gap-2 p-4 text-left hover:bg-primary-50 focus-visible:outline-2 focus-visible:outline-offset-2 sm:flex-row sm:items-center sm:justify-between"><span className="min-w-0"><span className="block break-words text-xs font-semibold text-primary-800">{row.company_name} · {labels[row.kind]}</span><span className="mt-1 block break-words font-semibold text-neutral-950">{row.title}</span><span className="mt-1 block text-sm text-neutral-600">{row.sender_name ? `From ${row.sender_name} · ` : ''}{row.unread ? 'Unread · ' : ''}{row.waiting ? 'Waiting on staff' : 'Handled'}</span></span><time className="shrink-0 text-xs text-neutral-600" dateTime={row.activity_at}>{new Date(row.activity_at).toLocaleString('en-US', { timeZone: 'Pacific/Guam' })}</time></button></li>)}</ul>

@@ -107,11 +107,17 @@ function PortalMessagesContent({ api, documents, searchDocuments, initialThreadI
   const dataGeneration = useRef(0);
   const [newThread, setNewThread] = useState({ subject: '', body: '', document_id: '' });
   const [reply, setReply] = useState({ body: '', document_id: '' });
+  const [newThreadAttachment, setNewThreadAttachment] = useState<ClientDocument | null>(null);
+  const [replyAttachment, setReplyAttachment] = useState<ClientDocument | null>(null);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(Boolean(initialThreadId));
 
   const selectedDocumentIds = useRef(new Set<number>());
   selectedDocumentIds.current = new Set([Number(newThread.document_id), Number(reply.document_id)]);
-  const availableDocuments = useMemo(() => [...new Map([...documents, ...searchedDocuments].map(doc => [doc.id, doc])).values()], [documents, searchedDocuments]);
+  const availableDocuments = useMemo(() => {
+    const selectedIds = new Set([Number(newThread.document_id), Number(reply.document_id)]);
+    const retained = searchDocuments ? [newThreadAttachment, replyAttachment].filter((doc): doc is ClientDocument => doc !== null && selectedIds.has(doc.id)) : [];
+    return [...new Map([...retained, ...documents, ...searchedDocuments].map(doc => [doc.id, doc])).values()];
+  }, [documents, searchedDocuments, searchDocuments, newThreadAttachment, replyAttachment, newThread.document_id, reply.document_id]);
 
   const [desktop, setDesktop] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
   useEffect(() => {
@@ -300,7 +306,7 @@ function PortalMessagesContent({ api, documents, searchDocuments, initialThreadI
         setSelectedThread(response.data);
         setThreads((current) => upsertThread(current, response.data));
       })
-      .catch((err) => { if (active && !unavailableRef.current) setError(err instanceof Error ? err.message : 'Failed to load conversation'); });
+      .catch((err) => { if (active && !unavailableRef.current) { setMobileConversationOpen(false); setError(err instanceof Error ? err.message : 'Failed to load conversation'); } });
 
     return () => {
       active = false;
@@ -479,7 +485,7 @@ function PortalMessagesContent({ api, documents, searchDocuments, initialThreadI
               />
               <Select
                 value={newThread.document_id}
-                onChange={(event) => setNewThread((current) => ({ ...current, document_id: event.target.value }))}
+                onChange={(event) => { setNewThreadAttachment(availableDocuments.find(doc => doc.id === Number(event.target.value)) ?? null); setNewThread((current) => ({ ...current, document_id: event.target.value })); }}
               >
                 <option value="">Attach an existing document</option>
                 {documentOptions.map((document) => (
@@ -574,7 +580,7 @@ function PortalMessagesContent({ api, documents, searchDocuments, initialThreadI
                     placeholder={`Reply ${audienceLabel}`}
                   />
                   <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                    <Select value={reply.document_id} onChange={(event) => setReply((current) => ({ ...current, document_id: event.target.value }))}>
+                    <Select value={reply.document_id} onChange={(event) => { setReplyAttachment(availableDocuments.find(doc => doc.id === Number(event.target.value)) ?? null); setReply((current) => ({ ...current, document_id: event.target.value })); }}>
                       <option value="">Attach an existing document</option>
                       {documentOptions.map((document) => (
                         <option key={document.value} value={document.value} disabled={document.disabled}>{document.label}</option>

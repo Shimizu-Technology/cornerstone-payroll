@@ -17,6 +17,8 @@ import type { EmployeeChangeRequest } from '@/services/api';
 export function AdminEmployeeChangeRequestsPage() {
   const [searchParams] = useSearchParams();
   const deepRequestId = Number(searchParams.get('request_id')) || null;
+  const pendingDeepSelection = useRef(deepRequestId);
+  useEffect(() => { pendingDeepSelection.current = deepRequestId; }, [deepRequestId]);
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
   const canReview = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
@@ -67,8 +69,10 @@ export function AdminEmployeeChangeRequestsPage() {
       const response = await adminEmployeeChangeRequestsApi.list({ status: requestedStatus || undefined });
       if (!isCurrentRequest()) return;
       setRequests(response.data);
-      if (deepRequestId || response.data[0]) {
-        await selectRequest(deepRequestId || response.data[0].id);
+      const selectedId = pendingDeepSelection.current || response.data[0]?.id;
+      pendingDeepSelection.current = null;
+      if (selectedId) {
+        await selectRequest(selectedId);
       }
     } catch (err) {
       if (isCurrentRequest()) {
@@ -77,12 +81,12 @@ export function AdminEmployeeChangeRequestsPage() {
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [selectRequest, setError, deepRequestId]);
+  }, [selectRequest, setError]);
 
   useEffect(() => {
     void load();
     return invalidateRequests;
-  }, [status, load, invalidateRequests]);
+  }, [status, load, invalidateRequests, deepRequestId]);
 
   const updateRequest = async (action: 'approve' | 'reject') => {
     if (!selected || !canReview) return;
@@ -112,6 +116,7 @@ export function AdminEmployeeChangeRequestsPage() {
 
         <div className="max-w-xs">
           <Select value={status} onChange={(e) => {
+            pendingDeepSelection.current = null;
             currentStatusRef.current = e.target.value;
             invalidateRequests();
             setSelected(null);

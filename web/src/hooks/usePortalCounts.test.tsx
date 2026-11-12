@@ -27,3 +27,22 @@ it('uses the personal unread-count endpoint for client Messages', async () => {
   await waitFor(() => expect(result.current?.unread_count).toBe(207));
   expect(mocks.counts).not.toHaveBeenCalled();
 });
+
+it('coalesces duplicate org subscriptions and a thread/message event burst', async () => {
+  mocks.counts.mockResolvedValue({ data: { unread_count: 1, waiting_count: 1 } });
+  const first = renderHook(usePortalCounts, { wrapper: MemoryRouter });
+  const second = renderHook(usePortalCounts, { wrapper: MemoryRouter });
+  await waitFor(() => expect(second.result.current?.unread_count).toBe(1));
+  await waitFor(() => expect(first.result.current?.unread_count).toBe(1));
+  const before = mocks.counts.mock.calls.length;
+  const event = vi.fn();
+  window.addEventListener('portal-work-changed', event);
+  try {
+    mocks.counts.mockResolvedValue({ data: { unread_count: 2, waiting_count: 2 } });
+    act(() => { for (const [, callbacks] of mocks.subscribe.mock.calls) { callbacks.onInboxChanged(); callbacks.onInboxChanged(); callbacks.onThread(); } });
+    await waitFor(() => expect(first.result.current?.unread_count).toBe(2));
+    expect(second.result.current?.unread_count).toBe(2);
+    expect(event).toHaveBeenCalledOnce();
+    expect(mocks.counts.mock.calls.length - before).toBe(2);
+  } finally { window.removeEventListener('portal-work-changed', event); }
+});

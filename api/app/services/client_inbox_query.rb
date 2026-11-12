@@ -68,19 +68,19 @@ class ClientInboxQuery
     else
       scoped_companies.where(id: @user.company_assignments.active_access.where(client_management: true).select(:company_id)).select(:id).to_sql
     end
-    sql = sanitize(<<~SQL, @user.id, @user.created_at, @user.id, snapshot, snapshot, @user.id, @user.created_at, snapshot, snapshot)
+    sql = sanitize(<<~SQL, @user.id, @user.created_at, @user.id, snapshot, @user.id, @user.created_at, snapshot, snapshot)
       SELECT t.id, t.company_id, 'message' AS kind, t.subject AS title,
-        MAX(m.created_at) AS activity_at,
-        (SELECT a.name FROM client_portal_messages x LEFT JOIN users a ON a.id = x.author_id WHERE x.client_portal_thread_id = t.id AND x.created_at <= #{connection.quote(snapshot)} ORDER BY x.id DESC LIMIT 1) AS sender_name,
-        BOOL_OR(author.role = #{User.roles.fetch('client')} AND m.id > GREATEST(t.read_baseline_message_id, COALESCE(r.last_displayed_message_id, 0)) AND m.author_id IS DISTINCT FROM ? AND m.created_at >= ?) AS unread,
-        ((t.status = 'open' OR MAX(m.created_at) > t.resolved_at) AND (SELECT a.role = #{User.roles.fetch('client')} FROM client_portal_messages x LEFT JOIN users a ON a.id = x.author_id WHERE x.client_portal_thread_id = t.id AND x.created_at <= #{connection.quote(snapshot)} ORDER BY x.id DESC LIMIT 1)) AS waiting
+        COALESCE(MAX(m.created_at), t.created_at) AS activity_at,
+        COALESCE((SELECT COALESCE(x.author_name_snapshot, a.name, 'Former portal user') FROM client_portal_messages x LEFT JOIN users a ON a.id = x.author_id WHERE x.client_portal_thread_id = t.id AND x.created_at <= #{connection.quote(snapshot)} ORDER BY x.id DESC LIMIT 1), t.created_by_name_snapshot, creator.name, 'Former portal user') AS sender_name,
+        COALESCE(BOOL_OR(m.author_audience <> 'staff' AND m.id > GREATEST(t.read_baseline_message_id, COALESCE(r.last_displayed_message_id, 0)) AND m.author_id IS DISTINCT FROM ? AND m.created_at >= ?), FALSE) AS unread,
+        ((t.status = 'open' OR COALESCE(MAX(m.created_at), t.created_at) > t.resolved_at) AND COALESCE((SELECT x.author_audience <> 'staff' FROM client_portal_messages x WHERE x.client_portal_thread_id = t.id AND x.created_at <= #{connection.quote(snapshot)} ORDER BY x.id DESC LIMIT 1), t.created_by_audience <> 'staff')) AS waiting
       FROM client_portal_threads t
-      JOIN client_portal_messages m ON m.client_portal_thread_id = t.id
-      LEFT JOIN users author ON author.id = m.author_id
+      LEFT JOIN client_portal_messages m ON m.client_portal_thread_id = t.id AND m.created_at <= #{connection.quote(snapshot)}
+      LEFT JOIN users creator ON creator.id = t.created_by_id
       LEFT JOIN portal_thread_read_receipts r ON r.client_portal_thread_id = t.id AND r.user_id = ?
-      WHERE t.company_id IN (#{ids}) AND t.created_at <= ? AND m.created_at <= ?
-      GROUP BY t.id, r.last_displayed_message_id
-      HAVING BOOL_OR(author.role = #{User.roles.fetch('client')})
+      WHERE t.company_id IN (#{ids}) AND t.created_at <= ?
+      GROUP BY t.id, r.last_displayed_message_id, creator.name
+      HAVING COALESCE(BOOL_OR(m.author_audience <> 'staff'), FALSE) OR t.created_by_audience <> 'staff'
       UNION ALL
       SELECT d.id, d.company_id, 'document', d.title, d.created_at, uploader.name,
         (NOT EXISTS (SELECT 1 FROM portal_document_read_receipts r WHERE r.client_document_id = d.id AND r.user_id = ?) AND d.created_at >= ?),

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_12_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_12_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -516,6 +516,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_120000) do
     t.index [ "client_portal_thread_id" ], name: "index_client_portal_messages_on_thread_id"
     t.index [ "company_id", "created_at" ], name: "index_client_portal_messages_on_company_created_at"
     t.index [ "company_id" ], name: "index_client_portal_messages_on_company_id"
+    t.string "author_audience", default: "unknown", null: false
+    t.string "author_name_snapshot"
+    t.check_constraint "author_audience::text = ANY (ARRAY['client'::character varying, 'staff'::character varying, 'unknown'::character varying]::text[])", name: "portal_message_author_audience"
   end
 
   create_table "client_portal_threads", force: :cascade do |t|
@@ -538,6 +541,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_120000) do
     t.index [ "company_id" ], name: "index_client_portal_threads_on_company_id"
     t.index [ "created_by_id" ], name: "index_client_portal_threads_on_created_by_id"
     t.index [ "resolved_by_id" ], name: "index_client_portal_threads_on_resolved_by_id"
+    t.string "created_by_audience", default: "unknown", null: false
+    t.string "created_by_name_snapshot"
+    t.check_constraint "created_by_audience::text = ANY (ARRAY['client'::character varying, 'staff'::character varying, 'unknown'::character varying]::text[])", name: "portal_thread_creator_audience"
   end
 
   create_table "companies", force: :cascade do |t|

@@ -14,6 +14,13 @@ async function fixture(page: Page) {
   const payPeriod = { id: 2, company_id: 1, start_date: '2026-10-16', end_date: '2026-10-31', pay_date: '2026-11-15', status: 'committed', time_tracking: { aire_calendar: { source_id: 1 } }, payroll_items: [item] };
   await page.route('**/api/v1/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    // Navigation now authenticates the portal badge's live subscription. This
+    // fixture has no Cable server; deny only that handshake while retaining the
+    // assertion that viewing paycheck evidence never writes payroll data.
+    if (path.endsWith('/cable_ticket')) {
+      await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'Live updates unavailable in this fixture' }) });
+      return;
+    }
     if (!['GET', 'OPTIONS'].includes(route.request().method())) writes.push(path);
     let body: unknown = { data: [], meta: { total_pages: 1 } };
     if (path.endsWith('/auth/me')) body = { user: { id: 1, name: 'Review Admin', email: 'review@example.test', role: 'admin', company_id: 1, assigned_company_ids: [1], capabilities: [] } };
