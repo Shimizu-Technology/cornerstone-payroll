@@ -40,3 +40,15 @@ Both widths were rerun end to end on reset data after these fixes.
 - an inbox selector matched both the period row and the period conversation row.
 
 **Not certified here:** real Clerk/Cable authentication, native phone keyboards, Safari and real email delivery. The advisory Impeccable scan of the new UI paths reported no findings.
+
+## Review round 1 retest (head 1f994f28)
+
+After the first CodeRabbit review was addressed, all six cases were rerun at 390 and 1280 on a fresh synthetic database. All 12 passed, and two cases gained extra checks:
+- **Q2** now enters a template link, then ticks "No changes this period". The saved revision has no link.
+- **Q4** now checks that opening the period in the foreground records the staff read cursor at exactly the latest client update.
+
+Runtime evidence:
+- 0 no-changes revisions carry a link or workbook.
+- All four drafts store a retry fingerprint.
+- Email stayed off: 16 deliveries skipped.
+- 0 payroll items written.
