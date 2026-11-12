@@ -32,6 +32,8 @@ module Api
           render json: { data: payload }
         rescue PortalNotifications::RecipientListUpdate::IneligibleRecipient
           render_invalid("Only active staff who can view this client can receive its alerts")
+        rescue PortalNotifications::RecipientListUpdate::EmailBelongsToAccount => e
+          render_invalid("#{e.message} already has a Cornerstone Payroll account. Tick that person in the list instead, so their own alert settings apply.")
         end
 
         private

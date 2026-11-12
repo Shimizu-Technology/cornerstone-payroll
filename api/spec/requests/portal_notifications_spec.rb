@@ -141,11 +141,18 @@ RSpec.describe "Portal activity notifications", :portal_notifications, type: :re
       expect(submitted.deliveries.first.deliver_after.in_time_zone("Pacific/Guam").hour).to eq(7)
 
       act_as(staff)
-      patch "/api/v1/admin/employee_change_requests/#{EmployeeChangeRequest.sole.id}/approve", params: { review_notes: "OK" }
-      expect(response).to have_http_status(:ok), response.body
-      decided = PortalNotificationEvent.find_by!(event_type: "employee_change_decided")
-      expect(decided.metadata).to include("decision" => "approved")
-      expect(decided.deliveries.map(&:user)).to eq([ client ])
+      with_portal_email do
+        patch "/api/v1/admin/employee_change_requests/#{EmployeeChangeRequest.sole.id}/approve", params: { review_notes: "OK" }
+        expect(response).to have_http_status(:ok), response.body
+        decided = PortalNotificationEvent.find_by!(event_type: "employee_change_decided")
+        expect(decided.metadata).to include("decision" => "approved")
+        delivery = decided.deliveries.sole
+        expect(delivery).to have_attributes(user_id: client.id, status: "pending", delivery_mode: "digest")
+
+        travel_to(delivery.deliver_after + 1.minute) { PortalNotifications::Dispatcher.run! }
+        expect(delivery.reload.status).to eq("sent")
+        expect(captured_portal_emails.map { |email| email[:to] }).to include(client.email)
+      end
     end
 
     %w[approve reject].each do |decision|

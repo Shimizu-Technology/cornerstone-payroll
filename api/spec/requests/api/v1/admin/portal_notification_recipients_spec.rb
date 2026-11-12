@@ -75,6 +75,17 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
     expect(AuditLog.where(action: "portal_notification_recipients#update")).to be_empty
   end
 
+  it "rejects an extra address that belongs to an account, so that person's own alert setting applies" do
+    save(emails: [ "RILEY@example.test" ])
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("riley@example.test already has a Cornerstone Payroll account")
+    expect(PortalNotificationRecipient.where(company: company)).to be_empty
+
+    save(user_ids: [ reviewer.id ], emails: [ "books@example.test" ])
+    expect(response).to have_http_status(:ok), response.body
+  end
+
   it "keeps each client's list separate" do
     save(emails: [ "first@example.test" ], headers: { "X-Company-Id" => other_company.id.to_s })
     get path, headers: headers
