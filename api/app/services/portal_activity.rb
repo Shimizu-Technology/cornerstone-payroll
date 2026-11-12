@@ -3,7 +3,7 @@
 # One vocabulary and deliberately small public projection for both audiences.
 class PortalActivity
   DOCUMENT_ACTIONS = %w[portal_documents#reviewed client_documents#create admin_client_documents#create client_documents#destroy admin_client_documents#destroy portal_documents#opened portal_documents#preview portal_documents#download client_documents#archive admin_client_documents#archive admin_client_documents#unarchive].freeze
-  THREAD_ACTIONS = %w[client_portal_threads#create client_portal_threads#update client_portal_threads#resolved client_portal_threads#reopened client_portal_threads#opened client_portal_threads#mark_read client_portal_messages#create].freeze
+  THREAD_ACTIONS = %w[client_portal_threads#create client_portal_threads#update client_portal_threads#resolved client_portal_threads#reopened client_portal_threads#opened client_portal_threads#mark_read client_portal_messages#create portal_file_requests#create portal_file_requests#respond portal_file_requests#accept portal_file_requests#ask_again portal_file_requests#withdraw].freeze
 
   def self.document_metadata(document)
     {
@@ -14,12 +14,13 @@ class PortalActivity
   end
 
   def self.message_metadata(message)
+    documents = message.attachment_documents
     {
       thread_id: message.client_portal_thread_id, subject: message.client_portal_thread.subject,
-      document_id: message.client_document_id, attachment_ids: [ message.client_document_id ].compact,
-      attachment_titles: [ message.client_document&.title ].compact,
-      employee_name: message.client_document&.employee&.full_name
-    }
+      document_id: message.client_document_id, attachment_ids: documents.map(&:id),
+      attachment_titles: documents.map(&:title),
+      employee_name: documents.first&.employee&.full_name
+    }.merge({ message_kind: (message.kind unless message.kind == "message"), file_request_id: message.portal_file_request_id }.compact)
   end
 
   def self.record!(user:, record:, action:, metadata: {}, **context)
