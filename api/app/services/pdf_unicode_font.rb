@@ -35,6 +35,16 @@ module PdfUnicodeFont
     end
   end
 
+  # Liberation Sans has no CJK or Hangul glyphs, so those characters print as
+  # empty boxes. Checks and tax filings refuse such a name instead of issuing
+  # a document whose payee or employee can't be read.
+  class UnprintableName < StandardError
+    def initialize(label, name, characters)
+      super("#{label} \"#{name}\" has characters checks and tax forms can't print " \
+            "(#{characters.join(' ')}). Enter the name in Latin letters, then try again.")
+    end
+  end
+
   module_function
 
   # Drop-in for Prawn::Document.new. Block forms receive the document.
@@ -61,5 +71,18 @@ module PdfUnicodeFont
     )
     pdf.font(FAMILY)
     pdf
+  end
+
+  def unprintable_characters(text)
+    text.to_s.each_char.reject { |char| char.match?(/[[:space:][:cntrl:]]/) || printable_codepoints.include?(char.ord) }.uniq
+  end
+
+  def ensure_printable!(name, label:)
+    missing = unprintable_characters(name)
+    raise UnprintableName.new(label, name, missing) if missing.any?
+  end
+
+  def printable_codepoints
+    @printable_codepoints ||= TTFunk::File.open(FILES[:normal]).cmap.unicode.first.code_map.keys.to_set.freeze
   end
 end

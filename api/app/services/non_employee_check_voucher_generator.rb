@@ -20,6 +20,7 @@ class NonEmployeeCheckVoucherGenerator
   end
 
   def generate
+    PdfUnicodeFont.ensure_printable!(check.payable_to, label: "Payee")
     PdfUnicodeFont.document(page_size: "LETTER", page_layout: :portrait, margin: 36) do |pdf|
       render_header(pdf)
       render_summary(pdf)

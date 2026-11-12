@@ -99,6 +99,24 @@ RSpec.describe "PDF generators with accented and non-Latin names" do
     expect_names(GeneralTransmittalPdfGenerator.new(transmittal).generate, %w[Mañibusan Nguyễn])
   end
 
+  it "refuses checks and tax summaries whose names would print as empty boxes" do
+    primary_item.employee.update!(first_name: "小明", last_name: "王")
+    unprintable = [ PdfUnicodeFont::UnprintableName, /Employee "小明 王".*\(小 明 王\).*Latin letters/ ]
+
+    expect { CheckGenerator.new(primary_item.reload).generate }.to raise_error(*unprintable)
+    expect { FirstHawaiianFourUpCheckGenerator.new(company: company, payroll_items: [ primary_item ]).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Payee "小明 王"/)
+
+    check = create(:non_employee_check, :with_check_number, company: company, payable_to: "김민수 Builders")
+    expect { NonEmployeeCheckGenerator.new(check).generate }.to raise_error(PdfUnicodeFont::UnprintableName, /\(김 민 수\)/)
+    expect { NonEmployeeCheckVoucherGenerator.new(check).generate }.to raise_error(PdfUnicodeFont::UnprintableName)
+
+    expect { W2GuPdfGenerator.new({ employees: [ { employee_name: "王小明" } ] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Employee "王小明"/)
+    expect { Form1099NecPdfGenerator.new({ reportable_contractors: [ { name: "Kim", business_name: "김 Trading" } ] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Contractor business "김 Trading"/)
+  end
+
   it "prints CJK and Hangul names without failing the document" do
     primary_item.employee.update!(first_name: "小明", last_name: "王")
     other = payroll_items.last.employee
