@@ -17,6 +17,7 @@ import { stepLabel, type PortalDocumentsApi } from './portalFiles';
 import { RequestFileDialog } from './RequestFileDialog';
 import { hasDraft } from './messageDrafts';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { subscribeToClientPortalThreads } from '@/services/clientPortalCable';
 import type { BoundedListMeta, ClientDocument, ClientPortalMessage, ClientPortalThread, PortalReadDisplay } from '@/services/api';
 
@@ -87,6 +88,9 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
   refreshCompanies: () => Promise<void>;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+  // Drafts belong to one person and one client.
+  const draftScope = `${user?.id ?? 'anonymous'}:${companyId}`;
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const filter = FILTERS.some(option => option.value === searchParams.get('conversations')) ? searchParams.get('conversations') || '' : '';
@@ -122,7 +126,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
   const unavailableRef = useRef(false);
   const dataGeneration = useRef(0);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(Boolean(initialThreadId || urlThreadId));
-  const [newFormOpen, setNewFormOpen] = useState(() => hasDraft(`${companyId}:new`));
+  const [newFormOpen, setNewFormOpen] = useState(() => hasDraft(`${draftScope}:new`));
   const [requestOpen, setRequestOpen] = useState<{ threadId: number | null; subject: string | null } | null>(null);
   // Phone history: opening a conversation pushes an entry, so the browser's
   // Back and the in-page Back both return to the same filtered list.
@@ -516,7 +520,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
               {staff && <Button type="button" variant="outline" disabled={unavailable} onClick={() => setRequestOpen({ threadId: null, subject: null })}><FileQuestion className="mr-2 h-4 w-4" aria-hidden />Request a file</Button>}
             </div>
             <div id="portal-new-conversation" className={`${newFormOpen ? 'block' : 'hidden lg:block'} rounded-lg border border-neutral-200 bg-neutral-50 p-4`}>
-              <MessageComposer draftKey={`${companyId}:new`} documentsApi={documentsApi} withSubject label={`Message ${audienceLabel}`}
+              <MessageComposer draftKey={`${draftScope}:new`} documentsApi={documentsApi} withSubject label={`Message ${audienceLabel}`}
                 placeholder={`Message ${audienceLabel}`} submitLabel="Start Conversation" disabled={unavailable} onSend={createThread}
                 actions={staff ? <Button type="button" variant="ghost" className="hidden lg:inline-flex" disabled={unavailable} onClick={() => setRequestOpen({ threadId: null, subject: null })}><FileQuestion className="mr-2 h-4 w-4" aria-hidden />Request a file</Button> : undefined} />
             </div>
@@ -608,13 +612,13 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
                 <div ref={messagesContainer} className="max-h-[min(520px,60dvh)] space-y-3 overflow-y-auto bg-neutral-50/60 p-4">
                   {(selectedThread.messages || []).map((message) => (
                     <MessageBubble key={message.id} message={message} documents={bubbleDocuments(message)} documentsApi={documentsApi}
-                      audience={audience} companyId={companyId} onChanged={() => refreshSelected(selectedThread.id)} />
+                      audience={audience} draftScope={draftScope} onChanged={() => refreshSelected(selectedThread.id)} />
                   ))}
                 </div>
 
                 <ResourceActivity key={selectedThread.id} id={selectedThread.id} api={api} revision={selectedThread.updated_at} />
                 <div className="border-t border-neutral-200 p-4">
-                  <MessageComposer key={selectedThread.id} draftKey={`${companyId}:thread:${selectedThread.id}`} documentsApi={documentsApi}
+                  <MessageComposer key={selectedThread.id} draftKey={`${draftScope}:thread:${selectedThread.id}`} documentsApi={documentsApi}
                     label={`Reply ${audienceLabel}`} placeholder={`Reply ${audienceLabel}`} submitLabel="Send" disabled={unavailable}
                     onSend={payload => sendReply(selectedThread, payload)} />
                 </div>
@@ -641,12 +645,12 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
   );
 }
 
-function MessageBubble({ message, documents, documentsApi, audience, companyId, onChanged }: {
+function MessageBubble({ message, documents, documentsApi, audience, draftScope, onChanged }: {
   message: ClientPortalMessage;
   documents: ClientDocument[];
   documentsApi: PortalDocumentsApi;
   audience: 'client' | 'staff';
-  companyId: number | null;
+  draftScope: string;
   onChanged: () => Promise<void>;
 }) {
   const fromStaff = message.author_audience === 'staff';
@@ -664,7 +668,7 @@ function MessageBubble({ message, documents, documentsApi, audience, companyId, 
       {message.body && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-neutral-700">{message.body}</p>}
       <MessageAttachments documents={documents} api={documentsApi} />
       {message.kind === 'file_request' && message.file_request && (
-        <FileRequestCard request={message.file_request} audience={audience} companyId={companyId} documentsApi={documentsApi} onChanged={onChanged} />
+        <FileRequestCard request={message.file_request} audience={audience} draftScope={draftScope} documentsApi={documentsApi} onChanged={onChanged} />
       )}
     </article>
   );
