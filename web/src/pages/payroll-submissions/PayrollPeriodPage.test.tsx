@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PayrollPeriodPage } from './PayrollPeriodPage';
-import type { PeriodDetail } from '@/services/payrollSubmissions';
+import type { PeriodDetail, SubmissionRevision } from '@/services/payrollSubmissions';
 import type { ClientDocument } from '@/services/api';
 
 const mocks = vi.hoisted(() => ({
@@ -24,7 +24,7 @@ vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany
 vi.mock('@/components/layout/Header', () => ({ Header: ({ title, description }: { title: string; description?: string }) => <header><h1>{title}</h1><p>{description}</p></header> }));
 
 const doc = (id: number, name: string): ClientDocument => ({ id, title: name, file_name: name, content_type: 'application/pdf', file_size: 10, category: 'payroll_source', created_at: '2026-11-17T00:00:00Z', visible_to_client: true, shared_by_staff: false, uploaded_by_id: 1, preview_status: 'not_required', preview_available: true, scan_status: 'clean' } as ClientDocument);
-const revision = (n: number, current: boolean) => ({
+const revision = (n: number, current: boolean): SubmissionRevision => ({
   id: n, revision: n, current, superseded: !current, submitted_at: '2026-11-17T02:00:00Z', submitted_by_name: 'Emma Client',
   acknowledged_at: null, acknowledged_by_name: null, no_changes: n === 1, notes: null, changes_link_url: null,
   changes: n === 2 ? [{ kind: 'paid_leave' as const, label: 'Paid leave', employee_id: 5, employee_name: 'Sam Worker', hours: '35' }] : [],
