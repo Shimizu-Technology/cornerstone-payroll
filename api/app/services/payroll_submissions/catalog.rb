@@ -25,9 +25,12 @@ module PayrollSubmissions
       Time.current.in_time_zone(TIME_ZONE).to_date
     end
 
-    def initialize(company:, today: self.class.today)
+    # today: fixed local date for tests; otherwise each period opens on its
+    # schedule's own local date.
+    def initialize(company:, today: nil)
       @company = company
-      @today = today
+      @fixed_today = today
+      @today = today || self.class.today
     end
 
     attr_reader :today
@@ -39,19 +42,13 @@ module PayrollSubmissions
     end
 
     def derives_from_schedule?
-      return false unless schedule
-
-      case schedule.period_rule
-      when "weekly", "biweekly" then schedule.period_anchor_date.present?
-      when "semimonthly" then true
-      else false
-      end
+      derivable?(schedule)
     end
 
     # Newest first: saved periods and offered ones, without duplicates.
     def entries
       records = PayrollSubmissionPeriod.where(company_id: @company.id).order(end_date: :desc, id: :desc).limit(LIST_LIMIT).to_a
-      offered = derives_from_schedule? ? derived_entries : created_entries
+      offered = offered_entries
       by_dates = records.index_by { |record| [ record.start_date, record.end_date ] }
       offered.each { |entry| entry.record ||= by_dates.delete([ entry.start_date, entry.end_date ]) }
       saved = by_dates.values.map { |record| entry_for_record(record) }
@@ -74,7 +71,7 @@ module PayrollSubmissions
       record = PayrollSubmissionPeriod.find_by(company_id: @company.id, start_date: start_date, end_date: end_date)
       return entry_for_record(record) if record
 
-      (derives_from_schedule? ? derived_entries : created_entries).find { |entry| entry.start_date == start_date && entry.end_date == end_date }
+      offered_entries.find { |entry| entry.start_date == start_date && entry.end_date == end_date }
     rescue Date::Error
       nil
     end
@@ -91,8 +88,10 @@ module PayrollSubmissions
       end.tap { |record| entry.record = record }
     end
 
+    # Uses the period's own schedule timezone, so a company behind Guam does
+    # not open early.
     def open_for_files?(entry)
-      @today >= entry.end_date
+      local_today(entry.schedule || schedule) >= entry.end_date
     end
 
     def pay_date_for(entry)
@@ -111,19 +110,58 @@ module PayrollSubmissions
         pay_period: record.pay_period, schedule: record.company_pay_schedule, source: record.source, record: record)
     end
 
-    def derived_entries
-      @derived_entries ||= derived_ranges.filter_map do |start_date, end_date|
-        next if start_date < schedule.effective_on || (schedule.ends_on && end_date > schedule.ends_on)
+    def derivable?(target)
+      return false unless target
 
-        pay_period = matching_pay_period(start_date, end_date)
-        Entry.new(start_date: start_date, end_date: end_date, schedule: schedule, source: "schedule", pay_period: pay_period,
-          pay_date: pay_period&.pay_date || schedule.scheduled_pay_date_for(end_date))
+      case target.period_rule
+      when "weekly", "biweekly" then target.period_anchor_date.present?
+      when "semimonthly" then true
+      else false
       end
     end
 
-    def derived_ranges
-      if schedule.period_rule == "semimonthly"
-        cursor = @today.day <= 15 ? @today.beginning_of_month : @today.change(day: 16)
+    def local_today(target)
+      return @fixed_today if @fixed_today
+
+      zone = ActiveSupport::TimeZone[target&.timezone.to_s] || ActiveSupport::TimeZone[TIME_ZONE]
+      Time.current.in_time_zone(zone).to_date
+    end
+
+    # The current schedule's periods, plus periods that ended before it took
+    # effect: created pay periods and, when the preceding schedule had a
+    # derivable rule, its derived periods. A schedule change never hides a
+    # period that still needs files. Duplicates keep the linked pay period.
+    def offered_entries
+      @offered_entries ||= begin
+        list = derivable?(schedule) ? derived_entries_for(schedule, @today) : created_entries
+        if schedule
+          cutoff = schedule.effective_on
+          list += created_entries.select { |entry| entry.end_date < cutoff } if derivable?(schedule)
+          previous = CompanyPaySchedule.for_date(@company.id, cutoff - 1)
+          if derivable?(previous)
+            list += derived_entries_for(previous, cutoff - 1)
+              .select { |entry| entry.end_date < cutoff && entry.end_date >= @today - CREATED_PERIOD_LOOKBACK }
+          end
+        end
+        list.group_by { |entry| [ entry.start_date, entry.end_date ] }.values
+          .map { |same| same.find(&:pay_period) || same.first }
+          .sort_by { |entry| -entry.end_date.jd }
+      end
+    end
+
+    def derived_entries_for(target, reference)
+      derived_ranges(target, reference).filter_map do |start_date, end_date|
+        next if start_date < target.effective_on || (target.ends_on && end_date > target.ends_on)
+
+        pay_period = matching_pay_period(start_date, end_date)
+        Entry.new(start_date: start_date, end_date: end_date, schedule: target, source: "schedule", pay_period: pay_period,
+          pay_date: pay_period&.pay_date || target.scheduled_pay_date_for(end_date))
+      end
+    end
+
+    def derived_ranges(target, reference)
+      if target.period_rule == "semimonthly"
+        cursor = reference.day <= 15 ? reference.beginning_of_month : reference.change(day: 16)
         ranges = []
         (DERIVED_PAST_PERIODS + 1).times do
           ranges << [ cursor, cursor.day == 1 ? cursor.change(day: 15) : cursor.end_of_month ]
@@ -132,9 +170,9 @@ module PayrollSubmissions
         return ranges
       end
 
-      length = schedule.period_rule == "weekly" ? 7 : 14
-      anchor = schedule.period_anchor_date
-      current = anchor + (((@today - anchor).to_i / length).floor * length)
+      length = target.period_rule == "weekly" ? 7 : 14
+      anchor = target.period_anchor_date
+      current = anchor + (((reference - anchor).to_i / length).floor * length)
       (0..DERIVED_PAST_PERIODS).map do |offset|
         start_date = current - (offset * length)
         [ start_date, start_date + (length - 1) ]

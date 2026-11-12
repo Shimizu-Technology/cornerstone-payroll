@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "digest"
+
 module PayrollSubmissions
   # Status changes, drafts and period messages. Each runs in one transaction
   # with the period row locked: status, history, audit entry and notification
@@ -86,10 +88,6 @@ module PayrollSubmissions
       key = params[:idempotency_key].presence&.to_s
       raise FileSet::Invalid, { "idempotency_key" => [ "is too long" ] } if key && key.length > 128
 
-      if key && entry.record && (existing = entry.record.drafts.find_by(created_by_id: @actor.id, idempotency_key: key))
-        return existing
-      end
-
       incoming = []
       incoming << [ "paycheck", params[:paycheck_pdf] ] if params[:paycheck_pdf].present?
       incoming << [ "direct_deposit", params[:direct_deposit_pdf] ] if params[:direct_deposit_pdf].present?
@@ -99,7 +97,15 @@ module PayrollSubmissions
       raise FileSet::Invalid, { "note" => [ "Keep the note under 5,000 characters" ] } if note && note.length > 5000
 
       post = ActiveModel::Type::Boolean.new.cast(params.fetch(:post, true))
-      files = FileSet.new(company_id: @company.id, files: incoming).prepare!.upload!
+      # Bound before any upload so the rescue below can always discard keys.
+      files = FileSet.new(company_id: @company.id, files: incoming)
+      files.prepare!
+      fingerprint = Digest::SHA256.hexdigest(JSON.generate([ files.fingerprint_parts, note, post ]))
+      if key && entry.record && (existing = entry.record.drafts.find_by(created_by_id: @actor.id, idempotency_key: key))
+        return replay_draft(existing, fingerprint)
+      end
+
+      files.upload!
       draft = nil
       created = false
       PayrollSubmissionPeriod.transaction do
@@ -120,7 +126,7 @@ module PayrollSubmissions
         end
         draft = period.drafts.create!(company_id: @company.id, revision: revision, note: note, created_by: @actor,
           paycheck_document: documents["paycheck"], direct_deposit_document: documents["direct_deposit"],
-          idempotency_key: key, posted_at: (Time.current if post), posted_by: (@actor if post))
+          idempotency_key: key, request_fingerprint: fingerprint, posted_at: (Time.current if post), posted_by: (@actor if post))
         if post
           publish!(period, draft)
         else
@@ -128,7 +134,10 @@ module PayrollSubmissions
         end
         created = true
       end
-      files.discard! unless created
+      unless created
+        files.discard!
+        return replay_draft(draft, fingerprint)
+      end
       draft
     rescue StandardError
       files&.discard!
@@ -182,6 +191,12 @@ module PayrollSubmissions
         period.lock!
         yield
       end
+    end
+
+    def replay_draft(existing, fingerprint)
+      raise Conflict, "This retry key was used for a different draft" unless existing.request_fingerprint == fingerprint
+
+      existing
     end
 
     def publish!(period, draft)

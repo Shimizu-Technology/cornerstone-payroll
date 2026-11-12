@@ -30,7 +30,7 @@ RSpec.describe PayrollSubmissions::CreateRevision, :postgres_concurrency do
     Organization.where(id: organization.id).delete_all
   end
 
-  it "gives two simultaneous first sends distinct, consecutive revisions on one period" do
+  it "serializes two simultaneous first sends: one becomes revision 1, the other must reload" do
     arrived = Queue.new
     release = Queue.new
     allow_any_instance_of(PayrollSubmissions::FileSet).to receive(:upload!).and_wrap_original do |original, *args|
@@ -54,16 +54,21 @@ RSpec.describe PayrollSubmissions::CreateRevision, :postgres_concurrency do
         end
       end
     end
-    Timeout.timeout(15) do
-      2.times { arrived.pop }
+    begin
+      Timeout.timeout(15) { 2.times { arrived.pop } }
+    ensure
+      # Always release both workers, even after a timeout or a failed worker,
+      # so no thread keeps a database connection into later examples.
       2.times { release << true }
-      threads.each(&:join)
+      threads.each { |thread| thread.join(10) || thread.kill }
     end
 
-    outcomes = Array.new(2) { results.pop }
-    expect(outcomes.map(&:first)).to eq(%i[ok ok]), outcomes.inspect
-    expect(outcomes.map(&:last)).to contain_exactly(1, 2)
+    outcomes = Array.new(2) { results.pop(true) }
+    expect(outcomes.map(&:first)).to contain_exactly(:ok, :error), outcomes.inspect
+    expect(outcomes.find { |kind, _| kind == :ok }.last).to eq(1)
+    expect(outcomes.find { |kind, _| kind == :error }.last).to be_a(described_class::Conflict)
     expect(PayrollSubmissionPeriod.where(company_id: company.id).count).to eq(1)
-    expect(PayrollSubmission.where(company_id: company.id).order(:revision).pluck(:revision)).to eq([ 1, 2 ])
+    expect(PayrollSubmission.where(company_id: company.id).pluck(:revision)).to eq([ 1 ])
+    expect(ClientDocument.where(company_id: company.id).count).to eq(1)
   end
 end

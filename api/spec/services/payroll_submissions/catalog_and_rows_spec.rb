@@ -3,7 +3,49 @@
 require "rails_helper"
 
 RSpec.describe "Pay-period catalog and change rows" do
+  include ActiveSupport::Testing::TimeHelpers
   let(:company) { create(:company) }
+
+  def schedule!(attrs)
+    CompanyPaySchedule.create!({ company: company, timezone: "Pacific/Guam", source: "operator_confirmed",
+      confirmation_status: "needs_confirmation" }.merge(attrs))
+  end
+
+  it "keeps the preceding schedule's periods offered after a schedule change" do
+    schedule!(frequency: "weekly", period_rule: "manual", pay_date_rule: "manual", effective_on: Date.new(2026, 1, 1), ends_on: Date.new(2026, 11, 15))
+    schedule!(frequency: "semimonthly", period_rule: "semimonthly", pay_date_rule: "semimonthly_15th_and_month_end", effective_on: Date.new(2026, 11, 16))
+    create(:pay_period, company: company, start_date: Date.new(2026, 11, 9), end_date: Date.new(2026, 11, 15), pay_date: Date.new(2026, 11, 20))
+    catalog = PayrollSubmissions::Catalog.new(company: company, today: Date.new(2026, 11, 18))
+    refs = catalog.entries.map(&:ref)
+    expect(refs).to include("2026-11-16_2026-11-30", "2026-11-09_2026-11-15")
+    expect(refs).not_to include("2026-11-01_2026-11-15")
+    entry = catalog.resolve("2026-11-09_2026-11-15")
+    expect(entry.pay_period).to be_present
+    expect(catalog.open_for_files?(entry)).to be(true)
+  end
+
+  it "also keeps derived periods of a preceding anchored schedule, without duplicates" do
+    schedule!(frequency: "biweekly", period_rule: "biweekly", period_start_weekday: 1, period_anchor_date: Date.new(2026, 10, 19),
+      pay_date_rule: "manual", effective_on: Date.new(2026, 1, 1), ends_on: Date.new(2026, 11, 15))
+    schedule!(frequency: "semimonthly", period_rule: "semimonthly", pay_date_rule: "semimonthly_15th_and_month_end", effective_on: Date.new(2026, 11, 16))
+    create(:pay_period, company: company, start_date: Date.new(2026, 11, 2), end_date: Date.new(2026, 11, 15), pay_date: Date.new(2026, 11, 20))
+    refs = PayrollSubmissions::Catalog.new(company: company, today: Date.new(2026, 11, 18)).entries.map(&:ref)
+    expect(refs.count("2026-11-02_2026-11-15")).to eq(1)
+    expect(refs).to include("2026-10-19_2026-11-01")
+  end
+
+  it "opens files on the schedule's local date, not Guam's" do
+    schedule!(frequency: "biweekly", period_rule: "manual", pay_date_rule: "manual", timezone: "Pacific/Honolulu", effective_on: Date.new(2026, 1, 1))
+    create(:pay_period, company: company, start_date: Date.new(2026, 11, 2), end_date: Date.new(2026, 11, 15), pay_date: Date.new(2026, 11, 20))
+    travel_to(Time.utc(2026, 11, 15, 2, 0)) do # Nov 15 noon in Guam, Nov 14 4 PM in Honolulu
+      catalog = PayrollSubmissions::Catalog.new(company: company)
+      expect(catalog.open_for_files?(catalog.resolve("2026-11-02_2026-11-15"))).to be(false)
+    end
+    travel_to(Time.utc(2026, 11, 15, 12, 0)) do
+      catalog = PayrollSubmissions::Catalog.new(company: company)
+      expect(catalog.open_for_files?(catalog.resolve("2026-11-02_2026-11-15"))).to be(true)
+    end
+  end
 
   it "derives semimonthly periods from the schedule without an anchor" do
     CompanyPaySchedule.create!(company: company, frequency: "semimonthly", period_rule: "semimonthly",

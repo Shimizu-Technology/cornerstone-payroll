@@ -98,10 +98,10 @@ class ClientInboxQuery
           WHEN EXTRACT(MONTH FROM p.start_date) <> EXTRACT(MONTH FROM p.end_date) THEN to_char(p.start_date, 'Mon FMDD') || ' – ' || to_char(p.end_date, 'Mon FMDD, YYYY')
           ELSE to_char(p.start_date, 'Mon FMDD') || '–' || to_char(p.end_date, 'FMDD, YYYY') END,
         latest.created_at, COALESCE(actor.name, latest.actor_name_snapshot, 'Former portal user'),
-        (latest.created_at >= ? AND latest.created_at > COALESCE(r.seen_at, '-infinity'::timestamp)),
+        (latest.created_at >= ? AND latest.id > COALESCE(r.last_seen_event_id, 0)),
         (p.status IN ('submitted', 'approved', 'changes_requested'))
       FROM payroll_submission_periods p
-      JOIN LATERAL (SELECT e.created_at, e.actor_id, e.actor_name_snapshot FROM payroll_submission_status_events e
+      JOIN LATERAL (SELECT e.id, e.created_at, e.actor_id, e.actor_name_snapshot FROM payroll_submission_status_events e
         WHERE e.payroll_submission_period_id = p.id AND e.actor_audience = 'client' AND e.created_at <= ?
         ORDER BY e.id DESC LIMIT 1) latest ON TRUE
       LEFT JOIN users actor ON actor.id = latest.actor_id

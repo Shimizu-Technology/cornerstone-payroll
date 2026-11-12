@@ -134,10 +134,23 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
     try { setError(null); accept((await api.get(ref)).data); } catch (err) { setError(err instanceof Error ? err.message : 'Could not load this pay period'); }
   }, [api, ref, accept]);
   useEffect(() => { void load(); }, [load]);
+  // Staff mark a period seen only once it is actually shown in the
+  // foreground, and only through the latest client update on screen.
   useEffect(() => {
-    if (audience !== 'staff' || !period?.id || document.visibilityState !== 'visible') return;
-    void adminPayrollSubmissionsApi.seen(String(period.id)).catch(() => undefined);
-  }, [audience, period?.id, period?.status_changed_at]);
+    const id = period?.id;
+    const displayed = period?.latest_client_event_id;
+    if (audience !== 'staff' || !id || !displayed) return;
+    let sent = false;
+    const mark = (): void => {
+      if (sent || document.visibilityState !== 'visible' || !document.hasFocus()) return;
+      sent = true;
+      void adminPayrollSubmissionsApi.seen(String(id), displayed).catch(() => { sent = false; });
+    };
+    mark();
+    window.addEventListener('focus', mark);
+    document.addEventListener('visibilitychange', mark);
+    return () => { window.removeEventListener('focus', mark); document.removeEventListener('visibilitychange', mark); };
+  }, [audience, period?.id, period?.latest_client_event_id]);
 
   if (error && !period) return <div><Header title="Pay period" /><div className="p-4 sm:p-6 lg:p-8"><p role="alert" className="rounded-lg border border-danger-200 p-4">{error}</p><Button variant="outline" className="mt-3" onClick={() => void load()}>Try again</Button></div></div>;
   if (!period) return <div><Header title="Pay period" /><p role="status" className="p-6">Loading pay period…</p></div>;

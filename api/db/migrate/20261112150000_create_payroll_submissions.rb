@@ -93,6 +93,7 @@ class CreatePayrollSubmissions < ActiveRecord::Migration[8.1]
       t.bigint :paycheck_document_id
       t.bigint :direct_deposit_document_id
       t.text :note
+      t.string :request_fingerprint, null: false
       t.references :created_by, foreign_key: { to_table: :users }
       t.datetime :posted_at
       t.references :posted_by, foreign_key: { to_table: :users }
@@ -141,6 +142,7 @@ class CreatePayrollSubmissions < ActiveRecord::Migration[8.1]
     create_table :payroll_submission_period_read_receipts do |t|
       t.references :payroll_submission_period, null: false, foreign_key: true, index: false
       t.references :user, null: false, foreign_key: true
+      t.bigint :last_seen_event_id, null: false, default: 0
       t.datetime :seen_at, null: false
       t.index [ :payroll_submission_period_id, :user_id ], unique: true, name: "idx_payroll_submission_period_reads_unique"
     end

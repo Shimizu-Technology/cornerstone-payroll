@@ -38,7 +38,7 @@ export function FileRow({ label, document, fallbackName, api }: { label: string;
   const [payload, setPayload] = useState<DocumentPreviewPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const download = async () => {
+  const download = async (): Promise<void> => {
     if (!document) return;
     try {
       setError(null);
@@ -51,9 +51,14 @@ export function FileRow({ label, document, fallbackName, api }: { label: string;
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    } catch (err) { setError(err instanceof Error ? err.message : 'Download failed'); }
+    } catch (err) {
+      // Close an open preview so the failure is visible beside the file.
+      setPreviewOpen(false);
+      setPayload(null);
+      setError(err instanceof Error ? err.message : 'Download failed');
+    }
   };
-  const preview = async () => {
+  const preview = async (): Promise<void> => {
     if (!document) return;
     try {
       setError(null); setPreviewOpen(true); setLoading(true); setPayload(null);

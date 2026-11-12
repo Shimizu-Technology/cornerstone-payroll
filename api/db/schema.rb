@@ -3276,6 +3276,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_150000) do
   create_table "payroll_submission_drafts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "payroll_submission_period_id", null: false
+    t.string "request_fingerprint", null: false
     t.integer "revision", null: false
     t.bigint "paycheck_document_id"
     t.bigint "direct_deposit_document_id"
@@ -3299,6 +3300,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_150000) do
   end
 
   create_table "payroll_submission_period_read_receipts", force: :cascade do |t|
+    t.bigint "last_seen_event_id", default: 0, null: false
     t.bigint "payroll_submission_period_id", null: false
     t.bigint "user_id", null: false
     t.datetime "seen_at", null: false

@@ -10,6 +10,7 @@ class PayrollSubmissionDraft < ApplicationRecord
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :posted_by, class_name: "User", optional: true
 
+  validates :request_fingerprint, presence: true
   validates :revision, numericality: { only_integer: true, greater_than: 0 }
   validates :note, length: { maximum: 5000 }, allow_nil: true
   validates :idempotency_key, length: { maximum: 128 }, allow_nil: true

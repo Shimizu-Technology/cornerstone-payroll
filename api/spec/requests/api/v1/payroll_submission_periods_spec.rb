@@ -193,6 +193,45 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(response).to have_http_status(:conflict)
     end
 
+    it "requires the base revision for a correction, but still reports an identical resend as a duplicate" do
+      send_package(no_changes: true)
+      send_package(no_changes: true, notes: "correction without a base")
+      expect(response).to have_http_status(:conflict)
+      expect(PayrollSubmission.count).to eq(1)
+    end
+
+    it "rejects workbook or link evidence alongside \"No changes this period\", including a carried-forward workbook" do
+      send_package(no_changes: true, changes_link_url: "https://example.test/sheet")
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "changes_link_url").join).to include("No changes this period")
+      send_package(no_changes: true, changes_workbook: synthetic_workbook)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "changes_workbook").join).to include("No changes this period")
+      expect(ClientDocument.count).to eq(0)
+
+      send_package(changes_workbook: synthetic_workbook)
+      workbook = data["submissions"].first["documents"].find { |d| d["role"] == "changes_workbook" }.dig("document", "id")
+      send_package(no_changes: true, keep_document_ids: [ workbook ], based_on_revision: 1)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(PayrollSubmission.count).to eq(1)
+    end
+
+    it "removes every stored object when an upload fails part-way through a package" do
+      calls = 0
+      written = []
+      allow_any_instance_of(R2StorageService).to receive(:upload).and_wrap_original do |original, key, *args, **opts|
+        calls += 1
+        original.call(key, *args, **opts)
+        written << key
+        raise R2StorageService::UploadError, "connection reset after write" if calls == 2
+      end
+      send_package(no_changes: true, attachments: [ synthetic_pdf("timesheet.pdf") ])
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(written.size).to eq(2)
+      expect(written.map { |key| R2StorageService.new.download(key) }).to all(be_nil)
+      expect([ ClientDocument.count, PayrollSubmission.count ]).to eq([ 0, 0 ])
+    end
+
     it "keeps submitted files as retained evidence when the client deletes them from the library" do
       send_package(no_changes: true)
       document = ClientDocument.last
@@ -244,13 +283,101 @@ RSpec.describe "Pay-period submissions", type: :request do
     it "refuses a stale or forged revision when acknowledging" do
       first = period.submissions.first
       as_client
-      send_package(no_changes: true, notes: "corrected")
+      send_package(no_changes: true, notes: "corrected", based_on_revision: 1)
       as_staff
       post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: first.id }
       expect(response).to have_http_status(:conflict)
       other = PayrollSubmissionPeriod.create!(company: other_company, start_date: Date.new(2026, 1, 1), end_date: Date.new(2026, 1, 14), source: "pay_period")
       post "#{staff_base}/#{other.id}/acknowledge", params: { submission_id: first.id }
       expect(response).to have_http_status(:not_found)
+    end
+
+    it "marks only the client update that was displayed as seen" do
+      shown = period.latest_client_event
+      get "#{staff_base}/#{period.id}"
+      expect(data["latest_client_event_id"]).to eq(shown.id)
+      as_client
+      send_package(no_changes: true, notes: "arrived while staff had the page open", based_on_revision: 1)
+      as_staff
+      post "#{staff_base}/#{period.id}/seen", params: { foreground: true, displayed_event_id: shown.id }
+      expect(response).to have_http_status(:no_content)
+      get staff_base
+      expect(data.first["unread"]).to be(true)
+      post "#{staff_base}/#{period.id}/seen", params: { foreground: true, displayed_event_id: period.latest_client_event.id }
+      get staff_base
+      expect(data.first["unread"]).to be(false)
+      post "#{staff_base}/#{period.id}/seen", params: { foreground: true, displayed_event_id: shown.id }
+      expect(period.read_receipts.find_by(user: staff).last_seen_event_id).to eq(period.latest_client_event.id)
+
+      post "#{staff_base}/#{period.id}/seen", params: { displayed_event_id: shown.id }
+      expect(response).to have_http_status(:unprocessable_entity)
+      other = PayrollSubmissionPeriod.create!(company: company, start_date: Date.new(2026, 1, 5), end_date: Date.new(2026, 1, 18), source: "pay_period")
+      other_event = other.with_lock { other.transition!("submit", actor: client) }
+      post "#{staff_base}/#{period.id}/seen", params: { foreground: true, displayed_event_id: other_event.id }
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "replays a draft retry and refuses a reused key with a different draft" do
+      post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
+      bytes = "%PDF-1.4\n% draft bytes\n%%EOF\n"
+      draft_pdf = -> { portal_upload("paychecks.pdf", bytes, "application/pdf") }
+      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: draft_pdf.call, note: "first", idempotency_key: "d1" }
+      expect(response).to have_http_status(:created)
+      expect do
+        post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: draft_pdf.call, note: "first", idempotency_key: "d1" }
+      end.not_to change(ClientDocument, :count)
+      expect(period.drafts.count).to eq(1)
+      expect do
+        post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: draft_pdf.call, note: "corrected note", idempotency_key: "d1" }
+      end.not_to change(ClientDocument, :count)
+      expect(response).to have_http_status(:conflict)
+      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: draft_pdf.call, note: "first", post: false, idempotency_key: "d1" }
+      expect(response).to have_http_status(:conflict)
+      expect(period.drafts.count).to eq(1)
+    end
+
+    it "removes both stored draft files when the second upload fails" do
+      post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
+      calls = 0
+      written = []
+      allow_any_instance_of(R2StorageService).to receive(:upload).and_wrap_original do |original, key, *args, **opts|
+        calls += 1
+        original.call(key, *args, **opts)
+        written << key
+        raise Timeout::Error, "read timeout after the object was stored" if calls == 2
+      end
+      expect do
+        post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf("p.pdf"), direct_deposit_pdf: synthetic_pdf("d.pdf") }
+      rescue Timeout::Error
+        nil
+      end.not_to change { [ ClientDocument.count, PayrollSubmissionDraft.count ] }
+      expect(written.size).to eq(2)
+      expect(written.map { |key| R2StorageService.new.download(key) }).to all(be_nil)
+    end
+
+    it "keeps a posted draft's files available to the client instead of archiving them" do
+      post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
+      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf("posted.pdf") }
+      posted = period.drafts.first.paycheck_document
+      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf("hidden.pdf"), post: false }
+      hidden = period.drafts.first.paycheck_document
+      allow_any_instance_of(Api::V1::Admin::ClientDocumentsController).to receive(:current_user) { User.find(staff.id) }
+      allow_any_instance_of(Api::V1::Admin::ClientDocumentsController).to receive(:current_company_id).and_return(company.id)
+
+      delete "/api/v1/admin/client_documents/#{posted.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("shared with the client for review")
+      expect(posted.reload).not_to be_archived
+
+      as_client
+      allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_user) { User.find(client.id) }
+      allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_company_id).and_return(company.id)
+      get "/api/v1/client/documents/#{posted.id}/download"
+      expect(response).to have_http_status(:ok)
+
+      delete "/api/v1/admin/client_documents/#{hidden.id}"
+      expect(response).to have_http_status(:ok)
+      expect(hidden.reload).to be_archived
     end
 
     it "keeps an unposted draft staff-only, then posts it for the client" do
@@ -387,7 +514,8 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(rows.first).to include("id" => period.id, "title" => "Payroll Nov 2–15, 2026", "waiting" => true, "unread" => true, "sender_name" => client.name)
 
       as_staff
-      post "#{staff_base}/#{period.id}/seen"
+      post "#{staff_base}/#{period.id}/seen", params: { foreground: true, displayed_event_id: period.latest_client_event.id }
+      expect(response).to have_http_status(:no_content)
       get "/api/v1/admin/client_inbox", params: { status: "all" }
       expect(response.parsed_body["data"].first).to include("unread" => false, "waiting" => true)
       post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }

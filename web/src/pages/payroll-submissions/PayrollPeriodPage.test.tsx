@@ -95,11 +95,53 @@ it('lets the client approve the posted draft or request a change with a note', a
 });
 
 it('lets staff confirm the exact current revision and records the page as seen', async () => {
-  mocks.get.mockResolvedValue({ data: period({ allowed_actions: ['acknowledge', 'save_draft', 'message'] }) });
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+  mocks.get.mockResolvedValue({ data: period({ latest_client_event_id: 41, allowed_actions: ['acknowledge', 'save_draft', 'message'] }) });
   mocks.acknowledge.mockResolvedValue({ data: period({ status: 'received', status_label: 'Received', allowed_actions: ['start_review', 'post_draft', 'save_draft', 'message'] }) });
   renderAt('staff');
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm receipt of revision 2' }));
   await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith('9', 2));
-  expect(mocks.seen).toHaveBeenCalledWith('9');
+  expect(mocks.seen).toHaveBeenCalledWith('9', 41);
   expect(await screen.findByRole('button', { name: 'Post draft for review' })).toBeTruthy();
+});
+
+it('marks a period seen only once it is shown in the foreground, through the displayed update', async () => {
+  const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+  mocks.get.mockResolvedValue({ data: period({ latest_client_event_id: 77 }) });
+  renderAt('staff');
+  await screen.findByRole('heading', { name: 'Payroll Nov 2–15, 2026' });
+  expect(mocks.seen).not.toHaveBeenCalled();
+  focus.mockReturnValue(true);
+  window.dispatchEvent(new Event('focus'));
+  await waitFor(() => expect(mocks.seen).toHaveBeenCalledWith('9', 77));
+  window.dispatchEvent(new Event('focus'));
+  expect(mocks.seen).toHaveBeenCalledTimes(1);
+});
+
+it('drops hidden change evidence when the client chooses no changes', async () => {
+  const withWorkbook = revision(2, true);
+  withWorkbook.changes_link_url = 'https://example.test/sheet';
+  withWorkbook.documents = [...withWorkbook.documents, { role: 'changes_workbook', file_name: 'changes.xlsx', file_size: 10, document: doc(150, 'changes.xlsx') }];
+  mocks.get.mockResolvedValue({ data: period({ submissions: [withWorkbook] }) });
+  mocks.submit.mockResolvedValue({ data: period({ current_revision: 3 }), outcome: 'created' });
+  renderAt('client');
+  fireEvent.click(await screen.findByRole('button', { name: 'Send an update or replace a file' }));
+  fireEvent.click(screen.getByLabelText('No changes this period'));
+  fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalled());
+  const form = mocks.submit.mock.calls[0][1] as FormData;
+  expect(form.get('no_changes')).toBe('true');
+  expect(form.get('changes')).toBe('[]');
+  expect(form.get('changes_link_url')).toBeNull();
+  expect(form.getAll('keep_document_ids[]')).toEqual(['102']);
+});
+
+it('shows an employee-list failure with a retry instead of an empty picker', async () => {
+  mocks.employees.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([{ id: 5, name: 'Sam Worker' }]);
+  mocks.get.mockResolvedValue({ data: period({ submissions: [], current_revision: null, status: 'waiting_for_files', status_label: 'Waiting for files' }) });
+  renderAt('client');
+  expect((await screen.findByRole('alert')).textContent).toContain('employee list did not load');
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  await waitFor(() => expect(screen.queryByText(/employee list did not load/)).toBeNull());
+  expect(mocks.employees).toHaveBeenCalledTimes(2);
 });

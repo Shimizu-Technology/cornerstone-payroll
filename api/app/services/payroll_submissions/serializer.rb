@@ -28,6 +28,7 @@ module PayrollSubmissions
         payload[:pay_period_id] = pay_period&.id
         payload[:source] = entry.source
         payload[:unread] = record ? unread?(record) : false
+        payload[:latest_client_event_id] = record ? latest_client_event(record)&.id || 0 : 0
       end
       payload
     end
@@ -126,12 +127,16 @@ module PayrollSubmissions
       end
     end
 
+    def latest_client_event(record)
+      record.status_events.select { |event| event.actor_audience == "client" }.max_by(&:id)
+    end
+
     def unread?(record)
-      latest = record.status_events.select { |event| event.actor_audience == "client" }.last
+      latest = latest_client_event(record)
       return false unless latest && latest.created_at >= @user.created_at
 
-      seen = record.read_receipts.find { |receipt| receipt.user_id == @user.id }&.seen_at
-      seen.nil? || seen < latest.created_at
+      seen = record.read_receipts.find { |receipt| receipt.user_id == @user.id }&.last_seen_event_id || 0
+      latest.id > seen
     end
   end
 end

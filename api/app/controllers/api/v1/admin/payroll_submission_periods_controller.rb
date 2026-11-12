@@ -42,11 +42,18 @@ module Api
           render_period
         end
 
-        # Opening the period page in the foreground clears it from unread.
+        # Sent by the page after it was shown in the foreground, with the
+        # latest client update it displayed. Later updates stay unread.
         def seen
           skip_default_audit_log!
-          saved_period!.mark_seen_by!(current_user)
+          unless params[:foreground] == true || params[:foreground] == "true"
+            return render json: { error: "A foreground display is required" }, status: :unprocessable_entity
+          end
+
+          saved_period!.mark_seen_through!(current_user, event_id: params.require(:displayed_event_id))
           head :no_content
+        rescue ArgumentError, ActionController::ParameterMissing
+          render json: { error: "A displayed update is required" }, status: :unprocessable_entity
         end
       end
     end

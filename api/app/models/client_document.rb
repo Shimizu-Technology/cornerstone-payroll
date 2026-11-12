@@ -81,8 +81,17 @@ class ClientDocument < ApplicationRecord
       payroll_submission_documents.exists? || payroll_submission_draft?
   end
 
+  # Raised instead of archiving a file the client still needs for review.
+  class SharedForReview < StandardError; end
+
   def payroll_submission_draft?
-    PayrollSubmissionDraft.where(company_id: company_id).where("paycheck_document_id = :id OR direct_deposit_document_id = :id", id: id).exists?
+    payroll_drafts_using_file.exists?
+  end
+
+  # A posted draft is what the client approves. Archiving would hide it from
+  # them while the period still shows it, so posted draft files stay usable.
+  def posted_payroll_draft?
+    payroll_drafts_using_file.posted.exists?
   end
 
   def ensure_usable_for!(purpose, staff_read: false)
@@ -95,6 +104,10 @@ class ClientDocument < ApplicationRecord
 
   def archive_or_destroy!(actor:)
     with_lock do
+      if posted_payroll_draft?
+        raise SharedForReview, "This file is part of a draft shared with the client for review. Post a corrected draft instead of removing it."
+      end
+
       if retained_evidence?
         update!(archived_at: Time.current, archived_by: actor) unless archived?
         :archived
@@ -145,6 +158,10 @@ class ClientDocument < ApplicationRecord
     "failed"
   end
   private
+
+  def payroll_drafts_using_file
+    PayrollSubmissionDraft.where(company_id: company_id).where("paycheck_document_id = :id OR direct_deposit_document_id = :id", id: id)
+  end
 
   def protect_retained_evidence
     return unless retained_evidence?
