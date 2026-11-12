@@ -40,8 +40,8 @@ module PdfUnicodeFont
   # a document whose payee or employee can't be read.
   class UnprintableName < StandardError
     def initialize(label, name, characters)
-      super("#{label} \"#{name}\" has characters checks and tax forms can't print " \
-            "(#{characters.join(' ')}). Enter the name in Latin letters, then try again.")
+      super("#{label} \"#{name.to_s.squish}\" has characters checks and tax forms can't print " \
+            "(#{characters.join(' ')}). Change it to Latin letters, then try again.")
     end
   end
 
@@ -73,8 +73,11 @@ module PdfUnicodeFont
     pdf
   end
 
+  # Prawn lays these out itself; every other character needs a real glyph.
+  LAYOUT_CHARACTERS = [ " ", "\n", "\r", "\t" ].freeze
+
   def unprintable_characters(text)
-    text.to_s.each_char.reject { |char| char.match?(/[[:space:][:cntrl:]]/) || printable_codepoints.include?(char.ord) }.uniq
+    text.to_s.each_char.reject { |char| LAYOUT_CHARACTERS.include?(char) || printable_codepoints.include?(char.ord) }.uniq
   end
 
   def ensure_printable!(name, label:)
@@ -83,6 +86,8 @@ module PdfUnicodeFont
   end
 
   def printable_codepoints
-    @printable_codepoints ||= TTFunk::File.open(FILES[:normal]).cmap.unicode.first.code_map.keys.to_set.freeze
+    # Glyph 0 is the .notdef box, so a code mapped to it can't print either.
+    @printable_codepoints ||= TTFunk::File.open(FILES[:normal]).cmap.unicode.first.code_map
+      .select { |_code, glyph| glyph.positive? }.keys.to_set.freeze
   end
 end

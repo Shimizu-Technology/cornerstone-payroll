@@ -236,6 +236,12 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
   end
 
   describe "#generate" do
+    it "refuses to file a name the form would print as empty boxes" do
+      employee_rows.first[:name] = "王小明"
+      expect { described_class.new(report: report).generate }
+        .to raise_error(PdfUnicodeFont::UnprintableName, /Employee "王小明"/)
+    end
+
     it "keeps each employee page independent when the official template has one page" do
       reader = PDF::Reader.new(StringIO.new(described_class.new(report: report).generate))
 

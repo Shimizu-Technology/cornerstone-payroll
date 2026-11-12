@@ -58,6 +58,8 @@ RSpec.describe PdfUnicodeFont do
     expect(described_class.unprintable_characters("Wiśniewska Nguyễn Шевченко Keʻala")).to be_empty
     expect(described_class.unprintable_characters("王小明 Kim 王")).to eq(%w[王 小 明])
     expect(described_class.unprintable_characters(nil)).to be_empty
+    expect(described_class.unprintable_characters("Taro\u3000Yamada")).to eq([ "\u3000" ])
+    expect(described_class.unprintable_characters("12 Chalan\nHagåtña\tGU")).to be_empty
   end
 
   it "is used by every generator that draws text" do

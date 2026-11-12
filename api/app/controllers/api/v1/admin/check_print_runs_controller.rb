@@ -44,6 +44,8 @@ module Api
           render json: { check_print_run: run_payload(run) }, status: :created
         rescue ArgumentError, CheckPrintRunGenerationService::InvalidSelectionError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue PdfUnicodeFont::UnprintableName => e
+          render json: { error: e.message, code: "unprintable_name" }, status: :unprocessable_entity
         rescue StandardError => e
           Rails.logger.error(
             "[check_print_runs#create] pay_period=#{@pay_period&.id} request_id=#{request.request_id} " \

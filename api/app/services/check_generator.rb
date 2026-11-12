@@ -207,6 +207,7 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   def render_document(voided: false, rehearsal_preview: false)
     PdfUnicodeFont.ensure_printable!(employee.full_name, label: "Employee")
+    PdfUnicodeFont.ensure_printable!(employee.full_address, label: "Employee address")
     PdfUnicodeFont.document(
       page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
