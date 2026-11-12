@@ -5,6 +5,8 @@ class PayrollImportRecord < ApplicationRecord
 
   belongs_to :pay_period
   belongs_to :payroll_intake_session, optional: true
+  has_many :submission_imports, class_name: "PayrollSubmissionImport", foreign_key: :payroll_import_id, dependent: :restrict_with_error
+  has_many :payroll_submissions, through: :submission_imports
 
   validates :status, inclusion: { in: %w[pending previewed applied partially_applied failed] }
 

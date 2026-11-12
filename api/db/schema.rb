@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2790,6 +2790,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
     t.bigint "payroll_intake_session_id", null: false
     t.integer "position", default: 0, null: false
     t.jsonb "raw_response", default: {}, null: false
+    t.bigint "payroll_submission_document_id"
     t.string "sha256"
     t.string "source_role", default: "legacy_source", null: false
     t.text "storage_reference"
@@ -2799,6 +2800,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
     t.string "verification_status", default: "legacy_unverified", null: false
     t.datetime "verified_at"
     t.index [ "payroll_intake_session_id", "document_type" ], name: "idx_payroll_intake_documents_session_type"
+    t.index [ "payroll_submission_document_id" ], name: "idx_intake_document_portal_source"
     t.index [ "payroll_intake_session_id", "position" ], name: "idx_payroll_intake_documents_session_position", unique: true
     t.index [ "payroll_intake_session_id" ], name: "idx_payroll_intake_documents_session"
     t.index [ "storage_reference" ], name: "idx_payroll_intake_documents_storage_reference", unique: true, where: "(storage_reference IS NOT NULL)"
@@ -3308,6 +3310,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
     t.index [ "posted_by_id" ], name: "index_payroll_submission_drafts_on_posted_by_id"
     t.check_constraint "(posted_at IS NULL) = (posted_by_id IS NULL)", name: "payroll_submission_drafts_posted_actor"
     t.check_constraint "paycheck_document_id IS NOT NULL OR direct_deposit_document_id IS NOT NULL", name: "payroll_submission_drafts_has_file"
+  end
+
+  create_table "payroll_submission_imports", force: :cascade do |t|
+    t.bigint "payroll_submission_id", null: false
+    t.bigint "payroll_import_id", null: false
+    t.bigint "current_submission_id", null: false
+    t.bigint "selected_by_id", null: false
+    t.text "superseded_reason"
+    t.datetime "applied_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "current_submission_id" ], name: "index_payroll_submission_imports_on_current_submission_id"
+    t.index [ "payroll_import_id" ], name: "index_payroll_submission_imports_on_payroll_import_id"
+    t.index [ "payroll_submission_id", "payroll_import_id", "current_submission_id" ], name: "idx_portal_import_selection", unique: true
+    t.index [ "payroll_submission_id" ], name: "index_payroll_submission_imports_on_payroll_submission_id"
+    t.index [ "selected_by_id" ], name: "index_payroll_submission_imports_on_selected_by_id"
   end
 
   create_table "payroll_submission_period_read_receipts", force: :cascade do |t|
@@ -5036,4 +5054,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
   add_foreign_key "client_documents", "users", column: "reviewed_by_id"
   add_foreign_key "portal_document_read_receipts", "client_documents"
   add_foreign_key "portal_document_read_receipts", "users"
+  add_foreign_key "payroll_intake_documents", "payroll_submission_documents"
+  add_foreign_key "payroll_submission_imports", "payroll_imports"
+  add_foreign_key "payroll_submission_imports", "payroll_submissions"
+  add_foreign_key "payroll_submission_imports", "payroll_submissions", column: "current_submission_id"
+  add_foreign_key "payroll_submission_imports", "users", column: "selected_by_id"
 end

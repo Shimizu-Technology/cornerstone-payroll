@@ -26,6 +26,10 @@ class PayrollSubmissionPeriod < ApplicationRecord
     "approve" => { audience: "client", from: %w[draft_ready], to: "approved" },
     "request_changes" => { audience: "client", from: %w[draft_ready], to: "changes_requested" },
     "acknowledge" => { audience: "staff", from: %w[submitted], to: "received" },
+    # Source evidence records what staff did, independently of client draft
+    # approval/payment. Importing or dispositioning does not change that status.
+    "import" => { audience: "staff", from: STATUSES, to: :unchanged },
+    "resolve_source" => { audience: "staff", from: STATUSES, to: :unchanged },
     "start_review" => { audience: "staff", from: %w[received changes_requested], to: "in_review" },
     "post_draft" => { audience: "staff", from: %w[waiting_for_files received in_review draft_ready changes_requested approved], to: "draft_ready" },
     "mark_paid" => { audience: "staff", from: %w[draft_ready approved], to: "paid" }
@@ -76,6 +80,14 @@ class PayrollSubmissionPeriod < ApplicationRecord
     submissions.first
   end
 
+  def pending_source_review?
+    source = submissions.first
+    return false unless source
+    return false if PayrollSubmissionImport.where(current_submission_id: source.id).where.not(applied_at: nil).exists?
+
+    !status_events.exists?(event: "resolve_source", payroll_submission_id: source.id)
+  end
+
   def current_draft
     drafts.where.not(posted_at: nil).first
   end
@@ -96,9 +108,10 @@ class PayrollSubmissionPeriod < ApplicationRecord
     end
 
     from = status
-    update!(status: rule[:to], status_changed_at: Time.current, status_changed_by: actor)
+    target = rule[:to] == :unchanged ? status : rule[:to]
+    update!(status: target, status_changed_at: Time.current, status_changed_by: actor) unless rule[:to] == :unchanged
     status_events.create!(
-      company_id: company_id, event: event.to_s, from_status: from, to_status: rule[:to],
+      company_id: company_id, event: event.to_s, from_status: from, to_status: target,
       actor: actor, actor_audience: audience, actor_name_snapshot: actor.name,
       payroll_submission: submission, payroll_submission_draft: draft, note: note.presence
     )

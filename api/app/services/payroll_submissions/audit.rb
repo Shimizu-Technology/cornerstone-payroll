@@ -8,6 +8,9 @@ module PayrollSubmissions
       payroll_submissions#create
       payroll_submission_periods#acknowledge
       payroll_submission_periods#start_review
+      payroll_submission_periods#import
+      payroll_submission_periods#resolve_source
+      payroll_submissions#open_import
       payroll_submission_periods#approve
       payroll_submission_periods#request_changes
       payroll_submission_periods#mark_paid

@@ -26,12 +26,13 @@ module PayrollIntake
     MAX_FILE_BYTES = PayrollIntake::AiExtractor::MAX_FILE_BYTES
 
     def initialize(pay_period:, source_type:, pasted_text: nil, files: [], actor: nil, storage: nil,
-                   supersedes_package_id: nil, supersession_reason: nil)
+                   supersedes_package_id: nil, supersession_reason: nil, portal_documents: [])
       @pay_period = pay_period
       @company = pay_period.company
       @source_type = source_type.to_s
       @pasted_text = pasted_text.to_s
       @files = Array(files).compact
+      @portal_documents = portal_documents
       @actor = actor
       @storage = storage
       @supersedes_package_id = supersedes_package_id.to_s.strip.presence
@@ -291,6 +292,7 @@ module PayrollIntake
         storage_service.upload(key, snapshot[:data], content_type: snapshot[:content_type])
         verify_retained_source!(key, snapshot)
         {
+          payroll_submission_document: @portal_documents[index],
           document_type: document_type_for(snapshot),
           source_role: source_role_for(
             filename: snapshot[:filename],

@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { prepareDocumentPreview, type DocumentPreviewPayload } from '@/lib/documentPreview';
 import type { ClientDocument } from '@/services/api';
-import { formatDate, formatGuam } from '@/lib/payrollSubmissionFormat';
-import { STATUS_STEPS, type ChangeRow, type PayrollSubmissionsApi, type SubmissionRevision, type SubmissionStatus } from '@/services/payrollSubmissions';
+import { changeSummary, formatGuam } from '@/lib/payrollSubmissionFormat';
+import { STATUS_STEPS, type PayrollSubmissionsApi, type SubmissionRevision, type SubmissionStatus } from '@/services/payrollSubmissions';
 
 // The shared status line. Text carries the state; color only reinforces it.
 export function StatusLine({ status }: { status: SubmissionStatus }): ReactElement {
@@ -88,28 +88,16 @@ export function FileRow({ label, document, fallbackName, api }: { label: string;
   );
 }
 
-function changeSummary(row: ChangeRow): string {
-  const who = row.employee_name || (row.employee_names?.length ? row.employee_names.join(', ') : '');
-  const parts: string[] = [];
-  switch (row.kind) {
-    case 'extra_hours': parts.push(`${row.hours} hours`); break;
-    case 'paid_leave': parts.push(`${row.hours} hours paid leave`); break;
-    case 'owner_pay': parts.push(`$${row.amount} ${row.basis === 'each' ? 'for each owner' : 'total'}`); break;
-    case 'new_hire': parts.push(`${row.name}, starting at $${row.starting_wage} ${row.wage_unit === 'salary' ? 'salary' : 'per hour'}`); if (row.start_date) parts.push(`starts ${formatDate(row.start_date)}`); break;
-    case 'wage_change': parts.push(`new wage $${row.new_wage} ${row.wage_unit === 'salary' ? 'salary' : 'per hour'}`); if (row.effective_date) parts.push(`from ${formatDate(row.effective_date)}`); break;
-    case 'deduction': parts.push(`${row.deduction_action} ${row.description}`); if (row.amount) parts.push(`$${row.amount}`); break;
-    case 'direct_deposit_addition': parts.push('add to direct deposit'); break;
-  }
-  return [who, ...parts].filter(Boolean).join(' · ');
-}
 
-export function RevisionCard({ revision, api }: { revision: SubmissionRevision; api: PayrollSubmissionsApi }): ReactElement {
+export function RevisionCard({ revision, api, companyId }: { revision: SubmissionRevision; api: PayrollSubmissionsApi; companyId?: number | null }): ReactElement {
   const body = (
     <div className="space-y-3">
       <p className="text-sm text-neutral-700">
         Sent by {revision.submitted_by_name || 'Former portal user'} · {formatGuam(revision.submitted_at)}
         {revision.acknowledged_at ? <> · Received by {revision.acknowledged_by_name} · {formatGuam(revision.acknowledged_at)}</> : revision.current ? <> · Not yet confirmed by Cornerstone</> : null}
       </p>
+      {revision.imported_at && <p className="text-sm font-semibold text-success-800">Imported · {formatGuam(revision.imported_at)}</p>}
+      {revision.imports?.map(record => <p key={record.id} className="text-sm"><a className="text-primary-800 underline" href={companyId ? `/companies/${companyId}/pay-runs/${record.pay_period_id}` : `/pay-periods/${record.pay_period_id}`}>Import #{record.id} · {record.status}</a></p>)}
       <ul className="divide-y divide-neutral-100">
         {revision.documents.map(file => <FileRow key={`${file.role}-${file.document?.id || file.file_name}`} label={ROLE_LABELS[file.role]} document={file.document} fallbackName={file.file_name} api={api} />)}
       </ul>

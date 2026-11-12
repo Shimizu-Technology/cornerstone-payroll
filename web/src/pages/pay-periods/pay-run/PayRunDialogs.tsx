@@ -94,6 +94,7 @@ export function PayRunDialogs({
         open={importModalOpen}
         onOpenChange={setImportModalOpen}
         payPeriodId={payPeriod.id}
+        companyId={Number(companyId)}
         onSourcePreviewed={() => void loadPayPeriod(payPeriod.id, true)}
         onImportComplete={handleImportComplete}
       />
