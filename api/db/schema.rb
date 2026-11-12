@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_12_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_12_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -544,6 +544,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_130000) do
     t.string "created_by_audience", default: "unknown", null: false
     t.string "created_by_name_snapshot"
     t.check_constraint "created_by_audience::text = ANY (ARRAY['client'::character varying, 'staff'::character varying, 'unknown'::character varying]::text[])", name: "portal_thread_creator_audience"
+    t.index [ "id", "company_id" ], name: "idx_client_portal_threads_tenant_key", unique: true
   end
 
   create_table "companies", force: :cascade do |t|
@@ -3253,6 +3254,133 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_130000) do
     t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'approved'::character varying::text, 'superseded'::character varying::text])", name: "payroll_review_packages_status_check"
   end
 
+  create_table "payroll_submission_documents", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payroll_submission_id", null: false
+    t.bigint "client_document_id", null: false
+    t.string "role", null: false
+    t.integer "position", default: 0, null: false
+    t.string "sha256", limit: 64, null: false
+    t.string "file_name_snapshot", null: false
+    t.bigint "file_size_snapshot", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "client_document_id" ], name: "index_payroll_submission_documents_on_client_document_id"
+    t.index [ "company_id" ], name: "index_payroll_submission_documents_on_company_id"
+    t.index [ "payroll_submission_id", "client_document_id" ], name: "idx_payroll_submission_documents_once", unique: true
+    t.index [ "payroll_submission_id" ], name: "idx_payroll_submission_documents_one_revel", unique: true, where: "((role)::text = 'revel_payroll'::text)"
+    t.index [ "payroll_submission_id" ], name: "idx_payroll_submission_documents_one_workbook", unique: true, where: "((role)::text = 'changes_workbook'::text)"
+    t.check_constraint "role::text = ANY (ARRAY['revel_payroll'::character varying, 'changes_workbook'::character varying, 'attachment'::character varying]::text[])", name: "payroll_submission_documents_role"
+  end
+
+  create_table "payroll_submission_drafts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payroll_submission_period_id", null: false
+    t.integer "revision", null: false
+    t.bigint "paycheck_document_id"
+    t.bigint "direct_deposit_document_id"
+    t.text "note"
+    t.bigint "created_by_id"
+    t.datetime "posted_at"
+    t.bigint "posted_by_id"
+    t.string "idempotency_key"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_payroll_submission_drafts_on_company_id"
+    t.index [ "created_by_id" ], name: "index_payroll_submission_drafts_on_created_by_id"
+    t.index [ "direct_deposit_document_id" ], name: "index_payroll_submission_drafts_on_direct_deposit_document_id"
+    t.index [ "id", "company_id" ], name: "idx_payroll_submission_drafts_tenant_key", unique: true
+    t.index [ "paycheck_document_id" ], name: "index_payroll_submission_drafts_on_paycheck_document_id"
+    t.index [ "payroll_submission_period_id", "created_by_id", "idempotency_key" ], name: "idx_payroll_submission_drafts_retry_key", unique: true, where: "(idempotency_key IS NOT NULL)"
+    t.index [ "payroll_submission_period_id", "revision" ], name: "idx_payroll_submission_drafts_revision", unique: true
+    t.index [ "posted_by_id" ], name: "index_payroll_submission_drafts_on_posted_by_id"
+    t.check_constraint "(posted_at IS NULL) = (posted_by_id IS NULL)", name: "payroll_submission_drafts_posted_actor"
+    t.check_constraint "paycheck_document_id IS NOT NULL OR direct_deposit_document_id IS NOT NULL", name: "payroll_submission_drafts_has_file"
+  end
+
+  create_table "payroll_submission_period_read_receipts", force: :cascade do |t|
+    t.bigint "payroll_submission_period_id", null: false
+    t.bigint "user_id", null: false
+    t.datetime "seen_at", null: false
+    t.index [ "payroll_submission_period_id", "user_id" ], name: "idx_payroll_submission_period_reads_unique", unique: true
+    t.index [ "user_id" ], name: "index_payroll_submission_period_read_receipts_on_user_id"
+  end
+
+  create_table "payroll_submission_periods", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.date "start_date", null: false
+    t.date "end_date", null: false
+    t.date "pay_date"
+    t.bigint "pay_period_id"
+    t.bigint "company_pay_schedule_id"
+    t.string "source", null: false
+    t.string "status", default: "waiting_for_files", null: false
+    t.datetime "status_changed_at"
+    t.bigint "status_changed_by_id"
+    t.bigint "client_portal_thread_id"
+    t.integer "lock_version", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "client_portal_thread_id" ], name: "idx_payroll_submission_periods_thread", unique: true, where: "(client_portal_thread_id IS NOT NULL)"
+    t.index [ "company_id", "start_date", "end_date" ], name: "idx_payroll_submission_periods_dates", unique: true
+    t.index [ "company_id" ], name: "index_payroll_submission_periods_on_company_id"
+    t.index [ "company_pay_schedule_id" ], name: "index_payroll_submission_periods_on_company_pay_schedule_id"
+    t.index [ "id", "company_id" ], name: "idx_payroll_submission_periods_tenant_key", unique: true
+    t.index [ "pay_period_id" ], name: "idx_payroll_submission_periods_pay_period", unique: true, where: "(pay_period_id IS NOT NULL)"
+    t.index [ "status_changed_by_id" ], name: "index_payroll_submission_periods_on_status_changed_by_id"
+    t.check_constraint "end_date >= start_date", name: "payroll_submission_periods_dates_ordered"
+    t.check_constraint "source::text = ANY (ARRAY['pay_period'::character varying, 'schedule'::character varying]::text[])", name: "payroll_submission_periods_source"
+    t.check_constraint "status::text = ANY (ARRAY['waiting_for_files'::character varying, 'submitted'::character varying, 'received'::character varying, 'in_review'::character varying, 'draft_ready'::character varying, 'approved'::character varying, 'changes_requested'::character varying, 'paid'::character varying]::text[])", name: "payroll_submission_periods_status"
+  end
+
+  create_table "payroll_submission_status_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payroll_submission_period_id", null: false
+    t.string "event", null: false
+    t.string "from_status", null: false
+    t.string "to_status", null: false
+    t.bigint "actor_id"
+    t.string "actor_audience", null: false
+    t.string "actor_name_snapshot"
+    t.bigint "payroll_submission_id"
+    t.bigint "payroll_submission_draft_id"
+    t.text "note"
+    t.datetime "created_at", null: false
+    t.index [ "actor_id" ], name: "index_payroll_submission_status_events_on_actor_id"
+    t.index [ "company_id" ], name: "index_payroll_submission_status_events_on_company_id"
+    t.index [ "payroll_submission_period_id", "id" ], name: "idx_payroll_submission_status_events_period"
+    t.check_constraint "actor_audience::text = ANY (ARRAY['client'::character varying, 'staff'::character varying]::text[])", name: "payroll_submission_status_events_audience"
+  end
+
+  create_table "payroll_submissions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payroll_submission_period_id", null: false
+    t.integer "revision", null: false
+    t.bigint "submitted_by_id"
+    t.string "submitted_by_name_snapshot"
+    t.datetime "submitted_at", null: false
+    t.boolean "no_changes", default: false, null: false
+    t.jsonb "change_rows", default: [], null: false
+    t.string "changes_link_url"
+    t.text "notes"
+    t.string "content_fingerprint", null: false
+    t.string "request_fingerprint", null: false
+    t.string "idempotency_key"
+    t.bigint "acknowledged_by_id"
+    t.datetime "acknowledged_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "acknowledged_by_id" ], name: "index_payroll_submissions_on_acknowledged_by_id"
+    t.index [ "company_id" ], name: "index_payroll_submissions_on_company_id"
+    t.index [ "id", "company_id" ], name: "idx_payroll_submissions_tenant_key", unique: true
+    t.index [ "payroll_submission_period_id", "revision" ], name: "idx_payroll_submissions_revision", unique: true
+    t.index [ "payroll_submission_period_id", "submitted_by_id", "idempotency_key" ], name: "idx_payroll_submissions_retry_key", unique: true, where: "(idempotency_key IS NOT NULL)"
+    t.index [ "submitted_by_id" ], name: "index_payroll_submissions_on_submitted_by_id"
+    t.check_constraint "NOT no_changes OR change_rows = '[]'::jsonb", name: "payroll_submissions_no_changes_is_empty"
+    t.check_constraint "jsonb_typeof(change_rows) = 'array'::text", name: "payroll_submissions_changes_array"
+    t.check_constraint "revision > 0", name: "payroll_submissions_revision_positive"
+  end
+
   create_table "payroll_time_allocations", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -4666,6 +4794,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_130000) do
   add_foreign_key "payroll_review_packages", "users", column: "approval_recorded_by_id", on_delete: :nullify
   add_foreign_key "payroll_review_packages", "users", column: "approved_by_id", on_delete: :nullify
   add_foreign_key "payroll_review_packages", "users", column: "generated_by_id", on_delete: :nullify
+  add_foreign_key "payroll_submission_documents", "client_documents", column: [ "client_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_documents_document_tenant"
+  add_foreign_key "payroll_submission_documents", "companies"
+  add_foreign_key "payroll_submission_documents", "payroll_submissions", column: [ "payroll_submission_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_documents_submission_tenant"
+  add_foreign_key "payroll_submission_drafts", "client_documents", column: [ "direct_deposit_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_drafts_direct_deposit_tenant"
+  add_foreign_key "payroll_submission_drafts", "client_documents", column: [ "paycheck_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_drafts_paycheck_tenant"
+  add_foreign_key "payroll_submission_drafts", "companies"
+  add_foreign_key "payroll_submission_drafts", "payroll_submission_periods", column: [ "payroll_submission_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_drafts_period_tenant"
+  add_foreign_key "payroll_submission_drafts", "users", column: "created_by_id"
+  add_foreign_key "payroll_submission_drafts", "users", column: "posted_by_id"
+  add_foreign_key "payroll_submission_period_read_receipts", "payroll_submission_periods"
+  add_foreign_key "payroll_submission_period_read_receipts", "users"
+  add_foreign_key "payroll_submission_periods", "client_portal_threads", column: [ "client_portal_thread_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_periods_thread_tenant"
+  add_foreign_key "payroll_submission_periods", "companies"
+  add_foreign_key "payroll_submission_periods", "company_pay_schedules"
+  add_foreign_key "payroll_submission_periods", "pay_periods", column: [ "pay_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_periods_pay_period_tenant"
+  add_foreign_key "payroll_submission_periods", "users", column: "status_changed_by_id"
+  add_foreign_key "payroll_submission_status_events", "companies"
+  add_foreign_key "payroll_submission_status_events", "payroll_submission_drafts", column: [ "payroll_submission_draft_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_status_events_draft_tenant"
+  add_foreign_key "payroll_submission_status_events", "payroll_submission_periods", column: [ "payroll_submission_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_status_events_period_tenant"
+  add_foreign_key "payroll_submission_status_events", "payroll_submissions", column: [ "payroll_submission_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_status_events_submission_tenant"
+  add_foreign_key "payroll_submission_status_events", "users", column: "actor_id"
+  add_foreign_key "payroll_submissions", "companies"
+  add_foreign_key "payroll_submissions", "payroll_submission_periods", column: [ "payroll_submission_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submissions_period_tenant"
+  add_foreign_key "payroll_submissions", "users", column: "acknowledged_by_id"
+  add_foreign_key "payroll_submissions", "users", column: "submitted_by_id"
   add_foreign_key "payroll_time_allocations", "companies"
   add_foreign_key "payroll_time_allocations", "daily_time_records"
   add_foreign_key "payroll_time_allocations", "employees"

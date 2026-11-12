@@ -72,6 +72,7 @@ const clientNavigation: NavItem[] = [
 
 const portalNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Payroll Files', href: '/payroll-files', icon: <FileSpreadsheet className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Messages', href: '/messages', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
@@ -113,6 +114,7 @@ const platformNavigation: NavItem[] = [
 const CLIENT_MANAGEMENT_PATH = '/settings/clients';
 
 const portalAdminNavigation: NavItem[] = [
+  { name: 'Pay Period Files', href: '/settings/payroll-submissions', icon: <FileSpreadsheet className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Documents', href: '/settings/client-documents', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Changes', href: '/settings/client-change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
 ];

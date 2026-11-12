@@ -119,3 +119,15 @@ it('stops automatic scroll restoration after a page failure and retries that cur
   expect(mocks.list).toHaveBeenCalledTimes(6);
   expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'restore3' }));
 });
+
+it('opens pay-period submissions on the period page for that client', async () => {
+  mocks.list.mockResolvedValue({ data: [{ ...row('payroll_submission', 7), title: 'Payroll Nov 2–15, 2026' }], meta: { next_cursor: null } });
+  render(<MemoryRouter initialEntries={['/app/client-inbox']}><ClientInbox /><Destination /></MemoryRouter>);
+  const button = await screen.findByRole('button', { name: /Payroll Nov 2–15, 2026/ });
+  expect(button.textContent).toContain('Second client · Pay period files');
+  fireEvent.click(button);
+  expect(mocks.switchCompany).toHaveBeenCalledWith(2);
+  const destination = screen.getByTestId('destination').textContent!;
+  expect(destination.split('?')[0]).toBe('/companies/2/payroll-submissions/7');
+  expect(new URLSearchParams(destination.split('?')[1]).get('inbox')).toBe('/app/client-inbox');
+});
