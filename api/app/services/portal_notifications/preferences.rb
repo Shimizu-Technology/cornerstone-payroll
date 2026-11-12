@@ -32,12 +32,15 @@ module PortalNotifications
 
         changes = {}
         PortalNotificationPreference.transaction do
+          # Serializes saves for one person, so two first saves of the same
+          # category cannot both insert and collide on the unique index.
+          User.lock.find(user.id)
           requested.each do |category, mode|
             category = category.to_s
             mode = mode.to_s
             raise ArgumentError, "Choose immediate, daily digest or off" unless PortalNotificationPreference::MODES.include?(mode)
 
-            preference = PortalNotificationPreference.lock.find_or_initialize_by(user_id: user.id, category: category)
+            preference = PortalNotificationPreference.find_or_initialize_by(user_id: user.id, category: category)
             before = preference.delivery_mode || allowed.dig(category, :default_mode)
             next if before == mode
 

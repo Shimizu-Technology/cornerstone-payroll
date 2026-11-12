@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,7 +35,7 @@ const SKIP_REASONS: Record<string, string> = {
   staging_contained: 'Held in the staging environment.',
 };
 
-export function NotificationSettings() {
+export function NotificationSettings(): ReactElement {
   const navigate = useNavigate();
   const { switchCompany } = useCompany();
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -44,44 +44,58 @@ export function NotificationSettings() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
-  // A late or repeated load must never overwrite choices the person is making.
-  const editedRef = useRef(false);
+  // Only the newest load may apply. Saving or leaving the page invalidates
+  // older loads, so a stale response can never replace saved choices.
+  const loadGenerationRef = useRef(0);
+  const mountedRef = useRef(false);
 
-  const apply = (data: Settings, { fromLoad = false } = {}) => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const apply = (data: Settings): void => {
     setSettings(data);
-    if (fromLoad && editedRef.current) return;
-    editedRef.current = false;
     setModes(Object.fromEntries(data.categories.map((category) => [category.key, category.delivery_mode])));
   };
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
+    const generation = ++loadGenerationRef.current;
+    const isCurrent = (): boolean => mountedRef.current && generation === loadGenerationRef.current;
     setLoadError(null);
     try {
-      apply((await notificationSettingsApi.get()).data, { fromLoad: true });
+      const response = await notificationSettingsApi.get();
+      if (isCurrent()) apply(response.data);
     } catch (caught) {
-      setLoadError(caught instanceof Error ? caught.message : 'Could not load notification settings.');
+      if (isCurrent()) setLoadError(caught instanceof Error ? caught.message : 'Could not load notification settings.');
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadGenerationRef.current += 1; };
+  }, [load]);
 
   const dirty = Boolean(settings?.categories.some((category) => modes[category.key] !== category.delivery_mode));
 
-  const save = async () => {
+  const save = async (): Promise<void> => {
+    loadGenerationRef.current += 1;
     setSaving(true);
     setSaveError(null);
     setSaved(false);
     try {
-      apply((await notificationSettingsApi.update(modes)).data);
+      const response = await notificationSettingsApi.update(modes);
+      if (!mountedRef.current) return;
+      apply(response.data);
       setSaved(true);
     } catch (caught) {
-      setSaveError(caught instanceof Error ? caught.message : 'Could not save notification settings.');
+      if (mountedRef.current) setSaveError(caught instanceof Error ? caught.message : 'Could not save notification settings.');
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   };
 
-  const openClient = (companyId: number) => {
+  const openClient = (companyId: number): void => {
     if (switchCompany(companyId)) navigate('/settings/client-documents');
   };
 
@@ -126,7 +140,7 @@ export function NotificationSettings() {
                         className="sm:w-48"
                         value={modes[category.key]}
                         disabled={saving}
-                        onChange={(event) => { editedRef.current = true; setSaved(false); setModes((current) => ({ ...current, [category.key]: event.target.value as NotificationDeliveryMode })); }}
+                        onChange={(event) => { setSaved(false); setModes((current) => ({ ...current, [category.key]: event.target.value as NotificationDeliveryMode })); }}
                       >
                         <option value="immediate">Immediately{category.default_mode === 'immediate' ? ' (recommended)' : ''}</option>
                         <option value="digest">Daily digest{category.default_mode === 'digest' ? ' (recommended)' : ''}</option>

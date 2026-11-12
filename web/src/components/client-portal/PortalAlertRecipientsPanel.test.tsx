@@ -108,14 +108,66 @@ describe('PortalAlertRecipientsPanel', () => {
     await waitFor(() => expect(screen.queryByText('first@example.test')).toBeNull());
   });
 
-  it('keeps ticks made before a repeated load finishes', async () => {
-    let resolveSecond!: (value: { data: PortalAlertRecipients }) => void;
-    mocks.get.mockResolvedValueOnce({ data: base }).mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+  it('ignores the older of two overlapping loads', async () => {
+    let resolveFirst!: (value: { data: PortalAlertRecipients }) => void;
+    mocks.get.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ data: { ...base, extra_emails: ['newest@example.test'], recipient_count: 1 } });
+    // StrictMode starts the load effect twice, as in development.
     render(<StrictMode><PortalAlertRecipientsPanel companyId={4} /></StrictMode>);
-    fireEvent.click(await screen.findByLabelText(/Dana Synthetic/));
-    resolveSecond({ data: base });
+    expect(await screen.findByText('newest@example.test')).toBeTruthy();
+    resolveFirst({ data: { ...base, extra_emails: ['stale@example.test'], recipient_count: 1 } });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect((screen.getByLabelText(/Dana Synthetic/) as HTMLInputElement).checked).toBe(true);
-    expect(screen.getByRole('button', { name: 'Save recipients' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.queryByText('stale@example.test')).toBeNull();
+  });
+
+  it('keeps a successful save when an older load finishes afterwards', async () => {
+    let resolveFirst!: (value: { data: PortalAlertRecipients }) => void;
+    const onCount = vi.fn();
+    const saved = { ...base, recipient_count: 1, eligible_users: base.eligible_users.map((user) => ({ ...user, selected: user.id === 2 })) };
+    mocks.get.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ data: base });
+    mocks.update.mockResolvedValue({ data: saved });
+    render(<StrictMode><PortalAlertRecipientsPanel companyId={4} onRecipientCountChange={onCount} /></StrictMode>);
+    fireEvent.click(await screen.findByLabelText(/Morgan Synthetic/));
+    fireEvent.click(screen.getByRole('button', { name: 'Save recipients' }));
+    expect(await screen.findByText('Alert recipients saved.')).toBeTruthy();
+
+    resolveFirst({ data: base }); // started before the save, finishes after it
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect((screen.getByLabelText(/Morgan Synthetic/) as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(onCount).toHaveBeenLastCalledWith(1);
+  });
+
+  it('ignores a request from a panel replaced for another client', async () => {
+    let resolveOld!: (value: { data: PortalAlertRecipients }) => void;
+    const onCount = vi.fn();
+    mocks.get.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce({ data: { ...base, company_id: 5, recipient_count: 3, extra_emails: ['b@example.test'] } });
+    const { rerender } = render(<PortalAlertRecipientsPanel key={4} companyId={4} onRecipientCountChange={onCount} />);
+    rerender(<PortalAlertRecipientsPanel key={5} companyId={5} onRecipientCountChange={onCount} />);
+    expect(await screen.findByText('b@example.test')).toBeTruthy();
+
+    resolveOld({ data: { ...base, recipient_count: 0 } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onCount).toHaveBeenLastCalledWith(3);
+    expect(onCount).not.toHaveBeenCalledWith(0);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('ignores a save that finishes after the panel is gone', async () => {
+    let resolveSave!: (value: { data: PortalAlertRecipients }) => void;
+    const onCount = vi.fn();
+    mocks.update.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+    const { unmount } = render(<PortalAlertRecipientsPanel companyId={4} onRecipientCountChange={onCount} />);
+    fireEvent.click(await screen.findByLabelText(/Dana Synthetic/));
+    fireEvent.click(screen.getByRole('button', { name: 'Save recipients' }));
+    unmount();
+    onCount.mockClear();
+    resolveSave({ data: { ...base, recipient_count: 7 } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onCount).not.toHaveBeenCalled();
   });
 });

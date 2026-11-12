@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
 import { BellRing, Mail, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { portalAlertRecipientsApi, type PortalAlertRecipients } from '@/services
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function roleLabel(role: string) {
+function roleLabel(role: string): string {
   if (role === 'org_admin' || role === 'admin') return 'Organization Admin';
   return role.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }
@@ -20,7 +20,7 @@ interface Props {
 }
 
 /** The selected client's staff-side portal alert recipients. */
-export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onRecipientCountChange }: Props) {
+export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onRecipientCountChange }: Props): ReactElement {
   const [settings, setSettings] = useState<PortalAlertRecipients | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [emails, setEmails] = useState<string[]>([]);
@@ -34,26 +34,34 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
   companyRef.current = companyId;
   const countCallbackRef = useRef(onRecipientCountChange);
   countCallbackRef.current = onRecipientCountChange;
-  // A late or repeated load must never overwrite edits in progress.
-  const editedRef = useRef(false);
+  // Only the newest load may apply. A save, a company change or unmounting
+  // invalidates older loads, so a stale response can never replace saved or
+  // in-progress choices, or report another client's recipient count.
+  const loadGenerationRef = useRef(0);
+  const mountedRef = useRef(false);
 
-  const apply = useCallback((data: PortalAlertRecipients, { fromLoad = false } = {}) => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const apply = useCallback((data: PortalAlertRecipients): void => {
     setSettings(data);
     countCallbackRef.current?.(data.recipient_count);
-    if (fromLoad && editedRef.current) return;
-    editedRef.current = false;
     setSelectedIds(data.eligible_users.filter((user) => user.selected).map((user) => user.id));
     setEmails(data.extra_emails);
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
     const requested = companyId;
+    const generation = ++loadGenerationRef.current;
+    const isCurrent = (): boolean => mountedRef.current && generation === loadGenerationRef.current && companyRef.current === requested;
     setLoadError(null);
     try {
       const response = await portalAlertRecipientsApi.get(requested);
-      if (companyRef.current === requested) apply(response.data, { fromLoad: true });
+      if (isCurrent()) apply(response.data);
     } catch (caught) {
-      if (companyRef.current !== requested) return;
+      if (!isCurrent()) return;
       setLoadError(caught instanceof Error ? caught.message : 'Could not load alert recipients.');
       countCallbackRef.current?.(null);
     }
@@ -61,11 +69,11 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
 
   useEffect(() => {
     countCallbackRef.current?.(null);
-    editedRef.current = false;
     setSettings(null);
     setSaved(false);
     setSaveError(null);
     void load();
+    return () => { loadGenerationRef.current += 1; };
   }, [load]);
 
   if (loadError) {
@@ -86,40 +94,40 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
   const nobody = selectedIds.length === 0 && emails.length === 0;
   const atEmailLimit = emails.length >= settings.max_extra_emails;
 
-  const toggle = (id: number) => {
-    editedRef.current = true;
+  const toggle = (id: number): void => {
     setSaved(false);
     setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   };
 
-  const addEmail = (event: FormEvent) => {
+  const addEmail = (event: FormEvent): void => {
     event.preventDefault();
     const email = draftEmail.trim().toLowerCase();
     if (!EMAIL_PATTERN.test(email)) return setEmailError('Enter a valid email address.');
     if (emails.includes(email)) return setEmailError('That address is already on the list.');
     if (atEmailLimit) return setEmailError(`Add up to ${settings.max_extra_emails} extra addresses.`);
     setEmailError(null);
-    editedRef.current = true;
     setSaved(false);
     setEmails((current) => [...current, email].sort());
     setDraftEmail('');
   };
 
-  const save = async () => {
+  const save = async (): Promise<void> => {
     const requested = companyId;
+    loadGenerationRef.current += 1;
+    const isCurrent = (): boolean => mountedRef.current && companyRef.current === requested;
     setSaving(true);
     setSaveError(null);
     setEmailError(null);
     setSaved(false);
     try {
       const response = await portalAlertRecipientsApi.update(requested, { user_ids: selectedIds, emails });
-      if (companyRef.current !== requested) return;
+      if (!isCurrent()) return;
       apply(response.data);
       setSaved(true);
     } catch (caught) {
-      if (companyRef.current === requested) setSaveError(caught instanceof Error ? caught.message : 'Could not save alert recipients.');
+      if (isCurrent()) setSaveError(caught instanceof Error ? caught.message : 'Could not save alert recipients.');
     } finally {
-      if (companyRef.current === requested) setSaving(false);
+      if (isCurrent()) setSaving(false);
     }
   };
 
@@ -192,7 +200,7 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
                       aria-label={`Remove ${email}`}
                       disabled={saving}
-                      onClick={() => { editedRef.current = true; setSaved(false); setEmails((current) => current.filter((value) => value !== email)); }}
+                      onClick={() => { setSaved(false); setEmails((current) => current.filter((value) => value !== email)); }}
                     >
                       <X className="h-4 w-4" />
                     </button>
