@@ -61,6 +61,16 @@ module PortalNotifications
       HTML
     end
 
+    # The dispatcher batches only events that share a destination, so every
+    # email's link reaches all the work it mentions.
+    def self.destination_group(event)
+      case event.category
+      when "payroll_submissions", "payroll_updates" then :payroll
+      when "employee_changes", "employee_change_decisions" then :changes
+      else :general
+      end
+    end
+
     def self.frontend_url
       ENV.fetch("FRONTEND_URL") { ENV.fetch("ALLOWED_ORIGINS", "http://localhost:5173").split(",").first.strip }.chomp("/")
     end
@@ -68,11 +78,15 @@ module PortalNotifications
     private
 
     def path_for(audience, events)
-      change_only = events.all? { |event| event.category.in?(%w[employee_changes employee_change_decisions]) }
-      if audience == "staff"
-        change_only ? "/settings/client-change-requests" : "/settings/client-documents"
-      else
-        change_only ? "/change-requests" : "/documents"
+      groups = events.map { |event| self.class.destination_group(event) }.uniq
+      group = groups.one? ? groups.first : :general
+      case [ audience == "staff", group ]
+      when [ true, :payroll ] then "/app/client-inbox"
+      when [ false, :payroll ] then "/payroll-files"
+      when [ true, :changes ] then "/settings/client-change-requests"
+      when [ false, :changes ] then "/change-requests"
+      when [ true, :general ] then "/settings/client-documents"
+      else "/documents"
       end
     end
 

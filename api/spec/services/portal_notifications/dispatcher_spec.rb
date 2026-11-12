@@ -83,6 +83,19 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
     end
   end
 
+  it "sends payroll work in its own email so each link reaches the work it mentions" do
+    with_portal_email do
+      client_message!
+      period = PayrollSubmissionPeriod.create!(company: company, start_date: Date.new(2026, 10, 19), end_date: Date.new(2026, 11, 1), source: "schedule")
+      PortalNotifications.payroll_period!("payroll_draft_decided", period: period, actor: client, dedupe: "mixed-batch")
+
+      dispatch_at(3.minutes.from_now)
+      links = captured_portal_emails.map { |email| email[:text][%r{https://\S+}] }
+      expect(links).to contain_exactly("https://payroll.example.test/settings/client-documents", "https://payroll.example.test/app/client-inbox")
+      expect(deliveries_for(staff).pluck(:status).uniq).to eq([ "sent" ])
+    end
+  end
+
   it "never puts names, subjects, bodies, file names or identifiers in the email or logs" do
     document = create(:client_document, company: company, title: "Jordan Reyes W-4 scan", file_name: "jordan-reyes-ssn.pdf")
     with_portal_email do

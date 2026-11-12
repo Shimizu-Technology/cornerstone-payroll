@@ -8,7 +8,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { clientInboxApi, mergeInboxRows, type InboxCounts, type InboxRow } from '@/services/clientInbox';
 
-const labels = { message: 'Message', document: 'Client upload', employee_change: 'Employee change' };
+const labels = { message: 'Message', document: 'Client upload', employee_change: 'Employee change', payroll_submission: 'Pay period files' };
 const scrollPositions = new Map<string, number>();
 export function ClientInbox(): ReactElement {
   const [params, setParams] = useSearchParams();
@@ -104,16 +104,20 @@ export function ClientInbox(): ReactElement {
     if (!switchCompany(row.company_id)) return;
     scrollPositions.set(scrollKey, getScroll()?.scrollTop || 0);
     const target = new URLSearchParams({ inbox: location.pathname + location.search });
+    if (row.kind === 'payroll_submission') {
+      navigate(`/companies/${row.company_id}/payroll-submissions/${row.id}?${target}`);
+      return;
+    }
     target.set(row.kind === 'message' ? 'thread_id' : row.kind === 'document' ? 'document_id' : 'request_id', String(row.id));
     navigate(`/companies/${row.company_id}/${row.kind === 'employee_change' ? 'client-change-requests' : 'client-documents'}?${target}`);
   };
   return <div ref={container}>
     <Header contextLabel="Workspace" contextValue="All accessible clients" title="Client Inbox" description="Portal work across your accessible clients. Choose an item to enter that client." />
     <div className="space-y-5 p-4 sm:p-6 lg:p-8">
-      <Card><CardContent className="flex flex-wrap gap-x-8 gap-y-3 pt-5"><p><strong className="tabular-nums">{counts?.unread_count ?? '—'}</strong> unread <span className="block text-xs text-neutral-600">{counts ? `${counts.unread_messages} conversations · ${counts.unread_documents} files` : 'Loading counts'}</span></p><p><strong className="tabular-nums">{counts?.waiting_count ?? '—'}</strong> waiting on staff <span className="block text-xs text-neutral-600">{counts ? `${counts.pending_changes} pending employee changes · ` : ''}Reading does not complete the work</span></p></CardContent></Card>
+      <Card><CardContent className="flex flex-wrap gap-x-8 gap-y-3 pt-5"><p><strong className="tabular-nums">{counts?.unread_count ?? '—'}</strong> unread <span className="block text-xs text-neutral-600">{counts ? `${counts.unread_messages} conversations · ${counts.unread_documents} files` : 'Loading counts'}</span></p><p><strong className="tabular-nums">{counts?.waiting_count ?? '—'}</strong> waiting on staff <span className="block text-xs text-neutral-600">{counts ? `${counts.waiting_payroll ?? 0} pay periods · ${counts.pending_changes} pending employee changes · ` : ''}Reading does not complete the work</span></p></CardContent></Card>
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="text-sm font-medium">Client<Select value={params.get('client') || ''} onChange={e => filter('client', e.target.value)}><option value="">All clients</option>{companies.filter(c => c.organization_id === user?.organization_id && c.active && c.payroll_environment === 'live').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></label>
-        <label className="text-sm font-medium">Kind<Select value={params.get('kind') || ''} onChange={e => filter('kind', e.target.value)}><option value="">All kinds</option><option value="message">Messages</option><option value="document">Client uploads</option><option value="employee_change">Employee changes</option></Select></label>
+        <label className="text-sm font-medium">Kind<Select value={params.get('kind') || ''} onChange={e => filter('kind', e.target.value)}><option value="">All kinds</option><option value="message">Messages</option><option value="document">Client uploads</option><option value="employee_change">Employee changes</option><option value="payroll_submission">Pay period files</option></Select></label>
         <label className="text-sm font-medium">Status<Select value={params.get('status') || 'waiting'} onChange={e => filter('status', e.target.value)}><option value="waiting">Waiting on staff</option><option value="unread">Unread</option><option value="all">All activity</option><option value="handled">Handled</option></Select></label>
       </div>
       <div className="flex items-center justify-between gap-3"><p className="text-sm text-neutral-600">Most recent client activity first</p><Button variant="outline" disabled={busy} onClick={() => void load(undefined, true)}>Refresh</Button></div>

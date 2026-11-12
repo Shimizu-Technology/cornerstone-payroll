@@ -29,6 +29,7 @@ import type { Employee } from '@/types';
 const documentCategories = [
   { value: '', label: 'All categories' },
   { value: 'payroll_source', label: 'Payroll Source' },
+  { value: 'payroll_review', label: 'Payroll Review Draft' },
   { value: 'employee_onboarding', label: 'W-4 / W-9 / Onboarding' },
   { value: 'tax_notice', label: 'Tax Notice' },
   { value: 'direct_deposit', label: 'Direct Deposit' },

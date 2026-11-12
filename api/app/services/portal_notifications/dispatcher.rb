@@ -45,9 +45,11 @@ module PortalNotifications
         rows = due_scope.where(recipient_key: recipient_key).order(:id).lock("FOR UPDATE SKIP LOCKED")
           .includes(:user, portal_notification_event: :subject).to_a
         kept = rows.reject { |row| skip_if_ineligible!(row) }
-        kept.group_by { |row| [ row.delivery_mode, row.batch_key ] }.map do |(mode, previous_key), group|
+        # New batches never mix destinations; an attempted batch keeps its rows.
+        kept.group_by { |row| [ row.delivery_mode, row.batch_key, (Email.destination_group(row.event) unless row.batch_key) ] }
+          .map do |(mode, previous_key, destination), group|
           ids = group.map(&:id).sort
-          key = previous_key || "portal-notification-#{Digest::SHA256.hexdigest("#{recipient_key}:#{mode}:#{ids.join(',')}")[0, 48]}"
+          key = previous_key || "portal-notification-#{Digest::SHA256.hexdigest("#{recipient_key}:#{mode}:#{destination}:#{ids.join(',')}")[0, 48]}"
           events = previous_key ? attempted_events(previous_key) : group.map(&:event)
           PortalNotificationDelivery.where(id: ids).update_all(
             [ "attempts = attempts + 1, claimed_at = ?, batch_key = ?, updated_at = ?", now, key, now ])
