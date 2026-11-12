@@ -12,7 +12,7 @@ module ClientPortalThreadActions
 
   def index
     threads = ClientPortalThread.where(company_id: current_company_id)
-                                .includes(:created_by, :resolved_by, messages: [ :author, { client_document: [ :employee, :uploaded_by ] } ])
+                                .includes(:created_by, :resolved_by, messages: ClientPortalThreadSerializer::MESSAGE_INCLUDES)
                                 .recent_first
     threads = threads.where(status: params[:status]) if params[:status].present?
     threads = bounded_page(threads)
@@ -38,7 +38,10 @@ module ClientPortalThreadActions
     initial_message = nil
     replayed = false
     key = params[:idempotency_key].presence
-    request_payload = { subject: params[:subject].presence || default_thread_subject, body: params[:body].to_s, document_id: params[:document_id].presence&.to_i }
+    document_ids = PortalMessages::Attachments.requested_ids(params)
+    documents = PortalMessages::Attachments.resolve!(company_id: current_company_id, user: current_user, ids: document_ids)
+    request_payload = { subject: params[:subject].presence || default_thread_subject, body: params[:body].to_s, document_id: document_ids.first }
+    request_payload[:document_ids] = document_ids if params[:document_ids].present?
 
     # Serialize per author across conversations, including simultaneous retries.
     current_user.with_lock do
@@ -55,7 +58,7 @@ module ClientPortalThreadActions
         created_by: current_user, idempotency_key: key, creation_payload: request_payload,
         subject: params[:subject].presence || default_thread_subject
       )
-      initial_message = create_message_for_thread!(created_thread) if params[:body].present? || params[:document_id].present?
+      initial_message = create_message_for_thread!(created_thread, documents) if params[:body].present? || documents.any?
       record_audit!("client_portal_threads#create", created_thread, { subject: created_thread.subject })
       if initial_message
         record_audit!("client_portal_messages#create", initial_message, PortalActivity.message_metadata(initial_message))
@@ -133,23 +136,14 @@ module ClientPortalThreadActions
     render json: { error: "Thread not found" }, status: :not_found
   end
 
-  def create_message_for_thread!(target_thread)
-    document = find_message_document
+  def create_message_for_thread!(target_thread, documents)
     ClientPortalMessage.create!(
       client_portal_thread: target_thread,
       company_id: current_company_id,
       author: current_user,
       body: params[:body],
-      client_document: document
+      attach_documents: documents
     )
-  end
-
-  def find_message_document
-    return nil if params[:document_id].blank?
-
-    ClientDocument.client_visible.find_by!(id: params[:document_id], company_id: current_company_id)
-  rescue ActiveRecord::RecordNotFound
-    raise ActiveRecord::RecordInvalid.new(ClientPortalMessage.new.tap { |message| message.errors.add(:client_document, "not found") })
   end
 
   def portal_serializer

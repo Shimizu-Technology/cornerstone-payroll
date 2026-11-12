@@ -67,8 +67,6 @@ async function loadAllEmployees() {
   });
 }
 
-const searchPortalDocuments = (search: string) => adminClientDocumentsApi.list({ search, per_page: 25 });
-
 export function AdminClientDocumentsPage() {
   const [searchParams] = useSearchParams();
   const deepDocumentId = Number(searchParams.get('document_id')) || null;
@@ -428,7 +426,8 @@ export function AdminClientDocumentsPage() {
         <PortalMessagesPanel
           initialThreadId={Number(searchParams.get('thread_id')) || null}
           api={adminPortalThreadsApi}
-          searchDocuments={searchPortalDocuments}
+          documentsApi={adminClientDocumentsApi}
+          audience="staff"
           documents={messageDocuments}
           audienceLabel="to the client"
           description="Coordinate corrections, follow-up notes, and updated payroll source files with the client."

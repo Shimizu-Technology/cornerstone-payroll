@@ -28,6 +28,8 @@ module Api
           documents = documents.where(category: params[:category]) if params[:category].present?
           documents = documents.where(employee_id: params[:employee_id]) if params[:employee_id].present?
           documents = documents.where(uploaded_by_id: params[:uploaded_by_id]) if params[:uploaded_by_id].present?
+          # The message file picker: only files the client can already see.
+          documents = documents.attachable if ActiveModel::Type::Boolean.new.cast(params[:attachable])
 
           stats = { employee_linked_count: documents.where.not(employee_id: nil).count,
                     unique_uploaders_count: documents.unscope(:order).distinct.count(:uploaded_by_id) }
@@ -58,6 +60,8 @@ module Api
             company_id: current_company_id, current_user: current_user,
             params: params
           ) do |uploaded|
+            next if uploaded.replayed
+
             uploaded.documents.each do |document|
               PortalActivity.record!(user: current_user, record: document, action: "admin_client_documents#create",
                 metadata: PortalActivity.document_metadata(document),
@@ -66,12 +70,14 @@ module Api
             audit_requirement_received!(uploaded.document_requirement) if uploaded.document_requirement
           end
           documents = result.documents
-          documents.each { |document| enqueue_preview_generation(document) }
+          documents.each { |document| enqueue_preview_generation(document) } unless result.replayed
 
           render json: {
             data: documents.map { |document| serialize_document(document) },
             message: documents.count == 1 ? "Document shared successfully" : "#{documents.count} documents shared successfully"
-          }, status: :created
+          }, status: result.replayed ? :ok : :created
+        rescue ClientDocumentUploadService::RetryConflict => e
+          render json: { error: e.message }, status: :conflict
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotFound

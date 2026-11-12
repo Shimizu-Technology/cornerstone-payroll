@@ -31,6 +31,7 @@ class ClientPortalThread < ApplicationRecord
   end
 
   has_many :read_receipts, class_name: "PortalThreadReadReceipt", dependent: :delete_all
+  has_many :file_requests, class_name: "PortalFileRequest", dependent: :restrict_with_error
 
   def read_cursor_for(user)
     [ read_baseline_message_id, read_receipts.find_by(user_id: user.id)&.last_displayed_message_id || 0 ].max

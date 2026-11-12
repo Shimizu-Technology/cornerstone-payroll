@@ -3,9 +3,10 @@
 import { MemoryRouter } from 'react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi, type Mock } from 'vitest';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactElement } from 'react';
 import type { ClientPortalThread } from '@/services/api';
 import { PortalMessagesPanel } from './PortalMessagesPanel';
+import { clearAllDrafts } from './messageDrafts';
 
 type Callbacks = { onConnected: () => void; onUnavailable: () => void; onError: () => void; onThread: (value: { thread: ClientPortalThread }) => void };
 const mocks = vi.hoisted(() => ({ company: 2, refresh: vi.fn(), subscribe: vi.fn(), callbacks: [] as Callbacks[] }));
@@ -15,11 +16,12 @@ vi.mock('@/services/clientPortalCable', () => ({ subscribeToClientPortalThreads:
 const thread = (companyId: number, subject: string) => ({ id: companyId, company_id: companyId, subject, status: 'open', created_at: '2026-10-12T00:00:00Z', updated_at: '2026-10-12T00:00:00Z', unread: false, messages: [] } as ClientPortalThread);
 type ThreadsApi = ComponentProps<typeof PortalMessagesPanel>['api'];
 let api: { [Key in keyof ThreadsApi]: Mock<ThreadsApi[Key]> };
-const view = () => <PortalMessagesPanel api={api} documents={[]} audienceLabel="client" description="Client messages" />;
+const routed = (node: ReactElement) => <MemoryRouter>{node}</MemoryRouter>;
+const view = () => routed(<PortalMessagesPanel api={api} documents={[]} audienceLabel="client" description="Client messages" />);
 
 beforeEach(() => {
   window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() });
-  vi.clearAllMocks(); mocks.company = 2; mocks.callbacks.length = 0; mocks.refresh.mockResolvedValue(undefined);
+  vi.clearAllMocks(); clearAllDrafts(); mocks.company = 2; mocks.callbacks.length = 0; mocks.refresh.mockResolvedValue(undefined);
   mocks.subscribe.mockImplementation((_company: number, callbacks: Callbacks) => { mocks.callbacks.push(callbacks); return Promise.resolve(vi.fn()); });
   api = { unreadCount: vi.fn().mockResolvedValue({ data: { unread_count: 0 } }), activity: vi.fn().mockResolvedValue({ data: [], meta: {} }), markRead: vi.fn(), list: vi.fn<ThreadsApi['list']>().mockResolvedValue({ data: [] }), get: vi.fn<ThreadsApi['get']>(), create: vi.fn<ThreadsApi['create']>(), update: vi.fn<ThreadsApi['update']>(), createMessage: vi.fn<ThreadsApi['createMessage']>() };
 });
@@ -76,7 +78,7 @@ it('does not restore a newly created conversation when its response arrives afte
   let finish!: (value: { data: ClientPortalThread }) => void;
   api.create.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   render(view()); await waitFor(() => expect(mocks.callbacks).toHaveLength(1));
-  fireEvent.change(screen.getByPlaceholderText('Subject'), { target: { value: 'Pending conversation' } });
+  fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Pending conversation' } });
   fireEvent.click(screen.getByRole('button', { name: 'Start Conversation' }));
   await waitFor(() => expect(api.create).toHaveBeenCalledOnce());
   await act(async () => mocks.callbacks[0].onUnavailable());
@@ -193,42 +195,10 @@ it('keeps a named file-archived tombstone and excludes archived files from attac
   const conversation = { ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document: archived }] } as ClientPortalThread;
   api.list.mockResolvedValue({ data: [conversation] });
   api.get.mockResolvedValue({ data: conversation });
-  render(<PortalMessagesPanel api={api} documents={[archived]} audienceLabel="client" description="Client messages" />);
+  render(routed(<PortalMessagesPanel api={api} documents={[archived]} audienceLabel="client" description="Client messages" />));
   expect(await screen.findByText('File archived: Payroll hours (hours.csv)')).toBeTruthy();
   expect(screen.queryByRole('option', { name: 'Payroll hours (hours.csv)' })).toBeNull();
   expect(screen.queryByRole('option', { name: 'Payroll hours (hours.csv)' })).toBeNull();
-});
-
-it.each(['archived', 'pending', 'infected', 'error', 'removed'])('clears both attachment selections when a document becomes %s', async (state) => {
-  const document = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
-  const conversation = thread(2, 'Payroll files');
-  api.list.mockResolvedValue({ data: [conversation] });
-  api.get.mockResolvedValue({ data: conversation });
-  const panel = (documents: import('@/services/api').ClientDocument[]) => <PortalMessagesPanel api={api} documents={documents} audienceLabel="client" description="Client messages" />;
-  const rendered = render(panel([document]));
-  await screen.findByPlaceholderText('Reply client');
-  const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
-  selects.forEach(select => fireEvent.change(select, { target: { value: '9' } }));
-  // A refresh which keeps this document usable must preserve both selections.
-  rendered.rerender(panel([{ ...document }]));
-  selects.forEach(select => expect(select.value).toBe('9'));
-  const next = state === 'removed' ? [] : [{ ...document, ...(state === 'archived' ? { archived_at: '2026-11-12T00:00:00Z' } : { scan_status: state as 'pending' | 'infected' | 'error' }) }];
-  rendered.rerender(panel(next));
-  await waitFor(() => selects.forEach(select => expect(select.value).toBe('')));
-  if (['pending', 'infected', 'error'].includes(state)) {
-    const options = screen.getAllByRole('option', { name: /Safety check unavailable/ }) as HTMLOptionElement[];
-    expect(options).toHaveLength(2);
-    options.forEach(option => expect(option.disabled).toBe(true));
-  }
-  fireEvent.change(screen.getByPlaceholderText('Subject'), { target: { value: 'New message' } });
-  fireEvent.change(screen.getByPlaceholderText('Reply client'), { target: { value: 'Reply text' } });
-  api.create.mockResolvedValue({ data: conversation });
-  api.createMessage.mockResolvedValue({ data: {} as import('@/services/api').ClientPortalMessage });
-  fireEvent.click(screen.getByRole('button', { name: 'Start Conversation' }));
-  await waitFor(() => expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ document_id: undefined })));
-  // Start conversation completion clears its draft, but must not restore a stale reply attachment.
-  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-  await waitFor(() => expect(api.createMessage).toHaveBeenCalledWith(2, expect.objectContaining({ document_id: undefined })));
 });
 
 it('keeps the thread response archive tombstone when the document list is stale', async () => {
@@ -236,7 +206,7 @@ it('keeps the thread response archive tombstone when the document list is stale'
   const conversation = { ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document: { ...stale, archived_at: '2026-11-12T00:00:00Z' } }] } as ClientPortalThread;
   api.list.mockResolvedValue({ data: [conversation] });
   api.get.mockResolvedValue({ data: conversation });
-  render(<PortalMessagesPanel api={api} documents={[stale]} audienceLabel="client" description="Client messages" />);
+  render(routed(<PortalMessagesPanel api={api} documents={[stale]} audienceLabel="client" description="Client messages" />));
   expect(await screen.findByText('File archived: Payroll hours (hours.csv)')).toBeTruthy();
   expect(screen.queryByRole('option', { name: 'Payroll hours (hours.csv)' })).toBeNull();
 });
@@ -247,27 +217,27 @@ it('re-reads the open conversation after unarchive so the restored file can be a
   const messageWith = (document: typeof archived) => ({ ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document }] } as ClientPortalThread);
   api.list.mockResolvedValue({ data: [messageWith(archived)] });
   api.get.mockResolvedValue({ data: messageWith(archived) });
-  const rendered = render(<PortalMessagesPanel api={api} documents={[archived]} audienceLabel="client" description="Client messages" />);
+  const rendered = render(routed(<PortalMessagesPanel api={api} documents={[archived]} audienceLabel="client" description="Client messages" />));
   expect(await screen.findByText('File archived: Payroll hours (hours.csv)')).toBeTruthy();
   const reads = api.get.mock.calls.length;
 
   api.get.mockResolvedValue({ data: messageWith(restored) });
-  rendered.rerender(<PortalMessagesPanel api={api} documents={[restored]} audienceLabel="client" description="Client messages" />);
+  rendered.rerender(routed(<PortalMessagesPanel api={api} documents={[restored]} audienceLabel="client" description="Client messages" />));
   await waitFor(() => expect(screen.queryByText('File archived: Payroll hours (hours.csv)')).toBeNull());
   expect(api.get.mock.calls.length).toBe(reads + 1);
-  expect(screen.getAllByRole('option', { name: 'Payroll hours (hours.csv)' }).length).toBeGreaterThan(0);
+  expect(screen.getByRole('button', { name: 'Download hours.csv' })).toBeTruthy();
 
   // An unchanged list does not re-read the conversation.
-  rendered.rerender(<PortalMessagesPanel api={api} documents={[{ ...restored }]} audienceLabel="client" description="Client messages" />);
+  rendered.rerender(routed(<PortalMessagesPanel api={api} documents={[{ ...restored }]} audienceLabel="client" description="Client messages" />));
   expect(api.get.mock.calls.length).toBe(reads + 1);
 });
 
 it('reuses a conversation retry key after losing the create response', async () => {
   api.create.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce({ data: thread(2, 'Retry topic') });
   render(view()); await waitFor(() => expect(api.list).toHaveBeenCalledOnce());
-  fireEvent.change(screen.getByPlaceholderText('Subject'), { target: { value: 'Retry topic' } });
+  fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Retry topic' } });
   fireEvent.click(screen.getByRole('button', { name: 'Start Conversation' }));
-  await screen.findByText('response lost');
+  await screen.findByText(/response lost/);
   fireEvent.click(screen.getByRole('button', { name: 'Start Conversation' }));
   await waitFor(() => expect(api.create).toHaveBeenCalledTimes(2));
   expect(api.create.mock.calls[0][0].idempotency_key).toBeTruthy();
@@ -309,101 +279,157 @@ it('keeps a newer badge count when an older Load more page finishes last', async
 });
 
 
-it('finds an older file through server search and keeps the chosen attachment while searching again', async () => {
-  const older = { id: 77, title: 'Older notice', file_name: 'old.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
-  const search = vi.fn().mockResolvedValue({ data: [] });
-  api.list.mockResolvedValue({ data: [thread(2, 'Payroll files')] });
-  api.get.mockResolvedValue({ data: thread(2, 'Payroll files') });
-  render(<PortalMessagesPanel api={api} documents={[]} searchDocuments={search} audienceLabel="client" description="Client messages" />);
-  await screen.findByPlaceholderText('Reply client');
-  search.mockResolvedValueOnce({ data: [older] });
-  fireEvent.change(screen.getByLabelText('Find a file to attach'), { target: { value: 'Older' } });
-  await screen.findAllByRole('option', { name: 'Older notice (old.pdf)' });
-  const replySelect = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
-  fireEvent.change(replySelect, { target: { value: '77' } });
-  fireEvent.change(screen.getByLabelText('Find a file to attach'), { target: { value: 'Another' } });
-  await waitFor(() => expect(search).toHaveBeenLastCalledWith('Another'));
-  expect(replySelect.value).toBe('77');
-});
-
 it('recovers the phone conversation list when the exact inbox thread is unavailable', async () => {
   window.matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() });
   api.list.mockResolvedValue({ data: [thread(2, 'Accessible conversation')] });
   api.get.mockRejectedValueOnce(new Error('Conversation is unavailable'));
   render(<MemoryRouter><PortalMessagesPanel api={api} documents={[]} initialThreadId={99} audienceLabel="client" description="Client messages" /></MemoryRouter>);
   await screen.findByText('Conversation is unavailable');
-  const subject = screen.getByPlaceholderText('Subject');
-  expect(subject.closest('.min-w-0.space-y-4')?.classList.contains('hidden')).toBe(false);
+  const start = screen.getByRole('button', { name: 'New conversation' });
+  expect(start.closest('.min-w-0.space-y-4')?.classList.contains('hidden')).toBe(false);
   api.get.mockResolvedValue({ data: thread(2, 'Accessible conversation') });
   fireEvent.click(screen.getByRole('button', { name: /Accessible conversation/ }));
   await screen.findByPlaceholderText('Reply client');
 });
 
-it('retains a selected attachment across a fresh library page with server search enabled', async () => {
-  const file = { id: 77, title: 'Chosen library file', file_name: 'chosen.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
-  const search = vi.fn().mockResolvedValue({ data: [] });
-  api.list.mockResolvedValue({ data: [thread(2, 'Payroll files')] });
-  api.get.mockResolvedValue({ data: thread(2, 'Payroll files') });
-  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
-  const result = render(view([file]));
+
+const doc = (id: number, title: string, extra: Partial<import('@/services/api').ClientDocument> = {}) => ({ id, title, file_name: `${title}.pdf`, file_size: 2048, content_type: 'application/pdf', visible_to_client: true, scan_status: 'not_scanned', preview_available: true, created_at: '2026-11-12T00:00:00Z', ...extra }) as import('@/services/api').ClientDocument;
+const documentsApi = () => ({
+  list: vi.fn().mockResolvedValue({ data: [], meta: { total_pages: 1 } }),
+  upload: vi.fn(),
+  preview: vi.fn().mockResolvedValue({ blob: new Blob(['%PDF'], { type: 'application/pdf' }) }),
+  download: vi.fn().mockResolvedValue({ blob: new Blob(['%PDF'], { type: 'application/pdf' }), filename: 'hours.pdf' }),
+  opened: vi.fn().mockResolvedValue(undefined),
+  activity: vi.fn().mockResolvedValue({ data: [], meta: {} }),
+});
+
+it('uploads a device file once and reuses both retry keys when the send fails', async () => {
+  const files = documentsApi();
+  const current = thread(2, 'Hours');
+  api.list.mockResolvedValue({ data: [current] }); api.get.mockResolvedValue({ data: current });
+  files.upload.mockResolvedValue({ data: [doc(41, 'hours')] });
+  api.createMessage.mockRejectedValueOnce(new Error('Network unavailable')).mockResolvedValueOnce({ data: { id: 5, thread_id: 2, created_at: '2026-11-12T00:00:00Z' } });
+  const { container } = render(routed(<PortalMessagesPanel api={api} documents={[]} documentsApi={files} audienceLabel="client" description="Client messages" />));
   await screen.findByPlaceholderText('Reply client');
-  const select = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
-  fireEvent.change(select, { target: { value: '77' } });
-  result.rerender(view([]));
-  expect(select.value).toBe('77');
-  // Fresh safety information still wins over the retained selection.
-  result.rerender(view([{ ...file, archived_at: '2026-11-12T00:00:00Z' }]));
-  await waitFor(() => expect(select.value).toBe(''));
+  const inputs = container.querySelectorAll('input[type="file"]');
+  const replyInput = inputs[inputs.length - 1] as HTMLInputElement;
+  fireEvent.change(replyInput, { target: { files: [new File(['%PDF-1.4'], 'hours.pdf', { type: 'application/pdf' })] } });
+  expect(await screen.findByText('Uploads when you send')).toBeTruthy();
+  fireEvent.change(screen.getByPlaceholderText('Reply client'), { target: { value: 'Hours attached' } });
+  const sendButton = screen.getByRole('button', { name: 'Send' });
+  fireEvent.click(sendButton);
+  expect(await screen.findByText(/Network unavailable.*Your text and files are kept/)).toBeTruthy();
+  expect(files.upload).toHaveBeenCalledOnce();
+  const form = files.upload.mock.calls[0][0] as FormData;
+  expect(form.get('for_message')).toBe('true');
+  expect(form.get('upload_key')).toBeTruthy();
+  expect((screen.getByPlaceholderText('Reply client') as HTMLTextAreaElement).value).toBe('Hours attached');
+
+  fireEvent.click(sendButton);
+  await waitFor(() => expect(api.createMessage).toHaveBeenCalledTimes(2));
+  // The uploaded file is not sent again, and the message keeps its key.
+  expect(files.upload).toHaveBeenCalledOnce();
+  expect(api.createMessage.mock.calls[1][1]).toEqual(api.createMessage.mock.calls[0][1]);
+  expect(api.createMessage.mock.calls[0][1]).toEqual(expect.objectContaining({ body: 'Hours attached', document_ids: [41] }));
+  await waitFor(() => expect((screen.getByPlaceholderText('Reply client') as HTMLTextAreaElement).value).toBe(''));
 });
 
-it.each(['archived', 'infected'] as const)('retires a stale searched selection when the refreshed library says %s', async state => {
-  const file = { id: 77, title: 'Searched notice', file_name: 'search.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
-  let resolveRefresh!: (value: { data: typeof file[] }) => void;
-  const search = vi.fn().mockResolvedValueOnce({ data: [file] }).mockImplementation(() => new Promise(resolve => { resolveRefresh = resolve; }));
-  api.list.mockResolvedValue({ data: [thread(2, 'Payroll files')] });
-  api.get.mockResolvedValue({ data: thread(2, 'Payroll files') });
-  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
-  const initial: typeof file[] = [];
-  const result = render(view(initial));
+it('keeps a failed upload visible with its key, so a retry cannot save the file twice', async () => {
+  const files = documentsApi();
+  const current = thread(2, 'Hours');
+  api.list.mockResolvedValue({ data: [current] }); api.get.mockResolvedValue({ data: current });
+  files.upload.mockRejectedValueOnce(new Error('Connection lost')).mockResolvedValueOnce({ data: [doc(42, 'timesheet')] });
+  api.createMessage.mockResolvedValue({ data: { id: 6, thread_id: 2, created_at: '2026-11-12T00:00:00Z' } });
+  const { container } = render(routed(<PortalMessagesPanel api={api} documents={[]} documentsApi={files} audienceLabel="client" description="Client messages" />));
   await screen.findByPlaceholderText('Reply client');
-  await screen.findAllByRole('option', { name: 'Searched notice (search.pdf)' });
-  const select = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
-  fireEvent.change(select, { target: { value: '77' } });
-  expect(select.value).toBe('77');
-  const unsafe: typeof file = { ...file, ...(state === 'archived' ? { archived_at: '2026-11-12T00:00:00Z' } : { scan_status: 'infected' }) };
-  result.rerender(view([unsafe]));
-  await waitFor(() => expect(select.value).toBe(''));
-  await waitFor(() => expect(search).toHaveBeenCalledTimes(2));
-  await act(async () => resolveRefresh({ data: [unsafe] }));
-  expect(select.value).toBe('');
+  const inputs = container.querySelectorAll('input[type="file"]');
+  fireEvent.change(inputs[inputs.length - 1], { target: { files: [new File(['%PDF'], 'a-very-long-file-name-without-any-spaces-for-the-november-payroll-period.pdf', { type: 'application/pdf' })] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  expect(await screen.findByText('Not uploaded: Connection lost')).toBeTruthy();
+  expect(api.createMessage).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(api.createMessage).toHaveBeenCalledOnce());
+  const keys = files.upload.mock.calls.map(call => (call[0] as FormData).get('upload_key'));
+  expect(keys[0]).toBe(keys[1]);
 });
 
-it('lets a newer search override an unchanged older library copy', async () => {
-  const file = { id: 77, title: 'Notice', file_name: 'notice.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
-  const search = vi.fn().mockResolvedValue({ data: [{ ...file, scan_status: 'infected' }] });
-  render(<PortalMessagesPanel api={api} documents={[file]} searchDocuments={search} audienceLabel="client" description="Client messages" />);
-  await screen.findAllByRole('option', { name: /Notice.*Safety check unavailable/ });
-  expect((screen.getByRole('option', { name: /Notice.*Safety check unavailable/ }) as HTMLOptionElement).disabled).toBe(true);
+it('attaches several existing files found by server search', async () => {
+  const files = documentsApi();
+  files.list.mockResolvedValue({ data: [doc(70, 'Riley timesheet'), doc(71, 'Sam timesheet')], meta: { total_pages: 1 } });
+  const current = thread(2, 'Hours');
+  api.list.mockResolvedValue({ data: [current] }); api.get.mockResolvedValue({ data: current });
+  api.createMessage.mockResolvedValue({ data: { id: 7, thread_id: 2, created_at: '2026-11-12T00:00:00Z' } });
+  render(routed(<PortalMessagesPanel api={api} documents={[]} documentsApi={files} audienceLabel="client" description="Client messages" />));
+  await screen.findByPlaceholderText('Reply client');
+  const pickers = screen.getAllByRole('button', { name: 'Choose existing file' });
+  fireEvent.click(pickers[pickers.length - 1]);
+  fireEvent.change(await screen.findByLabelText('Search files'), { target: { value: 'timesheet' } });
+  await waitFor(() => expect(files.list).toHaveBeenLastCalledWith({ search: 'timesheet', attachable: true, page: 1, per_page: 20 }));
+  fireEvent.click(await screen.findByRole('checkbox', { name: /Riley timesheet/ }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /Sam timesheet/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Attach 2 files' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(api.createMessage).toHaveBeenCalledWith(2, expect.objectContaining({ document_ids: [70, 71] })));
+  expect(files.upload).not.toHaveBeenCalled();
 });
 
-it('does not resurrect an invalidated search copy if the library changes again before search completes', async () => {
-  const file = { id: 77, title: 'Searched notice', file_name: 'search.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
-  const search = vi.fn().mockResolvedValueOnce({ data: [file] }).mockImplementation(() => new Promise(() => {}));
-  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
-  const result = render(view([]));
-  await screen.findByRole('option', { name: 'Searched notice (search.pdf)' });
-  result.rerender(view([{ ...file, archived_at: '2026-11-12T00:00:00Z' }]));
-  expect(screen.queryByRole('option', { name: 'Searched notice (search.pdf)' })).toBeNull();
-  result.rerender(view([]));
-  expect(screen.queryByRole('option', { name: 'Searched notice (search.pdf)' })).toBeNull();
+it('shows every attachment with preview and download from the bubble', async () => {
+  const files = documentsApi();
+  const conversation = { ...thread(2, 'Files'), messages: [{ id: 1, thread_id: 2, kind: 'message', body: 'Two files', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', documents: [doc(1, 'Week one'), doc(2, 'Week two')] }] } as ClientPortalThread;
+  api.list.mockResolvedValue({ data: [conversation] }); api.get.mockResolvedValue({ data: conversation });
+  render(routed(<PortalMessagesPanel api={api} documents={[]} documentsApi={files} audienceLabel="client" description="Client messages" />));
+  fireEvent.click(await screen.findByRole('button', { name: 'Download Week two.pdf' }));
+  await waitFor(() => expect(files.download).toHaveBeenCalledWith(2));
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Week one.pdf' }));
+  await waitFor(() => expect(files.preview).toHaveBeenCalledWith(1));
 });
 
-it('keeps newer search safety state when a page append retains the same older library object', async () => {
-  const file = { id: 77, title: 'Notice', file_name: 'notice.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
-  const search = vi.fn().mockResolvedValueOnce({ data: [{ ...file, scan_status: 'infected' }] }).mockImplementation(() => new Promise(() => {}));
-  const view = (documents: typeof file[]) => <PortalMessagesPanel api={api} documents={documents} searchDocuments={search} audienceLabel="client" description="Client messages" />;
-  const result = render(view([file]));
-  await screen.findByRole('option', { name: /Notice.*Safety check unavailable/ });
-  result.rerender(view([file, { ...file, id: 78, title: 'Page two file' }]));
-  expect((screen.getByRole('option', { name: /Notice.*Safety check unavailable/ }) as HTMLOptionElement).disabled).toBe(true);
+it('returns from a phone conversation to the same filter and keeps the reply draft', async () => {
+  window.matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const first = { ...thread(2, 'First topic'), id: 21 };
+  const second = { ...thread(2, 'Second topic'), id: 22 };
+  api.list.mockResolvedValue({ data: [first, second] });
+  api.get.mockImplementation(id => Promise.resolve({ data: id === 21 ? first : second }));
+  render(<MemoryRouter initialEntries={['/messages?conversations=open']}><PortalMessagesPanel api={api} documents={[]} audienceLabel="client" description="Client messages" /></MemoryRouter>);
+  await waitFor(() => expect(api.list).toHaveBeenCalledWith({ status: 'open' }));
+  const shown = async (subject: string) => waitFor(() => expect(screen.getAllByText(subject)).toHaveLength(2));
+  fireEvent.click(await screen.findByRole('button', { name: /Second topic/ }));
+  await shown('Second topic');
+  fireEvent.change(screen.getByPlaceholderText('Reply client'), { target: { value: 'Half-written answer' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Back to conversations' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: /Second topic/ }).closest('.min-w-0.space-y-4')?.classList.contains('hidden')).toBe(false));
+  expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('open');
+  await waitFor(() => expect(document.activeElement?.textContent).toContain('Second topic'));
+  fireEvent.click(screen.getByRole('button', { name: /First topic/ }));
+  await shown('First topic');
+  expect((screen.getByPlaceholderText('Reply client') as HTMLTextAreaElement).value).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: 'Back to conversations' }));
+  fireEvent.click(screen.getByRole('button', { name: /Second topic/ }));
+  await shown('Second topic');
+  await waitFor(() => expect((screen.getByPlaceholderText('Reply client') as HTMLTextAreaElement).value).toBe('Half-written answer'));
+});
+
+it('lets the client answer a file request with an upload, scoped to the requested file type', async () => {
+  const files = documentsApi();
+  files.upload.mockResolvedValue({ data: [doc(90, 'riley')] });
+  const request = { id: 3, thread_id: 2, title: 'Riley timesheet', category: 'payroll_source', employee_id: 8, employee_name: 'Riley Cook', payroll_submission_period_label: 'Nov 2–15, 2026', due_on: '2026-11-18', status: 'requested', status_label: 'Waiting for the file', created_at: '2026-11-12T00:00:00Z', lock_version: 0 } as import('@/services/api').PortalFileRequest;
+  const conversation = { ...thread(2, 'Payroll Nov 2–15'), open_file_request_count: 1, messages: [{ id: 1, thread_id: 2, kind: 'file_request', body: 'Please send it', author_name: 'Dafne', author_audience: 'staff', created_at: '2026-11-11T00:00:00Z', file_request: request }] } as ClientPortalThread;
+  api.list.mockResolvedValue({ data: [conversation] }); api.get.mockResolvedValue({ data: conversation });
+  const respond = vi.spyOn((await import('@/services/api')).clientPortalFileRequestsApi, 'respond').mockResolvedValue({ data: { ...request, status: 'responded', status_label: 'File sent' }, message: { id: 2, thread_id: 2, created_at: '2026-11-12T00:00:00Z' } });
+  const { container } = render(routed(<PortalMessagesPanel api={api} documents={[]} documentsApi={files} audienceLabel="client" description="Client messages" />));
+  expect(await screen.findByText('Waiting for the file')).toBeTruthy();
+  expect(screen.getByText(/For Riley Cook · Pay period Nov 2–15, 2026 · Needed by Nov 18, 2026/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Upload requested file' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Send requested file' }));
+  expect(await screen.findByText('Attach the requested file first.')).toBeTruthy();
+  const section = screen.getByRole('region', { name: 'File request: Riley timesheet' });
+  const input = section.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(['%PDF'], 'riley.pdf', { type: 'application/pdf' })] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send requested file' }));
+  await waitFor(() => expect(respond).toHaveBeenCalledWith(3, expect.objectContaining({ document_ids: [90] })));
+  const form = files.upload.mock.calls[0][0] as FormData;
+  expect(form.get('category')).toBe('payroll_source');
+  expect(form.get('employee_id')).toBe('8');
+  expect(container).toBeTruthy();
+  respond.mockRestore();
 });
