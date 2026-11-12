@@ -211,6 +211,9 @@ class PayPeriodLifecycleService
   end
 
   def validate_current_intake!
+    if pay_period.pending_portal_submission?
+      raise InvalidTransitionError, "Review the pending portal revision: import it or record a source disposition before approval or commit."
+    end
     return unless pay_period.intake_stale?
 
     raise InvalidTransitionError,

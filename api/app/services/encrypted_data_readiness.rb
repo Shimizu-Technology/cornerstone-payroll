@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 class EncryptedDataReadiness
+  class PlaintextValue < StandardError; end
+
   TARGETS = {
-    Employee => %i[ssn_encrypted bank_routing_number_encrypted bank_account_number_encrypted],
+    Employee => %i[ssn_encrypted bank_routing_number_encrypted bank_account_number_encrypted contractor_ein],
     TimeTrackingSource => %i[shared_secret],
     EmployeeChangeRequest => %i[sensitive_payload_encrypted],
     HistoricalWorker => %i[private_snapshot],
@@ -18,6 +20,12 @@ class EncryptedDataReadiness
 
     UserSession.active.select(UserSession.primary_key, :workos_access_token).find_each(batch_size: 100) do |session|
       session.workos_access_token
+    end
+
+    plaintext_eins = ContractorEinEncryption.plaintext_ids.size
+    if plaintext_eins.positive?
+      raise PlaintextValue,
+        "#{plaintext_eins} contractor EIN(s) are not encrypted; run bin/rails employees:encrypt_contractor_eins"
     end
 
     true

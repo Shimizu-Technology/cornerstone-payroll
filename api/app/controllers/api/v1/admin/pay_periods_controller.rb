@@ -336,6 +336,9 @@ module Api
         # POST /api/v1/admin/pay_periods/:id/run_payroll
         # Run payroll calculations for all employees in this pay period
         def run_payroll
+          if @pay_period.pending_portal_submission?
+            return render json: { error: "Review the pending portal revision: import it or record a source disposition before calculating payroll." }, status: :unprocessable_entity
+          end
           unless @pay_period.draft? || @pay_period.calculated?
             return render json: { error: "Can only run payroll on draft or calculated pay periods" }, status: :unprocessable_entity
           end

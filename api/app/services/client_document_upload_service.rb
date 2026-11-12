@@ -1,7 +1,14 @@
 # frozen_string_literal: true
 
+require "digest"
+
 class ClientDocumentUploadService
-  Result = Struct.new(:documents, :uploaded_keys, :document_requirement, keyword_init: true)
+  MAX_FILES = 10
+  MAX_TOTAL_BYTES = 50.megabytes
+  Result = Struct.new(:documents, :uploaded_keys, :document_requirement, :replayed, keyword_init: true)
+
+  # A retry key reused for a different set of files or details.
+  class RetryConflict < StandardError; end
 
   def initialize(company_id:, current_user:, params:)
     @company_id = company_id
@@ -14,29 +21,49 @@ class ClientDocumentUploadService
     files = uploaded_files
     raise ArgumentError, "at least one file is required" if files.empty?
 
+    raise ArgumentError, "Choose no more than 10 files at a time." if files.size > MAX_FILES
+    unless files.all? { |file| file.respond_to?(:tempfile) && file.respond_to?(:original_filename) && file.respond_to?(:content_type) }
+      raise ArgumentError, "Please choose files from your device and try again."
+    end
+    if files.sum { |file| file.size.to_i } > MAX_TOTAL_BYTES
+      raise ArgumentError, "These files total more than 50 MB. Please upload them in smaller groups."
+    end
+
     employee = find_employee!
     document_requirement = find_document_requirement!(employee, files)
     validation_errors = validation_errors_for(files)
     raise ActiveRecord::RecordInvalid.new(validation_proxy(validation_errors)) if validation_errors.any?
 
+    fingerprint = upload_fingerprint(files) if upload_key
+    if (saved = saved_upload(fingerprint, files.size))
+      return Result.new(documents: saved, uploaded_keys: [], document_requirement: nil, replayed: true)
+    end
+
     uploaded_keys = []
     documents = []
     prepared_uploads = files.map do |file|
       file_key = build_file_key(file.original_filename)
-      content_type = ClientDocument.detected_content_type(file)
+      content_type = @validated_types.fetch(file.object_id)
       @storage.upload(file_key, file.tempfile || file, content_type: content_type)
       uploaded_keys << file_key
       { file: file, file_key: file_key, content_type: content_type }
     end
 
+    replayed = nil
     ClientDocument.transaction do
+      if upload_key
+        # Serializes simultaneous retries; the first one to commit wins.
+        User.lock.find(@current_user.id)
+        replayed = saved_upload(fingerprint, files.size)
+        next if replayed
+      end
       if document_requirement
         Company.lock.find(@company_id)
         employee = find_employee!
         document_requirement = find_document_requirement!(employee, files)
       end
 
-      prepared_uploads.each do |prepared_upload|
+      prepared_uploads.each_with_index do |prepared_upload, position|
         file = prepared_upload.fetch(:file)
         documents << ClientDocument.create!(
           company_id: @company_id,
@@ -48,10 +75,15 @@ class ClientDocumentUploadService
           file_key: prepared_upload.fetch(:file_key),
           content_type: prepared_upload.fetch(:content_type),
           file_size: file.size,
+          scan_status: ClientDocumentScanner.adapter.initial_status,
           notes: @params[:notes],
           preview_status: ClientDocument.initial_preview_status_for(file),
           visible_to_client: visible_to_client?,
-          shared_by_staff: shared_by_staff?
+          shared_by_staff: shared_by_staff?,
+          upload_idempotency_key: upload_key,
+          upload_request_fingerprint: fingerprint,
+          upload_position: (position if upload_key),
+          uploaded_for_message: uploaded_for_message?
         )
       end
 
@@ -80,13 +112,59 @@ class ClientDocumentUploadService
       end
     end
 
-    Result.new(documents: documents, uploaded_keys: uploaded_keys, document_requirement: document_requirement)
+    if replayed
+      AuditedClientDocumentUpload.discard_uploaded_keys(@company_id, uploaded_keys)
+      return Result.new(documents: replayed, uploaded_keys: [], document_requirement: nil, replayed: true)
+    end
+
+    Result.new(documents: documents, uploaded_keys: uploaded_keys, document_requirement: document_requirement, replayed: false)
   rescue StandardError
     uploaded_keys&.each { |key| @storage.delete(key) }
     raise
   end
 
   private
+
+  def upload_key
+    return @upload_key if defined?(@upload_key)
+
+    key = @params[:upload_key].presence&.to_s
+    raise ArgumentError, "The upload retry key is too long." if key && key.length > 128
+
+    @upload_key = key
+  end
+
+  # Files saved by an earlier request with this retry key, or nil. A replay
+  # is only reported when every file of that request is still there.
+  def saved_upload(fingerprint, expected_count)
+    return nil unless upload_key
+
+    saved = ClientDocument.where(company_id: @company_id, uploaded_by_id: @current_user.id, upload_idempotency_key: upload_key)
+      .includes(:employee, :uploaded_by).order(:upload_position).to_a
+    return nil if saved.empty?
+    raise RetryConflict, "This upload retry key was used for different files." unless saved.all? { |document| document.upload_request_fingerprint == fingerprint }
+    unless saved.map(&:upload_position) == (0...expected_count).to_a
+      raise RetryConflict, "Some files from this upload were removed since it was saved. Choose the files again to upload them."
+    end
+
+    saved
+  end
+
+  # The files' names, sizes and bytes plus the details that shape the records.
+  def upload_fingerprint(files)
+    parts = files.map do |file|
+      io = file.tempfile || file
+      digest = Digest::SHA256.new
+      io.rewind
+      while (chunk = io.read(1.megabyte))
+        digest << chunk
+      end
+      io.rewind
+      [ file.original_filename.to_s, file.size.to_i, digest.hexdigest ]
+    end
+    details = [ @params[:category].presence || "misc", @params[:employee_id].presence&.to_s, @params[:title].presence, @params[:notes].presence, visible_to_client?, @params[:requirement_id].presence&.to_s, uploaded_for_message? ]
+    Digest::SHA256.hexdigest(JSON.generate([ parts, details ]))
+  end
 
   def uploaded_files
     Array.wrap(@params[:files].presence || @params[:file]).compact
@@ -113,10 +191,12 @@ class ClientDocumentUploadService
   end
 
   def validation_errors_for(files)
-    files.flat_map do |file|
-      ClientDocument.upload_validation_errors(file).map do |message|
-        "#{file.original_filename}: #{message}"
-      end
+    @validated_types = {}
+    files.filter_map do |file|
+      @validated_types[file.object_id] = ClientDocumentFileValidator.new(file).validate!
+      nil
+    rescue ClientDocumentFileValidator::InvalidFile => e
+      "#{file.original_filename}: #{e.message}"
     end
   end
 
@@ -135,6 +215,12 @@ class ClientDocumentUploadService
     return file.original_filename if total_files > 1
 
     @params[:title].presence || file.original_filename
+  end
+
+  # Uploaded in a message composer. The message, not a separate upload row,
+  # represents it in the Client Inbox once it is sent.
+  def uploaded_for_message?
+    ActiveModel::Type::Boolean.new.cast(@params[:for_message]) == true
   end
 
   def visible_to_client?

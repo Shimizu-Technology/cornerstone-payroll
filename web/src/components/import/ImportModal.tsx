@@ -1,4 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { Link } from 'react-router';
 import { useEffect, useState, useRef } from 'react';
 import { CheckCircle2, Download, RefreshCw } from 'lucide-react';
 import {
@@ -21,15 +22,18 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { changeSummary } from '@/lib/payrollSubmissionFormat';
 import { formatCurrency } from '@/lib/utils';
 import { payrollIntakeImportsApi, payPeriodsApi } from '@/services/api';
 import type { ImportPreviewResponse, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
 
 interface ImportModalProps {
+  initialPreview?: ImportPreviewResponse;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   payPeriodId: number;
+  companyId: number;
   onSourcePreviewed?: () => void;
   onImportComplete: (payPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => void;
 }
@@ -37,14 +41,14 @@ interface ImportModalProps {
 type Step = 'upload' | 'preview' | 'applying' | 'done';
 type EditableSourceRow = MosaSourceRow;
 
-export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed, onImportComplete }: ImportModalProps) {
-  const [step, setStep] = useState<Step>('upload');
+export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, onSourcePreviewed, onImportComplete }: ImportModalProps) {
+  const [step, setStep] = useState<Step>(initialPreview ? 'preview' : 'upload');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
-  const [previewData, setPreviewData] = useState<ImportPreviewResponse | null>(null);
-  const [sourceRows, setSourceRows] = useState<EditableSourceRow[]>([]);
+  const [previewData, setPreviewData] = useState<ImportPreviewResponse | null>(initialPreview || null);
+  const [sourceRows, setSourceRows] = useState<EditableSourceRow[]>(() => initialPreview?.preview.source_rows.map(row => ({ ...row, disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending' })) || []);
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
   const [reviewedOverwrite, setReviewedOverwrite] = useState(false);
@@ -172,6 +176,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
       setError(null);
       const response = await payPeriodsApi.applyImport(payPeriodId, {
         import_id: previewData.import_id,
+        portal_source_id: previewData.portal_source?.selection_id,
         rows: sourceRows.map((row) => ({
           id: row.id,
           disposition: row.disposition,
@@ -290,6 +295,17 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
         {error && (
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
+
+        {previewData?.portal_source && <section aria-label="Portal change checklist" className="min-w-0 space-y-2 rounded-lg border border-primary-200 bg-primary-50 p-4">
+          <h3 className="font-semibold">Portal revision {previewData.portal_source.revision} · staff checklist</h3>
+          <Link className="inline-flex min-h-11 items-center text-sm underline" to={`/companies/${companyId}/payroll-submissions/${previewData.portal_source.period_id}`}>Open retained portal submission</Link>
+          <p className="text-sm">Read-only instructions. These rows are not applied to payroll or employee records. Review and handle them separately before finalizing payroll.</p>
+          {!previewData.portal_source.current && <p className="text-sm font-semibold">Superseded source chosen: {previewData.portal_source.superseded_reason}</p>}
+          {previewData.portal_source.no_changes && <p className="text-sm">No changes this period.</p>}
+          <ul className="list-disc space-y-1 pl-5 text-sm">{previewData.portal_source.changes.map((row, index) => <li className="break-words" key={index}>{row.label}: {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
+          {previewData.portal_source.notes && <p className="whitespace-pre-wrap break-words text-sm">{previewData.portal_source.notes}</p>}
+          {previewData.portal_source.changes_link_url && <a className="break-all text-sm underline" href={previewData.portal_source.changes_link_url} target="_blank" rel="noopener noreferrer">Supporting changes link (review separately)</a>}
+        </section>}
 
         {/* Upload Step */}
         {step === 'upload' && (
@@ -672,6 +688,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
           {step === 'preview' && (
             <>
               <Button variant="outline" onClick={() => {
+                if (initialPreview) { handleClose(); return; }
                 setStep('upload');
                 setPreviewData(null);
                 setSourceRows([]);

@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useAuth as useClerkAuth } from '@clerk/clerk-react';
 import { ApiError, authApi, setAuthToken, setAuthTokenProvider } from '@/services/api';
+import { clearAllDrafts } from '@/components/client-portal/messageDrafts';
 
 interface User {
   id: number;
@@ -96,6 +97,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
         signOut: async () => {
           setUser(null);
+          clearAllDrafts();
           authApi.logout();
         },
         refreshUser: async () => {
@@ -199,6 +201,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
         signOut: async () => {
           setUser(null);
+          clearAllDrafts();
           authApi.logout();
           await clerkSignOut();
         },

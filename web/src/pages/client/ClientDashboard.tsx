@@ -44,13 +44,13 @@ export function ClientDashboard(): ReactElement {
       try {
         const [dashboard, documents] = await Promise.all([
           clientReportsApi.dashboard(),
-          clientDocumentsApi.list(),
+          clientDocumentsApi.list({ per_page: 1 }),
         ]);
         if (cancelled) return;
         setDashboardPayload({
           companyId: requestedCompanyId,
           stats: dashboard.stats,
-          documentCount: documents.data.length,
+          documentCount: documents.meta.total_count,
         });
       } catch (err) {
         if (!cancelled) {

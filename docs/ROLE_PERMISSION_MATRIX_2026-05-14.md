@@ -56,7 +56,8 @@ Read access remains narrower than a mutation response suggests:
 - Non-admin staff may update only a client's address, city/state/ZIP, phone, and email. They cannot change EIN, company identity/status, pay frequency, bank/check configuration, or the next check number through the company endpoint.
 - Accountants may read client configuration needed to process payroll, but configuration mutations are rejected.
 - Managers may inspect non-secret time-source metadata for imports, but only organization admins may create, test, rotate, or deactivate the secret-bearing integration.
-- Client users never enter the staff namespace, and staff users do not enter the client namespace.
+- Client users never enter the staff namespace, and staff users do not enter the client namespace. Every `/api/v1/client/*` endpoint returns 403 for a staff role (`ClientPortalAccess`), so staff edits are always validated and audited as staff actions.
+- Client responses mask tax identifiers to the last four digits (`ssn_last_four`, `contractor_ein_last_four`). Full SSNs and EINs are encrypted at rest and returned only to staff.
 
 ## Segregation and audit limits
 

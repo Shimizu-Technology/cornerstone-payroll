@@ -1,3 +1,4 @@
+import { usePortalCounts } from '@/hooks/usePortalCounts';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -23,6 +24,7 @@ function StatCard({ title, value, subtitle, loading }: { title: string; value: s
 
 export function Dashboard(): ReactElement {
   const navigate = useNavigate();
+  const portalCounts = usePortalCounts();
   const { activeCompanyId, activeCompany } = useCompany();
   const readOnlyWorkspace = !canWriteCompany(activeCompany);
   const [loading, setLoading] = useState(true);
@@ -116,6 +118,7 @@ export function Dashboard(): ReactElement {
         </Link>)}
       </CardContent></Card>}
 
+      <Card><CardContent className="pt-5"><Link to="/app/client-inbox" className="font-semibold text-primary-800 underline">Client Inbox</Link><p className="mt-2 text-sm text-neutral-600">{portalCounts ? `${portalCounts.waiting_count} waiting on staff · ${portalCounts.unread_count} unread across your clients` : 'Open portal work across your clients'}</p></CardContent></Card>
       <nav aria-label="Payroll shortcuts" className="flex flex-wrap gap-4 text-sm font-semibold text-primary-800">
         <Link className="rounded px-1 py-2 underline" to={readOnlyWorkspace && activeCompanyId ? employeesPath(activeCompanyId) : employeeHref}>{readOnlyWorkspace ? 'Browse employees' : 'Add employee'}</Link>
         <Link className="rounded px-1 py-2 underline" to={payRunsHref}>{readOnlyWorkspace ? 'Browse pay periods' : 'Run payroll'}</Link>

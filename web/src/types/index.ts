@@ -236,6 +236,7 @@ export interface Employee {
   email?: string;
   ssn?: string | null;
   ssn_last_four?: string | null;
+  contractor_ein_last_four?: string | null;
   date_of_birth?: string;
   hire_date?: string | null;
   termination_date?: string;

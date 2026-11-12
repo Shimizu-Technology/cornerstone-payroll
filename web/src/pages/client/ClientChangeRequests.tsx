@@ -9,14 +9,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MobileRecordCard } from '@/components/ui/mobile-record';
+import { LoadMoreFooter } from '@/components/ui/load-more';
+import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import { clientEmployeeChangeRequestsApi } from '@/services/api';
-import type { EmployeeChangeRequest } from '@/services/api';
+import type { BoundedListMeta, EmployeeChangeRequest } from '@/services/api';
 
 export function ClientChangeRequests() {
   const location = useLocation();
   const navigate = useNavigate();
   const routeState = location.state as { portalNotice?: string; selectedRequestId?: number | null } | null;
   const [requests, setRequests] = useState<EmployeeChangeRequest[]>([]);
+  const [requestsMeta, setRequestsMeta] = useState<BoundedListMeta | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  // Bumped on every fresh load so a slow "load more" for old filters is dropped.
+  const listGeneration = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -27,6 +34,7 @@ export function ClientChangeRequests() {
   const detailsRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
+    listGeneration.current += 1;
     try {
       setLoading(true);
       setError(null);
@@ -35,6 +43,8 @@ export function ClientChangeRequests() {
         status: status || undefined,
       });
       setRequests(response.data);
+      setRequestsMeta(response.meta);
+      setLoadMoreError(null);
       const nextSelection = response.data.find((request) => request.id === requestedSelection) || response.data[0] || null;
       setSelected(nextSelection);
       if (nextSelection) {
@@ -51,6 +61,28 @@ export function ClientChangeRequests() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadMore = async () => {
+    if (!requestsMeta) return;
+    const generation = listGeneration.current;
+    try {
+      setLoadingMore(true);
+      setLoadMoreError(null);
+      const response = await clientEmployeeChangeRequestsApi.list({
+        search: search || undefined,
+        status: status || undefined,
+        page: requestsMeta.current_page + 1,
+      });
+      if (generation !== listGeneration.current) return;
+      setRequests((current) => appendUniqueById(current, response.data));
+      setRequestsMeta(response.meta);
+    } catch (err) {
+      if (generation !== listGeneration.current) return;
+      setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more change requests');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     if (!routeState) return;
@@ -132,6 +164,15 @@ export function ClientChangeRequests() {
                   </TableBody>
                 </Table>
                 </div>
+                <LoadMoreFooter
+                  shown={requests.length}
+                  total={requestsMeta?.total_count ?? requests.length}
+                  noun="change requests"
+                  hasMore={hasMorePages(requestsMeta)}
+                  loading={loadingMore}
+                  error={loadMoreError}
+                  onLoadMore={() => void loadMore()}
+                />
                 </>
               )}
             </CardContent>

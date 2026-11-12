@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
+import { LoadMoreFooter } from '@/components/ui/load-more';
+import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
 import {
   isCurrentEmployeeDocumentRequest,
@@ -24,6 +26,7 @@ import {
   clientEmployeeDocumentRequirementsApi,
 } from '@/services/api';
 import type {
+  BoundedListMeta,
   ClientDocument,
   EmployeeDocumentReadinessResponse,
   EmployeeDocumentRequirement,
@@ -37,6 +40,7 @@ const documentCategories = [
   { value: 'insurance', label: 'Insurance / Benefits' },
   { value: 'tax_notice', label: 'Tax Notice' },
   { value: 'payroll_source', label: 'Payroll Source' },
+  { value: 'payroll_review', label: 'Payroll Review Draft' },
   { value: 'misc', label: 'Miscellaneous' },
 ];
 
@@ -88,6 +92,11 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
   const { user } = useAuth();
   const canReviewDocuments = ['super_admin', 'org_admin', 'admin', 'manager'].includes(user?.role || '');
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
+  // Only the client endpoint pages (200 per page); the staff list is unbounded
+  // and returns no meta, so the Load more footer never shows for staff.
+  const [documentsMeta, setDocumentsMeta] = useState<BoundedListMeta | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [requirements, setRequirements] = useState<EmployeeDocumentRequirement[]>([]);
   const [readyForPayroll, setReadyForPayroll] = useState<boolean | null>(null);
   const [readinessLoadStatus, setReadinessLoadStatus] = useState<ReadinessLoadStatus>('loading');
@@ -121,6 +130,9 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       loadedDocumentScopeRef.current = documentScope;
       requirementBaselinesRef.current = {};
       setDocuments([]);
+      setDocumentsMeta(null);
+      setLoadingMore(false);
+      setLoadMoreError(null);
       setRequirements([]);
       setReadyForPayroll(null);
       setReadinessLoadStatus('loading');
@@ -203,7 +215,10 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
 
       const loaded = reconcileEmployeeDocumentLoads(documentsResult, requirementsResult);
       if (loaded.documents) {
-        setDocuments(loaded.documents.data);
+        const listed: { data: ClientDocument[]; meta?: BoundedListMeta } = loaded.documents;
+        setDocuments(listed.data);
+        setDocumentsMeta(listed.meta ?? null);
+        setLoadMoreError(null);
       }
       if (loaded.readiness) {
         reconcileReadiness(loaded.readiness, requestScope);
@@ -227,6 +242,26 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       loadSequenceRef.current += 1;
     };
   }, [loadDocuments]);
+
+  const loadMoreDocuments = async () => {
+    if (!isClient || !documentsMeta) return;
+    const requestEmployeeId = employeeId;
+    const requestScope = activeDocumentScopeRef.current;
+    const requestId = loadSequenceRef.current;
+    const isCurrent = () => requestId === loadSequenceRef.current && isCurrentScope(requestScope, requestEmployeeId);
+    try {
+      setLoadingMore(true);
+      setLoadMoreError(null);
+      const response = await clientDocumentsApi.list({ employee_id: employeeId, page: documentsMeta.current_page + 1 });
+      if (!isCurrent()) return;
+      setDocuments((current) => appendUniqueById(current, response.data));
+      setDocumentsMeta(response.meta);
+    } catch (err) {
+      if (isCurrent()) setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more employee documents');
+    } finally {
+      if (isCurrent()) setLoadingMore(false);
+    }
+  };
 
   const selectedFiles = form.files;
   const supportsSingleTitle = selectedFiles.length <= 1;
@@ -380,7 +415,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
           </div>
           <div className="flex items-center gap-2">
             <div className="rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-600 shadow-sm">
-              {documents.length} file{documents.length === 1 ? '' : 's'}
+              {(documentsMeta?.total_count ?? documents.length).toLocaleString()} file{(documentsMeta?.total_count ?? documents.length) === 1 ? '' : 's'}
             </div>
             {headerAction}
           </div>
@@ -685,6 +720,18 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
               </div>
             ))}
           </div>
+        )}
+        {!loading && documents.length > 0 && (
+          <LoadMoreFooter
+            className="rounded-xl border"
+            shown={documents.length}
+            total={documentsMeta?.total_count ?? documents.length}
+            noun="documents"
+            hasMore={hasMorePages(documentsMeta)}
+            loading={loadingMore}
+            error={loadMoreError}
+            onLoadMore={() => void loadMoreDocuments()}
+          />
         )}
       </CardContent>
 

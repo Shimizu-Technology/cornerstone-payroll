@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -482,6 +482,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.datetime "updated_at", null: false
     t.bigint "uploaded_by_id"
     t.boolean "visible_to_client", default: true, null: false
+    t.string "scan_status", default: "not_scanned", null: false
+    t.datetime "archived_at"
+    t.bigint "archived_by_id"
+    t.bigint "reviewed_by_id"
+    t.datetime "reviewed_at"
+    t.string "upload_idempotency_key", limit: 128
+    t.string "upload_request_fingerprint", limit: 64
+    t.integer "upload_position"
+    t.boolean "uploaded_for_message", default: false, null: false
+    t.index [ "archived_by_id" ], name: "index_client_documents_on_archived_by_id"
     t.index [ "company_id", "category" ], name: "index_client_documents_on_company_id_and_category"
     t.index [ "company_id", "created_at" ], name: "index_client_documents_on_company_id_and_created_at"
     t.index [ "company_id", "preview_status" ], name: "index_client_documents_on_company_id_and_preview_status"
@@ -490,7 +500,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.index [ "employee_id" ], name: "index_client_documents_on_employee_id"
     t.index [ "file_key" ], name: "index_client_documents_on_file_key", unique: true
     t.index [ "id", "company_id" ], name: "idx_client_documents_readiness_tenant_key", unique: true
+    t.index [ "reviewed_by_id" ], name: "index_client_documents_on_reviewed_by_id"
     t.index [ "uploaded_by_id" ], name: "index_client_documents_on_uploaded_by_id"
+    t.index [ "company_id", "uploaded_by_id", "upload_idempotency_key", "upload_position" ], name: "idx_client_documents_upload_retry_key", unique: true, where: "(upload_idempotency_key IS NOT NULL)"
+    t.check_constraint "scan_status::text = ANY (ARRAY['not_scanned'::character varying, 'pending'::character varying, 'clean'::character varying, 'infected'::character varying, 'error'::character varying]::text[])", name: "client_document_scan_status"
   end
 
   create_table "client_portal_messages", force: :cascade do |t|
@@ -501,11 +514,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "idempotency_key", limit: 128
     t.index [ "author_id" ], name: "index_client_portal_messages_on_author_id"
     t.index [ "client_document_id" ], name: "index_client_portal_messages_on_client_document_id"
+    t.index [ "client_portal_thread_id", "author_id", "idempotency_key" ], name: "index_portal_messages_on_retry_key", unique: true
     t.index [ "client_portal_thread_id" ], name: "index_client_portal_messages_on_thread_id"
     t.index [ "company_id", "created_at" ], name: "index_client_portal_messages_on_company_created_at"
     t.index [ "company_id" ], name: "index_client_portal_messages_on_company_id"
+    t.string "author_audience", default: "unknown", null: false
+    t.string "author_name_snapshot"
+    t.string "kind", default: "message", null: false
+    t.bigint "portal_file_request_id"
+    t.index [ "id", "company_id" ], name: "idx_client_portal_messages_tenant_key", unique: true
+    t.index [ "portal_file_request_id" ], name: "idx_client_portal_messages_file_request", where: "(portal_file_request_id IS NOT NULL)"
+    t.check_constraint "author_audience::text = ANY (ARRAY['client'::character varying, 'staff'::character varying, 'unknown'::character varying]::text[])", name: "portal_message_author_audience"
+    t.check_constraint "(kind::text = 'message'::text) = (portal_file_request_id IS NULL)", name: "portal_message_kind_request"
+    t.check_constraint "kind::text = ANY (ARRAY['message'::character varying, 'file_request'::character varying, 'file_response'::character varying, 'file_request_accepted'::character varying, 'file_request_asked_again'::character varying, 'file_request_withdrawn'::character varying]::text[])", name: "portal_message_kind"
   end
 
   create_table "client_portal_threads", force: :cascade do |t|
@@ -520,10 +544,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.string "status", default: "open", null: false
     t.string "subject", null: false
     t.datetime "updated_at", null: false
+    t.bigint "read_baseline_message_id", default: 0, null: false
+    t.string "idempotency_key"
+    t.jsonb "creation_payload", default: {}, null: false
+    t.index [ "company_id", "created_by_id", "idempotency_key" ], name: "idx_portal_threads_author_retry", unique: true, where: "(idempotency_key IS NOT NULL)"
     t.index [ "company_id", "status", "last_message_at" ], name: "index_client_portal_threads_on_company_status_last_message"
     t.index [ "company_id" ], name: "index_client_portal_threads_on_company_id"
     t.index [ "created_by_id" ], name: "index_client_portal_threads_on_created_by_id"
     t.index [ "resolved_by_id" ], name: "index_client_portal_threads_on_resolved_by_id"
+    t.string "created_by_audience", default: "unknown", null: false
+    t.string "created_by_name_snapshot"
+    t.check_constraint "created_by_audience::text = ANY (ARRAY['client'::character varying, 'staff'::character varying, 'unknown'::character varying]::text[])", name: "portal_thread_creator_audience"
+    t.index [ "id", "company_id" ], name: "idx_client_portal_threads_tenant_key", unique: true
   end
 
   create_table "companies", force: :cascade do |t|
@@ -2758,6 +2790,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.bigint "payroll_intake_session_id", null: false
     t.integer "position", default: 0, null: false
     t.jsonb "raw_response", default: {}, null: false
+    t.bigint "payroll_submission_document_id"
     t.string "sha256"
     t.string "source_role", default: "legacy_source", null: false
     t.text "storage_reference"
@@ -2767,6 +2800,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.string "verification_status", default: "legacy_unverified", null: false
     t.datetime "verified_at"
     t.index [ "payroll_intake_session_id", "document_type" ], name: "idx_payroll_intake_documents_session_type"
+    t.index [ "payroll_submission_document_id" ], name: "idx_intake_document_portal_source"
     t.index [ "payroll_intake_session_id", "position" ], name: "idx_payroll_intake_documents_session_position", unique: true
     t.index [ "payroll_intake_session_id" ], name: "idx_payroll_intake_documents_session"
     t.index [ "storage_reference" ], name: "idx_payroll_intake_documents_storage_reference", unique: true, where: "(storage_reference IS NOT NULL)"
@@ -3233,6 +3267,151 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'approved'::character varying::text, 'superseded'::character varying::text])", name: "payroll_review_packages_status_check"
   end
 
+  create_table "payroll_submission_documents", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payroll_submission_id", null: false
+    t.bigint "client_document_id", null: false
+    t.string "role", null: false
+    t.integer "position", default: 0, null: false
+    t.string "sha256", limit: 64, null: false
+    t.string "file_name_snapshot", null: false
+    t.bigint "file_size_snapshot", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "client_document_id" ], name: "index_payroll_submission_documents_on_client_document_id"
+    t.index [ "company_id" ], name: "index_payroll_submission_documents_on_company_id"
+    t.index [ "payroll_submission_id", "client_document_id" ], name: "idx_payroll_submission_documents_once", unique: true
+    t.index [ "payroll_submission_id" ], name: "idx_payroll_submission_documents_one_revel", unique: true, where: "((role)::text = 'revel_payroll'::text)"
+    t.index [ "payroll_submission_id" ], name: "idx_payroll_submission_documents_one_workbook", unique: true, where: "((role)::text = 'changes_workbook'::text)"
+    t.check_constraint "role::text = ANY (ARRAY['revel_payroll'::character varying, 'changes_workbook'::character varying, 'attachment'::character varying]::text[])", name: "payroll_submission_documents_role"
+  end
+
+  create_table "payroll_submission_drafts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payroll_submission_period_id", null: false
+    t.string "request_fingerprint", null: false
+    t.integer "revision", null: false
+    t.bigint "paycheck_document_id"
+    t.bigint "direct_deposit_document_id"
+    t.text "note"
+    t.bigint "created_by_id"
+    t.datetime "posted_at"
+    t.bigint "posted_by_id"
+    t.string "idempotency_key"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_payroll_submission_drafts_on_company_id"
+    t.index [ "created_by_id" ], name: "index_payroll_submission_drafts_on_created_by_id"
+    t.index [ "direct_deposit_document_id" ], name: "index_payroll_submission_drafts_on_direct_deposit_document_id"
+    t.index [ "id", "company_id" ], name: "idx_payroll_submission_drafts_tenant_key", unique: true
+    t.index [ "paycheck_document_id" ], name: "index_payroll_submission_drafts_on_paycheck_document_id"
+    t.index [ "payroll_submission_period_id", "created_by_id", "idempotency_key" ], name: "idx_payroll_submission_drafts_retry_key", unique: true, where: "(idempotency_key IS NOT NULL)"
+    t.index [ "payroll_submission_period_id", "revision" ], name: "idx_payroll_submission_drafts_revision", unique: true
+    t.index [ "posted_by_id" ], name: "index_payroll_submission_drafts_on_posted_by_id"
+    t.check_constraint "(posted_at IS NULL) = (posted_by_id IS NULL)", name: "payroll_submission_drafts_posted_actor"
+    t.check_constraint "paycheck_document_id IS NOT NULL OR direct_deposit_document_id IS NOT NULL", name: "payroll_submission_drafts_has_file"
+  end
+
+  create_table "payroll_submission_imports", force: :cascade do |t|
+    t.bigint "payroll_submission_id", null: false
+    t.bigint "payroll_import_id", null: false
+    t.bigint "current_submission_id", null: false
+    t.bigint "selected_by_id", null: false
+    t.text "superseded_reason"
+    t.datetime "applied_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "current_submission_id" ], name: "index_payroll_submission_imports_on_current_submission_id"
+    t.index [ "payroll_import_id" ], name: "index_payroll_submission_imports_on_payroll_import_id"
+    t.index [ "payroll_submission_id", "payroll_import_id", "current_submission_id" ], name: "idx_portal_import_selection", unique: true
+    t.index [ "payroll_submission_id" ], name: "index_payroll_submission_imports_on_payroll_submission_id"
+    t.index [ "selected_by_id" ], name: "index_payroll_submission_imports_on_selected_by_id"
+  end
+
+  create_table "payroll_submission_period_read_receipts", force: :cascade do |t|
+    t.bigint "last_seen_event_id", default: 0, null: false
+    t.bigint "payroll_submission_period_id", null: false
+    t.bigint "user_id", null: false
+    t.datetime "seen_at", null: false
+    t.index [ "payroll_submission_period_id", "user_id" ], name: "idx_payroll_submission_period_reads_unique", unique: true
+    t.index [ "user_id" ], name: "index_payroll_submission_period_read_receipts_on_user_id"
+  end
+
+  create_table "payroll_submission_periods", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.date "start_date", null: false
+    t.date "end_date", null: false
+    t.date "pay_date"
+    t.bigint "pay_period_id"
+    t.bigint "company_pay_schedule_id"
+    t.string "source", null: false
+    t.string "status", default: "waiting_for_files", null: false
+    t.datetime "status_changed_at"
+    t.bigint "status_changed_by_id"
+    t.bigint "client_portal_thread_id"
+    t.integer "lock_version", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "client_portal_thread_id" ], name: "idx_payroll_submission_periods_thread", unique: true, where: "(client_portal_thread_id IS NOT NULL)"
+    t.index [ "company_id", "start_date", "end_date" ], name: "idx_payroll_submission_periods_dates", unique: true
+    t.index [ "company_id" ], name: "index_payroll_submission_periods_on_company_id"
+    t.index [ "company_pay_schedule_id" ], name: "index_payroll_submission_periods_on_company_pay_schedule_id"
+    t.index [ "id", "company_id" ], name: "idx_payroll_submission_periods_tenant_key", unique: true
+    t.index [ "pay_period_id" ], name: "idx_payroll_submission_periods_pay_period", unique: true, where: "(pay_period_id IS NOT NULL)"
+    t.index [ "status_changed_by_id" ], name: "index_payroll_submission_periods_on_status_changed_by_id"
+    t.check_constraint "end_date >= start_date", name: "payroll_submission_periods_dates_ordered"
+    t.check_constraint "source::text = ANY (ARRAY['pay_period'::character varying, 'schedule'::character varying]::text[])", name: "payroll_submission_periods_source"
+    t.check_constraint "status::text = ANY (ARRAY['waiting_for_files'::character varying, 'submitted'::character varying, 'received'::character varying, 'in_review'::character varying, 'draft_ready'::character varying, 'approved'::character varying, 'changes_requested'::character varying, 'paid'::character varying]::text[])", name: "payroll_submission_periods_status"
+  end
+
+  create_table "payroll_submission_status_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payroll_submission_period_id", null: false
+    t.string "event", null: false
+    t.string "from_status", null: false
+    t.string "to_status", null: false
+    t.bigint "actor_id"
+    t.string "actor_audience", null: false
+    t.string "actor_name_snapshot"
+    t.bigint "payroll_submission_id"
+    t.bigint "payroll_submission_draft_id"
+    t.text "note"
+    t.datetime "created_at", null: false
+    t.index [ "actor_id" ], name: "index_payroll_submission_status_events_on_actor_id"
+    t.index [ "company_id" ], name: "index_payroll_submission_status_events_on_company_id"
+    t.index [ "payroll_submission_period_id", "id" ], name: "idx_payroll_submission_status_events_period"
+    t.check_constraint "actor_audience::text = ANY (ARRAY['client'::character varying, 'staff'::character varying]::text[])", name: "payroll_submission_status_events_audience"
+  end
+
+  create_table "payroll_submissions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payroll_submission_period_id", null: false
+    t.integer "revision", null: false
+    t.bigint "submitted_by_id"
+    t.string "submitted_by_name_snapshot"
+    t.datetime "submitted_at", null: false
+    t.boolean "no_changes", default: false, null: false
+    t.jsonb "change_rows", default: [], null: false
+    t.string "changes_link_url"
+    t.text "notes"
+    t.string "content_fingerprint", null: false
+    t.string "request_fingerprint", null: false
+    t.string "idempotency_key"
+    t.bigint "acknowledged_by_id"
+    t.datetime "acknowledged_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "acknowledged_by_id" ], name: "index_payroll_submissions_on_acknowledged_by_id"
+    t.index [ "company_id" ], name: "index_payroll_submissions_on_company_id"
+    t.index [ "id", "company_id" ], name: "idx_payroll_submissions_tenant_key", unique: true
+    t.index [ "payroll_submission_period_id", "revision" ], name: "idx_payroll_submissions_revision", unique: true
+    t.index [ "payroll_submission_period_id", "submitted_by_id", "idempotency_key" ], name: "idx_payroll_submissions_retry_key", unique: true, where: "(idempotency_key IS NOT NULL)"
+    t.index [ "submitted_by_id" ], name: "index_payroll_submissions_on_submitted_by_id"
+    t.check_constraint "NOT no_changes OR change_rows = '[]'::jsonb", name: "payroll_submissions_no_changes_is_empty"
+    t.check_constraint "jsonb_typeof(change_rows) = 'array'::text", name: "payroll_submissions_changes_array"
+    t.check_constraint "revision > 0", name: "payroll_submissions_revision_positive"
+  end
+
   create_table "payroll_time_allocations", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -3257,6 +3436,137 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.check_constraint "ledger_key::text = ANY (ARRAY['authoritative'::character varying::text, 'parallel'::character varying::text, 'test'::character varying::text, 'historical'::character varying::text])", name: "payroll_time_allocations_ledger_check"
     t.check_constraint "scheduled_hours >= 0::numeric AND regular_hours >= 0::numeric AND overtime_hours >= 0::numeric AND pto_hours >= 0::numeric AND holiday_hours >= 0::numeric", name: "payroll_time_allocations_hours_check"
     t.check_constraint "source::text = ANY (ARRAY['schedule'::character varying::text, 'import'::character varying::text, 'manual'::character varying::text, 'correction_reference'::character varying::text, 'production_backfill'::character varying::text])", name: "payroll_time_allocations_source_check"
+  end
+
+  create_table "portal_document_read_receipts", force: :cascade do |t|
+    t.bigint "client_document_id", null: false
+    t.bigint "user_id", null: false
+    t.datetime "opened_at", null: false
+    t.index [ "client_document_id", "user_id" ], name: "idx_portal_document_reads_unique", unique: true
+    t.index [ "client_document_id" ], name: "index_portal_document_read_receipts_on_client_document_id"
+    t.index [ "user_id" ], name: "index_portal_document_read_receipts_on_user_id"
+  end
+
+  create_table "portal_file_requests", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "client_portal_thread_id", null: false
+    t.bigint "requested_by_id"
+    t.string "requested_by_name_snapshot"
+    t.string "title", limit: 200, null: false
+    t.string "category", null: false
+    t.bigint "employee_id"
+    t.bigint "payroll_submission_period_id"
+    t.date "due_on"
+    t.string "status", default: "requested", null: false
+    t.bigint "request_message_id"
+    t.bigint "last_response_message_id"
+    t.bigint "responded_by_id"
+    t.datetime "responded_at"
+    t.bigint "resolved_by_id"
+    t.datetime "resolved_at"
+    t.string "idempotency_key", limit: 128
+    t.string "request_fingerprint", limit: 64
+    t.integer "lock_version", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "client_portal_thread_id", "status" ], name: "idx_portal_file_requests_thread"
+    t.index [ "company_id", "requested_by_id", "idempotency_key" ], name: "idx_portal_file_requests_retry_key", unique: true, where: "(idempotency_key IS NOT NULL)"
+    t.index [ "company_id", "status", "updated_at" ], name: "idx_portal_file_requests_company_status"
+    t.index [ "company_id" ], name: "index_portal_file_requests_on_company_id"
+    t.index [ "employee_id" ], name: "index_portal_file_requests_on_employee_id"
+    t.index [ "id", "company_id" ], name: "idx_portal_file_requests_tenant_key", unique: true
+    t.index [ "payroll_submission_period_id", "status" ], name: "idx_portal_file_requests_period", where: "(payroll_submission_period_id IS NOT NULL)"
+    t.index [ "requested_by_id" ], name: "index_portal_file_requests_on_requested_by_id"
+    t.index [ "resolved_by_id" ], name: "index_portal_file_requests_on_resolved_by_id"
+    t.index [ "responded_by_id" ], name: "index_portal_file_requests_on_responded_by_id"
+    t.check_constraint "(status::text = ANY (ARRAY['accepted'::character varying, 'withdrawn'::character varying]::text[])) = (resolved_at IS NOT NULL)", name: "portal_file_requests_resolved_state"
+    t.check_constraint "status::text = ANY (ARRAY['requested'::character varying, 'responded'::character varying, 'accepted'::character varying, 'withdrawn'::character varying]::text[])", name: "portal_file_requests_status"
+  end
+
+  create_table "portal_message_attachments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "client_portal_message_id", null: false
+    t.bigint "client_document_id", null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.index [ "client_document_id" ], name: "idx_portal_message_attachments_document"
+    t.index [ "client_portal_message_id", "client_document_id" ], name: "idx_portal_message_attachments_once", unique: true
+  end
+
+  create_table "portal_notification_deliveries", force: :cascade do |t|
+    t.bigint "portal_notification_event_id", null: false
+    t.bigint "user_id"
+    t.string "recipient_email"
+    t.string "recipient_key", null: false
+    t.bigint "company_id", null: false
+    t.string "channel", default: "email", null: false
+    t.string "delivery_mode", null: false
+    t.string "status", default: "pending", null: false
+    t.datetime "deliver_after", null: false
+    t.datetime "next_attempt_at"
+    t.datetime "claimed_at"
+    t.integer "attempts", default: 0, null: false
+    t.string "batch_key"
+    t.string "skip_reason"
+    t.string "last_error_class"
+    t.string "provider_message_id"
+    t.datetime "sent_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "batch_key" ], name: "index_portal_notification_deliveries_on_batch_key"
+    t.index [ "company_id" ], name: "index_portal_notification_deliveries_on_company_id"
+    t.index [ "deliver_after", "recipient_key" ], name: "idx_portal_notification_deliveries_due", where: "((status)::text = 'pending'::text)"
+    t.index [ "portal_notification_event_id", "channel", "recipient_key" ], name: "idx_portal_notification_deliveries_once", unique: true
+    t.index [ "portal_notification_event_id" ], name: "idx_portal_notification_deliveries_event"
+    t.index [ "user_id", "created_at" ], name: "index_portal_notification_deliveries_on_user_id_and_created_at"
+  end
+
+  create_table "portal_notification_events", force: :cascade do |t|
+    t.bigint "organization_id", null: false
+    t.bigint "company_id", null: false
+    t.bigint "actor_id"
+    t.string "event_type", null: false
+    t.string "category", null: false
+    t.string "subject_type", null: false
+    t.bigint "subject_id", null: false
+    t.string "dedupe_key", null: false
+    t.string "recipient_status", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "occurred_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "actor_id" ], name: "index_portal_notification_events_on_actor_id"
+    t.index [ "company_id" ], name: "index_portal_notification_events_on_company_id"
+    t.index [ "dedupe_key" ], name: "index_portal_notification_events_on_dedupe_key", unique: true
+    t.index [ "organization_id", "recipient_status", "occurred_at" ], name: "idx_portal_notification_events_recipient_warning"
+    t.index [ "organization_id" ], name: "index_portal_notification_events_on_organization_id"
+    t.index [ "subject_type", "subject_id" ], name: "idx_portal_notification_events_subject"
+  end
+
+  create_table "portal_notification_preferences", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "category", null: false
+    t.string "delivery_mode", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "user_id", "category" ], name: "index_portal_notification_preferences_on_user_id_and_category", unique: true
+    t.index [ "user_id" ], name: "index_portal_notification_preferences_on_user_id"
+  end
+
+  create_table "portal_notification_recipients", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id"
+    t.string "email"
+    t.bigint "added_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "added_by_id" ], name: "index_portal_notification_recipients_on_added_by_id"
+    t.index [ "company_id", "email" ], name: "idx_portal_notification_recipients_email", unique: true, where: "(email IS NOT NULL)"
+    t.index [ "company_id", "user_id" ], name: "idx_portal_notification_recipients_user", unique: true, where: "(user_id IS NOT NULL)"
+    t.index [ "company_id" ], name: "index_portal_notification_recipients_on_company_id"
+    t.index [ "user_id" ], name: "index_portal_notification_recipients_on_user_id"
+    t.check_constraint "(user_id IS NULL) <> (email IS NULL)", name: "portal_notification_recipients_one_target"
   end
 
   create_table "printer_profiles", force: :cascade do |t|
@@ -3309,6 +3619,29 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.bigint "timecard_id", null: false
     t.datetime "updated_at", null: false
     t.index [ "timecard_id" ], name: "index_punch_entries_on_timecard_id"
+  end
+
+  create_table "portal_upload_cleanups", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "file_key", null: false
+    t.integer "attempts", default: 0, null: false
+    t.string "last_error_class"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "file_key" ], name: "index_portal_upload_cleanups_on_file_key", unique: true
+    t.index [ "completed_at" ], name: "index_portal_upload_cleanups_on_completed_at"
+  end
+
+  create_table "portal_thread_read_receipts", force: :cascade do |t|
+    t.bigint "client_portal_thread_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "last_displayed_message_id", null: false
+    t.datetime "opened_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "client_portal_thread_id", "user_id" ], name: "index_portal_receipts_on_thread_user", unique: true
+    t.index [ "user_id" ], name: "index_portal_thread_read_receipts_on_user_id"
   end
 
   create_table "prior_provider_history_drafts", force: :cascade do |t|
@@ -4174,12 +4507,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
   add_foreign_key "check_supersession_rollout_approvals", "companies"
   add_foreign_key "check_supersession_rollout_approvals", "users", column: "approved_by_id"
   add_foreign_key "client_documents", "companies"
+  add_foreign_key "client_documents", "users", column: "archived_by_id"
   add_foreign_key "client_documents", "employees"
   add_foreign_key "client_documents", "users", column: "uploaded_by_id"
   add_foreign_key "client_portal_messages", "client_documents", on_delete: :nullify
   add_foreign_key "client_portal_messages", "client_portal_threads"
   add_foreign_key "client_portal_messages", "companies"
   add_foreign_key "client_portal_messages", "users", column: "author_id", on_delete: :nullify
+  add_foreign_key "client_portal_messages", "portal_file_requests", column: [ "portal_file_request_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_client_portal_messages_file_request_tenant"
   add_foreign_key "client_portal_threads", "companies"
   add_foreign_key "client_portal_threads", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "client_portal_threads", "users", column: "resolved_by_id", on_delete: :nullify
@@ -4537,10 +4872,57 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
   add_foreign_key "payroll_review_packages", "users", column: "approval_recorded_by_id", on_delete: :nullify
   add_foreign_key "payroll_review_packages", "users", column: "approved_by_id", on_delete: :nullify
   add_foreign_key "payroll_review_packages", "users", column: "generated_by_id", on_delete: :nullify
+  add_foreign_key "payroll_submission_documents", "client_documents", column: [ "client_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_documents_document_tenant"
+  add_foreign_key "payroll_submission_documents", "companies"
+  add_foreign_key "payroll_submission_documents", "payroll_submissions", column: [ "payroll_submission_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_documents_submission_tenant"
+  add_foreign_key "payroll_submission_drafts", "client_documents", column: [ "direct_deposit_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_drafts_direct_deposit_tenant"
+  add_foreign_key "payroll_submission_drafts", "client_documents", column: [ "paycheck_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_drafts_paycheck_tenant"
+  add_foreign_key "payroll_submission_drafts", "companies"
+  add_foreign_key "payroll_submission_drafts", "payroll_submission_periods", column: [ "payroll_submission_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_drafts_period_tenant"
+  add_foreign_key "payroll_submission_drafts", "users", column: "created_by_id"
+  add_foreign_key "payroll_submission_drafts", "users", column: "posted_by_id"
+  add_foreign_key "payroll_submission_period_read_receipts", "payroll_submission_periods"
+  add_foreign_key "payroll_submission_period_read_receipts", "users"
+  add_foreign_key "payroll_submission_periods", "client_portal_threads", column: [ "client_portal_thread_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_periods_thread_tenant"
+  add_foreign_key "payroll_submission_periods", "companies"
+  add_foreign_key "payroll_submission_periods", "company_pay_schedules"
+  add_foreign_key "payroll_submission_periods", "pay_periods", column: [ "pay_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_periods_pay_period_tenant"
+  add_foreign_key "payroll_submission_periods", "users", column: "status_changed_by_id"
+  add_foreign_key "payroll_submission_status_events", "companies"
+  add_foreign_key "payroll_submission_status_events", "payroll_submission_drafts", column: [ "payroll_submission_draft_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_status_events_draft_tenant"
+  add_foreign_key "payroll_submission_status_events", "payroll_submission_periods", column: [ "payroll_submission_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_status_events_period_tenant"
+  add_foreign_key "payroll_submission_status_events", "payroll_submissions", column: [ "payroll_submission_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submission_status_events_submission_tenant"
+  add_foreign_key "payroll_submission_status_events", "users", column: "actor_id"
+  add_foreign_key "payroll_submissions", "companies"
+  add_foreign_key "payroll_submissions", "payroll_submission_periods", column: [ "payroll_submission_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_submissions_period_tenant"
+  add_foreign_key "payroll_submissions", "users", column: "acknowledged_by_id"
+  add_foreign_key "payroll_submissions", "users", column: "submitted_by_id"
   add_foreign_key "payroll_time_allocations", "companies"
   add_foreign_key "payroll_time_allocations", "daily_time_records"
   add_foreign_key "payroll_time_allocations", "employees"
   add_foreign_key "payroll_time_allocations", "payroll_items"
+  add_foreign_key "portal_file_requests", "client_portal_messages", column: [ "last_response_message_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_response_message_tenant"
+  add_foreign_key "portal_file_requests", "client_portal_messages", column: [ "request_message_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_request_message_tenant"
+  add_foreign_key "portal_file_requests", "client_portal_threads", column: [ "client_portal_thread_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_thread_tenant"
+  add_foreign_key "portal_file_requests", "companies"
+  add_foreign_key "portal_file_requests", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_employee_tenant"
+  add_foreign_key "portal_file_requests", "payroll_submission_periods", column: [ "payroll_submission_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_file_requests_period_tenant"
+  add_foreign_key "portal_file_requests", "users", column: "requested_by_id"
+  add_foreign_key "portal_file_requests", "users", column: "resolved_by_id"
+  add_foreign_key "portal_file_requests", "users", column: "responded_by_id"
+  add_foreign_key "portal_message_attachments", "client_documents", column: [ "client_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_message_attachments_document_tenant"
+  add_foreign_key "portal_message_attachments", "client_portal_messages", column: [ "client_portal_message_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_portal_message_attachments_message_tenant"
+  add_foreign_key "portal_message_attachments", "companies"
+  add_foreign_key "portal_notification_deliveries", "companies", on_delete: :cascade
+  add_foreign_key "portal_notification_deliveries", "portal_notification_events", on_delete: :cascade
+  add_foreign_key "portal_notification_deliveries", "users", on_delete: :cascade
+  add_foreign_key "portal_notification_events", "companies", on_delete: :cascade
+  add_foreign_key "portal_notification_events", "organizations", on_delete: :cascade
+  add_foreign_key "portal_notification_events", "users", column: "actor_id", on_delete: :nullify
+  add_foreign_key "portal_notification_preferences", "users", on_delete: :cascade
+  add_foreign_key "portal_notification_recipients", "companies", on_delete: :cascade
+  add_foreign_key "portal_notification_recipients", "users", column: "added_by_id", on_delete: :nullify
+  add_foreign_key "portal_notification_recipients", "users", on_delete: :cascade
   add_foreign_key "printer_profiles", "organizations"
   add_foreign_key "printer_profiles", "printer_profiles", column: "source_profile_id", on_delete: :nullify
   add_foreign_key "printer_profiles", "users", column: "created_by_id", on_delete: :nullify
@@ -4667,4 +5049,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
   add_foreign_key "time_tracking_category_mappings", "companies"
   add_foreign_key "time_tracking_category_mappings", "time_tracking_sources"
   add_foreign_key "time_tracking_category_mappings", "users", column: "reviewed_by_id"
+  add_foreign_key "portal_thread_read_receipts", "client_portal_threads"
+  add_foreign_key "portal_thread_read_receipts", "users"
+  add_foreign_key "client_documents", "users", column: "reviewed_by_id"
+  add_foreign_key "portal_document_read_receipts", "client_documents"
+  add_foreign_key "portal_document_read_receipts", "users"
+  add_foreign_key "payroll_intake_documents", "payroll_submission_documents"
+  add_foreign_key "payroll_submission_imports", "payroll_imports"
+  add_foreign_key "payroll_submission_imports", "payroll_submissions"
+  add_foreign_key "payroll_submission_imports", "payroll_submissions", column: "current_submission_id"
+  add_foreign_key "payroll_submission_imports", "users", column: "selected_by_id"
 end

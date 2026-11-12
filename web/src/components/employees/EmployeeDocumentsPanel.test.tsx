@@ -190,3 +190,27 @@ it('retains a dirty review note but exposes a selected document removed by the r
   expect((save(withholding) as HTMLButtonElement).disabled).toBe(true);
   expect(mocks.update).toHaveBeenCalledTimes(1);
 });
+
+it('pages a client employee with more than 200 documents and loads the older ones', async () => {
+  const user = userEvent.setup();
+  mocks.auth = { user: { id: 4, role: 'client' } };
+  const doc = (id: number) => ({ ...document, id, title: `Employee file ${id}`, file_name: `file-${id}.pdf` });
+  const meta = (page: number) => ({ current_page: page, total_pages: 2, total_count: 201, per_page: 200, employee_linked_count: 201 });
+  mocks.documents.mockImplementation((params?: { page?: number }) => Promise.resolve(
+    params?.page === 2
+      ? { data: [doc(1)], meta: meta(2) }
+      : { data: Array.from({ length: 200 }, (_, index) => doc(201 - index)), meta: meta(1) },
+  ));
+  render(<FeedbackProvider scopeKey="paging-test"><EmployeeDocumentsPanel employeeId={27} employeeName="Synthetic employee" isClient /></FeedbackProvider>);
+
+  expect((await screen.findByText(/Showing/)).textContent).toBe('Showing 200 of 201 documents');
+  expect(screen.getByText('201 files')).toBeTruthy();
+  expect(screen.queryByText('Employee file 1')).toBeNull();
+
+  await user.click(screen.getByRole('button', { name: 'Load more documents' }));
+
+  expect(await screen.findByText('Employee file 1')).toBeTruthy();
+  expect(mocks.documents).toHaveBeenLastCalledWith({ employee_id: 27, page: 2 });
+  expect(screen.getAllByText(/^Employee file \d+$/)).toHaveLength(201);
+  expect(screen.queryByRole('button', { name: 'Load more documents' })).toBeNull();
+});

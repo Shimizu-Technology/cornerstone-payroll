@@ -133,7 +133,9 @@ jobs:
       - name: Record AIRE Ruby runtime
         run: echo "AIRE_RUBY_BIN_DIR=$(dirname "$(command -v ruby)")" >> "$GITHUB_ENV"
       - name: Install PostgreSQL client and listener inspection
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client lsof
+        run: |
+          "$GITHUB_WORKSPACE/gate/.github/scripts/apt-refresh.sh"
+          sudo apt-get install -y postgresql-client lsof
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: payroll/.node-version

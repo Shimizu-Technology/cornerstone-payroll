@@ -67,7 +67,7 @@ class ClientEmployeeUpdateService
 
   def initialize(employee:, attrs:, requested_by:, company:)
     @employee = employee
-    @attrs = normalize_attrs(attrs.deep_symbolize_keys)
+    @attrs = without_inapplicable_contractor_fields(normalize_attrs(attrs.deep_symbolize_keys))
     guard_legacy_recurring_components!
     @requested_by = requested_by
     @company = company
@@ -345,7 +345,7 @@ class ClientEmployeeUpdateService
     proposed_visible, proposed_protected = protect_identifiers(approval_attrs)
     original_visible, original_protected = protect_identifiers(original_values)
 
-    EmployeeChangeRequest.create!(
+    change_request = EmployeeChangeRequest.create!(
       company: company,
       employee: employee,
       requested_by: requested_by,
@@ -361,6 +361,8 @@ class ClientEmployeeUpdateService
         "Client submitted a new worker's payroll details for approval." :
         "Client submitted payroll-sensitive employee changes for approval."
     )
+    PortalNotifications.employee_change_submitted!(change_request)
+    change_request
   rescue ActiveRecord::RecordNotUnique
     employee.errors.add(:base, "A payroll-sensitive change request is already pending for this employee")
     raise ActiveRecord::RecordInvalid, employee
@@ -407,6 +409,16 @@ class ClientEmployeeUpdateService
 
   def serialized_values_for(keys)
     serialize_payload(original_values_for(keys))
+  end
+
+  # Contractor settings mean nothing for a W-2 worker. The form still carries
+  # their defaults, which would otherwise become no-op approval changes that
+  # get saved onto the employee when staff approve the request.
+  def without_inapplicable_contractor_fields(raw_attrs)
+    target_type = raw_attrs[:employment_type].presence || employee.employment_type
+    return raw_attrs if target_type.to_s == "contractor"
+
+    raw_attrs.except(*Employee::CONTRACTOR_ONLY_ATTRIBUTES)
   end
 
   def normalize_attrs(raw_attrs)
