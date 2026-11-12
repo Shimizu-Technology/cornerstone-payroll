@@ -24,6 +24,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
   end
 
   before do
+    allow(ClientDocumentScanner).to receive(:adapter).and_return(ClientDocumentScanner::Noop.new)
     config = create(:annual_tax_config, **AnnualTaxConfig::OFFICIAL_2026_PAYROLL_TAXES, tax_year: run.pay_date.year)
     create(:filing_status_config, annual_tax_config: config, filing_status: "single", standard_deduction: 8600)
     stub_portal_user(Api::V1::Admin::PayrollImportsController, staff, company)
@@ -51,7 +52,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     objects[key] = bytes
     document = ClientDocument.create!(company: company, uploaded_by: staff, title: name, file_name: name, file_key: key,
       content_type: mime, file_size: bytes.bytesize, category: "payroll_source",
-      visible_to_client: true, scan_status: "clean")
+      visible_to_client: true, scan_status: ClientDocumentScanner.adapter.initial_status)
     submission.submission_documents.create!(company: company, client_document: document, role: role,
       position: submission.submission_documents.count, sha256: Digest::SHA256.hexdigest(bytes), file_name_snapshot: name, file_size_snapshot: bytes.bytesize)
   end
@@ -156,12 +157,51 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(response.parsed_body["error"]).to match(/checksum/)
   end
 
-  %w[not_scanned pending infected error].each do |scan|
+  %w[pending infected error].each do |scan|
     it "rejects a #{scan} scan" do
       source = revision
       source.revel_document.client_document.update!(scan_status: scan)
+      expect(PayrollIntake::PreviewService).not_to receive(:new)
       preview(source)
       expect(response).to have_http_status(:unprocessable_entity)
+      expect(PayrollIntakeSession.count).to eq(0)
+    end
+  end
+
+  it "imports not_scanned portal sources with the default Noop adapter" do
+    source = revision(workbook: true)
+    expect(source.submission_documents.map { |link| link.client_document.scan_status }).to eq(%w[not_scanned not_scanned])
+    data = preview(source)
+    expect(response).to have_http_status(:ok), response.body
+    apply(data)
+    expect(response).to have_http_status(:ok), response.body
+    expect(source.submission_imports.sole.applied_at).to be_present
+    expect(run.payroll_items.sole).to have_attributes(hours_worked: 40, overtime_hours: 2, pay_rate: 10)
+  end
+
+  context "with an enforcing scanner adapter" do
+    before do
+      adapter = double("enforcing intake adapter", initial_status: "not_scanned")
+      allow(adapter).to receive(:allowed?) { |document:, purpose:| purpose == :intake && document.scan_status == "clean" }
+      allow(ClientDocumentScanner).to receive(:adapter).and_return(adapter)
+    end
+
+    %w[not_scanned pending infected error].each do |status|
+      it "refuses #{status} files before parsing" do
+        source = revision
+        source.revel_document.client_document.update!(scan_status: status)
+        expect(PayrollIntake::PreviewService).not_to receive(:new)
+        preview(source)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(PayrollIntakeSession.count).to eq(0)
+      end
+    end
+
+    it "accepts a clean source allowed by the configured adapter" do
+      source = revision
+      source.revel_document.client_document.update!(scan_status: "clean")
+      preview(source)
+      expect(response).to have_http_status(:ok), response.body
     end
   end
 
