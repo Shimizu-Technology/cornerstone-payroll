@@ -103,7 +103,7 @@ export function RevisionCard({ revision, api }: { revision: SubmissionRevision; 
     <div className="space-y-3">
       <p className="text-sm text-neutral-700">
         Sent by {revision.submitted_by_name || 'Former portal user'} · {formatGuam(revision.submitted_at)}
-        {revision.acknowledged_at ? <> · Received by {revision.acknowledged_by_name} · {formatGuam(revision.acknowledged_at)}</> : <> · Not yet confirmed by Cornerstone</>}
+        {revision.acknowledged_at ? <> · Received by {revision.acknowledged_by_name} · {formatGuam(revision.acknowledged_at)}</> : revision.current ? <> · Not yet confirmed by Cornerstone</> : null}
       </p>
       <ul className="divide-y divide-neutral-100">
         {revision.documents.map(file => <FileRow key={`${file.role}-${file.document?.id || file.file_name}`} label={ROLE_LABELS[file.role]} document={file.document} fallbackName={file.file_name} api={api} />)}

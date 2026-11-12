@@ -73,19 +73,23 @@ module PayrollSubmissions
           no_changes: answers[:no_changes], change_rows: answers[:change_rows], changes_link_url: answers[:changes_link_url],
           notes: answers[:notes], content_fingerprint: content, request_fingerprint: request_fingerprint, idempotency_key: key
         )
-        position = 0
-        kept.each do |previous|
-          submission.submission_documents.create!(company_id: @company.id, client_document_id: previous.client_document_id,
-            role: previous.role, position: (position += 1), sha256: previous.sha256,
-            file_name_snapshot: previous.file_name_snapshot, file_size_snapshot: previous.file_size_snapshot)
-        end
-        new_documents = files.prepared.map do |item|
-          document = files.create_document!(item, actor: @actor, title: title_for(item, period, submission.revision),
-            category: "payroll_source", visible_to_client: true)
-          submission.submission_documents.create!(company_id: @company.id, client_document: document, role: item.role,
-            position: (position += 1), sha256: item.sha256, file_name_snapshot: item.file.original_filename,
-            file_size_snapshot: item.file.size)
-          document
+        # Revel PDF first, then the workbook, then attachments, kept and new alike.
+        rank = PayrollSubmissionDocument::ROLES.each_with_index.to_h
+        entries = kept.map { |previous| [ :kept, previous ] } + files.prepared.map { |item| [ :new, item ] }
+        new_documents = []
+        entries.sort_by.with_index { |(_, item), index| [ rank.fetch(item.role), index ] }.each.with_index(1) do |(kind, item), position|
+          if kind == :kept
+            submission.submission_documents.create!(company_id: @company.id, client_document_id: item.client_document_id,
+              role: item.role, position: position, sha256: item.sha256,
+              file_name_snapshot: item.file_name_snapshot, file_size_snapshot: item.file_size_snapshot)
+          else
+            document = files.create_document!(item, actor: @actor, title: title_for(item, period, submission.revision),
+              category: "payroll_source", visible_to_client: true)
+            submission.submission_documents.create!(company_id: @company.id, client_document: document, role: item.role,
+              position: position, sha256: item.sha256, file_name_snapshot: item.file.original_filename,
+              file_size_snapshot: item.file.size)
+            new_documents << document
+          end
         end
         period.transition!("submit", actor: @actor, submission: submission)
         new_documents.each do |document|

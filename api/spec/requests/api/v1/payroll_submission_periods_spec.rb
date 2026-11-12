@@ -109,7 +109,7 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(revision["documents"].first).not_to have_key("sha256")
       expect(revision["changes"].map { |c| c["kind"] }).to eq(changes.map { |c| c[:kind] })
       expect(revision["changes"].first).to include("employee_name" => employee.full_name, "hours" => "6.5")
-      expect(revision["changes"].second).to include("basis" => "each", "amount" => "1200.0")
+      expect(revision["changes"].second).to include("basis" => "each", "amount" => "1200.00")
       expect(employee.reload.attributes.except("updated_at")).to eq(employee_before.except("updated_at"))
       expect(pay_period.reload.payroll_items).to be_empty
       period = PayrollSubmissionPeriod.find(data["id"])
@@ -184,7 +184,7 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(response).to have_http_status(:created)
       expect(data["submissions"].map { |s| [ s["revision"], s["current"], s["superseded"] ] }).to eq([ [ 2, true, false ], [ 1, false, true ] ])
       current = data["submissions"].first["documents"]
-      expect(current.map { |d| d["role"] }).to contain_exactly("attachment", "revel_payroll")
+      expect(current.map { |d| d["role"] }).to eq(%w[revel_payroll attachment])
       expect(current.find { |d| d["role"] == "attachment" }.dig("document", "id")).to eq(attachment)
       expect(ClientDocument.find(first_revel)).to be_present
       expect(data["submissions"].last["documents"].first.dig("document", "id")).to eq(first_revel)

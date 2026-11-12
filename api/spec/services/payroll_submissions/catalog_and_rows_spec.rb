@@ -38,7 +38,7 @@ RSpec.describe "Pay-period catalog and change rows" do
       { "kind" => "deduction", "employee_id" => employee.id, "deduction_action" => "stop", "description" => "Uniform" }
     ], company_id: company.id)
     expect(rows).to eq([
-      { "kind" => "owner_pay", "employee_ids" => [ employee.id ], "amount" => "2400.0", "basis" => "total" },
+      { "kind" => "owner_pay", "employee_ids" => [ employee.id ], "amount" => "2400.00", "basis" => "total" },
       { "kind" => "deduction", "employee_id" => employee.id, "deduction_action" => "stop", "description" => "Uniform" }
     ])
     expect do
