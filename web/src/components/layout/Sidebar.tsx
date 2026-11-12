@@ -483,6 +483,16 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
                 <UserCircle className="h-4 w-4" />
                 Profile
               </button>
+              {user?.role !== 'employee' && (
+                <NavLink
+                  to="/app/notifications"
+                  onClick={() => { setUserMenuOpen(false); onNavigate?.(); }}
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-neutral-700 hover:bg-neutral-50"
+                >
+                  <Bell className="h-4 w-4" />
+                  Notifications
+                </NavLink>
+              )}
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-danger-600 hover:bg-danger-50"

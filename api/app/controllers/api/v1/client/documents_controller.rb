@@ -42,6 +42,7 @@ module Api
                 ip_address: request.remote_ip, user_agent: request.user_agent)
             end
             audit_requirement_received!(uploaded.document_requirement) if uploaded.document_requirement
+            PortalNotifications.client_upload!(documents: uploaded.documents, actor: current_user)
           end
           documents = result.documents
           documents.each { |document| enqueue_preview_generation(document) }
