@@ -28,7 +28,7 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
   end
 
   it "keeps real email off by default and records the skip when the activity happens" do
-    client_message!
+    with_portal_email(enabled: false) { client_message! }
     expect(deliveries_for(staff).sole).to have_attributes(status: "skipped", skip_reason: "email_delivery_disabled", delivery_mode: "immediate")
 
     dispatch_at(3.minutes.from_now)
@@ -39,8 +39,10 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
 
   it "never sends activity recorded while email was off after email is turned on" do
     list_portal_recipient!(company, email: "outside.owner@example.test")
-    client_message!
-    PortalNotifications.client_upload!(documents: [ create(:client_document, company: company) ], actor: client)
+    with_portal_email(enabled: false) do
+      client_message!
+      PortalNotifications.client_upload!(documents: [ create(:client_document, company: company) ], actor: client)
+    end
     before_enabling = PortalNotificationDelivery.where(company: company).pluck(:id)
     expect(PortalNotificationDelivery.where(id: before_enabling).pluck(:status).uniq).to eq([ "skipped" ])
 

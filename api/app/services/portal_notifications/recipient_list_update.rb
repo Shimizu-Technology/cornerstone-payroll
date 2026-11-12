@@ -6,6 +6,9 @@ module PortalNotifications
   # an ineligible staff member raises and rolls the whole change back.
   class RecipientListUpdate
     class IneligibleRecipient < StandardError; end
+    # Extra addresses are for people without an account. An account holder's
+    # address must be ticked instead, so their own alert setting applies.
+    class EmailBelongsToAccount < StandardError; end
 
     def self.call!(company:, actor:, user_ids:, emails:)
       new(company: company, actor: actor, user_ids: user_ids.uniq, emails: emails).call!
@@ -21,6 +24,8 @@ module PortalNotifications
     def call!
       eligible_ids = Recipients.eligible_staff_for(company).map(&:id)
       raise IneligibleRecipient if (user_ids - eligible_ids).any?
+      account_email = User.where("LOWER(email) IN (?)", emails).pick(:email) if emails.any?
+      raise EmailBelongsToAccount, account_email.downcase if account_email
 
       changes = replace!
       if changes.values.any?(&:present?)
