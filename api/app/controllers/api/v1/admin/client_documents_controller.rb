@@ -6,6 +6,9 @@ module Api
       class ClientDocumentsController < BaseController
         include PortalDocumentTracking
         include ClientDocumentUploadRateLimit
+        rescue_from ClientDocument::SharedForReview do |error|
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
         rescue_from ClientDocumentScanner::Blocked do |error|
           render json: { error: error.message }, status: :unprocessable_entity
         end

@@ -44,7 +44,7 @@ module PayrollSubmissions
       content = content_fingerprint(answers, kept.map { |doc| [ doc.role, doc.sha256 ] } + files.prepared.map { |item| [ item.role, item.sha256 ] })
       return Result.new(submission: current, outcome: :duplicate) if current && current.content_fingerprint == content
 
-      validate_roles!(kept, files.prepared)
+      validate_roles!(kept, files.prepared, no_changes: answers[:no_changes])
       files.upload!
       submission = nil
       outcome = :created
@@ -56,14 +56,18 @@ module PayrollSubmissions
           outcome = :replayed
           raise ActiveRecord::Rollback
         end
+        raise PayrollSubmissionPeriod::TransitionError, "This period is paid. Send any correction as a message." if period.status == "paid"
+
         latest = period.submissions.reload.first
-        if @params[:based_on_revision].present? && latest&.revision.to_s != @params[:based_on_revision].to_s
-          raise Conflict, "A newer revision was sent while you were working. Reload to see it, then send your update."
-        end
         if latest && latest.content_fingerprint == content
           submission = latest
           outcome = :duplicate
           raise ActiveRecord::Rollback
+        end
+        # A correction must name the revision it replaces, so a client working
+        # from an older revision cannot silently become current.
+        if latest && latest.revision.to_s != @params[:based_on_revision].to_s
+          raise Conflict, "A newer revision was sent while you were working. Reload to see it, then send your update."
         end
         kept = kept_documents(latest, keep_ids)
 
@@ -130,6 +134,9 @@ module PayrollSubmissions
       raise FileSet::Invalid, { "changes" => [ "Choose either \"No changes this period\" or list the changes, not both" ] } if no_changes && rows.any?
 
       link = @params[:changes_link_url].to_s.strip.presence
+      if no_changes && link
+        raise FileSet::Invalid, { "changes_link_url" => [ "Remove the template link, or untick \"No changes this period\"" ] }
+      end
       if link
         uri = URI.parse(link) rescue nil
         raise FileSet::Invalid, { "changes_link_url" => [ "Enter a full https:// link" ] } unless uri.is_a?(URI::HTTPS) && uri.host.present? && link.length <= 2000
@@ -164,9 +171,12 @@ module PayrollSubmissions
       keep_ids.map { |id| available.fetch(id) }
     end
 
-    def validate_roles!(kept, prepared)
+    def validate_roles!(kept, prepared, no_changes:)
       roles = kept.map(&:role) + prepared.map(&:role)
       errors = {}
+      if no_changes && roles.include?("changes_workbook")
+        errors["changes_workbook"] = [ "Remove the changes workbook, or untick \"No changes this period\"" ]
+      end
       errors["revel_payroll"] = [ "Attach the Revel payroll PDF" ] if roles.count("revel_payroll").zero?
       errors["revel_payroll"] = [ "Send one Revel payroll PDF per revision" ] if roles.count("revel_payroll") > 1
       errors["changes_workbook"] = [ "Send one changes workbook per revision" ] if roles.count("changes_workbook") > 1

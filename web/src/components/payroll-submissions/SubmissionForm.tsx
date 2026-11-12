@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,7 +15,7 @@ function rowFields(row: ChangeRow): ChangeRow {
     .filter(([, value]) => value !== undefined && value !== '')) as unknown as ChangeRow;
 }
 
-function FieldError({ messages }: { messages?: string[] }) {
+function FieldError({ messages }: { messages?: string[] }): ReactElement | null {
   if (!messages?.length) return null;
   return <p role="alert" className="mt-1 text-sm text-danger-700">{messages.join(' ')}</p>;
 }
@@ -24,6 +24,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   period: PeriodDetail; current?: SubmissionRevision; onSent: (detail: PeriodDetail, outcome: string) => void; onCancel?: () => void;
 }): ReactElement {
   const [employees, setEmployees] = useState<PickerEmployee[]>([]);
+  const [employeeState, setEmployeeState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [revel, setRevel] = useState<File | null>(null);
   const [workbook, setWorkbook] = useState<File | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -39,19 +40,28 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const [details, setDetails] = useState<Record<string, string[]>>({});
   const retry = useRef<{ identity: string; key: string } | null>(null);
 
-  useEffect(() => { void clientPayrollSubmissionsApi.employees().then(setEmployees).catch(() => setEmployees([])); }, []);
+  const loadEmployees = useCallback(async (): Promise<void> => {
+    setEmployeeState('loading');
+    try {
+      setEmployees(await clientPayrollSubmissionsApi.employees());
+      setEmployeeState('ready');
+    } catch {
+      setEmployeeState('error');
+    }
+  }, []);
+  useEffect(() => { void loadEmployees(); }, [loadEmployees]);
 
   const keptRevel = carryable.find(d => d.role === 'revel_payroll' && keep.includes(d.document!.id));
   const keptWorkbook = carryable.find(d => d.role === 'changes_workbook' && keep.includes(d.document!.id));
-  const update = (key: string, patch: Partial<ChangeRow>) => setRows(list => list.map(row => row.key === key ? { ...row, ...patch } : row));
-  const employeeSelect = (row: DraftRow, label: string) => (
+  const update = (key: string, patch: Partial<ChangeRow>): void => setRows(list => list.map(row => row.key === key ? { ...row, ...patch } : row));
+  const employeeSelect = (row: DraftRow, label: string): ReactElement => (
     <Select label={label} value={row.employee_id ? String(row.employee_id) : ''} onChange={e => update(row.key, { employee_id: e.target.value ? Number(e.target.value) : undefined })}>
       <option value="">Choose employee</option>
       {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
     </Select>
   );
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     setError(null); setDetails({});
     if (!revel && !keptRevel) { setDetails({ revel_payroll: ['Attach the Revel payroll PDF'] }); return; }
@@ -59,24 +69,27 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       setError('List the changes this period, attach the workbook or link, or choose "No changes this period".');
       return;
     }
+    // "No changes" sends no hidden change evidence: no rows, workbook or link.
+    const sentWorkbook = noChanges ? null : workbook;
+    const sentLink = noChanges ? '' : link.trim();
     const keepIds = keep.filter(id => {
       const doc = carryable.find(d => d.document?.id === id);
       if (!doc) return false;
       if (doc.role === 'revel_payroll' && revel) return false;
-      if (doc.role === 'changes_workbook' && workbook) return false;
+      if (doc.role === 'changes_workbook' && (workbook || noChanges)) return false;
       return true;
     });
     const changes = noChanges ? [] : rows.map(rowFields);
-    const identity = JSON.stringify([revel?.name, revel?.size, revel?.lastModified, workbook?.name, workbook?.size, attachments.map(f => [f.name, f.size, f.lastModified]), keepIds, noChanges, changes, link, notes, current?.revision]);
+    const identity = JSON.stringify([revel?.name, revel?.size, revel?.lastModified, sentWorkbook?.name, sentWorkbook?.size, attachments.map(f => [f.name, f.size, f.lastModified]), keepIds, noChanges, changes, sentLink, notes, current?.revision]);
     if (retry.current?.identity !== identity) retry.current = { identity, key: crypto.randomUUID() };
     const form = new FormData();
     if (revel) form.append('revel_payroll', revel);
-    if (workbook) form.append('changes_workbook', workbook);
+    if (sentWorkbook) form.append('changes_workbook', sentWorkbook);
     attachments.forEach(file => form.append('attachments[]', file));
     keepIds.forEach(id => form.append('keep_document_ids[]', String(id)));
     form.append('no_changes', String(noChanges));
     form.append('changes', JSON.stringify(changes));
-    if (link.trim()) form.append('changes_link_url', link.trim());
+    if (sentLink) form.append('changes_link_url', sentLink);
     if (notes.trim()) form.append('notes', notes.trim());
     if (current) form.append('based_on_revision', String(current.revision));
     form.append('idempotency_key', retry.current.key);
@@ -113,6 +126,11 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
         </label>
         {!noChanges && <>
           <p className="text-sm text-neutral-600">Only list what is different from the Revel report. Cornerstone reviews every change before it reaches payroll.</p>
+          {employeeState === 'loading' && <p role="status" className="text-sm text-neutral-600">Loading employees…</p>}
+          {employeeState === 'error' && <div role="alert" className="flex flex-col gap-2 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800 sm:flex-row sm:items-center sm:justify-between">
+            <span>The employee list did not load, so employees cannot be chosen yet.</span>
+            <Button type="button" size="sm" variant="outline" onClick={() => void loadEmployees()}>Try again</Button>
+          </div>}
           <ul className="space-y-3">
             {rows.map((row, index) => {
               const meta = CHANGE_KINDS.find(k => k.kind === row.kind)!;

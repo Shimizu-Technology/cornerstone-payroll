@@ -68,14 +68,21 @@ module PayrollSubmissions
       self
     end
 
+    # [[role, sha256, file name]] for retry fingerprints.
+    def fingerprint_parts
+      @prepared.map { |item| [ item.role, item.sha256, item.file.original_filename ] }
+    end
+
     # Call outside any database lock: storage is network I/O.
     def upload!
       storage = R2StorageService.new
       @prepared.each do |item|
         key = StagingStoragePolicy.new_key("client_documents/company_#{@company_id}/#{Time.current.strftime('%Y/%m')}/#{SecureRandom.uuid}_#{safe_name(item.file.original_filename)}")
-        storage.upload(key, item.file.tempfile, content_type: item.content_type)
+        # Recorded before the write: a failure part-way through an upload
+        # still leaves the key for discard! (and its cleanup intent) to remove.
         @uploaded_keys << key
         item.file_key = key
+        storage.upload(key, item.file.tempfile, content_type: item.content_type)
       end
       self
     end

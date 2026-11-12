@@ -103,11 +103,26 @@ class PayrollSubmissionPeriod < ApplicationRecord
     end
   end
 
-  def mark_seen_by!(user)
-    receipt = read_receipts.find_or_initialize_by(user_id: user.id)
-    receipt.update!(seen_at: Time.current)
-  rescue ActiveRecord::RecordNotUnique
-    read_receipts.find_by!(user_id: user.id).update!(seen_at: Time.current)
+  # Staff mark a period seen only through the latest client event they were
+  # shown. The cursor never moves backwards, and a client event that arrives
+  # after the page was displayed stays unread.
+  def mark_seen_through!(user, event_id:)
+    event_id = Integer(event_id.to_s, 10)
+    unless event_id.zero? || status_events.exists?(id: event_id, actor_audience: "client")
+      raise ActiveRecord::RecordNotFound, "That update is not part of this period"
+    end
+
+    with_lock do
+      receipt = read_receipts.find_or_initialize_by(user_id: user.id)
+      return receipt if receipt.persisted? && receipt.last_seen_event_id >= event_id
+
+      receipt.update!(last_seen_event_id: event_id, seen_at: Time.current)
+      receipt
+    end
+  end
+
+  def latest_client_event
+    status_events.where(actor_audience: "client").reorder(id: :desc).first
   end
 
   private

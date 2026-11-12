@@ -16,7 +16,7 @@ export function PeriodConversation({ api, periodRef, threadId, onThreadCreated }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const retry = useRef<{ body: string; key: string } | null>(null);
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
     if (!threadId) { setThread(null); return; }
     try { setThread((await api.threads.get(threadId)).data); } catch (err) { setError(err instanceof Error ? err.message : 'Could not load the conversation'); }
   }, [api, threadId]);
@@ -29,7 +29,7 @@ export function PeriodConversation({ api, periodRef, threadId, onThreadCreated }
   }, [load]);
   const container = useDisplayedMessages(thread, true, api.threads.markRead);
 
-  const send = async (event: FormEvent) => {
+  const send = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     const text = body.trim();
     if (!text) return;
@@ -38,7 +38,8 @@ export function PeriodConversation({ api, periodRef, threadId, onThreadCreated }
     try {
       await api.message(periodRef, { body: text, idempotency_key: retry.current.key });
       retry.current = null;
-      setBody('');
+      // Keep anything typed while the message was sending.
+      setBody(currentBody => (currentBody.trim() === text ? '' : currentBody));
       if (!threadId) onThreadCreated(); else await load();
     } catch (err) { setError(err instanceof Error ? err.message : 'Your message was not sent. Try again.'); } finally { setBusy(false); }
   };

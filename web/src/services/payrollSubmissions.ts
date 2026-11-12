@@ -1,5 +1,6 @@
 import api, { adminClientDocumentsApi, adminPortalThreadsApi, clientDocumentsApi, clientEmployeesApi, clientPortalThreadsApi, employeesApi } from './api';
 import type { ClientDocument, ClientPortalMessage } from './api';
+import type { PaginationMeta } from '@/types';
 
 export type SubmissionStatus = 'waiting_for_files' | 'submitted' | 'received' | 'in_review' | 'draft_ready' | 'approved' | 'changes_requested' | 'paid';
 export type ChangeKind = 'extra_hours' | 'owner_pay' | 'paid_leave' | 'new_hire' | 'wage_change' | 'deduction' | 'direct_deposit_addition';
@@ -45,7 +46,7 @@ export type PeriodSummary = {
   ref: string; id: number | null; start_date: string; end_date: string; label: string; pay_date: string | null;
   status: SubmissionStatus; status_label: string; open_for_files: boolean; opens_on: string;
   current_revision: number | null; last_submitted_at: string | null; status_changed_at: string | null;
-  pay_period_id?: number | null; source?: 'pay_period' | 'schedule'; unread?: boolean;
+  pay_period_id?: number | null; source?: 'pay_period' | 'schedule'; unread?: boolean; latest_client_event_id?: number;
 };
 export type PeriodAction = 'submit' | 'approve' | 'request_changes' | 'message' | 'acknowledge' | 'start_review' | 'post_draft' | 'save_draft' | 'mark_paid';
 export type PeriodDetail = PeriodSummary & {
@@ -55,11 +56,33 @@ export type PeriodDetail = PeriodSummary & {
 export type PickerEmployee = { id: number; name: string };
 type Detail = { data: PeriodDetail };
 
-const encode = (ref: string) => encodeURIComponent(ref);
-const pickerEmployees = (rows: { id: number; first_name: string; last_name: string }[]): PickerEmployee[] =>
-  rows.map(row => ({ id: row.id, name: `${row.first_name} ${row.last_name}`.trim() }));
+const encode = (ref: string): string => encodeURIComponent(ref);
+type EmployeeRow = { id: number; first_name: string; last_name: string };
+type EmployeePage = { data: EmployeeRow[]; meta: PaginationMeta };
+const EMPLOYEE_PAGE_SIZE = 200;
+const MAX_EMPLOYEE_PAGES = 50;
 
-function sharedApi(base: '/client' | '/admin') {
+// Every active employee, page by page, so a large company's later employees
+// can still be chosen in a change row.
+export async function loadAllEmployees(fetchPage: (page: number) => Promise<EmployeePage>): Promise<PickerEmployee[]> {
+  const rows: EmployeeRow[] = [];
+  for (let page = 1; page <= MAX_EMPLOYEE_PAGES; page += 1) {
+    const response = await fetchPage(page);
+    rows.push(...response.data);
+    if (!response.data.length || page >= (response.meta?.total_pages ?? page)) break;
+  }
+  const seen = new Set<number>();
+  return rows.filter(row => !seen.has(row.id) && seen.add(row.id))
+    .map(row => ({ id: row.id, name: `${row.first_name} ${row.last_name}`.trim() }));
+}
+
+type SharedPeriodApi = {
+  list: () => Promise<{ data: PeriodSummary[]; meta: { derives_from_schedule: boolean } }>;
+  get: (ref: string) => Promise<Detail>;
+  message: (ref: string, data: { body: string; idempotency_key: string }) => Promise<{ data: ClientPortalMessage; thread_id: number }>;
+};
+
+function sharedApi(base: '/client' | '/admin'): SharedPeriodApi {
   const root = `${base}/payroll_submission_periods`;
   return {
     list: () => api.get<{ data: PeriodSummary[]; meta: { derives_from_schedule: boolean } }>(root),
@@ -76,8 +99,8 @@ export const clientPayrollSubmissionsApi = {
     api.post<Detail>(`/client/payroll_submission_periods/${encode(ref)}/decision`, data),
   threads: clientPortalThreadsApi,
   documents: clientDocumentsApi,
-  employees: async (): Promise<PickerEmployee[]> =>
-    pickerEmployees((await clientEmployeesApi.list({ status: 'active', per_page: 200, sort_by: 'name' })).data),
+  employees: (): Promise<PickerEmployee[]> =>
+    loadAllEmployees(page => clientEmployeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page })),
 };
 
 export const adminPayrollSubmissionsApi = {
@@ -87,11 +110,13 @@ export const adminPayrollSubmissionsApi = {
   markPaid: (ref: string, note?: string) => api.post<Detail>(`/admin/payroll_submission_periods/${encode(ref)}/mark_paid`, { note }),
   createDraft: (ref: string, form: FormData) => api.postForm<Detail>(`/admin/payroll_submission_periods/${encode(ref)}/drafts`, form),
   postDraft: (ref: string, draftId: number) => api.post<Detail>(`/admin/payroll_submission_periods/${encode(ref)}/drafts/${draftId}/post`),
-  seen: (ref: string) => api.post<void>(`/admin/payroll_submission_periods/${encode(ref)}/seen`),
+  // Only after the page was shown in the foreground, through the latest client update it displayed.
+  seen: (ref: string, displayedEventId: number) =>
+    api.post<void>(`/admin/payroll_submission_periods/${encode(ref)}/seen`, { foreground: true, displayed_event_id: displayedEventId }),
   threads: adminPortalThreadsApi,
   documents: adminClientDocumentsApi,
-  employees: async (): Promise<PickerEmployee[]> =>
-    pickerEmployees((await employeesApi.list({ status: 'active', per_page: 200, sort_by: 'name' })).data),
+  employees: (): Promise<PickerEmployee[]> =>
+    loadAllEmployees(page => employeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page })),
 };
 
 export type PayrollSubmissionsApi = typeof clientPayrollSubmissionsApi | typeof adminPayrollSubmissionsApi;
