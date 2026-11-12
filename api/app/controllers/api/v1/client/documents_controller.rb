@@ -22,6 +22,7 @@ module Api
 
           documents = documents.where(category: params[:category]) if params[:category].present?
           documents = documents.where(employee_id: params[:employee_id]) if params[:employee_id].present?
+          documents = documents.attachable if ActiveModel::Type::Boolean.new.cast(params[:attachable])
           if params[:search].present?
             term = "%#{ClientDocument.sanitize_sql_like(params[:search].to_s.first(200))}%"
             documents = documents.where("title ILIKE :term OR file_name ILIKE :term", term: term)
@@ -40,21 +41,26 @@ module Api
             company_id: current_company_id, current_user: current_user,
             params: params.merge(visible_to_client: true)
           ) do |uploaded|
+            next if uploaded.replayed
+
             uploaded.documents.each do |document|
               PortalActivity.record!(user: current_user, record: document, action: "client_documents#create",
                 metadata: PortalActivity.document_metadata(document),
                 ip_address: request.remote_ip, user_agent: request.user_agent)
             end
             audit_requirement_received!(uploaded.document_requirement) if uploaded.document_requirement
-            PortalNotifications.client_upload!(documents: uploaded.documents, actor: current_user)
+            # Files uploaded in the message composer alert staff once, with the message.
+            PortalNotifications.client_upload!(documents: uploaded.documents, actor: current_user) unless for_message?
           end
           documents = result.documents
-          documents.each { |document| enqueue_preview_generation(document) }
+          documents.each { |document| enqueue_preview_generation(document) } unless result.replayed
 
           render json: {
             data: documents.map { |document| serialize_document(document) },
             message: documents.count == 1 ? "Document uploaded successfully" : "#{documents.count} documents uploaded successfully"
-          }, status: :created
+          }, status: result.replayed ? :ok : :created
+        rescue ClientDocumentUploadService::RetryConflict => e
+          render json: { error: e.message }, status: :conflict
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotFound
@@ -110,6 +116,10 @@ module Api
         end
 
         private
+
+        def for_message?
+          ActiveModel::Type::Boolean.new.cast(params[:for_message])
+        end
 
         def private_document_response!
           response.set_header("Cache-Control", "private, no-store")

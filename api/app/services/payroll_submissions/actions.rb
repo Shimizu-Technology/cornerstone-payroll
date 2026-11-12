@@ -48,6 +48,13 @@ module PayrollSubmissions
       locked(period) do
         next if period.status == "paid"
 
+        # File requests for this period lock the period row first, so this
+        # check cannot miss one being created at the same moment.
+        if (open_requests = period.outstanding_file_requests.count).positive?
+          raise PayrollSubmissionPeriod::TransitionError,
+            "#{open_requests == 1 ? 'A requested file is' : "#{open_requests} requested files are"} still outstanding. Accept or withdraw #{open_requests == 1 ? 'it' : 'them'} first."
+        end
+
         period.transition!("mark_paid", actor: @actor, note: note, draft: period.current_draft)
         audit!(period, "payroll_submission_periods#mark_paid", note_present: note.present?)
       end

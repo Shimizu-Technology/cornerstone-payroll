@@ -299,6 +299,16 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       }
 
       add({
+        id: 'client-messages-admin',
+        label: 'Client Messages',
+        description: 'Conversations and file requests with the selected client.',
+        group: 'Client Portal',
+        keywords: ['messages', 'portal', 'file request', 'missing file'],
+        icon: <FolderOpen className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/settings/client-messages',
+      });
+      add({
         id: 'client-documents-admin',
         label: 'Client Documents',
         description: 'Review documents uploaded through the client portal.',
