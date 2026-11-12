@@ -13,6 +13,8 @@ import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirec
 
 const ClientInbox = lazy(() => import('@/pages/ClientInbox').then(module => ({ default: module.ClientInbox })));
 const ClientMessages = lazy(() => import('@/pages/client/ClientMessages').then(module => ({ default: module.ClientMessages })));
+const PayrollPeriodsList = lazy(() => import('@/pages/payroll-submissions/PayrollPeriodsList').then(module => ({ default: module.PayrollPeriodsList })));
+const PayrollPeriodPage = lazy(() => import('@/pages/payroll-submissions/PayrollPeriodPage').then(module => ({ default: module.PayrollPeriodPage })));
 const Dashboard = lazy(() => import('@/pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const EmployeeList = lazy(() => import('@/pages/employees/EmployeeList').then((module) => ({ default: module.EmployeeList })));
 const EmployeeForm = lazy(() => import('@/pages/employees/EmployeeForm').then((module) => ({ default: module.EmployeeForm })));
@@ -322,6 +324,8 @@ function AppRoutes() {
         <Route path="/app" element={isClient ? <ClientDashboard /> : <Dashboard />} />
         <Route path="/app/client-inbox" element={<StaffOnlyRoute><ClientInbox /></StaffOnlyRoute>} />
         <Route path="/messages" element={<ClientOnlyRoute><ClientMessages /></ClientOnlyRoute>} />
+        <Route path="/payroll-files" element={<ClientOnlyRoute><PayrollPeriodsList audience="client" /></ClientOnlyRoute>} />
+        <Route path="/payroll-files/:ref" element={<ClientOnlyRoute><PayrollPeriodPage audience="client" /></ClientOnlyRoute>} />
         <Route path="/app/notifications" element={<NotificationSettings />} />
         <Route path="/app/aire-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/time-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
@@ -334,6 +338,8 @@ function AppRoutes() {
         <Route path="pay-periods/:id" element={<LegacyCompanyRedirect destination="pay-run" clientMode={isClient} />} />
         <Route path="companies/:companyId" element={<CompanyScopedRoute />}>
           <Route path="client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
+          <Route path="payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />
+          <Route path="payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
           <Route path="client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
           <Route path="employees" element={<EmployeeList />} />
           <Route path="employees/new" element={<EmployeeForm />} />
@@ -368,6 +374,8 @@ function AppRoutes() {
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AuditHistoryRoute><AuditLogs /></AuditHistoryRoute>} />
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
+        <Route path="settings/payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />
+        <Route path="settings/payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
         <Route path="settings/client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
         <Route path="check-settings" element={<CapabilityRoute capability="use_printer_profiles"><CheckSettingsPage /></CapabilityRoute>} />
         <Route path="payroll-reminders" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><PayrollReminders /></CapabilityRoute>} />

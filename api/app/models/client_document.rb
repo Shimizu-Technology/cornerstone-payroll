@@ -5,6 +5,7 @@ class ClientDocument < ApplicationRecord
   MAX_FILE_SIZE = 25.megabytes
   CATEGORIES = %w[
     payroll_source
+    payroll_review
     employee_onboarding
     tax_notice
     filing_evidence
@@ -41,6 +42,7 @@ class ClientDocument < ApplicationRecord
   has_many :employee_document_requirements, dependent: :restrict_with_error
   has_many :employee_document_requirement_events, dependent: :restrict_with_error
   has_many :payroll_filing_events, foreign_key: :evidence_document_id, dependent: :restrict_with_error
+  has_many :payroll_submission_documents, dependent: :restrict_with_error
 
   validates :title, :category, :file_name, :file_key, :content_type, presence: true
   validates :uploaded_by, presence: true, on: :create
@@ -75,7 +77,12 @@ class ClientDocument < ApplicationRecord
 
   def retained_evidence?
     archived? || client_portal_messages.exists? || employee_document_requirements.exists? ||
-      employee_document_requirement_events.exists? || payroll_filing_events.exists?
+      employee_document_requirement_events.exists? || payroll_filing_events.exists? ||
+      payroll_submission_documents.exists? || payroll_submission_draft?
+  end
+
+  def payroll_submission_draft?
+    PayrollSubmissionDraft.where(company_id: company_id).where("paycheck_document_id = :id OR direct_deposit_document_id = :id", id: id).exists?
   end
 
   def ensure_usable_for!(purpose, staff_read: false)

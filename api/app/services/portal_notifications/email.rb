@@ -69,6 +69,9 @@ module PortalNotifications
 
     def path_for(audience, events)
       change_only = events.all? { |event| event.category.in?(%w[employee_changes employee_change_decisions]) }
+      if events.all? { |event| event.category.in?(%w[payroll_submissions payroll_updates]) }
+        return audience == "staff" ? "/app/client-inbox" : "/payroll-files"
+      end
       if audience == "staff"
         change_only ? "/settings/client-change-requests" : "/settings/client-documents"
       else

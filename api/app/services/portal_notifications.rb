@@ -33,6 +33,14 @@ module PortalNotifications
     "employee_change_decisions" => {
       audience: "client", default_mode: "digest", label: "Change request decisions",
       description: "Cornerstone approves or declines a change you requested."
+    },
+    "payroll_submissions" => {
+      audience: "staff", default_mode: "immediate", label: "Pay period files and approvals",
+      description: "A client sends a pay period's payroll files, approves a draft or asks for a change."
+    },
+    "payroll_updates" => {
+      audience: "client", default_mode: "immediate", label: "Pay period updates",
+      description: "Cornerstone confirms your payroll files arrived or posts a draft for your review."
     }
   }.freeze
 
@@ -41,7 +49,11 @@ module PortalNotifications
     "client_upload" => { category: "client_uploads" },
     "employee_change_submitted" => { category: "employee_changes" },
     "staff_reply" => { category: "portal_replies", message: true },
-    "employee_change_decided" => { category: "employee_change_decisions" }
+    "employee_change_decided" => { category: "employee_change_decisions" },
+    "payroll_submission_sent" => { category: "payroll_submissions" },
+    "payroll_draft_decided" => { category: "payroll_submissions" },
+    "payroll_submission_acknowledged" => { category: "payroll_updates" },
+    "payroll_draft_posted" => { category: "payroll_updates" }
   }.freeze
 
   class << self
@@ -83,6 +95,18 @@ module PortalNotifications
       record!(event_type: "employee_change_decided", company: change_request.company, actor: actor, subject: change_request,
         dedupe_key: "employee_change_decided:#{change_request.id}:#{change_request.status}",
         metadata: { change_request_id: change_request.id, decision: change_request.status })
+    end
+
+    def payroll_submission_sent!(submission)
+      payroll_period!("payroll_submission_sent", period: submission.period, actor: submission.submitted_by,
+        dedupe: "submission:#{submission.id}", metadata: { submission_id: submission.id, revision: submission.revision })
+    end
+
+    # Approvals, change requests, receipts and posted drafts. Metadata keeps
+    # record ids only; the period subject carries the company.
+    def payroll_period!(event_type, period:, actor:, dedupe:, metadata: {})
+      record!(event_type: event_type, company: period.company, actor: actor, subject: period,
+        dedupe_key: "#{event_type}:#{dedupe}", metadata: metadata.merge(period_id: period.id))
     end
 
     # Repeating an event (a retried request, a replayed job) returns the saved
