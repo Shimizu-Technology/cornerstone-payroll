@@ -89,7 +89,7 @@ export function FileRow({ label, document, fallbackName, api }: { label: string;
 }
 
 
-export function RevisionCard({ revision, api }: { revision: SubmissionRevision; api: PayrollSubmissionsApi }): ReactElement {
+export function RevisionCard({ revision, api, companyId }: { revision: SubmissionRevision; api: PayrollSubmissionsApi; companyId?: number | null }): ReactElement {
   const body = (
     <div className="space-y-3">
       <p className="text-sm text-neutral-700">
@@ -97,7 +97,7 @@ export function RevisionCard({ revision, api }: { revision: SubmissionRevision; 
         {revision.acknowledged_at ? <> · Received by {revision.acknowledged_by_name} · {formatGuam(revision.acknowledged_at)}</> : revision.current ? <> · Not yet confirmed by Cornerstone</> : null}
       </p>
       {revision.imported_at && <p className="text-sm font-semibold text-success-800">Imported · {formatGuam(revision.imported_at)}</p>}
-      {revision.imports?.map(record => <p key={record.id} className="text-sm"><a className="text-primary-800 underline" href={`/companies/${revision.documents[0]?.document?.company_id}/pay-runs/${record.pay_period_id}`}>Import #{record.id} · {record.status}</a></p>)}
+      {revision.imports?.map(record => <p key={record.id} className="text-sm"><a className="text-primary-800 underline" href={companyId ? `/companies/${companyId}/pay-runs/${record.pay_period_id}` : `/pay-periods/${record.pay_period_id}`}>Import #{record.id} · {record.status}</a></p>)}
       <ul className="divide-y divide-neutral-100">
         {revision.documents.map(file => <FileRow key={`${file.role}-${file.document?.id || file.file_name}`} label={ROLE_LABELS[file.role]} document={file.document} fallbackName={file.file_name} api={api} />)}
       </ul>
