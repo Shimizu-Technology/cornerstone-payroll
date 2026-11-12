@@ -18,10 +18,10 @@ function badgeVariant(status: PortalFileRequest['status']): 'warning' | 'info' |
 // The request itself, with its current state for both sides. The client
 // answers by attaching the file here; staff accept the exact file they
 // reviewed, ask again with a note, or withdraw the request.
-export function FileRequestCard({ request, audience, companyId, documentsApi, onChanged }: {
+export function FileRequestCard({ request, audience, draftScope, documentsApi, onChanged }: {
   request: PortalFileRequest;
   audience: 'client' | 'staff';
-  companyId: number | null;
+  draftScope: string;
   documentsApi: PortalDocumentsApi;
   onChanged: () => void | Promise<void>;
 }): ReactElement {
@@ -86,7 +86,7 @@ export function FileRequestCard({ request, audience, companyId, documentsApi, on
       {audience === 'client' && outstanding && (
         answering ? (
           <div className="mt-3 rounded-lg border border-neutral-200 bg-white p-3">
-            <MessageComposer draftKey={`${companyId}:request:${request.id}`} documentsApi={documentsApi} label="Note for Cornerstone (optional)"
+            <MessageComposer draftKey={`${draftScope}:request:${request.id}`} documentsApi={documentsApi} label="Note for Cornerstone (optional)"
               requireAttachment rows={2} submitLabel="Send requested file"
               uploadFields={{ category: request.category, ...(request.employee_id ? { employee_id: String(request.employee_id) } : {}) }}
               onSend={async payload => {
