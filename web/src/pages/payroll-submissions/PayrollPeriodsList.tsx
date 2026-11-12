@@ -28,7 +28,7 @@ export function PayrollPeriodsList({ audience }: { audience: 'client' | 'staff' 
       <Header title={audience === 'client' ? 'Payroll files' : 'Pay period files'}
         description={audience === 'client' ? 'Send each pay period’s Revel payroll and changes, then review the draft.' : 'What each client sent for a pay period, and where review stands.'} />
       <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6 lg:p-8">
-        <p className="text-sm text-neutral-600">{derived ? 'Periods follow the pay schedule.' : 'Periods are the pay periods Cornerstone has set up.'} {audience === 'client' ? 'A period opens for files once it ends.' : 'Change the schedule in Pay Schedule settings.'}</p>
+        <p className="text-sm text-neutral-600">{derived ? 'Periods follow the pay schedule.' : 'Periods are the pay periods Cornerstone has set up.'} {audience === 'client' ? 'A period opens for files on its last day.' : 'Change the schedule in Pay Schedule settings.'}</p>
         {error && <div role="alert" className="rounded-lg border border-danger-200 p-4"><p>{error}</p><Button variant="outline" className="mt-2" onClick={() => void load()}>Try again</Button></div>}
         {!rows && !error && <p role="status">Loading pay periods…</p>}
         {rows && !rows.length && <p className="rounded-lg border border-neutral-200 bg-white p-6 text-neutral-700">{audience === 'client' ? 'No pay periods are open yet. Cornerstone will set up the next one.' : 'No pay periods yet. Set the pay schedule or create the pay period first.'}</p>}
