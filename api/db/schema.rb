@@ -490,6 +490,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_090000) do
     t.string "upload_idempotency_key", limit: 128
     t.string "upload_request_fingerprint", limit: 64
     t.integer "upload_position"
+    t.boolean "uploaded_for_message", default: false, null: false
     t.index [ "archived_by_id" ], name: "index_client_documents_on_archived_by_id"
     t.index [ "company_id", "category" ], name: "index_client_documents_on_company_id_and_category"
     t.index [ "company_id", "created_at" ], name: "index_client_documents_on_company_id_and_created_at"

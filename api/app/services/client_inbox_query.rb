@@ -89,8 +89,8 @@ class ClientInboxQuery
       FROM client_documents d LEFT JOIN users uploader ON uploader.id = d.uploaded_by_id
       WHERE d.company_id IN (#{ids}) AND d.shared_by_staff = FALSE AND d.archived_at IS NULL AND d.created_at <= ?
         AND NOT EXISTS (SELECT 1 FROM payroll_submission_documents psd WHERE psd.client_document_id = d.id)
-        AND NOT EXISTS (SELECT 1 FROM portal_message_attachments pma JOIN client_portal_messages pm ON pm.id = pma.client_portal_message_id
-          WHERE pma.client_document_id = d.id AND pm.author_id = d.uploaded_by_id)
+        AND NOT (d.uploaded_for_message AND EXISTS (SELECT 1 FROM portal_message_attachments pma JOIN client_portal_messages pm ON pm.id = pma.client_portal_message_id
+          WHERE pma.client_document_id = d.id AND pm.author_id = d.uploaded_by_id))
       UNION ALL
       SELECT e.id, e.company_id, 'employee_change', 'Employee change request', e.created_at, requester.name, FALSE, (e.status = #{EmployeeChangeRequest.statuses.fetch('pending')})
       FROM employee_change_requests e LEFT JOIN users requester ON requester.id = e.requested_by_id WHERE e.company_id IN (#{review_ids}) AND e.created_at <= ?
