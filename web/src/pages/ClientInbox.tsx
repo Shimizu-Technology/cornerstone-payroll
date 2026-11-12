@@ -58,6 +58,7 @@ export function ClientInbox(): ReactElement {
     } catch (err) {
       if (version.current === request) {
         setError(err instanceof Error ? err.message : 'Could not load inbox');
+        setRestoring(false);
         if (!next) { setRows([]); setCounts(null); setCursor(null); loadedPages.current = 1; }
       }
     } finally { if (version.current === request) setBusy(false); }
@@ -116,7 +117,7 @@ export function ClientInbox(): ReactElement {
         <label className="text-sm font-medium">Status<Select value={params.get('status') || 'waiting'} onChange={e => filter('status', e.target.value)}><option value="waiting">Waiting on staff</option><option value="unread">Unread</option><option value="all">All activity</option><option value="handled">Handled</option></Select></label>
       </div>
       <div className="flex items-center justify-between gap-3"><p className="text-sm text-neutral-600">Most recent client activity first</p><Button variant="outline" disabled={busy} onClick={() => void load(undefined, true)}>Refresh</Button></div>
-      {error && <div role="alert" className="rounded-lg border border-danger-200 p-4"><p>{error}</p><Button variant="outline" onClick={() => void load()}>Retry</Button></div>}
+      {error && <div role="alert" className="rounded-lg border border-danger-200 p-4"><p>{error}</p><Button variant="outline" onClick={() => void load(cursor || undefined)}>Retry</Button></div>}
       {!busy && !error && !rows.length && <p className="rounded-lg border border-neutral-200 bg-white p-6 text-neutral-600">No portal work matches these filters.</p>}
       <ul className="divide-y divide-neutral-200 rounded-xl border border-neutral-200 bg-white">{rows.map(row => <li key={row.key}><button type="button" onClick={() => open(row)} className="flex w-full flex-col gap-2 p-4 text-left hover:bg-primary-50 focus-visible:outline-2 focus-visible:outline-offset-2 sm:flex-row sm:items-center sm:justify-between"><span className="min-w-0"><span className="block break-words text-xs font-semibold text-primary-800">{row.company_name} · {labels[row.kind]}</span><span className="mt-1 block break-words font-semibold text-neutral-950">{row.title}</span><span className="mt-1 block text-sm text-neutral-600">{row.sender_name ? `From ${row.sender_name} · ` : ''}{row.unread ? 'Unread · ' : ''}{row.waiting ? 'Waiting on staff' : 'Handled'}</span></span><time className="shrink-0 text-xs text-neutral-600" dateTime={row.activity_at}>{new Date(row.activity_at).toLocaleString('en-US', { timeZone: 'Pacific/Guam' })}</time></button></li>)}</ul>
       {busy && <p role="status">Loading portal work…</p>}

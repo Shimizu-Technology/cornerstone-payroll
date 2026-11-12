@@ -18,13 +18,12 @@ export function AdminEmployeeChangeRequestsPage() {
   const [searchParams] = useSearchParams();
   const deepRequestId = Number(searchParams.get('request_id')) || null;
   const pendingDeepSelection = useRef(deepRequestId);
-  useEffect(() => { pendingDeepSelection.current = deepRequestId; }, [deepRequestId]);
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
   const canReview = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [requests, setRequests] = useState<EmployeeChangeRequest[]>([]);
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
-  const [status, setStatus] = useState('pending');
+  const [status, setStatus] = useState(() => deepRequestId ? '' : 'pending');
   const [reviewNotes, setReviewNotes] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -33,6 +32,11 @@ export function AdminEmployeeChangeRequestsPage() {
   const currentStatusRef = useRef(status);
   const listRequestIdRef = useRef(0);
   const detailRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    pendingDeepSelection.current = deepRequestId;
+    if (deepRequestId) { currentStatusRef.current = ''; setStatus(''); }
+  }, [deepRequestId]);
 
   const invalidateRequests = useCallback(() => {
     ++listRequestIdRef.current;

@@ -5,7 +5,7 @@ import { LoadMoreFooter } from '@/components/ui/load-more';
 import type { BoundedListMeta } from '@/services/api';
 import { appendUniqueById } from '@/lib/paged-list';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FolderOpen, Send, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -73,7 +73,7 @@ export function AdminClientDocumentsPage() {
   const deepDocumentId = Number(searchParams.get('document_id')) || null;
   const pageRef = useRef<HTMLDivElement>(null);
   const deepDocumentIdRef = useRef(deepDocumentId);
-  deepDocumentIdRef.current = deepDocumentId;
+  useLayoutEffect(() => { deepDocumentIdRef.current = deepDocumentId; }, [deepDocumentId]);
   const [search, setSearch] = useState('');
   const [documentMeta, setDocumentMeta] = useState<(BoundedListMeta & { employee_linked_count?: number; unique_uploaders_count?: number }) | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -125,7 +125,10 @@ export function AdminClientDocumentsPage() {
       firstPageReady.current = true;
       setDocumentMeta(response.meta);
     } catch (err) {
-      if (version === loadVersion.current) setError(err instanceof Error ? err.message : 'Failed to load client documents');
+      if (version === loadVersion.current) {
+        if (page === 1) { setDocuments([]); setMessageDocuments([]); }
+        setError(err instanceof Error ? err.message : 'Failed to load client documents');
+      }
     } finally {
       if (version === loadVersion.current) { setLoading(false); setLoadingMore(false); }
     }

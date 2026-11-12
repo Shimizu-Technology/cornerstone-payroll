@@ -24,3 +24,6 @@ The additive origin migration backfills from currently available users. It canno
 
 
 After review fixes, affected browser journeys passed again at 390×844 and 1280×900 on fresh synthetic data: saved exact-thread staff replies, filter/scroll return, multi-page background-window retention, subject-only discovery, exact PDF preview/close/review and inactive-company exclusion. The revised prior-period browser fixture passed all five cases; it denies the unrelated Cable-ticket handshake and retains the zero-payroll-write assertion.
+
+
+Second-review regression coverage adds safe recovery after an automatic restoration page fails, inclusive initial filters for approved/rejected request links, clearing previous rows after a failed file search, commit-time deep-document identity, and search/library freshness that cannot resurrect stale attachment safety data. These changes affect only frontend source; the completed 6,548-example backend gate remains unchanged. Final frontend and affected browser results are recorded in the PR/handoff.
