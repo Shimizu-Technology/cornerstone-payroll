@@ -46,7 +46,11 @@ module PortalFileRequests
         end
 
         period = attrs[:period_entry] && catalog.materialize!(attrs[:period_entry])
+        # A request posted in a period's conversation belongs to that period,
+        # so it holds the period open like one chosen explicitly.
+        period ||= attrs[:thread] && PayrollSubmissionPeriod.find_by(company_id: @company.id, client_portal_thread_id: attrs[:thread].id)
         period&.lock!
+        raise Conflict, "This pay period is paid, so it no longer takes file requests" if period&.status == "paid"
         thread = conversation_for!(period, attrs)
         thread.lock!
         request = PortalFileRequest.create!(
@@ -84,6 +88,7 @@ module PortalFileRequests
       body = message_body(params[:body])
       step!(request, params, kind: "file_request_accepted", body: body) do |locked, _message|
         require_reviewed_response!(locked, params)
+        require_usable_response_files!(locked)
         locked.update!(status: "accepted", resolved_by: @actor, resolved_at: Time.current)
         [ "portal_file_requests#accept", "file_request_reviewed" ]
       end
@@ -154,6 +159,21 @@ module PortalFileRequests
       raise Conflict, "The client sent a newer file. Review it first."
     rescue ArgumentError
       raise Invalid, { "response_message_id" => [ "Choose the file you reviewed" ] }
+    end
+
+    # The files in the reviewed response are locked and rechecked: still this
+    # company's, still shared, not archived and not held by the safety check.
+    def require_usable_response_files!(request)
+      response = request.last_response_message
+      ids = response&.attachment_ids || []
+      documents = ClientDocument.where(id: ids).order(:id).lock.to_a
+      usable = ids.any? && documents.size == ids.uniq.size &&
+        documents.all? { |document| document.company_id == @company.id && document.visible_to_client? && !document.archived? }
+      raise Conflict, "The file that was sent is no longer available. Ask the client again instead." unless usable
+
+      documents.each { |document| ClientDocumentScanner.ensure_allowed!(document, purpose: :download) }
+    rescue ClientDocumentScanner::Blocked
+      raise Conflict, "The file that was sent did not pass the safety check. Ask the client again instead."
     end
 
     def step_message!(request, kind:, body:, documents: [], key: nil)

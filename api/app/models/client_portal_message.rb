@@ -5,7 +5,7 @@ class ClientPortalMessage < ApplicationRecord
   MAX_ATTACHMENTS = 10
   KINDS = %w[message file_request file_response file_request_accepted file_request_asked_again file_request_withdrawn].freeze
 
-  attr_readonly :author_audience, :author_name_snapshot, :kind, :portal_file_request_id
+  attr_readonly :author_audience, :author_name_snapshot, :kind, :portal_file_request_id, :client_document_id
   before_validation :snapshot_author_origin, on: :create
   validates :author_audience, inclusion: { in: %w[client staff unknown] }
   validates :kind, inclusion: { in: KINDS }
@@ -38,14 +38,17 @@ class ClientPortalMessage < ApplicationRecord
     self.client_document = @attach_documents.first
   end
 
+  # A message saved by an older release has the legacy file but no join row.
   def attachment_documents
-    return attachments.map(&:client_document) if persisted?
+    return attachments.map(&:client_document).presence || [ client_document ].compact if persisted?
 
     @attach_documents || [ client_document ].compact
   end
 
   def attachment_ids
-    persisted? ? attachments.map(&:client_document_id) : attachment_documents.map(&:id)
+    return attachment_documents.map(&:id) unless persisted?
+
+    attachments.map(&:client_document_id).presence || [ client_document_id ].compact
   end
 
   # True when this message reopened a resolved conversation.

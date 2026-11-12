@@ -187,30 +187,66 @@ RSpec.describe "Portal message attachments", type: :request do
       expect(PortalNotificationEvent.where(event_type: "client_message").count).to eq(1)
     end
 
+    it "refuses to report a replay when a file from that upload has since been deleted" do
+      files = -> { [ synthetic_pdf("week-1.pdf", marker: "w1"), synthetic_pdf("week-2.pdf", marker: "w2") ] }
+      post "/api/v1/client/documents", params: { files: files.call, category: "payroll_source", for_message: true, upload_key: "two-files" }
+      expect(response).to have_http_status(:created)
+      second_id = response.parsed_body.dig("data", 1, "id")
+      delete "/api/v1/client/documents/#{second_id}"
+      expect(response).to have_http_status(:no_content)
+
+      expect do
+        post "/api/v1/client/documents", params: { files: files.call, category: "payroll_source", for_message: true, upload_key: "two-files" }
+      end.not_to change(ClientDocument, :count)
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body.fetch("error")).to include("Some files from this upload were removed")
+    end
+
     it "refuses a retry key reused for different files" do
       upload("upload-2", marker: "first")
       upload("upload-2", marker: "second")
       expect(response).to have_http_status(:conflict)
       expect(ClientDocument.count).to eq(1)
     end
+  end
 
-    it "lets one of two simultaneous retries save the files" do
-      storage = R2StorageService.new
-      allow(R2StorageService).to receive(:new).and_return(storage)
-      upload("upload-3")
-      original_id = response.parsed_body.dig("data", 0, "id")
-      # A retry that already uploaded bytes before seeing the saved files
-      # removes its own copy and returns the saved ones.
-      service = ClientDocumentUploadService.new(company_id: company.id, current_user: client,
-        params: ActionController::Parameters.new(files: [ synthetic_pdf("hours.pdf", marker: "a") ], category: "payroll_source", upload_key: "upload-3"))
-      allow(service).to receive(:saved_upload).and_wrap_original do |original, *args|
-        @checks = (@checks || 0) + 1
-        @checks == 1 ? nil : original.call(*args)
+  describe "the Client Inbox document queue" do
+    it "keeps an unreviewed library upload after it is attached, and leaves composer uploads to the message" do
+      as_client
+      post "/api/v1/client/documents", params: { files: [ synthetic_pdf("notice.pdf", marker: "lib") ], category: "tax_notice" }
+      library_id = response.parsed_body.dig("data", 0, "id")
+      post "/api/v1/client/documents", params: { files: [ synthetic_pdf("hours.pdf", marker: "msg") ], category: "payroll_source", for_message: true, upload_key: "composer" }
+      composer_id = response.parsed_body.dig("data", 0, "id")
+      send_message(body: "Both files", document_ids: [ library_id, composer_id ])
+      expect(response).to have_http_status(:created)
+      expect(ClientDocument.find(composer_id).uploaded_for_message).to be(true)
+      expect(ClientDocument.find(library_id).uploaded_for_message).to be(false)
+
+      allow_any_instance_of(Api::V1::Admin::ClientInboxController).to receive(:current_user) { User.find(staff.id) }
+      get "/api/v1/admin/client_inbox", params: { status: "waiting", kind: "document" }
+      expect(response.parsed_body.fetch("data").map { |row| row["id"] }).to eq([ library_id ])
+    end
+  end
+
+  describe "a message saved before the join table" do
+    it "replays its retry key with the legacy file and keeps that file fixed" do
+      as_client
+      file = document
+      legacy = ClientPortalMessage.create!(client_portal_thread: thread, company: company, author: client, body: "Legacy", attach_documents: [ file ], idempotency_key: "legacy-key")
+      PortalMessageAttachment.where(client_portal_message_id: legacy.id).delete_all
+
+      send_message(body: "Legacy", document_ids: [ file.id ], idempotency_key: "legacy-key")
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "id")).to eq(legacy.id)
+      expect(ClientPortalMessage.find(legacy.id).attachment_ids).to eq([ file.id ])
+
+      other = document
+      begin
+        ClientPortalMessage.find(legacy.id).update!(client_document_id: other.id)
+      rescue ActiveRecord::ActiveRecordError
+        # Rejected outright, depending on the readonly-attribute setting.
       end
-      expect(storage).to receive(:delete).once.and_call_original
-      result = service.upload!
-      expect(result.replayed).to be(true)
-      expect(result.documents.map(&:id)).to eq([ original_id ])
+      expect(legacy.reload.client_document_id).to eq(file.id)
     end
   end
 

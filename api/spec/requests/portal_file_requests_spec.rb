@@ -149,6 +149,73 @@ RSpec.describe "Portal file requests", type: :request do
     expect(period.reload.status).to eq("paid")
   end
 
+  it "refuses a new request on a paid pay period" do
+    period = PayrollSubmissions::Catalog.new(company: company).then { |catalog| catalog.materialize!(catalog.resolve(period_ref)) }
+    period.update!(status: "paid")
+    expect { request_file(idempotency_key: "paid") }.not_to change(PortalFileRequest, :count)
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body.fetch("error")).to eq("This pay period is paid, so it no longer takes file requests")
+
+    # Also when staff start it from the period's own conversation.
+    thread = create(:client_portal_thread, company: company, created_by: staff)
+    period.update!(client_portal_thread: thread)
+    expect { request_file(payroll_submission_period_ref: nil, thread_id: thread.id, idempotency_key: "paid-thread") }.not_to change(PortalFileRequest, :count)
+    expect(response).to have_http_status(:conflict)
+  end
+
+  it "ties a request made in a period's conversation to that period, so it blocks Mark paid" do
+    period = PayrollSubmissions::Catalog.new(company: company).then { |catalog| catalog.materialize!(catalog.resolve(period_ref)) }
+    thread = create(:client_portal_thread, company: company, created_by: staff, subject: "Payroll #{period.label}")
+    period.update!(client_portal_thread: thread, status: "draft_ready")
+    request_file(payroll_submission_period_ref: nil, thread_id: thread.id, idempotency_key: "from-thread")
+    expect(response).to have_http_status(:created)
+    expect(PortalFileRequest.find(data.fetch("id")).payroll_submission_period_id).to eq(period.id)
+
+    post "/api/v1/admin/payroll_submission_periods/#{period.id}/mark_paid"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(period.reload.status).to eq("draft_ready")
+  end
+
+  it "rechecks the sent file under lock before accepting it" do
+    request_file
+    request_id = data.fetch("id")
+    file = client_file
+    as_client
+    respond_with(request_id, [ file ])
+    answer = response.parsed_body.dig("message", "id")
+
+    as_staff
+    file.update_columns(scan_status: "infected")
+    post "/api/v1/admin/portal_file_requests/#{request_id}/accept", params: { response_message_id: answer }
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body.fetch("error")).to eq("The file that was sent did not pass the safety check. Ask the client again instead.")
+    expect(PortalFileRequest.find(request_id).status).to eq("responded")
+
+    file.update_columns(scan_status: "clean", archived_at: Time.current, archived_by_id: staff.id)
+    post "/api/v1/admin/portal_file_requests/#{request_id}/accept", params: { response_message_id: answer }
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body.fetch("error")).to eq("The file that was sent is no longer available. Ask the client again instead.")
+    expect(PortalFileRequest.find(request_id).messages.where(kind: "file_request_accepted")).to be_empty
+
+    file.update_columns(archived_at: nil, archived_by_id: nil)
+    post "/api/v1/admin/portal_file_requests/#{request_id}/accept", params: { response_message_id: answer }
+    expect(response).to have_http_status(:created)
+  end
+
+  it "keeps several files of one response in order" do
+    request_file
+    request_id = data.fetch("id")
+    first = client_file(title: "Week 1.pdf")
+    second = client_file(title: "Week 2.pdf")
+    as_client
+    respond_with(request_id, [ second, first ])
+    expect(response).to have_http_status(:created)
+    expect(response.parsed_body.dig("message", "documents").map { |row| row["id"] }).to eq([ second.id, first.id ])
+    message = ClientPortalMessage.find(response.parsed_body.dig("message", "id"))
+    expect(message.attachments.pluck(:client_document_id, :position)).to eq([ [ second.id, 0 ], [ first.id, 1 ] ])
+    expect(PortalNotificationEvent.where(event_type: "file_request_responded").sole.metadata).to include("attachment_count" => 2)
+  end
+
   it "posts a request without a period in the chosen conversation, or in a new one, and reopens it if resolved" do
     thread = create(:client_portal_thread, company: company, created_by: client, status: "resolved", resolved_at: 1.day.ago, resolved_by: staff)
     request_file(payroll_submission_period_ref: nil, employee_id: nil, thread_id: thread.id, idempotency_key: "in-thread")
@@ -205,7 +272,8 @@ RSpec.describe "Portal file requests", type: :request do
       "unread" => false, "state" => "requested", "thread_id" => request.client_portal_thread_id)
 
     as_client
-    respond_with(request.id, [ client_file ])
+    # Uploaded in the request's composer, so the request row represents it.
+    respond_with(request.id, [ client_file(uploaded_for_message: true) ])
     get "/api/v1/admin/client_inbox", params: { status: "waiting" }
     rows = response.parsed_body.fetch("data")
     expect(rows.map { |item| item["kind"] }).to eq([ "file_request" ])

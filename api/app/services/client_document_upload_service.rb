@@ -35,7 +35,7 @@ class ClientDocumentUploadService
     raise ActiveRecord::RecordInvalid.new(validation_proxy(validation_errors)) if validation_errors.any?
 
     fingerprint = upload_fingerprint(files) if upload_key
-    if (saved = saved_upload(fingerprint))
+    if (saved = saved_upload(fingerprint, files.size))
       return Result.new(documents: saved, uploaded_keys: [], document_requirement: nil, replayed: true)
     end
 
@@ -54,7 +54,7 @@ class ClientDocumentUploadService
       if upload_key
         # Serializes simultaneous retries; the first one to commit wins.
         User.lock.find(@current_user.id)
-        replayed = saved_upload(fingerprint)
+        replayed = saved_upload(fingerprint, files.size)
         next if replayed
       end
       if document_requirement
@@ -82,7 +82,8 @@ class ClientDocumentUploadService
           shared_by_staff: shared_by_staff?,
           upload_idempotency_key: upload_key,
           upload_request_fingerprint: fingerprint,
-          upload_position: (position if upload_key)
+          upload_position: (position if upload_key),
+          uploaded_for_message: uploaded_for_message?
         )
       end
 
@@ -133,14 +134,18 @@ class ClientDocumentUploadService
     @upload_key = key
   end
 
-  # Files saved by an earlier request with this retry key, or nil.
-  def saved_upload(fingerprint)
+  # Files saved by an earlier request with this retry key, or nil. A replay
+  # is only reported when every file of that request is still there.
+  def saved_upload(fingerprint, expected_count)
     return nil unless upload_key
 
     saved = ClientDocument.where(company_id: @company_id, uploaded_by_id: @current_user.id, upload_idempotency_key: upload_key)
       .includes(:employee, :uploaded_by).order(:upload_position).to_a
     return nil if saved.empty?
     raise RetryConflict, "This upload retry key was used for different files." unless saved.all? { |document| document.upload_request_fingerprint == fingerprint }
+    unless saved.map(&:upload_position) == (0...expected_count).to_a
+      raise RetryConflict, "Some files from this upload were removed since it was saved. Choose the files again to upload them."
+    end
 
     saved
   end
@@ -157,7 +162,7 @@ class ClientDocumentUploadService
       io.rewind
       [ file.original_filename.to_s, file.size.to_i, digest.hexdigest ]
     end
-    details = [ @params[:category].presence || "misc", @params[:employee_id].presence&.to_s, @params[:title].presence, @params[:notes].presence, visible_to_client?, @params[:requirement_id].presence&.to_s ]
+    details = [ @params[:category].presence || "misc", @params[:employee_id].presence&.to_s, @params[:title].presence, @params[:notes].presence, visible_to_client?, @params[:requirement_id].presence&.to_s, uploaded_for_message? ]
     Digest::SHA256.hexdigest(JSON.generate([ parts, details ]))
   end
 
@@ -210,6 +215,12 @@ class ClientDocumentUploadService
     return file.original_filename if total_files > 1
 
     @params[:title].presence || file.original_filename
+  end
+
+  # Uploaded in a message composer. The message, not a separate upload row,
+  # represents it in the Client Inbox once it is sent.
+  def uploaded_for_message?
+    ActiveModel::Type::Boolean.new.cast(@params[:for_message]) == true
   end
 
   def visible_to_client?

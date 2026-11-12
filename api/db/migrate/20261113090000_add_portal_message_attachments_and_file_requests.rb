@@ -91,12 +91,14 @@ class AddPortalMessageAttachmentsAndFileRequests < ActiveRecord::Migration[8.1]
     add_column :client_documents, :upload_idempotency_key, :string, limit: 128
     add_column :client_documents, :upload_request_fingerprint, :string, limit: 64
     add_column :client_documents, :upload_position, :integer
+    add_column :client_documents, :uploaded_for_message, :boolean, null: false, default: false
     add_index :client_documents, [ :company_id, :uploaded_by_id, :upload_idempotency_key, :upload_position ], unique: true,
       where: "upload_idempotency_key IS NOT NULL", name: "idx_client_documents_upload_retry_key"
   end
 
   def down
     remove_index :client_documents, name: "idx_client_documents_upload_retry_key"
+    remove_column :client_documents, :uploaded_for_message
     remove_column :client_documents, :upload_position
     remove_column :client_documents, :upload_request_fingerprint
     remove_column :client_documents, :upload_idempotency_key
