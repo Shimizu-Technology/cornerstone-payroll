@@ -30,6 +30,8 @@ export type SubmissionRevision = {
   id: number; revision: number; current: boolean; superseded: boolean;
   submitted_at: string; submitted_by_name?: string | null;
   acknowledged_at?: string | null; acknowledged_by_name?: string | null;
+  imported_at?: string | null;
+  imports?: { id: number; pay_period_id: number; status: string }[];
   no_changes: boolean; notes?: string | null; changes_link_url?: string | null;
   changes: ChangeRow[]; documents: SubmissionDocument[];
 };

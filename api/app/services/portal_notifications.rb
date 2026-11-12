@@ -52,6 +52,7 @@ module PortalNotifications
     "employee_change_decided" => { category: "employee_change_decisions" },
     "payroll_submission_sent" => { category: "payroll_submissions" },
     "payroll_draft_decided" => { category: "payroll_submissions" },
+    "payroll_submission_imported" => { category: "payroll_updates" },
     "payroll_submission_acknowledged" => { category: "payroll_updates" },
     "payroll_draft_posted" => { category: "payroll_updates" }
   }.freeze

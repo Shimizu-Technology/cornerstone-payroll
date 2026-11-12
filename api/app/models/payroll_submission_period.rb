@@ -26,6 +26,8 @@ class PayrollSubmissionPeriod < ApplicationRecord
     "approve" => { audience: "client", from: %w[draft_ready], to: "approved" },
     "request_changes" => { audience: "client", from: %w[draft_ready], to: "changes_requested" },
     "acknowledge" => { audience: "staff", from: %w[submitted], to: "received" },
+    "import" => { audience: "staff", from: STATUSES - %w[paid], to: "in_review" },
+    "resolve_source" => { audience: "staff", from: STATUSES - %w[paid], to: "in_review" },
     "start_review" => { audience: "staff", from: %w[received changes_requested], to: "in_review" },
     "post_draft" => { audience: "staff", from: %w[waiting_for_files received in_review draft_ready changes_requested approved], to: "draft_ready" },
     "mark_paid" => { audience: "staff", from: %w[draft_ready approved], to: "paid" }
@@ -67,6 +69,14 @@ class PayrollSubmissionPeriod < ApplicationRecord
 
   def current_submission
     submissions.first
+  end
+
+  def pending_source_review?
+    source = submissions.first
+    return false unless source
+    return false if PayrollSubmissionImport.where(current_submission_id: source.id).where.not(applied_at: nil).exists?
+
+    !status_events.exists?(event: "resolve_source", payroll_submission_id: source.id)
   end
 
   def current_draft

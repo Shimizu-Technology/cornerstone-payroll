@@ -135,8 +135,16 @@ class PayPeriod < ApplicationRecord
   validates :corrects_pay_period_id,
             presence: true,
             if: :supplemental?
+  validate :portal_source_review_complete
   validate :late_hours_import_complete
   validate :verified_tax_year_for_finalization
+
+  def portal_source_review_complete
+    return unless persisted? && will_save_change_to_status? && status.in?(%w[calculated approved committed])
+    return unless pending_portal_submission?
+
+    errors.add(:base, "Review the pending portal revision: import it or record a source disposition before calculation, approval or commit")
+  end
 
   def late_hours_import_complete
     return unless will_save_change_to_status? && status.in?(%w[calculated approved committed])
@@ -381,6 +389,11 @@ class PayPeriod < ApplicationRecord
 
   def can_edit?
     !committed? && !voided? && !training_baseline? && !retired_history?
+  end
+
+  def pending_portal_submission?
+    portal = PayrollSubmissionPeriod.find_by(company_id: company_id, start_date: start_date, end_date: end_date)
+    portal && (portal.pay_period_id.nil? || portal.pay_period_id == id) && portal.pending_source_review?
   end
 
   def intake_stale?
