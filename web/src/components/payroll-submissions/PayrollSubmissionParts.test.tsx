@@ -55,8 +55,8 @@ it('closes the preview and shows a failed download beside the file', async () =>
 });
 
 it('links retained import evidence to the explicit company even when file snapshots omit company_id', () => {
-  const revision = { id: 1, revision: 1, current: true, submitted_at: '2026-11-12T00:00:00Z', no_changes: true,
-    changes: [], documents: [], imports: [{ id: 12, pay_period_id: 42, status: 'applied' }] } as SubmissionRevision;
+  const revision: SubmissionRevision = { id: 1, revision: 1, current: true, superseded: false, submitted_at: '2026-11-12T00:00:00Z', no_changes: true,
+    changes: [], documents: [], imports: [{ id: 12, pay_period_id: 42, status: 'applied' }] };
   render(<RevisionCard revision={revision} api={{} as PayrollSubmissionsApi} companyId={7} />);
   expect(screen.getByRole('link', { name: 'Import #12 · applied' }).getAttribute('href')).toBe('/companies/7/pay-runs/42');
 });
