@@ -9,6 +9,7 @@ class User < ApplicationRecord
   belongs_to :organization
   belongs_to :company
   belongs_to :invited_by, class_name: "User", optional: true
+  has_many :portal_document_read_receipts, dependent: :delete_all
   has_many :portal_thread_read_receipts, dependent: :delete_all
   has_many :portal_notification_deliveries, dependent: :delete_all
   has_many :portal_notification_preferences, dependent: :delete_all

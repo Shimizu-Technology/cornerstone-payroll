@@ -7,6 +7,7 @@ module PortalDocumentTracking
 
   def opened
     @document.with_lock do
+      @document.read_receipts.find_or_initialize_by(user: current_user).update!(opened_at: Time.current)
       recent = PortalActivity.feed(@document).where(user_id: current_user.id, action: "portal_documents#opened").where("created_at > ?", 30.seconds.ago)
       audit_portal_document!("portal_documents#opened") unless recent.exists?
     end

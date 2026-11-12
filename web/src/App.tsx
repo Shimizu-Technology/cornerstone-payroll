@@ -11,6 +11,8 @@ import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 
+const ClientInbox = lazy(() => import('@/pages/ClientInbox').then(module => ({ default: module.ClientInbox })));
+const ClientMessages = lazy(() => import('@/pages/client/ClientMessages').then(module => ({ default: module.ClientMessages })));
 const Dashboard = lazy(() => import('@/pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const EmployeeList = lazy(() => import('@/pages/employees/EmployeeList').then((module) => ({ default: module.EmployeeList })));
 const EmployeeForm = lazy(() => import('@/pages/employees/EmployeeForm').then((module) => ({ default: module.EmployeeForm })));
@@ -318,6 +320,8 @@ function AppRoutes() {
         }
       >
         <Route path="/app" element={isClient ? <ClientDashboard /> : <Dashboard />} />
+        <Route path="/app/client-inbox" element={<StaffOnlyRoute><ClientInbox /></StaffOnlyRoute>} />
+        <Route path="/messages" element={<ClientOnlyRoute><ClientMessages /></ClientOnlyRoute>} />
         <Route path="/app/notifications" element={<NotificationSettings />} />
         <Route path="/app/aire-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/time-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
@@ -329,6 +333,8 @@ function AppRoutes() {
         <Route path="pay-periods" element={<LegacyCompanyRedirect destination="pay-runs" />} />
         <Route path="pay-periods/:id" element={<LegacyCompanyRedirect destination="pay-run" clientMode={isClient} />} />
         <Route path="companies/:companyId" element={<CompanyScopedRoute />}>
+          <Route path="client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
+          <Route path="client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
           <Route path="employees" element={<EmployeeList />} />
           <Route path="employees/new" element={<EmployeeForm />} />
           <Route path="employees/:id/edit" element={<EmployeeForm />} />

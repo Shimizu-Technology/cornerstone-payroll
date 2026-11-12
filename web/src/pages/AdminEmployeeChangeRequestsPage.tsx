@@ -1,3 +1,5 @@
+import { useSearchParams } from 'react-router';
+import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -13,6 +15,8 @@ import { adminEmployeeChangeRequestsApi } from '@/services/api';
 import type { EmployeeChangeRequest } from '@/services/api';
 
 export function AdminEmployeeChangeRequestsPage() {
+  const [searchParams] = useSearchParams();
+  const deepRequestId = Number(searchParams.get('request_id')) || null;
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
   const canReview = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
@@ -63,8 +67,8 @@ export function AdminEmployeeChangeRequestsPage() {
       const response = await adminEmployeeChangeRequestsApi.list({ status: requestedStatus || undefined });
       if (!isCurrentRequest()) return;
       setRequests(response.data);
-      if (response.data[0]) {
-        await selectRequest(response.data[0].id);
+      if (deepRequestId || response.data[0]) {
+        await selectRequest(deepRequestId || response.data[0].id);
       }
     } catch (err) {
       if (isCurrentRequest()) {
@@ -73,7 +77,7 @@ export function AdminEmployeeChangeRequestsPage() {
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [selectRequest, setError]);
+  }, [selectRequest, setError, deepRequestId]);
 
   useEffect(() => {
     void load();
@@ -103,6 +107,7 @@ export function AdminEmployeeChangeRequestsPage() {
       <Header title="Client Change Requests" description="Review and approve payroll-sensitive client-submitted changes." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+        <InboxReturnLink />
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         <div className="max-w-xs">

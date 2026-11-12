@@ -1,4 +1,9 @@
 import { uploadDocumentBatches } from '@/lib/document-upload-batches';
+import { useSearchParams } from 'react-router';
+import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
+import { LoadMoreFooter } from '@/components/ui/load-more';
+import type { BoundedListMeta } from '@/services/api';
+import { appendUniqueById } from '@/lib/paged-list';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FolderOpen, Send, ShieldCheck, Trash2, Users, X } from 'lucide-react';
@@ -61,7 +66,17 @@ async function loadAllEmployees() {
   });
 }
 
+const searchPortalDocuments = (search: string) => adminClientDocumentsApi.list({ search, per_page: 25 });
+
 export function AdminClientDocumentsPage() {
+  const [searchParams] = useSearchParams();
+  const deepDocumentId = Number(searchParams.get('document_id')) || null;
+  const pageRef = useRef<HTMLDivElement>(null);
+  const [search, setSearch] = useState('');
+  const [documentMeta, setDocumentMeta] = useState<(BoundedListMeta & { employee_linked_count?: number; unique_uploaders_count?: number }) | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadVersion = useRef(0);
+  const invalidateList = useCallback(() => { ++loadVersion.current; }, []);
   const { activeCompany, activeCompanyId } = useCompany();
   const canAdministerClient = useSelectedCompanyCapability('manage_client_administration');
   const [alertRecipientCount, setAlertRecipientCount] = useState<number | null>(null);
@@ -74,6 +89,7 @@ export function AdminClientDocumentsPage() {
   const [category, setCategory] = useState('');
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [inboxDocument, setInboxDocument] = useState<ClientDocument | null>(null);
   const [previewDocument, setPreviewDocument] = useState<ClientDocument | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -89,29 +105,27 @@ export function AdminClientDocumentsPage() {
     files: [] as File[],
   });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (page = 1) => {
+    const version = ++loadVersion.current;
     try {
-      setLoading(true);
+      if (page === 1) setLoading(true); else setLoadingMore(true);
       setError(null);
-      const [documentsResponse, messageDocumentsResponse] = category
-        ? await Promise.all([
-            adminClientDocumentsApi.list({ category }),
-            adminClientDocumentsApi.list(),
-          ])
-        : await adminClientDocumentsApi.list().then((response) => [response, response] as const);
-
-      setDocuments(documentsResponse.data);
-      setMessageDocuments(messageDocumentsResponse.data.filter((document) => document.visible_to_client));
+      const response = await adminClientDocumentsApi.list({ category, search, page, per_page: 50 });
+      if (version !== loadVersion.current) return;
+      setDocuments(current => page === 1 ? response.data : appendUniqueById(current, response.data));
+      setMessageDocuments(response.data.filter(document => document.visible_to_client));
+      setDocumentMeta(response.meta);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load client documents');
+      if (version === loadVersion.current) setError(err instanceof Error ? err.message : 'Failed to load client documents');
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) { setLoading(false); setLoadingMore(false); }
     }
-  }, [category, setError]);
+  }, [category, search, setError]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const timer = setTimeout(() => void load(), 250);
+    return () => { clearTimeout(timer); invalidateList(); };
+  }, [load, invalidateList]);
 
   useEffect(() => {
     let active = true;
@@ -128,14 +142,14 @@ export function AdminClientDocumentsPage() {
     };
   }, [setError]);
 
-  const totalFiles = useMemo(() => documents.length, [documents]);
+  const totalFiles = documentMeta?.total_count ?? documents.length;
   const employeeLinkedFiles = useMemo(
-    () => documents.filter((document) => document.employee_id).length,
-    [documents]
+    () => documentMeta?.employee_linked_count ?? documents.filter((document) => document.employee_id).length,
+    [documents, documentMeta]
   );
   const uniqueUploaders = useMemo(
-    () => new Set(documents.map((document) => document.uploaded_by_id)).size,
-    [documents]
+    () => documentMeta?.unique_uploaders_count ?? new Set(documents.map((document) => document.uploaded_by_id)).size,
+    [documents, documentMeta]
   );
   const selectedFiles = uploadForm.files;
   const supportsSingleTitle = selectedFiles.length <= 1;
@@ -218,6 +232,26 @@ export function AdminClientDocumentsPage() {
     }
   };
 
+  useEffect(() => {
+    if (!deepDocumentId) return;
+    pageRef.current?.closest('main')?.scrollTo({ top: 0, behavior: 'instant' });
+    let active = true;
+    void adminClientDocumentsApi.get(deepDocumentId).then(response => {
+      if (active) {
+        setInboxDocument(response.data);
+        setPreviewDocument(response.data);
+        setPreviewOpen(true);
+        setPreviewLoading(true);
+        void adminClientDocumentsApi.preview(response.data.id).then(async file => {
+          const payload = await prepareDocumentPreview(response.data, file.blob);
+          if (active) setPreviewPayload(payload);
+          else if (payload.objectUrl) URL.revokeObjectURL(payload.objectUrl);
+        }).catch(error => { if (active) setError(error instanceof Error ? error.message : 'Could not preview file'); }).finally(() => { if (active) setPreviewLoading(false); });
+      }
+    }).catch(error => { if (active) setError(error instanceof Error ? error.message : 'File is unavailable'); });
+    return () => { active = false; };
+  }, [deepDocumentId, setError]);
+
   const unarchiveDocument = async (document: ClientDocument): Promise<void> => {
     setError(null);
     try {
@@ -243,10 +277,12 @@ export function AdminClientDocumentsPage() {
   };
 
   return (
-    <div>
+    <div ref={pageRef}>
       <Header title="Client Documents" description="Review files uploaded through the client portal." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+        <InboxReturnLink />
+        {inboxDocument && inboxDocument.id === deepDocumentId && <Card><CardContent className="space-y-3 pt-5"><h2 className="break-words font-semibold">{inboxDocument.title}</h2><p className="text-sm text-neutral-600">{inboxDocument.reviewed_at ? 'Reviewed by staff' : 'Waiting on staff review'}</p><Button disabled={Boolean(inboxDocument.reviewed_at)} onClick={() => { void adminClientDocumentsApi.review(inboxDocument.id).then(response => { setInboxDocument(response.data); window.dispatchEvent(new Event('portal-work-changed')); }).catch(error => setError(error instanceof Error ? error.message : 'Could not mark reviewed')); }}>Mark reviewed</Button></CardContent></Card>}
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {success && <ActionFeedback tone="success" message={success} />}
         {canAdministerClient && alertRecipientCount === 0 && (
@@ -365,7 +401,9 @@ export function AdminClientDocumentsPage() {
         </Card>
 
         <PortalMessagesPanel
+          initialThreadId={Number(searchParams.get('thread_id')) || null}
           api={adminPortalThreadsApi}
+          searchDocuments={searchPortalDocuments}
           documents={messageDocuments}
           audienceLabel="to the client"
           description="Coordinate corrections, follow-up notes, and updated payroll source files with the client."
@@ -380,6 +418,7 @@ export function AdminClientDocumentsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <Input label="Search files" value={search} onChange={e => setSearch(e.target.value)} placeholder="Find older files by title or filename" />
             {loading ? (
               <div className="py-12 text-center text-sm text-gray-500">Loading client documents...</div>
             ) : documents.length === 0 ? (
@@ -497,6 +536,7 @@ export function AdminClientDocumentsPage() {
         )}
       </div>
 
+      {documentMeta && documentMeta.current_page < documentMeta.total_pages && <div className="px-4 pb-6 sm:px-6"><LoadMoreFooter shown={documents.length} total={documentMeta.total_count} noun="files" hasMore loading={loadingMore} onLoadMore={() => void load(documentMeta.current_page + 1)} /></div>}
       <DocumentPreviewModal
           activityApi={adminClientDocumentsApi}
         open={previewOpen}

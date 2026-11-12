@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class EmployeeChangeRequest < ApplicationRecord
+  include PortalInboxUpdates
   IDENTIFIER_KEYS = %i[ssn ssn_encrypted contractor_ein].freeze
   PERMITTED_EMPLOYEE_UPDATE_KEYS = %i[
     first_name

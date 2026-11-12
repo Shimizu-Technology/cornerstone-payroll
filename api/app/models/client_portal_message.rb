@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class ClientPortalMessage < ApplicationRecord
+  include PortalInboxUpdates
   belongs_to :client_portal_thread, inverse_of: :messages
   belongs_to :company
   belongs_to :author, class_name: "User", optional: true

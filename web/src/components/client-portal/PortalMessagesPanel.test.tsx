@@ -188,7 +188,7 @@ it('ignores an earlier broadcast fetch that finishes after a newer one', async (
 });
 
 it('keeps a named file-archived tombstone and excludes archived files from attachment choices', async () => {
-  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: '2026-11-11T00:00:00Z' } as import('@/services/api').ClientDocument;
+  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', visible_to_client: true, archived_at: '2026-11-11T00:00:00Z' } as import('@/services/api').ClientDocument;
   const conversation = { ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document: archived }] } as ClientPortalThread;
   api.list.mockResolvedValue({ data: [conversation] });
   api.get.mockResolvedValue({ data: conversation });
@@ -199,7 +199,7 @@ it('keeps a named file-archived tombstone and excludes archived files from attac
 });
 
 it.each(['archived', 'pending', 'infected', 'error', 'removed'])('clears both attachment selections when a document becomes %s', async (state) => {
-  const document = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const document = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
   const conversation = thread(2, 'Payroll files');
   api.list.mockResolvedValue({ data: [conversation] });
   api.get.mockResolvedValue({ data: conversation });
@@ -231,7 +231,7 @@ it.each(['archived', 'pending', 'infected', 'error', 'removed'])('clears both at
 });
 
 it('keeps the thread response archive tombstone when the document list is stale', async () => {
-  const stale = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: null } as import('@/services/api').ClientDocument;
+  const stale = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', visible_to_client: true, archived_at: null } as import('@/services/api').ClientDocument;
   const conversation = { ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document: { ...stale, archived_at: '2026-11-12T00:00:00Z' } }] } as ClientPortalThread;
   api.list.mockResolvedValue({ data: [conversation] });
   api.get.mockResolvedValue({ data: conversation });
@@ -241,7 +241,7 @@ it('keeps the thread response archive tombstone when the document list is stale'
 });
 
 it('re-reads the open conversation after unarchive so the restored file can be attached again', async () => {
-  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: '2026-11-12T00:00:00Z' } as import('@/services/api').ClientDocument;
+  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', visible_to_client: true, archived_at: '2026-11-12T00:00:00Z' } as import('@/services/api').ClientDocument;
   const restored = { ...archived, archived_at: null };
   const messageWith = (document: typeof archived) => ({ ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document }] } as ClientPortalThread);
   api.list.mockResolvedValue({ data: [messageWith(archived)] });
@@ -305,4 +305,22 @@ it('keeps a newer badge count when an older Load more page finishes last', async
   await act(async () => finishPage({ data: [{ ...thread(2, 'Older conversation'), id: 1 }], meta: meta(2) }));
   await screen.findByText('Older conversation');
   expect(screen.getByText('0 unread')).toBeTruthy();
+});
+
+
+it('finds an older file through server search and keeps the chosen attachment while searching again', async () => {
+  const older = { id: 77, title: 'Older notice', file_name: 'old.pdf', visible_to_client: true, scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const search = vi.fn().mockResolvedValue({ data: [] });
+  api.list.mockResolvedValue({ data: [thread(2, 'Payroll files')] });
+  api.get.mockResolvedValue({ data: thread(2, 'Payroll files') });
+  render(<PortalMessagesPanel api={api} documents={[]} searchDocuments={search} audienceLabel="client" description="Client messages" />);
+  await screen.findByPlaceholderText('Reply client');
+  search.mockResolvedValueOnce({ data: [older] });
+  fireEvent.change(screen.getByLabelText('Find a file to attach'), { target: { value: 'Older' } });
+  await screen.findAllByRole('option', { name: 'Older notice (old.pdf)' });
+  const replySelect = screen.getAllByRole('combobox')[1] as HTMLSelectElement;
+  fireEvent.change(replySelect, { target: { value: '77' } });
+  fireEvent.change(screen.getByLabelText('Find a file to attach'), { target: { value: 'Another' } });
+  await waitFor(() => expect(search).toHaveBeenLastCalledWith('Another'));
+  expect(replySelect.value).toBe('77');
 });
