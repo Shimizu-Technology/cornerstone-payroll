@@ -15,7 +15,7 @@ class ClientInboxQuery
   end
 
   def companies
-    scope = Company.active.joins(:organization).where(organizations: { status: "active" }).where(organization_id: @user.organization_id, test_workspace_archived_at: nil)
+    scope = Company.active.joins(:organization).where(organizations: { status: "active" }).where(organization_id: @user.organization_id, test_workspace_archived_at: nil, test_workspace_sealed_at: nil)
     scope = scope.where("companies.test_workspace_expires_at IS NULL OR companies.test_workspace_expires_at > ?", Time.current)
     scope = scope.where("companies.payroll_environment = ? OR (companies.test_workspace_purpose = ? AND companies.migration_rehearsal_status = ?)", "live", "sandbox", "ready")
     scope = scope.where(id: accessible_ids) unless @user.organization_admin?
@@ -23,7 +23,7 @@ class ClientInboxQuery
   end
 
   def summary
-    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind = 'payroll_submission' AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests FROM (#{to_sql(Time.current)}) inbox")
+    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind = 'payroll_submission' AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests FROM (#{to_sql(Time.current)}) inbox JOIN companies counted_company ON counted_company.id = inbox.company_id WHERE counted_company.payroll_environment = 'live'")
     row.transform_values(&:to_i)
   end
 

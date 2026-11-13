@@ -106,8 +106,8 @@ module Api
           ActiveRecord::Base.transaction do
             @user.assign_attributes(permitted)
             @user.role = requested_role if role_provided
-            @user.save!
             sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
+            @user.save!
             @user.association(:company_assignments).reset
             record_user_audit!("updated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end

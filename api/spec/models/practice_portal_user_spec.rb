@@ -82,4 +82,38 @@ RSpec.describe "Practice portal identity" do
     expect(client.payroll_access_allowed?).to be(false)
     expect(client.reload).not_to be_active
   end
+  it "memoizes practice company ids until the user is reloaded" do
+    expect(client).to receive(:practice_portal_open?).once.and_call_original
+    2.times { expect(client.accessible_company_ids).to eq([ workspace.id ]) }
+  end
+
+  it "deactivates invalid profiles independently and revokes pending invitations on archive" do
+    first = client
+    second = create(:user, company: workspace, practice_company: workspace, role: "client")
+    CompanyAssignment.create!(user: second, company: workspace, granted_by: admin)
+    first.update_columns(name: "", clerk_invitation_id: "inv_bad_profile", invitation_status: "pending")
+    service = instance_double(ClerkInvitationService, configured?: true)
+    allow(ClerkInvitationService).to receive(:new).and_return(service)
+    expect(service).to receive(:revoke_invitation).with("inv_bad_profile").and_return(success: true)
+    expect(PayrollAccess::RevocationDispatcher).to receive(:call).with(have_attributes(id: first.id))
+    expect(PayrollAccess::RevocationDispatcher).to receive(:call).with(have_attributes(id: second.id))
+    TestWorkspace::Lifecycle.new(company: workspace, actor: admin).archive!
+    expect(first.reload).not_to be_active
+    expect(first.clerk_invitation_id).to be_nil
+    expect(second.reload).not_to be_active
+  end
+
+  it "retries a failed invitation revocation on the next expiration sweep" do
+    client.update_columns(clerk_invitation_id: "inv_expired", invitation_status: "pending")
+    workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
+    service = instance_double(ClerkInvitationService, configured?: true)
+    allow(ClerkInvitationService).to receive(:new).and_return(service)
+    expect(service).to receive(:revoke_invitation).with("inv_expired").and_raise(Timeout::Error)
+    ExpirePracticePortalAccessJob.perform_now
+    expect(client.reload).not_to be_active
+    expect(client.clerk_invitation_id).to eq("inv_expired")
+    expect(service).to receive(:revoke_invitation).with("inv_expired").and_return(success: true)
+    ExpirePracticePortalAccessJob.perform_now
+    expect(client.reload.clerk_invitation_id).to be_nil
+  end
 end

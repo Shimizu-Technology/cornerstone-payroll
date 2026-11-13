@@ -3,11 +3,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router';
 import { ClientInbox } from './ClientInbox';
+import type { CompanyListItem } from '@/services/api';
 import { mergeInboxRows, type InboxRow } from '@/services/clientInbox';
-const mocks = vi.hoisted(() => ({ list: vi.fn(), counts: vi.fn(), switchCompany: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), counts: vi.fn(), switchCompany: vi.fn(), companies: [] as CompanyListItem[] }));
 vi.mock('@/services/clientInbox', async original => ({ ...await original<object>(), clientInboxApi: { list: mocks.list, counts: mocks.counts } }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 1 } }) }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ companies: [{ id: 2, name: 'Second client', active: true, payroll_environment: 'live' }], switchCompany: mocks.switchCompany }) }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 1, organization_id: 1 } }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ companies: mocks.companies, switchCompany: mocks.switchCompany }) }));
 vi.mock('@/components/layout/Header', () => ({ Header: ({ title }: { title: string }) => <h1>{title}</h1> }));
 const row = (kind: InboxRow['kind'], id = 1): InboxRow => ({ id, key: `${kind}:${id}`, kind, company_id: 2, company_name: 'Second client', title: `${kind} item ${id}`, activity_at: '2026-11-12T00:00:00Z', unread: true, waiting: true });
 function Destination() {
@@ -16,6 +17,7 @@ function Destination() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.companies = [{ id: 2, organization_id: 1, name: 'Second client', active: true, payroll_environment: 'live' } as CompanyListItem];
   HTMLElement.prototype.scrollTo = vi.fn(function (this: HTMLElement, options?: ScrollToOptions | number, y?: number) { this.scrollTop = typeof options === 'number' ? y || 0 : options?.top || 0; });
   mocks.list.mockResolvedValue({ data: [row('message')], meta: { next_cursor: null } });
   mocks.counts.mockResolvedValue({ data: { unread_count: 310, unread_messages: 210, unread_documents: 100, waiting_count: 320 } });
@@ -136,4 +138,24 @@ it('clearly labels practice work before opening it', async () => {
   mocks.list.mockResolvedValue({ data: [{ ...row('message'), practice_copy: true }], meta: { next_cursor: null } });
   render(<MemoryRouter><ClientInbox /></MemoryRouter>);
   expect(await screen.findByText('Second client · Practice copy · Message')).toBeTruthy();
+});
+
+it('offers only ready open practice copies and sends the selected company id', async () => {
+  const practice = { id: 3, organization_id: 1, name: 'Ready sandbox', active: true,
+    payroll_environment: 'migration_rehearsal', test_workspace: true, test_workspace_purpose: 'sandbox',
+    migration_rehearsal_status: 'ready' } as CompanyListItem;
+  mocks.companies.push(practice,
+    { ...practice, id: 4, name: 'Archived sandbox', test_workspace_archived_at: '2026-11-12' },
+    { ...practice, id: 5, name: 'Expired sandbox', test_workspace_expired: true },
+    { ...practice, id: 6, name: 'Inactive sandbox', active: false },
+    { ...practice, id: 7, name: 'Pending sandbox', migration_rehearsal_status: 'pending' },
+    { ...practice, id: 8, name: 'Sealed sandbox', test_workspace_sealed_at: '2026-11-12' });
+  render(<MemoryRouter><ClientInbox /></MemoryRouter>);
+  await screen.findByText('message item 1');
+  expect(screen.getByRole('option', { name: 'Ready sandbox · Practice copy' })).toBeTruthy();
+  for (const name of ['Archived', 'Expired', 'Inactive', 'Pending', 'Sealed']) {
+    expect(screen.queryByRole('option', { name: new RegExp(name) })).toBeNull();
+  }
+  fireEvent.change(screen.getByLabelText('Client'), { target: { value: '3' } });
+  await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ company_id: 3 })));
 });

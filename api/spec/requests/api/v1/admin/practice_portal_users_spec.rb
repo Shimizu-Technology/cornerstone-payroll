@@ -63,4 +63,46 @@ RSpec.describe "Practice portal invitations and assignments", type: :request do
     get "/api/v1/client/pay_periods", headers: { "X-Company-Id" => workspace.id.to_s }
     expect(response).to have_http_status(:forbidden)
   end
+  it "reactivates and restores a removed practice assignment in one atomic PATCH" do
+    user = create(:user, company: workspace, practice_company: workspace, role: "client")
+    user.update_columns(active: false)
+    patch "/api/v1/admin/users/#{user.id}", params: { user: { active: true, company_ids: [ workspace.id ] } }
+    expect(response).to have_http_status(:ok), response.body
+    expect(user.reload).to be_active
+    expect(user.company_assignments.sole.company_id).to eq(workspace.id)
+    user.update_columns(active: false)
+    user.company_assignments.delete_all
+    patch "/api/v1/admin/users/#{user.id}", params: { user: { active: true, name: "", company_ids: [ workspace.id ] } }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(user.reload).not_to be_active
+    expect(user.company_assignments).to be_empty
+  end
+
+  it "allows the practice portal surfaces only in its own copy" do
+    user = create(:user, company: workspace, practice_company: workspace, role: "client")
+    CompanyAssignment.create!(user: user, company: workspace, granted_by: admin)
+    employee = create(:employee, company: workspace)
+    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
+    allow_any_instance_of(ApplicationController).to receive(:current_user_id).and_return(user.id)
+    paths = %w[departments documents portal_threads portal_threads/unread_count employee_change_requests
+      employees employee_intake_settings pay_periods payroll_submission_periods reports/dashboard reports/annual_payroll_summary]
+    paths << "employees/#{employee.id}/document_requirements"
+    paths.each do |path|
+      get "/api/v1/client/#{path}", headers: { "X-Company-Id" => workspace.id.to_s }
+      expect(response).to have_http_status(:ok), "#{path}: #{response.status} #{response.body}"
+      get "/api/v1/client/#{path}", headers: { "X-Company-Id" => source.id.to_s }
+      expect(response).to have_http_status(:forbidden), path
+    end
+    # Pay statements are served in client period details; the admin PDF endpoint
+    # remains staff-only. Notification settings are personal, never company data.
+    get "/api/v1/notification_settings", headers: { "X-Company-Id" => workspace.id.to_s }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("data")).not_to have_key("administration")
+    get "/api/v1/admin/portal_notification_recipients", headers: { "X-Company-Id" => source.id.to_s }
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/client/departments", headers: { "X-Company-Id" => workspace.id.to_s }, params: { department: { name: "Practice kitchen" } }
+    expect(response).to have_http_status(:created), response.body
+    post "/api/v1/client/departments", headers: { "X-Company-Id" => source.id.to_s }, params: { department: { name: "Forbidden kitchen" } }
+    expect(response).to have_http_status(:forbidden)
+  end
 end

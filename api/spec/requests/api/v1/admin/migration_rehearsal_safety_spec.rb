@@ -45,7 +45,7 @@ RSpec.describe "Api::V1::Admin migration rehearsal safety", type: :request do
     expect(pay_period.reload.status).to eq("approved")
   end
 
-  it "blocks external time tracking setup, health calls and imports even when connected payroll is enabled" do
+  it "blocks external time tracking writes while retaining local health reads" do
     allow(ConnectedPayrollMode).to receive(:enabled?).and_return(true)
     allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_user).and_return(admin)
     allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_company_id).and_return(rehearsal.id)
@@ -55,7 +55,7 @@ RSpec.describe "Api::V1::Admin migration rehearsal safety", type: :request do
     }.not_to change(TimeTrackingSource, :count)
     expect(response).to have_http_status(:forbidden)
     get "/api/v1/admin/time_tracking_sources/0/health"
-    expect(response).to have_http_status(:forbidden)
+    expect(response).to have_http_status(:not_found)
     post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_time_tracking_import"
     expect(response).to have_http_status(:forbidden)
   end
