@@ -1631,6 +1631,7 @@ export interface PayrollItem {
   // Import fields (MoSa)
   tips?: number;
   loan_deduction?: number;
+  requested_loan_deduction?: number;
   tip_pool?: 'boh' | 'foh' | 'mixed' | null;
   import_source?: string | null;
   time_tracking_provenance?: {

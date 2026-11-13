@@ -651,6 +651,29 @@ class PayrollItem < ApplicationRecord
     !amount.finite? || !amount.positive?
   end
 
+  # A worksheet/import request survives a zero-pay cap. The legacy column
+  # continues to contain only the amount actually collected on this check.
+  def loan_deduction=(value)
+    super
+    self.custom_columns_data = custom_columns_data.to_h.merge("requested_loan_deduction" => self[:loan_deduction].to_d.to_s("F"))
+  end
+
+  def requested_loan_deduction
+    custom_columns_data.to_h.fetch("requested_loan_deduction", loan_deduction).to_d
+  end
+
+  def deduction_review_warnings
+    warnings = []
+    if custom_columns_data.to_h["mosa_missing_revel_hours"] && hours_worked.to_d.zero? && overtime_hours.to_d.zero?
+      warnings << "No Revel hours — enter hours from MoSa's email before calculating."
+    end
+    shortfall = (requested_loan_deduction - loan_deduction.to_d).round(2)
+    if shortfall.positive?
+      warnings << format("Loan requested $%.2f; collected $%.2f; $%.2f could not be deducted because pay was too low. Recalculate after entering hours.", requested_loan_deduction, loan_deduction, shortfall)
+    end
+    warnings
+  end
+
   # Calculate and store all values
   def calculate!(annual_fica_context: nil)
     ApplicationRecord.transaction do
