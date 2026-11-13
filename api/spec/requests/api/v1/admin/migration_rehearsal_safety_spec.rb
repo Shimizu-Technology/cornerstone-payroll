@@ -56,6 +56,10 @@ RSpec.describe "Api::V1::Admin migration rehearsal safety", type: :request do
     expect(response).to have_http_status(:forbidden)
     get "/api/v1/admin/time_tracking_sources/0/health"
     expect(response).to have_http_status(:not_found)
+    source = create(:time_tracking_source, company: rehearsal)
+    get "/api/v1/admin/time_tracking_sources/#{source.id}/health"
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body).to include("source_id" => source.id, "company_id" => rehearsal.id, "evidence_scope" => "local_records")
     post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_time_tracking_import"
     expect(response).to have_http_status(:forbidden)
   end

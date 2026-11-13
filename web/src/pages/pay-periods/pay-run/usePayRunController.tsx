@@ -23,7 +23,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
-import { type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, taxSyncStatusConfig, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
+import { type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, unavailableSavedWageRateLabels, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, taxSyncStatusConfig, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
 
 export function usePayRunController({
   active = true,
@@ -547,6 +547,15 @@ export function usePayRunController({
       const heldItem = payrollItems.find(item => !item.voided && worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
       if (heldItem) {
         setError(worksheetPayBasisHold(heldItem, employees.find(employee => employee.id === heldItem.employee_id))!.reason);
+        return;
+      }
+      const unavailableJob = payrollItems.filter(item => !item.voided && !(payPeriod.excluded_employee_ids || []).includes(item.employee_id))
+        .map(item => ({ employee: employees.find(employee => employee.id === item.employee_id), item }))
+        .map(({ employee, item }) => ({ employee, labels: unavailableSavedWageRateLabels(employee, item) }))
+        .find(entry => entry.labels.length > 0);
+      if (unavailableJob) {
+        const name = unavailableJob.employee ? `${unavailableJob.employee.first_name} ${unavailableJob.employee.last_name}` : 'this employee';
+        setError(`Saved hours for ${name} use an inactive or removed job (${unavailableJob.labels.join(', ')}). Restore or recreate that job in the employee’s pay setup, then reload this run before calculating. Saved payroll has not changed.`);
         return;
       }
       const invalidHours = Object.entries(hoursMap).find(([employeeId, entry]) => worksheetHoursInvalid(

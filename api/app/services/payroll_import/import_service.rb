@@ -71,8 +71,10 @@ module PayrollImport
       # owner is absent from both source files. Never infer it from annual pay
       # or another owner's instructions. Keep setup provenance explicit.
       if pay_period.includes_base_salary?
+        excluded_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
         employees_by_id.each_value do |employee|
           next unless employee.variable_salary?
+          next if excluded_ids.include?(employee.id)
           next if matched.any? { |row| row[:employee_id] == employee.id }
 
           match = { employee_id: employee.id, confidence: 1.0, matched_name: employee.full_name }

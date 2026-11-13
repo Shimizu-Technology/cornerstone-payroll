@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { Employee, PayrollItem } from '@/types';
-import { buildHoursMap, derivePayrollUiState } from './payRunSupport';
+import { buildHoursMap, derivePayrollUiState, unavailableSavedWageRateLabels } from './payRunSupport';
 
 it('rehydrates the retained loan request after a zero-pay cap instead of resubmitting zero', () => {
   const item = { employee_id: 7, loan_deduction: 0, requested_loan_deduction: 89 } as PayrollItem;
@@ -56,4 +56,20 @@ it('does not duplicate saved secondary hours when a same-rate primary job is add
   expect(rates.map(rate => rate.overtime_hours)).toEqual([0, 1.94]);
   expect(rates.map(rate => rate.holiday_hours)).toEqual([0, 2]);
   expect(rates.map(rate => rate.pto_hours)).toEqual([0, 3]);
+});
+
+it('detects saved nonzero hours on inactive and removed jobs before calculation', () => {
+  const employee = { wage_rates: [
+    { id: 1, label: 'Active', rate: 15, active: true },
+    { id: 2, label: 'Retired', rate: 10, active: false },
+  ] } as Employee;
+  const item = { id: 1, employee_id: 7, employment_type: 'hourly', pay_rate: 15, wage_rate_hours: [
+    { employee_wage_rate_id: 2, label: 'Retired', regular_hours: 4 },
+    { employee_wage_rate_id: 3, label: 'Deleted', overtime_hours: 2 },
+    { employee_wage_rate_id: 4, label: 'Empty', regular_hours: 0 },
+    { label: 'Legacy', rate: 12, regular_hours: 3, active: true },
+  ].map(entry => ({ rate: 10, regular_hours: 0, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, ...entry })) } as PayrollItem;
+  expect(unavailableSavedWageRateLabels(employee, item)).toEqual(['Retired', 'Deleted']);
+  expect(unavailableSavedWageRateLabels(employee, { ...item, timekeeping_source: 'correction_reference' })).toEqual([]);
+  expect(unavailableSavedWageRateLabels(employee, { ...item, import_source: 'time_tracking:aire' })).toEqual([]);
 });

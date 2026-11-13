@@ -2048,3 +2048,24 @@ it.each(['Sidebar Employees', 'Back'])('guards dirty hours through %s, preservin
     await screen.findByText('Left payroll worksheet');
   } finally { confirm.mockRestore(); }
 });
+
+it.each([false, true])('refuses calculation with saved hours on a removed/inactive job (removed=%s)', async removed => {
+  vi.clearAllMocks();
+  const employee = { id: 24, company_id: 7, first_name: 'Mia', last_name: 'Santos', employment_type: 'hourly',
+    pay_rate: 15, pay_frequency: 'biweekly', status: 'active', wage_rates: [
+      { id: 2, label: 'Server', rate: 15, is_primary: true, active: true },
+      ...(removed ? [] : [{ id: 1, label: 'Retired', rate: 10, is_primary: false, active: false }]),
+    ] } as Employee;
+  const period = { ...initialPayPeriod, status: 'draft', payroll_items: [{ id: 1, employee_id: 24,
+    employment_type: 'hourly', pay_rate: 10, hours_worked: 4, overtime_hours: 0, gross_pay: 40, net_pay: 35,
+    wage_rate_hours: [{ employee_wage_rate_id: 1, label: 'Retired', rate: 10, regular_hours: 4, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, active: true }],
+  }] } as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('region', { name: 'Payroll entry for Mia Santos' });
+  await calculateWithCoverage();
+  expect((await screen.findAllByText(/Saved hours for Mia Santos use an inactive or removed job/)).length).toBeGreaterThan(0);
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});

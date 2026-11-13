@@ -20,6 +20,12 @@ RSpec.describe PayrollImport::ImportService do
       expect(pay_period.payroll_items).to be_empty
     end
 
+    it "does not reintroduce an owner already excluded from the pay period" do
+      pay_period.pay_period_excluded_employees.create!(employee: owner)
+      expect(service.preview(pdf_records: [], excel_records: [])[:matched]).to be_empty
+      expect(pay_period.pay_period_excluded_employees.pluck(:employee_id)).to eq([ owner.id ])
+    end
+
     it "does not add base-salary rows to a special run that excludes base salary" do
       pay_period.update!(includes_base_salary: false)
       expect(service.preview(pdf_records: [], excel_records: [])[:matched]).to be_empty
