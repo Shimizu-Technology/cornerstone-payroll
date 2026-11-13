@@ -60,3 +60,21 @@ it('links retained import evidence to the explicit company even when file snapsh
   render(<RevisionCard revision={revision} api={{} as PayrollSubmissionsApi} companyId={7} />);
   expect(screen.getByRole('link', { name: 'Import #12 · applied' }).getAttribute('href')).toBe('/companies/7/pay-runs/42');
 });
+
+const archivedDocument = { id: 8, title: 'revel.pdf', file_name: 'revel.pdf', content_type: 'application/pdf', preview_available: true, scan_status: 'clean', archived_at: '2026-11-13T00:00:00Z' } as ClientDocument;
+
+it('shows a client a record-only label for an archived period file, with no Download or Preview', () => {
+  render(<ul><FileRow label="Revel payroll PDF" document={archivedDocument} api={{} as PayrollSubmissionsApi} audience="client" /></ul>);
+  expect(screen.getByText('Kept with this period as a record. Ask Cornerstone if you need it.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Download revel.pdf' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Preview revel.pdf' })).toBeNull();
+});
+
+it('still lets staff open an archived period file, and clients open a current one', () => {
+  const { unmount } = render(<ul><FileRow label="Revel payroll PDF" document={archivedDocument} api={{} as PayrollSubmissionsApi} audience="staff" /></ul>);
+  expect(screen.getByText('Archived, kept as a record')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Download revel.pdf' })).toBeTruthy();
+  unmount();
+  render(<ul><FileRow label="Revel payroll PDF" document={{ ...archivedDocument, archived_at: null }} api={{} as PayrollSubmissionsApi} audience="client" /></ul>);
+  expect(screen.getByRole('button', { name: 'Download revel.pdf' })).toBeTruthy();
+});

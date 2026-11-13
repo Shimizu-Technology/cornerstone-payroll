@@ -10,6 +10,7 @@ import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
+import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
 
 const ClientInbox = lazy(() => import('@/pages/ClientInbox').then(module => ({ default: module.ClientInbox })));
 const ClientMessages = lazy(() => import('@/pages/client/ClientMessages').then(module => ({ default: module.ClientMessages })));
@@ -70,10 +71,18 @@ const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
 
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user, authProblem } = useAuth();
 
-  // Skip auth check if disabled
+  // Skip auth check if disabled. A refused account still gets an explanation
+  // instead of an empty staff-style workspace.
   if (!AUTH_ENABLED) {
+    if (!isLoading && !user && authProblem) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
+          <AccountAccessNotice className="w-full max-w-lg" problem={authProblem} onRetry={() => window.location.reload()} />
+        </div>
+      );
+    }
     return <>{children}</>;
   }
 
