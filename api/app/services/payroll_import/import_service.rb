@@ -67,6 +67,19 @@ module PayrollImport
         matched << build_preview_row(nil, employee, excel_match, excel_data)
       end
 
+      # Variable base salary needs a separate reviewed amount even when the
+      # owner is absent from both source files. Never infer it from annual pay
+      # or another owner's instructions. Keep setup provenance explicit.
+      if pay_period.includes_base_salary?
+        employees_by_id.each_value do |employee|
+          next unless employee.variable_salary?
+          next if matched.any? { |row| row[:employee_id] == employee.id }
+
+          match = { employee_id: employee.id, confidence: 1.0, matched_name: employee.full_name }
+          matched << build_preview_row(nil, employee, match, nil).merge(payroll_setup_only: true)
+        end
+      end
+
       duplicate_employee_matches = matched
         .group_by { |row| row[:employee_id] }
         .filter_map do |employee_id, rows|

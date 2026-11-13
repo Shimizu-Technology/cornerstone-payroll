@@ -7,6 +7,32 @@ RSpec.describe PayrollImport::ImportService do
   let(:pay_period) { create(:pay_period, company: company) }
   let(:service) { described_class.new(pay_period) }
 
+  describe "variable pay absent from source files" do
+    let!(:owner) { create(:employee, company: company, employment_type: "salary", salary_type: "variable", pay_rate: 225_000) }
+
+    it "requires an individual reviewed amount with explicit payroll-setup provenance" do
+      create(:employee, company: company, employment_type: "salary", salary_type: "variable", status: "inactive")
+      create(:employee, employment_type: "salary", salary_type: "variable")
+      preview = service.preview(pdf_records: [], excel_records: [])
+      expect(preview[:matched]).to contain_exactly(include(employee_id: owner.id, payroll_setup_only: true,
+        period_pay_required: true, period_pay_missing: true, current_period_pay: nil, period_pay: nil))
+      expect { service.apply!(matched: preview[:matched]) }.to raise_error(ArgumentError, /#{owner.full_name}/)
+      expect(pay_period.payroll_items).to be_empty
+    end
+
+    it "does not add base-salary rows to a special run that excludes base salary" do
+      pay_period.update!(includes_base_salary: false)
+      expect(service.preview(pdf_records: [], excel_records: [])[:matched]).to be_empty
+    end
+
+    it "keeps a single row when the owner already appears in the workbook" do
+      preview = service.preview(pdf_records: [], excel_records: [ { employee_id: owner.id, period_pay: 8421.13 } ])
+      expect(preview[:matched].length).to eq(1)
+      expect(preview[:matched].first).to include(employee_id: owner.id, period_pay: 8421.13)
+      expect(preview[:matched].first[:payroll_setup_only]).to be_nil
+    end
+  end
+
   describe "#apply!" do
     it "snapshots the delivery method before issuing review so profile edits cannot change imported payroll" do
       employee = create(:employee, company: company, payment_delivery_method: "direct_deposit")

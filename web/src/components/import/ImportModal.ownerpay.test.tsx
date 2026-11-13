@@ -81,6 +81,15 @@ it('saves one person’s pay on their own paycheck row, stays in the review, and
   expect(screen.queryByText(/^Apply is off/)).toBeNull();
 });
 
+it('offers each variable-pay employee separately, including one absent from the files', () => {
+  const second = { ...ownerMissing, source_row_id: 3, employee_id: 3, employee_name: 'Sara Owner', payroll_setup_only: true };
+  open(preview([ownerMissing, second]));
+  expect(screen.getByLabelText('Pay for Monique Owner this period')).toBeTruthy();
+  expect(screen.getByLabelText('Pay for Sara Owner this period')).toBeTruthy();
+  expect(screen.getAllByText('From payroll setup, absent from source files. Review this person’s period pay.')).toHaveLength(2);
+  expect(applyButton().disabled).toBe(true);
+});
+
 it('updates the paycheck row that already exists instead of creating a second one', async () => {
   mocks.listItems.mockResolvedValue({ payroll_items: [{ id: 71, employee_id: 2 }] });
   mocks.updateItem.mockResolvedValue({ payroll_item: { id: 71 } });
