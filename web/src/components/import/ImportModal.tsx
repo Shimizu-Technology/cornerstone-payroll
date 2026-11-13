@@ -25,7 +25,7 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
 import { formatCurrency } from '@/lib/utils';
-import { payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
+import { ApiError, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
 
@@ -65,8 +65,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const nextAttentionRow = useRef(0);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
+  // Bumped when the review closes, so a save that finishes later is ignored.
+  const reviewGeneration = useRef(0);
 
   const reset = () => {
+    reviewGeneration.current += 1;
     setStep('upload');
     setPdfFile(null);
     setExcelFile(null);
@@ -146,18 +149,24 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   // Reload the saved review in place. Outcomes already chosen for each source row are kept.
   const reloadReview = async (expectedImportId: number) => {
+    const generation = reviewGeneration.current;
     const data = await payPeriodsApi.currentImport(payPeriodId);
+    if (generation !== reviewGeneration.current) return;
     if (data.import_id !== expectedImportId) {
       throw new Error('The saved review changed. Close this window and open the submission again.');
     }
-    const chosen = new Map(sourceRows.map((row) => [row.id, row]));
     setPreviewData(data);
-    setSourceRows(data.preview.source_rows.map((row) => {
-      const kept = chosen.get(row.id);
-      return kept
-        ? { ...row, disposition: kept.disposition, disposition_reason: kept.disposition_reason, target_pay_period_id: kept.target_pay_period_id }
-        : { ...row, disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending' };
-    }));
+    // Merge into the latest rows, not the ones from when the save started, so
+    // outcomes staff changed while the request was running are kept.
+    setSourceRows((current) => {
+      const chosen = new Map(current.map((row) => [row.id, row]));
+      return data.preview.source_rows.map((row) => {
+        const kept = chosen.get(row.id);
+        return kept
+          ? { ...row, disposition: kept.disposition, disposition_reason: kept.disposition_reason, target_pay_period_id: kept.target_pay_period_id }
+          : { ...row, disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending' };
+      });
+    });
     // The rows that need the replace-existing confirmation may have changed.
     setReviewedOverwrite(false);
   };
@@ -174,12 +183,15 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     try {
       const { payroll_items: items } = await payrollItemsApi.list(payPeriodId);
       const existing = items.find((item) => item.employee_id === row.employee_id);
-      if (existing) await payrollItemsApi.update(payPeriodId, existing.id, { salary_override: amount });
-      else await payrollItemsApi.create(payPeriodId, { employee_id: row.employee_id, salary_override: amount });
+      const guard = { expectedImportId: previewData.import_id };
+      if (existing) await payrollItemsApi.update(payPeriodId, existing.id, { salary_override: amount }, guard);
+      else await payrollItemsApi.create(payPeriodId, { employee_id: row.employee_id, salary_override: amount }, guard);
       await reloadReview(previewData.import_id);
       setOwnerPayDrafts((current) => ({ ...current, [row.employee_id]: null }));
     } catch (err) {
       setOwnerPayError(`Could not save pay for ${row.employee_name}. ${err instanceof Error ? err.message : ''}`.trim());
+      // A refused stale save changed nothing; show the current amounts.
+      if (err instanceof ApiError && err.status === 409) await reloadReview(previewData.import_id).catch(() => undefined);
     } finally {
       setOwnerPayBusy(null);
     }
@@ -517,6 +529,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 {warning.message}
               </div>
             ))}
+            {ownerPayError && missingPeriodPay.length === 0 && (
+              <p role="alert" className="rounded-lg border border-danger-200 bg-danger-50 p-4 text-sm font-medium text-danger-700">{ownerPayError}</p>
+            )}
             {missingPeriodPay.length > 0 && (
               <section role="alert" aria-label="Pay needed" data-attention="missing-pay" tabIndex={-1} className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                 <p className="font-medium">Period pay is required for {missingPeriodPay.map((row) => row.employee_name).join(', ')}.</p>

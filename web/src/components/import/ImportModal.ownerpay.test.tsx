@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { ImportModal } from './ImportModal';
+import { ApiError } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow } from '@/services/api';
 
 const mocks = vi.hoisted(() => ({
@@ -68,7 +69,7 @@ it('saves one person’s pay on their own paycheck row, stays in the review, and
   open(preview([ownerMissing]));
   fireEvent.change(ownerInput(), { target: { value: '4500' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save pay for Monique Owner' }));
-  await waitFor(() => expect(mocks.createItem).toHaveBeenCalledWith(9, { employee_id: 2, salary_override: 4500 }));
+  await waitFor(() => expect(mocks.createItem).toHaveBeenCalledWith(9, { employee_id: 2, salary_override: 4500 }, { expectedImportId: 30 }));
   expect(mocks.currentImport).toHaveBeenCalledWith(9);
   await waitFor(() => expect(screen.queryByRole('alert', { name: 'Pay needed' })).toBeNull());
   // Saved pay sits on an existing non-import row, so replacing it must be confirmed.
@@ -86,7 +87,7 @@ it('updates the paycheck row that already exists instead of creating a second on
   open(preview([ownerMissing]));
   fireEvent.change(ownerInput(), { target: { value: '1200.5' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save pay for Monique Owner' }));
-  await waitFor(() => expect(mocks.updateItem).toHaveBeenCalledWith(9, 71, { salary_override: 1200.5 }));
+  await waitFor(() => expect(mocks.updateItem).toHaveBeenCalledWith(9, 71, { salary_override: 1200.5 }, { expectedImportId: 30 }));
   expect(mocks.createItem).not.toHaveBeenCalled();
 });
 
@@ -133,4 +134,31 @@ it('lists what blocks Apply, jumps to each item, and keeps outcomes already chos
   await waitFor(() => expect(screen.queryByRole('alert', { name: 'Pay needed' })).toBeNull());
   expect((screen.getAllByLabelText('Outcome for Ghost, Gary')[0] as HTMLSelectElement).value).toBe('informational');
   expect((screen.getAllByLabelText('Reason for Ghost, Gary')[0] as HTMLInputElement).value).toBe('Not on this payroll');
+});
+
+it('keeps an outcome changed while the pay save is still running', async () => {
+  let finishSave: (value: unknown) => void = () => undefined;
+  mocks.createItem.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+  mocks.currentImport.mockResolvedValue(preview([ownerSaved], [unmatchedRow]));
+  open(preview([ownerMissing], [unmatchedRow]));
+  fireEvent.change(ownerInput(), { target: { value: '4500' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save pay for Monique Owner' }));
+  await waitFor(() => expect(mocks.createItem).toHaveBeenCalled());
+  fireEvent.change(screen.getAllByLabelText('Outcome for Ghost, Gary')[0], { target: { value: 'informational' } });
+  fireEvent.change(screen.getAllByLabelText('Reason for Ghost, Gary')[0], { target: { value: 'Not on this payroll' } });
+  finishSave({ payroll_item: { id: 70 } });
+  await waitFor(() => expect(screen.queryByRole('alert', { name: 'Pay needed' })).toBeNull());
+  expect((screen.getAllByLabelText('Outcome for Ghost, Gary')[0] as HTMLSelectElement).value).toBe('informational');
+  expect((screen.getAllByLabelText('Reason for Ghost, Gary')[0] as HTMLInputElement).value).toBe('Not on this payroll');
+});
+
+it('reloads the current amounts when the server refuses a stale save', async () => {
+  mocks.createItem.mockRejectedValue(new ApiError('This review is out of date or someone already entered this pay. Nothing was saved.', 409));
+  mocks.currentImport.mockResolvedValue(preview([ownerSaved]));
+  open(preview([ownerMissing]));
+  fireEvent.change(ownerInput(), { target: { value: '9999' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save pay for Monique Owner' }));
+  expect((await screen.findAllByText(/Nothing was saved/)).length).toBeGreaterThan(0);
+  await waitFor(() => expect(mocks.currentImport).toHaveBeenCalledWith(9));
+  await waitFor(() => expect(screen.queryByRole('alert', { name: 'Pay needed' })).toBeNull());
 });

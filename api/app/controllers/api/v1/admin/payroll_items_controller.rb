@@ -7,6 +7,8 @@ module Api
         before_action :set_pay_period
         before_action :set_payroll_item, only: [ :show, :update, :destroy, :recalculate, :update_payment_method ]
         around_action :with_financial_pay_period_lock, only: [ :create, :update, :destroy, :recalculate ]
+        # Runs inside the pay period lock, before anything is written.
+        before_action :reject_stale_import_review_pay, only: [ :create, :update ]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_items
         def index
@@ -172,6 +174,23 @@ module Api
         end
 
         private
+
+        # The import review saves a person's missing period pay through create
+        # or update. Refuse it when that review is no longer the current one,
+        # or when someone has already entered pay for that person.
+        def reject_stale_import_review_pay
+          return unless params.key?(:expected_import_id)
+
+          current = PayrollImport::CurrentReview.import_record_for(@pay_period)
+          item = @payroll_item&.reload || @pay_period.payroll_items.find_by(employee_id: params[:employee_id])
+          pay_already_entered = PayrollImport::LivePreviewRowState.manual_period_pay(item).present?
+          return if current && current.id == params[:expected_import_id].to_i && !pay_already_entered
+
+          render json: {
+            error: "This review is out of date or someone already entered this pay. Nothing was saved. Reload the review to see the current amounts.",
+            code: "stale_import_review"
+          }, status: :conflict
+        end
 
         def with_financial_pay_period_lock
           @pay_period.with_lock(requires_new: true) do
