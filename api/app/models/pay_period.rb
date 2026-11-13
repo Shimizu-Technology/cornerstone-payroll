@@ -506,7 +506,13 @@ class PayPeriod < ApplicationRecord
   end
 
   def compliance_warnings
+    # Deduction review warnings only guide runs that can still be calculated.
     warnings = []
+    if status.in?(%w[draft calculated])
+      payroll_items.includes(:employee).each do |item|
+        item.deduction_review_warnings.each { |message| warnings << "#{item.employee.full_name}: #{message}" }
+      end
+    end
     note = annual_fica_review_note
     warnings << note if note
     workweek = resolved_company_workweek

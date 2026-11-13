@@ -875,6 +875,28 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay.to_d).to eq(BigDecimal("0"))
     end
 
+    it "restores a manual direct loan after zero pay and a second partial-pay cap" do
+      payroll_item.hours_worked = 0
+      payroll_item.loan_deduction = 2_000
+      described_class.for(employee, payroll_item).calculate
+      payroll_item.save!
+      expect(payroll_item.reload.loan_deduction).to eq(0)
+      expect(payroll_item.requested_loan_deduction).to eq(2_000)
+
+      payroll_item.hours_worked = 1
+      described_class.for(employee, payroll_item).calculate
+      payroll_item.save!
+      expect(payroll_item.reload.loan_deduction).to be_between(0, 2_000).exclusive
+      expect(payroll_item.net_pay).to eq(0)
+      expect(payroll_item.requested_loan_deduction).to eq(2_000)
+
+      payroll_item.hours_worked = 200
+      payroll_item.pay_rate = 35
+      described_class.for(employee, payroll_item).calculate
+      expect(payroll_item.loan_deduction).to eq(2_000)
+      expect(payroll_item.net_pay).to be_positive
+    end
+
     it "preserves benefit sub-category for employer contribution payroll fields" do
       contribution_field = PayrollFieldDefinition.create!(
         company: company,

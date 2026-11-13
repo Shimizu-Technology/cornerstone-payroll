@@ -1605,6 +1605,7 @@ export const payPeriodsApi = {
       acknowledge_low_confidence_matches?: boolean;
       portal_source_id?: number;
       force_overwrite?: boolean;
+      wage_rate_choices?: Record<string, number>;
     },
   ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
@@ -2038,6 +2039,12 @@ export interface DeleteDraftCorrectionRunResponse {
 
 // Import types
 export interface ImportPreviewRow {
+  workbook_only?: boolean;
+  missing_revel_hours_with_deductions?: boolean;
+  wage_rate_options?: Array<{ id: number; label: string; rate: number }>;
+  selected_wage_rate_id?: number | null;
+  wage_rate_default_source?: string;
+  wage_rate_default_pay_period_id?: number | null;
   source_row_id: number;
   period_pay_required?: boolean;
   current_period_pay?: string | null;
