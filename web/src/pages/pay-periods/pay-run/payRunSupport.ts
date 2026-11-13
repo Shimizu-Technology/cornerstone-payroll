@@ -132,7 +132,7 @@ export function templateWageRates(employee: Employee | undefined, payrollItem?: 
     const useDefaultHours = !existing?.length;
     const defaultPrimaryHours = useDefaultHours && (configuredRates.length === 1 || sameSavedRate) ? toNumber(payrollItem?.hours_worked ?? 0) : 0;
 
-    return configuredRates.map((rate) => {
+    const configuredRows = configuredRates.map((rate) => {
       const matchedExisting =
         (rate.id != null ? existingById.get(rate.id) : undefined) ||
         existingByLabel.get(rate.label.trim().toLowerCase());
@@ -149,6 +149,20 @@ export function templateWageRates(employee: Employee | undefined, payrollItem?: 
         active: rate.active,
       };
     });
+    const configuredLabels = new Set(configuredRates.map(rate => rate.label.trim().toLowerCase()));
+    const legacyRows = (existing || [])
+      .filter(entry => entry.employee_wage_rate_id == null && !configuredLabels.has(entry.label.trim().toLowerCase()))
+      .map(entry => ({
+        ...entry,
+        rate: toNumber(entry.rate),
+        regular_hours: toNumber(entry.regular_hours),
+        overtime_hours: toNumber(entry.overtime_hours),
+        holiday_hours: toNumber(entry.holiday_hours),
+        pto_hours: toNumber(entry.pto_hours),
+        is_primary: entry.is_primary ?? false,
+        active: entry.active ?? true,
+      }));
+    return [...configuredRows, ...legacyRows];
   }
 
   if (existing && existing.length > 0) {

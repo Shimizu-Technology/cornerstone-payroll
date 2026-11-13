@@ -79,6 +79,7 @@ RSpec.describe PayrollWageRateInput do
     ordinary = create(:payroll_item, company: company, employee: employee,
       pay_period: create(:pay_period, company: company), timekeeping_source: "manual")
     rate = employee.employee_wage_rates.create!(label: "Retired", rate: 25, active: false)
+    ordinary.update!(wage_rate_hours: [ submitted.merge("employee_wage_rate_id" => rate.id, "label" => rate.label, "active" => false) ])
     expect {
       described_class.normalize(payroll_item: ordinary, entries: [ submitted.merge("employee_wage_rate_id" => rate.id) ])
     }.to raise_error(ArgumentError, /Inactive wage rate/)
