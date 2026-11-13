@@ -252,6 +252,44 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       )
     end
 
+    it "accepts only a saved job ID from the retained review and leaves source hours authoritative" do
+      primary = create(:employee_wage_rate, employee: included_employee, rate: 15.50)
+      selected = create(:employee_wage_rate, employee: included_employee, rate: 16.50)
+      import_record = create_preview!
+      rows = import_record.matched_data
+      rows.first.merge!("wage_rate_options" => [ { "id" => primary.id }, { "id" => selected.id } ], "selected_wage_rate_id" => primary.id)
+      import_record.update!(matched_data: rows)
+      [ included_employee, excluded_employee ].each do |employee|
+        create(:payroll_item, pay_period: pay_period, company: company, employee: employee)
+      end
+      captured = nil
+      allow_any_instance_of(PayrollImport::ImportService).to receive(:apply!) do |_service, **args|
+        captured = args[:matched]
+        { success: [], skipped: [], errors: [] }
+      end
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import", params: {
+        import_id: import_record.id, rows: reviewed_rows(import_record),
+        wage_rate_choices: { included_employee.id.to_s => selected.id },
+        matched: [ { employee_id: included_employee.id, regular_hours: 999, pay_rate: 999 } ]
+      }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(captured.first).to include(selected_wage_rate_id: selected.id, regular_hours: 40.0)
+    end
+
+    it "rejects a job ID absent from that employee's retained preview" do
+      import_record = create_preview!
+      expect_any_instance_of(PayrollImport::ImportService).not_to receive(:apply!)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import", params: {
+        import_id: import_record.id, rows: reviewed_rows(import_record), wage_rate_choices: { included_employee.id.to_s => 999 }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("Choose a job and rate")
+    end
+
     def reviewed_rows(import, included_employee_ids: [ included_employee.id, excluded_employee.id ])
       import.payroll_intake_session.rows.in_order.map do |row|
         if included_employee_ids.include?(row.employee_id)

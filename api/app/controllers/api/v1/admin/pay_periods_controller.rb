@@ -1533,6 +1533,7 @@ module Api
             check_print_count: item.check_print_count,
             check_status: item.check_status,
             loan_deduction: item.loan_deduction,
+            requested_loan_deduction: item.requested_loan_deduction,
             named_loan_payments: item.named_loan_payments.transform_values { |amount| amount.to_d.to_f },
             tip_pool: item.tip_pool,
             import_source: item.import_source,

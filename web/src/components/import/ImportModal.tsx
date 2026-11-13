@@ -1,6 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { Link } from 'react-router';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, type ReactElement } from 'react';
 import { CheckCircle2, Download, RefreshCw } from 'lucide-react';
 import {
   Dialog,
@@ -50,6 +50,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [previewData, setPreviewData] = useState<ImportPreviewResponse | null>(initialPreview || null);
   const [sourceRows, setSourceRows] = useState<EditableSourceRow[]>(() => initialPreview?.preview.source_rows.map(row => ({ ...row, disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending' })) || []);
+  const [rateChoices, setRateChoices] = useState<Record<string, number>>({});
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
   const [reviewedOverwrite, setReviewedOverwrite] = useState(false);
@@ -77,6 +78,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setError(null);
     setPreviewData(null);
     setSourceRows([]);
+    setRateChoices({});
     setTipsPaidOutFromTips(false);
     setReviewedSuggestedMatches(false);
     setReviewedOverwrite(false);
@@ -125,6 +127,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   const openPreview = (data: ImportPreviewResponse) => {
     setPreviewData(data);
+    setRateChoices({});
     setSourceRows(data.preview.source_rows.map((row) => ({
       ...row,
       disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending',
@@ -247,6 +250,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         })),
         acknowledge_low_confidence_matches: reviewedSuggestedMatches,
         force_overwrite: reviewedOverwrite,
+        wage_rate_choices: rateChoices,
       });
       setResults({
         success: response.results.success.length,
@@ -270,6 +274,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const includedSourceRowIds = new Set(includedSourceRows.map((row) => row.id));
   const included = matched.filter((row) => includedSourceRowIds.has(row.source_row_id));
   const missingPeriodPay = included.filter((row) => row.period_pay_missing);
+  const missingRateChoices = included.filter((row) => row.wage_rate_options?.length && !(rateChoices[row.employee_id] ?? row.selected_wage_rate_id));
   const overwriteRows = included.filter((row) => row.overwrite_required);
   const incompleteSourceRows = sourceRows.filter((row) => (
     row.disposition === 'pending'
@@ -289,6 +294,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       && includedBlockingRows.length === 0
       && duplicateIncludedEmployeeIds.size === 0
       && missingPeriodPay.length === 0
+      && missingRateChoices.length === 0
       && (overwriteRows.length === 0 || reviewedOverwrite)
       && (suggestedMatchCount === 0 || reviewedSuggestedMatches),
   );
@@ -317,6 +323,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     const names = missingPeriodPay.map((row) => row.employee_name).join(', ');
     attention.push({ key: 'pay', label: `Enter pay for ${names}`, reason: `pay is missing for ${names}`, jump: () => jumpToSection('missing-pay') });
   }
+  if (missingRateChoices.length > 0) {
+    const names = missingRateChoices.map((row) => row.employee_name).join(', ');
+    attention.push({ key: 'rates', label: `Choose job and rate for ${names}`, reason: `no job and rate chosen for ${names}`, jump: () => jumpToSection('rate-choices') });
+  }
   if (unresolvedRows.length > 0) {
     const count = unresolvedRows.length;
     attention.push({ key: 'rows', label: `Next row needing attention (${count})`, reason: `${count} source row${count === 1 ? ' needs' : 's need'} an outcome`, jump: jumpToNextRow });
@@ -328,6 +338,32 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     attention.push({ key: 'overwrite', label: 'Confirm replacing saved entries', reason: 'replacing saved entries is not confirmed', jump: () => jumpToSection('overwrite') });
   }
   const applyBlockedReason = canApply ? null : attention.length > 0 ? `Apply is off: ${attention.map((item) => item.reason).join('; ')}.` : 'Apply is off until the items marked in this review are finished.';
+
+  const rateChoiceControl = (row: ImportPreviewRow): ReactElement | null => row.wage_rate_options?.length ? (
+    <div className="mt-2 min-w-0 max-w-xs space-y-1 whitespace-normal text-left">
+      <label className="block text-xs font-medium text-neutral-700">
+        Job and rate
+        <select
+          aria-label={`Job and rate for ${row.employee_name}`}
+          className="mt-1 block min-h-11 w-full min-w-0 max-w-full rounded-lg border border-neutral-300 bg-white px-2 py-2 text-base"
+          value={rateChoices[row.employee_id] ?? row.selected_wage_rate_id ?? ''}
+          onChange={(event) => setRateChoices((current) => ({ ...current, [row.employee_id]: Number(event.target.value) }))}
+        >
+          <option value="">Choose a job and rate</option>
+          {row.wage_rate_options.map((option) => <option key={option.id} value={option.id}>{option.label} · {formatCurrency(option.rate)}/hr</option>)}
+        </select>
+      </label>
+      <p className="text-xs font-semibold text-neutral-800">
+        {row.wage_rate_options.filter((option) => option.id === (rateChoices[row.employee_id] ?? row.selected_wage_rate_id)).map((option) => `${option.label} · ${formatCurrency(option.rate)}/hr`).join('')}
+      </p>
+      <p className="text-xs text-neutral-600">{row.wage_rate_default_source}</p>
+      {rateChoices[row.employee_id] != null && rateChoices[row.employee_id] !== row.selected_wage_rate_id && <p className="text-xs text-neutral-600">Your selection will be used for all imported hours.</p>}
+    </div>
+  ) : null;
+
+  const missingHoursNotice = (row: ImportPreviewRow): ReactElement | null => row.missing_revel_hours_with_deductions ? (
+    <p className="mt-2 max-w-xs whitespace-normal text-xs font-medium text-amber-800">No Revel hours — enter hours from MoSa's email before calculating. Any hours already entered will be kept.</p>
+  ) : null;
 
   const dispositionControls = (row: EditableSourceRow) => (
     <div className="space-y-2">
@@ -509,6 +545,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
         {step === 'preview' && previewData && (
           <div ref={reviewRef} className="space-y-3">
+            {missingRateChoices.length > 0 && <p role="alert" data-attention="rate-choices" tabIndex={-1} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Choose a job and rate for {missingRateChoices.map((row) => row.employee_name).join(', ')} using the Job and rate selectors below before applying.</p>}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
               <span className="inline-flex items-center gap-2 font-semibold">
                 <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
@@ -631,9 +668,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                       <Badge variant={row.confidence >= 1 ? 'default' : row.confidence >= 0.8 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}% match</Badge>
                     </div>
                     <div>{dispositionControls(sourceRow)}</div>
+                    {missingHoursNotice(row)}
+                    {rateChoiceControl(row)}
                     <dl className="grid grid-cols-2 gap-3 text-sm">
                       <div><dt className="text-xs text-neutral-600">Hours</dt><dd className="font-medium">{row.regular_hours}{row.overtime_hours > 0 ? ` + ${row.overtime_hours} OT` : ''}</dd></div>
-                      <div><dt className="text-xs text-neutral-600">{row.period_pay_required ? 'Pay this person' : 'Profile rate'}</dt><dd className="font-medium">{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</dd></div>
+                      {!row.wage_rate_options?.length && <div><dt className="text-xs text-neutral-600">{row.period_pay_required ? 'Pay this person' : 'Profile rate'}</dt><dd className="font-medium">{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</dd></div>}
                       <div><dt className="text-xs text-neutral-600">Tips</dt><dd>{row.total_tips > 0 ? formatCurrency(row.total_tips) : '—'}{row.tip_pool ? ` · ${row.tip_pool.toUpperCase()}` : ''}</dd></div>
                       <div><dt className="text-xs text-neutral-600">Loan deduction</dt><dd>{sourceLoanAmount > 0 ? formatCurrency(sourceLoanAmount) : '—'}</dd></div>
                     </dl>
@@ -673,6 +712,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                         <TableCell>
                           <div>
                             <p className="font-medium text-neutral-900">{row.employee_name}</p>
+                            {missingHoursNotice(row)}
                             {row.pdf_employee_name && row.pdf_employee_name !== row.employee_name && (
                               <p className="text-xs text-neutral-600">PDF: {row.pdf_employee_name}</p>
                             )}
@@ -685,12 +725,15 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                           )}
                         </TableCell>
                         <TableCell className="text-right">
+                          {rateChoiceControl(row)}
+                          {!row.wage_rate_options?.length && <>
                           <p>{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</p>
                           <p className="text-xs text-neutral-600">
                             {row.period_pay_required
                               ? (row.period_pay_source === 'change_workbook' ? 'Pay this person · change workbook' : 'Pay this person · payroll worksheet')
                               : 'from employee profile'}
                           </p>
+                          </>}
                         </TableCell>
                         <TableCell className="text-right">
                           {row.total_tips > 0 ? (

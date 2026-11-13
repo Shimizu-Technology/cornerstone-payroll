@@ -162,3 +162,13 @@ it('reloads the current amounts when the server refuses a stale save', async () 
   await waitFor(() => expect(mocks.currentImport).toHaveBeenCalledWith(9));
   await waitFor(() => expect(screen.queryByRole('alert', { name: 'Pay needed' })).toBeNull());
 });
+
+it('lists a missing job and rate choice among the things to finish', () => {
+  const twoRates = row({ source_row_id: 1, wage_rate_options: [{ id: 11, label: 'Main Kitchen', rate: 15.5 }, { id: 12, label: 'Shared Kitchen', rate: 16.5 }], selected_wage_rate_id: null, wage_rate_default_source: 'Choose a job and rate' });
+  const initial = preview([]);
+  initial.preview.matched = [twoRates];
+  open(initial);
+  const needs = screen.getByRole('region', { name: 'Needs attention' });
+  expect(within(needs).getByRole('button', { name: 'Choose job and rate for Avery Server' })).toBeTruthy();
+  expect(screen.getByText(/Apply is off: no job and rate chosen for Avery Server/)).toBeTruthy();
+});
