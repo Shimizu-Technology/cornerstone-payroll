@@ -130,6 +130,22 @@ RSpec.describe HourlyPayrollCalculator do
     end
   end
 
+  it "uses the reviewed saved job rate rather than the primary rate on every recalculation" do
+    employee = create(:employee, company: company, department: department, pay_rate: 15.50)
+    job = create(:employee_wage_rate, employee: employee, label: "Shared Kitchen", rate: 16.50)
+    item = create(:payroll_item, employee: employee, pay_period: pay_period, pay_rate: 15.50)
+    item.wage_rate_hours = [ { employee_wage_rate_id: job.id, label: job.label, rate: job.rate,
+      regular_hours: 40, overtime_hours: 2 } ]
+    2.times do
+      described_class.new(employee, item).calculate
+      item.save!
+      item.reload
+      expect(item.gross_pay).to eq(709.50)
+      expect(item.hours_worked).to eq(40)
+      expect(item.payroll_item_earnings.find_by!(category: "regular").rate).to eq(16.50)
+    end
+  end
+
   describe "with a finalized-source rate correction" do
     let(:employee) do
       create(

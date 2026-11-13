@@ -177,9 +177,16 @@ module PayrollImport
               payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
               apply_period_pay!(payroll_item, employee, row)
 
-              # Set hours from PDF
-              payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
-              payroll_item.overtime_hours = row[:overtime_hours].to_f if row[:overtime_hours]
+              # Keep emailed hours on workbook-only rows, even under force_overwrite.
+              # Job allocations are rebuilt explicitly from the reviewed choice.
+              unless row[:workbook_only]
+                payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
+                payroll_item.overtime_hours = row[:overtime_hours].to_f if row[:overtime_hours]
+              end
+              apply_wage_rate_choice!(payroll_item, employee, row)
+              payroll_item.custom_columns_data = payroll_item.custom_columns_data.to_h.merge(
+                "mosa_missing_revel_hours" => row[:missing_revel_hours_with_deductions] == true
+              )
 
               # Set tips from Excel — reported_tips is the taxable tip source of truth.
               # Legacy `tips` is cleared to prevent historical double counting.
@@ -342,6 +349,13 @@ module PayrollImport
       source_bonus = excel_data&.dig(:bonus)
       retained_bonus = existing_item && PayrollBonusInput.manual?(existing_item)
       row = {
+        **WageRateChoice.new(employee: employee, pay_period: pay_period).preview,
+        workbook_only: pdf_row.nil?,
+        missing_revel_hours_with_deductions: pdf_row.nil? && (
+          loan_reconciliation.fetch(:direct_loan_deduction).positive? ||
+          Array(loan_reconciliation[:matches]).any? || configured_loan_due?(employee) ||
+          Array(excel_data&.dig(:payroll_components)).any? { |component| component.to_h.with_indifferent_access[:kind] == "deduction" }
+        ),
         bonus: source_bonus,
         current_bonus: existing_item&.bonus&.to_f || 0.0,
         effective_bonus: retained_bonus || source_bonus.nil? ? (existing_item&.bonus&.to_f || 0.0) : source_bonus.to_f,
@@ -388,6 +402,60 @@ module PayrollImport
       }
 
       row
+    end
+
+    def apply_wage_rate_choice!(item, employee, row)
+      choice = WageRateChoice.new(employee: employee, pay_period: pay_period).preview
+      if row[:wage_rate_options].present? || choice[:wage_rate_options].present?
+        selected_id = row[:selected_wage_rate_id]
+        rate = employee.active_wage_rates.find { |candidate| candidate.id.to_s == selected_id.to_s }
+        raise ArgumentError, "Choose an active job and rate for #{employee.full_name}, then apply again." unless rate
+
+        reviewed = Array(row[:wage_rate_options]).find { |option| option[:id].to_s == selected_id.to_s }
+        unless reviewed && reviewed[:rate].to_d == rate.rate
+          raise ArgumentError, "Saved job rates changed for #{employee.full_name}. Preview again before applying."
+        end
+
+        item.wage_rate_hours = [ {
+          employee_wage_rate_id: rate.id, label: rate.label, rate: rate.rate.to_f,
+          regular_hours: item.hours_worked.to_f, overtime_hours: item.overtime_hours.to_f,
+          holiday_hours: item.holiday_hours.to_f, pto_hours: item.pto_hours.to_f,
+          is_primary: rate.is_primary, active: true
+        } ]
+        item.custom_columns_data = item.custom_columns_data.to_h.merge(
+          "mosa_wage_rate_choice" => { "employee_wage_rate_id" => rate.id,
+            "default_source" => row[:wage_rate_default_source], "default_pay_period_id" => row[:wage_rate_default_pay_period_id] }
+        )
+      else
+        # Single-rate calculations keep using the profile rate. Stale saved
+        # allocations must not replace the newly imported hours.
+        item.clear_wage_rate_hours!
+      end
+    end
+
+    def configured_loan_due?(employee)
+      return false unless pay_period.recurring_items_enabled?
+
+      loans = employee.employee_loans.to_a
+      return true if loans.any? do |loan|
+        loan.active? && loan.repayment_schedule_active_on?(pay_period.pay_date) &&
+          loan.scheduled_payment_for(pay_date: pay_period.pay_date, requested_amount: loan.payment_amount || 0).positive?
+      end
+      return true if employee.employee_deductions.active.includes(:deduction_type).any? do |deduction|
+        deduction.deduction_type.active? && deduction.deduction_type.loan? && deduction.amount.positive? &&
+          loans.none? { |loan| loan.deduction_type_id == deduction.deduction_type_id }
+      end
+
+      employee.employee_payroll_fields.active.effective_on(pay_period.pay_date).includes(:payroll_field_definition).any? do |assignment|
+        definition = assignment.payroll_field_definition
+        # A $1 probe rounds small percentages to zero, so check the configured percentage.
+        configured = if definition.amount_type == "percentage"
+          (assignment.percentage.presence || definition.default_percentage || 0).to_d.positive?
+        else
+          assignment.effective_amount_for(1).positive?
+        end
+        assignment.employee_loan_id.nil? && definition.active? && definition.category == "loan" && configured
+      end
     end
 
     def source_period_pay(excel_data)
