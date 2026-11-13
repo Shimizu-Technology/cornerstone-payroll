@@ -116,4 +116,28 @@ RSpec.describe "Practice portal identity" do
     ExpirePracticePortalAccessJob.perform_now
     expect(client.reload.clerk_invitation_id).to be_nil
   end
+  it "retains the invitation if access reopens before the locked recheck" do
+    client.update_columns(clerk_invitation_id: "inv_reopened", invitation_status: "pending")
+    expect(client).to receive(:practice_portal_open?).ordered.and_return(false)
+    expect(client).to receive(:practice_portal_open?).ordered.and_return(true)
+    expect(ClerkInvitationService).not_to receive(:new)
+    TestWorkspace::PortalAccess.deactivate_if_closed!(client)
+    expect(client.reload).to be_active
+    expect(client.clerk_invitation_id).to eq("inv_reopened")
+  end
+
+  it "does not clear an invitation replaced while Clerk revokes the old one" do
+    client.update_columns(clerk_invitation_id: "inv_old", invitation_status: "pending")
+    workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
+    service = instance_double(ClerkInvitationService, configured?: true)
+    allow(ClerkInvitationService).to receive(:new).and_return(service)
+    expect(service).to receive(:revoke_invitation).with("inv_old") do
+      workspace.update_columns(test_workspace_expires_at: 1.day.from_now)
+      User.where(id: client.id).update_all(active: true, clerk_invitation_id: "inv_replacement")
+      { success: true }
+    end
+    TestWorkspace::PortalAccess.deactivate_if_closed!(client)
+    expect(client.reload).to be_active
+    expect(client.clerk_invitation_id).to eq("inv_replacement")
+  end
 end

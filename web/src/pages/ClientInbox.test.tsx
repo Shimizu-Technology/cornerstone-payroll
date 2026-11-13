@@ -31,6 +31,7 @@ it('shows server-wide counts and only switches company when opening a row', asyn
   render(<MemoryRouter initialEntries={['/app/client-inbox?kind=message']}><ClientInbox /><Destination /></MemoryRouter>);
   await screen.findByText('message item 1');
   expect(screen.getByText('310')).toBeTruthy();
+  expect(screen.getByText(/unread \(live clients\)/)).toBeTruthy();
   expect(mocks.switchCompany).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'unread' } });
   await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'unread' })));

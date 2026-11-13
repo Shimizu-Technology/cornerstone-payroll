@@ -86,6 +86,19 @@ export function formatSignedNumber(value: number) {
   return '0';
 }
 
+// Ordinary inactive/deleted job IDs cannot be resubmitted by the API. Refuse
+// calculation until staff restore the job, rather than silently dropping pay.
+export function unavailableSavedWageRateLabels(employee: Employee | undefined, item: PayrollItem): string[] {
+  if (item.timekeeping_source === 'correction_reference' || item.import_source?.startsWith('time_tracking:')) return [];
+  const rates = (employee?.wage_rates || []).filter(rate => rate.active !== false);
+  return (item.wage_rate_hours || []).filter(entry => {
+    if (![entry.regular_hours, entry.overtime_hours, entry.holiday_hours, entry.pto_hours].some(hours => toNumber(hours) !== 0)) return false;
+    if (entry.employee_wage_rate_id == null && entry.active !== false) return false;
+    return !rates.some(rate => (entry.employee_wage_rate_id != null && rate.id === entry.employee_wage_rate_id)
+      || rate.label.trim().toLowerCase() === entry.label.trim().toLowerCase());
+  }).map(entry => entry.label);
+}
+
 export function templateWageRates(employee: Employee | undefined, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
   if ((payrollItem?.correction_pay_basis_hold || payrollItem?.import_source?.startsWith('time_tracking:')) && !existing?.length) return [];

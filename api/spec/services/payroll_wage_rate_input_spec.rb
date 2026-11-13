@@ -75,6 +75,15 @@ RSpec.describe PayrollWageRateInput do
     expect(normalize(entry.merge("regular_hours" => 2, "active" => true))).to include("rate" => 25.0, "active" => source_item.reload.wage_rate_hours.sole["active"], "regular_hours" => 2)
   end
 
+  it "requires an active profile job for ordinary payroll even if the saved job became inactive" do
+    ordinary = create(:payroll_item, company: company, employee: employee,
+      pay_period: create(:pay_period, company: company), timekeeping_source: "manual")
+    rate = employee.employee_wage_rates.create!(label: "Retired", rate: 25, active: false)
+    expect {
+      described_class.normalize(payroll_item: ordinary, entries: [ submitted.merge("employee_wage_rate_id" => rate.id) ])
+    }.to raise_error(ArgumentError, /Inactive wage rate/)
+  end
+
   it "preserves ordinary legacy input" do
     ordinary = create(:payroll_item, company: company, employee: employee,
       pay_period: create(:pay_period, company: company), timekeeping_source: "manual")
