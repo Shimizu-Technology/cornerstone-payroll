@@ -506,7 +506,9 @@ class PayPeriod < ApplicationRecord
   end
 
   def compliance_warnings
-    warnings = []
+    warnings = payroll_items.includes(:employee).flat_map do |item|
+      item.deduction_review_warnings.map { |message| "#{item.employee.full_name}: #{message}" }
+    end
     note = annual_fica_review_note
     warnings << note if note
     workweek = resolved_company_workweek
