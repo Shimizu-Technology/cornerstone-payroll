@@ -95,8 +95,11 @@ it('does not block the run for an employee missing from the eligible list or for
   const item = { id: 1, employee_id: 7, employment_type: 'hourly', hours_worked: 10, pay_rate: 15, wage_rate_hours: [
     { employee_wage_rate_id: 1, label: 'Kitchen', rate: 15, regular_hours: 10, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: true, active: true },
   ] } as PayrollItem;
-  // Inactive or terminated employees are not in the eligible list; the server skips them.
-  expect(unavailableSavedWageRateLabels(undefined, item)).toEqual([]);
+  // Inactive or terminated employees are not in the eligible list; a regular run's server skips them.
+  expect(unavailableSavedWageRateLabels(undefined, item, 'regular')).toEqual([]);
+  // Final, correction and adjustment runs still calculate them, so their saved jobs stay checked.
+  expect(unavailableSavedWageRateLabels(undefined, item, 'final')).toEqual(['Kitchen']);
+  expect(unavailableSavedWageRateLabels(undefined, item)).toEqual(['Kitchen']);
   const employee = { id: 7, employment_type: 'hourly', wage_rates: [{ id: 2, label: 'Server', rate: 15, is_primary: true, active: true }] } as Employee;
   const legacy = { ...item, wage_rate_hours: [{ label: 'Old job', rate: 12, regular_hours: 4, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: false, active: false }] } as PayrollItem;
   expect(unavailableSavedWageRateLabels(employee, legacy)).toEqual([]);

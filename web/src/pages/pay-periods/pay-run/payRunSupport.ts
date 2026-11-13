@@ -88,12 +88,13 @@ export function formatSignedNumber(value: number) {
 
 // Ordinary inactive/deleted job IDs cannot be resubmitted by the API. Refuse
 // calculation until staff restore the job, rather than silently dropping pay.
-export function unavailableSavedWageRateLabels(employee: Employee | undefined, item: PayrollItem): string[] {
+export function unavailableSavedWageRateLabels(employee: Employee | undefined, item: PayrollItem, runPurpose?: string): string[] {
   if (item.timekeeping_source === 'correction_reference' || item.import_source?.startsWith('time_tracking:')) return [];
-  // An employee not on this run's eligible list is skipped by the server, so
-  // their saved jobs cannot block the run.
-  if (!employee) return [];
-  const rates = (employee.wage_rates || []).filter(rate => rate.active !== false);
+  // A regular run's server roster skips employees missing from the eligible
+  // list, so their saved jobs cannot block it. Final, correction and adjustment
+  // runs still calculate them, so their saved jobs must be checked.
+  if (!employee && runPurpose === 'regular') return [];
+  const rates = (employee?.wage_rates || []).filter(rate => rate.active !== false);
   return (item.wage_rate_hours || []).filter(entry => {
     if (![entry.regular_hours, entry.overtime_hours, entry.holiday_hours, entry.pto_hours].some(hours => toNumber(hours) !== 0)) return false;
     // Legacy entries without a job ID are accepted by the API as saved.

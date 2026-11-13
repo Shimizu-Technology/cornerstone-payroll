@@ -551,7 +551,7 @@ export function usePayRunController({
       }
       const unavailableJob = payrollItems.filter(item => !item.voided && !(payPeriod.excluded_employee_ids || []).includes(item.employee_id))
         .map(item => ({ employee: employees.find(employee => employee.id === item.employee_id), item }))
-        .map(({ employee, item }) => ({ employee, labels: unavailableSavedWageRateLabels(employee, item) }))
+        .map(({ employee, item }) => ({ employee, labels: unavailableSavedWageRateLabels(employee, item, payPeriod.run_purpose) }))
         .find(entry => entry.labels.length > 0);
       if (unavailableJob) {
         const name = unavailableJob.employee ? `${unavailableJob.employee.first_name} ${unavailableJob.employee.last_name}` : 'this employee';
