@@ -220,7 +220,7 @@ export function derivePayrollUiState(payrollItems: PayrollItem[]) {
       tipsPaidOut[String(item.employee_id)] = tipsPaidOutAmount;
     }
 
-    const loanAmount = toNumber(item.loan_deduction);
+    const loanAmount = toNumber(item.requested_loan_deduction ?? item.loan_deduction);
     if (loanAmount > 0) {
       loans[String(item.employee_id)] = loanAmount;
     }

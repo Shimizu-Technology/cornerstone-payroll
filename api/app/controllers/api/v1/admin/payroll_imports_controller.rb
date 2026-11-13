@@ -153,10 +153,21 @@ module Api
             end
 
             # The persisted server preview is authoritative. The browser may
-            # exclude rows, but it cannot rewrite imported hours or money.
+            # exclude rows and select a saved job, but cannot rewrite hours or money.
             matched_data = import_record.matched_data
               .map(&:deep_symbolize_keys)
               .select { |row| included_employee_ids.include?(row[:employee_id].to_i) }
+
+            rate_choices = params.permit(wage_rate_choices: {}).to_h.fetch("wage_rate_choices", {})
+            matched_data.each do |row|
+              next unless rate_choices.key?(row[:employee_id].to_s)
+
+              id = rate_choices.fetch(row[:employee_id].to_s).to_s
+              unless Array(row[:wage_rate_options]).any? { |option| option[:id].to_s == id }
+                raise ArgumentError, "Choose a job and rate from this employee's saved rates. Preview again if rates changed."
+              end
+              row[:selected_wage_rate_id] = id.to_i
+            end
 
             if included_decisions.any? && matched_data.empty?
               return render json: {
@@ -549,6 +560,7 @@ module Api
             tips: item.tips,
             tip_pool: item.tip_pool,
             loan_deduction: item.loan_deduction,
+            requested_loan_deduction: item.requested_loan_deduction,
             loan_payment: item.loan_payment,
             import_source: item.import_source
           }

@@ -245,6 +245,11 @@ class PayrollCalculator
   # Apply all employee_deductions and record itemized PayrollItemDeduction records.
   # Also updates the aggregate fields (loan_payment, insurance_payment) for backward compat.
   def apply_employee_deductions
+    # Restore the input before every calculation; capping only changes output.
+    unless payroll_item.custom_columns_data.to_h.key?("requested_loan_deduction")
+      payroll_item.loan_deduction = payroll_item.loan_deduction
+    end
+    payroll_item[:loan_deduction] = payroll_item.requested_loan_deduction
     payroll_item.payroll_item_deductions.clear
     @built_in_employer_match_rows = {}
 
@@ -800,7 +805,11 @@ class PayrollCalculator
 
     current = payroll_item.public_send(field).to_f
     reduction = [ current, amount ].min
-    payroll_item.public_send("#{field}=", (current - reduction).round(2))
+    if field == :loan_deduction
+      payroll_item[field] = (current - reduction).round(2)
+    else
+      payroll_item.public_send("#{field}=", (current - reduction).round(2))
+    end
     (amount - reduction).round(2)
   end
 
