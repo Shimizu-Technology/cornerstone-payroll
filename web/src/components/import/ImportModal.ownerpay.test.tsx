@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { ImportModal } from './ImportModal';
-import { ApiError } from '@/services/api';
+import { ApiError, payrollIntakeImportsApi } from '@/services/api';
+import type { PayrollIntakeImportData } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow } from '@/services/api';
 
 const mocks = vi.hoisted(() => ({
@@ -186,18 +187,35 @@ it('says the pay was saved and offers a reload when only the review reload fails
   expect(screen.queryByText(/could not reload/)).toBeNull();
 });
 
-it('ignores a pay save that finishes after the review was closed', async () => {
+it('ignores a pay save that finishes after the review was closed and reopened', async () => {
+  // The pay-run import reuses one modal instance; the portal mounts a new one each time.
+  vi.mocked(payrollIntakeImportsApi.list).mockResolvedValue({ imports: [
+    { id: 1, source_type: 'mosa_revel', current: true, status: 'previewed', package_revision: 1 } as PayrollIntakeImportData,
+  ] });
   let finishSave: (value: unknown) => void = () => undefined;
   mocks.createItem.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
-  mocks.currentImport.mockResolvedValue(preview([ownerSaved]));
-  const onOpenChange = vi.fn();
-  render(<MemoryRouter><ImportModal open payPeriodId={9} companyId={7} initialPreview={preview([ownerMissing])} onOpenChange={onOpenChange} onImportComplete={vi.fn()} /></MemoryRouter>);
-  fireEvent.change(ownerInput(), { target: { value: '4500' } });
+  mocks.currentImport.mockResolvedValue(preview([ownerMissing]));
+  const props = { payPeriodId: 9, companyId: 7, onOpenChange: vi.fn(), onImportComplete: vi.fn() };
+  const { rerender } = render(<MemoryRouter><ImportModal open {...props} /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: /Continue import version 1/ }));
+  fireEvent.change(await screen.findByLabelText('Pay for Monique Owner this period'), { target: { value: '4500' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save pay for Monique Owner' }));
   await waitFor(() => expect(mocks.createItem).toHaveBeenCalled());
-  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-  expect(onOpenChange).toHaveBeenCalledWith(false);
+
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(props.onOpenChange).toHaveBeenCalledWith(false);
+  rerender(<MemoryRouter><ImportModal open={false} {...props} /></MemoryRouter>);
+  rerender(<MemoryRouter><ImportModal open {...props} /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: /Continue import version 1/ }));
+  expect(await screen.findByRole('alert', { name: 'Pay needed' })).toBeTruthy();
+  expect(mocks.currentImport).toHaveBeenCalledTimes(2);
+
   finishSave({ payroll_item: { id: 70 } });
   await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(mocks.currentImport).not.toHaveBeenCalled();
+  // The old save neither reloads nor changes the reopened review.
+  expect(mocks.currentImport).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('alert', { name: 'Pay needed' })).toBeTruthy();
+  expect(ownerInput().value).toBe('');
+  expect(screen.getByRole('button', { name: 'Save pay for Monique Owner' }).textContent).not.toMatch(/Saving/);
+  expect(screen.queryByText(/Could not save|was saved/)).toBeNull();
 });
