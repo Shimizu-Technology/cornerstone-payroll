@@ -172,3 +172,32 @@ it('lists a missing job and rate choice among the things to finish', () => {
   expect(within(needs).getByRole('button', { name: 'Choose job and rate for Avery Server' })).toBeTruthy();
   expect(screen.getByText(/Apply is off: no job and rate chosen for Avery Server/)).toBeTruthy();
 });
+
+it('says the pay was saved and offers a reload when only the review reload fails', async () => {
+  mocks.createItem.mockResolvedValue({ payroll_item: { id: 70 } });
+  mocks.currentImport.mockRejectedValueOnce(new Error('Network error')).mockResolvedValueOnce(preview([ownerSaved]));
+  open(preview([ownerMissing]));
+  fireEvent.change(ownerInput(), { target: { value: '4500' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save pay for Monique Owner' }));
+  expect((await screen.findAllByText(/Pay for Monique Owner was saved, but the review could not reload/)).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Reload review' })[0]);
+  await waitFor(() => expect(screen.queryByRole('alert', { name: 'Pay needed' })).toBeNull());
+  expect(mocks.createItem).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/could not reload/)).toBeNull();
+});
+
+it('ignores a pay save that finishes after the review was closed', async () => {
+  let finishSave: (value: unknown) => void = () => undefined;
+  mocks.createItem.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+  mocks.currentImport.mockResolvedValue(preview([ownerSaved]));
+  const onOpenChange = vi.fn();
+  render(<MemoryRouter><ImportModal open payPeriodId={9} companyId={7} initialPreview={preview([ownerMissing])} onOpenChange={onOpenChange} onImportComplete={vi.fn()} /></MemoryRouter>);
+  fireEvent.change(ownerInput(), { target: { value: '4500' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save pay for Monique Owner' }));
+  await waitFor(() => expect(mocks.createItem).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+  finishSave({ payroll_item: { id: 70 } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(mocks.currentImport).not.toHaveBeenCalled();
+});

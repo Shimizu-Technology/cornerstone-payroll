@@ -547,6 +547,28 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(item.reload.salary_override).to eq(4500)
     end
 
+    it "refuses a review's owner-pay save after a newer portal revision arrives" do
+      data = preview(revision(bytes: bytes))
+      revision(rev: 2, bytes: bytes)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      post "#{url}/payroll_items", params: { employee_id: owner.id, expected_import_id: data["import_id"],
+        payroll_item: { employee_id: owner.id, salary_override: "4500.00" } }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(run.payroll_items.find_by(employee: owner)).to be_nil
+    end
+
+    it "counts an amount saved from the review as entered by hand even when it equals earlier workbook pay" do
+      data = preview(revision(bytes: bytes))
+      item = create(:payroll_item, pay_period: run, employee: owner, employment_type: "salary", salary_override: 4500,
+        custom_columns_data: { "period_pay_evidence" => { "source_type" => "mosa_change_workbook" } })
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      patch "#{url}/payroll_items/#{item.id}", params: { expected_import_id: data["import_id"],
+        payroll_item: { salary_override: "4500.00" } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      get "#{url}/current_import"
+      expect(owner_row(response.parsed_body)).to include("period_pay_missing" => false, "period_pay_source" => "payroll_worksheet")
+    end
+
     it "keeps refusing to apply while an owner has no pay of their own" do
       data = preview(revision(bytes: bytes))
       apply(data)

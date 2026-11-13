@@ -39,7 +39,8 @@ const CLIENT_TURN = new Set(['waiting_for_files', 'changes_requested', 'draft_re
 export function currentSubmissionPeriod(rows: PeriodSummary[]): PeriodSummary | null {
   return rows.find(row => row.open_for_files && CLIENT_TURN.has(row.status))
     ?? rows.find(row => row.open_for_files && row.status !== 'paid')
-    ?? rows.find(row => row.status !== 'paid')
+    // Rows arrive newest first; the next period to open is the earliest unpaid one.
+    ?? [...rows].reverse().find(row => row.status !== 'paid')
     ?? rows[0]
     ?? null;
 }

@@ -62,6 +62,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [ownerPayDrafts, setOwnerPayDrafts] = useState<Record<number, number | null>>({});
   const [ownerPayBusy, setOwnerPayBusy] = useState<number | null>(null);
   const [ownerPayError, setOwnerPayError] = useState<string | null>(null);
+  // Pay was saved but the review did not reload; offer a reload without saving again.
+  const [reviewReloadNeeded, setReviewReloadNeeded] = useState(false);
   const reviewRef = useRef<HTMLDivElement>(null);
   const nextAttentionRow = useRef(0);
   const pdfInputRef = useRef<HTMLInputElement>(null);
@@ -90,6 +92,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setOwnerPayDrafts({});
     setOwnerPayBusy(null);
     setOwnerPayError(null);
+    setReviewReloadNeeded(false);
   };
 
   useEffect(() => {
@@ -151,8 +154,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   };
 
   // Reload the saved review in place. Outcomes already chosen for each source row are kept.
-  const reloadReview = async (expectedImportId: number) => {
-    const generation = reviewGeneration.current;
+  const reloadReview = async (expectedImportId: number, generation = reviewGeneration.current) => {
+    if (generation !== reviewGeneration.current) return;
     const data = await payPeriodsApi.currentImport(payPeriodId);
     if (generation !== reviewGeneration.current) return;
     if (data.import_id !== expectedImportId) {
@@ -181,24 +184,60 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       setOwnerPayError(`Enter ${row.employee_name}’s pay for this period, greater than zero.`);
       return;
     }
+    // Closing the review bumps the generation; a save that finishes later must not touch a reopened review.
+    const generation = reviewGeneration.current;
+    const stillOpen = () => generation === reviewGeneration.current;
+    const importId = previewData.import_id;
     setOwnerPayBusy(row.employee_id);
     setOwnerPayError(null);
+    setReviewReloadNeeded(false);
+    let saved = false;
     try {
       const { payroll_items: items } = await payrollItemsApi.list(payPeriodId);
+      if (!stillOpen()) return;
       const existing = items.find((item) => item.employee_id === row.employee_id);
-      const guard = { expectedImportId: previewData.import_id };
+      const guard = { expectedImportId: importId };
       if (existing) await payrollItemsApi.update(payPeriodId, existing.id, { salary_override: amount }, guard);
       else await payrollItemsApi.create(payPeriodId, { employee_id: row.employee_id, salary_override: amount }, guard);
-      await reloadReview(previewData.import_id);
+      saved = true;
+      if (!stillOpen()) return;
+      await reloadReview(importId, generation);
+      if (!stillOpen()) return;
       setOwnerPayDrafts((current) => ({ ...current, [row.employee_id]: null }));
     } catch (err) {
-      setOwnerPayError(`Could not save pay for ${row.employee_name}. ${err instanceof Error ? err.message : ''}`.trim());
-      // A refused stale save changed nothing; show the current amounts.
-      if (err instanceof ApiError && err.status === 409) await reloadReview(previewData.import_id).catch(() => undefined);
+      if (!stillOpen()) return;
+      const detail = err instanceof Error ? err.message : '';
+      if (saved) {
+        setOwnerPayDrafts((current) => ({ ...current, [row.employee_id]: null }));
+        setOwnerPayError(`Pay for ${row.employee_name} was saved, but the review could not reload. ${detail}`.trim());
+        setReviewReloadNeeded(true);
+      } else {
+        setOwnerPayError(`Could not save pay for ${row.employee_name}. ${detail}`.trim());
+        // A refused stale save changed nothing; show the current amounts.
+        if (err instanceof ApiError && err.status === 409) await reloadReview(importId, generation).catch(() => undefined);
+      }
     } finally {
-      setOwnerPayBusy(null);
+      if (stillOpen()) setOwnerPayBusy(null);
     }
   };
+
+  const retryReviewReload = async () => {
+    if (!previewData) return;
+    try {
+      await reloadReview(previewData.import_id);
+      setReviewReloadNeeded(false);
+      setOwnerPayError(null);
+    } catch (err) {
+      setOwnerPayError(`The review could not reload. ${err instanceof Error ? err.message : ''}`.trim());
+    }
+  };
+
+  const ownerPayFeedback = ownerPayError && (
+    <div role="alert" className="mt-3 space-y-2 font-medium text-danger-700">
+      <p>{ownerPayError}</p>
+      {reviewReloadNeeded && <Button type="button" variant="outline" size="sm" onClick={() => void retryReviewReload()}>Reload review</Button>}
+    </div>
+  );
 
   const handleClose = () => {
     if (loading || step === 'applying') return;
@@ -567,7 +606,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               </div>
             ))}
             {ownerPayError && missingPeriodPay.length === 0 && (
-              <p role="alert" className="rounded-lg border border-danger-200 bg-danger-50 p-4 text-sm font-medium text-danger-700">{ownerPayError}</p>
+              <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 pb-4 pt-1 text-sm">{ownerPayFeedback}</div>
             )}
             {missingPeriodPay.length > 0 && (
               <section role="alert" aria-label="Pay needed" data-attention="missing-pay" tabIndex={-1} className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
@@ -598,7 +637,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                     );
                   })}
                 </ul>
-                {ownerPayError && <p role="alert" className="mt-3 font-medium text-danger-700">{ownerPayError}</p>}
+                {ownerPayFeedback}
               </section>
             )}
             {overwriteRows.length > 0 && (
