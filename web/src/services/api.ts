@@ -2055,6 +2055,7 @@ export interface ImportPreviewRow {
   current_bonus?: number;
   effective_bonus?: number;
   bonus_keeps_manual?: boolean;
+  payroll_setup_only?: boolean;
   employee_id: number;
   employee_name: string;
   employment_type: string;

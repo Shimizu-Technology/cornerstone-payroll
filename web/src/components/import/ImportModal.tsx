@@ -703,8 +703,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 return (
                   <section key={row.source_row_id} className="space-y-3 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Source row for ${row.employee_name}`}>
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0"><p className="font-semibold text-neutral-950">{row.employee_name}</p>{row.pdf_employee_name && row.pdf_employee_name !== row.employee_name && <p className="text-xs text-neutral-600">PDF: {row.pdf_employee_name}</p>}</div>
-                      <Badge variant={row.confidence >= 1 ? 'default' : row.confidence >= 0.8 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}% match</Badge>
+                      <div className="min-w-0"><p className="font-semibold text-neutral-950">{row.employee_name}</p>{row.payroll_setup_only && <p className="text-xs text-neutral-600">From payroll setup, absent from source files. Review this person’s period pay.</p>}{row.pdf_employee_name && row.pdf_employee_name !== row.employee_name && <p className="text-xs text-neutral-600">PDF: {row.pdf_employee_name}</p>}</div>
+                      <Badge variant={row.confidence >= 1 ? 'default' : row.confidence >= 0.8 ? 'warning' : 'danger'}>{row.payroll_setup_only ? 'Payroll setup' : `${Math.round(row.confidence * 100)}% match`}</Badge>
                     </div>
                     <div>{dispositionControls(sourceRow)}</div>
                     {missingHoursNotice(row)}
@@ -751,6 +751,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                         <TableCell>
                           <div>
                             <p className="font-medium text-neutral-900">{row.employee_name}</p>
+                            {row.payroll_setup_only && <p className="text-xs text-neutral-600">From payroll setup, absent from source files. Review this person’s period pay.</p>}
                             {missingHoursNotice(row)}
                             {row.pdf_employee_name && row.pdf_employee_name !== row.employee_name && (
                               <p className="text-xs text-neutral-600">PDF: {row.pdf_employee_name}</p>
@@ -835,7 +836,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                         </TableCell>
                         <TableCell className="text-center">
                           <Badge variant={row.confidence >= 1.0 ? 'default' : row.confidence >= 0.8 ? 'warning' : 'danger'}>
-                            {Math.round(row.confidence * 100)}%
+                            {row.payroll_setup_only ? 'Payroll setup' : `${Math.round(row.confidence * 100)}%`}
                           </Badge>
                         </TableCell>
                       </TableRow>

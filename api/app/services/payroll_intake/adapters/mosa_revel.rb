@@ -229,7 +229,7 @@ module PayrollIntake
           position: index,
           source_employee_name: name.to_s.strip.presence || "Unknown source row",
           employee_id: raw_row[:employee_id],
-          match_method: raw_row[:matched_name].present? ? "mosa_name_match" : nil,
+          match_method: raw_row[:payroll_setup_only] ? "payroll_setup" : (raw_row[:matched_name].present? ? "mosa_name_match" : nil),
           match_confidence: raw_row[:confidence],
           confidence: raw_row[:confidence],
           week1_hours: 0,

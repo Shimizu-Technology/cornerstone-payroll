@@ -524,6 +524,29 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(run.reload.pending_portal_submission?).to be(false)
     end
 
+    it "reviews and saves separate pay for two owners absent from both files" do
+      second = create(:employee, company: company, first_name: "Second", last_name: "Owner",
+        employment_type: "salary", salary_type: "variable", pay_rate: 300_000)
+      data = preview(revision)
+      expect(response).to have_http_status(:ok), response.body
+      rows = data.dig("preview", "matched").select { |row| [ owner.id, second.id ].include?(row["employee_id"]) }
+      expect(rows.size).to eq(2)
+      expect(rows).to all(include("payroll_setup_only" => true, "period_pay_missing" => true, "current_period_pay" => nil))
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      [ [ owner, "4500.00" ], [ second, "5200.00" ] ].each do |person, amount|
+        post "#{url}/payroll_items", params: { employee_id: person.id, expected_import_id: data["import_id"],
+          payroll_item: { employee_id: person.id, salary_override: amount } }, as: :json
+        expect(response).to have_http_status(:created), response.body
+      end
+      get "#{url}/current_import"
+      rows = response.parsed_body.dig("preview", "matched").select { |row| [ owner.id, second.id ].include?(row["employee_id"]) }
+      expect(rows).to all(include("period_pay_missing" => false, "payroll_setup_only" => true))
+      post "#{url}/apply_import", params: { import_id: data["import_id"], portal_source_id: data.dig("portal_source", "selection_id"), force_overwrite: true }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(4500)
+      expect(run.payroll_items.find_by!(employee: second).salary_override).to eq(5200)
+    end
+
     it "refuses a review's owner-pay save once the review is stale or pay was already entered" do
       data = preview(revision(bytes: bytes))
       stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
