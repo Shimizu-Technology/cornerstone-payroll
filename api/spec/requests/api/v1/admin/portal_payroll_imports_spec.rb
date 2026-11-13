@@ -524,6 +524,29 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(run.reload.pending_portal_submission?).to be(false)
     end
 
+    it "refuses a review's owner-pay save once the review is stale or pay was already entered" do
+      data = preview(revision(bytes: bytes))
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      save = ->(amount, import_id) do
+        post "#{url}/payroll_items", params: { employee_id: owner.id, expected_import_id: import_id,
+          payroll_item: { employee_id: owner.id, salary_override: amount } }, as: :json
+      end
+
+      save.call("4500.00", data["import_id"] + 1)
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["code"]).to eq("stale_import_review")
+      expect(run.payroll_items.find_by(employee: owner)).to be_nil
+
+      save.call("4500.00", data["import_id"])
+      expect(response).to have_http_status(:created), response.body
+      item = run.payroll_items.find_by!(employee: owner)
+
+      patch "#{url}/payroll_items/#{item.id}", params: { expected_import_id: data["import_id"],
+        payroll_item: { salary_override: "9999.00" } }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(item.reload.salary_override).to eq(4500)
+    end
+
     it "keeps refusing to apply while an owner has no pay of their own" do
       data = preview(revision(bytes: bytes))
       apply(data)

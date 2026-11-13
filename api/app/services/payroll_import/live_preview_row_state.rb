@@ -39,8 +39,12 @@ module PayrollImport
       amount if amount&.positive?
     end
 
-    # Pay entered by hand. Pay that an earlier workbook import wrote does not count.
     def manual_period_pay(item)
+      self.class.manual_period_pay(item)
+    end
+
+    # Pay entered by hand. Pay that an earlier workbook import wrote does not count.
+    def self.manual_period_pay(item)
       return if item.blank? || item.salary_override.to_d <= 0
 
       evidence = item.custom_columns_data.to_h["period_pay_evidence"].to_h

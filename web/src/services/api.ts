@@ -2186,10 +2186,12 @@ export const payrollItemsApi = {
     api.get<PayrollItemsListResponse>(`/admin/pay_periods/${payPeriodId}/payroll_items`),
   get: (payPeriodId: number, id: number, companyId?: number): Promise<{ payroll_item: PayrollItem }> =>
     api.get<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`, undefined, { companyId }),
-  create: (payPeriodId: number, data: Partial<PayrollItem> & { employee_id: number; auto_calculate?: boolean }) =>
-    api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items`, { employee_id: data.employee_id, payroll_item: data, auto_calculate: data.auto_calculate }),
-  update: (payPeriodId: number, id: number, data: Partial<PayrollItem> & { auto_calculate?: boolean; wage_rate_hours?: PayrollItemWageRateHours[] }) =>
-    api.patch<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`, { payroll_item: data, auto_calculate: data.auto_calculate }),
+  // expectedImportId: the import review saving this row. The server refuses
+  // the write if that review is no longer current or pay was already entered.
+  create: (payPeriodId: number, data: Partial<PayrollItem> & { employee_id: number; auto_calculate?: boolean }, options: { expectedImportId?: number } = {}) =>
+    api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items`, { employee_id: data.employee_id, payroll_item: data, auto_calculate: data.auto_calculate, expected_import_id: options.expectedImportId }),
+  update: (payPeriodId: number, id: number, data: Partial<PayrollItem> & { auto_calculate?: boolean; wage_rate_hours?: PayrollItemWageRateHours[] }, options: { expectedImportId?: number } = {}) =>
+    api.patch<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`, { payroll_item: data, auto_calculate: data.auto_calculate, expected_import_id: options.expectedImportId }),
   delete: (payPeriodId: number, id: number) =>
     api.delete<void>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
   recalculate: (payPeriodId: number, id: number) =>
