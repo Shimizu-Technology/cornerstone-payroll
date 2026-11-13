@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CompanyListItem } from '@/services/api';
-import { canWriteCompany } from './company-write-access';
+import { canWriteClientEmployeeProfile, canWriteCompany } from './company-write-access';
 const live = { id: 1, payroll_environment: 'live' } as CompanyListItem;
 const sandbox = { ...live, payroll_environment: 'migration_rehearsal', test_workspace: true, test_workspace_purpose: 'sandbox' } as CompanyListItem;
 describe('effective company write access', () => {
@@ -20,6 +20,14 @@ describe('effective company write access', () => {
 });
 
 describe('capability-specific workspace writes', () => {
+  it('allows only client profile editing for the server-scoped practice portal', () => {
+    const practice = { ...sandbox, practice_portal: true, workspace_can_write: false };
+    expect(canWriteClientEmployeeProfile(practice)).toBe(true);
+    expect(canWriteCompany(practice)).toBe(false);
+    expect(canWriteCompany(practice, 'manage_client_configuration')).toBe(false);
+    expect(canWriteClientEmployeeProfile({ ...practice, active: false })).toBe(false);
+    expect(canWriteClientEmployeeProfile({ ...practice, practice_portal: false })).toBe(false);
+  });
   it('does not turn payroll operator permission into configuration administration', () => {
     const operator = { ...sandbox, workspace_can_write: true, workspace_write_permissions: { payroll_operations: true, manage_client_configuration: false, manage_payroll_fields: true } };
     expect(canWriteCompany(operator)).toBe(true);
