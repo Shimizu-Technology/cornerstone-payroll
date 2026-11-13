@@ -45,6 +45,21 @@ RSpec.describe "Api::V1::Admin migration rehearsal safety", type: :request do
     expect(pay_period.reload.status).to eq("approved")
   end
 
+  it "blocks external time tracking setup, health calls and imports even when connected payroll is enabled" do
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(true)
+    allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_user).and_return(admin)
+    allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_company_id).and_return(rehearsal.id)
+    expect(TimeTracking::Client).not_to receive(:new)
+    expect {
+      post "/api/v1/admin/time_tracking_sources", params: { time_tracking_source: { name: "External source", source_type: "aire_services", base_url: "https://example.invalid", shared_secret: "test" } }
+    }.not_to change(TimeTrackingSource, :count)
+    expect(response).to have_http_status(:forbidden)
+    get "/api/v1/admin/time_tracking_sources/0/health"
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_time_tracking_import"
+    expect(response).to have_http_status(:forbidden)
+  end
+
   it "blocks saving Form 500 filing state" do
     post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: pay_period.id, status: "paid" } }
 

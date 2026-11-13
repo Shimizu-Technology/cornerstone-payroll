@@ -44,6 +44,10 @@ class TestWorkspaceSafetyPolicy
   }.freeze
 
   def self.blocked?(controller_path:, action_name:)
+    if controller_path.start_with?("api/v1/admin/time_tracking_", "api/v1/admin/aire_")
+      return !(controller_path == "api/v1/admin/time_tracking_sources" && action_name.in?(%w[index show]))
+    end
+
     if controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense", "api/v1/admin/finance_")
       return !FINANCE_READ_ACTIONS.fetch(controller_path, []).include?(action_name)
     end
