@@ -51,6 +51,18 @@ RSpec.describe "Staff Client Inbox", type: :request do
     expect(rows).to be_empty
   end
 
+  it "keeps practice activity out of live workload counts and excludes sealed copies" do
+    practice = create(:company, organization: org, payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox",
+      migration_source_company: company, migration_rehearsal_status: "ready", test_workspace_expires_at: 1.day.from_now)
+    message_for(practice)
+    message_for(company)
+    expect(rows.size).to eq(2)
+    get "/api/v1/admin/client_inbox/counts"
+    expect(response.parsed_body["data"]).to include("unread_count" => 1, "waiting_count" => 1, "unread_messages" => 1)
+    practice.update_columns(test_workspace_sealed_at: Time.current)
+    expect(rows.map { |row| row["company_id"] }).to eq([ company.id ])
+  end
+
   it "denies client users and cross-organization context, including super admins" do
     allow_any_instance_of(Api::V1::Admin::ClientInboxController).to receive(:current_user).and_return(client)
     get "/api/v1/admin/client_inbox/counts"

@@ -40,3 +40,20 @@ it('does not assign ambiguous differently-priced jobs without a saved allocation
   const item = { employee_id: 7, hours_worked: 68.84 } as PayrollItem;
   expect(buildHoursMap([item], [employee])['7'].wage_rates!.map(rate => rate.regular_hours)).toEqual([0, 0]);
 });
+
+it('does not duplicate saved secondary hours when a same-rate primary job is added', () => {
+  const employee = { id: 7, employment_type: 'hourly', wage_rates: [
+    { id: 13, label: 'New primary', rate: 12.5, is_primary: true, active: true },
+    { id: 12, label: 'Kitchen', rate: 12.5, is_primary: false, active: true },
+  ] } as Employee;
+  const item = { employee_id: 7, pay_rate: 12.5, hours_worked: 72.95, overtime_hours: 1.94,
+    holiday_hours: 2, pto_hours: 3, wage_rate_hours: [
+      { employee_wage_rate_id: 12, label: 'Kitchen', rate: 12.5, regular_hours: 72.95,
+        overtime_hours: 1.94, holiday_hours: 2, pto_hours: 3 },
+    ] } as PayrollItem;
+  const rates = buildHoursMap([item], [employee])['7'].wage_rates!;
+  expect(rates.map(rate => rate.regular_hours)).toEqual([0, 72.95]);
+  expect(rates.map(rate => rate.overtime_hours)).toEqual([0, 1.94]);
+  expect(rates.map(rate => rate.holiday_hours)).toEqual([0, 2]);
+  expect(rates.map(rate => rate.pto_hours)).toEqual([0, 3]);
+});

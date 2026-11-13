@@ -46,8 +46,9 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/expense_vendors" => %w[index]
   }.freeze
 
-  def self.blocked?(controller_path:, action_name:)
+  def self.blocked?(controller_path:, action_name:, request_method: nil)
     if controller_path.start_with?("api/v1/admin/time_tracking_", "api/v1/admin/aire_")
+      return false if request_method.in?(%w[GET HEAD])
       return !(controller_path == "api/v1/admin/time_tracking_sources" && action_name.in?(%w[index show]))
     end
 

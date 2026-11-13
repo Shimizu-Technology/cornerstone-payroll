@@ -120,10 +120,10 @@ class User < ApplicationRecord
   # - managers/accountants/clients: explicitly assigned companies (or home company)
   # - everyone else: just their home company
   def accessible_company_ids
-    return practice_portal_open? ? [ practice_company_id ] : [] if practice_company_id?
-
     @accessible_company_ids ||= begin
-      if super_admin?
+      if practice_company_id?
+        practice_portal_open? ? [ practice_company_id ] : []
+      elsif super_admin?
         Company.ids
       elsif organization_admin?
         organization_company_ids
@@ -159,6 +159,11 @@ class User < ApplicationRecord
         end
       end
     end
+  end
+
+  def reload(...)
+    @accessible_company_ids = nil
+    super
   end
 
   def can_access_company?(cid)

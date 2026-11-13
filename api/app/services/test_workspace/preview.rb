@@ -14,6 +14,11 @@ module TestWorkspace
 
     def call
       blockers = validation_errors
+      if blockers.empty?
+        cutoff = selected_periods.max_by(&:pay_date) || cutoff_period || excluded_periods.last
+        blockers.concat(OpeningYtdCloner.validation_errors(source_company: source_company, cutoff: cutoff,
+          before_cutoff: copy_mode == "exclude_recent" && selected_periods.empty?))
+      end
       selected = blockers.empty? ? selected_periods : []
 
       {

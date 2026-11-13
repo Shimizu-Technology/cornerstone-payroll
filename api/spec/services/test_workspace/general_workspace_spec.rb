@@ -195,10 +195,29 @@ RSpec.describe "General test workspaces" do
     HistoricalYtdBridge.create!(company: source_company, historical_import_batch: batch, historical_client_bootstrap: bootstrap,
       status: "applied", plan_digest: "opening", applied_at: Time.current, applied_by: actor, apply_acknowledgement: "APPLY HISTORICAL YTD",
       preview_summary: { through_period_end: "2026-09-18", through_pay_date: "2026-09-25" })
+    preview = TestWorkspace::Preview.new(source_company: source_company, copy_mode: "exclude_recent", excluded_payrolls: 2).call
+    expect(preview).to include(ready: false)
+    expect(preview[:blockers]).to include(/cutoff/)
     workspace = create_workspace(copy_mode: "exclude_recent", excluded_payrolls: 2)
     expect { TestWorkspace::Cloner.new(company: workspace, actor: actor).call }.to raise_error(ArgumentError, /cutoff/)
     expect(workspace.reload.migration_rehearsal_status).to eq("failed")
     expect(workspace.employees).to be_empty
+  end
+
+  it "blocks unapplied opening YTD before starting the copy" do
+    create(:historical_import_batch, company: source_company, status: "locked", locked_at: Time.current,
+      importer_version: HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS.first)
+    %w[setup_only all_committed exclude_recent through_pay_period].each do |mode|
+      preview = TestWorkspace::Preview.new(source_company: source_company, copy_mode: mode,
+        excluded_payrolls: 1, cutoff_pay_period_id: old_period.id).call
+      expect(preview[:ready]).to be(false)
+      expect(preview[:blockers]).to include(/Apply the source client/)
+    end
+    expect {
+      TestWorkspace::Create.new(source_company: source_company, actor: actor,
+        acknowledgement: TestWorkspace::Create::ACKNOWLEDGEMENT, name: "Blocked copy", copy_mode: "all_committed", assignments: []).call
+    }.to raise_error(ArgumentError, /opening YTD/)
+    expect(source_company.test_workspaces).to be_empty
   end
 
   private

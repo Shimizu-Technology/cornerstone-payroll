@@ -116,7 +116,8 @@ export function templateWageRates(employee: Employee | undefined, payrollItem?: 
     // opening the worksheet must not silently replace them with zeroes.
     const distinctRates = new Set(configuredRates.map(rate => toNumber(rate.rate)));
     const sameSavedRate = distinctRates.size === 1 && distinctRates.has(toNumber(payrollItem?.pay_rate));
-    const defaultPrimaryHours = configuredRates.length === 1 || sameSavedRate ? toNumber(payrollItem?.hours_worked ?? 0) : 0;
+    const useDefaultHours = !existing?.length;
+    const defaultPrimaryHours = useDefaultHours && (configuredRates.length === 1 || sameSavedRate) ? toNumber(payrollItem?.hours_worked ?? 0) : 0;
 
     return configuredRates.map((rate) => {
       const matchedExisting =
@@ -128,9 +129,9 @@ export function templateWageRates(employee: Employee | undefined, payrollItem?: 
         label: rate.label,
         rate: toNumber(rate.rate),
         regular_hours: matchedExisting ? toNumber(matchedExisting.regular_hours) : (rate.is_primary ? defaultPrimaryHours : 0),
-        overtime_hours: matchedExisting ? toNumber(matchedExisting.overtime_hours) : (rate.is_primary ? toNumber(payrollItem?.overtime_hours ?? 0) : 0),
-        holiday_hours: matchedExisting ? toNumber(matchedExisting.holiday_hours) : (rate.is_primary ? toNumber(payrollItem?.holiday_hours ?? 0) : 0),
-        pto_hours: matchedExisting ? toNumber(matchedExisting.pto_hours) : (rate.is_primary ? toNumber(payrollItem?.pto_hours ?? 0) : 0),
+        overtime_hours: matchedExisting ? toNumber(matchedExisting.overtime_hours) : (rate.is_primary && useDefaultHours ? toNumber(payrollItem?.overtime_hours ?? 0) : 0),
+        holiday_hours: matchedExisting ? toNumber(matchedExisting.holiday_hours) : (rate.is_primary && useDefaultHours ? toNumber(payrollItem?.holiday_hours ?? 0) : 0),
+        pto_hours: matchedExisting ? toNumber(matchedExisting.pto_hours) : (rate.is_primary && useDefaultHours ? toNumber(payrollItem?.pto_hours ?? 0) : 0),
         is_primary: rate.is_primary,
         active: rate.active,
       };

@@ -10,6 +10,9 @@ module TestWorkspace
     end
 
     def call
+      errors = self.class.validation_errors(source_company: source_company, cutoff: cutoff, before_cutoff: before_cutoff)
+      raise ArgumentError, errors.join("; ") if errors.any?
+
       lineage = []
       source_company.historical_import_batches.where(status: "locked").order(:id).each do |batch|
         bridge = batch.latest_applied_historical_ytd_bridge
@@ -18,7 +21,6 @@ module TestWorkspace
         end
         next unless bridge
 
-        validate_boundary!(bridge)
         target_batch = copy!(batch, company: company, created_by: actor, applied_by: actor, locked_by: actor,
           source_file_manifest: [])
         bootstrap = batch.historical_client_bootstrap && copy!(batch.historical_client_bootstrap,
@@ -38,20 +40,25 @@ module TestWorkspace
       company.update!(test_workspace_manifest: company.test_workspace_manifest.merge("opening_ytd" => lineage))
     end
 
+    def self.validation_errors(source_company:, cutoff:, before_cutoff: false)
+      source_company.historical_import_batches.where(status: "locked").filter_map do |batch|
+        bridge = batch.latest_applied_historical_ytd_bridge
+        if !bridge && batch.importer_version.in?(HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS)
+          next "Apply the source client’s opening YTD before copying this workspace"
+        end
+        next unless bridge && cutoff
+
+        summary = bridge.preview_summary
+        end_date = Date.iso8601(summary.fetch("through_period_end"))
+        pay_date = Date.iso8601(summary.fetch("through_pay_date"))
+        valid = before_cutoff ? end_date < cutoff.start_date && pay_date < cutoff.pay_date : end_date <= cutoff.end_date && pay_date <= cutoff.pay_date
+        "Choose a payroll cutoff after the imported opening YTD boundary" unless valid
+      end.uniq
+    end
+
     private
 
     attr_reader :source_company, :company, :actor, :employees, :cutoff, :before_cutoff
-
-    def validate_boundary!(bridge)
-      # setup_only has no payroll cutoff; retain the currently applied opening.
-      return unless cutoff
-
-      summary = bridge.preview_summary
-      end_date = Date.iso8601(summary.fetch("through_period_end"))
-      pay_date = Date.iso8601(summary.fetch("through_pay_date"))
-      valid = before_cutoff ? end_date < cutoff.start_date && pay_date < cutoff.pay_date : end_date <= cutoff.end_date && pay_date <= cutoff.pay_date
-      raise ArgumentError, "Choose a payroll cutoff after the imported opening YTD boundary" unless valid
-    end
 
     def verify!(source, target)
       fields = HistoricalEmployeeYtdBalance.column_names - %w[id created_at updated_at company_id historical_ytd_bridge_id employee_id]
