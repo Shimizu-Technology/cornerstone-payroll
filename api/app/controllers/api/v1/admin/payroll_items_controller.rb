@@ -114,7 +114,10 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           @payroll_item.mark_payroll_adjustments_overridden! if attrs.key?(:payroll_adjustments)
-          if attrs.key?(:salary_override) && @payroll_item.salary_override.to_d != attrs[:salary_override].to_d
+          # Pay saved from the import review is entered by hand even when it equals
+          # the amount an earlier workbook import wrote.
+          if attrs.key?(:salary_override) &&
+              (params.key?(:expected_import_id) || @payroll_item.salary_override.to_d != attrs[:salary_override].to_d)
             @payroll_item.clear_imported_period_pay_evidence!
           end
 
@@ -184,12 +187,25 @@ module Api
           current = PayrollImport::CurrentReview.import_record_for(@pay_period)
           item = @payroll_item&.reload || @pay_period.payroll_items.find_by(employee_id: params[:employee_id])
           pay_already_entered = PayrollImport::LivePreviewRowState.manual_period_pay(item).present?
-          return if current && current.id == params[:expected_import_id].to_i && !pay_already_entered
+          return if current && current.id == params[:expected_import_id].to_i && !pay_already_entered &&
+            portal_selections_current?(current)
 
           render json: {
             error: "This review is out of date or someone already entered this pay. Nothing was saved. Reload the review to see the current amounts.",
             code: "stale_import_review"
           }, status: :conflict
+        end
+
+        # A newer portal revision replaces the review even though the retained
+        # import record is unchanged; apply refuses it, so the pay save must too.
+        def portal_selections_current?(import_record)
+          import_record.submission_imports.all? do |selection|
+            selection.period.lock!
+            selection.validate_current!
+            true
+          rescue ArgumentError
+            false
+          end
         end
 
         def with_financial_pay_period_lock

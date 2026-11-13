@@ -110,6 +110,8 @@ describe('invitation delivery outcomes', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: 'Resend' }))[0]);
     expect(await screen.findByText(/Invitation delivery status is unavailable/)).toBeTruthy();
     expect(screen.queryByText(/Invitation (?:re)?sent to/)).toBeNull();
+    expect(screen.getByText(/could not confirm whether the invitation was sent/)).toBeTruthy();
+    expect(screen.queryByText(/because no invitation was sent/)).toBeNull();
   });
 
   it('creates an organization without claiming an invitation when no admin was requested', async () => {

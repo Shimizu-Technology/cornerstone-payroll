@@ -75,3 +75,11 @@ it('picks the period that waits on the client before newer or paid ones', () => 
   expect(currentSubmissionPeriod([rows[0]])?.ref).toBe('c');
   expect(currentSubmissionPeriod([])).toBeNull();
 });
+
+it('picks the earliest unopened unpaid period when none is open yet', () => {
+  const rows = [
+    period({ ref: 'later', open_for_files: false, status: 'waiting_for_files' }),
+    period({ ref: 'earlier', open_for_files: false, status: 'waiting_for_files' }),
+  ];
+  expect(currentSubmissionPeriod(rows)?.ref).toBe('earlier');
+});

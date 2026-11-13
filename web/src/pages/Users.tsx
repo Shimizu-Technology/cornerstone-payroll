@@ -77,7 +77,7 @@ export function Users() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   // The account exists but the sign-in invitation did not go out. Kept apart from
   // success so it reads as unfinished work, with a retry beside it.
-  const [inviteWarning, setInviteWarning] = useState<{ user: User; reason: string } | null>(null);
+  const [inviteWarning, setInviteWarning] = useState<{ user: User; reason: string; confirmedFailure: boolean } | null>(null);
 
   // New user form
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -202,7 +202,7 @@ export function Users() {
       setInviteWarning(null);
       if (invitationNeedsRetry(response)) {
         setSuccessMessage(null);
-        setInviteWarning({ user: response.data, reason: inviteFailureReason(response) });
+        setInviteWarning({ user: response.data, reason: inviteFailureReason(response), confirmedFailure: response.invitation_delivery_status === 'failed' });
       } else {
         setSuccessMessage(`Account created. ${invitationOutcomeMessage(response)}`);
       }
@@ -225,7 +225,7 @@ export function Users() {
       setError(null);
       setSuccessMessage(null);
       setInviteWarning(null);
-      if (invitationNeedsRetry(response)) setInviteWarning({ user, reason: inviteFailureReason(response) });
+      if (invitationNeedsRetry(response)) setInviteWarning({ user, reason: inviteFailureReason(response), confirmedFailure: response.invitation_delivery_status === 'failed' });
       else setSuccessMessage(invitationOutcomeMessage(response));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resend invitation');
@@ -481,9 +481,11 @@ export function Users() {
         )}
 
         {inviteWarning && (
-          <ActionFeedback tone="warning" message={`Account created for ${inviteWarning.user.name || inviteWarning.user.email}, but the invitation was not sent. ${inviteWarning.reason}`}>
+          <ActionFeedback tone="warning" message={`Account created for ${inviteWarning.user.name || inviteWarning.user.email}, but ${inviteWarning.confirmedFailure ? 'the invitation was not sent' : 'the invitation could not be confirmed'}. ${inviteWarning.reason}`}>
             <div className="space-y-2">
-              <p><span className="font-semibold">{inviteWarning.user.name || inviteWarning.user.email}</span> has an account, but cannot sign in yet because no invitation was sent.</p>
+              {inviteWarning.confirmedFailure
+                ? <p><span className="font-semibold">{inviteWarning.user.name || inviteWarning.user.email}</span> has an account, but cannot sign in yet because no invitation was sent.</p>
+                : <p><span className="font-semibold">{inviteWarning.user.name || inviteWarning.user.email}</span> has an account. We could not confirm whether the invitation was sent; check their status in the list below before retrying.</p>}
               <p className="text-amber-900">{inviteWarning.reason}</p>
               <Button size="sm" variant="outline" onClick={() => void handleResendInvitation(inviteWarning.user)} disabled={resendingId === inviteWarning.user.id}>
                 <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
