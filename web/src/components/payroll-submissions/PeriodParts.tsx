@@ -33,7 +33,9 @@ export function StatusLine({ status }: { status: SubmissionStatus }): ReactEleme
 
 const ROLE_LABELS = { revel_payroll: 'Revel payroll PDF', changes_workbook: 'Changes workbook', attachment: 'Attachment' } as const;
 
-export function FileRow({ label, document, fallbackName, api }: { label: string; document?: ClientDocument | null; fallbackName?: string; api: PayrollSubmissionsApi }): ReactElement {
+type Audience = 'client' | 'staff';
+
+export function FileRow({ label, document, fallbackName, api, audience }: { label: string; document?: ClientDocument | null; fallbackName?: string; api: PayrollSubmissionsApi; audience?: Audience }): ReactElement {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [payload, setPayload] = useState<DocumentPreviewPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -66,6 +68,8 @@ export function FileRow({ label, document, fallbackName, api }: { label: string;
       setPayload(await prepareDocumentPreview(document, file.blob));
     } catch (err) { setError(err instanceof Error ? err.message : 'Preview failed'); setPreviewOpen(false); } finally { setLoading(false); }
   };
+  // The client API refuses archived files, so a client sees the record, not a button that fails.
+  const recordOnly = audience === 'client' && Boolean(document?.archived_at);
   return (
     <li className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between">
       <span className="flex min-w-0 items-start gap-2">
@@ -73,12 +77,12 @@ export function FileRow({ label, document, fallbackName, api }: { label: string;
         <span className="min-w-0">
           <span className="block text-xs font-semibold text-neutral-600">{label}</span>
           <span className="block break-words text-sm text-neutral-900 [overflow-wrap:anywhere]">{document?.file_name || fallbackName}</span>
-          {document?.archived_at && <span className="block text-xs text-neutral-600">Archived, kept as a record</span>}
+          {document?.archived_at && <span className="block text-xs text-neutral-600">{recordOnly ? 'Kept with this period as a record. Ask Cornerstone if you need it.' : 'Archived, kept as a record'}</span>}
           {document && document.scan_status === 'pending' && <span className="block text-xs text-neutral-600">Safety check in progress</span>}
           {error && <span role="alert" className="block text-xs text-danger-700">{error}</span>}
         </span>
       </span>
-      {document && <span className="flex shrink-0 gap-2">
+      {document && !recordOnly && <span className="flex shrink-0 gap-2">
         {document.preview_available && <Button type="button" size="sm" variant="outline" onClick={() => void preview()} aria-label={`Preview ${document.file_name}`}><Eye className="mr-1 h-4 w-4" aria-hidden />Preview</Button>}
         <Button type="button" size="sm" variant="outline" onClick={() => void download()} aria-label={`Download ${document.file_name}`}><Download className="mr-1 h-4 w-4" aria-hidden />Download</Button>
       </span>}
@@ -89,7 +93,7 @@ export function FileRow({ label, document, fallbackName, api }: { label: string;
 }
 
 
-export function RevisionCard({ revision, api, companyId }: { revision: SubmissionRevision; api: PayrollSubmissionsApi; companyId?: number | null }): ReactElement {
+export function RevisionCard({ revision, api, companyId, audience }: { revision: SubmissionRevision; api: PayrollSubmissionsApi; companyId?: number | null; audience?: Audience }): ReactElement {
   const body = (
     <div className="space-y-3">
       <p className="text-sm text-neutral-700">
@@ -99,7 +103,7 @@ export function RevisionCard({ revision, api, companyId }: { revision: Submissio
       {revision.imported_at && <p className="text-sm font-semibold text-success-800">Imported · {formatGuam(revision.imported_at)}</p>}
       {revision.imports?.map(record => <p key={record.id} className="text-sm"><a className="text-primary-800 underline" href={companyId ? `/companies/${companyId}/pay-runs/${record.pay_period_id}` : `/pay-periods/${record.pay_period_id}`}>Import #{record.id} · {record.status}</a></p>)}
       <ul className="divide-y divide-neutral-100">
-        {revision.documents.map(file => <FileRow key={`${file.role}-${file.document?.id || file.file_name}`} label={ROLE_LABELS[file.role]} document={file.document} fallbackName={file.file_name} api={api} />)}
+        {revision.documents.map(file => <FileRow key={`${file.role}-${file.document?.id || file.file_name}`} label={ROLE_LABELS[file.role]} document={file.document} fallbackName={file.file_name} api={api} audience={audience} />)}
       </ul>
       <div>
         <h4 className="text-sm font-semibold text-neutral-900">Changes this period</h4>

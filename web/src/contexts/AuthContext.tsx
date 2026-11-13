@@ -18,8 +18,15 @@ interface User {
   company_capabilities?: Record<string, string[]>;
 }
 
+/** Why the backend refused to open an account, kept so the sign-in screen can explain it. */
+export interface AuthProblem {
+  status: number | null;
+  message: string;
+}
+
 interface AuthContextType {
   user: User | null;
+  authProblem: AuthProblem | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
@@ -33,6 +40,11 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+function authProblemFrom(err: unknown): AuthProblem {
+  if (err instanceof ApiError) return { status: err.status, message: err.message };
+  return { status: null, message: err instanceof Error ? err.message : 'Could not load your account' };
+}
 type AuthResponseUser = Awaited<ReturnType<typeof authApi.me>>['user'];
 
 function mapAuthUser(user: AuthResponseUser): User {
@@ -61,6 +73,7 @@ function isAdminRole(role?: string) {
 
 function DevAuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [authProblem, setAuthProblem] = useState<AuthProblem | null>(null);
   const [isLoading, setIsLoading] = useState(!authEnabled);
 
   useEffect(() => {
@@ -78,8 +91,8 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
 
     // In dev mode, just fetch /auth/me without a token
     authApi.me()
-      .then((res) => setUser(mapAuthUser(res.user)))
-      .catch(() => setUser(null))
+      .then((res) => { setUser(mapAuthUser(res.user)); setAuthProblem(null); })
+      .catch((err) => { setUser(null); setAuthProblem(authProblemFrom(err)); })
       .finally(() => setIsLoading(false));
   }, []);
 
@@ -87,6 +100,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        authProblem,
         isLoading,
         isAuthenticated: !!user,
         isAdmin: isAdminRole(user?.role),
@@ -103,6 +117,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         refreshUser: async () => {
           const res = await authApi.me();
           setUser(mapAuthUser(res.user));
+          setAuthProblem(null);
         },
       }}
     >
@@ -114,6 +129,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
 function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   const { isSignedIn, isLoaded, getToken, signOut: clerkSignOut } = useClerkAuth();
   const [user, setUser] = useState<User | null>(null);
+  const [authProblem, setAuthProblem] = useState<AuthProblem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [backendUnauthorized, setBackendUnauthorized] = useState(false);
 
@@ -150,7 +166,9 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
 
       const res = await authApi.me();
       setUser(mapAuthUser(res.user));
+      setAuthProblem(null);
     } catch (err) {
+      setAuthProblem(authProblemFrom(err));
       if (err instanceof ApiError && err.status === 401) {
         // Clerk session exists but backend rejected user (e.g. not provisioned/invited).
         // Sign out locally to prevent redirect/auth polling loops.
@@ -191,6 +209,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        authProblem,
         isLoading: !isLoaded || isLoading,
         isAuthenticated: !!user && isSignedIn === true,
         isAdmin: isAdminRole(user?.role),
@@ -201,6 +220,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
         signOut: async () => {
           setUser(null);
+          setAuthProblem(null);
           clearAllDrafts();
           authApi.logout();
           await clerkSignOut();

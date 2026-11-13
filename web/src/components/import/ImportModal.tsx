@@ -21,10 +21,11 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
 import { formatCurrency } from '@/lib/utils';
-import { payrollIntakeImportsApi, payPeriodsApi } from '@/services/api';
+import { ApiError, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
 
@@ -58,10 +59,20 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [currentPackage, setCurrentPackage] = useState<PayrollIntakeImportData | null>(null);
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const [replacementReason, setReplacementReason] = useState('');
+  const [ownerPayDrafts, setOwnerPayDrafts] = useState<Record<number, number | null>>({});
+  const [ownerPayBusy, setOwnerPayBusy] = useState<number | null>(null);
+  const [ownerPayError, setOwnerPayError] = useState<string | null>(null);
+  // Pay was saved but the review did not reload; offer a reload without saving again.
+  const [reviewReloadNeeded, setReviewReloadNeeded] = useState(false);
+  const reviewRef = useRef<HTMLDivElement>(null);
+  const nextAttentionRow = useRef(0);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
+  // Bumped when the review closes, so a save that finishes later is ignored.
+  const reviewGeneration = useRef(0);
 
   const reset = () => {
+    reviewGeneration.current += 1;
     setStep('upload');
     setPdfFile(null);
     setExcelFile(null);
@@ -78,6 +89,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setCurrentPackage(null);
     setReplacementConfirmed(false);
     setReplacementReason('');
+    setOwnerPayDrafts({});
+    setOwnerPayBusy(null);
+    setOwnerPayError(null);
+    setReviewReloadNeeded(false);
   };
 
   useEffect(() => {
@@ -137,6 +152,92 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       setLoading(false);
     }
   };
+
+  // Reload the saved review in place. Outcomes already chosen for each source row are kept.
+  const reloadReview = async (expectedImportId: number, generation = reviewGeneration.current) => {
+    if (generation !== reviewGeneration.current) return;
+    const data = await payPeriodsApi.currentImport(payPeriodId);
+    if (generation !== reviewGeneration.current) return;
+    if (data.import_id !== expectedImportId) {
+      throw new Error('The saved review changed. Close this window and open the submission again.');
+    }
+    setPreviewData(data);
+    // Merge into the latest rows, not the ones from when the save started, so
+    // outcomes staff changed while the request was running are kept.
+    setSourceRows((current) => {
+      const chosen = new Map(current.map((row) => [row.id, row]));
+      return data.preview.source_rows.map((row) => {
+        const kept = chosen.get(row.id);
+        return kept
+          ? { ...row, disposition: kept.disposition, disposition_reason: kept.disposition_reason, target_pay_period_id: kept.target_pay_period_id }
+          : { ...row, disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending' };
+      });
+    });
+    // The rows that need the replace-existing confirmation may have changed.
+    setReviewedOverwrite(false);
+  };
+
+  // Each person's pay is saved on their own paycheck row, apart from calculation.
+  const saveOwnerPay = async (row: ImportPreviewRow) => {
+    const amount = ownerPayDrafts[row.employee_id];
+    if (!previewData || !amount || amount <= 0) {
+      setOwnerPayError(`Enter ${row.employee_name}’s pay for this period, greater than zero.`);
+      return;
+    }
+    // Closing the review bumps the generation; a save that finishes later must not touch a reopened review.
+    const generation = reviewGeneration.current;
+    const stillOpen = () => generation === reviewGeneration.current;
+    const importId = previewData.import_id;
+    setOwnerPayBusy(row.employee_id);
+    setOwnerPayError(null);
+    setReviewReloadNeeded(false);
+    let saved = false;
+    try {
+      const { payroll_items: items } = await payrollItemsApi.list(payPeriodId);
+      if (!stillOpen()) return;
+      const existing = items.find((item) => item.employee_id === row.employee_id);
+      const guard = { expectedImportId: importId };
+      if (existing) await payrollItemsApi.update(payPeriodId, existing.id, { salary_override: amount }, guard);
+      else await payrollItemsApi.create(payPeriodId, { employee_id: row.employee_id, salary_override: amount }, guard);
+      saved = true;
+      if (!stillOpen()) return;
+      await reloadReview(importId, generation);
+      if (!stillOpen()) return;
+      setOwnerPayDrafts((current) => ({ ...current, [row.employee_id]: null }));
+    } catch (err) {
+      if (!stillOpen()) return;
+      const detail = err instanceof Error ? err.message : '';
+      if (saved) {
+        setOwnerPayDrafts((current) => ({ ...current, [row.employee_id]: null }));
+        setOwnerPayError(`Pay for ${row.employee_name} was saved, but the review could not reload. ${detail}`.trim());
+        setReviewReloadNeeded(true);
+      } else {
+        setOwnerPayError(`Could not save pay for ${row.employee_name}. ${detail}`.trim());
+        // A refused stale save changed nothing; show the current amounts.
+        if (err instanceof ApiError && err.status === 409) await reloadReview(importId, generation).catch(() => undefined);
+      }
+    } finally {
+      if (stillOpen()) setOwnerPayBusy(null);
+    }
+  };
+
+  const retryReviewReload = async () => {
+    if (!previewData) return;
+    try {
+      await reloadReview(previewData.import_id);
+      setReviewReloadNeeded(false);
+      setOwnerPayError(null);
+    } catch (err) {
+      setOwnerPayError(`The review could not reload. ${err instanceof Error ? err.message : ''}`.trim());
+    }
+  };
+
+  const ownerPayFeedback = ownerPayError && (
+    <div role="alert" className="mt-3 space-y-2 font-medium text-danger-700">
+      <p>{ownerPayError}</p>
+      {reviewReloadNeeded && <Button type="button" variant="outline" size="sm" onClick={() => void retryReviewReload()}>Reload review</Button>}
+    </div>
+  );
 
   const handleClose = () => {
     if (loading || step === 'applying') return;
@@ -238,6 +339,45 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   );
   const replacementReady = !replacementConfirmed || replacementReason.trim().length > 0;
 
+  // What still blocks Apply, in plain words, with a way to jump to each item. The long
+  // review list can put the cause far from the Apply button on a phone.
+  const unresolvedRows = [...incompleteSourceRows, ...includedBlockingRows.filter((row) => !incompleteSourceRows.includes(row))];
+  const jumpToSection = (name: string) => {
+    const section = reviewRef.current?.querySelector<HTMLElement>(`[data-attention="${name}"]`);
+    section?.scrollIntoView?.({ block: 'center' });
+    section?.focus();
+  };
+  const jumpToNextRow = () => {
+    if (unresolvedRows.length === 0) return;
+    const row = unresolvedRows[nextAttentionRow.current % unresolvedRows.length];
+    nextAttentionRow.current += 1;
+    const field = Array.from(reviewRef.current?.querySelectorAll<HTMLElement>('select[aria-label^="Outcome for "]') || [])
+      .filter((candidate) => candidate.getAttribute('aria-label') === `Outcome for ${row.source_employee_name}`);
+    const target = field.find((candidate) => candidate.offsetParent !== null) || field[0];
+    target?.scrollIntoView?.({ block: 'center' });
+    target?.focus();
+  };
+  const attention: { key: string; label: string; reason: string; jump: () => void }[] = [];
+  if (missingPeriodPay.length > 0) {
+    const names = missingPeriodPay.map((row) => row.employee_name).join(', ');
+    attention.push({ key: 'pay', label: `Enter pay for ${names}`, reason: `pay is missing for ${names}`, jump: () => jumpToSection('missing-pay') });
+  }
+  if (missingRateChoices.length > 0) {
+    const names = missingRateChoices.map((row) => row.employee_name).join(', ');
+    attention.push({ key: 'rates', label: `Choose job and rate for ${names}`, reason: `no job and rate chosen for ${names}`, jump: () => jumpToSection('rate-choices') });
+  }
+  if (unresolvedRows.length > 0) {
+    const count = unresolvedRows.length;
+    attention.push({ key: 'rows', label: `Next row needing attention (${count})`, reason: `${count} source row${count === 1 ? ' needs' : 's need'} an outcome`, jump: jumpToNextRow });
+  }
+  if (suggestedMatchCount > 0 && !reviewedSuggestedMatches) {
+    attention.push({ key: 'matches', label: `Confirm ${suggestedMatchCount} name match${suggestedMatchCount === 1 ? '' : 'es'}`, reason: 'suggested name matches are not confirmed', jump: () => jumpToSection('suggested-matches') });
+  }
+  if (overwriteRows.length > 0 && !reviewedOverwrite) {
+    attention.push({ key: 'overwrite', label: 'Confirm replacing saved entries', reason: 'replacing saved entries is not confirmed', jump: () => jumpToSection('overwrite') });
+  }
+  const applyBlockedReason = canApply ? null : attention.length > 0 ? `Apply is off: ${attention.map((item) => item.reason).join('; ')}.` : 'Apply is off until the items marked in this review are finished.';
+
   const rateChoiceControl = (row: ImportPreviewRow): ReactElement | null => row.wage_rate_options?.length ? (
     <div className="mt-2 min-w-0 max-w-xs space-y-1 whitespace-normal text-left">
       <label className="block text-xs font-medium text-neutral-700">
@@ -315,7 +455,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <DialogDescription>
             {step === 'upload' && 'Upload the Revel hours PDF and, when needed, one payroll change workbook.'}
             {step === 'preview' && (unresolvedCount > 0
-              ? `${unresolvedCount} source row${unresolvedCount === 1 ? '' : 's'} need attention before this import can be applied.`
+              ? `${unresolvedCount} source row${unresolvedCount === 1 ? ' needs' : 's need'} attention before this import can be applied.`
               : missingPeriodPay.length > 0
                 ? 'Enter the missing period pay before applying this import.'
                 : `${included.length} employees are ready. Review the source matches and apply.`)}
@@ -329,10 +469,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         )}
 
         {previewData?.portal_source && <section aria-label="Portal change checklist" className="min-w-0 space-y-2 rounded-lg border border-primary-200 bg-primary-50 p-4">
-          <h3 className="font-semibold">Portal revision {previewData.portal_source.revision} · staff checklist</h3>
+          <h3 className="font-semibold">Client revision {previewData.portal_source.revision} · changes for staff to make by hand</h3>
           <Link className="inline-flex min-h-11 items-center text-sm underline" to={`/companies/${companyId}/payroll-submissions/${previewData.portal_source.period_id}`}>Open retained portal submission</Link>
-          <p className="text-sm">Read-only instructions. These rows are not applied to payroll or employee records. Review and handle them separately before finalizing payroll.</p>
-          {!previewData.portal_source.current && <p className="text-sm font-semibold">Superseded source chosen: {previewData.portal_source.superseded_reason}</p>}
+          <p className="text-sm">Read-only list. Importing does not make these changes: nothing here is applied to payroll or employee setup. Someone at Cornerstone must make each one by hand, in the employee’s record or the pay worksheet, before this payroll is finalized.</p>
+          {!previewData.portal_source.current && <p className="text-sm font-semibold">You chose an older client revision, not the latest one. Reason: {previewData.portal_source.superseded_reason}</p>}
           {previewData.portal_source.no_changes && <p className="text-sm">No changes this period.</p>}
           <ul className="list-disc space-y-1 pl-5 text-sm">{previewData.portal_source.changes.map((row, index) => <li className="break-words" key={index}>{row.label}: {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
           {previewData.portal_source.notes && <p className="whitespace-pre-wrap break-words text-sm">{previewData.portal_source.notes}</p>}
@@ -347,7 +487,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 <div className="flex items-start gap-3">
                   <RefreshCw className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
                   <div className="flex-1">
-                    <p className="font-semibold">Revision {currentPackage.package_revision} is the current retained source</p>
+                    <p className="font-semibold">Import version {currentPackage.package_revision} is the set of files currently in review</p>
                     <p className="mt-1 text-sm text-amber-800">
                       {['previewed', 'reviewed'].includes(currentPackage.status)
                         ? 'Continue the saved review, or upload corrected files and document what changed.'
@@ -355,12 +495,12 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                     </p>
                     {['previewed', 'reviewed'].includes(currentPackage.status) && (
                       <Button type="button" variant="outline" size="sm" className="mt-3 border-amber-300 bg-white" onClick={() => void handleResumeCurrent()} disabled={loading}>
-                        Continue revision {currentPackage.package_revision}
+                        Continue import version {currentPackage.package_revision}
                       </Button>
                     )}
                     <label className="mt-3 flex items-start gap-2 text-xs font-medium">
                       <input type="checkbox" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} className="mt-0.5 rounded border-amber-300" />
-                      <span>This corrected Revel package replaces revision {currentPackage.package_revision}.</span>
+                      <span>These corrected files replace import version {currentPackage.package_revision}.</span>
                     </label>
                     {replacementConfirmed && (
                       <Input
@@ -443,29 +583,65 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         )}
 
         {step === 'preview' && previewData && (
-          <div className="space-y-3">
-            {missingRateChoices.length > 0 && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Choose a job and rate for {missingRateChoices.map((row) => row.employee_name).join(', ')} using the Job and rate selectors below before applying.</p>}
+          <div ref={reviewRef} className="space-y-3">
+            {missingRateChoices.length > 0 && <p role="alert" data-attention="rate-choices" tabIndex={-1} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Choose a job and rate for {missingRateChoices.map((row) => row.employee_name).join(', ')} using the Job and rate selectors below before applying.</p>}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
               <span className="inline-flex items-center gap-2 font-semibold">
                 <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                 {previewData.source_package.verified_source_count} source{previewData.source_package.source_count === 1 ? '' : 's'} retained and verified
               </span>
-              <span>Package revision {previewData.source_package.package_revision} · {previewData.source_package.package_id.slice(0, 8)}</span>
+              <span>Import version {previewData.source_package.package_revision} <span className="text-green-800">· reference {previewData.source_package.package_id.slice(0, 8)}</span></span>
             </div>
+            {attention.length > 0 && (
+              <section aria-label="Needs attention" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                <p className="font-semibold">{attention.length === 1 ? '1 thing' : `${attention.length} things`} to finish before you can apply</p>
+                <ul className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  {attention.map((item) => <li key={item.key}><Button type="button" variant="outline" className="w-full sm:w-auto" onClick={item.jump}>{item.label}</Button></li>)}
+                </ul>
+              </section>
+            )}
             {(previewData.preview.source_warnings || []).map((warning) => (
               <div key={warning.code} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 {warning.message}
               </div>
             ))}
+            {ownerPayError && missingPeriodPay.length === 0 && (
+              <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 pb-4 pt-1 text-sm">{ownerPayFeedback}</div>
+            )}
             {missingPeriodPay.length > 0 && (
-              <div role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
+              <section role="alert" aria-label="Pay needed" data-attention="missing-pay" tabIndex={-1} className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                 <p className="font-medium">Period pay is required for {missingPeriodPay.map((row) => row.employee_name).join(', ')}.</p>
-                <p className="mt-2">Enter a separate amount for each person on the workbook’s OWNER PERIOD PAY sheet, or in the payroll worksheet, then preview again. Combined owner amounts are not accepted. If an employee should not be paid in this run, choose a different outcome and record why.</p>
-                <Button variant="outline" className="mt-4" onClick={handleClose}>Return to payroll worksheet</Button>
-              </div>
+                <p className="mt-2">Enter each person’s own amount here and save it. You stay in this review. A combined amount for several owners is not accepted. If someone should not be paid in this run, choose a different outcome for them and record why.</p>
+                <ul className="mt-3 space-y-3">
+                  {missingPeriodPay.map((row) => {
+                    const busy = ownerPayBusy === row.employee_id;
+                    return (
+                      <li key={row.source_row_id} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                        <label className="block min-w-0 text-xs font-medium text-neutral-700 sm:w-72">
+                          Pay for {row.employee_name} this period ($, this person only)
+                          <NumericInput
+                            className="mt-1 min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3"
+                            aria-label={`Pay for ${row.employee_name} this period`}
+                            value={ownerPayDrafts[row.employee_id] ?? null}
+                            onValueChange={(value) => setOwnerPayDrafts((current) => ({ ...current, [row.employee_id]: value }))}
+                            placeholder="0.00"
+                            min={0}
+                            fixedDecimalsOnBlur={2}
+                            disabled={ownerPayBusy !== null}
+                          />
+                        </label>
+                        <Button type="button" variant="outline" disabled={ownerPayBusy !== null || !ownerPayDrafts[row.employee_id]} onClick={() => void saveOwnerPay(row)}>
+                          {busy ? 'Saving…' : `Save pay for ${row.employee_name}`}
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {ownerPayFeedback}
+              </section>
             )}
             {overwriteRows.length > 0 && (
-              <label className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-4 text-xs text-warning-900">
+              <label data-attention="overwrite" tabIndex={-1} className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-4 text-xs text-warning-900">
                 <input type="checkbox" checked={reviewedOverwrite} onChange={(event) => setReviewedOverwrite(event.target.checked)} className="shrink-0 self-start" />
                 <span>Replace existing hours, tips and direct loan deductions with the reviewed source values for {overwriteRows.map((row) => row.employee_name).join(', ')}. Saved period pay and manually entered bonuses are retained.</span>
               </label>
@@ -497,7 +673,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             )}
 
             {suggestedMatchCount > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+              <div data-attention="suggested-matches" tabIndex={-1} className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
                 <p className="font-medium">Review {suggestedMatchCount} suggested name match{suggestedMatchCount === 1 ? '' : 'es'}</p>
                 <ul className="mt-2 space-y-1">
                   {suggestedMatches.map((match, index) => (
@@ -715,36 +891,41 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           </div>
         )}
 
-        <DialogFooter>
-          {step === 'upload' && (
-            <>
-              <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
-              <Button onClick={handlePreview} disabled={!pdfFile || loading || !replacementReady}>
-                {loading ? 'Parsing...' : 'Preview Import'}
-              </Button>
-            </>
+        <div className={step === 'preview' ? 'sticky -bottom-4 z-10 -mx-4 border-t border-neutral-200 bg-white px-4 pb-4 sm:-bottom-6 sm:-mx-6 sm:px-6 sm:pb-6' : undefined}>
+          {step === 'preview' && applyBlockedReason && (
+            <p id="apply-blocked-reason" role="status" className="pt-3 text-sm font-medium text-amber-900">{applyBlockedReason}</p>
           )}
-          {step === 'preview' && (
-            <>
-              <Button variant="outline" onClick={() => {
-                if (initialPreview) { handleClose(); return; }
-                setStep('upload');
-                setPreviewData(null);
-                setSourceRows([]);
-                setReviewedSuggestedMatches(false);
-                setReviewedOverwrite(false);
-              }}>
-                Back
-              </Button>
-              <Button onClick={handleApply} disabled={!canApply}>
-                Apply Import ({included.length} employees)
-              </Button>
-            </>
-          )}
-          {step === 'done' && (
-            <Button onClick={handleClose}>Close</Button>
-          )}
-        </DialogFooter>
+          <DialogFooter>
+            {step === 'upload' && (
+              <>
+                <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
+                <Button onClick={handlePreview} disabled={!pdfFile || loading || !replacementReady}>
+                  {loading ? 'Parsing...' : 'Preview Import'}
+                </Button>
+              </>
+            )}
+            {step === 'preview' && (
+              <>
+                <Button variant="outline" onClick={() => {
+                  if (initialPreview) { handleClose(); return; }
+                  setStep('upload');
+                  setPreviewData(null);
+                  setSourceRows([]);
+                  setReviewedSuggestedMatches(false);
+                  setReviewedOverwrite(false);
+                }}>
+                  Back
+                </Button>
+                <Button onClick={handleApply} disabled={!canApply} aria-describedby={applyBlockedReason ? 'apply-blocked-reason' : undefined}>
+                  Apply Import ({included.length} employees)
+                </Button>
+              </>
+            )}
+            {step === 'done' && (
+              <Button onClick={handleClose}>Close</Button>
+            )}
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/table';
 import { usersApi, companiesApi, ApiError } from '@/services/api';
 import type { User, UserRole } from '@/types';
-import type { CompanyListItem } from '@/services/api';
+import type { CompanyListItem, InvitationDeliveryResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { ClientManagementDialog } from '@/components/users/ClientManagementDialog';
 import { UserActivityPanel } from '@/components/users/UserActivityPanel';
@@ -49,6 +49,19 @@ const allRoleOptions: RoleOption[] = [
   { value: 'employee', label: 'Employee', scope: 'No payroll workspace access today', can: 'Reserved for a future employee self-service experience.', cannot: 'Cannot currently sign in to staff or client payroll workspaces.', assignment: 'Do not use for active access until the employee portal is released.' },
 ];
 
+// A failed or unknown delivery means the person was created but cannot sign in yet.
+function invitationNeedsRetry(response: InvitationDeliveryResponse): boolean {
+  return response.invitation_delivery_status === 'failed'
+    || !['captured', 'queued', 'submitted', 'not_requested'].includes(response.invitation_delivery_status);
+}
+
+function inviteFailureReason(response: InvitationDeliveryResponse): string {
+  if (response.invitation_delivery_status === 'failed') {
+    return `Invitation email failed${response.invitation_error ? `: ${response.invitation_error}` : ''}.`;
+  }
+  return invitationOutcomeMessage(response);
+}
+
 export function Users() {
   const { user: currentUser } = useAuth();
   const roleOptions = currentUser?.role === 'super_admin'
@@ -62,6 +75,9 @@ export function Users() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // The account exists but the sign-in invitation did not go out. Kept apart from
+  // success so it reads as unfinished work, with a retry beside it.
+  const [inviteWarning, setInviteWarning] = useState<{ user: User; reason: string; confirmedFailure: boolean } | null>(null);
 
   // New user form
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -183,7 +199,13 @@ export function Users() {
         company_ids: assignmentCompanyIdsForRole(newRole, newClientIds, availableCompanies),
       };
       const response = await usersApi.create(payload);
-      setSuccessMessage(`User created. ${invitationOutcomeMessage(response)}`);
+      setInviteWarning(null);
+      if (invitationNeedsRetry(response)) {
+        setSuccessMessage(null);
+        setInviteWarning({ user: response.data, reason: inviteFailureReason(response), confirmedFailure: response.invitation_delivery_status === 'failed' });
+      } else {
+        setSuccessMessage(`Account created. ${invitationOutcomeMessage(response)}`);
+      }
 
       handleCancelAddNew();
       await fetchUsers();
@@ -202,7 +224,8 @@ export function Users() {
       await fetchUsers();
       setError(null);
       setSuccessMessage(null);
-      if (response.invitation_delivery_status === 'failed') setError(invitationOutcomeMessage(response));
+      setInviteWarning(null);
+      if (invitationNeedsRetry(response)) setInviteWarning({ user, reason: inviteFailureReason(response), confirmedFailure: response.invitation_delivery_status === 'failed' });
       else setSuccessMessage(invitationOutcomeMessage(response));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resend invitation');
@@ -455,6 +478,21 @@ export function Users() {
         {error && (
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
             <p className="text-danger-700">{error}</p></ActionFeedback>
+        )}
+
+        {inviteWarning && (
+          <ActionFeedback tone="warning" message={`Account created for ${inviteWarning.user.name || inviteWarning.user.email}, but ${inviteWarning.confirmedFailure ? 'the invitation was not sent' : 'the invitation could not be confirmed'}. ${inviteWarning.reason}`}>
+            <div className="space-y-2">
+              {inviteWarning.confirmedFailure
+                ? <p><span className="font-semibold">{inviteWarning.user.name || inviteWarning.user.email}</span> has an account, but cannot sign in yet because no invitation was sent.</p>
+                : <p><span className="font-semibold">{inviteWarning.user.name || inviteWarning.user.email}</span> has an account. We could not confirm whether the invitation was sent; check their status in the list below before retrying.</p>}
+              <p className="text-amber-900">{inviteWarning.reason}</p>
+              <Button size="sm" variant="outline" onClick={() => void handleResendInvitation(inviteWarning.user)} disabled={resendingId === inviteWarning.user.id}>
+                <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+                {resendingId === inviteWarning.user.id ? 'Retrying…' : 'Retry invitation'}
+              </Button>
+            </div>
+          </ActionFeedback>
         )}
 
         {successMessage && (

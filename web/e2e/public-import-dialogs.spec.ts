@@ -307,10 +307,9 @@ test('PayrollIntakeImportModal guards preview, apply, and nested employee creati
   await expect(dialog).toBeVisible();
 });
 
-test('MoSa import routes missing period pay to the worksheet and requires review before replacing saved hours', async ({ page }): Promise<void> => {
+test('MoSa import takes missing period pay in the review and requires review before replacing saved hours', async ({ page }): Promise<void> => {
   let periodPayEntered = false;
-  await page.route('**/admin/pay_periods/701/preview_import', async (route): Promise<void> => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+  const previewBody = (): string => JSON.stringify({
       import_id: 904,
       source_package: { id: 905, package_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', package_revision: 1, package_schema_version: '1.0', current: true, verified_source_count: 2, source_count: 2, disposition_targets: [] },
       preview: {
@@ -325,25 +324,36 @@ test('MoSa import routes missing period pay to the worksheet and requires review
           employee_name: 'Variable Salary', row_kind: 'matched', disposition: 'pending', disposition_reason: null,
           target_pay_period_id: null, errors: [], warnings: [] }],
       },
-    }) });
+    });
+  await page.route('**/admin/pay_periods/701/preview_import', async (route): Promise<void> => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: previewBody() });
+  });
+  await page.route('**/admin/pay_periods/701/current_import', async (route): Promise<void> => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: previewBody() });
+  });
+  let savedPay: unknown = null;
+  await page.route('**/admin/pay_periods/701/payroll_items', async (route): Promise<void> => {
+    if (route.request().method() === 'POST') {
+      savedPay = route.request().postDataJSON();
+      periodPayEntered = true;
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ payroll_item: { id: 990, employee_id: 801 } }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ payroll_items: [] }) });
   });
   await mountHarness(page, 'mountImportModalHarness');
   const dialog = page.getByRole('dialog', { name: 'Import Payroll Data' });
-  const preview = async (): Promise<void> => {
-    await dialog.locator('input[type="file"]').first().setInputFiles({ name: 'hours.pdf', mimeType: 'application/pdf', buffer: Buffer.from('fixture') });
-    await dialog.getByRole('button', { name: 'Preview Import' }).click();
-  };
-  await preview();
-  await expect(dialog.getByRole('alert')).toContainText('Period pay is required for Variable Salary');
+  await dialog.locator('input[type="file"]').first().setInputFiles({ name: 'hours.pdf', mimeType: 'application/pdf', buffer: Buffer.from('fixture') });
+  await dialog.getByRole('button', { name: 'Preview Import' }).click();
+  await expect(dialog.getByRole('alert').first()).toContainText('Period pay is required for Variable Salary');
   await expect(dialog.getByText('Missing period pay', { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
-  await dialog.getByRole('button', { name: 'Return to payroll worksheet' }).click();
-  await expect(dialog).not.toBeVisible();
 
-  periodPayEntered = true;
-  await page.getByRole('button', { name: 'Open payroll import' }).click();
-  await preview();
+  await dialog.getByLabel('Pay for Variable Salary this period').fill('9000');
+  await dialog.getByRole('button', { name: 'Save pay for Variable Salary' }).click();
   await expect(dialog.getByText('$9,000.00', { exact: true }).filter({ visible: true })).toBeVisible();
+  expect(savedPay).toMatchObject({ employee_id: 801, payroll_item: { salary_override: 9000 } });
+  await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
   await dialog.getByRole('checkbox', { name: /Replace existing hours/ }).check();
   await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeEnabled();

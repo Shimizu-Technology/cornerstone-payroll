@@ -1,4 +1,4 @@
-import type { SubmissionStatus, ChangeRow } from '@/services/payrollSubmissions';
+import type { SubmissionStatus, ChangeRow, PeriodSummary } from '@/services/payrollSubmissions';
 
 export function formatGuam(value?: string | null): string {
   if (!value) return '';
@@ -30,4 +30,17 @@ export function changeSummary(row: ChangeRow): string {
     case 'direct_deposit_addition': parts.push('add to direct deposit'); break;
   }
   return [who, ...parts].filter(Boolean).join(' · ');
+}
+
+// Newest first. The period the client most likely needs to act on comes first, then any open one,
+// then the next one coming up.
+const CLIENT_TURN = new Set(['waiting_for_files', 'changes_requested', 'draft_ready']);
+
+export function currentSubmissionPeriod(rows: PeriodSummary[]): PeriodSummary | null {
+  return rows.find(row => row.open_for_files && CLIENT_TURN.has(row.status))
+    ?? rows.find(row => row.open_for_files && row.status !== 'paid')
+    // Rows arrive newest first; the next period to open is the earliest unpaid one.
+    ?? [...rows].reverse().find(row => row.status !== 'paid')
+    ?? rows[0]
+    ?? null;
 }
