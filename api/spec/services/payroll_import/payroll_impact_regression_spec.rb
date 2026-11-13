@@ -105,6 +105,13 @@ RSpec.describe PayrollImport::ImportService do
     expect(item.deduction_review_warnings.join).to include("No Revel hours")
   end
 
+  it "flags a small percentage loan field on a workbook-only row" do
+    field = create(:payroll_field_definition, company: company, kind: "deduction", category: "loan",
+      tax_treatment: "post_tax_deduction", amount_type: "percentage")
+    employee.employee_payroll_fields.create!(payroll_field_definition: field, percentage: 0.25)
+    expect(preview(hours: false, loan: 0)[:missing_revel_hours_with_deductions]).to be(true)
+  end
+
   context "with distinct active wage rates" do
     let!(:primary) { create(:employee_wage_rate, employee: employee, label: "Main Kitchen", rate: 15.50, is_primary: true) }
     let!(:joint) { create(:employee_wage_rate, employee: employee, label: "Shared Kitchen", rate: 16.50) }
