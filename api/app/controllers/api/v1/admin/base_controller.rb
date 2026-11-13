@@ -146,7 +146,7 @@ module Api
               error: "This test workspace is still being prepared. Try again after its verified copy is ready."
             }, status: :conflict
           end
-          return unless TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name)
+          return unless TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name, request_method: request.request_method)
 
           message = if finance_request?
             "You are in a payroll test workspace. This finance book contains live records, so changes are unavailable. Select a live client to continue."

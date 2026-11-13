@@ -44,6 +44,7 @@ module Api
           client_management: StaffRolePolicy.client_management_allowed?(current_user, company),
           payroll_environment: company.payroll_environment,
           test_workspace: company.test_workspace?,
+          practice_portal: current_user.client? && current_user.practice_company_id == company.id,
           test_workspace_purpose: company.test_workspace_purpose,
           test_workspace_purpose_label: company.test_workspace_purpose_label,
           test_workspace_expires_at: company.test_workspace_expires_at,

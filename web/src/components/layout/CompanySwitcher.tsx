@@ -72,7 +72,7 @@ export function CompanySwitcher() {
           {activeLabel || 'Loading...'}
         </p>
         {activeCompany && isTestWorkspace(activeCompany) && (
-          <p className="mt-0.5 text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}{!canWriteCompany(activeCompany) ? ' · Read-only' : ''}</p>
+          <p className="mt-0.5 text-xs font-semibold text-amber-700">{activeCompany.practice_portal ? 'Practice copy · Client portal' : activeCompany.test_workspace_purpose_label || 'Test workspace'}{!activeCompany.practice_portal && !canWriteCompany(activeCompany) ? ' · Read-only' : ''}</p>
         )}
       </div>
     );
@@ -100,7 +100,7 @@ export function CompanySwitcher() {
             {activeLabel || 'Select Company'}
           </p>
           {activeCompany && isTestWorkspace(activeCompany) && (
-            <p className="text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}{!canWriteCompany(activeCompany) ? ' · Read-only' : ''}</p>
+            <p className="text-xs font-semibold text-amber-700">{activeCompany.practice_portal ? 'Practice copy · Client portal' : activeCompany.test_workspace_purpose_label || 'Test workspace'}{!activeCompany.practice_portal && !canWriteCompany(activeCompany) ? ' · Read-only' : ''}</p>
           )}
           <p className="text-xs text-neutral-600">
             {activeCompany?.active_employees || 0} employees

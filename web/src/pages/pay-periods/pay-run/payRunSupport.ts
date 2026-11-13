@@ -86,6 +86,24 @@ export function formatSignedNumber(value: number) {
   return '0';
 }
 
+// Ordinary inactive/deleted job IDs cannot be resubmitted by the API. Refuse
+// calculation until staff restore the job, rather than silently dropping pay.
+export function unavailableSavedWageRateLabels(employee: Employee | undefined, item: PayrollItem, runPurpose?: string): string[] {
+  if (item.timekeeping_source === 'correction_reference' || item.import_source?.startsWith('time_tracking:')) return [];
+  // A regular run's server roster skips employees missing from the eligible
+  // list, so their saved jobs cannot block it. Final, correction and adjustment
+  // runs still calculate them, so their saved jobs must be checked.
+  if (!employee && runPurpose === 'regular') return [];
+  const rates = (employee?.wage_rates || []).filter(rate => rate.active !== false);
+  return (item.wage_rate_hours || []).filter(entry => {
+    if (![entry.regular_hours, entry.overtime_hours, entry.holiday_hours, entry.pto_hours].some(hours => toNumber(hours) !== 0)) return false;
+    // Legacy entries without a job ID are accepted by the API as saved.
+    if (entry.employee_wage_rate_id == null) return false;
+    return !rates.some(rate => (entry.employee_wage_rate_id != null && rate.id === entry.employee_wage_rate_id)
+      || rate.label.trim().toLowerCase() === entry.label.trim().toLowerCase());
+  }).map(entry => entry.label);
+}
+
 export function templateWageRates(employee: Employee | undefined, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
   if ((payrollItem?.correction_pay_basis_hold || payrollItem?.import_source?.startsWith('time_tracking:')) && !existing?.length) return [];
@@ -111,9 +129,15 @@ export function templateWageRates(employee: Employee | undefined, payrollItem?: 
     const existingByLabel = new Map(
       (existing || []).map((entry) => [entry.label.trim().toLowerCase(), entry])
     );
-    const defaultPrimaryHours = configuredRates.length > 1 ? 0 : toNumber(payrollItem?.hours_worked ?? 0);
+    // MoSa's single-rate import omits job allocations when all configured jobs
+    // pay the same rate. Keep those saved hours on the profile's primary job;
+    // opening the worksheet must not silently replace them with zeroes.
+    const distinctRates = new Set(configuredRates.map(rate => toNumber(rate.rate)));
+    const sameSavedRate = distinctRates.size === 1 && distinctRates.has(toNumber(payrollItem?.pay_rate));
+    const useDefaultHours = !existing?.length;
+    const defaultPrimaryHours = useDefaultHours && (configuredRates.length === 1 || sameSavedRate) ? toNumber(payrollItem?.hours_worked ?? 0) : 0;
 
-    return configuredRates.map((rate) => {
+    const configuredRows = configuredRates.map((rate) => {
       const matchedExisting =
         (rate.id != null ? existingById.get(rate.id) : undefined) ||
         existingByLabel.get(rate.label.trim().toLowerCase());
@@ -123,13 +147,27 @@ export function templateWageRates(employee: Employee | undefined, payrollItem?: 
         label: rate.label,
         rate: toNumber(rate.rate),
         regular_hours: matchedExisting ? toNumber(matchedExisting.regular_hours) : (rate.is_primary ? defaultPrimaryHours : 0),
-        overtime_hours: matchedExisting ? toNumber(matchedExisting.overtime_hours) : (rate.is_primary ? toNumber(payrollItem?.overtime_hours ?? 0) : 0),
-        holiday_hours: matchedExisting ? toNumber(matchedExisting.holiday_hours) : (rate.is_primary ? toNumber(payrollItem?.holiday_hours ?? 0) : 0),
-        pto_hours: matchedExisting ? toNumber(matchedExisting.pto_hours) : (rate.is_primary ? toNumber(payrollItem?.pto_hours ?? 0) : 0),
+        overtime_hours: matchedExisting ? toNumber(matchedExisting.overtime_hours) : (rate.is_primary && useDefaultHours ? toNumber(payrollItem?.overtime_hours ?? 0) : 0),
+        holiday_hours: matchedExisting ? toNumber(matchedExisting.holiday_hours) : (rate.is_primary && useDefaultHours ? toNumber(payrollItem?.holiday_hours ?? 0) : 0),
+        pto_hours: matchedExisting ? toNumber(matchedExisting.pto_hours) : (rate.is_primary && useDefaultHours ? toNumber(payrollItem?.pto_hours ?? 0) : 0),
         is_primary: rate.is_primary,
         active: rate.active,
       };
     });
+    const configuredLabels = new Set(configuredRates.map(rate => rate.label.trim().toLowerCase()));
+    const legacyRows = (existing || [])
+      .filter(entry => entry.employee_wage_rate_id == null && !configuredLabels.has(entry.label.trim().toLowerCase()))
+      .map(entry => ({
+        ...entry,
+        rate: toNumber(entry.rate),
+        regular_hours: toNumber(entry.regular_hours),
+        overtime_hours: toNumber(entry.overtime_hours),
+        holiday_hours: toNumber(entry.holiday_hours),
+        pto_hours: toNumber(entry.pto_hours),
+        is_primary: entry.is_primary ?? false,
+        active: entry.active ?? true,
+      }));
+    return [...configuredRows, ...legacyRows];
   }
 
   if (existing && existing.length > 0) {

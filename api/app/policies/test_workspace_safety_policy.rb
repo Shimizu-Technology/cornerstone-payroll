@@ -4,6 +4,9 @@ class TestWorkspaceSafetyPolicy
   BLOCKED_ACTIONS = {
     # These records are shared across live companies, rather than copied into a workspace.
     "api/v1/admin/annual_retirement_limits" => %w[create update],
+    "api/v1/admin/tax_configs" => %w[
+      create update destroy activate verify replace_withholding update_filing_status update_brackets
+    ],
     "api/v1/admin/pay_periods" => %w[
       commit void reopen_unpaid create_correction_run correct_pay_date generate_fit_check retry_tax_sync corrective_paychecks
     ],
@@ -43,7 +46,12 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/expense_vendors" => %w[index]
   }.freeze
 
-  def self.blocked?(controller_path:, action_name:)
+  def self.blocked?(controller_path:, action_name:, request_method: nil)
+    if controller_path.start_with?("api/v1/admin/time_tracking_", "api/v1/admin/aire_")
+      return false if request_method.in?(%w[GET HEAD])
+      return !(controller_path == "api/v1/admin/time_tracking_sources" && action_name.in?(%w[index show]))
+    end
+
     if controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense", "api/v1/admin/finance_")
       return !FINANCE_READ_ACTIONS.fetch(controller_path, []).include?(action_name)
     end

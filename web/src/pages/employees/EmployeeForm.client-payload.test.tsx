@@ -4,9 +4,9 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeForm } from './EmployeeForm';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn(), departments: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn(), departments: vi.fn(), company: undefined as Record<string, unknown> | undefined }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1, role: 'client' }, isClient: true, isSuperAdmin: false, isManager: false }) }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: async () => {}, activeCompanyId: 1 }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: async () => {}, activeCompanyId: 1, activeCompany: mocks.company }) }));
 vi.mock('@/hooks/useEmployeeIntakeSettings', () => ({ useEmployeeIntakeSettings: () => ({ settings: { enabled: false }, loading: false }) }));
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/employees/EmployeeDocumentsPanel', () => ({ EmployeeDocumentsPanel: () => null }));
@@ -41,6 +41,7 @@ function submit(): void { fireEvent.submit(document.getElementById('employee-for
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.company = undefined;
   mocks.departments.mockResolvedValue({ data: [] });
   mocks.update.mockResolvedValue({ data: hourly, change_request: null, message: 'Saved' });
   HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -48,6 +49,27 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('Client employee form payload', () => {
+  it('offers the department picker and saves a practice client profile without staff payroll permission', async () => {
+    mocks.company = { id: 1, active: true, test_workspace: true, practice_portal: true, workspace_can_write: false };
+    mocks.get.mockResolvedValue({ data: hourly });
+    mocks.departments.mockResolvedValue({ data: [{ id: 3, name: 'Practice kitchen', active: true }] });
+    view(7);
+    const department = await screen.findByLabelText('Department');
+    await screen.findByRole('option', { name: 'Practice kitchen' });
+    fireEvent.change(department, { target: { value: '3' } });
+    submit();
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(7, expect.objectContaining({ department_id: 3 })));
+    expect(screen.queryByText('Employee details are read-only')).toBeNull();
+  });
+
+  it.each(['test_workspace_read_only', 'test_workspace_expired', 'test_workspace_archived_at', 'test_workspace_sealed_at'])('keeps a closed practice profile read-only for %s', key => {
+    mocks.company = { id: 1, practice_portal: true, [key]: key.endsWith('_at') ? '2026-11-13' : true };
+    mocks.get.mockResolvedValue({ data: hourly });
+    view(7);
+    expect(screen.getByText('Employee details are read-only')).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
   it('leaves contractor defaults out of a W-2 worker update', async () => {
     mocks.get.mockResolvedValue({ data: hourly });
     view(7);

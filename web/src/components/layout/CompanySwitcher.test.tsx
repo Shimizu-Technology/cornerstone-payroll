@@ -164,3 +164,12 @@ describe('CompanySwitcher', () => {
   });
 
 });
+
+it('labels the practice portal without calling the client read-only', () => {
+  const practice = { id: 12, organization_id: 1, name: 'Practice client', test_workspace: true, practice_portal: true,
+    payroll_environment: 'migration_rehearsal', workspace_can_write: false };
+  companyContext.mockReturnValue({ companies: [practice], activeCompany: practice, activeOrganizationId: 1, canSwitchCompany: false });
+  render(<MemoryRouter><CompanySwitcher /></MemoryRouter>);
+  expect(screen.getByText('Practice copy · Client portal')).toBeTruthy();
+  expect(screen.queryByText(/Read-only/)).toBeNull();
+});

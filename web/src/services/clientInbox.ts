@@ -1,7 +1,7 @@
 import api from './api';
 
 export type InboxKind = 'message' | 'document' | 'employee_change' | 'payroll_submission' | 'file_request';
-export type InboxRow = { id: number; key: string; company_id: number; company_name: string; sender_name?: string | null; kind: InboxKind; title: string; activity_at: string; unread: boolean; waiting: boolean; thread_id?: number; state?: string; state_label?: string };
+export type InboxRow = { id: number; key: string; company_id: number; company_name: string; practice_copy?: boolean; sender_name?: string | null; kind: InboxKind; title: string; activity_at: string; unread: boolean; waiting: boolean; thread_id?: number; state?: string; state_label?: string };
 export type InboxFilters = { company_id?: number; kind?: string; status?: string };
 export type InboxCounts = { unread_count: number; waiting_count: number; unread_messages: number; unread_documents: number; pending_changes: number; waiting_payroll?: number; waiting_file_requests?: number };
 export const clientInboxApi = {

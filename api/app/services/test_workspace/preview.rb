@@ -14,6 +14,11 @@ module TestWorkspace
 
     def call
       blockers = validation_errors
+      if blockers.empty?
+        cutoff = selected_periods.max_by(&:pay_date) || cutoff_period || excluded_periods.last
+        blockers.concat(OpeningYtdCloner.validation_errors(source_company: source_company, cutoff: cutoff,
+          before_cutoff: copy_mode == "exclude_recent" && selected_periods.empty?))
+      end
       selected = blockers.empty? ? selected_periods : []
 
       {
@@ -122,7 +127,7 @@ module TestWorkspace
         "Check numbers, payment state, filings, messages, documents, and external connections are never copied."
       ]
       if historical_ytd_opening_balances?
-        messages << "This client has imported opening YTD balances. A general workspace copies Cornerstone payroll history, not the imported source archive; use a verified migration rehearsal when exact migration evidence is required."
+        messages << "Applicable imported opening YTD balances are copied with source lineage. Original import files and payment evidence stay with the production client. Choose a cutoff after the opening YTD boundary."
       end
       messages
     end

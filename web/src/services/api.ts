@@ -2055,6 +2055,7 @@ export interface ImportPreviewRow {
   current_bonus?: number;
   effective_bonus?: number;
   bonus_keeps_manual?: boolean;
+  payroll_setup_only?: boolean;
   employee_id: number;
   employee_name: string;
   employment_type: string;
@@ -3869,6 +3870,7 @@ export interface CompanyListItem {
   client_payroll_approval_required?: boolean;
   payroll_environment: 'live' | 'migration_rehearsal';
   test_workspace?: boolean;
+  practice_portal?: boolean;
   test_workspace_purpose?: 'sandbox' | 'migration_rehearsal' | 'training_replay' | 'backup_snapshot' | null;
   test_workspace_purpose_label?: string;
   test_workspace_manifest?: Record<string, unknown>;

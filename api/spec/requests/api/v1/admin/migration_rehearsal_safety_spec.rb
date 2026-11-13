@@ -45,10 +45,42 @@ RSpec.describe "Api::V1::Admin migration rehearsal safety", type: :request do
     expect(pay_period.reload.status).to eq("approved")
   end
 
+  it "blocks external time tracking writes while retaining local health reads" do
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(true)
+    allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_user).and_return(admin)
+    allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_company_id).and_return(rehearsal.id)
+    expect(TimeTracking::Client).not_to receive(:new)
+    expect {
+      post "/api/v1/admin/time_tracking_sources", params: { time_tracking_source: { name: "External source", source_type: "aire_services", base_url: "https://example.invalid", shared_secret: "test" } }
+    }.not_to change(TimeTrackingSource, :count)
+    expect(response).to have_http_status(:forbidden)
+    get "/api/v1/admin/time_tracking_sources/0/health"
+    expect(response).to have_http_status(:not_found)
+    source = create(:time_tracking_source, company: rehearsal)
+    get "/api/v1/admin/time_tracking_sources/#{source.id}/health"
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body).to include("source_id" => source.id, "company_id" => rehearsal.id, "evidence_scope" => "local_records")
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_time_tracking_import"
+    expect(response).to have_http_status(:forbidden)
+  end
+
   it "blocks saving Form 500 filing state" do
     post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: pay_period.id, status: "paid" } }
 
     expect(response).to have_http_status(:forbidden)
     expect(Form500Filing.where(pay_period: pay_period)).to be_empty
+  end
+
+  it "blocks shared tax-rule writes while a practice copy is selected" do
+    allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_user).and_return(admin)
+    allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_company_id).and_return(rehearsal.id)
+    expect {
+      post "/api/v1/admin/tax_configs", params: { tax_year: 2040 }
+    }.not_to change(AnnualTaxConfig, :count)
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/tax_configs/0/activate"
+    expect(response).to have_http_status(:forbidden)
+    patch "/api/v1/admin/tax_configs/0/brackets/single", params: { brackets: [] }
+    expect(response).to have_http_status(:forbidden)
   end
 end

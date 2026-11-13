@@ -22,6 +22,18 @@ RSpec.describe PortalNotifications::Recipients, :portal_notifications do
     [ targets.map(&:key), status ]
   end
 
+  it "excludes practice copies for staff and client email, including queued deliveries" do
+    client
+    company.update_columns(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox",
+      migration_source_company_id: other_company.id, migration_rehearsal_status: "ready")
+    event = client_message_event
+    expect(resolved(event)).to eq([ [], "no_recipients" ])
+    allow(event).to receive(:audience).and_return("client")
+    expect(resolved(event)).to eq([ [], "no_recipients" ])
+    delivery = PortalNotificationDelivery.new(portal_notification_event: event, user: client)
+    expect(described_class.revocation_reason(delivery)).to eq("access_revoked")
+  end
+
   describe "staff-side alerts use only the client's configured list" do
     it "includes listed active staff who can view the client and nobody unlisted" do
       admin = create(:user, company: other_company, role: "admin")

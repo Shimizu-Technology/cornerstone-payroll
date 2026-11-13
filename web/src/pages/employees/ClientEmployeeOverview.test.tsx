@@ -7,12 +7,14 @@ import { ClientEmployeeOverview } from './ClientEmployeeOverview';
 
 const apiMocks = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock('@/services/api', () => ({ clientEmployeesApi: { get: apiMocks.get } }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1 }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1,
+  activeCompany: { id: 1, test_workspace: true, practice_portal: true, workspace_can_write: false },
+}) }));
 
 describe('ClientEmployeeOverview', () => {
   afterEach(cleanup);
 
-  it('shows how the employee is paid before opening Edit', async () => {
+  it('shows practice clients the profile edit link despite denied staff payroll permission', async () => {
     apiMocks.get.mockResolvedValue({ data: {
       id: 2, company_id: 1, first_name: 'Dina', last_name: 'Deposit', status: 'active',
       employment_type: 'hourly', pay_rate: 20, pay_frequency: 'biweekly',

@@ -11,6 +11,8 @@ class CompanyAssignment < ApplicationRecord
   validates :workspace_access_level, inclusion: { in: WORKSPACE_ACCESS_LEVELS }, allow_nil: true
   validate :company_must_belong_to_user_organization
   validate :test_workspace_requires_staff_user
+  before_validation :set_practice_client_grant
+  after_create :audit_practice_client_grant
   validate :test_workspace_access_level_shape
   validate :grantor_must_belong_to_organization
 
@@ -24,6 +26,21 @@ class CompanyAssignment < ApplicationRecord
   end
 
   private
+
+  def set_practice_client_grant
+    return unless user&.practice_company_id? && company_id == user.practice_company_id
+
+    self.workspace_access_level = nil
+    self.expires_at = company.test_workspace_expires_at
+  end
+
+  def audit_practice_client_grant
+    return unless user&.practice_company_id?
+
+    AuditLog.record!(user: granted_by, organization_id: company.organization_id, company_id: company.id,
+      action: "test_workspace#portal_access_granted", record_type: "users", record_id: user_id,
+      metadata: { practice_company_id: company.id, expires_at: expires_at }, event_category: "security")
+  end
 
   def client_management_grant_shape
     return unless client_management?
@@ -49,7 +66,12 @@ class CompanyAssignment < ApplicationRecord
   end
 
   def test_workspace_requires_staff_user
-    return if user.blank? || company.blank? || !company.test_workspace? || user.staff_member?
+    return if user.blank? || company.blank?
+    if user.practice_company_id?
+      errors.add(:company, "must be the login’s practice copy") unless company_id == user.practice_company_id && user.client?
+      return
+    end
+    return if !company.test_workspace? || user.staff_member?
 
     errors.add(:company, "test workspaces are available only to payroll staff")
   end
@@ -57,7 +79,9 @@ class CompanyAssignment < ApplicationRecord
   def test_workspace_access_level_shape
     return if company.blank?
 
-    if company.test_workspace? && workspace_access_level.blank?
+    if user&.practice_company_id?
+      errors.add(:workspace_access_level, "is unavailable to practice client logins") if workspace_access_level.present?
+    elsif company.test_workspace? && workspace_access_level.blank?
       errors.add(:workspace_access_level, "is required for a test workspace")
     elsif company.live_payroll? && workspace_access_level.present?
       errors.add(:workspace_access_level, "is only available for a test workspace")

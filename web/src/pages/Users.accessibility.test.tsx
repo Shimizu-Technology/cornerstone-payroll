@@ -142,3 +142,23 @@ describe('Users accessible account controls', () => {
   });
 
 });
+
+
+it('offers a separate practice login and prevents selecting real clients alongside it', async () => {
+  apiMocks.companies.list.mockResolvedValue({ companies: [
+    { id: 1, name: 'Real client', payroll_environment: 'live' },
+    { id: 2, name: 'Practice client', payroll_environment: 'migration_rehearsal', test_workspace: true,
+      test_workspace_purpose: 'sandbox', migration_rehearsal_status: 'ready' },
+  ] });
+  const user = userEvent.setup();
+  render(<Users />);
+  await user.click(await screen.findByRole('button', { name: 'Invite User' }));
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Role' }), 'client');
+  await user.click(await screen.findByRole('checkbox', { name: /Real client/ }));
+  await user.click(screen.getByRole('checkbox', { name: /Practice client/ }));
+  expect((screen.getByRole('checkbox', { name: /Practice client/ }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole('checkbox', { name: /Real client/ }) as HTMLInputElement).checked).toBe(false);
+  expect(screen.getByText(/This login cannot access real clients/)).toBeTruthy();
+  await user.click(screen.getByRole('checkbox', { name: /Real client/ }));
+  expect((screen.getByRole('checkbox', { name: /Practice client/ }) as HTMLInputElement).checked).toBe(false);
+});

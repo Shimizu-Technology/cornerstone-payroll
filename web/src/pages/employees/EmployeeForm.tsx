@@ -17,7 +17,7 @@ import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeS
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
-import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -1036,7 +1036,7 @@ export function EmployeeForm() {
   const ssnComparisonReady = ssnDigits.length === 9 && ssnConfirmationDigits.length === 9;
   const ssnsMatch = ssnComparisonReady && ssnDigits === ssnConfirmationDigits;
 
-  if (!canWriteCompany(activeCompany)) {
+  if (!(isClient ? canWriteClientEmployeeProfile(activeCompany) : canWriteCompany(activeCompany))) {
     return <section className="space-y-4 rounded-xl border border-neutral-200 bg-white p-6" aria-label="Read-only employee access">
       <h1 className="text-xl font-semibold text-neutral-900">Employee details are read-only</h1>
       <p className="text-sm leading-6 text-neutral-700">{companyReadOnlyMessage(activeCompany)}</p>

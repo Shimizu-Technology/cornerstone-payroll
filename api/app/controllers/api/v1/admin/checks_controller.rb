@@ -123,7 +123,7 @@ module Api
               starting_slot: params[:starting_slot], rehearsal_preview: true
             ).generate
           else
-            combine_pdfs(items.map { |item| CheckGenerator.new(item, company: render_company).generate_rehearsal_preview })
+            CheckGenerator.generate_rehearsal_batch(items, company: render_company)
           end
 
           response.headers["Cache-Control"] = "private, no-store"
