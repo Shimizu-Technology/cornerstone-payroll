@@ -107,6 +107,17 @@ class CheckGenerator
     render_document(rehearsal_preview: true)
   end
 
+  # Keep font subsets and transparency resources in one document. Merging
+  # independently rendered previews can discard later pages' VOID glyphs.
+  def self.generate_rehearsal_batch(items, company:)
+    PdfUnicodeFont.document(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
+      items.each_with_index do |item, index|
+        pdf.start_new_page unless index.zero?
+        new(item, company: company).send(:draw_document, pdf, rehearsal_preview: true)
+      end
+    end.render
+  end
+
   def alignment_test
     render_alignment_test
   end
@@ -206,16 +217,21 @@ class CheckGenerator
   # Main render
   # -----------------------------------------------------------------------
   def render_document(voided: false, rehearsal_preview: false)
-    PdfUnicodeFont.ensure_printable!(employee.full_name, label: "Employee")
-    PdfUnicodeFont.ensure_printable!(employee.full_address, label: "Employee address")
     PdfUnicodeFont.document(
       page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
-      draw_perforations(pdf)
-      draw_check_face(pdf, check_y, voided, rehearsal_preview: rehearsal_preview)
-      draw_stub(pdf, stub1_y, voided, rehearsal_preview: rehearsal_preview)
-      draw_stub(pdf, stub2_y, voided, rehearsal_preview: rehearsal_preview)
+      draw_document(pdf, voided: voided, rehearsal_preview: rehearsal_preview)
     end.render
+  end
+
+  def draw_document(pdf, voided: false, rehearsal_preview: false)
+    PdfUnicodeFont.ensure_printable!(employee.full_name, label: "Employee")
+    PdfUnicodeFont.ensure_printable!(employee.full_address, label: "Employee address")
+    pdf.font(PdfUnicodeFont::FAMILY)
+    draw_perforations(pdf)
+    draw_check_face(pdf, check_y, voided, rehearsal_preview: rehearsal_preview)
+    draw_stub(pdf, stub1_y, voided, rehearsal_preview: rehearsal_preview)
+    draw_stub(pdf, stub2_y, voided, rehearsal_preview: rehearsal_preview)
   end
 
   # -----------------------------------------------------------------------

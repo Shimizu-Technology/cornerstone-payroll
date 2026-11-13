@@ -228,6 +228,23 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(draft_period.reload.status).to eq("calculated")
     end
 
+    it "keeps every page's VOID font resources together in a multi-check preview" do
+      create(:payroll_item, pay_period: draft_period, employee: employee_b, check_number: nil,
+        gross_pay: 400, net_pay: 350, payment_delivery_method: "paper_check")
+      void_draws = capture_void_draws
+
+      get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
+
+      expect(response).to have_http_status(:ok)
+      pages = PDF::Reader.new(StringIO.new(response.body)).pages
+      expect(pages.size).to eq(2)
+      expect(pages[0].text).to include("Alice Reyes")
+      expect(pages[1].text).to include("Bob Santos")
+      expect(void_draws.size).to eq(6)
+      expect(pages.map { |page| page.attributes.fetch(:Resources).fetch(:Font) }.uniq.size).to eq(1)
+      expect(draft_period.payroll_items.where.not(check_number: nil)).to be_empty
+    end
+
     it "allows an approved rehearsal run but never a draft or live client" do
       draft_period.update_columns(status: "approved")
       get "/api/v1/admin/pay_periods/#{draft_period.id}/checks/rehearsal_preview_pdf"
