@@ -93,6 +93,18 @@ RSpec.describe PayrollImport::ImportService do
     expect(item.loan_deduction).to eq(89)
   end
 
+  it "flags configured loans on workbook-only rows even when capping removes their deductions" do
+    type = DeductionType.create!(company: company, name: "Synthetic loan", category: "post_tax", sub_category: "loan")
+    employee.employee_deductions.create!(deduction_type: type, amount: 50)
+    EmployeeLoan.create!(company: company, employee: employee, deduction_type: type,
+      name: "Synthetic scheduled loan", tracking_mode: "recurring_no_balance", payment_amount: 50, status: "active", first_deduction_date: period.pay_date)
+    row = preview(hours: false, loan: 0)
+    expect(row[:missing_revel_hours_with_deductions]).to be(true)
+    item = import(row)
+    expect(item.payroll_item_deductions).to be_empty
+    expect(item.deduction_review_warnings.join).to include("No Revel hours")
+  end
+
   context "with distinct active wage rates" do
     let!(:primary) { create(:employee_wage_rate, employee: employee, label: "Main Kitchen", rate: 15.50, is_primary: true) }
     let!(:joint) { create(:employee_wage_rate, employee: employee, label: "Shared Kitchen", rate: 16.50) }
@@ -145,6 +157,30 @@ RSpec.describe PayrollImport::ImportService do
       expect(row).to include(selected_wage_rate_id: primary.id, wage_rate_default_pay_period_id: previous.id)
     end
 
+    it "keeps emailed scalar edits in the reviewed job, including a saved API-style update" do
+      item = import(preview(hours: false).merge(selected_wage_rate_id: joint.id))
+      item.update!(hours_worked: 26)
+      item.reload.calculate!
+      expect(item.reload.hours_worked).to eq(26)
+      expect(item.wage_rate_hours.first).to include("regular_hours" => 26, "employee_wage_rate_id" => joint.id)
+      expect(item.loan_deduction).to eq(89)
+      item.hours_worked = 30
+      item.calculate!
+      expect(item.reload.hours_worked).to eq(30)
+      expect(item.payroll_item_earnings.find_by!(category: "regular").amount).to eq(495)
+    end
+
+    it "counts negative-hour jobs and keeps same-job reversals identifiable" do
+      previous = committed_allocation([ bucket(primary, 10) ])
+      item = previous.payroll_items.find_by!(employee: employee)
+      # Negative source reversals are retained as committed history, not fresh
+      # nonnegative worksheet inputs. Only the default-selection reader runs.
+      item.update_columns(custom_columns_data: { "wage_rate_hours" => [ bucket(primary, 10), bucket(joint, -2) ] })
+      expect(preview[:selected_wage_rate_id]).to be_nil
+      item.update_columns(custom_columns_data: { "wage_rate_hours" => [ bucket(joint, -2), bucket(joint, 10) ] })
+      expect(preview[:selected_wage_rate_id]).to eq(joint.id)
+    end
+
     it "requires a choice for a prior split instead of guessing" do
       committed_allocation([ bucket(primary, 10), bucket(joint, 20) ])
       row = preview
@@ -168,7 +204,8 @@ RSpec.describe PayrollImport::ImportService do
       item.wage_rate_hours = [ bucket(primary, 26) ]
       item.save!
       import(preview(hours: false).merge(selected_wage_rate_id: joint.id), force_overwrite: true)
-      expect(item.reload.wage_rate_hours.first["regular_hours"]).to eq(26)
+      expect(item.reload.wage_rate_hours.first).to include("regular_hours" => 26, "employee_wage_rate_id" => joint.id, "rate" => 16.50)
+      expect(item.payroll_item_earnings.find_by!(category: "regular").amount).to eq(429)
       expect(item.hours_worked).to eq(26)
       expect(item.loan_deduction).to eq(89)
     end

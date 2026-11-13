@@ -353,7 +353,7 @@ module PayrollImport
         workbook_only: pdf_row.nil?,
         missing_revel_hours_with_deductions: pdf_row.nil? && (
           loan_reconciliation.fetch(:direct_loan_deduction).positive? ||
-          Array(loan_reconciliation[:matches]).any? ||
+          Array(loan_reconciliation[:matches]).any? || configured_loan_due?(employee) ||
           Array(excel_data&.dig(:payroll_components)).any? { |component| component.to_h.with_indifferent_access[:kind] == "deduction" }
         ),
         bonus: source_bonus,
@@ -430,6 +430,26 @@ module PayrollImport
         # Single-rate calculations keep using the profile rate. Stale saved
         # allocations must not replace the newly imported hours.
         item.clear_wage_rate_hours!
+      end
+    end
+
+    def configured_loan_due?(employee)
+      return false unless pay_period.recurring_items_enabled?
+
+      loans = employee.employee_loans.to_a
+      return true if loans.any? do |loan|
+        loan.active? && loan.repayment_schedule_active_on?(pay_period.pay_date) &&
+          loan.scheduled_payment_for(pay_date: pay_period.pay_date, requested_amount: loan.payment_amount || 0).positive?
+      end
+      return true if employee.employee_deductions.active.includes(:deduction_type).any? do |deduction|
+        deduction.deduction_type.active? && deduction.deduction_type.loan? && deduction.amount.positive? &&
+          loans.none? { |loan| loan.deduction_type_id == deduction.deduction_type_id }
+      end
+
+      employee.employee_payroll_fields.active.effective_on(pay_period.pay_date).includes(:payroll_field_definition).any? do |assignment|
+        definition = assignment.payroll_field_definition
+        assignment.employee_loan_id.nil? && definition.active? && definition.category == "loan" &&
+          assignment.effective_amount_for(1).positive?
       end
     end
 

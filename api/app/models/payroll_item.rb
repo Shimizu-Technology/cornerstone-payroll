@@ -57,6 +57,7 @@ class PayrollItem < ApplicationRecord
   # is respected without triggering a pay_period reload query.
   before_validation :sync_company_from_pay_period, on: :create
   before_validation :normalize_pay_precision
+  before_validation :synchronize_mosa_reviewed_hours!
 
   validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
   validates :payment_delivery_method, inclusion: { in: Employee::PAYMENT_DELIVERY_METHODS }, allow_nil: true
@@ -674,6 +675,23 @@ class PayrollItem < ApplicationRecord
     warnings
   end
 
+  # Scalar worksheet/API edits must update the reviewed job bucket as well.
+  # Otherwise a saved zero-hour bucket would overwrite emailed hours.
+  def synchronize_mosa_reviewed_hours!
+    return unless import_source == "mosa_revel" && custom_columns_data.to_h["mosa_wage_rate_choice"].present?
+
+    changed_hours = { hours_worked: "regular_hours", overtime_hours: "overtime_hours",
+      holiday_hours: "holiday_hours", pto_hours: "pto_hours" }.select { |field, _key| will_save_change_to_attribute?(field) }
+    return if changed_hours.empty? || wage_rate_hours.empty?
+    if wage_rate_hours.many?
+      raise ArgumentError, "Enter hours against each job for this employee, then calculate again."
+    end
+
+    entry = wage_rate_hours.first
+    changed_hours.each { |field, key| entry[key] = public_send(field).to_f }
+    self.wage_rate_hours = [ entry ]
+  end
+
   # Calculate and store all values
   def calculate!(annual_fica_context: nil)
     ApplicationRecord.transaction do
@@ -693,6 +711,7 @@ class PayrollItem < ApplicationRecord
         raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."
       end
 
+      synchronize_mosa_reviewed_hours!
       calculator = PayrollCalculator.for(employee, self, annual_fica_context: annual_fica_context)
       calculator.calculate
       save!

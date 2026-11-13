@@ -19,6 +19,21 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     )
   end
 
+  it "keeps scalar PATCH hours on the reviewed MoSa job instead of its old zero-hour allocation" do
+    rate = create(:employee_wage_rate, employee: employee, label: "Shared Kitchen", rate: 16.50)
+    payroll_item.update!(hours_worked: 0, import_source: "mosa_revel")
+    payroll_item.wage_rate_hours = [ { employee_wage_rate_id: rate.id, label: rate.label, rate: rate.rate, regular_hours: 0 } ]
+    payroll_item.custom_columns_data = payroll_item.custom_columns_data.merge("mosa_wage_rate_choice" => { "employee_wage_rate_id" => rate.id })
+    payroll_item.save!
+
+    patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}",
+      params: { payroll_item: { hours_worked: 26 } }, as: :json
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(payroll_item.reload.hours_worked).to eq(26)
+    expect(payroll_item.wage_rate_hours.first).to include("regular_hours" => 26, "rate" => 16.50)
+  end
+
   before do
     allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_user).and_return(admin_user)

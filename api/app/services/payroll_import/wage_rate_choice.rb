@@ -18,9 +18,10 @@ module PayrollImport
         .where("pay_periods.pay_date < ?", @pay_period.pay_date)
         .order("pay_periods.pay_date DESC, pay_periods.committed_at DESC, payroll_items.id DESC").first
       entries = Array(previous&.wage_rate_hours).select do |entry|
-        %w[regular_hours overtime_hours holiday_hours pto_hours].any? { |key| entry[key].to_d.positive? }
+        %w[regular_hours overtime_hours holiday_hours pto_hours].any? { |key| entry[key].to_d.nonzero? }
       end
-      selected = if entries.one?
+      jobs = entries.group_by { |entry| entry["employee_wage_rate_id"].presence || [ entry["label"], entry["rate"].to_d ] }
+      selected = if jobs.one?
         entry = entries.first
         rates.find do |rate|
           entry["employee_wage_rate_id"].present? ? rate.id.to_s == entry["employee_wage_rate_id"].to_s :

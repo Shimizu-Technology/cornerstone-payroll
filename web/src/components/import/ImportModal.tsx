@@ -1,6 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { Link } from 'react-router';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, type ReactElement } from 'react';
 import { CheckCircle2, Download, RefreshCw } from 'lucide-react';
 import {
   Dialog,
@@ -238,7 +238,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   );
   const replacementReady = !replacementConfirmed || replacementReason.trim().length > 0;
 
-  const rateChoiceControl = (row: ImportPreviewRow) => row.wage_rate_options?.length ? (
+  const rateChoiceControl = (row: ImportPreviewRow): ReactElement | null => row.wage_rate_options?.length ? (
     <div className="mt-2 min-w-0 max-w-xs space-y-1 whitespace-normal text-left">
       <label className="block text-xs font-medium text-neutral-700">
         Job and rate
@@ -260,7 +260,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     </div>
   ) : null;
 
-  const missingHoursNotice = (row: ImportPreviewRow) => row.missing_revel_hours_with_deductions ? (
+  const missingHoursNotice = (row: ImportPreviewRow): ReactElement | null => row.missing_revel_hours_with_deductions ? (
     <p className="mt-2 max-w-xs whitespace-normal text-xs font-medium text-amber-800">No Revel hours — enter hours from MoSa's email before calculating. Any hours already entered will be kept.</p>
   ) : null;
 
@@ -444,6 +444,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
         {step === 'preview' && previewData && (
           <div className="space-y-3">
+            {missingRateChoices.length > 0 && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Choose a job and rate for {missingRateChoices.map((row) => row.employee_name).join(', ')} using the Job and rate selectors below before applying.</p>}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
               <span className="inline-flex items-center gap-2 font-semibold">
                 <CheckCircle2 className="h-4 w-4" aria-hidden="true" />

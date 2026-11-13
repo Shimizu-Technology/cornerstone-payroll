@@ -29,7 +29,7 @@ function preview(selected: number | null = 22): ImportPreviewResponse {
   };
 }
 
-function mount(data = preview()) {
+function mount(data = preview()): void {
   render(<MemoryRouter><ImportModal open payPeriodId={9} companyId={7} initialPreview={data} onOpenChange={vi.fn()} onImportComplete={vi.fn()} /></MemoryRouter>);
 }
 
@@ -43,6 +43,7 @@ it('shows missing-hours instructions and the committed default in both responsiv
 it('blocks apply until a missing choice is supplied and submits only the selected saved job ID', async () => {
   apply.mockResolvedValue({ results: { success: [{ employee_id: 7 }], errors: [] }, pay_period: { id: 9 } });
   mount(preview(null));
+  expect(screen.getByRole('alert').textContent).toContain('Choose a job and rate for Alex Example');
   const button = screen.getByRole('button', { name: /Apply Import/ });
   expect((button as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(screen.getAllByRole('combobox', { name: 'Job and rate for Alex Example' })[0], { target: { value: '21' } });
