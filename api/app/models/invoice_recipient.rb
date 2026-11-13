@@ -13,11 +13,16 @@ class InvoiceRecipient < ApplicationRecord
   validates :default_rate, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :template_type, inclusion: { in: %w[standard hourly project tuition] }
   validate :company_must_belong_to_organization
+  validate :source_company_is_live
 
   scope :active, -> { where(active: true) }
   scope :alphabetical, -> { order(:name, :id) }
 
   private
+
+  def source_company_is_live
+    errors.add(:company, "practice copies cannot be real billing recipients") if company&.test_workspace?
+  end
 
   def normalize_blanks
     self.email = email.to_s.strip.presence

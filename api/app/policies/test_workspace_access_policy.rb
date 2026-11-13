@@ -14,6 +14,9 @@ class TestWorkspaceAccessPolicy
 
   def self.allowed?(user:, company:, request_method:, capability: nil, controller_path: nil, action_name: nil)
     return true unless company&.test_workspace?
+    if user&.client? && controller_path == "api/v1/client/reports"
+      return request_method.in?(%w[GET HEAD]) && user.practice_company_id == company.id && user.practice_portal_open?
+    end
     return false unless user&.staff_member?
     return true if ADMIN_ROLES.include?(user.role) && GLOBAL_ADMIN_CAPABILITIES.include?(capability)
     read_request = request_method.in?(%w[GET HEAD]) ||

@@ -8,6 +8,7 @@ class User < ApplicationRecord
 
   belongs_to :organization
   belongs_to :company
+  belongs_to :practice_company, class_name: "Company", optional: true
   belongs_to :invited_by, class_name: "User", optional: true
   has_many :portal_document_read_receipts, dependent: :delete_all
   has_many :portal_thread_read_receipts, dependent: :delete_all
@@ -42,6 +43,7 @@ class User < ApplicationRecord
   validates :invitation_status, inclusion: { in: INVITATION_STATUSES }
   validate :company_must_belong_to_organization
   validate :migration_rehearsal_company_requires_staff_role
+  validate :practice_scope_is_isolated
   validate :platform_owner_requirements
   validate :platform_owner_identity_is_immutable, on: :update
 
@@ -100,6 +102,7 @@ class User < ApplicationRecord
   # authority for access. Platform super admins retain recovery access when a
   # customer organization is inactive; every user must still be active.
   def payroll_access_allowed?
+    TestWorkspace::PortalAccess.deactivate_if_closed!(self) if active? && practice_company_id?
     active? && (super_admin? || organization&.active?)
   end
 
@@ -117,6 +120,8 @@ class User < ApplicationRecord
   # - managers/accountants/clients: explicitly assigned companies (or home company)
   # - everyone else: just their home company
   def accessible_company_ids
+    return practice_portal_open? ? [ practice_company_id ] : [] if practice_company_id?
+
     @accessible_company_ids ||= begin
       if super_admin?
         Company.ids
@@ -162,7 +167,27 @@ class User < ApplicationRecord
     accessible_company_ids.include?(cid)
   end
 
+  def practice_portal_open?
+    workspace = Company.find_by(id: practice_company_id)
+    client? && company_id == practice_company_id && workspace&.sandbox? && workspace.active? &&
+      workspace.test_workspace_ready? && !workspace.test_workspace_read_only? &&
+      (new_record? || company_assignments.active_access.exists?(company_id: practice_company_id))
+  end
+
   private
+
+  def practice_scope_is_isolated
+    if practice_company_id_in_database.present? && will_save_change_to_practice_company_id?
+      errors.add(:practice_company, "cannot be changed for a practice-only login")
+    end
+    return unless practice_company_id?
+
+    errors.add(:base, "A practice-only login must remain a client of its practice copy") unless client? && company_id == practice_company_id
+    errors.add(:practice_company, "must be a ready, active practice copy") if active? && !practice_portal_open?
+    if company_assignments.where.not(company_id: practice_company_id).exists?
+      errors.add(:base, "A practice-only login cannot be assigned to another client")
+    end
+  end
 
   def disconnect_cable_after_deactivation
     PayrollAccess::RevocationDispatcher.call(self) unless active?
@@ -204,9 +229,9 @@ class User < ApplicationRecord
   end
 
   def migration_rehearsal_company_requires_staff_role
-    return if company.blank? || !company.test_workspace? || staff_member?
+    return if company.blank? || !company.test_workspace? || staff_member? || (client? && practice_company_id == company_id)
 
-    errors.add(:company, "test workspaces are available only to payroll staff")
+    errors.add(:company, "requires a practice-only client login or payroll staff")
   end
 
   def organization_company_ids

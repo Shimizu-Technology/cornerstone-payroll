@@ -38,6 +38,7 @@ RSpec.describe TrainingReplay::Cloner do
   end
 
   it "creates explicit staff access and queues an isolated training copy" do
+    source_company.update!(payroll_intake_source_types: [ "mosa_revel" ])
     expect {
       @target = TrainingReplay::Create.new(
         source_company: source_company,
@@ -53,6 +54,8 @@ RSpec.describe TrainingReplay::Cloner do
       migration_source_company_id: source_company.id,
       active_printer_profile_id: nil
     )
+    expect(@target.payroll_intake_source_types).to eq([ "mosa_revel" ])
+    expect(@target.auto_create_fit_check).to be(false)
     expect(@target.test_workspace_manifest.fetch("practice_source_pay_period_ids")).to eq([
       first_practice_source.id,
       second_practice_source.id
@@ -113,6 +116,25 @@ RSpec.describe TrainingReplay::Cloner do
     expect(baseline.update(notes: "changed")).to be(false)
     expect(baseline.errors.full_messages.join).to include("locked reference evidence")
     expect(baseline.payroll_items.sole.update(gross_pay: 5)).to be(false)
+  end
+
+  it "preserves test lineage without carrying promoted payment authority into baseline or practice runs" do
+    batch = create(:historical_import_batch, company: source_company, status: "locked", importer_version: "quickbooks-online-payroll-v4")
+    rehearsal = create(:company, organization: organization, payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "migration_rehearsal", migration_source_company: source_company,
+      migration_source_batch: batch, migration_rehearsal_status: "ready")
+    [ baseline_source, first_practice_source ].each do |source|
+      origin = create(:pay_period, company: rehearsal, start_date: source.start_date, end_date: source.end_date, pay_date: source.pay_date)
+      source.update!(promotion_source_pay_period: origin, promotion_payment_disposition: "process_in_cornerstone",
+        promoted_payment_prepared_at: Time.current, promoted_payment_prepared_by: actor)
+    end
+    target = build_target
+    described_class.new(company: target, actor: actor).call
+    expect(target.pay_periods.pluck(:test_workspace_source_pay_period_id)).to contain_exactly(baseline_source.id, first_practice_source.id, second_practice_source.id)
+    target.pay_periods.each do |period|
+      expect(period).to have_attributes(promotion_source_pay_period_id: nil, promotion_payment_disposition: nil,
+        promoted_payment_prepared_at: nil, promoted_payment_prepared_by_id: nil)
+    end
   end
 
   it "previews only same-tax-year baseline payroll" do
