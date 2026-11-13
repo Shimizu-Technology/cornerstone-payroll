@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Users } from './Users';
@@ -45,6 +45,31 @@ describe('invitation delivery outcomes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send Invitation' }));
     expect(await screen.findByText(new RegExp(message.replace(/[()]/g, '\\$&')))).toBeTruthy();
     expect(screen.queryByText(/Invitation (?:re)?sent to/)).toBeNull();
+  });
+
+  it('shows a created account whose invitation failed as a warning with a direct retry, not as success', async () => {
+    mocks.users.create.mockResolvedValue({ data: invitee, invitation_delivery_status: 'failed', invitation_sent: false, invitation_error: 'Clerk API not configured' });
+    mocks.users.resendInvitation.mockResolvedValue({ data: invitee, invitation_delivery_status: 'submitted', invitation_sent: true });
+    render(<Users />);
+    await screen.findAllByText('Synthetic Invitee');
+    fireEvent.click(screen.getByRole('button', { name: 'Invite User' }));
+    fireEvent.change(screen.getByPlaceholderText('Email address *'), { target: { value: invitee.email } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send Invitation' }));
+    expect(await screen.findByText(/Invitation email failed: Clerk API not configured\./)).toBeTruthy();
+    expect(screen.getByText(/has an account, but cannot sign in yet because no invitation was sent/)).toBeTruthy();
+    expect(screen.queryByText(/^Account created\./)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry invitation' }));
+    await waitFor(() => expect(mocks.users.resendInvitation).toHaveBeenCalledWith(invitee.id));
+    expect(await screen.findByText(/Invitation submitted to the email provider/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry invitation' })).toBeNull());
+  });
+
+  it('keeps the retry in front of the user when the retry fails too', async () => {
+    mocks.users.resendInvitation.mockResolvedValue({ data: invitee, invitation_delivery_status: 'failed', invitation_sent: false, invitation_error: 'Synthetic failure' });
+    render(<Users />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Resend' }))[0]);
+    expect(await screen.findByText(/Invitation email failed: Synthetic failure\./)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry invitation' })).toBeTruthy();
   });
 
   it.each(outcomes)('shows %s for user resend', async (status, message) => {

@@ -3,6 +3,7 @@ import { Navigate } from 'react-router';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -25,7 +26,7 @@ const highlights = [
 ];
 
 export function Login() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, authProblem, refreshUser, signOut } = useAuth();
 
   if (isLoading) {
     return (
@@ -98,6 +99,16 @@ export function Login() {
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900">Sign in to Cornerstone Payroll</h2>
             <p className="mt-2 text-sm text-neutral-500">Use your Cornerstone account to continue.</p>
           </div>
+
+          {authProblem && (
+            <AccountAccessNotice
+              className="mb-6"
+              problem={authProblem}
+              // A refused 401 has already signed the person out, so the form below is the way forward.
+              onRetry={authProblem.status === 401 ? undefined : () => { void refreshUser().catch(() => undefined); }}
+              onSignOut={authProblem.status === 401 ? undefined : () => { void signOut(); }}
+            />
+          )}
 
           <SignIn
             routing="hash"

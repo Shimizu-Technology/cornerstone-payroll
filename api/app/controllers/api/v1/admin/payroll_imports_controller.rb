@@ -365,6 +365,7 @@ module Api
             payload = row.source_payload.to_h
             payload["preview_row"].to_h.merge("source_row_id" => row.id) if payload["row_kind"] == "matched"
           end
+          matched = PayrollImport::LivePreviewRowState.new(@pay_period).refresh(matched)
 
           {
             matched: matched,
