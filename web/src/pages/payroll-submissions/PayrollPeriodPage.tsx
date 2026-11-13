@@ -15,10 +15,10 @@ import { adminPayrollSubmissionsApi, clientPayrollSubmissionsApi, type PeriodDet
 
 type Audience = 'client' | 'staff';
 
-function DraftFiles({ draft, api }: { draft: SubmissionDraft; api: typeof clientPayrollSubmissionsApi | typeof adminPayrollSubmissionsApi }) {
+function DraftFiles({ draft, api, audience }: { draft: SubmissionDraft; api: typeof clientPayrollSubmissionsApi | typeof adminPayrollSubmissionsApi; audience: Audience }) {
   return <ul className="divide-y divide-neutral-100">
-    {draft.paycheck_document && <FileRow label="Draft paychecks" document={draft.paycheck_document} api={api} />}
-    {draft.direct_deposit_document && <FileRow label="Draft direct deposits" document={draft.direct_deposit_document} api={api} />}
+    {draft.paycheck_document && <FileRow label="Draft paychecks" document={draft.paycheck_document} api={api} audience={audience} />}
+    {draft.direct_deposit_document && <FileRow label="Draft direct deposits" document={draft.direct_deposit_document} api={api} audience={audience} />}
   </ul>;
 }
 
@@ -186,12 +186,12 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
           <div className="flex flex-wrap items-center gap-2"><h2 id="draft-review" className="text-base font-semibold text-neutral-950">Draft {currentDraft.revision} for review</h2><Badge variant="info">Current</Badge></div>
           <p className="text-sm text-neutral-700">Posted by {currentDraft.posted_by_name} · {formatGuam(currentDraft.posted_at)}</p>
           {currentDraft.note && <p className="whitespace-pre-wrap break-words text-sm text-neutral-800">{currentDraft.note}</p>}
-          <DraftFiles draft={currentDraft} api={api} />
+          <DraftFiles draft={currentDraft} api={api} audience={audience} />
           {audience === 'client' && period.allowed_actions.includes('approve') && <ClientDecision period={period} draft={currentDraft} onDone={detail => { setNotice(detail.status === 'approved' ? 'Approved. Cornerstone has been told.' : 'Change request sent to Cornerstone.'); accept(detail); }} />}
         </section>}
         {otherDrafts.map(draft => <details key={draft.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
           <summary className="cursor-pointer font-semibold text-neutral-800">Draft {draft.revision} {draft.posted ? <Badge variant="outline" className="ml-2">Superseded</Badge> : <Badge variant="warning" className="ml-2">Staff only, not shared</Badge>}</summary>
-          <div className="mt-3"><DraftFiles draft={draft} api={api} /></div>
+          <div className="mt-3"><DraftFiles draft={draft} api={api} audience={audience} /></div>
         </details>)}
 
         {audience === 'client' && canSubmit && (!current || editing) && <section className="rounded-xl border border-neutral-200 bg-white p-4">
@@ -205,7 +205,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
             <h2 id="revisions" className="text-base font-semibold text-neutral-950">Files sent for this period</h2>
             {audience === 'client' && canSubmit && current && !editing && <Button type="button" variant="outline" onClick={() => setEditing(true)}>Send an update or replace a file</Button>}
           </div>
-          {period.submissions.length ? period.submissions.map(revision => <RevisionCard key={revision.id} revision={revision} api={api} companyId={companyId ? Number(companyId) : activeCompanyId} />)
+          {period.submissions.length ? period.submissions.map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} />)
             : <p className="text-sm text-neutral-600">Nothing has been sent for this period yet.</p>}
         </section>
 

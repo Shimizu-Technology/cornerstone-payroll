@@ -23,15 +23,8 @@ module Api
         # GET /api/v1/admin/pay_periods/:pay_period_id/current_import
         # Reopens the latest unapplied MoSa review without requiring another upload.
         def current
-          source_package = @pay_period.payroll_intake_sessions.current
-                                      .where(source_type: "mosa_revel", status: %w[previewed reviewed])
-                                      .order(package_revision: :desc, id: :desc)
-                                      .first
-          import_record = PayrollImportRecord.find_by(
-            pay_period: @pay_period,
-            payroll_intake_session: source_package,
-            status: "previewed"
-          ) if source_package
+          source_package = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          import_record = PayrollImport::CurrentReview.import_record_for(@pay_period, source_package)
           unless source_package && import_record
             return render json: { error: "There is no current MoSa import waiting for review." }, status: :not_found
           end
@@ -376,6 +369,7 @@ module Api
             payload = row.source_payload.to_h
             payload["preview_row"].to_h.merge("source_row_id" => row.id) if payload["row_kind"] == "matched"
           end
+          matched = PayrollImport::LivePreviewRowState.new(@pay_period).refresh(matched)
 
           {
             matched: matched,

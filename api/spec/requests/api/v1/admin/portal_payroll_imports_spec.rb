@@ -488,4 +488,95 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     end.to raise_error(ArgumentError, /MoSa import review/)
     expect(run.payroll_items.count).to eq(0)
   end
+
+  context "with a variable-pay owner in the files" do
+    let!(:owner) do
+      create(:employee, company: company, first_name: "Owner", last_name: "Example",
+        employment_type: "salary", salary_type: "variable", pay_rate: 200_000)
+    end
+    let(:bytes) do
+      File.binread(build_revel_pdf([ { name: "Example, Avery", regular_hours: 40, regular_pay: 400 },
+        { name: "Example, Owner", regular_hours: 0, regular_pay: 0 } ], period_start: run.start_date, period_end: run.end_date))
+    end
+
+    def owner_row(payload)
+      payload.dig("preview", "matched").find { |row| row["employee_id"] == owner.id }
+    end
+
+    it "saves each owner's pay during review, reopens the review with it, and applies" do
+      data = preview(revision(bytes: bytes))
+      expect(owner_row(data)).to include("period_pay_required" => true, "period_pay_missing" => true, "overwrite_required" => false)
+
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      post "#{url}/payroll_items", params: { employee_id: owner.id, payroll_item: { employee_id: owner.id, salary_override: "4500.00" } }, as: :json
+      expect(response).to have_http_status(:created), response.body
+
+      get "#{url}/current_import"
+      expect(response).to have_http_status(:ok), response.body
+      expect(owner_row(response.parsed_body)).to include(
+        "period_pay_missing" => false, "current_period_pay" => "4500.0", "period_pay_source" => "payroll_worksheet", "overwrite_required" => true
+      )
+      expect(response.parsed_body.dig("portal_source", "selection_id")).to eq(data.dig("portal_source", "selection_id"))
+
+      post "#{url}/apply_import", params: { import_id: data["import_id"], portal_source_id: data.dig("portal_source", "selection_id"), force_overwrite: true }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(4500)
+      expect(run.reload.pending_portal_submission?).to be(false)
+    end
+
+    it "refuses a review's owner-pay save once the review is stale or pay was already entered" do
+      data = preview(revision(bytes: bytes))
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      save = ->(amount, import_id) do
+        post "#{url}/payroll_items", params: { employee_id: owner.id, expected_import_id: import_id,
+          payroll_item: { employee_id: owner.id, salary_override: amount } }, as: :json
+      end
+
+      save.call("4500.00", data["import_id"] + 1)
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["code"]).to eq("stale_import_review")
+      expect(run.payroll_items.find_by(employee: owner)).to be_nil
+
+      save.call("4500.00", data["import_id"])
+      expect(response).to have_http_status(:created), response.body
+      item = run.payroll_items.find_by!(employee: owner)
+
+      patch "#{url}/payroll_items/#{item.id}", params: { expected_import_id: data["import_id"],
+        payroll_item: { salary_override: "9999.00" } }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(item.reload.salary_override).to eq(4500)
+    end
+
+    it "refuses a review's owner-pay save after a newer portal revision arrives" do
+      data = preview(revision(bytes: bytes))
+      revision(rev: 2, bytes: bytes)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      post "#{url}/payroll_items", params: { employee_id: owner.id, expected_import_id: data["import_id"],
+        payroll_item: { employee_id: owner.id, salary_override: "4500.00" } }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(run.payroll_items.find_by(employee: owner)).to be_nil
+    end
+
+    it "counts an amount saved from the review as entered by hand even when it equals earlier workbook pay" do
+      data = preview(revision(bytes: bytes))
+      item = create(:payroll_item, pay_period: run, employee: owner, employment_type: "salary", salary_override: 4500,
+        custom_columns_data: { "period_pay_evidence" => { "source_type" => "mosa_change_workbook" } })
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      patch "#{url}/payroll_items/#{item.id}", params: { expected_import_id: data["import_id"],
+        payroll_item: { salary_override: "4500.00" } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      get "#{url}/current_import"
+      expect(owner_row(response.parsed_body)).to include("period_pay_missing" => false, "period_pay_source" => "payroll_worksheet")
+    end
+
+    it "keeps refusing to apply while an owner has no pay of their own" do
+      data = preview(revision(bytes: bytes))
+      apply(data)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/Pay this period/)
+      expect(run.reload.pending_portal_submission?).to be(true)
+      get "#{url}/current_import"
+      expect(owner_row(response.parsed_body)).to include("period_pay_missing" => true)
+    end
+  end
 end

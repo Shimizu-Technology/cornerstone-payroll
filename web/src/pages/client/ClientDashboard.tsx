@@ -5,6 +5,7 @@ import { CalendarDays, FileBarChart2, FolderOpen, Users } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { PayrollFilesEntry } from '@/components/payroll-submissions/PayrollFilesEntry';
 import { clientDocumentsApi, clientReportsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -77,6 +78,8 @@ export function ClientDashboard(): ReactElement {
         {error && (
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
+
+        <PayrollFilesEntry />
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           <PortalStat
