@@ -23,6 +23,14 @@ RSpec.describe TimeTracking::Client do
     )
   end
 
+  it "refuses practice sources before a job can make any network request" do
+    live = create(:company)
+    practice = create(:company, organization: live.organization, payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "sandbox", migration_source_company: live, migration_rehearsal_status: "ready")
+    source = build(:time_tracking_source, company: practice)
+    expect { client_for(source) }.to raise_error(described_class::Error, /practice copy/)
+  end
+
   describe "AIRE payroll cockpit" do
     let(:source) do
       create(
