@@ -111,7 +111,12 @@ export function templateWageRates(employee: Employee | undefined, payrollItem?: 
     const existingByLabel = new Map(
       (existing || []).map((entry) => [entry.label.trim().toLowerCase(), entry])
     );
-    const defaultPrimaryHours = configuredRates.length > 1 ? 0 : toNumber(payrollItem?.hours_worked ?? 0);
+    // MoSa's single-rate import omits job allocations when all configured jobs
+    // pay the same rate. Keep those saved hours on the profile's primary job;
+    // opening the worksheet must not silently replace them with zeroes.
+    const distinctRates = new Set(configuredRates.map(rate => toNumber(rate.rate)));
+    const sameSavedRate = distinctRates.size === 1 && distinctRates.has(toNumber(payrollItem?.pay_rate));
+    const defaultPrimaryHours = configuredRates.length === 1 || sameSavedRate ? toNumber(payrollItem?.hours_worked ?? 0) : 0;
 
     return configuredRates.map((rate) => {
       const matchedExisting =
