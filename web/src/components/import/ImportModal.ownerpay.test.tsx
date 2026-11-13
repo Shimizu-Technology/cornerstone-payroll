@@ -191,7 +191,7 @@ it('ignores a pay save that finishes after the review was closed and reopened', 
   // The pay-run import reuses one modal instance; the portal mounts a new one each time.
   vi.mocked(payrollIntakeImportsApi.list).mockResolvedValue({ imports: [
     { id: 1, source_type: 'mosa_revel', current: true, status: 'previewed', package_revision: 1 } as PayrollIntakeImportData,
-  ] });
+  ], disposition_targets: [] });
   let finishSave: (value: unknown) => void = () => undefined;
   mocks.createItem.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
   mocks.currentImport.mockResolvedValue(preview([ownerMissing]));
