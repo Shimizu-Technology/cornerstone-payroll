@@ -2069,3 +2069,27 @@ it.each([false, true])('refuses calculation with saved hours on a removed/inacti
   expect((await screen.findAllByText(/Saved hours for Mia Santos use an inactive or removed job/)).length).toBeGreaterThan(0);
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
+
+it('submits the saved legacy job bucket when configured jobs have different labels', async () => {
+  vi.clearAllMocks();
+  const employee = { id: 24, company_id: 7, first_name: 'Mia', last_name: 'Santos', employment_type: 'hourly',
+    pay_rate: 15, pay_frequency: 'biweekly', status: 'active', wage_rates: [
+      { id: 1, label: 'New primary', rate: 15, is_primary: true, active: true },
+      { id: 2, label: 'Server', rate: 15, is_primary: false, active: true },
+    ] } as Employee;
+  const legacy = { label: 'Legacy kitchen', rate: 12, regular_hours: 3,
+    overtime_hours: 1, holiday_hours: 2, pto_hours: 4, is_primary: false, active: true };
+  const period = { ...initialPayPeriod, status: 'draft', payroll_items: [{ id: 1, employee_id: 24,
+    employment_type: 'hourly', pay_rate: 12, hours_worked: 3, overtime_hours: 1, holiday_hours: 2, pto_hours: 4,
+    gross_pay: 126, net_pay: 110, wage_rate_hours: [legacy],
+  }] } as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('region', { name: 'Payroll entry for Mia Santos' });
+  await calculateWithCoverage();
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledOnce());
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['24'].wage_rates).toContainEqual(legacy);
+});

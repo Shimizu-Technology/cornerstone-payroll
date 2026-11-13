@@ -73,3 +73,20 @@ it('detects saved nonzero hours on inactive and removed jobs before calculation'
   expect(unavailableSavedWageRateLabels(employee, { ...item, timekeeping_source: 'correction_reference' })).toEqual([]);
   expect(unavailableSavedWageRateLabels(employee, { ...item, import_source: 'time_tracking:aire' })).toEqual([]);
 });
+
+it.each([true, false])('retains a saved legacy job bucket alongside configured jobs (active=%s)', active => {
+  const employee = { id: 7, employment_type: 'hourly', wage_rates: [
+    { id: 1, label: 'New primary', rate: 15, is_primary: true, active: true },
+    { id: 2, label: 'Server', rate: 15, is_primary: false, active: true },
+  ] } as Employee;
+  const legacy = { label: 'Legacy kitchen', rate: 12, regular_hours: 3,
+    overtime_hours: 1, holiday_hours: 2, pto_hours: 4, is_primary: false, active };
+  const item = { id: 1, employee_id: 7, employment_type: 'hourly', hours_worked: 3, overtime_hours: 1, holiday_hours: 2, pto_hours: 4,
+    pay_rate: 12, wage_rate_hours: [legacy] } as PayrollItem;
+  const rates = buildHoursMap([item], [employee])['7'].wage_rates!;
+  expect(rates).toContainEqual(legacy);
+  expect(rates.reduce((sum, r) => sum + r.regular_hours, 0)).toBe(3);
+  expect(rates.reduce((sum, r) => sum + r.overtime_hours, 0)).toBe(1);
+  expect(rates.reduce((sum, r) => sum + (r.holiday_hours || 0), 0)).toBe(2);
+  expect(rates.reduce((sum, r) => sum + (r.pto_hours || 0), 0)).toBe(4);
+});
