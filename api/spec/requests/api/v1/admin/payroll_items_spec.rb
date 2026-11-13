@@ -34,6 +34,25 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     expect(payroll_item.wage_rate_hours.first).to include("regular_hours" => 26, "rate" => 16.50)
   end
 
+  it "saves an explicit split across a reviewed MoSa item's jobs even when the totals change" do
+    kitchen = create(:employee_wage_rate, employee: employee, label: "Shared Kitchen", rate: 16.50)
+    joint = create(:employee_wage_rate, employee: employee, label: "Joint", rate: 15.50)
+    payroll_item.update!(hours_worked: 0, import_source: "mosa_revel")
+    payroll_item.wage_rate_hours = [ { employee_wage_rate_id: kitchen.id, label: kitchen.label, rate: kitchen.rate, regular_hours: 0 } ]
+    payroll_item.custom_columns_data = payroll_item.custom_columns_data.merge("mosa_wage_rate_choice" => { "employee_wage_rate_id" => kitchen.id })
+    payroll_item.save!
+
+    patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}",
+      params: { payroll_item: { wage_rate_hours: [
+        { employee_wage_rate_id: kitchen.id, label: kitchen.label, rate: kitchen.rate, regular_hours: 10 },
+        { employee_wage_rate_id: joint.id, label: joint.label, rate: joint.rate, regular_hours: 16 }
+      ] } }, as: :json
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(payroll_item.reload.hours_worked).to eq(26)
+    expect(payroll_item.wage_rate_hours.map { |entry| entry["regular_hours"] }).to eq([ 10, 16 ])
+  end
+
   before do
     allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_user).and_return(admin_user)

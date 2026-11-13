@@ -683,6 +683,8 @@ class PayrollItem < ApplicationRecord
     changed_hours = { hours_worked: "regular_hours", overtime_hours: "overtime_hours",
       holiday_hours: "holiday_hours", pto_hours: "pto_hours" }.select { |field, _key| will_save_change_to_attribute?(field) }
     return if changed_hours.empty? || wage_rate_hours.empty?
+    # An explicit allocation edit sends the job entries and their totals together.
+    return if wage_rate_hours_assigned_in_this_save?
     if wage_rate_hours.many?
       raise ArgumentError, "Enter hours against each job for this employee, then calculate again."
     end
@@ -690,6 +692,12 @@ class PayrollItem < ApplicationRecord
     entry = wage_rate_hours.first
     changed_hours.each { |field, key| entry[key] = public_send(field).to_f }
     self.wage_rate_hours = [ entry ]
+  end
+
+  def wage_rate_hours_assigned_in_this_save?
+    saved = attribute_in_database("custom_columns_data")
+    saved = saved.is_a?(Hash) ? saved["wage_rate_hours"] || saved[:wage_rate_hours] : nil
+    Array(saved).as_json != wage_rate_hours.as_json
   end
 
   # Calculate and store all values

@@ -448,8 +448,13 @@ module PayrollImport
 
       employee.employee_payroll_fields.active.effective_on(pay_period.pay_date).includes(:payroll_field_definition).any? do |assignment|
         definition = assignment.payroll_field_definition
-        assignment.employee_loan_id.nil? && definition.active? && definition.category == "loan" &&
+        # A $1 probe rounds small percentages to zero, so check the configured percentage.
+        configured = if definition.amount_type == "percentage"
+          (assignment.percentage.presence || definition.default_percentage || 0).to_d.positive?
+        else
           assignment.effective_amount_for(1).positive?
+        end
+        assignment.employee_loan_id.nil? && definition.active? && definition.category == "loan" && configured
       end
     end
 
