@@ -26,6 +26,13 @@ RSpec.describe PayrollImport::ImportService do
       expect(pay_period.pay_period_excluded_employees.pluck(:employee_id)).to eq([ owner.id ])
     end
 
+    it "leaves out an active owner who is not on this period's roster" do
+      owner.update!(hire_date: pay_period.end_date + 1.day)
+      preview = service.preview(pdf_records: [], excel_records: [])
+      expect(preview[:matched]).to be_empty
+      expect { service.apply!(matched: preview[:matched]) }.not_to raise_error
+    end
+
     it "does not add base-salary rows to a special run that excludes base salary" do
       pay_period.update!(includes_base_salary: false)
       expect(service.preview(pdf_records: [], excel_records: [])[:matched]).to be_empty

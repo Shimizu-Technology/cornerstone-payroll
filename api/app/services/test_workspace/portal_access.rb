@@ -33,15 +33,33 @@ module TestWorkspace
 
       invitation_id = user.clerk_invitation_id
       result = service.revoke_invitation(invitation_id)
-      if result[:success]
-        User.where(id: user.id, clerk_invitation_id: invitation_id).update_all(clerk_invitation_id: nil, updated_at: Time.current)
-        user.reload
+      if result[:success] || invitation_already_closed?(result)
+        clear_invitation!(user, invitation_id)
       else
         Rails.logger.error("[PracticePortalAccess] Invitation revocation failed for user=#{user.id}")
       end
+    rescue StagingOutboundPolicy::Blocked
+      # Staging refuses this Clerk target, so a retry every minute can never succeed.
+      Rails.logger.warn("[PracticePortalAccess] Staging blocked invitation revocation for user=#{user.id}")
+      clear_invitation!(user, invitation_id)
     rescue StandardError => error
       # Retain the invitation id so the next sweep can retry independently.
       Rails.logger.error("[PracticePortalAccess] Invitation revocation failed for user=#{user.id}: #{error.class}")
+    end
+
+    # Clerk answers 4xx for an invitation that is already revoked, accepted or
+    # expired, or that no longer exists. Retrying those every minute never helps.
+    # Auth, timeout and rate-limit responses are kept for the next sweep.
+    def self.invitation_already_closed?(result)
+      status = result[:status].to_i
+      status.between?(400, 499) && ![ 401, 403, 408, 429 ].include?(status)
+    end
+
+    def self.clear_invitation!(user, invitation_id)
+      return if invitation_id.blank?
+
+      User.where(id: user.id, clerk_invitation_id: invitation_id).update_all(clerk_invitation_id: nil, updated_at: Time.current)
+      user.reload
     end
   end
 end

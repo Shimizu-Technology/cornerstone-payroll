@@ -140,4 +140,38 @@ RSpec.describe "Practice portal identity" do
     expect(client.reload).to be_active
     expect(client.clerk_invitation_id).to eq("inv_replacement")
   end
+
+  it "stops retrying an invitation Clerk says is already closed, but keeps retrying rate limits" do
+    client.update_columns(clerk_invitation_id: "inv_gone", invitation_status: "pending")
+    workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
+    service = instance_double(ClerkInvitationService, configured?: true)
+    allow(ClerkInvitationService).to receive(:new).and_return(service)
+    expect(service).to receive(:revoke_invitation).with("inv_gone").and_return(success: false, error: "rate limited", status: 429)
+    ExpirePracticePortalAccessJob.perform_now
+    expect(client.reload.clerk_invitation_id).to eq("inv_gone")
+    expect(service).to receive(:revoke_invitation).with("inv_gone").and_return(success: false, error: "not found", status: 404)
+    ExpirePracticePortalAccessJob.perform_now
+    expect(client.reload.clerk_invitation_id).to be_nil
+  end
+
+  it "clears an invitation staging refuses to revoke instead of retrying every minute" do
+    client.update_columns(clerk_invitation_id: "inv_staging", invitation_status: "pending")
+    workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
+    service = instance_double(ClerkInvitationService, configured?: true)
+    allow(ClerkInvitationService).to receive(:new).and_return(service)
+    expect(service).to receive(:revoke_invitation).with("inv_staging").and_raise(StagingOutboundPolicy::Blocked)
+    ExpirePracticePortalAccessJob.perform_now
+    expect(client.reload.clerk_invitation_id).to be_nil
+  end
+
+  it "keeps sweeping other users when one user's deactivation fails" do
+    other = create(:user, company: workspace, practice_company: workspace, role: "client")
+    CompanyAssignment.create!(user: other, company: workspace, granted_by: admin)
+    client
+    workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
+    allow(TestWorkspace::PortalAccess).to receive(:deactivate_if_closed!).and_call_original
+    allow(TestWorkspace::PortalAccess).to receive(:deactivate_if_closed!).with(having_attributes(id: [ client.id, other.id ].min)).and_raise(ActiveRecord::LockWaitTimeout)
+    expect { ExpirePracticePortalAccessJob.perform_now }.not_to raise_error
+    expect(User.find([ client.id, other.id ].max)).not_to be_active
+  end
 end
