@@ -66,4 +66,17 @@ RSpec.describe "Api::V1::Admin migration rehearsal safety", type: :request do
     expect(response).to have_http_status(:forbidden)
     expect(Form500Filing.where(pay_period: pay_period)).to be_empty
   end
+
+  it "blocks shared tax-rule writes while a practice copy is selected" do
+    allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_user).and_return(admin)
+    allow_any_instance_of(Api::V1::Admin::BaseController).to receive(:current_company_id).and_return(rehearsal.id)
+    expect {
+      post "/api/v1/admin/tax_configs", params: { tax_year: 2040 }
+    }.not_to change(AnnualTaxConfig, :count)
+    expect(response).to have_http_status(:forbidden)
+    post "/api/v1/admin/tax_configs/0/activate"
+    expect(response).to have_http_status(:forbidden)
+    patch "/api/v1/admin/tax_configs/0/brackets/single", params: { brackets: [] }
+    expect(response).to have_http_status(:forbidden)
+  end
 end
