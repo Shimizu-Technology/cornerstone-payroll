@@ -4,7 +4,7 @@ module TestWorkspace
   class Create
     ACKNOWLEDGEMENT = "CREATE TEST WORKSPACE"
     EXPIRATION_DAYS = [ 30, 60, 90, 180 ].freeze
-    COMPANY_FIELDS = MigrationRehearsal::Create::COMPANY_FIELDS
+    COMPANY_FIELDS = (MigrationRehearsal::Create::COMPANY_FIELDS + %w[client_payroll_approval_required check_memo_template payroll_intake_source_types]).freeze
     ACCESS_LEVELS = CompanyAssignment::WORKSPACE_ACCESS_LEVELS
 
     def initialize(source_company:, actor:, acknowledgement:, assignments:, name: nil, copy_mode: "all_committed",
@@ -119,7 +119,7 @@ module TestWorkspace
           exclusions: payload.fetch(:warnings)
         },
         auto_create_fit_check: false,
-        payroll_intake_source_types: []
+        payroll_intake_source_types: source_company.payroll_intake_source_types
       ))
     end
 

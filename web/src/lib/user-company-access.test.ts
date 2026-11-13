@@ -20,6 +20,12 @@ describe('user company access', () => {
     expect(assignmentCompanyIdsForRole('client', [1, 2], [production, testWorkspace])).toEqual([1]);
   });
 
+  it('allows one ready practice copy for a separate client login', () => {
+    const ready = { ...testWorkspace, test_workspace_purpose: 'sandbox', migration_rehearsal_status: 'ready' } as CompanyListItem;
+    expect(assignmentCompanyIdsForRole('client', [2], [production, ready])).toEqual([2]);
+    expect(assignmentCompanyIdsForRole('client', [2], [production, { ...ready, test_workspace_expired: true }])).toEqual([]);
+  });
+
   it('preserves test workspace choices for staff and clears roles without assignments', () => {
     expect(assignmentCompanyIdsForRole('accountant', [1, 2], [production, testWorkspace])).toEqual([1, 2]);
     expect(assignmentCompanyIdsForRole('admin', [1, 2], [production, testWorkspace])).toEqual([]);

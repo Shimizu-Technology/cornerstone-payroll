@@ -51,6 +51,8 @@ module TrainingReplay
         baseline_sources = baseline_sources_before(practice_sources.first)
         baseline_sources.each { |source| copy_baseline_period!(source, maps) }
         practice_sources.each { |source| copy_practice_period!(source, maps) }
+        TestWorkspace::OpeningYtdCloner.new(source_company: source_company, company: company, actor: actor,
+          employees: maps.fetch(:employees), cutoff: practice_sources.first, before_cutoff: true).call
         verify_copy!(baseline_sources, practice_sources)
 
         company.update!(migration_rehearsal_status: "ready", migration_rehearsal_completed_at: Time.current)
@@ -107,6 +109,7 @@ module TrainingReplay
           employee: maps.fetch(:employees).fetch(source_item.employee_id),
           **PAYROLL_ITEM_CLEAR_COLUMNS
         )
+        TestWorkspace::PayrollCopyVerification.call(source_item, target_item)
         copy_baseline_children!(source_item, target_item, maps)
       end
       target
@@ -146,6 +149,10 @@ module TrainingReplay
         company: company,
         company_pay_schedule: source.company_pay_schedule_id && maps.fetch(:pay_schedules)[source.company_pay_schedule_id],
         company_workweek: source.company_workweek_id && maps.fetch(:workweeks)[source.company_workweek_id],
+        promotion_source_pay_period_id: nil,
+        promotion_payment_disposition: nil,
+        promoted_payment_prepared_at: nil,
+        promoted_payment_prepared_by_id: nil,
         status: status,
         parallel_run: true,
         correction_status: nil,

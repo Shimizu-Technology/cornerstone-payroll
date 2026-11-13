@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_13_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -4420,6 +4420,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
     t.datetime "last_active_at"
     t.datetime "last_login_at"
     t.string "last_session_id_digest"
+    t.bigint "practice_company_id"
     t.string "name", null: false
     t.bigint "organization_id", null: false
     t.boolean "platform_owner", default: false, null: false
@@ -4433,6 +4434,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
     t.index [ "platform_owner" ], name: "index_users_on_single_platform_owner", unique: true, where: "(platform_owner = true)"
     t.index [ "workos_id" ], name: "index_users_on_workos_id", unique: true
     t.check_constraint "NOT platform_owner OR role = 5 AND active = true AND lower(email::text) = 'shimizutechnology@gmail.com'::text", name: "users_platform_owner_identity"
+    t.index [ "practice_company_id" ], name: "index_users_on_practice_company_id"
+    t.check_constraint "practice_company_id IS NULL OR company_id = practice_company_id AND role = 4", name: "users_practice_scope"
   end
 
   create_table "w2_filing_readinesses", force: :cascade do |t|
@@ -5059,4 +5062,5 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
   add_foreign_key "payroll_submission_imports", "payroll_submissions"
   add_foreign_key "payroll_submission_imports", "payroll_submissions", column: "current_submission_id"
   add_foreign_key "payroll_submission_imports", "users", column: "selected_by_id"
+  add_foreign_key "users", "companies", column: "practice_company_id"
 end

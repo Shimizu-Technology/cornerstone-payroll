@@ -144,6 +144,63 @@ RSpec.describe "General test workspaces" do
     expect(TestWorkspaceAccessPolicy.allowed?(user: actor, company: workspace, request_method: "PATCH")).to be(true)
   end
 
+  %w[through_pay_period exclude_recent all_committed].each do |mode|
+    it "copies promoted histories with test lineage in #{mode} mode" do
+      rehearsal = create(:company, organization: organization, payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "migration_rehearsal", migration_source_company: source_company, migration_rehearsal_status: "ready",
+        migration_source_batch: create(:historical_import_batch, company: source_company, status: "locked", locked_at: Time.current, importer_version: "quickbooks-online-payroll-v4"))
+      rehearsal_period = create(:pay_period, company: rehearsal, start_date: old_period.start_date,
+        end_date: old_period.end_date, pay_date: old_period.pay_date)
+      old_period.update!(promotion_source_pay_period: rehearsal_period, promotion_payment_disposition: "process_in_cornerstone",
+        promoted_payment_prepared_at: Time.current, promoted_payment_prepared_by: actor)
+      workspace = create_workspace(copy_mode: mode, cutoff_pay_period_id: old_period.id)
+      TestWorkspace::Cloner.new(company: workspace, actor: actor).call
+      baseline = workspace.pay_periods.find_by!(test_workspace_source_pay_period_id: old_period.id)
+      expect(baseline).to have_attributes(promotion_source_pay_period_id: nil, promotion_payment_disposition: nil,
+        promoted_payment_prepared_at: nil, promoted_payment_prepared_by_id: nil, status: "approved", parallel_run: true)
+      expected = mode == "all_committed" ? 3 : 1
+      expect(workspace.pay_periods.count).to eq(expected)
+      expect(old_period.reload.promotion_source_pay_period).to eq(rehearsal_period)
+    end
+  end
+
+  it "copies exact opening YTD and the latest revision once without duplicating later payroll" do
+    batch = create(:historical_import_batch, company: source_company, status: "locked", locked_at: Time.current)
+    bootstrap = HistoricalClientBootstrap.create!(company: source_company, historical_import_batch: batch,
+      status: "applied", plan_digest: "opening", applied_at: Time.current, applied_by: actor)
+    first = HistoricalYtdBridge.create!(company: source_company, historical_import_batch: batch, historical_client_bootstrap: bootstrap,
+      status: "applied", plan_digest: "opening", applied_at: 1.day.ago, applied_by: actor, apply_acknowledgement: "APPLY HISTORICAL YTD",
+      preview_summary: { through_period_end: "2026-07-10", through_pay_date: "2026-07-17" })
+    latest = HistoricalYtdBridge.create!(first.attributes.except("id", "created_at", "updated_at").merge(
+      revision: 2, supersedes_historical_ytd_bridge: first, applied_at: Time.current, plan_digest: "revision2"))
+    [ first, latest ].each_with_index do |bridge, n|
+      HistoricalEmployeeYtdBalance.create!(company: source_company, employee: employee, historical_ytd_bridge: bridge,
+        tax_year: 2026, through_period_end: "2026-07-10", through_pay_date: "2026-07-17", gross_pay: 199_000 + n,
+        social_security_taxable_wages: 184_000, medicare_taxable_wages: 199_000 + n, federal_income_tax: 24_000, loans: 250)
+    end
+    workspace = create_workspace(copy_mode: "exclude_recent", excluded_payrolls: 2)
+    TestWorkspace::Cloner.new(company: workspace, actor: actor).call
+    copied = workspace.employees.sole
+    expect(copied.historical_employee_ytd_balances.count).to eq(1)
+    expect(copied.historical_employee_ytd_balances.sole.ytd_aggregate_totals).to eq(latest.historical_employee_ytd_balances.sole.ytd_aggregate_totals)
+    expect(copied.ytd_totals_before(year: 2026, pay_date: first_recent.pay_date, pay_period_id: 2**62)).to eq(
+      employee.ytd_totals_before(year: 2026, pay_date: first_recent.pay_date, pay_period_id: 0))
+    expect(workspace.reload.test_workspace_manifest.fetch("opening_ytd").sole).to include("source_bridge_id" => latest.id, "source_revision" => 2)
+    expect(workspace.historical_import_batches.sole.historical_import_source_files).to be_empty
+  end
+
+  it "fails closed when the selected cutoff precedes opening YTD" do
+    batch = create(:historical_import_batch, company: source_company, status: "locked", locked_at: Time.current)
+    bootstrap = HistoricalClientBootstrap.create!(company: source_company, historical_import_batch: batch, plan_digest: "opening")
+    HistoricalYtdBridge.create!(company: source_company, historical_import_batch: batch, historical_client_bootstrap: bootstrap,
+      status: "applied", plan_digest: "opening", applied_at: Time.current, applied_by: actor, apply_acknowledgement: "APPLY HISTORICAL YTD",
+      preview_summary: { through_period_end: "2026-09-18", through_pay_date: "2026-09-25" })
+    workspace = create_workspace(copy_mode: "exclude_recent", excluded_payrolls: 2)
+    expect { TestWorkspace::Cloner.new(company: workspace, actor: actor).call }.to raise_error(ArgumentError, /cutoff/)
+    expect(workspace.reload.migration_rehearsal_status).to eq("failed")
+    expect(workspace.employees).to be_empty
+  end
+
   private
 
   def source_period(start_date, end_date, pay_date, gross, check_number)
@@ -152,11 +209,12 @@ RSpec.describe "General test workspaces" do
     period
   end
 
-  def create_workspace(copy_mode:, excluded_payrolls: 2)
+  def create_workspace(copy_mode:, excluded_payrolls: 2, cutoff_pay_period_id: nil)
     preview = TestWorkspace::Preview.new(
       source_company: source_company,
       copy_mode: copy_mode,
-      excluded_payrolls: excluded_payrolls
+      excluded_payrolls: excluded_payrolls,
+      cutoff_pay_period_id: cutoff_pay_period_id
     )
     periods = preview.selected_periods
     source_company.test_workspaces.create!(

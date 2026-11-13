@@ -19,6 +19,7 @@ class FinanceBook < ApplicationRecord
   validates :name, uniqueness: { scope: :organization_id, conditions: -> { where.not(kind: "personal") } }, unless: :personal?
   validates :kind, inclusion: { in: KINDS }
   validate :company_belongs_to_organization
+  validate :source_company_is_live
   validate :client_book_has_company
   validate :personal_book_ownership
 
@@ -41,6 +42,10 @@ class FinanceBook < ApplicationRecord
   end
 
   private
+
+  def source_company_is_live
+    errors.add(:company, "practice copies cannot have real financial books") if company&.test_workspace?
+  end
 
   def company_belongs_to_organization
     return if company.blank? || organization.blank? || company.organization_id == organization_id

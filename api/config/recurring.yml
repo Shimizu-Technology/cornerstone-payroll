@@ -10,6 +10,11 @@
 #     schedule: at 5am every day
 
 production:
+  expire_practice_portal_access:
+    class: ExpirePracticePortalAccessJob
+    queue: default
+    schedule: every minute
+
   retry_portal_upload_cleanups:
     class: PortalUploadCleanupJob
     queue: default

@@ -131,3 +131,9 @@ it('opens pay-period submissions on the period page for that client', async () =
   expect(destination.split('?')[0]).toBe('/companies/2/payroll-submissions/7');
   expect(new URLSearchParams(destination.split('?')[1]).get('inbox')).toBe('/app/client-inbox');
 });
+
+it('clearly labels practice work before opening it', async () => {
+  mocks.list.mockResolvedValue({ data: [{ ...row('message'), practice_copy: true }], meta: { next_cursor: null } });
+  render(<MemoryRouter><ClientInbox /></MemoryRouter>);
+  expect(await screen.findByText('Second client · Practice copy · Message')).toBeTruthy();
+});

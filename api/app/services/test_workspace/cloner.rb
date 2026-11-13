@@ -28,6 +28,8 @@ module TestWorkspace
           loan_balance_on: loan_balance_on(source_periods)
         ).call
         source_periods.each { |source| copy_baseline_period!(source, maps) }
+        OpeningYtdCloner.new(source_company: source_company, company: company, actor: actor,
+          employees: maps.fetch(:employees), cutoff: source_periods.max_by(&:pay_date)).call
         verify_copy!(source_periods)
 
         company.update!(migration_rehearsal_status: "ready", migration_rehearsal_completed_at: Time.current)
@@ -80,6 +82,7 @@ module TestWorkspace
           employee: maps.fetch(:employees).fetch(source_item.employee_id),
           **PAYROLL_ITEM_CLEAR_COLUMNS
         )
+        TestWorkspace::PayrollCopyVerification.call(source_item, target_item)
         copy_item_children!(source_item, target_item, maps)
       end
       source.pay_period_excluded_employees.order(:id).each do |excluded|
@@ -98,6 +101,10 @@ module TestWorkspace
         company: company,
         company_pay_schedule: source.company_pay_schedule_id && maps.fetch(:pay_schedules)[source.company_pay_schedule_id],
         company_workweek: source.company_workweek_id && maps.fetch(:workweeks)[source.company_workweek_id],
+        promotion_source_pay_period_id: nil,
+        promotion_payment_disposition: nil,
+        promoted_payment_prepared_at: nil,
+        promoted_payment_prepared_by_id: nil,
         status: "approved",
         parallel_run: true,
         correction_status: nil,

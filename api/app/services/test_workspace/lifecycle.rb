@@ -19,6 +19,7 @@ module TestWorkspace
 
         timestamp = Time.current
         company.update!(active: false, test_workspace_archived_at: timestamp)
+        PortalAccess.deactivate_closed!(company)
         audit!("test_workspace#archive", archived_at: timestamp)
       end
       company
