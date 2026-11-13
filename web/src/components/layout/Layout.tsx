@@ -20,7 +20,8 @@ export function Layout() {
   const { activeCompany, activeCompanyId, activeOrganizationName, activeOrganizationId } = useCompany();
   const location = useLocation();
   const financePage = location.pathname.startsWith('/tools/finance') || location.pathname.startsWith('/tools/invoices') || location.pathname.startsWith('/tools/expenses');
-  const readOnlyWorkspace = !canWriteCompany(activeCompany);
+  const practicePortal = activeCompany?.practice_portal === true;
+  const readOnlyWorkspace = !practicePortal && !canWriteCompany(activeCompany);
   const outlet = useOutlet();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const pendingMobileCommand = useRef<'all' | 'companies' | null>(null);
@@ -184,9 +185,11 @@ export function Layout() {
                 <FlaskConical className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                 <div>
                   <span className="font-semibold">
-                    {readOnlyWorkspace ? 'Read-only workspace' : activeCompany.test_workspace_purpose_label || 'Test workspace'} — no live payroll.
+                    Practice copy — {readOnlyWorkspace ? 'read-only' : 'no live payroll'}.
                   </span>{' '}
-                  {readOnlyWorkspace
+                  {practicePortal
+                    ? 'You can upload files, exchange messages, and review or approve drafts here. These practice records stay separate from real clients.'
+                    : readOnlyWorkspace
                     ? companyReadOnlyMessage(activeCompany)
                     : 'Changes stay in this test workspace. Payroll cannot be committed. Only VOID-marked test checks can be previewed and downloaded; real checks, payments, communications, and filing-ready actions remain blocked.'}
                   {activeCompany.migration_source_company_name && (

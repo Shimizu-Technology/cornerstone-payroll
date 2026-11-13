@@ -49,6 +49,7 @@ class Invoice < ApplicationRecord
   validate :recipient_must_belong_to_organization
   validate :billing_profile_must_belong_to_organization
   validate :company_must_belong_to_organization
+  validate :source_company_is_live
   validate :recurrence_must_belong_to_organization
   validate :finance_relations_must_belong_to_book
   validate :due_date_cannot_precede_invoice_date
@@ -270,6 +271,10 @@ class Invoice < ApplicationRecord
   end
 
   private
+
+  def source_company_is_live
+    errors.add(:company, "practice copies cannot be used for real invoices") if company&.test_workspace?
+  end
 
   def finance_book_parent
     invoice_recurrence || invoice_billing_profile || invoice_recipient

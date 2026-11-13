@@ -52,7 +52,7 @@ class ClerkInvitationService
     if response.is_a?(Net::HTTPSuccess)
       { success: true }
     else
-      { success: false, error: extract_error_message(response) }
+      { success: false, error: extract_error_message(response), status: response.code.to_i }
     end
   rescue Timeout::Error, Errno::ECONNREFUSED => e
     { success: false, error: e.message }

@@ -342,7 +342,7 @@ export function Users() {
             key={company.id}
             className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600"
           >
-            {company.name}{company.test_workspace ? ` · ${company.workspace_access_level?.replace('_', ' ') || 'operator'}` : ''}
+            {company.name}{company.test_workspace ? user.role === 'client' ? ' · Practice copy only' : ` · ${company.workspace_access_level?.replace('_', ' ') || 'operator'}` : ''}
           </span>
         ))}
       </div>
@@ -356,7 +356,7 @@ export function Users() {
     summaryLabel?: string
   ) => {
     const assignableCompanies = role === 'client'
-      ? availableCompanies.filter(company => !isTestWorkspaceCompany(company))
+      ? availableCompanies.filter(company => !isTestWorkspaceCompany(company) || (company.test_workspace_purpose === 'sandbox' && company.migration_rehearsal_status === 'ready' && company.active !== false && !company.test_workspace_read_only && !company.test_workspace_expired && !company.test_workspace_archived_at))
       : availableCompanies;
     if (companiesLoadError && availableCompanies.length === 0) {
       return (
@@ -381,6 +381,7 @@ export function Users() {
 
     return (
       <>
+        {role === 'client' && <p className="mb-2 text-sm text-neutral-600">For practice, use a separate email and choose one practice copy. This login cannot access real clients and is deactivated when the copy is archived or expires.</p>}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           {assignableCompanies.map(company => {
             const testWorkspace = isTestWorkspaceCompany(company);
@@ -396,13 +397,19 @@ export function Users() {
                 <input
                   type="checkbox"
                   checked={selectedIds.includes(company.id)}
-                  onChange={() => toggleCompanySelection(company.id, setSelectedIds)}
+                  onChange={() => {
+                    if (role !== 'client') return toggleCompanySelection(company.id, setSelectedIds);
+                    if (testWorkspace) setSelectedIds(selectedIds.includes(company.id) ? [] : [company.id]);
+                    else setSelectedIds(current => current.filter(id => !availableCompanies.find(c => c.id === id && isTestWorkspaceCompany(c))).includes(company.id)
+                      ? current.filter(id => id !== company.id)
+                      : [...current.filter(id => !availableCompanies.find(c => c.id === id && isTestWorkspaceCompany(c))), company.id]);
+                  }}
                   className="h-4 w-4 text-primary-600 rounded border-neutral-300 focus:ring-primary-500"
                 />
                 <div className="min-w-0">
                   <p className="font-medium text-neutral-900 truncate">{company.name}</p>
                   <p className={`text-xs ${testWorkspace ? 'font-medium text-amber-700' : 'text-neutral-600'}`}>
-                    {testWorkspace ? `${company.test_workspace_purpose_label || 'Test workspace'} · operator access` : `${company.active_employees} employees`}
+                    {testWorkspace ? role === 'client' ? 'Practice copy · separate client login only' : `${company.test_workspace_purpose_label || 'Test workspace'} · operator access` : `${company.active_employees} employees`}
                   </p>
                 </div>
               </label>

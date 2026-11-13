@@ -72,6 +72,8 @@ module TimeTracking
     end
 
     def initialize(source, delegation: nil, actor: nil, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
+      raise Error, "External time tracking is unavailable in a practice copy" if source.company&.test_workspace?
+
       @source = source
       @delegation = delegation
       @actor = actor

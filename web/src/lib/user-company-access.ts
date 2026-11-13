@@ -15,6 +15,10 @@ export function assignmentCompanyIdsForRole(
   if (!needsClientAssignment(role)) return [];
   if (role !== 'client') return selectedIds;
 
+  if (selectedIds.length === 1 && companies.some(company => company.id === selectedIds[0] &&
+    company.test_workspace_purpose === 'sandbox' && company.migration_rehearsal_status === 'ready' &&
+    company.active !== false && !company.test_workspace_read_only && !company.test_workspace_expired && !company.test_workspace_archived_at)) return selectedIds;
+
   const productionCompanyIds = new Set(
     companies.filter(company => !isTestWorkspaceCompany(company)).map(company => company.id)
   );

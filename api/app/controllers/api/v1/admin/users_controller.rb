@@ -47,6 +47,18 @@ module Api
           user.invited_at = Time.current
           user.name = user.email.split("@").first.titleize if user.name.blank?
 
+          if user.client? && company_ids_provided
+            selected = Company.where(id: normalize_company_ids(company_ids))
+            if selected.any?(&:test_workspace?)
+              unless selected.one? && assignable_company_ids.include?(selected.first.id) && selected.first.sandbox?
+                user.errors.add(:base, "Choose one practice copy for a separate practice-only login")
+                raise ActiveRecord::RecordInvalid, user
+              end
+              user.practice_company = selected.first
+              user.company = selected.first
+            end
+          end
+
           ActiveRecord::Base.transaction do
             user.save!
             sync_company_assignments!(user, company_ids: company_ids, role: user.role, company_ids_provided: company_ids_provided)
@@ -94,8 +106,8 @@ module Api
           ActiveRecord::Base.transaction do
             @user.assign_attributes(permitted)
             @user.role = requested_role if role_provided
-            @user.save!
             sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
+            @user.save!
             @user.association(:company_assignments).reset
             record_user_audit!("updated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
@@ -114,6 +126,8 @@ module Api
             record_user_audit!("activated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
           render json: { data: user_json(@user) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/users/:id/deactivate
@@ -169,6 +183,10 @@ module Api
 
         # POST /api/v1/admin/users/:id/resend_invitation
         def resend_invitation
+          if @user.practice_company_id? && !@user.practice_portal_open?
+            return render json: { error: "Restore the practice copy before inviting its client login" }, status: :unprocessable_entity
+          end
+
           unless @user.invitation_pending?
             return render json: { error: "User has already accepted their invitation" }, status: :unprocessable_entity
           end
@@ -239,6 +257,10 @@ module Api
           return unless company_ids_provided
 
           normalized_company_ids = normalize_company_ids(company_ids)
+          if user.practice_company_id? && normalized_company_ids != [ user.practice_company_id ]
+            user.errors.add(:base, "A practice-only login must stay assigned only to its practice copy")
+            raise ActiveRecord::RecordInvalid, user
+          end
 
           unauthorized_ids = normalized_company_ids - assignable_company_ids
           if unauthorized_ids.any?

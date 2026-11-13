@@ -6,11 +6,11 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Layout } from './Layout';
 
-const scope = vi.hoisted(() => ({ organization: 1, company: 1 }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, name: 'Synthetic client', active: true }, activeCompanyId: scope.company, activeOrganizationId: scope.organization }) }));
+const scope = vi.hoisted(() => ({ organization: 1, company: 1, practicePortal: false }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, name: 'Synthetic client', active: true, test_workspace: scope.practicePortal, practice_portal: scope.practicePortal, workspace_can_write: !scope.practicePortal }, activeCompanyId: scope.company, activeOrganizationId: scope.organization }) }));
 vi.mock('./CommandPalette', () => ({ CommandPalette: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Command palette"><input autoFocus aria-label="Command search" /></div> : null }));
 vi.mock('./Sidebar', () => ({ Sidebar: ({ onNavigate, onOpenCommandPalette }: { onNavigate?: () => void; onOpenCommandPalette?: () => void }) => <nav><Link to="/employees" onClick={onNavigate}>Employees</Link><button>Client settings</button><button onClick={onOpenCommandPalette}>Command menu</button></nav> }));
-beforeEach(() => { scope.organization = 1; scope.company = 1; vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function (this: HTMLElement) { return this.parentElement; }); });
+beforeEach(() => { scope.organization = 1; scope.company = 1; scope.practicePortal = false; vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function (this: HTMLElement) { return this.parentElement; }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 function view(): React.ReactElement {
@@ -80,4 +80,12 @@ it('retains the global inbox across client switches but remounts it across organ
   scope.organization = 2;
   result.rerender(scopedView());
   expect((screen.getByLabelText('Inbox draft') as HTMLInputElement).value).toBe('');
+});
+
+it('labels a practice client portal and explains its permitted actions', () => {
+  scope.practicePortal = true;
+  render(view());
+  expect(screen.getByText('Practice copy — no live payroll.')).toBeTruthy();
+  expect(screen.getByText(/You can upload files, exchange messages, and review or approve drafts here/)).toBeTruthy();
+  expect(screen.queryByText(/You have read-only access/)).toBeNull();
 });

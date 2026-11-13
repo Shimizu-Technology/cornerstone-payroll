@@ -32,6 +32,7 @@ RSpec.describe "General test workspace administration", type: :request do
   after { clear_enqueued_jobs }
 
   it "previews and creates a general workspace with a chosen copy boundary" do
+    source_company.update!(payroll_intake_source_types: [ "mosa_revel" ], client_payroll_approval_required: true)
     get "/api/v1/admin/companies/#{source_company.id}/test_workspace_preview", params: {
       copy_mode: "exclude_recent",
       excluded_payrolls: 2
@@ -54,6 +55,10 @@ RSpec.describe "General test workspace administration", type: :request do
     expect(response).to have_http_status(:accepted)
     workspace = Company.find(response.parsed_body.dig("company", "id"))
     expect(workspace).to have_attributes(name: "Spike Anything Goes Test", test_workspace_purpose: "sandbox")
+    expect(workspace.payroll_intake_source_types).to eq([ "mosa_revel" ])
+    expect(workspace.client_payroll_approval_required).to be(true)
+    expect(workspace.auto_create_fit_check).to be(false)
+    expect(workspace.time_tracking_sources).to be_empty
     expect(workspace.test_workspace_manifest.fetch("copied_source_pay_period_ids").length).to eq(1)
     expect(workspace.company_assignments.sole).to have_attributes(user: accountant, workspace_access_level: "operator")
     expect(TestWorkspace::CloneJob).to have_been_enqueued.with(workspace.id, admin.id)
