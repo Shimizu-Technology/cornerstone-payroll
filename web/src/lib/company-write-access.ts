@@ -4,6 +4,16 @@ export function isTestWorkspaceCompany(company: CompanyListItem | null | undefin
   return company?.test_workspace ?? company?.payroll_environment === 'migration_rehearsal';
 }
 
+// The practice-portal flag is scoped by the server to the client's own copy.
+// Client profile changes use client endpoints and their approval flow, not the
+// staff payroll permission represented by workspace_can_write.
+export function canWriteClientEmployeeProfile(company: CompanyListItem | null | undefined): boolean {
+  if (!company?.practice_portal) return canWriteCompany(company);
+  return company.active !== false && !company.test_workspace_read_only && !company.test_workspace_expired
+    && !company.test_workspace_archived_at && !company.test_workspace_sealed_at
+    && company.test_workspace_purpose !== 'backup_snapshot';
+}
+
 // A test workspace needs the server's effective permission, not a staff role.
 // Missing optional data for ordinary clients preserves the existing UI contract;
 // authoritative server guards still govern every write.

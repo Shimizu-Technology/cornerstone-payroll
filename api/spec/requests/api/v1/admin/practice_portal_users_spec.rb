@@ -102,6 +102,16 @@ RSpec.describe "Practice portal invitations and assignments", type: :request do
     expect(response).to have_http_status(:forbidden)
     post "/api/v1/client/departments", headers: { "X-Company-Id" => workspace.id.to_s }, params: { department: { name: "Practice kitchen" } }
     expect(response).to have_http_status(:created), response.body
+    department_id = response.parsed_body.dig("data", "id")
+    patch "/api/v1/client/employees/#{employee.id}", headers: { "X-Company-Id" => workspace.id.to_s },
+      params: { employee: { city: "Practice city", department_id: department_id } }
+    expect(response).to have_http_status(:ok), response.body
+    expect(employee.reload.city).to eq("Practice city")
+    expect(employee.department_id).to eq(department_id)
+    patch "/api/v1/client/employees/#{employee.id}", headers: { "X-Company-Id" => source.id.to_s },
+      params: { employee: { city: "Forbidden city" } }
+    expect(response).to have_http_status(:forbidden)
+    expect(employee.reload.city).to eq("Practice city")
     post "/api/v1/client/departments", headers: { "X-Company-Id" => source.id.to_s }, params: { department: { name: "Forbidden kitchen" } }
     expect(response).to have_http_status(:forbidden)
   end
