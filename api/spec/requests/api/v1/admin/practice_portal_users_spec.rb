@@ -146,6 +146,8 @@ RSpec.describe "Practice portal invitations and assignments", type: :request do
   end
 
   it "allows the practice portal surfaces only in its own copy" do
+    # Payroll files are offered only to copies configured for MoSa/Revel intake.
+    workspace.update!(payroll_intake_source_types: [ "mosa_revel" ])
     user = create(:user, company: workspace, practice_company: workspace, role: "client")
     CompanyAssignment.create!(user: user, company: workspace, granted_by: admin)
     employee = create(:employee, company: workspace)

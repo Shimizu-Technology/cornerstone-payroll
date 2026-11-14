@@ -157,6 +157,17 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(run.reload.pending_portal_submission?).to be(false)
   end
 
+  it "does not consume a regular client revision after the linked run changes to a special purpose" do
+    source = revision
+    data = pay_run_preview(source)
+    run.update_columns(run_purpose: "bonus")
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("matching regular pay run")
+    expect(source.submission_imports).to be_empty
+    expect(run.reload.pending_portal_submission?).to be(true)
+  end
+
   it "refuses old, cross-company and cross-period revision selections" do
     old = revision
     data = pay_run_preview(old)

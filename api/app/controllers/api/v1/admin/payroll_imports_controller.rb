@@ -368,7 +368,7 @@ module Api
             raise ArgumentError, "Choose the current pending client revision for this company and pay period"
           end
           period.lock!
-          unless @pay_period.cycle == "regular" && @pay_period.correction_status.nil?
+          unless @pay_period.cycle == "regular" && @pay_period.run_purpose == "regular" && @pay_period.correction_status.nil?
             raise ArgumentError, "Only the matching regular pay run may use a client revision"
           end
           if period.pay_period_id.nil?
