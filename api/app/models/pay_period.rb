@@ -310,6 +310,9 @@ class PayPeriod < ApplicationRecord
   scope :approved, -> { where(status: "approved") }
   scope :committed, -> { where(status: "committed") }
   scope :reportable_committed, -> { committed.where(correction_status: [ nil, "correction" ]) }
+  # Finished payroll a client may see. A practice copy cannot commit, so its
+  # copied "baseline" runs stand in for the source client's paid history.
+  scope :client_finished, -> { reportable_committed.or(where(test_workspace_role: "baseline", correction_status: [ nil, "correction" ])) }
   # A test workspace cannot commit or pay anyone. Its calculated runs are
   # provisional inputs for testing reports and cumulative tax math only.
   def self.reportable_for_company(company)
@@ -368,6 +371,10 @@ class PayPeriod < ApplicationRecord
 
   def training_baseline?
     test_workspace_role == "baseline"
+  end
+
+  def client_finished?
+    correction_status.in?([ nil, "correction" ]) && (committed? || training_baseline?)
   end
 
   def training_practice?

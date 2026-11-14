@@ -58,7 +58,7 @@ export function PortalImportAction({ period, companyId, onApplied }: { period: P
     {selected.changes_link_url && !selected.documents.some(doc => doc.role === 'changes_workbook') && <div className="space-y-2 rounded-lg border border-primary-200 bg-primary-50 p-3">
       <a className="break-all text-sm underline" href={selected.changes_link_url} target="_blank" rel="noopener noreferrer">Client’s tips &amp; loans workbook link</a>
       <p className="text-sm">Open it, download the workbook, and attach it here.</p>
-      <label className="block text-sm font-medium">Downloaded workbook (Excel)<input className="mt-2 block w-full text-sm" type="file" accept=".xls,.xlsx" onChange={e => setStaffWorkbook(e.target.files?.[0] || null)} /></label>
+      <label className="block text-sm font-medium">Downloaded workbook (Excel)<input key={selected.id} className="mt-2 block w-full text-sm" type="file" accept=".xls,.xlsx" onChange={e => setStaffWorkbook(e.target.files?.[0] || null)} /></label>
       <p className="text-sm text-neutral-600">Saved as staff evidence with your name and the import. The client’s revision stays as sent.</p>
     </div>}
     {resolve && <label className="block text-sm">Why isn’t the latest revision being used?<textarea className="mt-1 block min-h-20 w-full rounded-md border border-neutral-300 p-2" maxLength={2000} value={dispositionReason} onChange={e => setDispositionReason(e.target.value)} /></label>}

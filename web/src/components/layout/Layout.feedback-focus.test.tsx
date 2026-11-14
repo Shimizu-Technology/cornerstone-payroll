@@ -11,6 +11,7 @@ vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({
   activeCompany: { id: 1, name: 'Synthetic client', active: true },
   activeCompanyId: 1, activeOrganizationId: 1, activeOrganizationName: 'Synthetic organization',
 }) }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { role: 'admin' } }) }));
 vi.mock('./Sidebar', () => ({ Sidebar: () => <nav><a href="/employees">Employees</a></nav> }));
 vi.mock('./CommandPalette', () => ({ CommandPalette: () => null }));
 

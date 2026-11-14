@@ -47,6 +47,73 @@ RSpec.describe "Practice portal invitations and assignments", type: :request do
     expect(response).to have_http_status(:forbidden)
   end
 
+  it "shows the practice login its copied history but not the practice run" do
+    user = create(:user, company: workspace, practice_company: workspace, role: "client")
+    CompanyAssignment.create!(user: user, company: workspace, granted_by: admin)
+    employee = create(:employee, company: workspace)
+    source_period = create(:pay_period, :committed, company: source, start_date: Date.new(2026, 10, 5),
+      end_date: Date.new(2026, 10, 18), pay_date: Date.new(2026, 10, 22))
+    baseline = create(:pay_period, :approved, company: workspace, parallel_run: true, start_date: source_period.start_date,
+      end_date: source_period.end_date, pay_date: source_period.pay_date)
+    create(:payroll_item, pay_period: baseline, company: workspace, employee: employee, gross_pay: 1000, net_pay: 810)
+    # The cloner writes copied history before sealing it as a baseline.
+    baseline.update_columns(test_workspace_role: "baseline", test_workspace_source_pay_period_id: source_period.id)
+    practice = create(:pay_period, :approved, company: workspace, start_date: Date.new(2026, 10, 19),
+      end_date: Date.new(2026, 11, 1), pay_date: Date.new(2026, 11, 5))
+    [ Api::V1::Client::PayPeriodsController, Api::V1::Client::ReportsController ].each do |controller|
+      allow_any_instance_of(controller).to receive(:current_user).and_return(user)
+    end
+    headers = { "X-Company-Id" => workspace.id.to_s }
+
+    get "/api/v1/client/pay_periods", headers: headers
+    expect(response).to have_http_status(:ok), response.body
+    ids = response.parsed_body.fetch("pay_periods").map { |row| row.fetch("id") }
+    expect(ids).to include(baseline.id)
+    expect(ids).not_to include(practice.id)
+
+    get "/api/v1/client/pay_periods", params: { register_eligible: true }, headers: headers
+    expect(response.parsed_body.fetch("pay_periods").map { |row| row.fetch("id") }).to eq([ baseline.id ])
+
+    get "/api/v1/client/pay_periods/#{baseline.id}", headers: headers
+    expect(response).to have_http_status(:ok), response.body
+    get "/api/v1/client/pay_periods/#{practice.id}", headers: headers
+    expect(response).to have_http_status(:not_found)
+
+    get "/api/v1/client/reports/payroll_register", params: { pay_period_id: baseline.id }, headers: headers
+    expect(response).to have_http_status(:ok), response.body
+    get "/api/v1/client/reports/dashboard", headers: headers
+    expect(response.parsed_body.dig("stats", "current_pay_period", "id")).to eq(baseline.id)
+  end
+
+  it "lets a practice login add an employee to its own open copy only" do
+    user = create(:user, company: workspace, practice_company: workspace, role: "client")
+    CompanyAssignment.create!(user: user, company: workspace, granted_by: admin)
+    allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:current_user).and_return(user)
+    params = { employee: { first_name: "Taylor", last_name: "Cruz", ssn: "123-45-6789", ssn_confirmation: "123-45-6789",
+      employment_type: "hourly", salary_type: "hourly", pay_rate: 16.25, filing_status: "single",
+      hire_date: "2026-04-01", w4_effective_on: "2026-04-01", address_line1: "1 St", city: "Hagatna", state: "GU", zip: "96910" } }
+
+    post "/api/v1/client/employees", headers: { "X-Company-Id" => workspace.id.to_s }, params: params
+    expect(response).to have_http_status(:created), response.body
+    post "/api/v1/client/employees", headers: { "X-Company-Id" => source.id.to_s }, params: params
+    expect(response).to have_http_status(:forbidden)
+    expect(source.employees.where(last_name: "Cruz")).to be_empty
+
+    workspace.update_columns(test_workspace_sealed_at: Time.current)
+    expect {
+      post "/api/v1/client/employees", headers: { "X-Company-Id" => workspace.id.to_s }, params: params
+    }.not_to change(Employee, :count)
+    expect(response).to have_http_status(:forbidden)
+    workspace.update_columns(test_workspace_sealed_at: nil)
+
+    TestWorkspace::Lifecycle.new(company: workspace, actor: admin).archive!
+    allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:current_user).and_return(User.find(user.id))
+    expect {
+      post "/api/v1/client/employees", headers: { "X-Company-Id" => workspace.id.to_s }, params: params
+    }.not_to change(Employee, :count)
+    expect(response).to have_http_status(:forbidden).or have_http_status(:unprocessable_entity)
+  end
+
   it "rejects a mixed invitation and leaves no account or invitation behind" do
     expect {
       post "/api/v1/admin/users", params: { user: { email: "mixed@example.invalid", role: "client", company_ids: [ source.id, workspace.id ] } }

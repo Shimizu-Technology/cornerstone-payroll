@@ -25,7 +25,7 @@ export function PayrollPeriodsList({ audience }: { audience: 'client' | 'staff' 
 
   return (
     <div>
-      <Header title={audience === 'client' ? 'Payroll files' : 'Pay period files'}
+      <Header title="Pay period files"
         description={audience === 'client' ? 'Send each pay period’s Revel payroll and changes, then review the draft.' : 'What each client sent for a pay period, and where review stands.'} />
       <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6 lg:p-8">
         <p className="text-sm text-neutral-600">{derived ? 'Periods follow the pay schedule.' : 'Periods are the pay periods Cornerstone has set up.'} {audience === 'client' ? 'A period opens for files on its last day.' : 'Change the schedule in Pay Schedule settings.'}</p>

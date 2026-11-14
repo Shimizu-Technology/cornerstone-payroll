@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PortalImportAction } from './PortalImportAction';
 import type { PeriodDetail } from '@/services/payrollSubmissions';
@@ -101,4 +102,15 @@ it('shows a link and passes the downloaded workbook as staff evidence for the se
   fireEvent.change(screen.getByLabelText('Downloaded workbook (Excel)'), { target: { files: [file] } });
   fireEvent.click(screen.getByRole('button', { name: 'Review these submitted files' }));
   await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith(9, 20, expect.objectContaining({ staff_workbook: file })));
+});
+
+
+it('clears the downloaded workbook picker when staff select another client revision', async () => {
+  const linked = { ...period, submissions: period.submissions.map(row => ({ ...row, documents: [], changes_link_url: 'https://example.test/workbook', workbook_choice: 'link' })) } as PeriodDetail;
+  render(<PortalImportAction period={linked} companyId={7} onApplied={vi.fn()} />);
+  const picker = screen.getByLabelText('Downloaded workbook (Excel)') as HTMLInputElement;
+  await userEvent.upload(picker, new File(['synthetic'], 'downloaded.xlsx'));
+  expect(picker.files?.length).toBe(1);
+  fireEvent.change(screen.getByLabelText('Client’s revision'), { target: { value: '10' } });
+  expect((screen.getByLabelText('Downloaded workbook (Excel)') as HTMLInputElement).files?.length).toBe(0);
 });

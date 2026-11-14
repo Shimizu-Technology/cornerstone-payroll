@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeList } from './EmployeeList';
 
 const apiMocks = vi.hoisted(() => ({ listEmployees: vi.fn(), listDepartments: vi.fn() }));
+const companyMock = vi.hoisted(() => ({ activeCompany: undefined as Record<string, unknown> | undefined }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1 }, isClient: true }) }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1 }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1, activeCompany: companyMock.activeCompany }) }));
 vi.mock('@/services/api', () => ({
   employeesApi: { list: apiMocks.listEmployees },
   clientEmployeesApi: { list: apiMocks.listEmployees },
@@ -17,7 +18,24 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/components/employees/EmployeeBulkImportModal', () => ({ EmployeeBulkImportModal: () => null }));
 
 describe('EmployeeList payment delivery', () => {
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); companyMock.activeCompany = undefined; });
+
+  it('lets a practice-copy client add an employee without the staff payroll permission', async () => {
+    companyMock.activeCompany = { id: 1, active: true, test_workspace: true, practice_portal: true, workspace_can_write: false };
+    apiMocks.listDepartments.mockResolvedValue({ data: [] });
+    apiMocks.listEmployees.mockResolvedValue({ data: [], meta: { current_page: 1, total_pages: 1, total_count: 0, per_page: 500 } });
+    render(<MemoryRouter initialEntries={['/companies/1/employees']}><Routes><Route path="/companies/:companyId/employees" element={<EmployeeList />} /></Routes></MemoryRouter>);
+    expect((await screen.findAllByRole('button', { name: 'Add Employee' })).length).toBeGreaterThan(0);
+  });
+
+  it('hides Add Employee from a client whose practice copy is archived', async () => {
+    companyMock.activeCompany = { id: 1, active: true, test_workspace: true, practice_portal: true, test_workspace_archived_at: '2026-11-14' };
+    apiMocks.listDepartments.mockResolvedValue({ data: [] });
+    apiMocks.listEmployees.mockResolvedValue({ data: [], meta: { current_page: 1, total_pages: 1, total_count: 0, per_page: 500 } });
+    render(<MemoryRouter initialEntries={['/companies/1/employees']}><Routes><Route path="/companies/:companyId/employees" element={<EmployeeList />} /></Routes></MemoryRouter>);
+    expect(await screen.findByText('No employees are available in this workspace.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add Employee' })).toBeNull();
+  });
 
   it('shows reviewed and default methods in the list and opens a read-only employee route', async () => {
     apiMocks.listDepartments.mockResolvedValue({ data: [] });
