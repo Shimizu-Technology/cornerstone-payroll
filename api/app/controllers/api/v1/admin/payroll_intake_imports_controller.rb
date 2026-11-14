@@ -4,8 +4,9 @@ module Api
   module V1
     module Admin
       class PayrollIntakeImportsController < BaseController
+        include SheetPreviewResponse
         before_action :set_pay_period
-        before_action :set_session, only: [ :show, :apply, :download_source_document ]
+        before_action :set_session, only: [ :show, :apply, :download_source_document, :preview_source_document ]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports
         def index
@@ -92,11 +93,50 @@ module Api
           end
 
           bytes = PayrollIntake::SourcePackageVerifier.new(session: @session).verified_bytes!(document)
+          audit_source_document!(document, "payroll_intake_imports#download_source_document")
+          send_data bytes,
+                    filename: document.filename.presence || "payroll-source-#{document.id}.txt",
+                    type: document.content_type.presence || "text/plain",
+                    disposition: "attachment"
+        rescue PayrollIntake::SourcePackageVerifier::VerificationError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports/:id/documents/:document_id/preview
+        # Shows a retained source beside import review: the PDF inline, or a
+        # workbook as capped sheet tables. Same lookup and checks as download.
+        def preview_source_document
+          response.set_header("Cache-Control", "private, no-store")
+          response.set_header("X-Content-Type-Options", "nosniff")
+          document = @session.documents.find_by(id: params[:document_id])
+          return render json: { error: "Source file not found" }, status: :not_found unless document
+          if document.verification_status == "legacy_unverified"
+            return render json: { error: "This legacy source predates verified package retention." }, status: :unprocessable_entity
+          end
+
+          pdf = document.content_type == "application/pdf" || File.extname(document.filename.to_s).casecmp?(".pdf")
+          unless pdf || SpreadsheetPreview.spreadsheet?(document.filename)
+            return render json: { error: "This source file can't be previewed here. Download it instead." }, status: :unprocessable_entity
+          end
+
+          bytes = PayrollIntake::SourcePackageVerifier.new(session: @session).verified_bytes!(document)
+          action = "payroll_intake_imports#preview_source_document"
+          return render_sheet_preview(bytes: bytes, filename: document.filename) { audit_source_document!(document, action) } unless pdf
+
+          audit_source_document!(document, action)
+          send_data bytes, filename: document.filename.presence || "payroll-source-#{document.id}.pdf", type: "application/pdf", disposition: "inline"
+        rescue PayrollIntake::SourcePackageVerifier::VerificationError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        private
+
+        def audit_source_document!(document, action)
           AuditLog.record!(
             user: current_user,
             organization_id: @session.company.organization_id,
             company_id: @session.company_id,
-            action: "payroll_intake_imports#download_source_document",
+            action: action,
             record_type: "payroll_intake_sessions",
             record_id: @session.id,
             subject_name: @session.source_label,
@@ -108,15 +148,7 @@ module Api
               sha256: document.sha256
             }
           )
-          send_data bytes,
-                    filename: document.filename.presence || "payroll-source-#{document.id}.txt",
-                    type: document.content_type.presence || "text/plain",
-                    disposition: "attachment"
-        rescue PayrollIntake::SourcePackageVerifier::VerificationError => e
-          render json: { error: e.message }, status: :unprocessable_entity
         end
-
-        private
 
         def set_pay_period
           @pay_period = PayPeriod.includes(:payroll_items).find(params[:pay_period_id])
