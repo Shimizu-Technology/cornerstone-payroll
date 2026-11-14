@@ -809,4 +809,148 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(owner_row(response.parsed_body)).to include("period_pay_missing" => true)
     end
   end
+  describe "standing change review" do
+    let!(:owner) { create(:employee, :salary, company: company, salary_type: "variable", pay_rate: 0) }
+    let!(:manual_worker) { create(:employee, company: company, pay_rate: 35) }
+    let!(:manual_job) { create(:employee_wage_rate, employee: manual_worker, label: "Maintenance", rate: 35) }
+
+    def standing_source
+      source = revision
+      source.update_columns(change_rows: [
+        { "kind" => "owner_pay", "employee_id" => owner.id, "amount" => "8421.13" },
+        { "kind" => "extra_hours", "employee_id" => manual_worker.id, "employee_wage_rate_id" => manual_job.id,
+          "wage_rate" => "35.0", "hours" => "68" }
+      ])
+      source
+    end
+
+    def reviewed_standing_params(data)
+      { import_id: data.fetch("import_id"), confirm_client_changes: true,
+        reviewed_changes: [ { change_index: 0, amount: "8421.13" }, { change_index: 1, hours: "68" } ] }
+    end
+
+    it "prefills the portal review without writes and atomically applies per-person pay and saved-job hours" do
+      source = standing_source
+      data = preview(source)
+      expect(response).to have_http_status(:ok), response.body
+      expect(data.dig("client_change_prefill", "rows")).to include(include("employee_id" => owner.id, "amount" => "8421.13"),
+        include("employee_id" => manual_worker.id, "hours" => "68", "employee_wage_rate_id" => manual_job.id))
+      expect(run.payroll_items).to be_empty
+      apply(data)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("Confirm")
+      expect(run.payroll_items).to be_empty
+      post "#{url}/apply_import", params: reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id")), as: :json
+      expect(response).to have_http_status(:ok), response.body
+      owner_item = run.payroll_items.find_by!(employee: owner)
+      worker_item = run.payroll_items.find_by!(employee: manual_worker)
+      expect(owner_item.salary_override).to eq(BigDecimal("8421.13"))
+      expect(owner_item.custom_columns_data.dig("period_pay_evidence", "source_type")).to eq("client_submission")
+      expect(worker_item.hours_worked).to eq(68)
+      expect(worker_item.wage_rate_hours.sole).to include("employee_wage_rate_id" => manual_job.id, "rate" => 35.0, "regular_hours" => 68.0)
+      expect(source.submission_imports.sole.applied_at).to be_present
+      expect(run.reload.pending_portal_submission?).to be(false)
+    end
+
+    it "offers the same figures for pay-run linking and persists staff edits only on successful apply" do
+      source = standing_source
+      data = pay_run_preview(source)
+      expect(data["client_change_prefill"]).to be_nil
+      expect(data.dig("pending_change_prefill", "submission_id")).to eq(source.id)
+      params = reviewed_standing_params(data).merge(use_submission_id: source.id)
+      params[:reviewed_changes][0][:amount] = "8421.12"
+      params[:reviewed_changes][1][:hours] = "67.5"
+      post "#{url}/apply_import", params: params, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.12"))
+      expect(run.payroll_items.find_by!(employee: manual_worker).hours_worked).to eq(BigDecimal("67.5"))
+      expect(source.submission_imports.sole).to have_attributes(source_route: "pay_run", applied_at: be_present)
+    end
+
+    it "keeps Revel hours on their reviewed job and adds extra hours only to the submitted job" do
+      base_job = create(:employee_wage_rate, employee: employee, label: "Service", rate: 10, is_primary: true)
+      extra_job = create(:employee_wage_rate, employee: employee, label: "Maintenance", rate: 35)
+      source = standing_source
+      source.update_columns(change_rows: source.change_rows + [ { "kind" => "extra_hours", "employee_id" => employee.id,
+        "employee_wage_rate_id" => extra_job.id, "wage_rate" => "35.0", "hours" => "3" } ])
+      data = preview(source)
+      input = reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id"),
+        wage_rate_choices: { employee.id.to_s => base_job.id })
+      input[:reviewed_changes] << { change_index: 2, hours: "3" }
+      post "#{url}/apply_import", params: input, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      item = run.payroll_items.find_by!(employee: employee)
+      expect(item.hours_worked).to eq(43)
+      expect(item.wage_rate_hours).to contain_exactly(
+        include("employee_wage_rate_id" => base_job.id, "regular_hours" => 40.0, "overtime_hours" => 2.0, "rate" => 10.0),
+        include("employee_wage_rate_id" => extra_job.id, "regular_hours" => 3.0, "overtime_hours" => 0.0, "rate" => 35.0))
+    end
+
+    it "replaces the previous client-only hours on corrected-source reimport instead of adding them twice" do
+      source = standing_source
+      data = preview(source)
+      post "#{url}/apply_import", params: reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id")), as: :json
+      expect(response).to have_http_status(:ok), response.body
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      expect(item.hours_worked).to eq(68)
+      expect(item.custom_columns_data.dig("client_change_evidence", "baseline_regular_hours")).to eq("0.0")
+      client = create(:user, company: company, role: "client")
+      corrected_pdf = File.binread(build_revel_pdf([ { name: "Example, Avery", regular_hours: 41, overtime_hours: 2, regular_pay: 410 } ],
+        period_start: run.start_date, period_end: run.end_date))
+      second = revision(rev: 2, bytes: corrected_pdf)
+      second.update_columns(change_rows: source.change_rows)
+      period.transition!("submit", actor: client, submission: second)
+      replacement = preview(second, supersedes_package_id: data.dig("source_package", "package_id"), supersession_reason: "Corrected source files")
+      expect(response).to have_http_status(:ok), response.body
+      input = reviewed_standing_params(replacement).merge(portal_source_id: replacement.dig("portal_source", "selection_id"))
+      input[:reviewed_changes][1][:hours] = "67"
+      post "#{url}/apply_import", params: input, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.hours_worked).to eq(67)
+      expect(item.wage_rate_hours.sole["regular_hours"]).to eq(67.0)
+      item.update!(hours_worked: 66)
+      next_pdf = File.binread(build_revel_pdf([ { name: "Example, Avery", regular_hours: 42, overtime_hours: 2, regular_pay: 420 } ],
+        period_start: run.start_date, period_end: run.end_date))
+      third = revision(rev: 3, bytes: next_pdf)
+      third.update_columns(change_rows: source.change_rows)
+      period.transition!("submit", actor: client, submission: third)
+      latest = preview(third, supersedes_package_id: replacement.dig("source_package", "package_id"), supersession_reason: "Another correction")
+      expect(response).to have_http_status(:ok), response.body
+      post "#{url}/apply_import", params: reviewed_standing_params(latest).merge(portal_source_id: latest.dig("portal_source", "selection_id")), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "row_errors").map { |error| error["error"] }.join).to include("Reconcile the worksheet hours")
+      expect(item.reload.hours_worked).to eq(66)
+    end
+
+    it "keeps legacy total/each instructions on the manual per-person period-pay path" do
+      source = revision
+      source.update_columns(change_rows: [ { "kind" => "owner_pay", "amount" => "16842.26", "basis" => "total", "employee_ids" => [ owner.id ], "note" => "Both owners" } ])
+      data = preview(source)
+      expect(response).to have_http_status(:ok), response.body
+      expect(data.dig("client_change_prefill", "rows")).to be_empty
+      expect(data.dig("client_change_prefill", "manual_review_warnings").join).to include("no split is inferred")
+      expect(data.dig("preview", "matched").find { |row| row["employee_id"] == owner.id }).to include("period_pay_missing" => true)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      post "#{url}/payroll_items", params: { employee_id: owner.id, salary_override: "8421.13", expected_import_id: data.fetch("import_id") }, as: :json
+      expect(response).to have_http_status(:created), response.body
+      post "#{url}/apply_import", params: { import_id: data.fetch("import_id"), portal_source_id: data.dig("portal_source", "selection_id"), force_overwrite: true }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.13"))
+    end
+
+    it "rejects a rate changed after preview and a newer portal revision without payroll writes" do
+      source = standing_source
+      data = preview(source)
+      manual_job.update!(rate: 36)
+      post "#{url}/apply_import", params: reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id")), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("changed")
+      expect(run.payroll_items).to be_empty
+      expect(source.submission_imports.sole.applied_at).to be_nil
+      revision(rev: 2)
+      post "#{url}/apply_import", params: reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id")), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(run.payroll_items).to be_empty
+    end
+  end
 end

@@ -1611,6 +1611,8 @@ export const payPeriodsApi = {
       use_submission_id?: number;
       force_overwrite?: boolean;
       wage_rate_choices?: Record<string, number>;
+      confirm_client_changes?: boolean;
+      reviewed_changes?: { change_index: number; amount?: string; hours?: string }[];
     },
   ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
@@ -2053,7 +2055,7 @@ export interface ImportPreviewRow {
   source_row_id: number;
   period_pay_required?: boolean;
   current_period_pay?: string | null;
-  period_pay_source?: 'change_workbook' | 'payroll_worksheet' | null;
+  period_pay_source?: 'change_workbook' | 'payroll_worksheet' | 'client_changes' | null;
   period_pay_missing?: boolean;
   overwrite_required?: boolean;
   bonus?: number | null;
@@ -2120,7 +2122,11 @@ export interface MosaSourceRow {
   warnings: PayrollIntakeWarning[];
 }
 
+export type ClientChangePrefill = { submission_id: number; revision: number; manual_review_warnings?: string[]; rows: { change_index: number; kind: 'owner_pay' | 'extra_hours'; employee_id?: number; employee_name?: string; amount?: string; hours?: string; employee_wage_rate_id?: number; wage_rate_label?: string; wage_rate?: string; error?: string; overwrite_required?: boolean; saved_regular_hours?: string; saved_overtime_hours?: string }[] };
+
 export interface ImportPreviewResponse {
+  client_change_prefill?: ClientChangePrefill | null;
+  pending_change_prefill?: ClientChangePrefill | null;
   pending_portal_source?: { submission_id: number; revision: number; period_id: number; workbook_choice?: 'attach' | 'link' | 'none' | null; changes_link_url?: string | null; notes?: string | null; no_changes: boolean; changes: import('./payrollSubmissions').ChangeRow[] } | null;
   portal_source?: {
     selection_id: number; submission_id: number; revision: number; period_id: number; current: boolean;

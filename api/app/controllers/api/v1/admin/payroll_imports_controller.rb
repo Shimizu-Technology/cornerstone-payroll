@@ -170,6 +170,12 @@ module Api
               row[:selected_wage_rate_id] = id.to_i
             end
 
+            if selection
+              matched_data = PayrollSubmissions::ImportChanges.new(submission: selection.payroll_submission, pay_period: @pay_period)
+                .apply_to(matched_data, reviewed: params.permit(reviewed_changes: [ :change_index, :amount, :hours ])[:reviewed_changes],
+                  confirmed: params[:confirm_client_changes], source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] })
+            end
+
             if included_decisions.any? && matched_data.empty?
               return render json: {
                 error: "Keep at least one matched employee in the import.",
@@ -355,8 +361,16 @@ module Api
           {
             import_id: import_record.id, preview: preview, source_package: source_package_json(source_package),
             duplicate: package_result[:duplicate], portal_source: portal_source_json(selection),
-            pending_portal_source: pending_portal_source_json
+            pending_portal_source: pending_portal_source_json,
+            client_change_prefill: (selection ? change_prefill(selection.payroll_submission) : nil),
+            pending_change_prefill: (!selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission) : nil)
           }
+        end
+
+        def change_prefill(submission)
+          changes = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: @pay_period)
+          { submission_id: submission.id, revision: submission.revision, rows: changes.proposals,
+            manual_review_warnings: changes.manual_review_warnings }
         end
 
         def pay_run_selection!(record)

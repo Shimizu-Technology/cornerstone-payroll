@@ -114,6 +114,15 @@ module PayrollImport
       }
     end
 
+    # A submitted employee may be absent from both files. Keep the same setup,
+    # loan reconciliation and payroll inputs as the ordinary import builder.
+    def client_change_preview(employee)
+      raise ArgumentError, "Employee must belong to this client" unless employee.company_id == company_id
+
+      build_preview_row(nil, employee, { employee_id: employee.id, confidence: 1.0, matched_name: employee.full_name }, nil)
+        .merge(payroll_setup_only: true)
+    end
+
     # Apply: persist matched import data to PayrollItems
     # @param matched [Array<Hash>] preview rows to apply
     # @param force_overwrite [Boolean] allow overwriting non-import existing payroll items
@@ -202,9 +211,16 @@ module PayrollImport
                 payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
                 payroll_item.overtime_hours = row[:overtime_hours].to_f if row[:overtime_hours]
               end
-              apply_wage_rate_choice!(payroll_item, employee, row)
+              restore_client_hours_baseline!(payroll_item) if row[:workbook_only] && !row[:client_extra_hours]
+              # Preserve workbook-only worksheet splits. Extra hours belong
+              # only to their submitted job, not to every existing allocation.
+              preserve_split = row[:client_extra_hours] && row[:workbook_only] && payroll_item.wage_rate_hours.present?
+              has_base_hours = [ payroll_item.hours_worked, payroll_item.overtime_hours, payroll_item.holiday_hours, payroll_item.pto_hours ].any? { |hours| hours.to_d.positive? }
+              apply_wage_rate_choice!(payroll_item, employee, row) if !preserve_split && (!row[:client_extra_hours] || has_base_hours)
+              apply_client_hours!(payroll_item, employee, row) if row[:client_extra_hours]
               payroll_item.custom_columns_data = payroll_item.custom_columns_data.to_h.merge(
-                "mosa_missing_revel_hours" => row[:missing_revel_hours_with_deductions] == true
+                "mosa_missing_revel_hours" => row[:missing_revel_hours_with_deductions] == true,
+                "client_change_evidence" => row[:client_change_evidence]
               )
 
               # Set tips from Excel — reported_tips is the taxable tip source of truth.
@@ -452,6 +468,57 @@ module PayrollImport
       end
     end
 
+    def apply_client_hours!(item, employee, row)
+      input = row.fetch(:client_extra_hours)
+      rate = employee.active_wage_rates.find { |candidate| candidate.id.to_s == input[:employee_wage_rate_id].to_s }
+      unless rate && rate.rate == input[:rate].to_d
+        raise ArgumentError, "Saved job and rate changed for #{employee.full_name}. Review the client change again."
+      end
+      restore_client_hours_baseline!(item) if row[:workbook_only]
+      baseline_hours = item.hours_worked.to_d.to_s("F")
+      baseline_allocations = item.wage_rate_hours.deep_dup
+      allocations = item.wage_rate_hours
+      if allocations.empty? && [ item.hours_worked, item.overtime_hours, item.holiday_hours, item.pto_hours ].any? { |hours| hours.to_d.positive? }
+        base = employee.primary_wage_rate
+        unless base && base.rate == item.pay_rate && employee.active_wage_rates.map(&:rate).uniq.one?
+          raise ArgumentError, "Choose a saved job for the existing hours for #{employee.full_name}."
+        end
+        allocations << { "employee_wage_rate_id" => base.id, "label" => base.label, "rate" => base.rate.to_f,
+          "regular_hours" => item.hours_worked.to_f, "overtime_hours" => item.overtime_hours.to_f,
+          "holiday_hours" => item.holiday_hours.to_f, "pto_hours" => item.pto_hours.to_f, "active" => true, "is_primary" => base.is_primary }
+      end
+      entry = allocations.find { |allocation| allocation["employee_wage_rate_id"].to_s == rate.id.to_s && allocation["rate"].to_d == rate.rate }
+      unless entry
+        entry = { "employee_wage_rate_id" => rate.id, "label" => rate.label, "rate" => rate.rate.to_f,
+          "regular_hours" => 0, "overtime_hours" => 0, "holiday_hours" => 0, "pto_hours" => 0, "is_primary" => rate.is_primary, "active" => true }
+        allocations << entry
+      end
+      entry["regular_hours"] = (entry["regular_hours"].to_d + input[:hours].to_d).to_f
+      item.hours_worked = item.hours_worked.to_d + input[:hours].to_d
+      item.wage_rate_hours = allocations
+      row[:client_change_evidence] = row[:client_change_evidence].merge(
+        baseline_regular_hours: baseline_hours, baseline_allocations: baseline_allocations,
+        applied_regular_hours: item.hours_worked.to_d.to_s("F"), applied_allocations: item.wage_rate_hours,
+        applied_hours: client_hours_inputs(item)
+      )
+    end
+
+    def client_hours_inputs(item)
+      %w[hours_worked overtime_hours holiday_hours pto_hours].to_h { |field| [ field, item.public_send(field).to_d.to_s("F") ] }
+    end
+
+    def restore_client_hours_baseline!(item)
+      previous = item.custom_columns_data.to_h["client_change_evidence"].to_h
+      return unless previous["kind"] == "extra_hours"
+
+      unless previous.key?("baseline_regular_hours") && item.hours_worked.to_d == previous["applied_regular_hours"].to_d &&
+          item.wage_rate_hours == previous["applied_allocations"] && client_hours_inputs(item) == previous["applied_hours"]
+        raise ArgumentError, "Saved hours changed after the client's hours were imported for #{item.employee.full_name}. Reconcile the worksheet hours before importing again."
+      end
+      item.hours_worked = previous.fetch("baseline_regular_hours")
+      item.wage_rate_hours = previous.fetch("baseline_allocations")
+    end
+
     def configured_loan_due?(employee)
       return false unless pay_period.recurring_items_enabled?
 
@@ -524,7 +591,7 @@ module PayrollImport
         "amount" => amount.to_s("F"),
         "employee_id" => employee.id,
         "employee_name" => employee.full_name,
-        "source_type" => "mosa_change_workbook"
+        "source_type" => evidence[:source_type] == "client_submission" ? "client_submission" : "mosa_change_workbook"
       )
       payroll_item.custom_columns_data = data
     end
