@@ -164,3 +164,14 @@ it('keeps a posted draft and approval available without a Send form for clients 
   fireEvent.click(screen.getByRole('button', { name: 'Approve draft 1' }));
   await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith('9', expect.objectContaining({ decision: 'approve', draft_id: 4 })));
 });
+it('counts explicit skips separately from changes in the sent receipt', async () => {
+  const standing = { kind: 'owner_pay' as const, standing_change_id: 1, employee_id: 5, employee_name: 'Sam Worker' };
+  mocks.get.mockResolvedValue({ data: period({ standing_changes: [standing] }) });
+  mocks.submit.mockResolvedValue({ data: period({ current_revision: 3, submissions: [{ ...revision(3, true), workbook_choice: 'none', no_changes: true, changes: [{ ...standing, skipped: true }] }] }), outcome: 'created' });
+  renderAt('client');
+  fireEvent.click(await screen.findByRole('button', { name: 'Send an update or replace a file' }));
+  fireEvent.click(screen.getByLabelText('No changes this period'));
+  fireEvent.click(screen.getByLabelText('No tips or loans this period'));
+  fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
+  await screen.findByText(/0 changes · 1 not this period/);
+});

@@ -48,7 +48,7 @@ module PayrollImport
       return if item.blank? || item.salary_override.to_d <= 0
 
       evidence = item.custom_columns_data.to_h["period_pay_evidence"].to_h
-      return if evidence["source_type"] == "mosa_change_workbook"
+      return if %w[mosa_change_workbook client_submission].include?(evidence["source_type"])
 
       item.salary_override.to_d
     end

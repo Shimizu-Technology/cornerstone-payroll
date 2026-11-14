@@ -53,6 +53,7 @@ const InvoiceCenter = lazy(() => import('@/pages/InvoiceCenter').then((module) =
 const ExpenseLedger = lazy(() => import('@/pages/ExpenseLedger').then((module) => ({ default: module.ExpenseLedger })));
 const FinanceOverview = lazy(() => import('@/pages/FinanceOverview').then((module) => ({ default: module.FinanceOverview })));
 const FinanceAgentAccess = lazy(() => import('@/pages/FinanceAgentAccess').then((module) => ({ default: module.FinanceAgentAccess })));
+const StandingChangesSettings = lazy(() => import('@/pages/StandingChangesSettings'));
 const PayrollReminders = lazy(() => import('@/pages/PayrollReminders'));
 const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').then((module) => ({ default: module.TimeTrackingSources })));
 const AireHistoryApproval = lazy(() => import('@/pages/AireHistoryApproval').then((module) => ({ default: module.AireHistoryApproval })));
@@ -396,6 +397,7 @@ function AppRoutes() {
         <Route path="check-settings" element={<CapabilityRoute capability="use_printer_profiles"><CheckSettingsPage /></CapabilityRoute>} />
         <Route path="payroll-reminders" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><PayrollReminders /></CapabilityRoute>} />
         <Route path="time-tracking-sources" element={<AdminOnlyRoute><TimeTrackingSources /></AdminOnlyRoute>} />
+        <Route path="standing-changes" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><StandingChangesSettings /></CapabilityRoute>} />
         <Route path="pay-schedule-settings" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><PayScheduleSettings /></CapabilityRoute>} />
         <Route path="settings/clients" element={<StaffOnlyRoute><Clients /></StaffOnlyRoute>} />
       </Route>

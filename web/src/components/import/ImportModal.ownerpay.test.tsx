@@ -228,3 +228,165 @@ it('ignores a pay save that finishes after the review was closed and reopened', 
   expect(screen.getByRole('button', { name: 'Save pay for Morgan Owner' }).textContent).not.toMatch(/Saving/);
   expect(screen.queryByText(/Could not save|was saved/)).toBeNull();
 });
+
+it('fills per-owner boxes from client changes, permits edits and requires explicit confirmation without worksheet writes', async () => {
+  const data = preview([ownerMissing]);
+  data.client_change_prefill = { submission_id: 20, revision: 2, rows: [
+    { change_index: 0, kind: 'owner_pay', employee_id: 2, employee_name: 'Morgan Owner', amount: '4500.00' },
+    { change_index: 1, kind: 'extra_hours', employee_id: 1, employee_name: 'Avery Server', hours: '68', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0' },
+  ] };
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
+  open(data);
+  expect(ownerInput().value).toBe('4500.00');
+  expect((screen.getByLabelText('Extra hours for Avery Server') as HTMLInputElement).value).toBe('68');
+  expect(applyButton().disabled).toBe(true);
+  fireEvent.change(ownerInput(), { target: { value: '4495.00' } });
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ confirm_client_changes: true, reviewed_changes: [{ change_index: 0, amount: '4495.00' }, { change_index: 1, hours: '68' }] })));
+  expect(mocks.createItem).not.toHaveBeenCalled(); expect(mocks.updateItem).not.toHaveBeenCalled();
+});
+
+it('offers prefill only after selecting the pending revision on the pay-run route', () => {
+  const data = preview([ownerMissing]);
+  data.portal_source = null;
+  data.pending_portal_source = { submission_id: 20, revision: 2, period_id: 90, changes: [], no_changes: false };
+  data.pending_change_prefill = { submission_id: 20, revision: 2, rows: [{ change_index: 0, kind: 'owner_pay', employee_id: 2, employee_name: 'Morgan Owner', amount: '4500.00' }] };
+  open(data);
+  expect(ownerInput().value).toBe('');
+  fireEvent.click(screen.getByLabelText(/Use this import for the client’s revision/));
+  expect(ownerInput().value).toBe('4500.00');
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.change(ownerInput(), { target: { value: '4495.00' } });
+  expect(applyButton().disabled).toBe(true);
+});
+
+it('blocks client changes with a missing employee or job and retains legacy total/each display', () => {
+  const data = preview([]);
+  data.portal_source!.changes = [{ kind: 'owner_pay', amount: '1200', basis: 'each', note: 'Both owners' }];
+  data.client_change_prefill = { submission_id: 20, revision: 2, rows: [{ change_index: 0, kind: 'extra_hours', employee_id: 1, employee_name: 'Avery Server', hours: '68', error: 'Saved job and rate are missing or inactive.' }] };
+  open(data);
+  expect(screen.getByText(/\$1200 for each owner/)).toBeTruthy();
+  expect(screen.getByText('Saved job and rate are missing or inactive.')).toBeTruthy();
+  expect(applyButton().disabled).toBe(true);
+});
+
+it('counts employees present only in the client changes in the Apply total', () => {
+  const data = preview([ownerMissing]);
+  data.client_change_prefill = { submission_id: 20, revision: 2, rows: [
+    { change_index: 0, kind: 'owner_pay', employee_id: 2, employee_name: 'Morgan Owner', amount: '4500.00' },
+    { change_index: 1, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0' },
+  ] };
+  open(data);
+  expect(screen.getByRole('button', { name: 'Apply Import (3 employees)' })).toBeTruthy();
+});
+it('requires overwrite confirmation for an existing worksheet employee absent from both files', () => {
+  const data = preview([]);
+  data.client_change_prefill = { submission_id: 20, revision: 2, rows: [
+    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0', overwrite_required: true, saved_regular_hours: '2.0', saved_overtime_hours: '0.0' },
+  ] };
+  open(data);
+  expect(screen.getByText('Baseline before client hours: 2.0 regular hours · 0.0 overtime hours.')).toBeTruthy();
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
+  expect(applyButton().disabled).toBe(true);
+  fireEvent.click(screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/));
+  expect(applyButton().disabled).toBe(false);
+});
+
+it('requires renewed overwrite confirmation when selecting a revision adds an existing client-only employee', () => {
+  const data = preview([]);
+  data.portal_source = null;
+  data.preview.matched[0].overwrite_required = true;
+  data.pending_portal_source = { submission_id: 20, revision: 2, period_id: 90, changes: [], no_changes: false };
+  data.pending_change_prefill = { submission_id: 20, revision: 2, rows: [
+    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0', overwrite_required: true, saved_regular_hours: '2.0', saved_overtime_hours: '0.0' },
+  ] };
+  open(data);
+  fireEvent.click(screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(screen.getByLabelText(/Use this import for the client’s revision/));
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
+  expect((screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/) as HTMLInputElement).checked).toBe(false);
+  expect(applyButton().disabled).toBe(true);
+  fireEvent.click(screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/));
+  expect(applyButton().disabled).toBe(false);
+});
+
+
+it('requires a deliberate pay choice when client and existing or workbook pay differ', async () => {
+  const data = preview([ownerSaved]);
+  data.client_change_prefill = { submission_id: 20, revision: 2, rows: [
+    { change_index: 0, kind: 'owner_pay', employee_id: 2, employee_name: 'Morgan Owner', amount: '5000', saved_period_pay: '4500.0', workbook_period_pay: '4000', pay_conflict: true },
+  ] };
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: {} });
+  open(data);
+  expect(screen.getByText('Existing pay: $4,500.00')).toBeTruthy();
+  expect(screen.getByText('Workbook pay: $4,000.00')).toBeTruthy();
+  expect((screen.getByLabelText(/I checked the owner pay and extra hours/) as HTMLInputElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Pay choice for Morgan Owner'), { target: { value: 'workbook' } });
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
+  fireEvent.click(screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ reviewed_changes: [expect.objectContaining({ pay_choice: 'workbook', saved_period_pay: '4500.0', workbook_period_pay: '4000' })] })));
+});
+
+it('lets staff decline an invalid client row with a required reason and records the decision', async () => {
+  const data = preview([]);
+  data.client_change_prefill = { submission_id: 20, revision: 2, removals: ["Jordan: revision 1's 68 h will be removed"], rows: [
+    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', error: 'Employee is excluded' },
+  ] };
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: {} });
+  open(data);
+  expect(screen.getByText("Jordan: revision 1's 68 h will be removed")).toBeTruthy();
+  fireEvent.click(screen.getByLabelText('Don’t apply this change for Jordan Worker'));
+  expect((screen.getByLabelText(/I checked the owner pay and extra hours/) as HTMLInputElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Reason for declining Jordan Worker'), { target: { value: 'Not working this period' } });
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ reviewed_changes: [{ change_index: 0, hours: '68', decision: 'decline', reason: 'Not working this period' }] })));
+});
+
+function skippedOwnerPreview() {
+  const data = preview([ownerMissing]);
+  data.client_change_prefill = { submission_id: 20, revision: 2, rows: [
+    { change_index: -2, kind: 'owner_pay', employee_id: 2, employee_name: 'Morgan Owner', requires_pay_decision: true },
+  ] };
+  return data;
+}
+
+it('requires a fresh amount or reasoned no-pay decision for earlier client owner pay', async () => {
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
+  open(skippedOwnerPreview());
+  expect(ownerInput().value).toBe('');
+  expect(applyButton().disabled).toBe(true);
+  expect(screen.getByText(/Earlier client pay is no longer selected/)).toBeTruthy();
+  fireEvent.change(ownerInput(), { target: { value: '3000' } });
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ reviewed_changes: [{ change_index: -2, amount: '3000' }] })));
+  expect(mocks.updateItem).not.toHaveBeenCalled();
+});
+
+it.each(['no-pay choice', 'row exclusion'])('applies %s as a reasoned no-pay decision inside the review', async mode => {
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
+  open(skippedOwnerPreview());
+  if (mode === 'no-pay choice') {
+    fireEvent.click(screen.getByLabelText('No pay this period for Morgan Owner'));
+  } else {
+    fireEvent.change(screen.getAllByLabelText('Outcome for Owner, Morgan')[0], { target: { value: 'excluded' } });
+  }
+  expect(applyButton().disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Reason for no pay for Morgan Owner'), { target: { value: 'Client confirmed no pay' } });
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
+    reviewed_changes: [{ change_index: -2, amount: '', decision: 'no_pay', reason: 'Client confirmed no pay' }],
+    rows: expect.arrayContaining([expect.objectContaining({ id: 2, disposition: 'excluded', disposition_reason: 'Client confirmed no pay' })]),
+  })));
+});

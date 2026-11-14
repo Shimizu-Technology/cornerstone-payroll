@@ -20,7 +20,9 @@ function submissionReceipt(detail: PeriodDetail): string {
   const workbook = sent?.workbook_choice === 'none' ? 'No tips or loans'
     : sent?.changes_link_url ? 'Link sent'
     : sent?.documents.some(doc => doc.role === 'changes_workbook') ? 'Workbook ✓' : 'Workbook not included';
-  return `Sent. Revision ${detail.current_revision} is with Cornerstone. Revel PDF ✓ · ${workbook} · ${sent?.changes.length || 0} changes`;
+  const changed = sent?.changes.filter(row => !row.skipped).length || 0;
+  const skipped = sent?.changes.filter(row => row.skipped).length || 0;
+  return `Sent. Revision ${detail.current_revision} is with Cornerstone. Revel PDF ✓ · ${workbook} · ${changed} changes${skipped ? ` · ${skipped} not this period` : ''}`;
 }
 
 function DraftFiles({ draft, api, audience }: { draft: SubmissionDraft; api: typeof clientPayrollSubmissionsApi | typeof adminPayrollSubmissionsApi; audience: Audience }) {
