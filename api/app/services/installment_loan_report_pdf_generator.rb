@@ -18,13 +18,14 @@ class InstallmentLoanReportPdfGenerator
 
   # @param company [Company]
   # @param as_of_date [Date] show loan state as of this date (defaults to today)
-  def initialize(company, as_of_date: nil)
+  def initialize(company, as_of_date: nil, pay_period_scope: nil)
+    @pay_period_scope = pay_period_scope
     @company = company
     @as_of_date = as_of_date || Date.current
   end
 
   def generate
-    loans = InstallmentLoanReportBuilder.new(company, as_of_date: as_of_date).loans
+    loans = InstallmentLoanReportBuilder.new(company, as_of_date: as_of_date, pay_period_scope: @pay_period_scope).loans
     pdf = PdfUnicodeFont.document(page_size: "LETTER", page_layout: :portrait, margin: [ 36, 36, 50, 36 ])
     render_document(pdf, loans)
   end

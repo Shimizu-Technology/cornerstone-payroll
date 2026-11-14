@@ -10,7 +10,9 @@ class QuarterlyCompliancePacketBuilder
 
   attr_reader :company, :year, :quarter
 
-  def initialize(company, year, quarter)
+  def initialize(company, year, quarter, pay_period_scope: PayPeriod.reportable_committed, client_view: false)
+    @pay_period_scope = pay_period_scope
+    @client_view = client_view
     @company = company
     @year = Integer(year)
     @quarter = Integer(quarter)
@@ -18,11 +20,11 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def generate
-    {
+    report = {
       meta: meta,
-      due_dates: due_dates,
+      due_dates: @client_view ? { official_due_date: due_date.iso8601 } : due_dates,
       source_rules: source_rules,
-      workflow: workflow_section,
+      workflow: @client_view ? nil : workflow_section,
       pay_periods: pay_period_rows,
       form_500: form_500_section,
       w1: w1_section,
@@ -32,6 +34,13 @@ class QuarterlyCompliancePacketBuilder
       review_checks: review_checks,
       component_taxability: component_taxability
     }
+    if @client_view
+      report.delete(:workflow)
+      report[:federal_941].delete(:filing_steps)
+      report[:federal_941][:deposit_schedule].delete(:firm_payment_policy)
+      report[:federal_941][:deposit_schedule].delete(:note)
+    end
+    report
   end
 
   private
@@ -53,7 +62,7 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def pay_periods
-    @pay_periods ||= PayPeriod.reportable_committed
+    @pay_periods ||= @pay_period_scope
                               .where(company_id: company.id, pay_date: quarter_start..quarter_end)
                               .order(:pay_date, :id)
   end
@@ -347,7 +356,7 @@ class QuarterlyCompliancePacketBuilder
 
   def federal_941_section
     @federal_941_section ||= begin
-      report = Form941GuAggregator.new(company, year, quarter).generate
+      report = Form941GuAggregator.new(company, year, quarter, pay_period_scope: @pay_period_scope).generate
       schedule = suggested_federal_deposit_schedule
       {
         filing_channel: "IRS Form 941",
@@ -640,7 +649,7 @@ class QuarterlyCompliancePacketBuilder
                  .financially_reportable.reportable
                  .where.not(employment_type: "contractor")
                  .where(pay_periods: {
-                   id: PayPeriod.reportable_committed
+                   id: @pay_period_scope
                      .where(company_id: company.id, pay_date: tax_year_start...date)
                      .select(:id)
                  })
@@ -766,7 +775,7 @@ class QuarterlyCompliancePacketBuilder
 
   def suggested_federal_deposit_schedule
     liability = [ [ year - 2, 3 ], [ year - 2, 4 ], [ year - 1, 1 ], [ year - 1, 2 ] ].sum do |lookback_year, lookback_quarter|
-      Form941GuAggregator.new(company, lookback_year, lookback_quarter)
+      Form941GuAggregator.new(company, lookback_year, lookback_quarter, pay_period_scope: @pay_period_scope)
                          .generate
                          .dig(:lines, :line12_total_after_credits)
                          .to_f
