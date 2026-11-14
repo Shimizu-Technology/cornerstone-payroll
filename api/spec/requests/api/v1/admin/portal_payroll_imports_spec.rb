@@ -1322,6 +1322,24 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(item.wage_rate_hours.sum { |entry| entry["overtime_hours"].to_d }).to eq(3)
     end
 
+    it "keeps each legacy row's own overtime and clears overtime from a dropped bucket" do
+      source = standing_source
+      apply_standing(preview(source))
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      legacy = { "label" => "Legacy", "holiday_hours" => 0.0, "pto_hours" => 0.0, "active" => true }
+      dropped = { "employee_wage_rate_id" => manual_job.id, "source_bucket_key" => "gone", "label" => "Maintenance", "rate" => 35.0,
+        "regular_hours" => 0.0, "overtime_hours" => 5.0, "holiday_hours" => 0.0, "pto_hours" => 0.0, "active" => true }
+      evidence = item.custom_columns_data["client_change_evidence"].merge(
+        "baseline_allocations" => [ legacy.merge("rate" => 10.0, "regular_hours" => 1.0, "overtime_hours" => 0.0),
+          legacy.merge("label" => "Legacy B", "rate" => 20.0, "regular_hours" => 1.0, "overtime_hours" => 0.0), dropped ])
+      item.update_columns(custom_columns_data: item.custom_columns_data.merge("client_change_evidence" => evidence,
+        "wage_rate_hours" => [ legacy.merge("rate" => 10.0, "regular_hours" => 30.0, "overtime_hours" => 4.0),
+          legacy.merge("label" => "Legacy B", "rate" => 20.0, "regular_hours" => 38.0, "overtime_hours" => 2.0) ]))
+      Api::V1::Admin::PayrollItemsController.new.send(:sync_client_hours_evidence!, item.reload)
+      baseline = item.reload.custom_columns_data.dig("client_change_evidence", "baseline_allocations")
+      expect(baseline.map { |entry| [ entry["rate"].to_d, entry["overtime_hours"].to_d ] }).to eq([ [ 10, 4 ], [ 20, 2 ], [ 35, 0 ] ])
+    end
+
     it "keeps each time bucket's own overtime when two buckets share a job rate" do
       source = standing_source
       apply_standing(preview(source))
