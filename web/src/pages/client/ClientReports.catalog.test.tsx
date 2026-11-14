@@ -56,3 +56,13 @@ it('keeps payroll reports available on employee-list failure and retries all emp
   expect(screen.getByRole('option', { name: 'Ana Perez' })).toBeTruthy();
   expect(screen.queryByText(/Employee reports are unavailable/)).toBeNull();
 });
+
+it('reads every page of pay periods before choosing finished payroll', async () => {
+  api.periods
+    .mockResolvedValueOnce({ pay_periods: [{ id: 9, record_type: 'native', status: 'approved', start_date: '2026-06-01', end_date: '2026-06-14' }], meta: { current_page: 1, total_pages: 2 } })
+    .mockResolvedValueOnce({ pay_periods: [{ id: 4, record_type: 'native', status: 'committed', start_date: '2026-01-01', end_date: '2026-01-14' }], meta: { current_page: 2, total_pages: 2 } });
+  render(<ClientReports />);
+  await waitFor(() => expect(api.register).toHaveBeenCalledWith(4));
+  expect(api.periods).toHaveBeenNthCalledWith(2, { page: 2, per_page: 100 });
+  expect(screen.getByRole('option', { name: '2026-01-01 - 2026-01-14' })).toBeTruthy();
+});

@@ -67,4 +67,22 @@ RSpec.describe InstallmentLoanReportBuilder do
     expect(snapshot[:balance_as_of]).to eq(125)
     expect(snapshot[:transactions]).to be_empty
   end
+
+  it "replays a scoped ledger from its first recorded entry when an addition is backdated" do
+    loan.loan_transactions.delete_all
+    loan.update!(current_balance: 225)
+    [
+      [ "addition", 200, 0, 200, Date.new(2026, 1, 1) ],
+      [ "payment", 50, 200, 150, Date.new(2026, 1, 20) ],
+      [ "addition", 100, 150, 250, Date.new(2026, 1, 10) ],
+      [ "payment", 25, 250, 225, Date.new(2026, 2, 1) ]
+    ].each do |type, amount, before, after, date|
+      loan.loan_transactions.create!(transaction_type: type, amount: amount, balance_before: before, balance_after: after, transaction_date: date)
+    end
+
+    scoped = described_class.new(company, as_of_date: Date.new(2026, 3, 1), pay_period_scope: PayPeriod.client_finished).loans.sole
+    unscoped = described_class.new(company, as_of_date: Date.new(2026, 3, 1)).loans.sole
+    expect(scoped[:balance_as_of]).to eq(225)
+    expect(unscoped[:balance_as_of]).to eq(225)
+  end
 end

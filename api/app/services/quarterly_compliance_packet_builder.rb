@@ -38,6 +38,8 @@ class QuarterlyCompliancePacketBuilder
       report[:form_500][:deposits].each { |deposit| deposit.except!(:notes, :confirmation_number, :receipt_attached) }
       report.delete(:workflow)
       report[:federal_941].delete(:filing_steps)
+      report[:w1].delete(:filing_steps)
+      report[:swica].delete(:filing_steps)
       report[:federal_941][:deposit_schedule].delete(:firm_payment_policy)
       report[:federal_941][:deposit_schedule].delete(:note)
     end
