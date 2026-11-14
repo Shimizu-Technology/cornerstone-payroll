@@ -93,6 +93,38 @@ Rails.application.routes.draw do
         resources :imported_pay_periods, only: [ :show ]
 
         namespace :reports do
+          get :payroll_summary_by_employee_pdf
+          get :payroll_summary_by_employee_xlsx
+          get :tax_summary
+          get :tax_summary_csv
+          get :tax_summary_pdf
+          get :tax_summary_xlsx
+          get :employer_liability
+          get :employer_liability_csv
+          get :employer_liability_pdf
+          get :employer_liability_xlsx
+          get :form_941_gu
+          get :form_941_gu_pdf
+          get :form_941_gu_xlsx
+          get :quarterly_compliance_packet
+          get :quarterly_compliance_packet_pdf
+          get :quarterly_compliance_packet_xlsx
+          get :quarterly_compliance_packet_form_941_pdf
+          get :quarterly_compliance_packet_schedule_b_pdf
+          get :quarterly_compliance_packet_w1_pdf
+          get :quarterly_compliance_packet_swica_pdf
+          get :employee_pay_history
+          get :employee_pay_history_csv
+          get :employee_pay_history_pdf
+          get :employee_pay_history_xlsx
+          get :paycheck_history_pdf
+          get :paycheck_history_xlsx
+          get :deductions_contributions_pdf
+          get :deductions_contributions_xlsx
+          get :retirement_plans_pdf
+          get :retirement_plans_xlsx
+          get :installment_loans_pdf
+          get :installment_loans_xlsx
           get :dashboard
           get :payroll_register
           get :payroll_register_csv

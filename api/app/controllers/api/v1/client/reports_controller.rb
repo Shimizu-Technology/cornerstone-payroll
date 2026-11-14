@@ -23,6 +23,37 @@ module Api
 
         private
 
+        def report_meta(company, report_key)
+          super.merge(payroll_status_note: company&.test_workspace? ? "TEST ONLY — finished copied history and committed payroll" : nil)
+        end
+
+        def report_pay_periods
+          PayPeriod.client_finished.where(company_id: current_company_id)
+        end
+
+        def annual_report_pay_periods
+          report_pay_periods
+        end
+
+        def loan_report_pay_periods
+          report_pay_periods
+        end
+
+        def client_report_view?
+          true
+        end
+
+        def find_pay_period_for_report
+          id = params[:pay_period_id]
+          if id.blank?
+            render json: { error: "pay_period_id is required" }, status: :unprocessable_entity
+            return nil
+          end
+          period = report_pay_periods.find_by(id: id)
+          render json: { error: "Pay period not found" }, status: :not_found unless period
+          period
+        end
+
         def current_pay_period_summary
           pp = PayPeriod.client_finished
                         .where(company_id: current_company_id)

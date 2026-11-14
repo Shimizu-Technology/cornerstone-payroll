@@ -3468,6 +3468,9 @@ export const reportsApi = {
 };
 
 export const clientReportsApi = {
+  download: (report: string, format: string, params: Record<string, string | number>) =>
+    api.getBlobWithParams(`/client/reports/${report}_${format}`, params),
+
   dashboard: () =>
     api.get<DashboardResponse>('/client/reports/dashboard'),
   payrollRegister: (payPeriodId: number) =>

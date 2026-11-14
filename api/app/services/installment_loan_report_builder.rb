@@ -3,7 +3,8 @@
 class InstallmentLoanReportBuilder
   attr_reader :company, :as_of_date
 
-  def initialize(company, as_of_date: nil)
+  def initialize(company, as_of_date: nil, pay_period_scope: nil)
+    @pay_period_scope = pay_period_scope
     @company = company
     @as_of_date = as_of_date || Date.current
   end
@@ -20,6 +21,19 @@ class InstallmentLoanReportBuilder
 
   def loan_snapshot(loan)
     all_transactions = loan.loan_transactions.chronological.to_a
+    if @pay_period_scope
+      allowed_ids = @pay_period_scope.where(company_id: company.id).pluck(:id)
+      balance = all_transactions.first&.balance_before || loan.original_amount
+      all_transactions = all_transactions.filter_map do |txn|
+        next unless txn.pay_period_id.nil? || allowed_ids.include?(txn.pay_period_id)
+
+        visible = txn.dup
+        visible.balance_before = balance
+        balance += txn.transaction_type == "addition" ? txn.amount : -txn.amount
+        visible.balance_after = balance
+        visible
+      end
+    end
     transactions = all_transactions.select { |txn| txn.transaction_date <= as_of_date }
 
     {
@@ -36,7 +50,7 @@ class InstallmentLoanReportBuilder
     return BigDecimal("0") if loan.start_date.present? && loan.start_date > as_of_date
     return all_transactions.first.balance_before if all_transactions.any?
 
-    loan.current_balance
+    @pay_period_scope ? loan.original_amount : loan.current_balance
   end
 
   def status_as_of(loan, transactions)
