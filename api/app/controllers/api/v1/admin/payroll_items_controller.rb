@@ -119,7 +119,7 @@ module Api
           # Compare regular totals per job bucket; a bucket holding only overtime,
           # holiday or PTO leaves the client's regular-hours baseline intact.
           regular_by_bucket = lambda do |entries|
-            entries.to_a.map(&:to_h).group_by { |entry| entry.values_at("employee_wage_rate_id", "source_bucket_key").map(&:to_s) }
+            entries.to_a.map(&:to_h).group_by { |entry| entry.values_at("employee_wage_rate_id", "source_bucket_key").map(&:to_s) + [ entry["rate"].to_d ] }
               .transform_values { |list| list.sum { |entry| entry["regular_hours"].to_d } }.reject { |_bucket, total| total.zero? }
           end
           regular_changed = changed_hours.include?("hours_worked") ||

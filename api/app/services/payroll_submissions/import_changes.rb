@@ -55,7 +55,9 @@ module PayrollSubmissions
         if exclusions.any? && exclusions.all? { |decision| decision.disposition == "excluded" }
           reviewed << { change_index: change[:change_index], decision: "no_pay", reason: exclusions.map(&:reason).uniq.join("; ") }.with_indifferent_access
         else
-          raise ArgumentError, "#{change[:employee_name]}: earlier client owner pay is no longer selected. Enter new pay in this review, or choose No pay this period / Exclude from payroll and record a reason."
+          left_out = source_employee_ids.map(&:to_s).include?(change[:employee_id].to_s) && rows.none? { |row| row[:employee_id].to_s == change[:employee_id].to_s }
+          hint = left_out ? " To use the workbook's pay, include #{change[:employee_name]}'s file row instead of deferring it." : ""
+          raise ArgumentError, "#{change[:employee_name]}: earlier client owner pay is no longer selected. Enter new pay in this review, or choose No pay this period / Exclude from payroll and record a reason.#{hint}"
         end
       end
       if changes.any? && !ActiveModel::Type::Boolean.new.cast(confirmed)

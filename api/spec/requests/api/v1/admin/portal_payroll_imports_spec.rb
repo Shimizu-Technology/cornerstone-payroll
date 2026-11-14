@@ -1351,6 +1351,21 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       end
     end
 
+    it "treats regular hours moved between job entries without a saved job as a new baseline" do
+      source = standing_source
+      data = preview(source)
+      apply_standing(data)
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      legacy = { "label" => "Legacy A", "rate" => 10.0, "regular_hours" => 30.0, "overtime_hours" => 0.0, "holiday_hours" => 0.0, "pto_hours" => 0.0, "active" => true }
+      item.update_columns(custom_columns_data: item.custom_columns_data.merge("wage_rate_hours" => [ legacy, legacy.merge("label" => "Legacy B", "rate" => 20.0, "regular_hours" => 38.0) ]))
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      moved = [ legacy.merge("regular_hours" => 25.0), legacy.merge("label" => "Legacy B", "rate" => 20.0, "regular_hours" => 43.0) ]
+      patch "#{url}/payroll_items/#{item.id}", params: { payroll_item: { wage_rate_hours: moved } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.hours_worked).to eq(68)
+      expect(item.custom_columns_data["client_change_evidence"]).to be_nil
+    end
+
     it "keeps the client hours apart from overtime added in a new job bucket with no regular hours" do
       source = standing_source
       data = preview(source)
