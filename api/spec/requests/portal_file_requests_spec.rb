@@ -119,6 +119,7 @@ RSpec.describe "Portal file requests", type: :request do
   end
 
   it "keeps an unresolved request from marking the pay period complete" do
+    company.update!(payroll_intake_source_types: [ "mosa_revel" ])
     period = PayrollSubmissions::Catalog.new(company: company).then { |catalog| catalog.materialize!(catalog.resolve(period_ref)) }
     period.update!(status: "draft_ready")
     request_file(idempotency_key: "blocking")
