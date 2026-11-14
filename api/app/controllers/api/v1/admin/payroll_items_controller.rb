@@ -115,10 +115,13 @@ module Api
           attrs[:employment_type] = @payroll_item.employee.employment_type
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
-          if saved_hours.any? { |field, value| attrs.key?(field.to_sym) && attrs[field.to_sym].to_d != value.to_d } ||
-              saved_allocations != @payroll_item.wage_rate_hours
-            @payroll_item.custom_columns_data = @payroll_item.custom_columns_data.to_h.merge("client_change_evidence" => nil)
-          end
+          changed_hours = saved_hours.keys.select { |field| attrs.key?(field.to_sym) && attrs[field.to_sym].to_d != saved_hours[field].to_d }
+          regular_changed = changed_hours.include?("hours_worked") ||
+            saved_allocations.map { |entry| entry.to_h.slice("employee_wage_rate_id", "regular_hours") } !=
+              @payroll_item.wage_rate_hours.map { |entry| entry.to_h.slice("employee_wage_rate_id", "regular_hours") }
+          # New regular hours become the baseline a corrected revision adds to.
+          @payroll_item.custom_columns_data = @payroll_item.custom_columns_data.to_h.merge("client_change_evidence" => nil) if regular_changed
+          refresh_client_hours_evidence = !regular_changed && changed_hours.any?
           @payroll_item.mark_payroll_adjustments_overridden! if attrs.key?(:payroll_adjustments)
           # Pay saved from the import review is entered by hand even when it equals
           # the amount an earlier workbook import wrote.
@@ -130,6 +133,7 @@ module Api
           PayrollBonusInput.manual!(@payroll_item, attrs[:bonus]) if attrs.key?(:bonus)
 
           if @payroll_item.update(attrs)
+            sync_client_hours_evidence!(@payroll_item) if refresh_client_hours_evidence
             calculate_with_timekeeping!(@payroll_item) if params[:auto_calculate]
             invalidate_prior_calculation!("Payroll employee rows changed after calculation.")
             render json: { payroll_item: payroll_item_json(@payroll_item) }
@@ -256,6 +260,30 @@ module Api
           return if @payroll_item
 
           render json: { error: "Payroll item not found", details: {} }, status: :not_found
+        end
+
+        # Overtime, holiday and PTO never come from the client. When staff change only
+        # those, keep the client-hours evidence and carry the new values into both its
+        # applied and baseline snapshots, so a corrected revision swaps the client's
+        # regular hours without losing the staff edit.
+        def sync_client_hours_evidence!(item)
+          evidence = item.custom_columns_data.to_h["client_change_evidence"]
+          return unless evidence.is_a?(Hash) && evidence["kind"] == "extra_hours" && evidence["applied_hours"].is_a?(Hash)
+
+          other = %w[overtime_hours holiday_hours pto_hours]
+          current = item.wage_rate_hours.map(&:to_h)
+          by_rate = current.index_by { |entry| entry["employee_wage_rate_id"] }
+          baseline = Array(evidence["baseline_allocations"]).map(&:to_h)
+          baseline = baseline.map { |entry| entry.merge(by_rate.fetch(entry["employee_wage_rate_id"], {}).slice(*other)) }
+          current.each do |entry|
+            next if baseline.any? { |row| row["employee_wage_rate_id"] == entry["employee_wage_rate_id"] }
+            next if other.all? { |field| entry[field].to_d.zero? }
+
+            baseline << entry.merge("regular_hours" => 0.0)
+          end
+          applied_hours = evidence["applied_hours"].merge(other.to_h { |field| [ field, item.public_send(field).to_d.to_s("F") ] })
+          item.update_columns(custom_columns_data: item.custom_columns_data.to_h.merge("client_change_evidence" =>
+            evidence.merge("applied_hours" => applied_hours, "applied_allocations" => current, "baseline_allocations" => baseline)))
         end
 
         def payroll_item_params
