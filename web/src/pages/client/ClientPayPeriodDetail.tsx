@@ -131,7 +131,7 @@ export function ClientPayPeriodDetail(): ReactElement {
               <SummaryCard label="Employees" value={String(resolvedPayPeriod.employee_count ?? resolvedPayPeriod.payroll_items?.length ?? 0)} />
               <SummaryCard label="Gross Pay" value={formatCurrency(resolvedPayPeriod.total_gross ?? 0)} />
               <SummaryCard label="Net Pay" value={formatCurrency(resolvedPayPeriod.total_net ?? 0)} />
-              <SummaryCard label="Status" value={resolvedPayPeriod.status.charAt(0).toUpperCase() + resolvedPayPeriod.status.slice(1)} />
+              <SummaryCard label="Status" value={resolvedPayPeriod.test_workspace_role === 'baseline' ? 'Paid (copied history)' : resolvedPayPeriod.status.charAt(0).toUpperCase() + resolvedPayPeriod.status.slice(1)} />
             </div>
 
 

@@ -73,7 +73,7 @@ const clientNavigation: NavItem[] = [
 
 const portalNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Payroll Files', href: '/payroll-files', icon: <FileSpreadsheet className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Pay Period Files', href: '/payroll-files', icon: <FileSpreadsheet className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Messages', href: '/messages', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
@@ -332,7 +332,9 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           {!collapsed && (
             <div>
               <p className="text-sm font-semibold tracking-tight text-neutral-900">Cornerstone Payroll</p>
-              <p className="text-xs text-neutral-600">Payroll workspace</p>
+              {isClient
+                ? <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Client Portal</p>
+                : <p className="text-xs text-neutral-600">Payroll workspace</p>}
             </div>
           )}
         </NavLink>

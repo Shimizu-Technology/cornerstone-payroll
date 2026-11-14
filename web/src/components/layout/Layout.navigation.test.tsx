@@ -8,6 +8,7 @@ import { Layout } from './Layout';
 
 const scope = vi.hoisted(() => ({ organization: 1, company: 1, practicePortal: false }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, name: 'Synthetic client', active: true, test_workspace: scope.practicePortal, practice_portal: scope.practicePortal, workspace_can_write: !scope.practicePortal }, activeCompanyId: scope.company, activeOrganizationId: scope.organization }) }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { role: scope.practicePortal ? 'client' : 'admin' } }) }));
 vi.mock('./CommandPalette', () => ({ CommandPalette: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Command palette"><input autoFocus aria-label="Command search" /></div> : null }));
 vi.mock('./Sidebar', () => ({ Sidebar: ({ onNavigate, onOpenCommandPalette }: { onNavigate?: () => void; onOpenCommandPalette?: () => void }) => <nav><Link to="/employees" onClick={onNavigate}>Employees</Link><button>Client settings</button><button onClick={onOpenCommandPalette}>Command menu</button></nav> }));
 beforeEach(() => { scope.organization = 1; scope.company = 1; scope.practicePortal = false; vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function (this: HTMLElement) { return this.parentElement; }); });
@@ -88,4 +89,5 @@ it('labels a practice client portal and explains its permitted actions', () => {
   expect(screen.getByText('Practice copy — no live payroll.')).toBeTruthy();
   expect(screen.getByText(/You can upload files, exchange messages, and review or approve drafts here/)).toBeTruthy();
   expect(screen.queryByText(/You have read-only access/)).toBeNull();
+  expect(screen.getByText('Cornerstone Payroll · Client Portal')).toBeTruthy();
 });
