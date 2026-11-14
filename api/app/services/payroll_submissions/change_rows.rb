@@ -9,7 +9,7 @@ module PayrollSubmissions
     MAX_TEXT = 500
     KINDS = {
       "extra_hours" => { employee: :required, fields: { "hours" => :hours } },
-      "owner_pay" => { employee: :optional_many, fields: { "amount" => :money, "basis" => :basis } },
+      "owner_pay" => { employee: :required, fields: { "amount" => :money } },
       "paid_leave" => { employee: :required, fields: { "hours" => :hours } },
       "new_hire" => { employee: :none, fields: { "name" => :name, "starting_wage" => :money, "wage_unit" => :wage_unit, "start_date" => :optional_date } },
       "wage_change" => { employee: :required, fields: { "new_wage" => :money, "wage_unit" => :wage_unit, "effective_date" => :optional_date } },
@@ -53,8 +53,16 @@ module PayrollSubmissions
       raise Invalid, { "changes" => [ "List no more than #{MAX_ROWS} changes" ] } if rows.size > MAX_ROWS
 
       employee_ids = rows.flat_map { |row| Array(row["employee_ids"]) + [ row["employee_id"] ] }.compact.map { |id| integer(id) }.compact.uniq
-      @employees = Employee.where(company_id: @company_id, id: employee_ids).pluck(:id).to_set
+      @employees = Employee.where(company_id: @company_id, id: employee_ids).index_by(&:id)
+      @defaults = PayrollStandingChange.where(company_id: @company_id).index_by(&:id)
       normalized = rows.each_with_index.map { |row, index| normalize_row(row, index) }
+      missing = @defaults.values.select(&:active?).reject { |item| normalized.any? { |row| row["standing_change_id"] == item.id } }
+      @errors["changes"] << "Every period defaults changed. Reload and fill in or skip every default." if missing.any?
+      duplicates = normalized.select { |row| %w[owner_pay extra_hours].include?(row["kind"]) && !row["skipped"] }
+        .group_by { |row| [ row["kind"], row["employee_id"] ] }.values.any?(&:many?)
+      @errors["changes"] << "Keep one owner-pay or extra-hours row per employee." if duplicates
+      default_ids = normalized.filter_map { |row| row["standing_change_id"] }
+      @errors["changes"] << "Keep one answer per every-period default." if default_ids.uniq.size != default_ids.size
       raise Invalid, @errors.to_h if @errors.any?
 
       normalized
@@ -89,23 +97,49 @@ module PayrollSubmissions
       end
 
       result = { "kind" => kind }
+      if row["standing_change_id"].present?
+        item = @defaults[integer(row["standing_change_id"])]
+        unless item && item.kind == kind && item.employee_id == integer(row["employee_id"]) && item.employee_wage_rate_id == integer(row["employee_wage_rate_id"])
+          @errors[key] << "Every period default changed. Reload before sending."
+          return result
+        end
+        result.merge!("standing_change_id" => item.id, "employee_id" => item.employee_id)
+        if ActiveModel::Type::Boolean.new.cast(row["skipped"])
+          return result.merge("skipped" => true, "employee_wage_rate_id" => item.employee_wage_rate_id).compact
+        end
+        @errors[key] << item.availability_error if item.availability_error
+      elsif ActiveModel::Type::Boolean.new.cast(row["skipped"])
+        @errors[key] << "Only an every-period default can be marked Not this period."
+      end
       case spec[:employee]
       when :required
         id = integer(row["employee_id"])
-        if id && @employees.include?(id)
+        if id && @employees.key?(id)
           result["employee_id"] = id
         else
           @errors[key] << "#{LABELS[kind]}: choose an employee from this company"
         end
       when :optional_many
         ids = Array(row["employee_ids"]).map { |value| integer(value) }
-        if ids.any? { |id| id.nil? || !@employees.include?(id) }
+        if ids.any? { |id| id.nil? || !@employees.key?(id) }
           @errors[key] << "#{LABELS[kind]}: choose employees from this company"
         else
           result["employee_ids"] = ids.uniq
         end
       end
 
+      employee = @employees[result["employee_id"]]
+      if kind == "owner_pay" && employee && (!employee.active? || !employee.variable_salary?)
+        @errors[key] << "Choose an active employee with variable salary for owner pay."
+      end
+      if kind == "extra_hours" && employee
+        rate = employee.active_wage_rates.find_by(id: integer(row["employee_wage_rate_id"]))
+        unless employee.active? && employee.hourly_pay_basis? && rate && !rate.rate.nil?
+          @errors[key] << "Choose an active employee and their saved job and rate for extra hours."
+        else
+          result.merge!("employee_wage_rate_id" => rate.id, "wage_rate_label" => rate.label, "wage_rate" => rate.rate.to_s("F"))
+        end
+      end
       spec[:fields].each do |field, type|
         value = coerce(type, row[field])
         if value == :invalid

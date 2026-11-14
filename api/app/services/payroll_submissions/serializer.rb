@@ -37,6 +37,7 @@ module PayrollSubmissions
       record = entry.record
       payload = summary(entry).merge(
         schedule_note: schedule_note,
+        standing_changes: StandingChanges.new(company: @catalog.company, before_pay_date: @catalog.pay_date_for(entry)).rows,
         thread_id: record&.client_portal_thread_id,
         file_requests: record ? file_requests(record) : [],
         submissions: [], drafts: [], history: [],

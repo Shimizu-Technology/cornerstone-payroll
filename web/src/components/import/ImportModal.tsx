@@ -52,6 +52,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [sourceRows, setSourceRows] = useState<EditableSourceRow[]>(() => initialPreview?.preview.source_rows.map(row => ({ ...row, disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending' })) || []);
   const [rateChoices, setRateChoices] = useState<Record<string, number>>({});
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
+  const [reviewedClientChanges, setReviewedClientChanges] = useState(false);
+  const [clientChangeDrafts, setClientChangeDrafts] = useState<Record<number, string>>({});
   const [usePendingRevision, setUsePendingRevision] = useState(false);
   const [staffWorkbook, setStaffWorkbook] = useState<File | null>(null);
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
@@ -77,6 +79,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     reviewGeneration.current += 1;
     setStep('upload');
     setUsePendingRevision(false); setStaffWorkbook(null);
+    setReviewedClientChanges(false); setClientChangeDrafts({});
     setPdfFile(null);
     setExcelFile(null);
     setLoading(false);
@@ -133,6 +136,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   const openPreview = (data: ImportPreviewResponse) => {
     setPreviewData(data);
+    setReviewedClientChanges(false); setClientChangeDrafts({});
     setUsePendingRevision(false);
     setRateChoices({});
     setSourceRows(data.preview.source_rows.map((row) => ({
@@ -279,7 +283,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   };
 
   const handleApply = async () => {
-    if (!previewData || loading) return;
+    if (!previewData || loading || !canApply) return;
     try {
       setStep('applying');
       setError(null);
@@ -296,6 +300,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         acknowledge_low_confidence_matches: reviewedSuggestedMatches,
         force_overwrite: reviewedOverwrite,
         wage_rate_choices: rateChoices,
+        ...(clientChanges.length ? { confirm_client_changes: reviewedClientChanges,
+          reviewed_changes: clientChanges.map(row => ({ change_index: row.change_index,
+            [row.kind === 'owner_pay' ? 'amount' : 'hours']: clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '' })) } : {}),
       });
       setResults({
         success: response.results.success.length,
@@ -314,13 +321,22 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setSourceRows((current) => current.map((row) => row.id === rowId ? { ...row, ...patch } : row));
   };
 
-  const matched = previewData?.preview.matched || [];
+  const activeChangePrefill = previewData?.client_change_prefill || (usePendingRevision ? previewData?.pending_change_prefill : null);
+  const clientChanges = activeChangePrefill?.rows || [];
+  const clientChangesInvalid = clientChanges.some(row => row.error || !/^\d+(\.\d{1,2})?$/.test(clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '') || Number(clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours) <= 0 || Number(clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours) > (row.kind === 'owner_pay' ? 10_000_000 : 1000));
+  const matched = (previewData?.preview.matched || []).map(row => {
+    const owner = clientChanges.find(change => change.kind === 'owner_pay' && change.employee_id === row.employee_id && !change.error);
+    return owner ? { ...row, period_pay_missing: false, period_pay_source: 'client_changes' as const, current_period_pay: clientChangeDrafts[owner.change_index] ?? owner.amount } : row;
+  });
   const includedSourceRows = sourceRows.filter((row) => row.disposition === 'included');
   const includedSourceRowIds = new Set(includedSourceRows.map((row) => row.id));
   const included = matched.filter((row) => includedSourceRowIds.has(row.source_row_id));
+  const clientOnlyEmployees = new Set(clientChanges.filter(change => change.employee_id && !change.error && !matched.some(row => row.employee_id === change.employee_id)).map(change => change.employee_id));
+  const reviewedEmployeeCount = included.length + clientOnlyEmployees.size;
   const missingPeriodPay = included.filter((row) => row.period_pay_missing);
   const missingRateChoices = included.filter((row) => row.wage_rate_options?.length && !(rateChoices[row.employee_id] ?? row.selected_wage_rate_id));
-  const overwriteRows = included.filter((row) => row.overwrite_required);
+  const overwriteRows = [...included.filter((row) => row.overwrite_required),
+    ...clientChanges.filter(change => change.overwrite_required && !matched.some(row => row.employee_id === change.employee_id))];
   const incompleteSourceRows = sourceRows.filter((row) => (
     row.disposition === 'pending'
       || (['excluded', 'deferred', 'informational'].includes(row.disposition) && !row.disposition_reason?.trim())
@@ -335,6 +351,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const canApply = Boolean(
     previewData
       && !loading
+      && (!clientChanges.length || (reviewedClientChanges && !clientChangesInvalid))
       && sourceRows.length > 0
       && incompleteSourceRows.length === 0
       && includedBlockingRows.length === 0
@@ -365,6 +382,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     target?.focus();
   };
   const attention: { key: string; label: string; reason: string; jump: () => void }[] = [];
+  if (clientChanges.length && (!reviewedClientChanges || clientChangesInvalid)) {
+    attention.push({ key: 'client-changes', label: 'Review the client’s amounts and hours', reason: 'client changes need confirmation', jump: () => jumpToSection('client-changes') });
+  }
   if (missingPeriodPay.length > 0) {
     const names = missingPeriodPay.map((row) => row.employee_name).join(', ');
     attention.push({ key: 'pay', label: `Enter pay for ${names}`, reason: `pay is missing for ${names}`, jump: () => jumpToSection('missing-pay') });
@@ -465,7 +485,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               ? `${unresolvedCount} source row${unresolvedCount === 1 ? ' needs' : 's need'} attention before this import can be applied.`
               : missingPeriodPay.length > 0
                 ? 'Enter the missing period pay before applying this import.'
-                : `${included.length} employees are ready. Review the source matches and apply.`)}
+                : `${reviewedEmployeeCount} employees are ready. Review the source matches and apply.`)}
             {step === 'applying' && 'Applying import...'}
             {step === 'done' && 'Import complete.'}
           </DialogDescription>
@@ -477,20 +497,20 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
         {previewData?.pending_portal_source && !previewData.portal_source && <section className="space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-4" aria-label="Pending client revision">
           <p className="text-sm">A client revision is waiting. Confirm that this import uses the files and changes for that revision. The selection is recorded only when this import applies successfully.</p>
-          <h3 className="font-semibold">Client revision {previewData.pending_portal_source.revision} · changes for staff to make by hand</h3>
+          <h3 className="font-semibold">Client revision {previewData.pending_portal_source.revision} · changes for this period</h3>
           <Link className="inline-flex min-h-11 items-center text-sm underline" to={`/companies/${companyId}/payroll-submissions/${previewData.pending_portal_source.period_id}`}>Open retained portal submission</Link>
-          <p className="text-sm">Importing does not make these changes. Make each change in the employee’s record or pay worksheet before finalizing payroll.</p>
+          <p className="text-sm">Select this revision to fill owner pay and extra hours for review. Review other changes separately before finalizing payroll.</p>
           <p className="text-sm">Workbook choice: {previewData.pending_portal_source.workbook_choice === 'attach' ? 'Attached workbook' : previewData.pending_portal_source.workbook_choice === 'link' ? 'Link sent' : previewData.pending_portal_source.workbook_choice === 'none' ? 'No tips or loans this period' : 'Not recorded'}</p>
           {previewData.pending_portal_source.no_changes && <p className="text-sm">No changes this period.</p>}
           <ul className="list-disc space-y-1 pl-5 text-sm">{previewData.pending_portal_source.changes.map((row, index) => <li className="break-words [overflow-wrap:anywhere]" key={index}>{row.label}: {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
           {previewData.pending_portal_source.notes && <p className="whitespace-pre-wrap break-words text-sm">{previewData.pending_portal_source.notes}</p>}
           {previewData.pending_portal_source.changes_link_url && <a className="break-all text-sm underline" href={previewData.pending_portal_source.changes_link_url} target="_blank" rel="noopener noreferrer">Client’s tips &amp; loans workbook link</a>}
-          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={usePendingRevision} onChange={e => setUsePendingRevision(e.target.checked)} />Use this import for the client’s revision {previewData.pending_portal_source.revision}</label>
+          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={usePendingRevision} onChange={e => { setUsePendingRevision(e.target.checked); setReviewedClientChanges(false); setClientChangeDrafts({}); }} />Use this import for the client’s revision {previewData.pending_portal_source.revision}</label>
         </section>}
         {previewData?.portal_source && <section aria-label="Portal change checklist" className="min-w-0 space-y-2 rounded-lg border border-primary-200 bg-primary-50 p-4">
-          <h3 className="font-semibold">Client revision {previewData.portal_source.revision} · changes for staff to make by hand</h3>
+          <h3 className="font-semibold">Client revision {previewData.portal_source.revision} · changes for this period</h3>
           <Link className="inline-flex min-h-11 items-center text-sm underline" to={`/companies/${companyId}/payroll-submissions/${previewData.portal_source.period_id}`}>Open retained portal submission</Link>
-          <p className="text-sm">Read-only list. Importing does not make these changes: nothing here is applied to payroll or employee setup. Someone at Cornerstone must make each one by hand, in the employee’s record or the pay worksheet, before this payroll is finalized.</p>
+          <p className="text-sm">Submitted evidence stays unchanged. Owner pay and extra hours are filled below for confirmation; other changes still need staff review before finalizing payroll.</p>
           {!previewData.portal_source.current && <p className="text-sm font-semibold">You chose an older client revision, not the latest one. Reason: {previewData.portal_source.superseded_reason}</p>}
           {previewData.portal_source.no_changes && <p className="text-sm">No changes this period.</p>}
           <ul className="list-disc space-y-1 pl-5 text-sm">{previewData.portal_source.changes.map((row, index) => <li className="break-words" key={index}>{row.label}: {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
@@ -647,6 +667,20 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             {ownerPayError && missingPeriodPay.length === 0 && (
               <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 pb-4 pt-1 text-sm">{ownerPayFeedback}</div>
             )}
+            {activeChangePrefill?.manual_review_warnings?.map(message => <p key={message} className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">{message}</p>)}
+            {clientChanges.length > 0 && <section data-attention="client-changes" tabIndex={-1} aria-label="From the client's changes" className="space-y-3 rounded-lg border border-info-200 bg-info-50 p-4">
+              <h3 className="font-semibold">From the client’s changes · revision {activeChangePrefill?.revision}</h3>
+              <p className="text-sm">Review each person’s figures. You can edit them here before applying. Other submitted changes still need staff review.</p>
+              {clientChanges.map(change => <div key={change.change_index} className="space-y-2 rounded-lg border border-neutral-200 bg-white p-3">
+                {change.error && <p role="alert" className="text-sm text-danger-700">{change.error}</p>}
+                <Input label={change.kind === 'owner_pay' ? `Pay for ${change.employee_name || 'owner'} this period` : `Extra hours for ${change.employee_name || 'employee'}`}
+                  inputMode="decimal" value={clientChangeDrafts[change.change_index] ?? change.amount ?? change.hours ?? ''}
+                  disabled={!!change.error} onChange={event => { setClientChangeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />
+                {change.kind === 'extra_hours' && change.saved_regular_hours !== undefined && <p className="text-xs text-neutral-600">Saved worksheet: {change.saved_regular_hours} regular hours · {change.saved_overtime_hours || '0'} overtime hours.</p>}
+                <p className="text-xs text-neutral-600">{change.kind === 'owner_pay' ? 'This person only · from the client’s changes' : `${change.wage_rate_label || 'Missing job'} · $${change.wage_rate || '?'} /hr · added to the imported or saved hours`}</p>
+              </div>)}
+              <label className="flex min-h-11 items-start gap-2 text-sm font-medium"><input type="checkbox" className="mt-1 shrink-0" disabled={clientChangesInvalid} checked={reviewedClientChanges} onChange={event => setReviewedClientChanges(event.target.checked)} /><span>I checked the owner pay and extra hours from the client’s changes, including any edits above.</span></label>
+            </section>}
             {missingPeriodPay.length > 0 && (
               <section role="alert" aria-label="Pay needed" data-attention="missing-pay" tabIndex={-1} className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
                 <p className="font-medium">Period pay is required for {missingPeriodPay.map((row) => row.employee_name).join(', ')}.</p>
@@ -682,7 +716,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             {overwriteRows.length > 0 && (
               <label data-attention="overwrite" tabIndex={-1} className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-4 text-xs text-warning-900">
                 <input type="checkbox" checked={reviewedOverwrite} onChange={(event) => setReviewedOverwrite(event.target.checked)} className="shrink-0 self-start" />
-                <span>Replace existing hours, tips and direct loan deductions with the reviewed source values for {overwriteRows.map((row) => row.employee_name).join(', ')}. Saved period pay and manually entered bonuses are retained.</span>
+                <span>Replace existing hours, tips and direct loan deductions with the reviewed source values for {overwriteRows.map((row) => row.employee_name).join(', ')}. {clientChanges.some(change => change.kind === 'owner_pay') ? 'Confirmed owner-pay changes replace the named owners’ period pay. Other saved period pay and manually entered bonuses are retained.' : 'Saved period pay and manually entered bonuses are retained.'}</span>
               </label>
             )}
             {unresolvedCount > 0 && (
@@ -809,7 +843,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                           <p>{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</p>
                           <p className="text-xs text-neutral-600">
                             {row.period_pay_required
-                              ? (row.period_pay_source === 'change_workbook' ? 'Pay this person · change workbook' : 'Pay this person · payroll worksheet')
+                              ? (row.period_pay_source === 'client_changes' ? 'Pay this person · from the client’s changes' : row.period_pay_source === 'change_workbook' ? 'Pay this person · change workbook' : 'Pay this person · payroll worksheet')
                               : 'from employee profile'}
                           </p>
                           </>}
@@ -893,7 +927,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                   : 'Tips were not already paid daily and will remain in employee checks.'}
               </div>
               <p>
-                {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {included.length} to import
+                {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {reviewedEmployeeCount} to import
               </p>
               <p>
                 Gross pay and taxes will be calculated from employee profiles, imported hours, separate per-person period pay, tips, and typed one-time components. A manually entered legacy bonus is retained during reimport.
@@ -951,6 +985,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                   if (initialPreview) { handleClose(); return; }
                   setStep('upload');
                   setUsePendingRevision(false); setStaffWorkbook(null);
+    setReviewedClientChanges(false); setClientChangeDrafts({});
                   setPreviewData(null);
                   setSourceRows([]);
                   setReviewedSuggestedMatches(false);
@@ -959,7 +994,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                   Back
                 </Button>
                 <Button onClick={handleApply} disabled={!canApply} aria-describedby={applyBlockedReason ? 'apply-blocked-reason' : undefined}>
-                  Apply Import ({included.length} employees)
+                  Apply Import ({reviewedEmployeeCount} employees)
                 </Button>
               </>
             )}

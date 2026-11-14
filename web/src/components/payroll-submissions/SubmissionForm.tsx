@@ -7,11 +7,11 @@ import { LabeledTextarea } from '@/components/payroll-submissions/LabeledTextare
 import { CHANGE_KINDS, clientPayrollSubmissionsApi, type ChangeKind, type ChangeRow, type PeriodDetail, type PickerEmployee, type SubmissionRevision } from '@/services/payrollSubmissions';
 
 type DraftRow = ChangeRow & { key: string };
-const blankRow = (kind: ChangeKind): DraftRow => ({ key: crypto.randomUUID(), kind, ...(kind === 'owner_pay' ? { basis: undefined, employee_ids: [] } : {}), ...(kind === 'new_hire' || kind === 'wage_change' ? { wage_unit: 'hourly' } : {}) });
+const blankRow = (kind: ChangeKind): DraftRow => ({ key: crypto.randomUUID(), kind, ...(kind === 'new_hire' || kind === 'wage_change' ? { wage_unit: 'hourly' } : {}) });
 
 function rowFields(row: ChangeRow): ChangeRow {
-  const { kind, employee_id, employee_ids, hours, amount, basis, name, starting_wage, new_wage, wage_unit, start_date, effective_date, deduction_action, description, note } = row;
-  return Object.fromEntries(Object.entries({ kind, employee_id, employee_ids, hours, amount, basis, name, starting_wage, new_wage, wage_unit, start_date, effective_date, deduction_action, description, note })
+  const { kind, employee_id, employee_ids, standing_change_id, skipped, employee_wage_rate_id, hours, amount, basis, name, starting_wage, new_wage, wage_unit, start_date, effective_date, deduction_action, description, note } = row;
+  return Object.fromEntries(Object.entries({ kind, employee_id, employee_ids, standing_change_id, skipped, employee_wage_rate_id, hours, amount, basis, name, starting_wage, new_wage, wage_unit, start_date, effective_date, deduction_action, description, note })
     .filter(([, value]) => value !== undefined && value !== '')) as unknown as ChangeRow;
 }
 
@@ -45,7 +45,13 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const carryable = current?.documents.filter(d => d.document) || [];
   const [keep, setKeep] = useState<number[]>(carryable.map(d => d.document!.id));
   const [noChanges, setNoChanges] = useState(current?.no_changes ?? false);
-  const [rows, setRows] = useState<DraftRow[]>((current?.changes || []).map(row => ({ ...row, key: crypto.randomUUID() })));
+  const [rows, setRows] = useState<DraftRow[]>(() => {
+    const defaults = period.standing_changes || [];
+    const previous = current?.changes || [];
+    return [...defaults.map(row => ({ ...row, ...previous.find(item => item.standing_change_id === row.standing_change_id && item.kind === row.kind && item.employee_id === row.employee_id && item.employee_wage_rate_id === row.employee_wage_rate_id) })),
+      ...previous.filter(row => !defaults.some(item => item.standing_change_id === row.standing_change_id))]
+      .map(row => ({ ...row, key: crypto.randomUUID() }));
+  });
   const [workbookChoice, setWorkbookChoice] = useState<'attach' | 'link' | 'none' | ''>(current?.workbook_choice || (current?.documents.some(d => d.role === 'changes_workbook') ? 'attach' : current?.changes_link_url ? 'link' : ''));
   const [link, setLink] = useState(current?.changes_link_url || '');
   const [notes, setNotes] = useState(current?.notes || '');
@@ -71,9 +77,9 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const keptWorkbook = carryable.find(d => d.role === 'changes_workbook' && keep.includes(d.document!.id));
   const update = (key: string, patch: Partial<ChangeRow>): void => setRows(list => list.map(row => row.key === key ? { ...row, ...patch } : row));
   const employeeSelect = (row: DraftRow, label: string): ReactElement => (
-    <Select label={label} value={row.employee_id ? String(row.employee_id) : ''} onChange={e => update(row.key, { employee_id: e.target.value ? Number(e.target.value) : undefined })}>
+    <Select label={label} value={row.employee_id ? String(row.employee_id) : ''} disabled={!!row.standing_change_id} onChange={e => update(row.key, { employee_id: e.target.value ? Number(e.target.value) : undefined, employee_wage_rate_id: undefined })}>
       <option value="">Choose employee</option>
-      {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+      {employees.filter(employee => row.kind === 'owner_pay' ? employee.variable_salary !== false : row.kind === 'extra_hours' ? employee.hourly !== false : true).map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
     </Select>
   );
 
@@ -88,7 +94,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       try { const url = new URL(link.trim()); if (url.protocol !== 'https:' || !url.hostname || link.trim().length > 2000) throw new Error(); }
       catch { setDetails({ changes_link_url: ['Enter a full https:// link'] }); return; }
     }
-    if (!noChanges && rows.length === 0) { setDetails({ changes: ['List the changes this period or choose "No changes this period"'] }); return; }
+    if (!noChanges && !rows.some(row => !row.skipped)) { setDetails({ changes: ['List the changes this period or choose "No changes this period"'] }); return; }
     if (!hasNewWorkbook && attachments.some(file => /\.xlsx?$/i.test(file.name)) && !excelSupporting) { setDetails({ attachment: ['Use the Excel file as the tips & loans workbook or confirm it is supporting material.'] }); return; }
     const sentWorkbook = workbookChoice === 'attach' ? workbook : null;
     const sentLink = workbookChoice === 'link' ? link.trim() : '';
@@ -99,7 +105,9 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       if (doc.role === 'changes_workbook' && (workbook || workbookChoice !== 'attach')) return false;
       return true;
     });
-    const changes = noChanges ? [] : rows.map(rowFields);
+    const changes = rows.filter(row => !noChanges || row.standing_change_id).map(row => rowFields(noChanges ? { ...row, skipped: true } : row));
+    const invalid = changes.find(row => !row.skipped && ((row.kind === 'owner_pay' && (!row.employee_id || !/^\d+(\.\d{1,2})?$/.test(row.amount || '') || Number(row.amount) <= 0 || Number(row.amount) > 10_000_000)) || (row.kind === 'extra_hours' && (!row.employee_id || !row.employee_wage_rate_id || !/^\d+(\.\d{1,2})?$/.test(row.hours || '') || Number(row.hours) <= 0 || Number(row.hours) > 1000))));
+    if (invalid) { setDetails({ changes: ['Choose an employee and enter a positive amount or hours, with a saved job for extra hours. Skip any every-period row you do not need.'] }); return; }
     setBusy(true);
     try {
       const identity = JSON.stringify([await fileIdentity(revel), await fileIdentity(sentWorkbook), await Promise.all(attachments.map(fileIdentity)), keepIds, workbookChoice, excelSupporting, noChanges, changes, sentLink, notes, current?.revision]);
@@ -167,6 +175,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
           <input type="checkbox" className="h-5 w-5" checked={noChanges} onChange={e => setNoChanges(e.target.checked)} />
           No changes this period
         </label>
+        {noChanges && rows.some(row => row.standing_change_id) && <p className="text-sm text-neutral-600">Every-period rows will be recorded as Not this period.</p>}
         {!noChanges && <>
           <p className="text-sm text-neutral-600">Only list what is different from the Revel report. Cornerstone reviews every change before it reaches payroll.</p>
           {employeeState === 'loading' && <p role="status" className="text-sm text-neutral-600">Loading employees…</p>}
@@ -179,16 +188,21 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
               const meta = CHANGE_KINDS.find(k => k.kind === row.kind)!;
               return <li key={row.key} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                 <div className="mb-2 flex items-start justify-between gap-2"><p className="font-semibold text-neutral-900">{index + 1}. {meta.label}</p>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setRows(list => list.filter(r => r.key !== row.key))} aria-label={`Remove change ${index + 1}, ${meta.label}`}><Trash2 className="h-4 w-4" aria-hidden /></Button></div>
+                  {!row.standing_change_id && <Button type="button" size="sm" variant="ghost" onClick={() => setRows(list => list.filter(r => r.key !== row.key))} aria-label={`Remove change ${index + 1}, ${meta.label}`}><Trash2 className="h-4 w-4" aria-hidden /></Button>}</div>
+                {row.standing_change_id && <div className="mb-3"><p className="text-xs font-semibold text-neutral-700">Every period · {row.employee_name}</p><label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={!!row.skipped} onChange={e => update(row.key, { skipped: e.target.checked })} />Not this period</label></div>}
+                {row.availability_error && !row.skipped && <p role="alert" className="mb-2 text-sm text-danger-700">{row.availability_error}</p>}
                 <p className="mb-2 text-xs text-neutral-600">{meta.hint}</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {['extra_hours', 'paid_leave', 'wage_change', 'deduction', 'direct_deposit_addition'].includes(row.kind) && employeeSelect(row, 'Employee')}
+                <fieldset disabled={row.skipped} className="grid min-w-0 gap-3 sm:grid-cols-2">
+                  {['owner_pay', 'extra_hours', 'paid_leave', 'wage_change', 'deduction', 'direct_deposit_addition'].includes(row.kind) && employeeSelect(row, 'Employee')}
                   {(row.kind === 'extra_hours' || row.kind === 'paid_leave') && <Input label="Hours" inputMode="decimal" value={row.hours || ''} onChange={e => update(row.key, { hours: e.target.value })} />}
+                  {row.kind === 'extra_hours' && <Select label="Saved job and rate" value={row.employee_wage_rate_id || ''} disabled={!!row.standing_change_id} onChange={e => update(row.key, { employee_wage_rate_id: Number(e.target.value) || undefined })}>
+                    <option value="">Choose saved job</option>
+                    {employees.find(employee => employee.id === row.employee_id)?.wage_rates?.map(rate => <option key={rate.id} value={rate.id}>{rate.label} · ${rate.rate}/hr</option>)}
+                  </Select>}
                   {row.kind === 'owner_pay' && <>
                     <Input label="Amount ($)" inputMode="decimal" value={row.amount || ''} onChange={e => update(row.key, { amount: e.target.value })} />
-                    <fieldset className="text-sm"><legend className="text-xs font-medium text-neutral-600">This amount is</legend>
-                      <div className="mt-1 flex gap-4">{(['total', 'each'] as const).map(basis => <label key={basis} className="flex min-h-11 items-center gap-2"><input type="radio" name={`basis-${row.key}`} checked={row.basis === basis} onChange={() => update(row.key, { basis })} />{basis === 'total' ? 'Total for all owners' : 'For each owner'}</label>)}</div>
-                    </fieldset>
+                    {row.last_period_amount && <p className="self-end py-3 text-sm text-neutral-600">Last period: {Number(row.last_period_amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</p>}
+                    {!row.employee_id && row.basis && <p className="text-sm text-warning-800">Previous revision: ${row.amount} {row.basis}. Choose one owner and enter that person’s own amount.</p>}
                   </>}
                   {row.kind === 'new_hire' && <>
                     <Input label="Name" value={row.name || ''} onChange={e => update(row.key, { name: e.target.value })} />
@@ -207,7 +221,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
                     <Input label="Amount per paycheck ($, optional)" inputMode="decimal" value={row.amount || ''} onChange={e => update(row.key, { amount: e.target.value })} />
                   </>}
                   <div className="sm:col-span-2"><Input label="Note (optional)" value={row.note || ''} onChange={e => update(row.key, { note: e.target.value })} /></div>
-                </div>
+                </fieldset>
                 <FieldError messages={details[`changes.${index + 1}`]} />
               </li>;
             })}
