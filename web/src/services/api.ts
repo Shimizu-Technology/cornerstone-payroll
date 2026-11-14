@@ -1612,7 +1612,7 @@ export const payPeriodsApi = {
       force_overwrite?: boolean;
       wage_rate_choices?: Record<string, number>;
       confirm_client_changes?: boolean;
-      reviewed_changes?: { change_index: number; amount?: string; hours?: string }[];
+      reviewed_changes?: { change_index: number; amount?: string; hours?: string; decision?: string; reason?: string; pay_choice?: string; saved_period_pay?: string; workbook_period_pay?: string }[];
     },
   ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
@@ -2122,7 +2122,7 @@ export interface MosaSourceRow {
   warnings: PayrollIntakeWarning[];
 }
 
-export type ClientChangePrefill = { submission_id: number; revision: number; manual_review_warnings?: string[]; rows: { change_index: number; kind: 'owner_pay' | 'extra_hours'; employee_id?: number; employee_name?: string; amount?: string; hours?: string; employee_wage_rate_id?: number; wage_rate_label?: string; wage_rate?: string; error?: string; overwrite_required?: boolean; saved_regular_hours?: string; saved_overtime_hours?: string }[] };
+export type ClientChangePrefill = { submission_id: number; revision: number; manual_review_warnings?: string[]; removals?: string[]; rows: { change_index: number; kind: 'owner_pay' | 'extra_hours'; employee_id?: number; employee_name?: string; amount?: string; hours?: string; employee_wage_rate_id?: number; wage_rate_label?: string; wage_rate?: string; error?: string; overwrite_required?: boolean; saved_regular_hours?: string; saved_overtime_hours?: string; saved_period_pay?: string; workbook_period_pay?: string; pay_conflict?: boolean }[] };
 
 export interface ImportPreviewResponse {
   client_change_prefill?: ClientChangePrefill | null;

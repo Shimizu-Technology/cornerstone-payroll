@@ -16,6 +16,7 @@ class CreatePayrollStandingChanges < ActiveRecord::Migration[8.1]
       t.boolean :active, null: false, default: true
       t.timestamps
     end
+    add_index :payroll_standing_changes, [ :company_id, :kind, :employee_id ], unique: true, where: "active", name: "idx_standing_changes_active_employee_kind"
     add_check_constraint :payroll_standing_changes, "kind IN ('owner_pay', 'extra_hours')", name: "standing_change_kind"
     add_check_constraint :payroll_standing_changes, "position >= 0", name: "standing_change_position"
   end

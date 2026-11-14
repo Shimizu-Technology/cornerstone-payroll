@@ -133,7 +133,7 @@ module PayrollSubmissions
         @errors[key] << "Choose an active employee with variable salary for owner pay."
       end
       if kind == "extra_hours" && employee
-        rate = employee.active_wage_rates.find_by(id: integer(row["employee_wage_rate_id"]))
+        rate = employee.active_wage_rates.find { |rate| rate.id == integer(row["employee_wage_rate_id"]) }
         unless employee.active? && employee.hourly_pay_basis? && rate && !rate.rate.nil?
           @errors[key] << "Choose an active employee and their saved job and rate for extra hours."
         else

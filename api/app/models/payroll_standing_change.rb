@@ -11,6 +11,7 @@ class PayrollStandingChange < ApplicationRecord
   scope :ordered, -> { order(:position, :id) }
   validates :kind, inclusion: { in: KINDS }
   validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+  validates :employee_id, uniqueness: { scope: [ :company_id, :kind ], conditions: -> { where(active: true) } }, if: :active?
   validate :same_company_and_job
   validate :usable_configuration, if: :active?
   after_save :audit_change

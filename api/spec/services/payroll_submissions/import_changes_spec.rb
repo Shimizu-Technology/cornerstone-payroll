@@ -63,6 +63,55 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     result = service.apply_to(rows.first(1), reviewed: reviewed, confirmed: true, source_employee_ids: [ owner.id ])
     expect(result.last).to include(employee_id: worker.id, client_extra_hours: { hours: "68", employee_wage_rate_id: rate.id, rate: "35.0" })
   end
+  it "shows baseline hours on reimport rather than the previously applied total" do
+    create(:payroll_item, company: company, employee: worker, pay_period: period, hours_worked: 70,
+      custom_columns_data: { client_change_evidence: { kind: "extra_hours", submission_id: submission.id,
+        baseline_regular_hours: "2.0", applied_regular_hours: "70.0" } })
+    expect(service.proposals.last[:saved_regular_hours]).to eq("2.0")
+  end
+
+  it "requires a choice before replacing saved owner pay" do
+    create(:payroll_item, company: company, employee: owner, pay_period: period, salary_override: 5000)
+    expect(service.proposals.first).to include(saved_period_pay: "5000.0", pay_conflict: true)
+    expect { service.apply_to(rows, reviewed: reviewed, confirmed: true) }.to raise_error(ArgumentError, /Choose.*pay/)
+    input = reviewed.deep_dup
+    input.first.merge!(pay_choice: "saved", saved_period_pay: "5000.0")
+    expect(service.apply_to(rows, reviewed: input, confirmed: true).first[:period_pay]).to be_nil
+  end
+
+  it "requires a choice between workbook and client owner pay" do
+    rows.first.merge!(period_pay: "4000", period_pay_evidence: { source: "Workbook" })
+    expect { service.apply_to(rows, reviewed: reviewed, confirmed: true) }.to raise_error(ArgumentError, /Choose.*pay/)
+    input = reviewed.deep_dup
+    input.first.merge!(pay_choice: "workbook", workbook_period_pay: "4000")
+    expect(service.apply_to(rows, reviewed: input, confirmed: true).first).to include(period_pay: "4000", period_pay_evidence: { source: "Workbook" })
+    expect(service.review_decisions.first).to include(pay_choice: "workbook", applied_value: "4000", reviewed_value: "8421.13")
+  end
+
+  it "lets staff decline an invalid row with a required reason" do
+    worker.update!(status: "inactive")
+    input = reviewed.deep_dup
+    input.last.merge!(decision: "decline", reason: "Not working this period")
+    expect(service.apply_to(rows.first(1), reviewed: input, confirmed: true).sole[:period_pay]).to eq("8421.13")
+    expect(service.review_decisions.last).to include(decision: "decline", reason: "Not working this period", employee_id: worker.id)
+    input.last[:reason] = " "
+    expect { service.apply_to(rows.first(1), reviewed: input, confirmed: true) }.to raise_error(ArgumentError, /reason/)
+  end
+
+  it "supports preloaded active wage rates" do
+    worker.employee_wage_rates.load
+    allow(Employee).to receive(:find_by).with(company_id: company.id, id: worker.id).and_return(worker)
+    allow(Employee).to receive(:find_by).with(company_id: company.id, id: owner.id).and_return(owner)
+    expect(service.proposals.last[:error]).to be_nil
+  end
+
+  it "normalizes extra hours with preloaded employee rates" do
+    worker.employee_wage_rates.load
+    allow(Employee).to receive(:where).with(company_id: company.id, id: [ worker.id ]).and_return([ worker ])
+    result = PayrollSubmissions::ChangeRows.normalize!([ changes.last ], company_id: company.id)
+    expect(result.sole).to include("employee_wage_rate_id" => rate.id, "hours" => "68")
+  end
+
   context "legacy revisions" do
     let(:changes) { [ { kind: "owner_pay", amount: "1200", basis: "each", note: "Both owners" }, { kind: "extra_hours", employee_id: worker.id, hours: "5" } ] }
 
