@@ -279,7 +279,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   };
 
   const handleApply = async () => {
-    if (!previewData) return;
+    if (!previewData || loading) return;
     try {
       setStep('applying');
       setError(null);
@@ -334,6 +334,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const nonMatchedSourceRows = sourceRows.filter((row) => row.row_kind !== 'matched');
   const canApply = Boolean(
     previewData
+      && !loading
       && sourceRows.length > 0
       && incompleteSourceRows.length === 0
       && includedBlockingRows.length === 0
@@ -937,7 +938,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             )}
             {step === 'preview' && (
               <>
-                <Button variant="outline" onClick={() => {
+                <Button variant="outline" disabled={loading} onClick={() => {
+                  if (loading) return;
                   if (initialPreview) { handleClose(); return; }
                   setStep('upload');
                   setUsePendingRevision(false); setStaffWorkbook(null);
