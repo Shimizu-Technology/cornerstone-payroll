@@ -85,6 +85,28 @@ RSpec.describe "Practice portal invitations and assignments", type: :request do
     expect(response.parsed_body.dig("stats", "current_pay_period", "id")).to eq(baseline.id)
   end
 
+  it "lets a practice login add an employee to its own open copy only" do
+    user = create(:user, company: workspace, practice_company: workspace, role: "client")
+    CompanyAssignment.create!(user: user, company: workspace, granted_by: admin)
+    allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:current_user).and_return(user)
+    params = { employee: { first_name: "Taylor", last_name: "Cruz", ssn: "123-45-6789", ssn_confirmation: "123-45-6789",
+      employment_type: "hourly", salary_type: "hourly", pay_rate: 16.25, filing_status: "single",
+      hire_date: "2026-04-01", w4_effective_on: "2026-04-01", address_line1: "1 St", city: "Hagatna", state: "GU", zip: "96910" } }
+
+    post "/api/v1/client/employees", headers: { "X-Company-Id" => workspace.id.to_s }, params: params
+    expect(response).to have_http_status(:created), response.body
+    post "/api/v1/client/employees", headers: { "X-Company-Id" => source.id.to_s }, params: params
+    expect(response).to have_http_status(:forbidden)
+    expect(source.employees.where(last_name: "Cruz")).to be_empty
+
+    TestWorkspace::Lifecycle.new(company: workspace, actor: admin).archive!
+    allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:current_user).and_return(User.find(user.id))
+    expect {
+      post "/api/v1/client/employees", headers: { "X-Company-Id" => workspace.id.to_s }, params: params
+    }.not_to change(Employee, :count)
+    expect(response).to have_http_status(:forbidden).or have_http_status(:unprocessable_entity)
+  end
+
   it "rejects a mixed invitation and leaves no account or invitation behind" do
     expect {
       post "/api/v1/admin/users", params: { user: { email: "mixed@example.invalid", role: "client", company_ids: [ source.id, workspace.id ] } }
