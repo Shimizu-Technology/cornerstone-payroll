@@ -25,11 +25,22 @@ class PayStubGenerator
 
   attr_reader :payroll_item, :employee, :pay_period, :company
 
-  def initialize(payroll_item)
+  def initialize(payroll_item, pay_period_scope: nil)
+    @pay_period_scope = pay_period_scope
     @payroll_item = payroll_item
     @employee = payroll_item.employee
     @pay_period = payroll_item.pay_period
     @company = pay_period.company
+    if pay_period_scope
+      totals = employee.ytd_totals_before(
+        year: pay_period.pay_date.year, pay_date: pay_period.pay_date,
+        pay_period_id: pay_period.id, for_reporting: true, pay_period_scope: pay_period_scope
+      )
+      { ytd_gross: :gross_pay, ytd_net: :net_pay, ytd_withholding_tax: :withholding_tax,
+        ytd_social_security_tax: :social_security_tax, ytd_medicare_tax: :medicare_tax }.each do |target, source|
+        payroll_item[target] = totals.fetch(source, 0).to_d + payroll_item[source].to_d
+      end
+    end
   end
 
   def generate
@@ -639,7 +650,8 @@ class PayStubGenerator
         year: pay_period.pay_date.year,
         pay_date: pay_period.pay_date,
         pay_period_id: pay_period.id,
-        for_reporting: true
+        for_reporting: true,
+        pay_period_scope: @pay_period_scope
       )
       gross = totals.fetch(:gross_pay).to_d + payroll_item.gross_pay.to_d
       earnings_ytd_breakdown.pay_ytd_total(gross)
@@ -647,7 +659,7 @@ class PayStubGenerator
   end
 
   def earnings_ytd_breakdown
-    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item)
+    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item, pay_period_scope: @pay_period_scope)
   end
 
   def source_earning_labels
@@ -673,7 +685,7 @@ class PayStubGenerator
   end
 
   def statement_ytd_breakdown
-    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item)
+    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item, pay_period_scope: @pay_period_scope)
   end
 
   def pay_stub_deduction_label(row)
@@ -690,7 +702,7 @@ class PayStubGenerator
   def ytd_source_items
     @ytd_source_items ||= begin
       pay_date = pay_period.pay_date
-      prior_periods = PayPeriod.reportable_for_company(company).where(
+      prior_periods = (@pay_period_scope || PayPeriod.reportable_for_company(company)).where(
         pay_date: Date.new(pay_date.year, 1, 1)..pay_date)
         .where("pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)",
           pay_date: pay_date, period_id: pay_period.id)
@@ -726,7 +738,8 @@ class PayStubGenerator
         year: year,
         pay_date: payroll_item.pay_period.pay_date,
         pay_period_id: payroll_item.pay_period_id,
-        for_reporting: true
+        for_reporting: true,
+        pay_period_scope: @pay_period_scope
       )
     end
   end
