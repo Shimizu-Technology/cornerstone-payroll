@@ -41,7 +41,7 @@ class PayrollSubmission < ApplicationRecord
   end
 
   def no_changes_has_no_rows
-    errors.add(:change_rows, "must be empty when there are no changes this period") if no_changes && change_rows.present?
+    errors.add(:change_rows, "must be empty when there are no changes this period") if no_changes && change_rows.any? { |row| !row["skipped"] }
   end
 
   def immutable_after_create

@@ -87,8 +87,8 @@ RSpec.describe "Pay-period submissions", type: :request do
   describe "sending a package" do
     it "saves a complete package as revision 1 without touching payroll or employee records" do
       changes = [
-        { kind: "extra_hours", employee_id: employee.id, hours: "6.5", note: "Not in Revel" },
-        { kind: "owner_pay", amount: "1200", basis: "each" },
+        { kind: "extra_hours", employee_id: employee.id, employee_wage_rate_id: create(:employee_wage_rate, employee: employee).id, hours: "6.5", note: "Not in Revel" },
+        { kind: "owner_pay", employee_id: create(:employee, :salary, company: company, salary_type: "variable").id, amount: "1200" },
         { kind: "paid_leave", employee_id: employee.id, hours: "35" },
         { kind: "new_hire", name: "Synthetic New Hire", starting_wage: "12.50", wage_unit: "hourly", start_date: "2026-11-10" },
         { kind: "wage_change", employee_id: employee.id, new_wage: "13", wage_unit: "hourly" },
@@ -109,7 +109,7 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(revision["documents"].first).not_to have_key("sha256")
       expect(revision["changes"].map { |c| c["kind"] }).to eq(changes.map { |c| c[:kind] })
       expect(revision["changes"].first).to include("employee_name" => employee.full_name, "hours" => "6.5")
-      expect(revision["changes"].second).to include("basis" => "each", "amount" => "1200.00")
+      expect(revision["changes"].second).to include("employee_id" => changes.second[:employee_id], "amount" => "1200.00")
       expect(employee.reload.attributes.except("updated_at")).to eq(employee_before.except("updated_at"))
       expect(pay_period.reload.payroll_items).to be_empty
       period = PayrollSubmissionPeriod.find(data["id"])
@@ -616,6 +616,33 @@ RSpec.describe "Pay-period submissions", type: :request do
       post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
       get "/api/v1/admin/client_inbox/counts"
       expect(response.parsed_body.dig("data", "waiting_payroll")).to eq(0)
+    end
+  end
+  describe "every-period defaults" do
+    let!(:owner) { create(:employee, :salary, company: company, salary_type: "variable", pay_rate: 0) }
+    let!(:default) { PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay") }
+
+    it "offers blank per-person defaults, refuses omission, and records a filled default as a change" do
+      get "#{client_base}/#{ref}"
+      expect(response).to have_http_status(:ok)
+      expect(data.fetch("standing_changes").sole).to include("standing_change_id" => default.id, "employee_id" => owner.id)
+      expect(data.fetch("standing_changes").sole).not_to have_key("amount")
+      send_package(no_changes: true)
+      expect(response).to have_http_status(:unprocessable_entity)
+      send_package(changes: [ { kind: "owner_pay", standing_change_id: default.id, employee_id: owner.id, amount: "8421.13" } ].to_json)
+      expect(response).to have_http_status(:created), response.body
+      expect(data.fetch("submissions").first.fetch("changes").sole).to include("amount" => "8421.13")
+      expect(PayrollItem.count).to eq(0)
+    end
+
+    it "records explicit skips alongside No changes and rejects using both No changes and an amount" do
+      row = { kind: "owner_pay", standing_change_id: default.id, employee_id: owner.id }
+      send_package(no_changes: true, changes: [ row.merge(amount: "1") ].to_json)
+      expect(response).to have_http_status(:unprocessable_entity)
+      send_package(no_changes: true, changes: [ row.merge(skipped: true) ].to_json)
+      expect(response).to have_http_status(:created), response.body
+      expect(data.fetch("submissions").first).to include("no_changes" => true, "changes" => [ include("skipped" => true) ])
+      expect(default.reload).to be_active
     end
   end
 end

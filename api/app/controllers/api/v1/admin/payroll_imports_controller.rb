@@ -49,11 +49,13 @@ module Api
           end
 
           begin
+            selected_source = pay_run_selection.source! if params[:use_submission_id].present?
             package_result = PayrollIntake::PreviewService.new(
               pay_period: @pay_period,
               source_type: "mosa_revel",
               files: [ pdf_file, excel_file ].compact,
               actor: current_user,
+              portal_submission: selected_source,
               supersedes_package_id: params[:supersedes_package_id],
               supersession_reason: params[:supersession_reason]
             ).call
@@ -65,7 +67,9 @@ module Api
                 "This exact Revel package was already applied. Upload a corrected source only when something changed."
               end
               return render json: {
-                error: message
+                error: message,
+                details: { pending_submission_id: pending_portal_source_json&.fetch(:submission_id),
+                  pending_revision: pending_portal_source_json&.fetch(:revision) }
               }, status: :unprocessable_entity
             end
 
@@ -129,6 +133,10 @@ module Api
                   "Only the current previewed source package can be applied."
               }, status: :unprocessable_entity
             end
+            revision_id = source_package.evidence_snapshot["payroll_submission_id"]
+            if revision_id && selection&.payroll_submission_id != revision_id
+              raise ArgumentError, "Select the client revision used to create this replacement review."
+            end
             PayrollIntake::SourcePackageVerifier.new(session: source_package).verify!
 
             disposition_plan = PayrollIntake::DispositionPlan.new(
@@ -138,7 +146,8 @@ module Api
             ).validate!
             included_decisions = disposition_plan.decisions.select(&:included?)
 
-            validate_mosa_included_rows!(included_decisions)
+            client_changes = PayrollSubmissions::ImportChanges.new(submission: selection.payroll_submission, pay_period: @pay_period) if selection
+            validate_mosa_included_rows!(included_decisions, restorable_owner_ids: client_changes&.restorable_owner_ids || [])
             included_employee_ids = included_decisions.map { |decision| decision.row.employee_id }.compact.to_set
 
             low_confidence_matches = import_record.raw_data.to_h.fetch("low_confidence_matches", []).to_a
@@ -170,7 +179,14 @@ module Api
               row[:selected_wage_rate_id] = id.to_i
             end
 
-            if included_decisions.any? && matched_data.empty?
+            if selection
+              matched_data = client_changes.apply_to(matched_data, reviewed: params.permit(reviewed_changes: [ :change_index, :amount, :hours, :decision, :reason, :pay_choice, :saved_period_pay, :workbook_period_pay ])[:reviewed_changes],
+                  confirmed: params[:confirm_client_changes], dispositions: disposition_plan.decisions, source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] })
+            end
+
+            unpaid_owners = client_changes&.unpaid_owners || {}
+            matched_data.reject! { |row| unpaid_owners.key?(row[:employee_id].to_i) }
+            if included_decisions.any? { |decision| !unpaid_owners.key?(decision.row.employee_id) } && matched_data.empty?
               return render json: {
                 error: "Keep at least one matched employee in the import.",
                 details: { remaining_matched_rows: matched_data.length }
@@ -190,14 +206,20 @@ module Api
               selection.period.save! if selection && selection.period.changed?
               selection&.save! if selection&.new_record?
               selection&.update!(applied_at: Time.current)
+              client_changes&.apply_period_decisions!(actor: current_user)
               if matched_data.any?
                 service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
                 results = service.apply!(matched: matched_data, force_overwrite: force_overwrite, tips_paid_out_from_tips: tips_paid_out_from_tips)
               end
               raise ActiveRecord::Rollback if results[:errors].any?
 
-              import_record.update!(status: "applied", validation_errors: [])
+              import_record.update!(status: "applied", validation_errors: [],
+                raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || []))
               disposition_plan.decisions.each do |decision|
+                if decision.included? && unpaid_owners.key?(decision.row.employee_id)
+                  decision.disposition = "excluded"
+                  decision.reason = unpaid_owners[decision.row.employee_id]
+                end
                 if decision.included?
                   payroll_item = @pay_period.payroll_items.find_by!(employee_id: decision.row.employee_id)
                   disposition_plan.apply!(
@@ -222,12 +244,15 @@ module Api
                 period = selection.period
                 # Keep Imported tied to the actual selected revision; choosing
                 # an old source does not label the newer files as imported.
+                decline_notes = client_changes.review_decisions.select { |row| %w[decline no_pay].include?(row[:decision]) }
+                  .map { |row| "#{row[:employee_name] || 'Missing employee'}: #{row[:decision] == 'no_pay' ? 'No pay this period' : "Don't apply"} — #{row[:reason]}" }
                 period.transition!("import", actor: current_user,
-                  submission: selection.payroll_submission, note: "Imported revision #{selection.payroll_submission.revision} into payroll review.")
+                  submission: selection.payroll_submission, note: ([ "Imported revision #{selection.payroll_submission.revision} into payroll review." ] + decline_notes).join(" "))
                 PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#import",
                   metadata: { submission_id: selection.payroll_submission_id, current_submission_id: selection.current_submission_id,
                     superseded_reason: selection.superseded_reason, source_route: selection.source_route,
                     staff_workbook_document_id: selection.staff_workbook_document_id,
+                    client_change_decisions: client_changes.review_decisions,
                     import_id: import_record.id, source_package_id: source_package.id })
                 PortalNotifications.payroll_period!("payroll_submission_imported", period: period, actor: current_user,
                   dedupe: "import:#{import_record.id}", metadata: { submission_id: selection.payroll_submission_id, revision: selection.payroll_submission.revision })
@@ -355,13 +380,25 @@ module Api
           {
             import_id: import_record.id, preview: preview, source_package: source_package_json(source_package),
             duplicate: package_result[:duplicate], portal_source: portal_source_json(selection),
-            pending_portal_source: pending_portal_source_json
+            pending_portal_source: pending_portal_source_json,
+            client_change_prefill: (selection ? change_prefill(selection.payroll_submission, preview[:matched]) : nil),
+            pending_change_prefill: (!selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission, preview[:matched]) : nil)
           }
         end
 
+        def change_prefill(submission, rows)
+          changes = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: @pay_period)
+          { submission_id: submission.id, revision: submission.revision, rows: changes.proposals(source_rows: rows.map(&:deep_symbolize_keys)), removals: changes.removals,
+            manual_review_warnings: changes.manual_review_warnings }
+        end
+
         def pay_run_selection!(record)
+          pay_run_selection.build(record)
+        end
+
+        def pay_run_selection
           PayrollSubmissions::PayRunSelection.new(pay_period: @pay_period, actor: current_user,
-            period: pending_portal_period, submission_id: params[:use_submission_id]).build(record)
+            period: pending_portal_period, submission_id: params[:use_submission_id])
         end
 
         def pending_portal_period
@@ -530,14 +567,14 @@ module Api
           end
         end
 
-        def validate_mosa_included_rows!(decisions)
+        def validate_mosa_included_rows!(decisions, restorable_owner_ids: [])
           duplicate_ids = decisions.filter_map { |decision| decision.row.employee_id }.tally.select { |_id, count| count > 1 }.keys
           excluded_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
           errors = decisions.flat_map do |decision|
             row = decision.row
             messages = []
             messages << "#{row.source_employee_name} must be matched to a Cornerstone employee or given a non-payroll outcome." if row.employee.blank?
-            if excluded_ids.include?(row.employee_id)
+            if excluded_ids.include?(row.employee_id) && !restorable_owner_ids.include?(row.employee_id)
               messages << "#{row.source_employee_name} is excluded from this pay period; choose Excluded and record why."
             end
             row.errors_payload.each do |payload|

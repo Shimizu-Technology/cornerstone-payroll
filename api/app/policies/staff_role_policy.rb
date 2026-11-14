@@ -51,6 +51,7 @@ class StaffRolePolicy
   }.freeze
 
   CONTROLLER_CAPABILITIES = {
+    "api/v1/admin/payroll_standing_changes" => :manage_client_configuration,
     "api/v1/admin/time_tracking_imports" => :payroll_operations,
     "api/v1/admin/aire_history_approvals" => :payroll_operations,
     "api/v1/admin/time_tracking_source_health" => :payroll_operations,

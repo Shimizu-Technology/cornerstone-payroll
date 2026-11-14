@@ -678,7 +678,7 @@ class PayrollItem < ApplicationRecord
   # Scalar worksheet/API edits must update the reviewed job bucket as well.
   # Otherwise a saved zero-hour bucket would overwrite emailed hours.
   def synchronize_mosa_reviewed_hours!
-    return unless import_source == "mosa_revel" && custom_columns_data.to_h["mosa_wage_rate_choice"].present?
+    return unless import_source == "mosa_revel"
 
     changed_hours = { hours_worked: "regular_hours", overtime_hours: "overtime_hours",
       holiday_hours: "holiday_hours", pto_hours: "pto_hours" }.select { |field, _key| will_save_change_to_attribute?(field) }

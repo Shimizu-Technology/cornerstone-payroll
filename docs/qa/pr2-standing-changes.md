@@ -1,0 +1,441 @@
+# PR 2: Standing changes
+
+## Scope and baseline
+
+Agent-executed implementation and affected-flow QA for Cornerstone staff and client payroll submissions. Verified clean isolated worktree `t3/standing-change-defaults` at `de4b62ca0abf23199371bbf1b0cb3e0719f605d3`, equal to `origin/main`, on November 14, 2026. No production writes, email, deployment or merge are authorized.
+
+Sources: `portal-mosa-plan-20261114.md` (PR 2, decisions 3 and 8), `mosa-walkthrough-feedback-20261114.md`, `docs/qa/pr1-mosa-files.md`, and the submission/import/settings code at that baseline. Private source documents and production-copy evidence stay outside Git.
+
+MoSa's client sends Revel hours, a tips/loans workbook, and period changes. Staff must review these before payroll. The two owners use variable salary; their amounts are per person. Addison is hourly, absent from Revel, and his workbook loan must still be collected. The current importer preserves workbook-only worksheet hours and requires separate owner period pay. This work makes those inputs visible for review from immutable submitted changes.
+
+Experience follows the surrounding operational UI: default rows first, explicit skips, blank numeric inputs, previous locked payroll as a hint, no new motion. Staff settings use selected-client capability and workspace write checks. Import confirmation stays beside editable figures. Legacy total/each rows remain readable and are never split by inference.
+
+## Required scenarios
+
+| ID | Starting state and actions | Expected saved outcome | Status |
+| --- | --- | --- | --- |
+| S1 | Staff with configuration rights sets two owner defaults and one saved-job hours default; client/operator without rights tries settings | Company-scoped defaults audited; unauthorized writes refused | passed: both browser widths; API permission tests |
+| S2 | Client at 1440 and 390 sees defaults and previous-period hints; fills rows, skips one, adds a row, sends | Blank amounts initially; immutable revision retains filled and skipped rows; list changes/No changes enforced | passed at both widths; later receipt-count test awaits final run |
+| S3 | Staff opens portal review, edits one proposed value, confirms, applies | Owner salary override and exact job/rate hours persisted; workbook tips/loans retained | passed at both widths on synthetic sources; real workbook reconciliation blocked |
+| S4 | Staff opens pay-run Import MoSa with a pending revision and links it | Same proposals and persisted values; pending-source gate clears only after success | desktop checkpoint passed; final-source phone apply and saved values passed |
+| S5 | Old total/each revision; employee inactive/terminated; job deleted/changed; review superseded | Legacy display preserved; clear refusals; no guessing or stale writes | API/service checks passed; legacy display rechecked at 1440 and 390 |
+| R1 | Fresh verified Neon branch, practice copy through Oct 5–18; Oct 19–Nov 1 paid Nov 5, real files; owners 8421.13 each, Addison 68 hours, two direct-deposit notes | Apply without retyping numbers; calculate matches period 117 except known Billy +0.01; Addison loan 219.70 | blocked by machine load; branch preparation only, no financial rehearsal result claimed |
+| R2 | Fingerprint company 6 before/after rehearsal; stop runtimes and delete verified task branch | Zero company-6 changes; branch absent; no owned running resources | preparation integrity passed; post-financial-rehearsal coverage remains not_run |
+
+Every browser scenario requires 1440 and 390 widths and visible plus persisted outcome verification. Native device/Safari coverage is excluded. Required scenarios remain gates until passed. Full suites are left to CI. Before each heavy step, check `uptime`; when 1-minute load exceeds approximately 25, continue lighter work and defer the step.
+
+## Design
+
+`PayrollStandingChange` stores company, employee, kind, optional employee wage rate, order and active flag. No recurring amount is stored. Saves emit audit history; deactivation preserves references. A revision stores the default identity, explicit skip or number, and saved job/rate snapshot. Existing revisions are not rewritten when configuration changes.
+
+`PayrollSubmissions::ImportChanges` projects submitted owner amounts and extra hours for both import entry points. Apply requires explicit confirmation and the complete reviewed change list. It validates live employee eligibility and the saved rate against the submitted snapshot. Owner pay reaches existing `salary_override` and per-person period-pay evidence. Extra hours add to Revel hours (or existing workbook-only worksheet hours) and reach `wage_rate_hours`; workbook tips/loans keep their existing path. Existing source-package/current-revision guards and payroll-item `expected_import_id` guard remain in place.
+
+## Evidence and limits
+
+Implementation and verification in progress. Initial machine load: 63.39, then 88.32. No heavy checks or servers have been started.
+
+## Resource ownership
+
+Lifecycle session `01a1d9da-7b35-73d0-b267-93b56bf5cb87`; baseline audited. All baseline Postgres/Redis, browser/device surfaces and other listeners are borrowed. No runtime handoff authorized.
+
+## Verification checkpoint (November 14, 22:23 Guam)
+
+Code is implemented in this working tree. Targeted runs passed: standing-change model 5 examples; standing-change normalization/hints 4; import-change projection 5; settings requests 4 (in the combined batch); portal import requests 68; submission requests 37; remaining submission/import/wage-choice/tenancy/settings batch 52; import service 29. These overlap and are not a unique-example total. TypeScript and frontend lint passed. Affected Vitest passed 45 tests across 6 files with one worker; the later client-only employee-count regression still needs its retest. Brakeman reported zero errors and warnings. Full RuboCop initially found two blank lines in request specs; those were corrected and its final rerun remains pending.
+
+The initial frontend dependency copy lacked dev packages; its TypeScript/module errors and Vitest startup failures were resolved with a fresh `npm ci --ignore-scripts`. A genuine type incompatibility for optional saved-job IDs was fixed by filtering unsaved rates. The final TypeScript and affected tests above ran against the complete local install.
+
+Synthetic browser evidence uses isolated database `cornerstone_pr2_ui_01a1d9da`, sanitized test-mode Rails with an outbound TCP guard, E2E identities and local retained storage. Settings, client defaults/hints, explicit skip plus additional owner row, staff edit/confirmation and portal apply passed at 1440×900 and 390×900. Persisted values in both runs: first owner 1100.01 (staff edit from submitted 1100), second owner 1200.00 from the added row, worker 68 hours allocated to the saved $35 maintenance job. Original revision evidence retains the skip and submitted amounts. Phone settings/form/review have no horizontal document overflow at 390 CSS pixels. The desktop pay-run linked-revision route also passed with owners 1300/1400 and worker32, without retyping any review number. Mobile linked-route and mobile legacy display remain pending. Legacy total/each display passed at desktop width.
+
+The first synthetic apply correctly failed with no partial rows because prior committed fixture paychecks lacked verified FICA bases. Those synthetic historical checks were recalculated to establish valid evidence; apply then succeeded with unchanged payroll guards. An initial partial-label locator and a `button` selector for a summary control caused automation timeouts; fresh snapshots and exact visible selectors resumed the same journeys. The client-only employee count was corrected from 3 to 4 after the browser exposed it.
+
+Private evidence is under `output/pr2-standing-changes-20261114/` (logs, saved-input TSVs and forthcoming screenshot copies). No real client files are committed. Current lifecycle-owned resources: Rails PID76254/3658, Vite PID76735/5658, proxy PID77860/5660, preview tab `tab_2i_e60e53fc-08fc-48e4-b927-3d2799347d0a`. All were claimed immediately. Cleanup is pending while QA continues; no runtime handoff is intended.
+
+Fresh Neon rehearsal branch created: `pr2-standing-changes-20261114` / `br-dawn-shadow-a1j8o2gc`, parent `br-bitter-unit-a1dagbos`, endpoint `ep-steep-paper-a1ry673f`. Every database client launch uses the live endpoint/branch verification wrapper. Company6 fingerprint captured before schema migration. The migration passed on this fresh copy (parent schema version20261114090000). A dedicated rehearsal actor is created in company1. No browser/client payroll actions or practice-copy creation have run there yet. The branch must be deleted after the final fingerprint comparison.
+
+Load varied from 63–153 during initial work, briefly fell below25 for checks and startup, and rose to53 after the phone portal case. Heavy steps pause again while lighter work continues.
+
+### Correction and compatibility follow-up
+
+The final import path records the baseline and resulting hours/allocations of a client-only contribution. A corrected-source reimport replaces that earlier contribution; changed worksheet hours or allocations require reconciliation. The five original standing-review cases plus the new reimport/manual-edit case passed as six request examples. Legacy total/each and jobless extra-hours instructions are shown as explicit manual-review warnings and remain on the existing guarded worksheet/period-pay path. No split or job is inferred. The projection service's six examples passed, including legacy compatibility. ImportModal's employee-count follow-up passed 16 examples before the later saved-worksheet confirmation test was added.
+
+The portal import service was restarted after the first reimport correction: PID76254 was cleaned and replaced by claimed PID6557. A redundant startup attempt exited on the already-owned port; no other process was stopped. The lifecycle ledger contains the current ownership.
+
+The phone linked-route client send and file preview are complete; selecting the pending revision displayed 1300/1400 and32 hours. Apply is paused because load rose above25. The phone legacy case is also pending. Recent small additions still require final frontend checks: failed-settings-load recovery, separate skipped-row counts in receipts, manual-review warnings and saved worksheet/overwrite confirmation for an employee absent from both files.
+
+## Draft PR handoff and remaining gates
+
+**Not ready for merge.** Machine load ultimately exceeded240. Heavy checks and remaining browser/rehearsal steps were stopped under Leon's explicit load limit. Required phone linked apply, phone legacy display, final source frontend/static reruns, and the production-copy financial rehearsal remain gates. Full backend/frontend suites belong to CI. No merge or deployment was attempted.
+
+The final staged API/web source diff before this ledger update has SHA-256 `a4b3e0ea6e85d8fed54a063b31c968ddd13e554eeac06615508db67f024efd76`. Earlier passing tests and browser cases are recorded above with their follow-up changes; they are not a claim that every final-source case passed. Final focused model run passed all5 examples, including destruction audit. Final standing-review request run passed all6 cases, including corrected reimport and legacy manual pay. The touched Ruby scan covered30 files and corrected its remaining blank-line offense. The newest frontend tests are committed for CI and the lead's local rerun; no final complete local frontend run is claimed.
+
+The isolated Neon copy was migrated successfully and a dedicated company1 rehearsal actor was created. No practice workspace or real-file submission/import/calculation was executed. Company6 fingerprint comparison covers9,548 records: **zero added, zero removed, zero changed**. This proves copy integrity during preparation only; it does not establish payroll reconciliation. Private `fingerprint-diff.json` retains the comparison. The task branch is deleted and its absence verified in private `neon-cleanup.json` (see final cleanup note).
+
+Lifecycle cleanup closed/released the owned preview tab and stopped Vite76735, proxy77860 and replacement API6557. Earlier API76254 was also cleaned. Status reports **no active owned resources**. No runtime handoff; borrowed/protected services and all other sessions were left alone. The isolated source worktree, synthetic databases and private evidence are retained for continuation.
+
+Continue after verifying load below approximately25: rerun final targeted backend and frontend gates; finish the two phone cases; create a **fresh** verified Neon branch from the specified parent and execute R1 fully with the real files and protected outbound environment; compare the required financial fields and loan; fingerprint and delete that branch. The private `remaining-checks.md`, scripts and synthetic fixture JSON retain exact inputs and method. Recheck all endpoint and worktree facts rather than trusting saved identifiers from this run.
+
+## Acceptance continuation — November 14, 2026
+
+Resumed in the existing held worktree at `e4ed47d834a9693a93dffd16f0c50a0310cf5a02`. Tracked files were clean; the pre-existing untracked `.codex/` handoff was preserved. The PR targets `main` and remains draft, held, unmerged and undeployed. The original product brief and required scenarios above still apply. Current lifecycle session: `01a1da30-cbe8-7630-bdfd-ce4280f0701c`.
+
+CodeRabbit's three material findings were verified and fixed: a workbook-only row restores its previous hours baseline when a corrected change is removed, refusing removal after a worksheet edit; selecting or deselecting a pending revision resets overwrite confirmation; migration rollback refuses before changing tables, constraints or immutable skipped-revision evidence. Added regressions also exercise a real foreign-company default and successful settings edit/deactivation.
+
+**Supported rollback:** roll back application code only and retain the expanded constraint and standing-change tables. Do not run this migration down or rewrite existing submitted rows, fingerprints or defaults to satisfy the former constraint. Any future schema contraction requires a separately reviewed evidence-preserving migration. A populated skipped revision test verifies that the explicit irreversible-migration refusal leaves the revision and its fingerprints, active default and constraint intact.
+
+Final-source local checks for these changes: `npm ci` passed (297 packages, zero reported vulnerabilities); targeted backend batch passed **290 examples, zero failures**; full RuboCop passed **1,844 files, no offenses**; Brakeman reported **zero errors and warnings**; frontend lint and `tsc -b` passed; all six affected Vitest files passed **54 tests** with `--maxWorkers=2`; Impeccable 4.6.0 advisory scan returned `[]`. The affected files include StandingChangesSettings, PayrollPeriodPage, SubmissionForm and all three ImportModal test files. An initial regression expected a job allocation for a single-rate baseline that originally had none; its assertion was corrected to verify the original empty allocation and restored two hours. The combined batch was rerun afterward and passed. No product assertion was weakened.
+
+Phone linked-import apply now passed at 390×900 without typing review numbers. Independently saved rows show owner amounts 1300/1400, 32 hours on the saved $35 job, and an applied `pay_run` submission link. Legacy each-owner display was rechecked at 390 and 1440; the saved original row remains unchanged and neither width has horizontal document overflow. These are responsive browser checks, not native-device or Safari coverage.
+
+Private continuation logs use `acceptance-*` under the existing private evidence root. A fresh production-copy branch and the full ASUS run are in progress; neither is passed by this checkpoint. The new rehearsal evidence is under `acceptance-20261114T1322/`. Old deleted endpoint verification and substitution of old saved URLs into the fresh verifier both refused before any database connection.
+
+### Rehearsal blocker and cleanup
+
+The fresh branch was `br-summer-wave-a11ja91w` (`pr2-standing-changes-acceptance-20261114`), endpoint `ep-soft-rain-a1g6dx88`, from the required parent. Live API verification ran before each database client; old saved URLs were rejected. The migration and isolated company-1 fixture actor succeeded. Environment preflight confirmed `env -i`, no email/Clerk/AIRE/provider credentials, local storage and paused connected payroll. A TCP probe was refused by the outbound guard before connecting.
+
+**R1 remains not_run.** Before rehearsal server startup, the one-minute Mac load rose above 300 (308.20 at 23:31 Guam), exceeding the inherited approximately-25 execution limit. No practice copy, period, standing defaults, real-file upload, financial apply or calculation was performed on this branch. There are no new reconciliation numbers against period 117 and no verified $219.70 loan result. The earlier production-copy fingerprint is not financial acceptance.
+
+After stopping the synthetic runtimes and closing the task tab, company 6 fingerprints covered **9,548 records before and after: zero added, zero removed, zero changed**. The fresh Neon branch was deleted and its absence confirmed with a live 404. The API/Web/proxy and preview tab were cleaned; an orphan Vite child was identified by the owned parent and exact command, then stopped. Lifecycle status reports no active owned resources. Shared/protected resources were untouched. No runtime is handed off. The held worktree, synthetic databases and private evidence remain available.
+
+All five CodeRabbit threads received replies describing commit `aa2eb380` and the passing focused regressions. The connector denied replies with HTTP 403; the authenticated GitHub CLI posted them successfully. This is a response to findings, not reviewer approval. New-head review and CI results remain separate gates. No ready-for-review transition, merge or deployment was performed.
+
+### ASUS full-suite result
+
+The secret-free ASUS run completed in **16 minutes 53 seconds: 6,842 examples, 2 failures, 5 pending**. It ran the final application/test source now committed as `aa2eb380`. The wrapper used disposable Postgres at `127.0.0.1:55432`, explicit test database URLs and schema-only setup matching CI; it did not load operational seeds. Transfer excluded ignored/private data, environment files, keys, Kamal secret paths and encrypted credentials. No real MoSa files or credentials were transferred.
+
+Both failures are runner-environment prerequisites: `spec/security/operator_artifact_safety_spec.rb:21` expects `git grep` to return 1 for no matches, but the copied tree has no Git index and returns 128; `spec/tasks/db_safe_prepare_spec.rb:30` reads `.kamal/secrets-common` and `.kamal/secrets`, which the runner deliberately excluded. Those two cases are not claimed passed. Five pending cases cover one macOS-only sandbox contract and four transaction-pooler scenarios without their optional pooler URLs. No application failure was reported in this run, but it is not a clean full-suite pass.
+
+Use the automatically triggered CI full backend job for source commit `aa2eb380` as the fallback full-suite gate. It is still pending at this checkpoint; the green `e4ed47d8` CI is historical evidence only. Final documentation changes do not alter application/test source. Do not mark the PR ready until a current-source full suite, the remaining final-source browser replay, and R1/R2 financial rehearsal acceptance pass. The remote wrapper completed its cleanup trap and shut down its temporary WSL runner; no remote runtime handoff is intended.
+
+
+## Mac mini production-copy rehearsal — November 15, 2026
+
+**Blocked; R1 is not accepted and R2 failed. PR remains draft.** Agent-executed desktop Chromium acceptance attempted against application commit `a9959d1bee6aa26a8aa3d2354d62ca30d83571ba` in the clean dedicated clone. No product code was changed. The throwaway production-copy endpoint and branch-only login were checked before every database client. Migration was already applied by the lead. Test mode, E2E identities, supplied encryption keys, private local storage, paused connected payroll and the Ruby outbound TCP guard isolated the run. The encryption read probe passed. No real email was sent.
+
+The company-6 before fingerprint covered **9,548 records**. Client Management → Create test workspace was exercised with history through October 5–18. Copy construction was still pending when the integrity failure was detected; it had not reached historical payroll insertion. No completed practice workspace or new regular period is claimed. Standing defaults, practice-client invitation, real-file submission, staff prefill/confirm/apply and calculation were **not_run**. Financial comparison: **0 paychecks compared; no match count established**. The expected one-paycheck +$0.01 historical exception and expected $219.70 loan remain **unverified** in this attempt. No payroll number was typed into the staff worksheet or review.
+
+An interim fingerprint found a removed company-6 `cable_connection_tickets` record. `CableTicketService.issue!` calls `CableConnectionTicket.stale.delete_all` globally before issuing the local browser ticket. This reproduces the collateral cleanup documented in PR 1. It blocks the required zero-diff acceptance. Per the stop-on-blocker instruction, no restoration, product fix or further payroll rehearsal was attempted. After stopping the API, proxy and browsers, the final fingerprint covered **9,547 records: zero added, one removed, zero changed**; the sole removed record belongs to that ticket table. Payroll/business row hashes match, but the complete fingerprint does not, so this is not a pass.
+
+Environment limits: Ruby 3.3.7 was available through mise; rbenv had no installed versions. The shared lifecycle command/profile were absent, so the synced helper ran with a private task-local protection profile. The read-only shared-context check failed because the host lacks `~/.config/shimizu-technology/agent-context.json`; applicable synced guidance was read directly. Shared preview reported unavailable and its open attempt failed; local bundled Chromium performed the UI action. Safari, native devices and mobile financial acceptance were not run. Dependencies were installed locally; no customer material went to the external runner.
+
+One initial psql invocation incorrectly supplied a URL through `PGDATABASE`; its error exposed the throwaway credential in tool output. Subsequent invocations used parsed libpq environment fields and private diagnostic logs. No credential is recorded in this ledger or Git. The lead must delete the throwaway Neon branch; this host has no API key. Local file deletion cannot retract conversation/tool output.
+
+Lifecycle session `manual-20261115-000154-27487-4f65` stopped the exact owned API process, Vite/proxy and Chromium runner. The API changed its process title during startup; its exact PID/start identity was reverified and reclaimed before final termination. No listeners remained on the two task ports and lifecycle status reported **no active owned resources**. Shared/protected services were untouched. No runtime handoff, ready transition, merge or deployment occurred.
+
+Wipe verification: the private rehearsal tree (including URL, encryption keys, source files, storage, screenshots and logs) and the task-created Rails test log were deleted. `ls -la ~/private` showed only `.` and `..`. Recursive exact-host scans returned zero matches with no diagnostics in `~/private` and the dedicated clone. The OS temporary directory scan returned zero matches with seven traversal/read diagnostics (exit 2); this is not a claim that every OS temp entry was readable. Task Chromium contexts closed; no task-process PID remained. Earlier unrelated browser profiles and other sessions were preserved. Only this ledger changed; the final clone state is clean on `main`. The remote throwaway database remains for the lead to delete.
+
+## Mac mini financial rehearsal, run 2 — November 15, 2026
+
+**Not accepted; PR remains draft.** Agent-executed desktop Chromium rehearsal tested clean source commit `5f7f61903ac6ec9be795dbdf4e43df2af2cd3701`. No product code changed. The dedicated staff actor and encryption read probe succeeded. Database clients checked the password-free URL host against staged branch metadata and used `PGPASSFILE`; no password was placed in a URL, argument or output. Test mode, E2E identity, private local storage, inline jobs and the Ruby outbound guard isolated the production copy. No real invitation or external delivery occurred.
+
+The Client Management UI submitted creation of a practice workspace with copied history through October 5–18. Copy construction was pending when execution stopped; no completed workspace or new regular period is claimed. Standing defaults, practice-client invitation, real-file submission, staff prefill/confirmation/apply, calculation and financial reconciliation were **not_run**. **0 paychecks compared; no financial match count or aggregate established.** The expected single-paycheck +$0.01 exception and expected $219.70 loan remain unverified. No staff payroll number was entered.
+
+**Harness containment failure:** the local proxy returned 503 for `POST /api/v1/cable_tickets`, but the application's actual route is singular, `POST /api/v1/cable_ticket`. The singular requests reached Rails and invoked its global stale-ticket deletion. The agent failed to verify the actual route before browser startup. This is a rehearsal setup error, not a newly established product defect. A future fresh-copy run must refuse both spellings (and verify the real singular request is blocked) before opening the app. No restoration or further payroll action was attempted after the interim fingerprint exposed the deletion.
+
+After stopping owned runtimes, the complete company-6 fingerprint covered **9,548 records before and 9,547 after: zero added, one removed, zero changed**. The sole removed record is in `cable_connection_tickets`; all other compared hashes match. R2 therefore failed and R1 remains incomplete. No ready transition, merge or deployment was performed. The lead still owns deletion of the throwaway Neon branch.
+
+Environment limits: Ruby 3.3.7 came from mise because rbenv has no installed versions. The installed lifecycle command/profile were absent, so the synced helper used a private task-local protection profile and session `pr2-run2`. Shared preview was unavailable; its local URL open failed with connection refused, so bundled local Chromium executed the UI. Safari, native devices and mobile financial coverage were not run. Local dependencies and bundled Chromium were installed; private data never went to ASUS.
+
+The lifecycle helper stopped the exact owned API tree, proxy, Vite and remaining Chromium runner. Status reported **no active owned resources**; the three task ports had no listeners. Shared/protected services were left unchanged. No runtime handoff.
+
+Wipe verification: deleted the entire `~/private/pr2-rehearsal` tree (credentials, keys, originals, storage, scripts, browser state and diagnostics) and task-generated Rails test log. Task Chromium contexts/profiles were closed; remaining profiles belonged to other running workers and were preserved. `ls -la ~/private` showed only `.` and `..`. Exact-host `grep -r -l -F` across `~/work` and `~/private` returned no matches and no diagnostics (exit 1). The OS temporary directory returned no matches but nine read/traversal diagnostics (exit 2); full readability is not claimed. No task-owned processes or listeners remained. The shared-guidance read-only check failed because this host lacks `~/.config/shimizu-technology/agent-context.json`; relevant synced skills and agreements were read directly. Only this QA ledger is committed; the clone is returned to clean `main` after pushing.
+
+## Mac mini financial rehearsal, run 3 — November 15, 2026
+
+Agent-executed desktop Chromium acceptance on clean application commit `c8f719ca374373ebf5154b122750c7f1c1747959`, using the dedicated clone and a fresh staged production-copy branch. This run inherits the product brief and R1/R2 acceptance above. No product code, parent/production data, real email, external provider, merge or deployment was changed or invoked. Each database client checked the password-free URL host and role against branch metadata, used `PGPASSFILE` and required TLS. Test-mode E2E identities, supplied encryption keys, local private storage, inline jobs and the Ruby outbound guard contained the run.
+
+**Cable gate passed before practice-copy creation.** Global ticket count was **1 before and 1 after** the initial authenticated staff-browser load. The proxy recorded the real singular `POST /api/v1/cable_ticket` refused with **503**, and refused every path beginning `/api/v1/cable_ticket` or `/cable`, including WebSocket upgrades. Rails request-log and server-log cross-checks found **zero `CableTicketsController` hits**. The baseline company-6 fingerprint covered **9,548 records**. An interim fingerprint after copy/period creation also covered **9,548 records: zero added, zero removed, zero changed**.
+
+The Client Management UI created a practice workspace with history through October 5–18. Copy verification completed successfully with **220 historical paychecks across four periods**. The UI created a regular October 19–November 1 period, paid November 5. Staff saved **two owner-pay defaults and one extra-hours default on the required saved $35 job**, all on copied employees. The UI invited one practice-only client account restricted to the copy; E2E identity supplied access without real invitation delivery.
+
+The client submitted the actual PDF and workbook with workbook choice **attach**, filled the three initially blank default rows with **two amounts of $8,421.13 and 68 hours**, and included notes requesting two direct-deposit additions. The saved immutable revision has **three change rows**; **2/2 retained source checksums** match the staged originals. Staff opened the retained-file review and verified all three figures were prefilled correctly, without typing any payroll number. The client-figure and suggested-name-match confirmations were completed and Apply was enabled. No overwrite confirmation was offered: this newly created period had **zero saved payroll rows** before import, so there were no existing owner rows to replace. Apply committed **52 payroll rows** and the applied portal-source link. The required hourly row saved **68.00 hours and $219.70 loan deduction/payment**.
+
+The import calculates as part of Apply, so the explicit follow-up calculation action is labeled **Recalculate**. Browser harness retries corrected an employee option containing a middle name, a selector waiting for “Calculate Payroll” after import, and the collapsed Hours section that hides Recalculate. These are harness corrections; no product code or payroll input was changed. The explicit recalculation was invoked through the Hours section.
+
+**Financial reconciliation passed after explicit Recalculate completed with HTTP 200 and the browser showed its saved calculated state.** All **52/52 production paychecks** have a one-to-one copied-employee counterpart. Across **36 financial fields**, **51/52 match exactly**. The remaining paycheck has only the known historical **+$0.01 gross and net**, with corresponding **+$0.01 FIT, Social Security and Medicare taxable wage bases**; tax amounts match. Compared fields cover regular/overtime/holiday/PTO hours, tip amounts, loan inputs/payments, gross, employee and employer taxes, retirement, insurance, additions, deductions and net. The required loan is **$219.70**. There are **zero unexplained financial differences**.
+
+A broader metadata comparison found **49 tip-pool labels** populated by the actual workbook (**23 FOH, 26 BOH**) where historical rows have null labels. `LoanTipExcelParser#tip_pool` derives these labels from the workbook’s pool components, and `ImportService` retains them. All compared tip amounts match; these labels are not additional pay or deductions. This is explained metadata, not a second financial exception.
+
+**R2 passed after stopping runtimes:** company-6 fingerprints contain **9,548 records before and after: zero added, zero removed, zero changed**. The global ticket count remains **1**, and Rails has **zero cable-controller hits** throughout the run. No fixture restoration or source-company repair was performed.
+
+Environment limits: bundled local desktop Chromium only; Safari, native devices and mobile financial coverage were **not_run**. No broad automated suite, external invitation delivery, direct-deposit activation, merge or deployment was attempted; this task rehearsed notes and payroll correctness. Ruby 3.3.7 ran through mise because rbenv has no installed versions. The installed lifecycle command/profile was absent; the synced helper used a task-local profile honoring the home server’s protected services and baseline. Lifecycle session **pr2-run3** stopped the exact owned processes. The API changed its process title to Puma, so its PID/start identity was reverified and reclaimed before final termination. Status reports **no active owned resources**, the three task ports have no listeners, and shared preview lists no task tabs. Shared/protected resources were unchanged. No runtime handoff.
+
+Wipe verification: deleted the entire private rehearsal tree, including credentials, keys, originals, local storage, scripts, browser profiles, screenshots and diagnostics, and deleted the task-generated Rails test log. **`ls -A ~/private` returned no entries (entry count 0).** Exact-host `grep -r -l -F` over `~/work` and `~/private` returned **zero matches, no diagnostics, exit 1**. The same scan over the OS `$TMPDIR` returned **zero matches but eight permission/socket diagnostics, exit 2** (“Operation not permitted” / “Operation not supported on socket”). This does not prove absence inside unreadable OS temp entries. All task-created Chromium temporary data was scoped to the deleted private directory; unrelated OS/other-worker resources were preserved.
+
+**Financial R1 and integrity R2 passed; complete requested wipe-scan proof remains limited by the OS temp diagnostics.** Consequently this run leaves PR #457 **draft** and does **not** invoke `gh pr ready`; it does not claim every requested finish check passed. The lead still owns deletion of the throwaway Neon branch. Backend/frontend/browser CI on the tested source was successful at inspection; the existing review decision was **changes requested**, not approval. Only this aggregate QA ledger is committed and pushed. The dedicated clone is returned to clean `main`.
+
+## Corrected-revision fix round — November 15, 2026
+
+Agent-executed affected-flow QA, starting from `91d9a18d4066a3d8282a45b0e9d133ae5ef4c3da` in the existing `t3/standing-change-defaults` worktree. The lead-authorized rehearsal schema dump was preserved under untracked `.codex/rehearsal-schema-before-fix.patch`, restored, and the branch fast-forwarded before implementation. Product context and acceptance remain the PR 2 plan above. Staff review corrected client revisions before calculation; client changes must not survive their revision, silently replace other pay, or leave scalar hours and job allocations inconsistent. Salaried extra hours remain out of scope.
+
+| Case | Required actions and saved result | 1440 × 900 | 390 × 900 |
+| --- | --- | --- | --- |
+| F1 | Review revision 1 with saved owner pay 3000, workbook 4000, client 5000. Explicitly choose pay; no silent replacement. | passed: client 5000 saved | passed: workbook 4000 saved |
+| F2 | Decline inactive employee's extra hours with a required reason. Other rows apply; reason retained on import and visible in history. | passed | passed |
+| F3 | After revision 1 adds 68 to Addison's 2 baseline hours, revision 2 skips Addison and owner. Review names the removed 68 hours; owner pay is missing until staff supplies a fresh decision. Apply restores Addison to 2 and removes old owner client-pay attribution. | passed: fresh staff pay 1000; Addison 2; Avery corrected to 41 | passed: same saved result |
+
+Fixtures are wholly synthetic in dedicated local database `cornerstone_pr457_fix_ui`; all UI actions use the real application, with isolated E2E identities, local storage, paused connected payroll and the Ruby outbound TCP guard. Neither a production copy nor real client files are used in this fix round. The earlier single-import rehearsal (52 paychecks, 51 exact and the known one-cent difference) is historical evidence only; the lead will repeat it after these fixes. Responsive Chromium checks do not cover Safari or a native device.
+
+Implementation: rebuild/clear non-workbook allocations even for zero Revel hours; synthesize cleanup rows for earlier client hours absent from both files; treat earlier client owner pay as imported evidence and require fresh pay; re-baseline worksheet edits by clearing client-hours evidence and synchronizing job buckets; require explicit owner pay choices against current saved/workbook amounts; enforce active-default uniqueness in the model and partial database index; display baseline hours; retain per-change declines and reasons on import/audit/history; use array/relation-safe active-rate lookup; make deactivated defaults from older revisions ordinary removable client rows.
+
+The first regression run included test-helper errors, which were corrected (client actor and import-record class). A controlled rerun against the original application then produced **14 examples, 7 failures**, reproducing zero-hour allocations, skipped and dropped Addison, skipped and dropped owner pay, worksheet edits and staff decline. Corrected code passed the initial 29-example focused batch. The targeted existing-source batch then passed 265 examples, including the unchanged import-service and variable-salary single-import specs. Six affected Vitest files passed 57 tests with one worker; lint, TypeScript build, full RuboCop (1844 files), Brakeman (zero errors/warnings), and Impeccable advisory (`[]`) passed. Final follow-up counts and cleanup are recorded below when complete.
+
+Lifecycle session `01a1dab5-8e15-7132-bc16-84117806525c`. Baseline shared database/Redis, all three iOS simulators and unrelated listeners are borrowed. The task owns only its synthetic Rails/Vite/proxy and browser tab. The task-owned browser tab and exact Rails/Vite/proxy processes have been closed or stopped. Lifecycle status reports **no active owned resources**; shared/protected resources were unchanged. No runtime handoff. No merge, deployment, production-copy rehearsal or sub-agent is part of this task.
+
+
+### Final fix-round verification
+
+All **3 required browser cases passed at both 1440 × 900 and 390 × 900**. Revision 1 retained the chosen owner pay (desktop client 5000; phone workbook 4000), additive worker hours 70 and the recorded inactive-row decline. Revision 2 restored Addison to 2 with empty original allocations, cleared earlier client-hour evidence, required and saved fresh staff owner pay 1000 with no imported-pay attribution, and saved Avery's corrected 41 hours. Both imports per viewport are persisted as applied; the original revision evidence remains unchanged. Decline reason “Not working this period” remains visible in history after reload. Document width equalled viewport width at both sizes.
+
+Private synthetic evidence is retained in the worktree's untracked `.codex/ui/`: `revision1-{desktop,mobile}.png`, `revision2-{desktop,mobile}-missing-pay.png`, `mobile-history.png`, `revision{1,2}-{desktop,mobile}-saved.json`, fixtures and reproducible seed/revision scripts. The local synthetic UI and test databases are retained for inspection; their shared PostgreSQL service is borrowed and remains running. Temporary initial server launches exited with their shell; replacement foreground servers were claimed and later cleaned by exact identity.
+
+Final backend batch: **268 examples, zero failures**, covering import service, variable salary, wage-rate choice, all submission services, portal/pay-run import requests, submission requests, payroll items, standing-change requests/model and migration rollback. The original single-import spec files are unchanged. Follow-up regressions also prove that an unrelated worksheet save with unchanged hours preserves the old baseline, and that audit decisions distinguish the reviewed client value from the actual selected pay. Final frontend lint, `tsc -b` and all six affected Vitest files passed (**57 tests**, `--maxWorkers=1`). Full RuboCop and Brakeman passed as recorded above; final verification after the last controller refinement is recorded below.
+
+Not run in this round: full backend/whole-frontend suites or ASUS run (targeted checks were requested on the loaded Mac), Safari/native devices, external delivery, and the production-copy financial rehearsal. The lead owns that new rehearsal. Salaried extra hours remain excluded. The PR stays draft, held, unmerged and undeployed. Existing CodeRabbit threads were already resolved before this fix round; the new head's CI/reviewer coverage remains separate from local acceptance.
+
+
+Final-source replay repeated F1–F3 on new synthetic fixtures at both widths after the last worksheet/audit refinement. All three cases passed in each dimension, with independent persisted-output assertions. Artifacts use the `final-` prefix under `.codex/ui/`, with `final-replay-ledger.json` and `final-revision{1,2}-{desktop,mobile}-saved.json`. The tested application/web diff against `91d9a18d` has SHA-256 `621e3c4f78c94d8d23fd85ae3bdbfc3e3b00a2d6c958e40f4e5212cd55645077`; the source was unchanged through both final browser runs. The final four touched Ruby files passed RuboCop after refinement, and a fresh full Brakeman scan again reported zero errors and warnings. The final Impeccable advisory scan returned `[]`.
+
+Final lifecycle cleanup closed/released the last preview tab and stopped exact owned Rails44945, Vite45060 and proxy45092. Earlier replay resources were also cleaned. Lifecycle status reports **no active owned resources**. No runtime handoff; all baseline/shared/protected services and simulators remain untouched. The existing worktree, branch, synthetic databases, schema backup patch and private evidence are retained. No production-copy rehearsal, merge or deployment occurred in this task.
+
+## Mac mini financial rehearsal, run 4 — November 15, 2026
+
+**Blocked at corrected-revision review; leave PR #457 draft.** Agent-executed desktop Chromium acceptance tested clean application head `945219b8cb366f0d9ac2aa012aae5a6998c63f52` in the dedicated clone. This inherits the product brief above and repeats run 3 with a required corrected-revision cycle. No product code changed. No merge, deployment, production write, external invitation delivery or provider call was attempted.
+
+Containment: every database client verified the password-free URL host against the staged branch metadata, used `PGPASSFILE` and required TLS. Test/E2E mode, supplied encryption keys, random secret, disabled external credentials, local private storage, inline jobs and the outbound Ruby guard isolated the run. The encryption read probe passed. Shared preview was unavailable and its open attempt failed; local Chromium performed the journeys with external browser requests refused and temporary data confined to the private rehearsal tree.
+
+### Required results
+
+| Step | Observed outcome | Status |
+| --- | --- | --- |
+| 1 | Company-6 baseline: 9,548 records | passed |
+| Cable gate before 2 | Global ticket count 1 before and 1 after initial staff loads; singular cable-ticket requests refused with 503 | passed |
+| 2 | UI-created practice copy through the required prior period: 220 historical paychecks across four periods. New regular period has October 19–November 1 dates and November 5 pay date. | passed |
+| 3 | UI saved two owner defaults and one extra-hours default on the required saved $35 job | passed |
+| 4 | UI invited one practice-only client assigned solely to the copy. Revision 1 retained three change rows, both source checksums matched, workbook choice attach, required owner amounts/hours and two direct-deposit notes saved. | passed |
+| 5 | Staff review prefilled both owner amounts at $8,421.13 and extra hours at 68; figures/name matches confirmed without typing payroll numbers; Apply committed 52 rows and one applied portal link. Explicit Recalculate completed with HTTP 200. | passed |
+| 6 | 52/52 counterparts; 36 financial fields; 51 exact, one known +$0.01 exception; required loan $219.70 | passed |
+| 7a | Client sent revision 2 using the same files, one owner amount retained, the other owner and extra-hours default explicitly skipped. Saved three rows, two skips, attach choice, 2/2 source checksum matches. | passed |
+| 7b | Staff selected latest revision 2 and clicked Review these submitted files. Preview returned HTTP 422; review never opened and no corrected-files control was offered. | failed |
+| 7c | No revision-2 apply/calculation occurred. Baseline-hour restoration, fresh owner-pay outcome, allocation consistency and unchanged-other-employee checks cannot be accepted. | blocked / not_run |
+| 7d–7e | Stop-on-defect instruction applied. Revision 3, final reconciliation and no-doubled-hours acceptance were not run. | blocked / not_run |
+| 8 | After stopping runtimes: company 6 still has 9,548 records, zero added, zero removed, zero changed | passed |
+
+Step 6's single exception was independently verified as the expected historical paycheck. Gross and net are each +$0.01; FIT, Social Security and Medicare taxable wage bases are each +$0.01. Tax amounts and all other compared financial fields match. Hours, tips, loans, taxes, retirement, insurance, additions, deductions and net were included. There are zero unexplained financial differences in revision 1. This does not establish corrected-revision acceptance.
+
+### Blocking defect
+
+A new client revision that changes only structured standing changes, while retaining byte-identical payroll files, cannot open staff import review after revision 1 was applied. The UI displays: **“This source package was already applied or superseded. Review a corrected current source.”** It does not offer **Use corrected files**. Neither the required hours-removal notice nor the fresh owner-pay decision can be reached.
+
+Read-only source inspection supports the observed failure: `PayrollIntake::PreviewService#import_hash` includes source/parser/workweek/text and file metadata/checksums, but no submission revision or structured changes. `existing_duplicate_session` returns the earlier applied package before replacement handling; `PayrollImportsController#persist_preview` then rejects that package as not applyable. This produces the generic 422 rather than the `ReplacementRequiredError` details needed to expose the corrected-files control. No bypass, direct database repair, alternative import route or product fix was attempted. The planned fresh staff-pay decision was never entered.
+
+### Harness limits and cleanup
+
+Harness corrections covered initial route/option selectors, asynchronous page readiness and update-button discovery. Apply's initial four-minute response wait expired while Rails continued; it was not retried. The saved 52 rows and applied link were verified, followed by the explicit calculation. Its initial response matcher expected `/calculate` instead of the actual `/run_payroll`; Rails independently logged HTTP 200 after 341,121 ms, and the final saved financial snapshot was taken afterward. The waiting browser tree was stopped by exact validated identity. Subsequent waits used the actual endpoint and a longer allowance. These harness issues are separate from the reproduced revision-2 product failure.
+
+Final global ticket count remains **1**. The proxy logged **655 refused cable requests**, all 503; Rails server/request logs contain **zero cable-controller hits**. Both interim and final company-6 fingerprints match the baseline exactly. No source-company repair or restoration occurred.
+
+Lifecycle session `01a1dae0-0892-7412-bd29-3bb81d652b5e` recorded the baseline with the synced helper and a private protection profile because the installed command/profile was absent. Exact owned API/Vite/proxy processes and all local Chromium trees were stopped. Lifecycle status reports **no active owned resources**; the three task ports have no listeners and shared preview has no task tab. Shared/protected services and other sessions were preserved; no runtime handoff. OS-temp Playwright profiles created during this interval were traced through their process ancestry to separate projects' test workers and left untouched. Creation time alone did not establish this task's ownership.
+
+Only desktop Chromium was exercised. Safari/native devices/mobile financial coverage, broad automated suites, real delivery and direct-deposit activation were not run. Existing tested-source CI backend/frontend/browser checks passed and CodeRabbit status was successful at inspection, while GitHub's review decision remained **changes requested**. These checks do not override the failed required financial acceptance. Do not mark ready, merge or deploy. The lead retains ownership of deleting the throwaway Neon branch.
+
+Wipe proof: the entire private rehearsal directory (credentials, keys, originals, retained storage, scripts, profiles, diagnostics and other artifacts) and the task-generated Rails test log were deleted. **`ls -A ~/private` returned no entries; entry count 0.** Exact-host `grep -r -l -F` across `~/work` and `~/private` returned **zero matching files, zero diagnostics, exit 1**. The OS `$TMPDIR` scan returned **zero matching files, 10 permission/socket diagnostics, exit 2**. Those OS restrictions prevent proof about unreadable entries; they are not a clean complete-temp scan. All this task's local browser temporary data was under the deleted private tree. Other projects' verified active profiles were preserved. The dedicated clone is returned to clean `main` after the aggregate-only ledger commit and push. Financial acceptance remains blocked, so `gh pr ready` was not run.
+
+## Run 5 — identical-file correction fix (November 15, 2026)
+
+Implementation sub-agent, affected-flow QA. Used only the assigned `t3-c94dadfe-0bd84211a10cbddc` worktree on `t3/standing-change-defaults`. Initial status was clean apart from the existing untracked `.codex/`; fetched and fast-forwarded to verified `d88f296bd33bba7e9ffd0db0b1f33dcdea67a4e1`. The PR targets `main` and remains draft. This run uses synthetic data only; run 4's failed financial acceptance is not superseded by synthetic results. The lead must rerun the production-copy rehearsal. No merge or deployment.
+
+### Correction identity and audit
+
+A newer **selected current client revision** may supersede the current applied package when the source identity matches and its structured changes differ. The new session uses the original source hash plus the immutable submission ID for idempotency, retains the original hash and submission ID in evidence, and records `supersedes_id` and `client revision N: changes only`. Its sources are independently retained and verified. It follows the ordinary preview, removal/restore, fresh-owner-pay, source verification and apply paths. No `applyable?` bypass, schema change or rewrite of earlier source/selection evidence was added.
+
+An exact re-send (identical files, `change_rows` and `no_changes`) is **refused**, explaining that the files and changes were already applied and a corrected revision is needed. Reopening an applied revision remains refused. Plain Import MoSa keeps its original file identity and duplicate refusal, including when an older identical package is superseded.
+
+For pay-run uploads, that duplicate refusal can offer **Use this import for the client's revision N**. Selecting it explicitly previews the replacement against the pending revision; the `pay_run` selection is persisted only by successful apply. Apply requires the same revision used to create the replacement. Both apply and owner-pay saves refuse stale revision context, even before the pay-run selection has been persisted or after a source disposition. Existing tenancy, `validate_current!` and `expected_import_id` checks remain in force. Expected duplicate recovery appears inline, avoiding an error toast covering the action on a phone.
+
+### Automated verification
+
+Final backend source: **305 targeted RSpec examples, zero failures**, covering import requests, portal imports, submission periods, intake requests/services, payroll items, standing changes, import/change projection services, wage choice and package evidence. The new request/service coverage uses byte-identical synthetic Revel PDF/workbook bytes for revisions 1–3; covers skips, dropped rows, edited amounts, baseline/allocation restoration, fresh owner decisions, re-send refusal, same-revision refusal, stale apply/pay saves, explicit linked selection and unchanged plain duplicate protection. Revision 3 matches the first apply's saved financial/hour fields with no doubled hours.
+
+Full RuboCop: **1,845 files, no offenses**. Brakeman: **zero errors and security warnings**. Frontend lint and `tsc -b` passed. All six affected Vitest files passed **59 tests** with `--maxWorkers=1`. Impeccable 4.6.0 advisory scan: `[]`. Separate local databases were created with `db:create db:schema:load`, without seeds or `db:prepare`.
+
+Tested application/spec diff against `d88f296b`, including the new service spec, SHA-256: `013c44bdf9d13ba8adfa573572dd867f07b9db94468c89ef6644680e85bf413d`. No application changes followed the final checks. Private local logs use `.codex/identical-*`; no evidence files or synthetic attachments are committed.
+
+### Browser acceptance
+
+Agent-executed Chromium at **1440×900 and 390×900**, local synthetic Rails/Vite/proxy stack, test-mode authentication, independent local storage, outbound Ruby TCP guard, and cable requests refused at the proxy. Revisions were prepared as isolated fixtures; staff review, decisions, saves and applies used the real UI. Client submission editing, Safari/native devices, real delivery, full suites/ASUS and the production-copy rehearsal were not run here.
+
+| Case | Expected observable and saved result | 1440 | 390 |
+| --- | --- | --- | --- |
+| I1: revision 1 | Review client owner pay 5000 and Addison 68 hours; confirm and apply. Saved owner 5000; Addison 2 baseline + 68 = 70 hours with matching maintenance-job allocation; Avery 40 source hours. | passed | passed |
+| I2: identical files, revision 2 skips | Review opens without corrected-file upload. Displays revision 1's 68-hour removal and missing owner pay. Apply stays off until staff enter fresh owner pay 500. After apply, owner 500; Addison returns to 2 baseline hours and 2 allocated hours; Avery remains 40 hours with unchanged gross/net. | passed | passed |
+| I3: original changes restored, revision 3 | From pay-run Import MoSa, plain identical upload refuses; inline revision-selection action opens review. Choose client pay instead of saved 500, confirm without retyping client numbers, apply. Saved hours, allocations, owner pay, gross and net match revision 1 for all three employees. Selection route is `pay_run`; packages form the audited 1→2→3 chain. | passed | passed |
+
+All three cases passed both required widths. No document overflow was observed in either review or the duplicate recovery. Evidence retained under `.codex/identical-ui/`: desktop/mobile revision-1 and revision-2 PNGs, desktop/mobile pay-run retry PNGs, baseline and per-revision saved JSON/logs, checksum checks, and `comparison.json` with equality `true` at both widths. Responsive Chromium coverage is not native-device acceptance.
+
+Harness corrections: a baseline job fixture initially omitted its required label, so its allocation normalized to empty; fresh fixtures supplied the label before the accepted runs. Attempted fixture re-seeds hit unique email/storage-key constraints; accepted fixtures use unique identities and keys. One wait expected two imported employees, while the success count correctly includes the restored third employee; persisted results confirmed success without retrying apply. The phone error-toast obstruction was a product issue and was fixed and retested. Initial test-command path/filter mistakes were corrected; only completed final runs are counted above.
+
+### Cleanup and handback
+
+Lifecycle session `01a1db04-1d0c-7ad2-b266-b0ee7ca7ed91`. Owned preview tab closed; Rails, Vite/esbuild and proxy stopped by verified PID/ancestry. The helper treated exec-renamed Rails/npm records as cleaned before those processes exited; the independent listener check caught this, and exact owned processes were stopped. Ports 3662/5662/5664 have no listeners. Shared/baseline services were untouched; no runtime handoff. The two disposable test databases are dropped after verification. The held worktree and local evidence remain for the lead. CI and final-head CodeRabbit coverage remain separate from local acceptance; all pre-existing CodeRabbit threads were resolved at inspection.
+
+## Mac mini financial rehearsal, run 5 — November 15, 2026
+
+**Blocked at revision-2 Apply; leave PR #457 draft.** Agent-executed desktop bundled Chromium acceptance tested clean product head `51210e61` in the dedicated clone. The inherited product brief and runs 3–4 method apply. No product code changed. No merge, deployment, production write, external invitation delivery or provider call was performed. The staged throwaway database branch remains the lead's deletion responsibility.
+
+Containment: every database-client launch checked the password-free URL host against staged branch metadata, with `PGPASSFILE` and required TLS. Test/E2E mode, supplied encryption keys (read probe passed), random secret, disabled provider credentials, local private storage, inline jobs, Ruby outbound guard and browser external-request refusal contained the run. Shared preview open failed with connection refused; local Chromium performed the UI journeys. The missing installed lifecycle profile was replaced only for this task by a private protection profile and the synced helper.
+
+| Step | Observed result | Status |
+| --- | --- | --- |
+| 1 | Company-6 baseline: 9,548 records | passed |
+| Cable gate before 2 | Global ticket count 1 before and 1 after authenticated staff load; actual singular cable-ticket requests refused with 503 | passed |
+| 2 | UI-created practice copy verified ready with 220 historical paychecks across four periods; new regular October 19–November 1 period paid November 5 | passed |
+| 3 | UI saved two owner-pay defaults and one extra-hours default on the required saved $35 job | passed |
+| 4 | UI invited a practice-only client restricted to the copy; revision 1 saved three change rows, required values and two direct-deposit notes, attach choice, 2/2 matching source checksums | passed |
+| 5 | Staff verified both $8,421.13 prefills and 68 extra hours, confirmed figures and suggested matches, applied without typing payroll numbers; 52 rows saved; explicit Recalculate returned HTTP 200 | passed |
+| 6 | 52/52 counterparts, 36 financial fields, 51 exact, one expected +$0.01 exception; required loan $219.70 | passed |
+| 7a | Revision 2 saved the same files, three rows with two explicit skips, retained owner amount, attach choice and 2/2 matching source checksums | passed |
+| 7b review | Identical-file review opened, clearly named revision 1's 68-hour removal and required a fresh decision for the skipped owner's period pay | passed |
+| 7b apply | Staff chose Exclude from payroll with a reason to clear earlier client pay. Apply returned HTTP 422 despite the documented outcome | failed |
+| 7c | Corrected import/calculation did not occur. Baseline restoration, cleared owner pay, allocation consistency and unchanged-other-employee acceptance remain unverified | blocked / not_run |
+| 7d–7f | Stop-on-defect: revision 3, final reconciliation and applied-revision reopening refusal were not run | blocked / not_run |
+| 8 | Final company-6 fingerprint: 9,548 records, zero added, zero removed, zero changed | passed |
+
+Step 6's exception is the expected historical paycheck: gross, net, FIT taxable wages, Social Security taxable wages and Medicare taxable wages are each +$0.01. All compared tax amounts match. Hours, tips, loans, gross, employee/employer taxes, retirement, insurance, additions, deductions and net were compared. There are zero unexplained financial differences in revision 1. After the revision-2 refusal, an independent saved snapshot of all 52 paycheck results, including hours and allocations, was identical to revision 1. This proves refusal did not alter those results; it does not pass the corrected revision.
+
+### Blocking defect
+
+The skipped owner was explicitly resolved using **Exclude from payroll**, with reason **“Client marked not this period; clear earlier client pay.”** The UI enabled Apply and showed 51 ready employees. The actual apply request contained both the excluded disposition and that reason, but returned HTTP 422:
+
+> earlier client owner pay is no longer selected. Enter current pay on the worksheet or explicitly resolve this employee before importing.
+
+The UI's Action needs attention panel displayed this refusal. No payroll amount was typed, no alternative outcome or backend bypass was attempted, and the financial sequence stopped. Read-only inspection of `PayrollSubmissions::ImportChanges#apply_to` shows its final prior-item loop rejects a prior owner-pay item absent from the included rows, without accounting for the explicitly excluded source outcome. The identical-file identity fix reached review successfully; the fresh no-pay resolution remains blocked at apply. No product fix was made.
+
+### Execution limits and cleanup
+
+Browser harness corrections covered route prefixes, sidebar disclosure, change-row container selection and asynchronous readiness. A browser wait expired during the single practice-copy request; creation was not retried, and the eventual ready copy/history was independently verified. All staff financial applies were submitted once. The successful revision-1 Apply and explicit calculation completed before reconciliation; the revision-2 failure is a real HTTP 422, not a timeout. Private browser text, request logs, source originals, keys and financial snapshots were not committed.
+
+Final global cable-ticket count: **1**. Proxy refusal records: **823**. Rails cable-controller hits: **0**. The proxy refused paths beginning `/api/v1/cable_ticket` or `/cable`, and WebSocket upgrades. Fingerprints were captured before practice creation and after server/browser shutdown; no source-company restoration was performed.
+
+Lifecycle session `01a1db25-af58-7f92-be66-703d370f8a74` reports **no active owned resources**. Exact API/Vite/proxy processes and task Chromium trees were stopped; ports 3633/5658/5660 have no listeners and shared preview lists no task tab. OS-temp Playwright profiles observed during cleanup belonged to a separate project's active QA worker, verified by process ancestry, and were preserved. No runtime handoff. Shared/protected services remain untouched.
+
+Only desktop Chromium financial coverage ran. Mobile/Safari/native-device coverage, broad suites, external delivery and direct-deposit activation were not run. Tested-source backend/frontend/browser CI was successful at inspection, with GitHub review decision **changes requested**. These do not override the failed required rehearsal. `gh pr ready` was not run; no merge or deploy.
+
+Wipe proof: deleted the entire private rehearsal tree, task Rails test log and 23 newly created cache files. **`ls -A ~/private` returned no entries; entry count 0.** Exact-host `grep -r -l -F` over `~/work` and `~/private` returned **zero matching files, zero diagnostics, exit 1**. The OS `$TMPDIR` scan returned **zero matching files, 21 diagnostics, exit 2**; unreadable OS entries prevent a complete-temp absence claim. Task browser temporary data was confined to the deleted private tree; unrelated verified worker profiles were preserved. The dedicated clone is returned to clean `main` after this aggregate-only ledger commit and push. The lead still owns deleting the throwaway Neon branch.
+
+## Run 6 — explicit owner no-pay decision (November 15, 2026)
+
+Implementation sub-agent; assigned worktree `t3-c94dadfe-0bd84211a10cbddc`, branch `t3/standing-change-defaults`. Initial state was clean except untracked `.codex/`; fetched and fast-forwarded to verified `256fa48783c25dbfc3d6d15735862a1d93d36f51`. PR targets `main` and stays draft. No merge, deployment, sub-agent or production-copy rehearsal is authorized here.
+
+Context: Cornerstone staff review MoSa client revisions before calculating payroll. MoSa's variable-salary owners have no saved base pay; earlier client pay must never become an implied decision for a later revision. Sources: the plan's PR 2 section (`output/portal-mosa-plan-20261114.md`), run 5 above, `PayrollSubmissions::ImportChanges`, the worksheet exclusion action, `PayPeriodDefaultRoster`, and import/current-review guards. The current production-copy acceptance remains blocked until the lead repeats it.
+
+No-pay semantics: use the existing pay-period exclusion mechanism and destroy the owner's payroll item, as the worksheet removal action does. This removes salary override, period-pay evidence and calculated paycheck values together. Save the reason and exclusion ID with the import decision, audit metadata and status history. A later affirmative client owner-pay change can undo only a matching exclusion created by such an imported decision; unrelated exclusions stay intact. No schema, tenancy or authorization change; ordinary Import MoSa keeps its existing behavior.
+
+Agent-executed affected-flow acceptance, synthetic local data only:
+
+| Case | Starting state and required actions/outcomes | Dimensions | Status |
+| --- | --- | --- | --- |
+| N1 | Apply revision 1, owner $8,421.13 and worker extra hours; inspect saved pay | 1440×900, 390×900 | passed |
+| N2 | Open byte-identical revision 2 with owner/worker skipped; require fresh in-review pay or reasoned no-pay choice | both | passed |
+| N3 | Select no pay / existing row exclusion with reason, apply; verify no owner item, persisted exclusion, recorded reason and restored worker baseline | both | passed |
+| N4 | Restore revision 1 changes in byte-identical revision 3, apply; verify exact financial result and removed exclusion | both | passed |
+
+Automated acceptance also covers fresh amount, missing decision, missing reason, failed-calculation rollback and the explicitly linked pay-run route. Safari/native devices, real transport, broad/full suites and production-copy financial reconciliation are outside this run. Test results and final resource disposition follow after execution.
+
+### Final verification
+
+**311 targeted RSpec examples, zero failures** on the final source. Coverage includes MoSa import requests, portal imports, submission periods, payroll items, standing changes, intake requests and services, import service, variable salary, wage choices and client-change projection. Fourteen new request cases cover seven outcomes through both portal and explicit linked pay-run selection: no pay, row exclusion, fresh $3,000 pay, missing decision, missing reason, revision-3 restoration and failed-calculation rollback. All fourteen failed against `256fa487`; the three new frontend cases also failed there. Original-head failures were recorded before restoring the implementation.
+
+The first broader run found four regressions in deliberate manual-pay resolution. A staff review/worksheet save clears period-pay provenance while retaining the older client tag; that already-entered fresh amount must continue to work. The new decision requirement now checks retained client period-pay provenance as well. The complete targeted set passed after this correction. Removing an owner also invalidates the previous calculation inside the import transaction, including when no included rows remain to calculate.
+
+Final RuboCop: **1,845 files, no offenses**. Brakeman: **zero errors and security warnings**. Frontend lint and `tsc -b` passed. Six affected Vitest files passed **61 tests**, with `--maxWorkers=1`. Impeccable 4.6.0 advisory scan: `[]`. Both task-created databases (`cornerstone_pr457_nopay_test` and `cornerstone_pr457_nopay_ui`) used schema-only setup, never seeds or `db:prepare`, and were dropped after execution. Existing databases were preserved.
+
+Final application/spec diff against `256fa487` SHA-256: `56210b0048ccee031a0ba97265bd17e952c4c0788fef215cdeb658b5e41f1b32`. No application changes followed this final-source replay. Local synthetic stack: Rails 3665, Vite 5665, proxy 5667, test-mode staff identities, local storage, paused connected payroll, Ruby outbound TCP guard, proxy refusal of cable-ticket and cable paths. These are synthetic financial assertions, not a production-copy reconciliation or actual provider delivery.
+
+**Four required browser cases passed in both dimensions** on fresh final-source fixtures. Revisions 1–3 used byte-identical PDF/workbook files. At 1440×900 the staff selected the existing row action **Exclude from payroll** and entered its reason in that row. At 390×900 the staff selected the explicit **No pay this period** checkbox and its required reason. Both controls synchronized to one no-pay decision; confirmation and Apply completed in the review. Persisted revision-2 assertions verified no owner payroll item, a reasoned pay-period exclusion, recorded decision/exclusion ID, and worker baseline restoration to 2 hours. Revision 3 restored $8,421.13 owner pay and 70 worker hours; all decimal payroll fields, job allocations, employment type and import source matched revision 1 exactly, with no owner exclusion left over. The visible history contained the no-pay reason. Phone document width stayed 390px with no horizontal overflow.
+
+Private evidence is retained under untracked `.codex/nopay-ui/`: final `revision{1,2,3}-{1440,390}.json` saved assertions, `revision2-{desktop,mobile}.png`, `history-mobile.png`, fixtures and repeatable scripts. Earlier artifacts have `initial-` prefixes. The first desktop run used an incorrect nested-label locator and case-sensitive completion text; timeouts were inspected before continuing, with no duplicate financial apply. Final-source replay used corrected controls and passed. Safari/native devices, browser execution of the linked route/fresh-pay variant, full backend/frontend suites, ASUS and production-copy rehearsal were **not_run**; linked-route and fresh-pay behavior passed request/Vitest coverage. The lead owns the production-copy rehearsal and draft readiness.
+
+Lifecycle session `01a1db47-b52d-7080-9f12-2d3324ce1509`: task preview tab closed/released; exact owned Rails 33313/replacement 50181, Vite 37401 and proxy 40945 stopped. Status reports **no active owned resources**. Shared PostgreSQL/Redis, protected services, baseline simulators and other sessions were untouched. No runtime handoff. The assigned worktree, branch and untracked evidence remain available; no merge or deployment.
+
+## Mac mini financial rehearsal, run 6 — November 15, 2026
+
+**Blocked at revision-2 Apply; leave PR #457 draft.** Agent-executed desktop bundled Chromium acceptance tested clean product head `7752458f05e93bcad082a730bc508cbae736374f` in the dedicated clone. This inherits the product brief and runs 3–5 method. No product code changed. No merge, deployment, production write, external invitation delivery or provider call was performed. The lead owns deletion of the staged throwaway database branch.
+
+Every database-client launch verified the password-free URL host against branch metadata, used `PGPASSFILE` and required TLS. Test/E2E mode, supplied encryption keys (read probe passed), random secret, disabled provider credentials, local private storage, inline jobs, Ruby outbound TCP guard and browser external-request refusal contained the run. Shared preview open failed with `net::ERR_CONNECTION_REFUSED`; local bundled Chromium performed the UI journeys. The absent lifecycle command/profile was handled with the synced helper and a private protection profile.
+
+| Step | Observed result | Status |
+| --- | --- | --- |
+| 1 | Company-6 baseline: 9,548 records | passed |
+| Cable gate before 2 | Global ticket count 1 before and 1 after authenticated staff load; actual singular cable-ticket requests refused with 503 | passed |
+| 2 | UI-created practice copy ready; 220 historical paychecks across four periods through the required cutoff. New regular October 19–November 1 period paid November 5 | passed |
+| 3 | UI saved two owner-pay defaults and one extra-hours default on the required saved $35 job | passed |
+| 4 | UI invited practice-only client, independently verified assignment solely to the copy. Revision 1 retained three required change rows, attach choice, two requested direct-deposit notes, 2/2 matching source checksums | passed |
+| 5 | Staff verified both $8,421.13 prefills and 68 extra hours, confirmed figures and suggested matches, and applied without typing payroll numbers. Explicit Recalculate completed successfully | passed |
+| 6 | 52/52 counterparts; all 42 decimal financial/input fields excluding YTD: 51 exact, one expected +$0.01 exception; required loan $219.70 | passed |
+| 7a | Revision 2 retained identical files with 2/2 matching source checksums, attach choice, one owner amount and two explicit skips | passed |
+| 7b review | Review showed the 68-hour removal and fresh owner decision. Staff chose No pay this period, entered a reason, confirmed review and overwrite; Apply enabled for 51 employees | passed |
+| 7b apply | Apply returned HTTP 422 with one failed extra-hours row | failed |
+| 7c | Corrected import/calculation did not occur. Baseline restoration, removed owner item, saved exclusion/decision/reason and unchanged-other-employee acceptance remain unverified | blocked / not_run |
+| 7d–7f | Stop-on-defect: revision 3, final reconciliation and applied-revision reopening refusal were not run | blocked / not_run |
+| 8 | Final company-6 fingerprint: 9,548 records; zero added, zero removed, zero changed | passed |
+
+Step 6's expected exception was independently checked against the known source employee: gross, net, FIT taxable wages, Social Security taxable wages and Medicare taxable wages are each +$0.01. All compared tax amounts match. Comparison includes regular/overtime/holiday/PTO hours, tips, loans, gross, employee/employer taxes, retirement, insurance, additions, deductions, net and salary override. There are zero unexplained financial differences in revision 1. The comparison expands the earlier 36-field checks to all 42 non-YTD decimal fields.
+
+### Blocking defect and rollback
+
+Revision-2 Apply returned: **“Nothing was imported because one or more payroll rows failed. Correct the listed rows and retry.”** Its single row error says saved hours changed after the client's hours were imported: **applied regular hours 68.0; baseline 0.0; current 68.0**, then instructs staff to save intended job hours and reopen the import. No worksheet edit, replacement number, retry, backend bypass or product fix was attempted.
+
+Read-only inspection identifies `PayrollImport::ImportService#restore_client_hours_baseline!` as the refusing guard. After the required explicit revision-1 recalculation, current normalized job allocations differ from `client_change_evidence.applied_allocations`; the scalar regular/overtime/holiday/PTO inputs still match `applied_hours`. Allocation differences include job ID, label, primary flag and regular hours. The review's no-pay decision was accepted far enough to run the import, but the corrected extra-hours restoration blocked the transaction. This run does not establish that the no-pay decision persists successfully.
+
+An independent post-refusal snapshot of **all 52 financial/hour/allocation/evidence records is identical to revision 1**. The extra-hours row remains at 68 hours with 68 allocated hours; the skipped owner still has the original item, and there is no owner exclusion. These are rollback checks, not passed revision-2 acceptance. Revision-2 recalculation and revision-3 actions were not attempted.
+
+### Execution and containment
+
+The practice-copy request was submitted once and completed after its history transaction. An initial browser locator waited on the public root; the corrected gate used Client Management before practice creation. The first explicit-calculation harness selected a hidden Hours label and timed out before issuing any calculation; the corrected harness opened the Hours disclosure and submitted one successful recalculation. Read-only helper association/property mistakes were corrected. These harness issues did not alter product code or payroll values. Each financial Apply was submitted once.
+
+Final global cable-ticket count: **1**. Proxy refusals: **867**. Rails cable-controller hits: **0**. Proxy refused paths beginning `/api/v1/cable_ticket` or `/cable`, plus WebSocket upgrades. Fingerprints were captured before practice creation and after runtime shutdown; no source-company restoration was performed.
+
+Lifecycle session `pr2-run6` reports **no active owned resources**. Exact owned API/Vite/proxy process trees and task Chromium browsers stopped; ports 3633/5658/5660 have no listeners, and shared preview reports no task tab. Shared/protected services were preserved. No runtime handoff. Only desktop Chromium financial coverage ran; mobile/Safari/native-device coverage, broad suites, external delivery and direct-deposit activation were not run. The failed required rehearsal keeps the PR draft; `gh pr ready` was not run.
+
+Wipe proof: deleted the entire private rehearsal tree, including keys, password file, original files, retained storage, browser temporary data, scripts, screenshots/diagnostics and logs. Deleted **30 task-created repository log/cache files**. The two OS-temp Playwright paths observed by creation time had already disappeared when rechecked; no such path remained to delete. **`ls -A ~/private` returned no entries; entry count 0.** Exact-host `grep -r -l -F` across `~/work` and `~/private` returned **zero matching files, zero diagnostics, exit 1**. The OS `$TMPDIR` scan returned **zero matching files, 21 diagnostics, exit 2**. OS permission/socket restrictions prevent a complete-temp absence claim; no private data was transferred elsewhere. All task-launched local Chromium temp data was scoped to the deleted private tree. No owned resource remains running.
+
+Tested product head backend/frontend/browser CI passed at final inspection; GitHub review decision remained **changes requested**. This is separate from the failed required financial rehearsal. Only this aggregate QA record is committed and pushed, and the dedicated clone returns to clean `main`. No ready transition, merge or deploy; the lead still owns deleting the throwaway Neon branch.
+
+## Mac mini financial rehearsal, run 7 — November 15, 2026
+
+**All required rehearsal steps passed.** Agent-executed acceptance tested clean product head `744471ad25e16987fe56bd783661340f77300e68` in the dedicated clone. No product code changed. This run repeats the production-copy method from runs 3–6, including the QA proxy, cable gate, source-company fingerprints, real-file checksums, per-employee comparison and explicit worksheet Recalculate after every Apply. No merge, deployment, production write or external delivery was performed. The lead owns deletion of the throwaway database branch.
+
+Every database-client launch verified the password-free URL host against the staged branch metadata and used `PGPASSFILE` with required TLS. The encryption read probe passed. Test/E2E mode, a random secret, a sanitized environment, local private storage, inline jobs, test mail delivery and the Ruby outbound guard contained the application. All financial review/Apply and Recalculate actions used the UI. Staff typed no payroll figures. The practice-only client was independently verified as assigned solely to the isolated copy.
+
+| Step | Observed result | Status |
+| --- | --- | --- |
+| 1 | Source-company baseline: 9,548 records | passed |
+| Cable gate before 2 | Ticket count 1 before and 1 after authenticated staff load; actual singular ticket requests returned 503 | passed |
+| 2 | UI-created copy ready with 220 historical paychecks across four periods through the required cutoff; new October 19–November 1 period paid November 5 | passed |
+| 3 | Three required standing defaults saved, including the specified saved $35 job | passed |
+| 4 | Revision 1 retained three required change rows, attach choice and both requested notes; 2/2 source checksums matched | passed |
+| 5 | Both owner amounts and 68 extra hours were prefilled, reviewed and applied without staff retyping. All 52 employees imported; explicit worksheet Recalculate completed with HTTP 200 | passed |
+| 6 | 52/52 counterparts across 42 non-YTD decimal financial/input fields: 51 exact, one expected +$0.01 exception; required loan $219.70 | passed |
+| 7a | Revision 2 retained identical files, attach choice, one owner amount and two explicit skips; 2/2 checksums matched | passed |
+| 7b | Review displayed removal of the prior 68 hours and required a fresh owner decision. Staff chose No pay this period and entered a reason. Apply imported 51 employees with HTTP 200; explicit worksheet Recalculate returned HTTP 200 | passed |
+| 7c | Worker restored to 0 baseline hours with 0 allocated hours and cleared client-hours evidence. Skipped owner had no payroll item, a saved exclusion, and matching recorded no-pay decision/reason/exclusion ID. Retained owner and all 49 other employees were unchanged | passed |
+| 7d | Revision 3 matched revision 1's changes, notes and workbook choice; 2/2 identical file checksums. Apply imported 52 employees with HTTP 200; explicit worksheet Recalculate returned HTTP 200 | passed |
+| 7e | All 52 financial/input and job-allocation results matched step 6. Production comparison again yielded 51 exact and only the expected +$0.01 exception; loan $219.70; restored owner pay $8,421.13; exclusion removed; no doubled hours | passed |
+| 7f | Reopening applied revision 3 returned HTTP 422: “This client revision was already applied. Send a newer revision to correct its changes.” No import dialog opened | passed |
+| 8 | After runtime shutdown: 9,548 source-company records; zero added, zero removed, zero changed | passed |
+
+Both production comparisons cover hours, tips, loans, gross, employee/employer taxes, retirement, insurance, additions, deductions, net and salary override. The known exception is +$0.01 in gross, net and the three relevant taxable-wage bases; all tax amounts match. There are zero unexplained differences. The final comparison required no null/zero equivalences. Within-run equality includes saved job allocations, establishing restoration without doubling. Immutable revision/import provenance is expected to differ and is not treated as financial output.
+
+### Execution limits and cleanup
+
+The practice-copy request completed once, with all history inside its transaction. Each Apply and explicit Recalculate was submitted once; the request log contains exactly three explicit calculations. Initial date-field and asynchronous-readiness harness mistakes were corrected before their intended actions. Shared preview handled the first two cycles and revision-3 Apply. Before revision-3 Recalculate, two preview evaluation failures occurred without submitting a calculation: a missing Hours element, then a redeclared evaluation variable. The owned preview tab was closed; local bundled Chromium completed the final UI calculation and reopening refusal, with external browser requests refused and temporary files confined to the private tree.
+
+Final global ticket count: **1**. Proxy cable refusals: **1,620**. Rails cable-controller hits: **0**. The proxy refused paths beginning `/api/v1/cable_ticket` or `/cable` and refused WebSocket upgrades. No source-company repair or restoration was performed.
+
+Lifecycle session `pr2-run7` reported **no active owned resources**. The helper stopped the owned Vite/proxy trees but missed the exec-renamed Rails process; the independent listener check caught it. Its exact PID, start time, process group, Puma command and repository working directory were verified before terminating its owned group. Ports 3633/5658/5660 have no listeners. The preview tab and local task browsers are closed; no private-profile browser process remains. Shared/protected services were preserved. No runtime handoff.
+
+Only desktop Chromium financial acceptance ran. Mobile/Safari/native-device coverage, broad automated suites, real delivery and direct-deposit activation were **not_run**. The remote branch advanced during execution to `5fe92cb9` with deferred-row and individual worksheet job/rate follow-ups. Those commits were inspected; this rehearsal made zero individual worksheet-update requests and did not defer source rows. The QA commit is rebased onto that remote head, but the complete financial/browser run above tested `744471ad`; no later-head full replay is claimed.
+
+Wipe proof: the complete private rehearsal directory was deleted, including credentials, keys, original files, retained storage, scripts, browser temporary data and diagnostics. **30 task-created repository cache/log files** were deleted by creation time, preserving baseline files. The task's native Playwright profiles had already been removed by browser shutdown; none remained. The finished task lifecycle scratch ledger was removed after cleanup verification. **`ls -A ~/private` returned no entries; entry count 0.** Exact-host `grep -r -l -F` across `~/work` and `~/private` returned **zero matching files, zero diagnostics, exit 1**. The `$TMPDIR` scan returned **zero matching files, 21 OS permission/socket diagnostics, exit 2**; unreadable OS entries prevent a complete-temp absence claim. No task-owned runtime or private artifact is intentionally retained.
+
+At final pre-push inspection, the remote product head's backend, frontend and browser CI passed; CodeRabbit status was successful and GitHub reported no review decision. Those results are separate from this rehearsal and any new QA-commit checks. All required run-7 financial acceptance steps passed, so the PR is marked ready after pushing this aggregate-only record. It remains unmerged and undeployed; the dedicated clone returns to clean `main`. Database-branch deletion remains with the lead.
