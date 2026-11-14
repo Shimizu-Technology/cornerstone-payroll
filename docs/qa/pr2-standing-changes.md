@@ -356,3 +356,47 @@ Final application/spec diff against `256fa487` SHA-256: `56210b0048ccee031a0ba97
 Private evidence is retained under untracked `.codex/nopay-ui/`: final `revision{1,2,3}-{1440,390}.json` saved assertions, `revision2-{desktop,mobile}.png`, `history-mobile.png`, fixtures and repeatable scripts. Earlier artifacts have `initial-` prefixes. The first desktop run used an incorrect nested-label locator and case-sensitive completion text; timeouts were inspected before continuing, with no duplicate financial apply. Final-source replay used corrected controls and passed. Safari/native devices, browser execution of the linked route/fresh-pay variant, full backend/frontend suites, ASUS and production-copy rehearsal were **not_run**; linked-route and fresh-pay behavior passed request/Vitest coverage. The lead owns the production-copy rehearsal and draft readiness.
 
 Lifecycle session `01a1db47-b52d-7080-9f12-2d3324ce1509`: task preview tab closed/released; exact owned Rails 33313/replacement 50181, Vite 37401 and proxy 40945 stopped. Status reports **no active owned resources**. Shared PostgreSQL/Redis, protected services, baseline simulators and other sessions were untouched. No runtime handoff. The assigned worktree, branch and untracked evidence remain available; no merge or deployment.
+
+## Mac mini financial rehearsal, run 6 — November 15, 2026
+
+**Blocked at revision-2 Apply; leave PR #457 draft.** Agent-executed desktop bundled Chromium acceptance tested clean product head `7752458f05e93bcad082a730bc508cbae736374f` in the dedicated clone. This inherits the product brief and runs 3–5 method. No product code changed. No merge, deployment, production write, external invitation delivery or provider call was performed. The lead owns deletion of the staged throwaway database branch.
+
+Every database-client launch verified the password-free URL host against branch metadata, used `PGPASSFILE` and required TLS. Test/E2E mode, supplied encryption keys (read probe passed), random secret, disabled provider credentials, local private storage, inline jobs, Ruby outbound TCP guard and browser external-request refusal contained the run. Shared preview open failed with `net::ERR_CONNECTION_REFUSED`; local bundled Chromium performed the UI journeys. The absent lifecycle command/profile was handled with the synced helper and a private protection profile.
+
+| Step | Observed result | Status |
+| --- | --- | --- |
+| 1 | Company-6 baseline: 9,548 records | passed |
+| Cable gate before 2 | Global ticket count 1 before and 1 after authenticated staff load; actual singular cable-ticket requests refused with 503 | passed |
+| 2 | UI-created practice copy ready; 220 historical paychecks across four periods through the required cutoff. New regular October 19–November 1 period paid November 5 | passed |
+| 3 | UI saved two owner-pay defaults and one extra-hours default on the required saved $35 job | passed |
+| 4 | UI invited practice-only client, independently verified assignment solely to the copy. Revision 1 retained three required change rows, attach choice, two requested direct-deposit notes, 2/2 matching source checksums | passed |
+| 5 | Staff verified both $8,421.13 prefills and 68 extra hours, confirmed figures and suggested matches, and applied without typing payroll numbers. Explicit Recalculate completed successfully | passed |
+| 6 | 52/52 counterparts; all 42 decimal financial/input fields excluding YTD: 51 exact, one expected +$0.01 exception; required loan $219.70 | passed |
+| 7a | Revision 2 retained identical files with 2/2 matching source checksums, attach choice, one owner amount and two explicit skips | passed |
+| 7b review | Review showed the 68-hour removal and fresh owner decision. Staff chose No pay this period, entered a reason, confirmed review and overwrite; Apply enabled for 51 employees | passed |
+| 7b apply | Apply returned HTTP 422 with one failed extra-hours row | failed |
+| 7c | Corrected import/calculation did not occur. Baseline restoration, removed owner item, saved exclusion/decision/reason and unchanged-other-employee acceptance remain unverified | blocked / not_run |
+| 7d–7f | Stop-on-defect: revision 3, final reconciliation and applied-revision reopening refusal were not run | blocked / not_run |
+| 8 | Final company-6 fingerprint: 9,548 records; zero added, zero removed, zero changed | passed |
+
+Step 6's expected exception was independently checked against the known source employee: gross, net, FIT taxable wages, Social Security taxable wages and Medicare taxable wages are each +$0.01. All compared tax amounts match. Comparison includes regular/overtime/holiday/PTO hours, tips, loans, gross, employee/employer taxes, retirement, insurance, additions, deductions, net and salary override. There are zero unexplained financial differences in revision 1. The comparison expands the earlier 36-field checks to all 42 non-YTD decimal fields.
+
+### Blocking defect and rollback
+
+Revision-2 Apply returned: **“Nothing was imported because one or more payroll rows failed. Correct the listed rows and retry.”** Its single row error says saved hours changed after the client's hours were imported: **applied regular hours 68.0; baseline 0.0; current 68.0**, then instructs staff to save intended job hours and reopen the import. No worksheet edit, replacement number, retry, backend bypass or product fix was attempted.
+
+Read-only inspection identifies `PayrollImport::ImportService#restore_client_hours_baseline!` as the refusing guard. After the required explicit revision-1 recalculation, current normalized job allocations differ from `client_change_evidence.applied_allocations`; the scalar regular/overtime/holiday/PTO inputs still match `applied_hours`. Allocation differences include job ID, label, primary flag and regular hours. The review's no-pay decision was accepted far enough to run the import, but the corrected extra-hours restoration blocked the transaction. This run does not establish that the no-pay decision persists successfully.
+
+An independent post-refusal snapshot of **all 52 financial/hour/allocation/evidence records is identical to revision 1**. The extra-hours row remains at 68 hours with 68 allocated hours; the skipped owner still has the original item, and there is no owner exclusion. These are rollback checks, not passed revision-2 acceptance. Revision-2 recalculation and revision-3 actions were not attempted.
+
+### Execution and containment
+
+The practice-copy request was submitted once and completed after its history transaction. An initial browser locator waited on the public root; the corrected gate used Client Management before practice creation. The first explicit-calculation harness selected a hidden Hours label and timed out before issuing any calculation; the corrected harness opened the Hours disclosure and submitted one successful recalculation. Read-only helper association/property mistakes were corrected. These harness issues did not alter product code or payroll values. Each financial Apply was submitted once.
+
+Final global cable-ticket count: **1**. Proxy refusals: **867**. Rails cable-controller hits: **0**. Proxy refused paths beginning `/api/v1/cable_ticket` or `/cable`, plus WebSocket upgrades. Fingerprints were captured before practice creation and after runtime shutdown; no source-company restoration was performed.
+
+Lifecycle session `pr2-run6` reports **no active owned resources**. Exact owned API/Vite/proxy process trees and task Chromium browsers stopped; ports 3633/5658/5660 have no listeners, and shared preview reports no task tab. Shared/protected services were preserved. No runtime handoff. Only desktop Chromium financial coverage ran; mobile/Safari/native-device coverage, broad suites, external delivery and direct-deposit activation were not run. The failed required rehearsal keeps the PR draft; `gh pr ready` was not run.
+
+Wipe proof: deleted the entire private rehearsal tree, including keys, password file, original files, retained storage, browser temporary data, scripts, screenshots/diagnostics and logs. Deleted **30 task-created repository log/cache files**. The two OS-temp Playwright paths observed by creation time had already disappeared when rechecked; no such path remained to delete. **`ls -A ~/private` returned no entries; entry count 0.** Exact-host `grep -r -l -F` across `~/work` and `~/private` returned **zero matching files, zero diagnostics, exit 1**. The OS `$TMPDIR` scan returned **zero matching files, 21 diagnostics, exit 2**. OS permission/socket restrictions prevent a complete-temp absence claim; no private data was transferred elsewhere. All task-launched local Chromium temp data was scoped to the deleted private tree. No owned resource remains running.
+
+Tested product head backend/frontend/browser CI passed at final inspection; GitHub review decision remained **changes requested**. This is separate from the failed required financial rehearsal. Only this aggregate QA record is committed and pushed, and the dedicated clone returns to clean `main`. No ready transition, merge or deploy; the lead still owns deleting the throwaway Neon branch.
