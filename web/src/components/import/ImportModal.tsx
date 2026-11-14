@@ -174,6 +174,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     }
     setPreviewData(data);
     setUsePendingRevision(false);
+    // Refreshed saved or workbook pay can differ from what staff confirmed.
+    setReviewedClientChanges(false);
+    setClientPayChoices({});
     // Merge into the latest rows, not the ones from when the save started, so
     // outcomes staff changed while the request was running are kept.
     setSourceRows((current) => {

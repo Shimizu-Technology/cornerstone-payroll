@@ -1016,6 +1016,31 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(item.reload.custom_columns_data["client_change_evidence"]).to eq(evidence)
     end
 
+    it "keeps the client hours apart from a later overtime-only worksheet edit" do
+      source = standing_source
+      data = preview(source)
+      apply_standing(data)
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      patch "#{url}/payroll_items/#{item.id}", params: { payroll_item: { overtime_hours: 3 } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.custom_columns_data["client_change_evidence"]).to be_present
+      apply_standing(corrected_standing(data, source.change_rows))
+      expect(item.reload.hours_worked).to eq(68)
+      expect(item.overtime_hours).to eq(3)
+      expect(item.wage_rate_hours.sum { |entry| entry["regular_hours"].to_d }).to eq(68)
+      expect(item.wage_rate_hours.sum { |entry| entry["overtime_hours"].to_d }).to eq(3)
+    end
+
+    it "applies a file-absent worker with several saved jobs on the job the client named" do
+      create(:employee_wage_rate, employee: manual_worker, label: "Kitchen", rate: 18)
+      source = standing_source
+      apply_standing(preview(source))
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      expect(item.hours_worked).to eq(68)
+      expect(item.wage_rate_hours.map { |entry| [ entry["employee_wage_rate_id"], entry["regular_hours"].to_d ] }).to eq([ [ manual_job.id, 68 ] ])
+    end
+
     it "records staff declines on the import and in review history" do
       source = standing_source
       manual_worker.update!(status: "inactive")

@@ -49,7 +49,9 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
     const defaults = period.standing_changes || [];
     const previous = current?.changes || [];
     return [...defaults.map(row => ({ ...row, ...previous.find(item => item.standing_change_id === row.standing_change_id && item.kind === row.kind && item.employee_id === row.employee_id && item.employee_wage_rate_id === row.employee_wage_rate_id) })),
-      ...previous.filter(row => !defaults.some(item => item.standing_change_id === row.standing_change_id)).map(row => ({ ...row, standing_change_id: undefined, skipped: undefined }))]
+      // A skipped default that was later deactivated has nothing to carry forward.
+      ...previous.filter(row => !defaults.some(item => item.standing_change_id === row.standing_change_id) && !(row.standing_change_id && row.skipped))
+        .map(row => ({ ...row, standing_change_id: undefined, skipped: undefined }))]
       .map(row => ({ ...row, key: crypto.randomUUID() }));
   });
   const [workbookChoice, setWorkbookChoice] = useState<'attach' | 'link' | 'none' | ''>(current?.workbook_choice || (current?.documents.some(d => d.role === 'changes_workbook') ? 'attach' : current?.changes_link_url ? 'link' : ''));

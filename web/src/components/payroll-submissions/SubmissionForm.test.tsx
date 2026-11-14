@@ -190,3 +190,13 @@ it('renders a deactivated default from an older revision as an ordinary removabl
   fireEvent.click(screen.getByRole('button', { name: /Remove change 1/ }));
   expect(screen.queryByLabelText('Amount ($)')).toBeNull();
 });
+
+it('drops a skipped default that was later deactivated instead of reopening it as a blank change', () => {
+  const current = { changes: [
+    { kind: 'owner_pay', employee_id: 135, standing_change_id: 8, employee_name: 'Sara Owner', skipped: true },
+    { kind: 'owner_pay', employee_id: 122, standing_change_id: 9, employee_name: 'Monique Owner', amount: '5000' },
+  ], documents: [] } as unknown as SubmissionRevision;
+  render(<SubmissionForm period={{ ...period, standing_changes: [] }} current={current} onSent={vi.fn()} />);
+  expect(screen.getAllByLabelText('Amount ($)')).toHaveLength(1);
+  expect((screen.getByLabelText('Amount ($)') as HTMLInputElement).value).toBe('5000');
+});
