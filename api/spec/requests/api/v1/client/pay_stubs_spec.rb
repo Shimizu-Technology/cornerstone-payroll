@@ -80,7 +80,7 @@ RSpec.describe "Client pay stubs", type: :request do
     user.update!(practice_company_id: company.id)
     prior = create(:pay_period, company: company, start_date: period.start_date - 30.days,
       end_date: period.end_date - 30.days, pay_date: period.pay_date - 30.days)
-    prior.update_columns(status: "approved", test_workspace_role: "practice")
+    prior.update_columns(status: "approved")
     create(:payroll_item, company: company, employee: employee, pay_period: prior, gross_pay: 9999, net_pay: 9999)
     period.update_columns(status: "approved", test_workspace_role: "baseline", test_workspace_source_pay_period_id: source_period.id)
     item.update_columns(ytd_gross: 10099, ytd_net: 10089, ytd_withholding_tax: 1234)
