@@ -1058,6 +1058,25 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.13"))
     end
 
+    it "opens and applies a third identical-files revision once when the second was only previewed" do
+      source = standing_source
+      apply_standing(preview(source))
+      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("hours" => "32") })
+      preview(second)
+      expect(response).to have_http_status(:ok), response.body
+      third = identical_revision(source, rev: 3, changes: source.change_rows.map { |row| row.merge("hours" => "50") })
+      data = preview(third)
+      expect(response).to have_http_status(:ok), response.body
+      reviewed = reviewed_standing_params(data)[:reviewed_changes]
+      reviewed.last[:hours] = "50"
+      apply_standing(data, reviewed)
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      expect(item.hours_worked).to eq(50)
+      expect(item.wage_rate_hours.sum { |entry| entry["regular_hours"].to_d }).to eq(50)
+      expect(second.submission_imports.sole.applied_at).to be_nil
+      expect(third.submission_imports.where.not(applied_at: nil).count).to eq(1)
+    end
+
     it "guards pay-run replacement selection even after source disposition and a newer revision" do
       source = standing_source
       first = pay_run_preview(source)
@@ -1226,6 +1245,17 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       Api::V1::Admin::PayrollItemsController.new.send(:sync_client_hours_evidence!, item.reload)
       baseline = item.reload.custom_columns_data.dig("client_change_evidence", "baseline_allocations")
       expect(baseline.map { |entry| [ entry["source_bucket_key"], entry["overtime_hours"].to_d ] }).to eq([ [ "a", 1 ], [ "b", 2 ] ])
+    end
+
+    it "asks for a job instead of moving a file-absent worker's own hours to the client's job" do
+      create(:employee_wage_rate, employee: manual_worker, label: "Kitchen", rate: 18)
+      create(:payroll_item, pay_period: run, company: company, employee: manual_worker, hours_worked: 10, pay_rate: 35)
+      data = preview(standing_source)
+      post "#{url}/apply_import", params: reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id"),
+        force_overwrite: true, confirm_overwrite: true), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.body).to include("Choose")
+      expect(run.payroll_items.find_by!(employee: manual_worker).hours_worked).to eq(10)
     end
 
     it "records staff declines on the import and in review history" do

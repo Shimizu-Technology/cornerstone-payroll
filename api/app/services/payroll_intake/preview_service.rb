@@ -194,10 +194,15 @@ module PayrollIntake
         return
       end
       current = PayrollIntakeSession.current.find_by(pay_period: pay_period, source_type: source_type)
-      return unless current&.applied_at && (current.evidence_snapshot["source_import_hash"] || current.import_hash) == source_hash
+      same_files = ->(session) { (session.evidence_snapshot["source_import_hash"] || session.import_hash) == source_hash }
+      # An earlier changes-only correction may still be an unapplied draft. Walk
+      # back through same-file corrections to the package that was applied.
+      applied = current
+      applied = applied.supersedes while applied && !applied.applied_at && same_files.call(applied) && applied.supersedes
+      return unless current && applied&.applied_at && same_files.call(current) && same_files.call(applied)
 
       prior = PayrollSubmissionImport.joins(:payroll_import)
-        .where(payroll_imports: { payroll_intake_session_id: current.id }).where.not(applied_at: nil)
+        .where(payroll_imports: { payroll_intake_session_id: applied.id }).where.not(applied_at: nil)
         .order(id: :desc).first&.payroll_submission
       unless prior && prior.payroll_submission_period_id == period.id && prior.revision < submission.revision &&
           period.current_submission.id == submission.id
