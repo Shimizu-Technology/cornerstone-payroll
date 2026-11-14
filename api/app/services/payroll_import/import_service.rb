@@ -521,12 +521,25 @@ module PayrollImport
       return unless previous["kind"] == "extra_hours"
 
       unless previous.key?("baseline_regular_hours") && item.hours_worked.to_d == previous["applied_regular_hours"].to_d &&
-          item.wage_rate_hours == previous["applied_allocations"] && client_hours_inputs(item) == previous["applied_hours"]
+          same_job_hours?(item.wage_rate_hours, previous["applied_allocations"]) && client_hours_inputs(item) == previous["applied_hours"]
         raise ArgumentError, "Saved hours changed after the client's hours were imported for #{item.employee.full_name}. Applied regular hours: #{previous["applied_regular_hours"]}; baseline: #{previous["baseline_regular_hours"]}; current: #{item.hours_worked}. Save the intended hours against each job on the worksheet, then reopen this import. Reconcile the worksheet hours before importing again."
       end
       item.hours_worked = previous.fetch("baseline_regular_hours")
       item.wage_rate_hours = previous.fetch("baseline_allocations")
       true
+    end
+
+    # The pay run worksheet resends every saved job, zero-hour ones included, and
+    # a single-job worker's totals without allocations. Only hours per job count.
+    def same_job_hours?(current, applied)
+      applied_jobs = job_hours(applied)
+      job_hours(current) == applied_jobs || (current.blank? && applied_jobs.size <= 1)
+    end
+
+    def job_hours(entries)
+      Array(entries).map(&:to_h).group_by { |entry| [ entry["employee_wage_rate_id"].to_s, entry["rate"].to_d ] }
+        .transform_values { |list| %w[regular_hours overtime_hours holiday_hours pto_hours].map { |field| list.sum { |entry| entry[field].to_d } } }
+        .reject { |_job, hours| hours.all?(&:zero?) }
     end
 
     def configured_loan_due?(employee)
