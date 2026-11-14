@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SubmissionForm } from './SubmissionForm';
 import type { PeriodDetail, SubmissionRevision } from '@/services/payrollSubmissions';
@@ -42,11 +43,14 @@ it.each(['attach', 'link', 'none'] as const)('sends an explicit %s choice indepe
 it('asks about Excel in Other files and moves it into the visible workbook slot', async () => {
   render(<SubmissionForm period={period} onSent={vi.fn()} />);
   uploadPdf();
-  fireEvent.change(screen.getByLabelText('Other files'), { target: { files: [workbook()] } });
+  const otherFiles = screen.getByLabelText('Other files') as HTMLInputElement;
+  await userEvent.upload(otherFiles, workbook());
+  expect(otherFiles.value).toContain('tips.XLSX');
   expect(screen.getByText(/Is this the tips & loans workbook/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Yes, move to workbook slot' }));
   expect(screen.getByLabelText('Attach the workbook')).toHaveProperty('checked', true);
   expect(screen.getByText('Selected: tips.XLSX')).toBeTruthy();
+  expect(otherFiles.value).toBe('');
   send(); await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
   const form = mocks.submit.mock.calls[0][1] as FormData;
   expect(form.get('changes_workbook')).toBeTruthy(); expect(form.getAll('attachments[]')).toEqual([]);
