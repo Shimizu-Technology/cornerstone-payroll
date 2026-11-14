@@ -90,3 +90,33 @@ Fix-round frontend results (2026-11-15, working tree based on 064d572e):
   says rate limited; that status is not an independent review of these fixes.
 - Playwright terminated its Vite/browser children; lifecycle reports no active
   owned resources after that phase. Existing simulators/shared services untouched.
+
+## Fix-round handback — backend blocked
+Tested implementation: b3046e93; combined stub code: 5245b451. Final changes
+below this point are documentation only. Agent-executed results above remain
+valid for those source trees: 3 report Vitest tests / 4 report browser scenarios;
+combined 7 Vitest tests / 6 browser scenarios. Full lint, TypeScript, RuboCop and
+Brakeman passed locally. R4/R5 passed at 1440/390; R1/R2/R3/R6 are blocked, not
+passed, pending the database-backed run. No backend examples executed on ASUS.
+
+The runner repeatedly refused execution with exit 75 for over 20 minutes, with
+several SSH banner/rsync interruptions (255). A read-only lock inspection found
+another npm Playwright run holding the lock for over 33 minutes. Its processes
+were left untouched. The task retry wrapper was stopped between attempts; no
+remote tests or task-owned database/container had started. No full RSpec suite
+was run. Native hardware and real API browser integration remain not_run.
+
+No inline CodeRabbit threads existed to answer. Review was requested after the
+fix push; CodeRabbit acknowledged #458's request, but no completed review of
+the new head was available at handback. CI browser passed; backend/frontend CI
+were still in progress at the last inspection. The PR remains draft.
+
+Next action: rerun all required client request specs, all six admin report
+request files, and touched service regressions on ASUS with TEST_DATABASE_URL
+pointing to localhost:55432. The sibling PR ledger and local handoff retain the
+exact command. Fix any failures, recheck the final heads and review threads,
+and mark ready only after all required acceptance passes. Do not merge/deploy.
+
+Cleanup: owned Playwright/Vite processes and retry wrapper ended; lifecycle
+reports no active owned resources. Existing simulators and shared services were
+preserved. Worktree and branches are retained for the lead; no runtime handoff.
