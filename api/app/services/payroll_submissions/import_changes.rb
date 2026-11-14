@@ -31,7 +31,7 @@ module PayrollSubmissions
           saved_overtime_hours: existing&.overtime_hours&.to_s("F"),
           **(row["kind"] == "owner_pay" ? pay.merge(pay_conflict: pay.values.compact.any? { |amount| amount.to_d != row["amount"].to_d }) : {}) }.compact
       end
-      submitted + missing_owner_pay(submitted)
+      submitted + missing_owner_pay(submitted, source_rows)
     end
 
     def removals
@@ -125,10 +125,17 @@ module PayrollSubmissions
     def apply_period_decisions!(actor:)
       @review_decisions.each do |decision|
         if decision[:decision] == "no_pay"
-          exclusion = @period.pay_period_excluded_employees.find_or_initialize_by(employee_id: decision[:employee_id])
-          exclusion.update!(reason: decision[:reason], excluded_by: actor)
-          @period.payroll_items.where(employee_id: decision[:employee_id]).find_each(&:destroy!)
-          decision[:exclusion_id] = exclusion.id
+          # Keep an exclusion staff already recorded; only one this decision
+          # creates may later be undone by a client revision.
+          unless @period.pay_period_excluded_employees.exists?(employee_id: decision[:employee_id])
+            exclusion = @period.pay_period_excluded_employees.create!(employee_id: decision[:employee_id], reason: decision[:reason], excluded_by: actor)
+            decision[:exclusion_id] = exclusion.id
+          end
+          begin
+            @period.payroll_items.where(employee_id: decision[:employee_id]).find_each(&:destroy!)
+          rescue ActiveRecord::RecordNotDestroyed, ActiveRecord::DeleteRestrictionError
+            raise ArgumentError, "#{decision[:employee_name]} already has a check, payment or tax record on this pay run. Resolve it before choosing No pay this period."
+          end
           @period.invalidate_calculation!(reason: "Owner excluded after a reviewed no-pay decision.")
         elsif decision[:decision] == "apply" && decision[:kind] == "owner_pay"
           managed_owner_exclusion(decision[:employee_id])&.destroy!
@@ -140,6 +147,14 @@ module PayrollSubmissions
       @submission.change_rows.filter_map do |row|
         row["employee_id"].to_i if row["kind"] == "owner_pay" && !row["skipped"] && managed_owner_exclusion(row["employee_id"])
       end
+    end
+
+    # Owners this review leaves without a paycheck, with the reason: a new no-pay
+    # decision, or an earlier no-pay exclusion kept because restored pay was declined.
+    def unpaid_owners
+      restored = @review_decisions.filter_map { |decision| decision[:employee_id].to_i if decision[:decision] == "apply" && decision[:kind] == "owner_pay" }
+      kept = (restorable_owner_ids - restored).index_with { |id| managed_owner_exclusion(id).reason }
+      kept.merge(@review_decisions.select { |decision| decision[:decision] == "no_pay" }.to_h { |decision| [ decision[:employee_id].to_i, decision[:reason] ] })
     end
 
     def manual_review_warnings
@@ -154,13 +169,15 @@ module PayrollSubmissions
 
     private
 
-    def missing_owner_pay(submitted)
+    def missing_owner_pay(submitted, source_rows)
       prior_items.filter_map do |item|
         next unless item.custom_columns_data.to_h.dig("client_change_evidence", "kind") == "owner_pay"
         # A deliberate worksheet/review save clears period-pay provenance and
         # already supplies a fresh staff amount, even if the client tag remains.
         next unless item.custom_columns_data.to_h.dig("period_pay_evidence", "source_type") == "client_submission"
         next if submitted.any? { |change| change[:kind] == "owner_pay" && change[:employee_id].to_s == item.employee_id.to_s }
+        # A corrected workbook with this owner's pay supplies the new amount.
+        next if pay_state(nil, source_rows.find { |row| row[:employee_id].to_s == item.employee_id.to_s })[:workbook_period_pay]
 
         { change_index: -item.employee_id, kind: "owner_pay", employee_id: item.employee_id,
           employee_name: item.employee.full_name, requires_pay_decision: true,
@@ -188,7 +205,8 @@ module PayrollSubmissions
       return 0.to_d unless item
 
       evidence = item.custom_columns_data.to_h["client_change_evidence"].to_h
-      evidence["kind"] == "extra_hours" ? evidence["baseline_regular_hours"].to_d : item.hours_worked.to_d
+      regular = evidence["kind"] == "extra_hours" ? evidence["baseline_regular_hours"].to_d : item.hours_worked.to_d
+      regular + item.overtime_hours.to_d + item.holiday_hours.to_d + item.pto_hours.to_d
     end
 
     def prior_items

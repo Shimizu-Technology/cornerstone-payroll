@@ -70,6 +70,17 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     expect(service.proposals.last[:saved_regular_hours]).to eq("2.0")
   end
 
+  it "takes a corrected workbook's owner pay instead of requiring a new decision when the client drops owner pay" do
+    create(:payroll_item, company: company, employee: owner, pay_period: period, salary_override: 8421.13,
+      custom_columns_data: { client_change_evidence: { kind: "owner_pay", submission_id: submission.id + 1 },
+        period_pay_evidence: { source_type: "client_submission" } })
+    submission.update_columns(change_rows: [])
+    expect(service.proposals(source_rows: [ { employee_id: owner.id } ])).to contain_exactly(include(employee_id: owner.id, requires_pay_decision: true))
+    workbook_rows = [ { employee_id: owner.id, period_pay: "5000" } ]
+    expect(service.proposals(source_rows: workbook_rows)).to be_empty
+    expect(service.apply_to(workbook_rows, reviewed: [], confirmed: false).sole).to include(period_pay: "5000")
+  end
+
   it "requires a choice before replacing saved owner pay" do
     create(:payroll_item, company: company, employee: owner, pay_period: period, salary_override: 5000)
     expect(service.proposals.first).to include(saved_period_pay: "5000.0", pay_conflict: true)

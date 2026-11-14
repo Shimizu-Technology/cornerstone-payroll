@@ -116,9 +116,14 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           changed_hours = saved_hours.keys.select { |field| attrs.key?(field.to_sym) && attrs[field.to_sym].to_d != saved_hours[field].to_d }
+          # Compare regular totals per job bucket; a bucket holding only overtime,
+          # holiday or PTO leaves the client's regular-hours baseline intact.
+          regular_by_bucket = lambda do |entries|
+            entries.to_a.map(&:to_h).group_by { |entry| entry.values_at("employee_wage_rate_id", "source_bucket_key").map(&:to_s) }
+              .transform_values { |list| list.sum { |entry| entry["regular_hours"].to_d } }.reject { |_bucket, total| total.zero? }
+          end
           regular_changed = changed_hours.include?("hours_worked") ||
-            saved_allocations.map { |entry| entry.to_h.slice("employee_wage_rate_id", "source_bucket_key", "regular_hours") } !=
-              @payroll_item.wage_rate_hours.map { |entry| entry.to_h.slice("employee_wage_rate_id", "source_bucket_key", "regular_hours") }
+            regular_by_bucket.call(saved_allocations) != regular_by_bucket.call(@payroll_item.wage_rate_hours)
           # New regular hours become the baseline a corrected revision adds to.
           @payroll_item.custom_columns_data = @payroll_item.custom_columns_data.to_h.merge("client_change_evidence" => nil) if regular_changed
           # Overtime, holiday or PTO can also arrive only through the job allocations.
