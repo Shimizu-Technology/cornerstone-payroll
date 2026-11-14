@@ -6,6 +6,7 @@ import { Sidebar } from './Sidebar';
 import { CommandPalette } from './CommandPalette';
 import { FinanceWriteNotice } from '@/components/finance/FinanceWriteNotice';
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
@@ -18,6 +19,8 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 
 export function Layout() {
   const { activeCompany, activeCompanyId, activeOrganizationName, activeOrganizationId } = useCompany();
+  const { user } = useAuth();
+  const isClient = user?.role === 'client';
   const location = useLocation();
   const financePage = location.pathname.startsWith('/tools/finance') || location.pathname.startsWith('/tools/invoices') || location.pathname.startsWith('/tools/expenses');
   const practicePortal = activeCompany?.practice_portal === true;
@@ -172,7 +175,7 @@ export function Layout() {
             <Menu className="h-5 w-5" />
           </button>
           <div className="min-w-0 text-center">
-            <p className="text-sm font-semibold tracking-tight text-neutral-900">Cornerstone Payroll</p>
+            <p className="text-sm font-semibold tracking-tight text-neutral-900">{isClient ? 'Cornerstone Payroll · Client Portal' : 'Cornerstone Payroll'}</p>
             <p className="truncate text-xs font-medium text-primary-700">{financePage ? activeOrganizationName || 'Finance workspace' : activeCompany?.name || 'Payroll workspace'}</p>
           </div>
           <div className="h-9 w-9" />

@@ -36,7 +36,7 @@ import {
 } from '@/lib/utils';
 import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { canWriteCompany } from '@/lib/company-write-access';
+import { canWriteClientEmployeeProfile, canWriteCompany } from '@/lib/company-write-access';
 import { useCompany } from '@/contexts/CompanyContext';
 import { currentAppPath, employeePath, newEmployeePath } from '@/lib/routes';
 import { EmployeeIntakeSettingsPanel } from '@/components/employees/EmployeeIntakeSettingsPanel';
@@ -64,6 +64,9 @@ export function EmployeeList() {
   const { user, isClient } = useAuth();
   const { activeCompanyId, activeCompany } = useCompany();
   const readOnlyWorkspace = !canWriteCompany(activeCompany);
+  // A practice-copy client adds employees through the client profile flow,
+  // which the staff payroll permission above does not cover.
+  const canAddEmployee = isClient ? canWriteClientEmployeeProfile(activeCompany) : !readOnlyWorkspace;
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const returnTo = currentAppPath(location.pathname, location.search);
   const openEmployee = (employeeId: number): void => {
@@ -295,7 +298,7 @@ export function EmployeeList() {
         title="Employees"
         description="Manage your company's employees"
         actions={
-          readOnlyWorkspace ? undefined : (
+          !canAddEmployee ? undefined : (
             <div className="flex items-center gap-2">
               {!isClient && (
                 <Button variant="outline" onClick={() => setShowBulkImport(true)}>
@@ -417,11 +420,11 @@ export function EmployeeList() {
             <p className="mt-1 text-sm text-gray-500">
               {hasActiveFilters
                 ? 'Try adjusting your filters.'
-                : readOnlyWorkspace
+                : !canAddEmployee
                   ? 'No employees are available in this workspace.'
                 : 'Get started by adding your first employee.'}
             </p>
-            {!hasActiveFilters && !readOnlyWorkspace && (
+            {!hasActiveFilters && canAddEmployee && (
               <div className="mt-6">
                 <Button onClick={() => navigate(newEmployeePath(companyId, { returnTo }))}>
                   <Plus className="w-4 h-4 mr-2" />

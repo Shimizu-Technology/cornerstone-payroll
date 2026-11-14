@@ -11,6 +11,7 @@ module Api
 
         class AuditWriteFailed < StandardError; end
 
+        before_action :reject_closed_practice_copy, only: [ :create, :update ]
         before_action :set_employee, only: [ :show, :update ]
 
         def index
@@ -92,6 +93,14 @@ module Api
         end
 
         private
+
+        # A practice copy can close (archived, sealed, expired) while its form is
+        # still open; refuse the write rather than relying on the hidden button.
+        def reject_closed_practice_copy
+          return unless current_company&.test_workspace_read_only?
+
+          render json: { error: "This practice copy is read-only. Your changes were not saved." }, status: :forbidden
+        end
 
         def set_employee
           @employee = Employee.find_by(id: params[:id], company_id: current_company_id)

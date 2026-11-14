@@ -62,6 +62,7 @@ module Api
             end_date: pay_period.end_date,
             pay_date: pay_period.pay_date,
             status: pay_period.status,
+            test_workspace_role: pay_period.test_workspace_role,
             run_purpose: pay_period.run_purpose,
             includes_base_salary: pay_period.includes_base_salary,
             includes_recurring_items: pay_period.includes_recurring_items,
@@ -115,7 +116,7 @@ module Api
 
         def client_visible_period?(pay_period)
           return false unless pay_period
-          return true if pay_period.committed?
+          return true if pay_period.client_finished?
 
           pay_period.company.client_payroll_approval_required? &&
             pay_period.status.in?(%w[calculated approved]) &&
