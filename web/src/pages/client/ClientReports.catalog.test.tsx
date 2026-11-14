@@ -66,3 +66,13 @@ it('reads every page of pay periods before choosing finished payroll', async () 
   expect(api.periods).toHaveBeenNthCalledWith(2, { page: 2, per_page: 100 });
   expect(screen.getByRole('option', { name: '2026-01-01 - 2026-01-14' })).toBeTruthy();
 });
+
+it('keeps reading past fifty pages until the last page the server reports', async () => {
+  api.periods.mockImplementation(async ({ page }: { page: number }) => ({
+    pay_periods: [{ id: page, record_type: 'native', status: page === 60 ? 'committed' : 'approved', start_date: '2020-01-01', end_date: `2020-01-${String(page % 28 + 1).padStart(2, '0')}` }],
+    meta: { current_page: page, total_pages: 60 },
+  }));
+  render(<ClientReports />);
+  await waitFor(() => expect(api.register).toHaveBeenCalledWith(60));
+  expect(api.periods).toHaveBeenCalledTimes(60);
+});
