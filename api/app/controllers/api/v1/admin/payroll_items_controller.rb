@@ -121,7 +121,8 @@ module Api
               @payroll_item.wage_rate_hours.map { |entry| entry.to_h.slice("employee_wage_rate_id", "regular_hours") }
           # New regular hours become the baseline a corrected revision adds to.
           @payroll_item.custom_columns_data = @payroll_item.custom_columns_data.to_h.merge("client_change_evidence" => nil) if regular_changed
-          refresh_client_hours_evidence = !regular_changed && changed_hours.any?
+          # Overtime, holiday or PTO can also arrive only through the job allocations.
+          refresh_client_hours_evidence = !regular_changed && (changed_hours.any? || saved_allocations != @payroll_item.wage_rate_hours)
           @payroll_item.mark_payroll_adjustments_overridden! if attrs.key?(:payroll_adjustments)
           # Pay saved from the import review is entered by hand even when it equals
           # the amount an earlier workbook import wrote.
