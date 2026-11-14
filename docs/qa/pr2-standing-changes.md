@@ -196,3 +196,46 @@ Not run in this round: full backend/whole-frontend suites or ASUS run (targeted 
 Final-source replay repeated F1–F3 on new synthetic fixtures at both widths after the last worksheet/audit refinement. All three cases passed in each dimension, with independent persisted-output assertions. Artifacts use the `final-` prefix under `.codex/ui/`, with `final-replay-ledger.json` and `final-revision{1,2}-{desktop,mobile}-saved.json`. The tested application/web diff against `91d9a18d` has SHA-256 `621e3c4f78c94d8d23fd85ae3bdbfc3e3b00a2d6c958e40f4e5212cd55645077`; the source was unchanged through both final browser runs. The final four touched Ruby files passed RuboCop after refinement, and a fresh full Brakeman scan again reported zero errors and warnings. The final Impeccable advisory scan returned `[]`.
 
 Final lifecycle cleanup closed/released the last preview tab and stopped exact owned Rails44945, Vite45060 and proxy45092. Earlier replay resources were also cleaned. Lifecycle status reports **no active owned resources**. No runtime handoff; all baseline/shared/protected services and simulators remain untouched. The existing worktree, branch, synthetic databases, schema backup patch and private evidence are retained. No production-copy rehearsal, merge or deployment occurred in this task.
+
+## Mac mini financial rehearsal, run 4 — November 15, 2026
+
+**Blocked at corrected-revision review; leave PR #457 draft.** Agent-executed desktop Chromium acceptance tested clean application head `945219b8cb366f0d9ac2aa012aae5a6998c63f52` in the dedicated clone. This inherits the product brief above and repeats run 3 with a required corrected-revision cycle. No product code changed. No merge, deployment, production write, external invitation delivery or provider call was attempted.
+
+Containment: every database client verified the password-free URL host against the staged branch metadata, used `PGPASSFILE` and required TLS. Test/E2E mode, supplied encryption keys, random secret, disabled external credentials, local private storage, inline jobs and the outbound Ruby guard isolated the run. The encryption read probe passed. Shared preview was unavailable and its open attempt failed; local Chromium performed the journeys with external browser requests refused and temporary data confined to the private rehearsal tree.
+
+### Required results
+
+| Step | Observed outcome | Status |
+| --- | --- | --- |
+| 1 | Company-6 baseline: 9,548 records | passed |
+| Cable gate before 2 | Global ticket count 1 before and 1 after initial staff loads; singular cable-ticket requests refused with 503 | passed |
+| 2 | UI-created practice copy through the required prior period: 220 historical paychecks across four periods. New regular period has October 19–November 1 dates and November 5 pay date. | passed |
+| 3 | UI saved two owner defaults and one extra-hours default on the required saved $35 job | passed |
+| 4 | UI invited one practice-only client assigned solely to the copy. Revision 1 retained three change rows, both source checksums matched, workbook choice attach, required owner amounts/hours and two direct-deposit notes saved. | passed |
+| 5 | Staff review prefilled both owner amounts at $8,421.13 and extra hours at 68; figures/name matches confirmed without typing payroll numbers; Apply committed 52 rows and one applied portal link. Explicit Recalculate completed with HTTP 200. | passed |
+| 6 | 52/52 counterparts; 36 financial fields; 51 exact, one known +$0.01 exception; required loan $219.70 | passed |
+| 7a | Client sent revision 2 using the same files, one owner amount retained, the other owner and extra-hours default explicitly skipped. Saved three rows, two skips, attach choice, 2/2 source checksum matches. | passed |
+| 7b | Staff selected latest revision 2 and clicked Review these submitted files. Preview returned HTTP 422; review never opened and no corrected-files control was offered. | failed |
+| 7c | No revision-2 apply/calculation occurred. Baseline-hour restoration, fresh owner-pay outcome, allocation consistency and unchanged-other-employee checks cannot be accepted. | blocked / not_run |
+| 7d–7e | Stop-on-defect instruction applied. Revision 3, final reconciliation and no-doubled-hours acceptance were not run. | blocked / not_run |
+| 8 | After stopping runtimes: company 6 still has 9,548 records, zero added, zero removed, zero changed | passed |
+
+Step 6's single exception was independently verified as the expected historical paycheck. Gross and net are each +$0.01; FIT, Social Security and Medicare taxable wage bases are each +$0.01. Tax amounts and all other compared financial fields match. Hours, tips, loans, taxes, retirement, insurance, additions, deductions and net were included. There are zero unexplained financial differences in revision 1. This does not establish corrected-revision acceptance.
+
+### Blocking defect
+
+A new client revision that changes only structured standing changes, while retaining byte-identical payroll files, cannot open staff import review after revision 1 was applied. The UI displays: **“This source package was already applied or superseded. Review a corrected current source.”** It does not offer **Use corrected files**. Neither the required hours-removal notice nor the fresh owner-pay decision can be reached.
+
+Read-only source inspection supports the observed failure: `PayrollIntake::PreviewService#import_hash` includes source/parser/workweek/text and file metadata/checksums, but no submission revision or structured changes. `existing_duplicate_session` returns the earlier applied package before replacement handling; `PayrollImportsController#persist_preview` then rejects that package as not applyable. This produces the generic 422 rather than the `ReplacementRequiredError` details needed to expose the corrected-files control. No bypass, direct database repair, alternative import route or product fix was attempted. The planned fresh staff-pay decision was never entered.
+
+### Harness limits and cleanup
+
+Harness corrections covered initial route/option selectors, asynchronous page readiness and update-button discovery. Apply's initial four-minute response wait expired while Rails continued; it was not retried. The saved 52 rows and applied link were verified, followed by the explicit calculation. Its initial response matcher expected `/calculate` instead of the actual `/run_payroll`; Rails independently logged HTTP 200 after 341,121 ms, and the final saved financial snapshot was taken afterward. The waiting browser tree was stopped by exact validated identity. Subsequent waits used the actual endpoint and a longer allowance. These harness issues are separate from the reproduced revision-2 product failure.
+
+Final global ticket count remains **1**. The proxy logged **655 refused cable requests**, all 503; Rails server/request logs contain **zero cable-controller hits**. Both interim and final company-6 fingerprints match the baseline exactly. No source-company repair or restoration occurred.
+
+Lifecycle session `01a1dae0-0892-7412-bd29-3bb81d652b5e` recorded the baseline with the synced helper and a private protection profile because the installed command/profile was absent. Exact owned API/Vite/proxy processes and all local Chromium trees were stopped. Lifecycle status reports **no active owned resources**; the three task ports have no listeners and shared preview has no task tab. Shared/protected services and other sessions were preserved; no runtime handoff. OS-temp Playwright profiles created during this interval were traced through their process ancestry to separate projects' test workers and left untouched. Creation time alone did not establish this task's ownership.
+
+Only desktop Chromium was exercised. Safari/native devices/mobile financial coverage, broad automated suites, real delivery and direct-deposit activation were not run. Existing tested-source CI backend/frontend/browser checks passed and CodeRabbit status was successful at inspection, while GitHub's review decision remained **changes requested**. These checks do not override the failed required financial acceptance. Do not mark ready, merge or deploy. The lead retains ownership of deleting the throwaway Neon branch.
+
+Wipe proof: the entire private rehearsal directory (credentials, keys, originals, retained storage, scripts, profiles, diagnostics and other artifacts) and the task-generated Rails test log were deleted. **`ls -A ~/private` returned no entries; entry count 0.** Exact-host `grep -r -l -F` across `~/work` and `~/private` returned **zero matching files, zero diagnostics, exit 1**. The OS `$TMPDIR` scan returned **zero matching files, 10 permission/socket diagnostics, exit 2**. Those OS restrictions prevent proof about unreadable entries; they are not a clean complete-temp scan. All this task's local browser temporary data was under the deleted private tree. Other projects' verified active profiles were preserved. The dedicated clone is returned to clean `main` after the aggregate-only ledger commit and push. Financial acceptance remains blocked, so `gh pr ready` was not run.
