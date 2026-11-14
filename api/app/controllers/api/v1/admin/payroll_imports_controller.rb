@@ -216,7 +216,7 @@ module Api
               import_record.update!(status: "applied", validation_errors: [],
                 raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || []))
               disposition_plan.decisions.each do |decision|
-                if unpaid_owners.key?(decision.row.employee_id)
+                if decision.included? && unpaid_owners.key?(decision.row.employee_id)
                   decision.disposition = "excluded"
                   decision.reason = unpaid_owners[decision.row.employee_id]
                 end

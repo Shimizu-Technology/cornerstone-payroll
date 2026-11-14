@@ -79,6 +79,8 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     workbook_rows = [ { employee_id: owner.id, period_pay: "5000" } ]
     expect(service.proposals(source_rows: workbook_rows)).to be_empty
     expect(service.apply_to(workbook_rows, reviewed: [], confirmed: false).sole).to include(period_pay: "5000")
+    expect { described_class.new(submission: submission, pay_period: period).apply_to([], reviewed: [], confirmed: true, source_employee_ids: [ owner.id ]) }
+      .to raise_error(ArgumentError, /include .+ file row instead of deferring/)
   end
 
   it "requires a choice before replacing saved owner pay" do
