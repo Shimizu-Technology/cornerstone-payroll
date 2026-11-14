@@ -117,8 +117,8 @@ module Api
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           changed_hours = saved_hours.keys.select { |field| attrs.key?(field.to_sym) && attrs[field.to_sym].to_d != saved_hours[field].to_d }
           regular_changed = changed_hours.include?("hours_worked") ||
-            saved_allocations.map { |entry| entry.to_h.slice("employee_wage_rate_id", "regular_hours") } !=
-              @payroll_item.wage_rate_hours.map { |entry| entry.to_h.slice("employee_wage_rate_id", "regular_hours") }
+            saved_allocations.map { |entry| entry.to_h.slice("employee_wage_rate_id", "source_bucket_key", "regular_hours") } !=
+              @payroll_item.wage_rate_hours.map { |entry| entry.to_h.slice("employee_wage_rate_id", "source_bucket_key", "regular_hours") }
           # New regular hours become the baseline a corrected revision adds to.
           @payroll_item.custom_columns_data = @payroll_item.custom_columns_data.to_h.merge("client_change_evidence" => nil) if regular_changed
           # Overtime, holiday or PTO can also arrive only through the job allocations.
@@ -281,11 +281,12 @@ module Api
 
           other = %w[overtime_hours holiday_hours pto_hours]
           current = item.wage_rate_hours.map(&:to_h)
-          by_rate = current.index_by { |entry| entry["employee_wage_rate_id"] }
+          bucket = ->(entry) { [ entry["employee_wage_rate_id"], entry["source_bucket_key"] ] }
+          by_bucket = current.index_by(&bucket)
           baseline = Array(evidence["baseline_allocations"]).map(&:to_h)
-          baseline = baseline.map { |entry| entry.merge(by_rate.fetch(entry["employee_wage_rate_id"], {}).slice(*other)) }
+          baseline = baseline.map { |entry| entry.merge(by_bucket.fetch(bucket.call(entry), {}).slice(*other)) }
           current.each do |entry|
-            next if baseline.any? { |row| row["employee_wage_rate_id"] == entry["employee_wage_rate_id"] }
+            next if baseline.any? { |row| bucket.call(row) == bucket.call(entry) }
             next if other.all? { |field| entry[field].to_d.zero? }
 
             baseline << entry.merge("regular_hours" => 0.0)

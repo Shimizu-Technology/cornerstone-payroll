@@ -157,6 +157,16 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(run.reload.pending_portal_submission?).to be(false)
   end
 
+  it "previews a pay-run import linked to a schedule revision that has no pay run yet" do
+    source = revision
+    period.update!(pay_period: nil, source: "schedule")
+    pdf = source.revel_document
+    post "#{url}/preview_import", params: { pdf_file: portal_upload("revel.pdf", objects.fetch(pdf.client_document.file_key), "application/pdf"),
+      excel_file: workbook_upload, use_submission_id: source.id }
+    expect(response).to have_http_status(:ok), response.body
+    expect(period.reload.pay_period_id).to be_nil
+  end
+
   [ false, true ].each do |schedule_period|
     it "keeps a failed saved-job selection retryable (schedule period: #{schedule_period})" do
       source = revision
@@ -1200,6 +1210,22 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(item.reload.hours_worked).to eq(68)
       expect(item.wage_rate_hours.sum { |entry| entry["regular_hours"].to_d }).to eq(68)
       expect(item.wage_rate_hours.sum { |entry| entry["overtime_hours"].to_d }).to eq(3)
+    end
+
+    it "keeps each time bucket's own overtime when two buckets share a job rate" do
+      source = standing_source
+      apply_standing(preview(source))
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      job = { "employee_wage_rate_id" => manual_job.id, "label" => "Maintenance", "rate" => 35.0, "holiday_hours" => 0.0, "pto_hours" => 0.0, "active" => true }
+      evidence = item.custom_columns_data["client_change_evidence"].merge(
+        "baseline_allocations" => [ job.merge("source_bucket_key" => "a", "regular_hours" => 1.0, "overtime_hours" => 0.0),
+          job.merge("source_bucket_key" => "b", "regular_hours" => 1.0, "overtime_hours" => 0.0) ])
+      item.update_columns(custom_columns_data: item.custom_columns_data.merge("client_change_evidence" => evidence,
+        "wage_rate_hours" => [ job.merge("source_bucket_key" => "a", "regular_hours" => 35.0, "overtime_hours" => 1.0),
+          job.merge("source_bucket_key" => "b", "regular_hours" => 35.0, "overtime_hours" => 2.0) ]))
+      Api::V1::Admin::PayrollItemsController.new.send(:sync_client_hours_evidence!, item.reload)
+      baseline = item.reload.custom_columns_data.dig("client_change_evidence", "baseline_allocations")
+      expect(baseline.map { |entry| [ entry["source_bucket_key"], entry["overtime_hours"].to_d ] }).to eq([ [ "a", 1 ], [ "b", 2 ] ])
     end
 
     it "records staff declines on the import and in review history" do
