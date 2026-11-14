@@ -81,6 +81,7 @@ export function ClientPayPeriods(): ReactElement {
         formatDateRange(period.start_date, period.end_date),
         formatDate(period.pay_date),
         period.status,
+        period.test_workspace_role === 'baseline' ? 'Paid (copied history)' : null,
         period.source.label,
         period.source.detail,
       ]
