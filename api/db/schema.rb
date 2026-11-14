@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_13_200000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_14_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3321,11 +3321,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_200000) do
     t.datetime "applied_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "source_route", default: "portal", null: false
+    t.bigint "staff_workbook_document_id"
+    t.bigint "staff_workbook_attached_by_id"
+    t.datetime "staff_workbook_attached_at"
     t.index [ "current_submission_id" ], name: "index_payroll_submission_imports_on_current_submission_id"
     t.index [ "payroll_import_id" ], name: "index_payroll_submission_imports_on_payroll_import_id"
     t.index [ "payroll_submission_id", "payroll_import_id", "current_submission_id" ], name: "idx_portal_import_selection", unique: true
     t.index [ "payroll_submission_id" ], name: "index_payroll_submission_imports_on_payroll_submission_id"
     t.index [ "selected_by_id" ], name: "index_payroll_submission_imports_on_selected_by_id"
+    t.index [ "staff_workbook_attached_by_id" ], name: "idx_on_staff_workbook_attached_by_id_7f3bdc1b01"
+    t.index [ "staff_workbook_document_id" ], name: "index_payroll_submission_imports_on_staff_workbook_document_id"
   end
 
   create_table "payroll_submission_period_read_receipts", force: :cascade do |t|
@@ -3401,6 +3407,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_200000) do
     t.datetime "acknowledged_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "workbook_choice"
     t.index [ "acknowledged_by_id" ], name: "index_payroll_submissions_on_acknowledged_by_id"
     t.index [ "company_id" ], name: "index_payroll_submissions_on_company_id"
     t.index [ "id", "company_id" ], name: "idx_payroll_submissions_tenant_key", unique: true
@@ -3410,6 +3417,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_200000) do
     t.check_constraint "NOT no_changes OR change_rows = '[]'::jsonb", name: "payroll_submissions_no_changes_is_empty"
     t.check_constraint "jsonb_typeof(change_rows) = 'array'::text", name: "payroll_submissions_changes_array"
     t.check_constraint "revision > 0", name: "payroll_submissions_revision_positive"
+    t.check_constraint "workbook_choice IS NULL OR (workbook_choice::text = ANY (ARRAY['attach'::character varying, 'link'::character varying, 'none'::character varying]::text[]))", name: "submission_workbook_choice"
   end
 
   create_table "payroll_time_allocations", force: :cascade do |t|
@@ -5058,6 +5066,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_200000) do
   add_foreign_key "portal_document_read_receipts", "client_documents"
   add_foreign_key "portal_document_read_receipts", "users"
   add_foreign_key "payroll_intake_documents", "payroll_submission_documents"
+  add_foreign_key "payroll_submission_imports", "payroll_intake_documents", column: "staff_workbook_document_id"
+  add_foreign_key "payroll_submission_imports", "users", column: "staff_workbook_attached_by_id"
   add_foreign_key "payroll_submission_imports", "payroll_imports"
   add_foreign_key "payroll_submission_imports", "payroll_submissions"
   add_foreign_key "payroll_submission_imports", "payroll_submissions", column: "current_submission_id"

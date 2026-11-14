@@ -8,7 +8,7 @@ RSpec.describe PayrollSubmissions::CreateRevision, :postgres_concurrency do
   self.use_transactional_tests = false
 
   let!(:organization) { Organization.create!(name: "Submission concurrency #{SecureRandom.hex(4)}") }
-  let!(:company) { create(:company, organization: organization) }
+  let!(:company) { create(:company, organization: organization, payroll_intake_source_types: [ "mosa_revel" ]) }
   let!(:clients) { Array.new(2) { create(:user, company: company, organization: organization, role: "client") } }
   let!(:pay_period) { create(:pay_period, company: company, start_date: Date.new(2026, 11, 2), end_date: Date.new(2026, 11, 15), pay_date: Date.new(2026, 11, 20)) }
 
@@ -47,7 +47,7 @@ RSpec.describe PayrollSubmissions::CreateRevision, :postgres_concurrency do
           catalog = PayrollSubmissions::Catalog.new(company: Company.find(company.id))
           entry = catalog.resolve("2026-11-02_2026-11-15")
           result = described_class.new(company: Company.find(company.id), actor: User.find(client.id), entry: entry, catalog: catalog,
-            params: { revel_payroll: synthetic_pdf, notes: "sender #{index}" }.with_indifferent_access).call
+            params: { workbook_choice: "none", no_changes: true, revel_payroll: synthetic_pdf, notes: "sender #{index}" }.with_indifferent_access).call
           results << [ :ok, result.submission.revision ]
         rescue StandardError => error
           results << [ :error, error ]

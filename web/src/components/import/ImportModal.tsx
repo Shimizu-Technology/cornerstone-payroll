@@ -52,6 +52,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [sourceRows, setSourceRows] = useState<EditableSourceRow[]>(() => initialPreview?.preview.source_rows.map(row => ({ ...row, disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending' })) || []);
   const [rateChoices, setRateChoices] = useState<Record<string, number>>({});
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
+  const [usePendingRevision, setUsePendingRevision] = useState(false);
+  const [staffWorkbook, setStaffWorkbook] = useState<File | null>(null);
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
   const [reviewedOverwrite, setReviewedOverwrite] = useState(false);
   const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
@@ -74,6 +76,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const reset = () => {
     reviewGeneration.current += 1;
     setStep('upload');
+    setUsePendingRevision(false); setStaffWorkbook(null);
     setPdfFile(null);
     setExcelFile(null);
     setLoading(false);
@@ -130,6 +133,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   const openPreview = (data: ImportPreviewResponse) => {
     setPreviewData(data);
+    setUsePendingRevision(false);
     setRateChoices({});
     setSourceRows(data.preview.source_rows.map((row) => ({
       ...row,
@@ -162,6 +166,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       throw new Error('The saved review changed. Close this window and open the submission again.');
     }
     setPreviewData(data);
+    setUsePendingRevision(false);
     // Merge into the latest rows, not the ones from when the save started, so
     // outcomes staff changed while the request was running are kept.
     setSourceRows((current) => {
@@ -274,13 +279,14 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   };
 
   const handleApply = async () => {
-    if (!previewData) return;
+    if (!previewData || loading) return;
     try {
       setStep('applying');
       setError(null);
       const response = await payPeriodsApi.applyImport(payPeriodId, {
         import_id: previewData.import_id,
         portal_source_id: previewData.portal_source?.selection_id,
+        use_submission_id: usePendingRevision ? previewData.pending_portal_source?.submission_id : undefined,
         rows: sourceRows.map((row) => ({
           id: row.id,
           disposition: row.disposition,
@@ -328,6 +334,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const nonMatchedSourceRows = sourceRows.filter((row) => row.row_kind !== 'matched');
   const canApply = Boolean(
     previewData
+      && !loading
       && sourceRows.length > 0
       && incompleteSourceRows.length === 0
       && includedBlockingRows.length === 0
@@ -468,6 +475,18 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
+        {previewData?.pending_portal_source && !previewData.portal_source && <section className="space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-4" aria-label="Pending client revision">
+          <p className="text-sm">A client revision is waiting. Confirm that this import uses the files and changes for that revision. The selection is recorded only when this import applies successfully.</p>
+          <h3 className="font-semibold">Client revision {previewData.pending_portal_source.revision} · changes for staff to make by hand</h3>
+          <Link className="inline-flex min-h-11 items-center text-sm underline" to={`/companies/${companyId}/payroll-submissions/${previewData.pending_portal_source.period_id}`}>Open retained portal submission</Link>
+          <p className="text-sm">Importing does not make these changes. Make each change in the employee’s record or pay worksheet before finalizing payroll.</p>
+          <p className="text-sm">Workbook choice: {previewData.pending_portal_source.workbook_choice === 'attach' ? 'Attached workbook' : previewData.pending_portal_source.workbook_choice === 'link' ? 'Link sent' : previewData.pending_portal_source.workbook_choice === 'none' ? 'No tips or loans this period' : 'Not recorded'}</p>
+          {previewData.pending_portal_source.no_changes && <p className="text-sm">No changes this period.</p>}
+          <ul className="list-disc space-y-1 pl-5 text-sm">{previewData.pending_portal_source.changes.map((row, index) => <li className="break-words [overflow-wrap:anywhere]" key={index}>{row.label}: {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
+          {previewData.pending_portal_source.notes && <p className="whitespace-pre-wrap break-words text-sm">{previewData.pending_portal_source.notes}</p>}
+          {previewData.pending_portal_source.changes_link_url && <a className="break-all text-sm underline" href={previewData.pending_portal_source.changes_link_url} target="_blank" rel="noopener noreferrer">Client’s tips &amp; loans workbook link</a>}
+          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={usePendingRevision} onChange={e => setUsePendingRevision(e.target.checked)} />Use this import for the client’s revision {previewData.pending_portal_source.revision}</label>
+        </section>}
         {previewData?.portal_source && <section aria-label="Portal change checklist" className="min-w-0 space-y-2 rounded-lg border border-primary-200 bg-primary-50 p-4">
           <h3 className="font-semibold">Client revision {previewData.portal_source.revision} · changes for staff to make by hand</h3>
           <Link className="inline-flex min-h-11 items-center text-sm underline" to={`/companies/${companyId}/payroll-submissions/${previewData.portal_source.period_id}`}>Open retained portal submission</Link>
@@ -476,7 +495,25 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           {previewData.portal_source.no_changes && <p className="text-sm">No changes this period.</p>}
           <ul className="list-disc space-y-1 pl-5 text-sm">{previewData.portal_source.changes.map((row, index) => <li className="break-words" key={index}>{row.label}: {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
           {previewData.portal_source.notes && <p className="whitespace-pre-wrap break-words text-sm">{previewData.portal_source.notes}</p>}
-          {previewData.portal_source.changes_link_url && <a className="break-all text-sm underline" href={previewData.portal_source.changes_link_url} target="_blank" rel="noopener noreferrer">Supporting changes link (review separately)</a>}
+          {previewData.portal_source.changes_link_url && <a className="break-all text-sm underline" href={previewData.portal_source.changes_link_url} target="_blank" rel="noopener noreferrer">Client’s tips &amp; loans workbook link</a>}
+          {previewData.portal_source.staff_workbook && <p className="break-all text-sm">Staff workbook: {previewData.portal_source.staff_workbook.filename} · attached by {previewData.portal_source.staff_workbook.attached_by_name} · {new Date(previewData.portal_source.staff_workbook.attached_at).toLocaleString('en-US')} · SHA-256 {previewData.portal_source.staff_workbook.sha256}</p>}
+          {previewData.portal_source.changes_link_url && previewData.preview.source_warnings?.some(w => w.code === 'missing_workbook') && <div className="space-y-2">
+            <p className="text-sm">Open it, download the workbook, and attach it here.</p>
+            <label className="block text-sm">Downloaded workbook (Excel)<input className="mt-2 block w-full" type="file" accept=".xls,.xlsx" onChange={e => setStaffWorkbook(e.target.files?.[0] || null)} /></label>
+            <Button type="button" variant="outline" disabled={!staffWorkbook || loading} onClick={async () => {
+              if (!staffWorkbook || !previewData.portal_source) return;
+              setLoading(true); setError(null);
+              try {
+                const data = await payPeriodsApi.previewPortalSubmission(payPeriodId, previewData.portal_source.submission_id, {
+                  staff_workbook: staffWorkbook, superseded_reason: previewData.portal_source.superseded_reason,
+                  supersedes_package_id: previewData.source_package.package_id, supersession_reason: 'Staff attached the workbook from the client’s link',
+                  tips_paid_out_from_tips: previewData.preview.tips_paid_out_from_tips,
+                });
+                openPreview(data); setStaffWorkbook(null); onSourcePreviewed?.();
+              } catch (err) { setError(err instanceof Error ? err.message : 'Could not attach workbook'); }
+              finally { setLoading(false); }
+            }}>Attach workbook and refresh review</Button>
+          </div>}
         </section>}
 
         {/* Upload Step */}
@@ -533,6 +570,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               </label>
               <input
                 ref={pdfInputRef}
+                aria-label="Revel POS Payroll PDF"
                 type="file"
                 accept=".pdf"
                 onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
@@ -550,6 +588,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               </label>
               <input
                 ref={excelInputRef}
+                aria-label="Cornerstone payroll changes workbook (optional)"
                 type="file"
                 accept=".xlsx,.xls"
                 onChange={(e) => {
@@ -601,7 +640,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               </section>
             )}
             {(previewData.preview.source_warnings || []).map((warning) => (
-              <div key={warning.code} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <div key={warning.code} role={warning.severity === 'warning' ? 'alert' : undefined} className={warning.severity === 'info' ? 'rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700' : 'rounded-lg border border-warning-300 bg-warning-50 px-4 py-3 text-sm font-semibold text-warning-950'}>
                 {warning.message}
               </div>
             ))}
@@ -907,9 +946,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             )}
             {step === 'preview' && (
               <>
-                <Button variant="outline" onClick={() => {
+                <Button variant="outline" disabled={loading} onClick={() => {
+                  if (loading) return;
                   if (initialPreview) { handleClose(); return; }
                   setStep('upload');
+                  setUsePendingRevision(false); setStaffWorkbook(null);
                   setPreviewData(null);
                   setSourceRows([]);
                   setReviewedSuggestedMatches(false);

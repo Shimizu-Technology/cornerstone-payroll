@@ -66,6 +66,213 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     post "#{url}/apply_import", params: { import_id: data["import_id"], portal_source_id: data.dig("portal_source", "selection_id") }, as: :json
   end
 
+  def workbook_upload
+    portal_upload("downloaded.xlsx", PayrollImport::MosaSupplementalTemplate.new(run).generate,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+  end
+
+  def pay_run_preview(source)
+    pdf = source.revel_document
+    post "#{url}/preview_import", params: { pdf_file: portal_upload("revel.pdf", objects.fetch(pdf.client_document.file_key), "application/pdf"), excel_file: workbook_upload }
+    expect(response).to have_http_status(:ok), response.body
+    response.parsed_body
+  end
+
+  it "retains and verifies a staff workbook against a link revision without changing the client evidence" do
+    source = revision
+    source.update_columns(workbook_choice: "link", changes_link_url: "https://example.test/workbook")
+    original = source.reload.attributes
+    post "#{url}/preview_import", params: { submission_id: source.id, staff_workbook: workbook_upload }
+    expect(response).to have_http_status(:ok), response.body
+    data = response.parsed_body
+    selection = PayrollSubmissionImport.find(data.dig("portal_source", "selection_id"))
+    evidence = selection.staff_workbook_document
+    expect(evidence).to have_attributes(source_role: "supplemental_workbook", verification_status: "verified", filename: "downloaded.xlsx")
+    expect(selection).to have_attributes(staff_workbook_attached_by: staff, staff_workbook_attached_at: be_present)
+    expect(data.dig("portal_source", "staff_workbook")).to include("filename" => "downloaded.xlsx", "sha256" => evidence.sha256, "attached_by_name" => staff.name)
+    expect(Digest::SHA256.hexdigest(objects.fetch(evidence.storage_reference))).to eq(evidence.sha256)
+    expect(source.reload.attributes).to eq(original)
+    expect(source.submission_documents.count).to eq(1)
+    expect { selection.update!(staff_workbook_attached_at: 1.day.ago) }.to raise_error(ActiveRecord::RecordInvalid)
+    selection.reload
+    apply(data)
+    expect(response).to have_http_status(:ok), response.body
+    expect(run.reload.pending_portal_submission?).to be(false)
+    catalog = PayrollSubmissions::Catalog.new(company: company)
+    detail = PayrollSubmissions::Serializer.new(current_user: staff, catalog: catalog).detail(catalog.resolve(period.id))
+    expect(detail[:submissions].first[:imports].sole[:staff_workbook]).to include(filename: "downloaded.xlsx", sha256: evidence.sha256, attached_by_name: staff.name)
+  end
+
+  it "refuses staff workbooks for revisions without links or already containing workbooks" do
+    source = revision(workbook: true)
+    post "#{url}/preview_import", params: { submission_id: source.id, staff_workbook: workbook_upload }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("only supplement")
+    expect(PayrollIntakeSession.count).to eq(0)
+  end
+
+  it "refuses non-Excel staff evidence and rejects retained staff workbook tampering on apply" do
+    source = revision
+    source.update_columns(workbook_choice: "link", changes_link_url: "https://example.test/workbook")
+    post "#{url}/preview_import", params: { submission_id: source.id, staff_workbook: synthetic_pdf }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(PayrollIntakeSession.count).to eq(0)
+    post "#{url}/preview_import", params: { submission_id: source.id, staff_workbook: workbook_upload }
+    expect(response).to have_http_status(:ok), response.body
+    data = response.parsed_body
+    evidence = PayrollSubmissionImport.find(data.dig("portal_source", "selection_id")).staff_workbook_document
+    objects[evidence.storage_reference] = "changed bytes"
+    apply(data)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(run.payroll_items).to be_empty
+    expect(run.reload.pending_portal_submission?).to be(true)
+    expect(evidence.reload.verification_status).to eq("failed")
+  end
+
+  it "explicitly links pay-run Import MoSa to the current pending revision only on successful apply" do
+    source = revision
+    data = pay_run_preview(source)
+    expect(data.dig("pending_portal_source", "submission_id")).to eq(source.id)
+    post "#{url}/apply_import", params: { import_id: data["import_id"] }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(run.reload.pending_portal_submission?).to be(true)
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    selection = source.submission_imports.sole
+    expect(selection).to have_attributes(source_route: "pay_run", selected_by: staff, applied_at: be_present)
+    expect(run.reload.pending_portal_submission?).to be(false)
+    audit = PayrollSubmissions::Audit.feed(period).find_by!(action: "payroll_submission_periods#import")
+    expect(audit.metadata).to include("source_route" => "pay_run", "submission_id" => source.id, "import_id" => data["import_id"])
+  end
+
+  it "claims a schedule revision created before its matching pay run, only on successful apply" do
+    source = revision
+    period.update!(pay_period: nil)
+    data = pay_run_preview(source)
+    expect(data.dig("pending_portal_source", "submission_id")).to eq(source.id)
+    expect(period.reload.pay_period_id).to be_nil
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(period.reload.pay_period_id).to eq(run.id)
+    expect(run.reload.pending_portal_submission?).to be(false)
+  end
+
+  [ false, true ].each do |schedule_period|
+    it "keeps a failed saved-job selection retryable (schedule period: #{schedule_period})" do
+      source = revision
+      period.update!(pay_period: nil, source: "schedule") if schedule_period
+      data = pay_run_preview(source)
+      post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id,
+        wage_rate_choices: { employee.id.to_s => 999999 } }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("saved rates")
+      expect(PayrollSubmissionImport.count).to eq(0)
+      expect(period.reload.pay_period_id).to eq(schedule_period ? nil : run.id)
+      expect(PayrollImportRecord.find(data["import_id"]).status).to eq("previewed")
+      get "#{url}/current_import"
+      expect(response.parsed_body["portal_source"]).to be_nil
+      expect(response.parsed_body.dig("pending_portal_source", "submission_id")).to eq(source.id)
+      post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(source.submission_imports.sole).to have_attributes(source_route: "pay_run", applied_at: be_present)
+      expect(period.reload.pay_period_id).to eq(run.id)
+      expect(run.reload.pending_portal_submission?).to be(false)
+    end
+  end
+
+  it "keeps a schedule revision retryable after an unexpected apply exception" do
+    source = revision
+    period.update!(pay_period: nil, source: "schedule")
+    data = pay_run_preview(source)
+    allow_any_instance_of(PayrollIntake::SourcePackageVerifier).to receive(:verify!).and_raise(StandardError, "verification interrupted")
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("verification interrupted")
+    expect(PayrollSubmissionImport.count).to eq(0)
+    expect(period.reload.pay_period_id).to be_nil
+    expect(PayrollImportRecord.find(data["import_id"]).status).to eq("previewed")
+    allow_any_instance_of(PayrollIntake::SourcePackageVerifier).to receive(:verify!).and_call_original
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(period.reload.pay_period_id).to eq(run.id)
+    expect(source.submission_imports.sole.applied_at).to be_present
+  end
+
+  it "includes the pending revision checklist, notes and workbook choice in pay-run review" do
+    source = revision
+    source.update_columns(workbook_choice: "link", changes_link_url: "https://example.test/corrected", notes: "Check owner pay and the new hire")
+    data = pay_run_preview(source)
+    expect(data["pending_portal_source"]).to include("period_id" => period.id, "workbook_choice" => "link",
+      "changes_link_url" => "https://example.test/corrected", "notes" => "Check owner pay and the new hire", "no_changes" => false)
+    expect(data.dig("pending_portal_source", "changes").sole).to include("kind" => "wage_change", "label" => "Wage change", "employee_name" => employee.full_name, "new_wage" => "99.00")
+  end
+
+  it "does not consume a regular client revision after the linked run changes to a special purpose" do
+    source = revision
+    data = pay_run_preview(source)
+    run.update_columns(run_purpose: "bonus")
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("matching regular pay run")
+    expect(source.submission_imports).to be_empty
+    expect(run.reload.pending_portal_submission?).to be(true)
+  end
+
+  it "refuses old, cross-company and cross-period revision selections" do
+    old = revision
+    data = pay_run_preview(old)
+    current = revision(rev: 2)
+    foreign_company = create(:company)
+    foreign_period = PayrollSubmissionPeriod.create!(company: foreign_company, start_date: run.start_date, end_date: run.end_date, source: "pay_period")
+    other_period = PayrollSubmissionPeriod.create!(company: company, start_date: run.start_date - 14, end_date: run.end_date - 14, source: "pay_period")
+    invalid = [ old.id, foreign_period.submissions.create!(company: foreign_company, revision: 1, submitted_at: Time.current, content_fingerprint: "c", request_fingerprint: "r").id,
+      other_period.submissions.create!(company: company, revision: 1, submitted_at: Time.current, content_fingerprint: "c", request_fingerprint: "r").id ]
+    invalid.each do |id|
+      post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: id }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity), response.body
+      expect(PayrollSubmissionImport.count).to eq(0)
+      expect(run.reload.pending_portal_submission?).to be(true)
+    end
+    expect(period.current_submission).to eq(current)
+  end
+
+  it "rolls back a pay-run revision link if applying a payroll row fails" do
+    source = revision
+    data = pay_run_preview(source)
+    allow_any_instance_of(PayrollImport::ImportService).to receive(:apply!).and_return(success: [], skipped: [], errors: [ { error: "row failed" } ])
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(source.submission_imports).to be_empty
+    expect(run.reload.pending_portal_submission?).to be(true)
+    allow_any_instance_of(PayrollImport::ImportService).to receive(:apply!).and_call_original
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(source.submission_imports.sole.applied_at).to be_present
+  end
+
+  it "also warns on a pay-run upload without any portal revision or workbook" do
+    bytes = File.binread(build_revel_pdf([ { name: "Example, Avery", regular_hours: 40, regular_pay: 400 } ],
+      period_start: run.start_date, period_end: run.end_date))
+    post "#{url}/preview_import", params: { pdf_file: portal_upload("revel.pdf", bytes, "application/pdf") }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("preview", "source_warnings")).to include(include("code" => "missing_workbook", "severity" => "warning"))
+    expect(response.parsed_body["portal_source"]).to be_nil
+  end
+
+  it "warns for missing workbook, distinguishes an explicit none, and notes zero workbook tips" do
+    source = revision
+    data = preview(source)
+    expect(data.dig("preview", "source_warnings")).to include(include("code" => "missing_workbook", "message" => "No tips or loans: the workbook wasn't included"))
+    source.update_columns(workbook_choice: "none")
+    data = preview(source)
+    expect(data.dig("preview", "source_warnings")).to include(include("code" => "client_no_tips_or_loans", "severity" => "info"))
+    expect(data.dig("preview", "can_apply")).to be(true)
+    source2 = revision(rev: 2, workbook: true)
+    data = preview(source2, supersedes_package_id: data.dig("source_package", "package_id"), supersession_reason: "Workbook added")
+    expect(response).to have_http_status(:ok), response.body
+    expect(data.dig("preview", "source_warnings")).to include(include("code" => "zero_workbook_tips", "severity" => "info"))
+  end
+
   it "bridges synthetic #433 files, deduplicates retries, applies once and retains independent bytes and both-way provenance" do
     source = revision(workbook: true)
     data = preview(source)

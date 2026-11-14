@@ -33,7 +33,7 @@ module PayrollSubmissions
       @today = today || self.class.today
     end
 
-    attr_reader :today
+    attr_reader :today, :company
 
     def schedule
       return @schedule if defined?(@schedule)

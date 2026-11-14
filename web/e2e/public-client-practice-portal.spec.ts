@@ -5,6 +5,7 @@ function json(route: Route, body: unknown): Promise<void> {
 }
 
 const practiceCopy = {
+  payroll_intake_source_types: ['mosa_revel'],
   id: 12, name: 'MoSa Practice', active: true, payroll_environment: 'migration_rehearsal',
   test_workspace: true, practice_portal: true, workspace_can_write: false, test_workspace_purpose: 'sandbox',
   migration_source_company_name: 'MoSa',

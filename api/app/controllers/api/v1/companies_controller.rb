@@ -39,6 +39,7 @@ module Api
           active_employees: active_employee_counts.fetch(company.id, 0),
           total_employees: total_employee_counts.fetch(company.id, 0),
           pay_frequency: company.pay_frequency,
+          payroll_intake_source_types: company.payroll_intake_source_types,
           historical_payroll_enabled: company.historical_payroll_enabled,
           client_capabilities: StaffRolePolicy.capabilities_for(current_user, company: company),
           client_management: StaffRolePolicy.client_management_allowed?(current_user, company),

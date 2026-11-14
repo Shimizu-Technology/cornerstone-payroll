@@ -14,7 +14,6 @@ module PayrollSubmissions
     WORKBOOK_TYPES = %w[
       application/vnd.ms-excel
       application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-      text/csv
     ].freeze
 
     Prepared = Struct.new(:role, :file, :sha256, :content_type, :file_key, keyword_init: true)
@@ -109,7 +108,7 @@ module PayrollSubmissions
       when "revel_payroll", "paycheck", "direct_deposit"
         return "must be a PDF" unless content_type == "application/pdf"
       when "changes_workbook"
-        return "must be an Excel workbook or CSV file" unless WORKBOOK_TYPES.include?(content_type)
+        return "must be an Excel workbook (.xls or .xlsx)" unless WORKBOOK_TYPES.include?(content_type) && File.extname(file.original_filename).downcase.in?(%w[.xls .xlsx])
       end
       return "must be 8 MB or smaller" if %w[revel_payroll changes_workbook].include?(role) && file.size.to_i > SOURCE_FILE_LIMIT
 

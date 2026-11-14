@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PortalImportAction } from './PortalImportAction';
 import type { PeriodDetail } from '@/services/payrollSubmissions';
@@ -89,4 +90,27 @@ it('names the client submission and the import version separately, with plain-la
   expect(screen.getByRole('button', { name: 'Review these submitted files' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Don’t use this submission — record why' })).toBeTruthy();
   expect(screen.queryByText(/disposition|retained import package|Source revision/i)).toBeNull();
+});
+
+it('shows a link and passes the downloaded workbook as staff evidence for the selected revision', async () => {
+  const linked = { ...period, submissions: [{ ...period.submissions[0], documents: [], changes_link_url: 'https://example.test/workbook', workbook_choice: 'link' }] } as PeriodDetail;
+  mocks.preview.mockResolvedValue({ import_id: 30, portal_source: { selection_id: 1, revision: 2 } });
+  render(<PortalImportAction period={linked} companyId={7} onApplied={vi.fn()} />);
+  expect(screen.getByRole('link', { name: 'Client’s tips & loans workbook link' }).getAttribute('href')).toBe('https://example.test/workbook');
+  expect(screen.getByText('Open it, download the workbook, and attach it here.')).toBeTruthy();
+  const file = new File(['synthetic'], 'downloaded.xlsx');
+  fireEvent.change(screen.getByLabelText('Downloaded workbook (Excel)'), { target: { files: [file] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Review these submitted files' }));
+  await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith(9, 20, expect.objectContaining({ staff_workbook: file })));
+});
+
+
+it('clears the downloaded workbook picker when staff select another client revision', async () => {
+  const linked = { ...period, submissions: period.submissions.map(row => ({ ...row, documents: [], changes_link_url: 'https://example.test/workbook', workbook_choice: 'link' })) } as PeriodDetail;
+  render(<PortalImportAction period={linked} companyId={7} onApplied={vi.fn()} />);
+  const picker = screen.getByLabelText('Downloaded workbook (Excel)') as HTMLInputElement;
+  await userEvent.upload(picker, new File(['synthetic'], 'downloaded.xlsx'));
+  expect(picker.files?.length).toBe(1);
+  fireEvent.change(screen.getByLabelText('Client’s revision'), { target: { value: '10' } });
+  expect((screen.getByLabelText('Downloaded workbook (Excel)') as HTMLInputElement).files?.length).toBe(0);
 });

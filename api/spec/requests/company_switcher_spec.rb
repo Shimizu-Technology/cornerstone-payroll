@@ -17,6 +17,7 @@ RSpec.describe "Company switcher context", type: :request do
     expect(response).to have_http_status(:ok)
     companies = response.parsed_body.fetch("companies")
     expect(companies.pluck("organization_name")).to contain_exactly("Cornerstone QA", "Shimizu Technology LLC")
+    expect(companies).to all(include("payroll_intake_source_types" => []))
     expect(companies.pluck("id")).to include(response.parsed_body.fetch("current_company_id"))
   end
 end
