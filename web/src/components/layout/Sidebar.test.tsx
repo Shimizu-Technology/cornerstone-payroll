@@ -3,19 +3,19 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Sidebar } from './Sidebar';
-const actor = vi.hoisted(() => ({ allowed: true, delegated: false, selectedId: 7 }));
+const actor = vi.hoisted(() => ({ allowed: true, delegated: false, selectedId: 7, role: 'accountant', mosa: false }));
 vi.mock('@/hooks/usePortalCounts', () => ({ usePortalCounts: () => null }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({
-  user: { role: 'accountant', name: 'Assigned accountant', email: 'accountant@example.test' },
+  user: { role: actor.role, name: 'Assigned accountant', email: 'accountant@example.test' },
   isAccountant: true, signOut: vi.fn(),
   hasCapability: (capability: string) => actor.allowed && capability === 'manage_own_aire_account_link',
 }) }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({
-  activeCompanyId: actor.selectedId, activeCompany: { id: 7, name: 'Assigned client', client_capabilities: actor.delegated ? ['manage_client_configuration', 'manage_client_administration'] : [] }, canViewClientManagement: false,
+  activeCompanyId: actor.selectedId, activeCompany: { id: 7, name: 'Assigned client', payroll_intake_source_types: actor.mosa ? ['mosa_revel'] : [], client_capabilities: actor.delegated ? ['manage_client_configuration', 'manage_client_administration'] : [] }, canViewClientManagement: false,
 }) }));
 vi.mock('./CompanySwitcher', () => ({ CompanySwitcher: () => null }));
 vi.mock('./OrganizationSwitcher', () => ({ OrganizationSwitcher: () => null }));
-beforeEach(() => { actor.allowed = true; actor.delegated = false; actor.selectedId = 7; });
+beforeEach(() => { actor.allowed = true; actor.delegated = false; actor.selectedId = 7; actor.role = 'accountant'; actor.mosa = false; });
 afterEach(cleanup);
 describe('Accountant personal connection navigation', () => {
   it('offers personal connection without source or calendar configuration rights', () => {
@@ -53,4 +53,13 @@ it('highlights only Client Inbox when visiting its route', () => {
   render(<MemoryRouter initialEntries={['/app/client-inbox']}><Sidebar /></MemoryRouter>);
   expect(screen.getByRole('link', { name: 'Dashboard' }).getAttribute('aria-current')).toBeNull();
   expect(screen.getByRole('link', { name: 'Client Inbox' }).getAttribute('aria-current')).toBe('page');
+});
+
+it('shows Payroll Files only to portal clients with MoSa intake', () => {
+  actor.role = 'client';
+  const view = render(<MemoryRouter><Sidebar /></MemoryRouter>);
+  expect(screen.queryByRole('link', { name: 'Payroll Files' })).toBeNull();
+  actor.mosa = true;
+  view.rerender(<MemoryRouter><Sidebar /></MemoryRouter>);
+  expect(screen.getByRole('link', { name: 'Payroll Files' })).toBeTruthy();
 });

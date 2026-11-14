@@ -274,7 +274,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     if (!canManageClientConfiguration) return false;
     return true;
   });
-  const primaryNavigation = (isClient ? portalNavigation : clientNavigation).map((item): NavItem => {
+  const primaryNavigation = (isClient ? portalNavigation.filter(item => item.href !== '/payroll-files' || activeCompany?.payroll_intake_source_types?.includes('mosa_revel')) : clientNavigation).map((item): NavItem => {
     if (item.href === '/messages') return { ...item, count: counts?.unread_count };
     if (item.href === '/app/client-inbox') return { ...item, count: counts?.waiting_count };
     if (!activeCompanyId) return item;

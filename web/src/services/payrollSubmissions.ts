@@ -31,7 +31,8 @@ export type SubmissionRevision = {
   submitted_at: string; submitted_by_name?: string | null;
   acknowledged_at?: string | null; acknowledged_by_name?: string | null;
   imported_at?: string | null;
-  imports?: { id: number; pay_period_id: number; status: string }[];
+  imports?: { id: number; pay_period_id: number; status: string; source_route?: 'portal' | 'pay_run'; staff_workbook?: { document_id: number; filename: string; sha256: string; attached_by_name: string; attached_at: string } | null }[];
+  workbook_choice?: 'attach' | 'link' | 'none' | null;
   no_changes: boolean; notes?: string | null; changes_link_url?: string | null;
   changes: ChangeRow[]; documents: SubmissionDocument[];
 };

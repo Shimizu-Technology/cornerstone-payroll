@@ -1585,8 +1585,12 @@ export const payPeriodsApi = {
     if (replacement?.reason) formData.append('supersession_reason', replacement.reason);
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
   },
-  previewPortalSubmission: (id: number, submissionId: number, options: { superseded_reason?: string; supersedes_package_id?: string; supersession_reason?: string; tips_paid_out_from_tips?: boolean } = {}): Promise<ImportPreviewResponse> =>
-    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, { submission_id: submissionId, ...options }),
+  previewPortalSubmission: (id: number, submissionId: number, options: { superseded_reason?: string; supersedes_package_id?: string; supersession_reason?: string; tips_paid_out_from_tips?: boolean; staff_workbook?: File } = {}): Promise<ImportPreviewResponse> => {
+    const form = new FormData();
+    form.append('submission_id', String(submissionId));
+    Object.entries(options).forEach(([key, value]) => { if (value !== undefined) form.append(key, value instanceof File ? value : String(value)); });
+    return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, form);
+  },
   resolvePortalSource: (id: number, submissionId: number, reason: string): Promise<{ resolved_submission_id: number }> =>
     api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
   currentImport: (id: number): Promise<ImportPreviewResponse> =>
@@ -1604,6 +1608,7 @@ export const payPeriodsApi = {
       }>;
       acknowledge_low_confidence_matches?: boolean;
       portal_source_id?: number;
+      use_submission_id?: number;
       force_overwrite?: boolean;
       wage_rate_choices?: Record<string, number>;
     },
@@ -2116,9 +2121,12 @@ export interface MosaSourceRow {
 }
 
 export interface ImportPreviewResponse {
+  pending_portal_source?: { submission_id: number; revision: number; workbook_choice?: 'attach' | 'link' | 'none' | null; changes_link_url?: string } | null;
   portal_source?: {
     selection_id: number; submission_id: number; revision: number; period_id: number; current: boolean;
     superseded_reason?: string; notes?: string; changes_link_url?: string; no_changes: boolean;
+    workbook_choice?: 'attach' | 'link' | 'none' | null;
+    staff_workbook?: { document_id: number; filename: string; sha256: string; attached_by_name: string; attached_at: string } | null;
     changes: import('./payrollSubmissions').ChangeRow[];
   } | null;
   import_id: number;
@@ -3856,6 +3864,7 @@ export const printerProfilesApi = {
 // Companies API (Multi-tenant company switching)
 // ============================================================
 export interface CompanyListItem {
+  payroll_intake_source_types?: string[];
   client_capabilities?: string[];
   client_management?: boolean;
   id: number;

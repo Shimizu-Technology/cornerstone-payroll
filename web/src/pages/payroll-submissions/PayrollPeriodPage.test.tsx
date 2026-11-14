@@ -67,10 +67,12 @@ it('sends an update as a new revision carrying the Revel PDF forward with a stab
   fireEvent.click(await screen.findByRole('button', { name: 'Send an update or replace a file' }));
   expect(screen.getByText(/becomes revision 3/)).toBeTruthy();
   expect(screen.getByText(/Keeping revel-2.pdf from revision 2/)).toBeTruthy();
+  fireEvent.click(screen.getByLabelText('No tips or loans this period'));
   fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
   await screen.findByText('Network down');
+  fireEvent.click(screen.getByLabelText('No tips or loans this period'));
   fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
-  await screen.findByText('Sent. Revision 3 is with Cornerstone.');
+  await screen.findByText(/Sent. Revision 3 is with Cornerstone\./);
   const [first, second] = mocks.submit.mock.calls.map(call => call[1] as FormData);
   expect(first.get('idempotency_key')).toBe(second.get('idempotency_key'));
   expect(second.getAll('keep_document_ids[]')).toEqual(['102']);
@@ -118,7 +120,7 @@ it('marks a period seen only once it is shown in the foreground, through the dis
   expect(mocks.seen).toHaveBeenCalledTimes(1);
 });
 
-it('drops hidden change evidence when the client chooses no changes', async () => {
+it('sends none independently of no structured changes and removes hidden workbook evidence', async () => {
   const withWorkbook = revision(2, true);
   withWorkbook.changes_link_url = 'https://example.test/sheet';
   withWorkbook.documents = [...withWorkbook.documents, { role: 'changes_workbook', file_name: 'changes.xlsx', file_size: 10, document: doc(150, 'changes.xlsx') }];
@@ -127,6 +129,7 @@ it('drops hidden change evidence when the client chooses no changes', async () =
   renderAt('client');
   fireEvent.click(await screen.findByRole('button', { name: 'Send an update or replace a file' }));
   fireEvent.click(screen.getByLabelText('No changes this period'));
+  fireEvent.click(screen.getByLabelText('No tips or loans this period'));
   fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
   await waitFor(() => expect(mocks.submit).toHaveBeenCalled());
   const form = mocks.submit.mock.calls[0][1] as FormData;
