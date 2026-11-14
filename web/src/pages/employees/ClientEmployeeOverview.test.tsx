@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClientEmployeeOverview } from './ClientEmployeeOverview';
 
 const apiMocks = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock('@/services/api', () => ({ clientEmployeesApi: { get: apiMocks.get } }));
+vi.mock('@/services/api', () => ({ clientEmployeesApi: { get: apiMocks.get }, clientPayStubsApi: { history: async () => ({ pay_stubs: [] }) } }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1,
   activeCompany: { id: 1, test_workspace: true, practice_portal: true, workspace_can_write: false },
 }) }));

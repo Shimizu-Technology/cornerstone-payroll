@@ -3467,6 +3467,18 @@ export const reportsApi = {
     }>(`/admin/reports/check_signoff_preview?pay_period_id=${payPeriodId}`),
 };
 
+export interface ClientPayStub {
+  id: number;
+  pay_period_id: number;
+  pay_date: string;
+  period_description: string;
+  net_pay: number | string;
+}
+export const clientPayStubsApi = {
+  history: (employeeId: number) => api.get<{ pay_stubs: ClientPayStub[] }>(`/client/pay_stubs/employee/${employeeId}`),
+  download: (itemId: number) => api.getBlobWithParams(`/client/pay_stubs/${itemId}/download`),
+};
+
 export const clientReportsApi = {
   download: (report: string, format: string, params: Record<string, string | number>) =>
     api.getBlobWithParams(`/client/reports/${report}_${format}`, params),

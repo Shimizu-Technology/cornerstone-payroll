@@ -92,6 +92,9 @@ Rails.application.routes.draw do
         end
         resources :imported_pay_periods, only: [ :show ]
 
+        get "pay_stubs/employee/:employee_id", to: "pay_stubs#index"
+        get "pay_stubs/:id/download", to: "pay_stubs#download"
+
         namespace :reports do
           get :payroll_summary_by_employee_pdf
           get :payroll_summary_by_employee_xlsx

@@ -17,7 +17,8 @@ class PayrollStatementYtdBreakdown
   AUTO_LOAN_REIMBURSEMENT = /\bauto\s+loan\s+reimb(?:ursement|ursem)?/i
   GENERIC_REIMBURSEMENT = /\Areimb(?:ursement|ursem)?\z/i
 
-  def initialize(payroll_item)
+  def initialize(payroll_item, pay_period_scope: nil)
+    @pay_period_scope = pay_period_scope
     @payroll_item = payroll_item
     @employee = payroll_item.employee
     @pay_period = payroll_item.pay_period
@@ -359,7 +360,7 @@ class PayrollStatementYtdBreakdown
   def ytd_source_items
     @ytd_source_items ||= begin
       pay_date = pay_period.pay_date || Date.current
-      prior_periods = PayPeriod.reportable_for_company(company)
+      prior_periods = (@pay_period_scope || PayPeriod.reportable_for_company(company))
         .where(pay_date: Date.new(pay_date.year, 1, 1)..pay_date)
         .where(
           "pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)",
