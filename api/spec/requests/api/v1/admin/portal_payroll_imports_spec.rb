@@ -1401,6 +1401,55 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       end
     end
 
+    %w[several_jobs one_job].each do |jobs|
+      it "restores client hours after the pay run worksheet recalculates them (#{jobs})" do
+        kitchen = create(:employee_wage_rate, employee: manual_worker, label: "Kitchen", rate: 18, is_primary: true) if jobs == "several_jobs"
+        source = standing_source
+        add_source(source, PayrollImport::MosaSupplementalTemplate.new(run).generate, "changes_workbook", "changes.xlsx",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        apply_standing(preview(source))
+        item = run.payroll_items.find_by!(employee: manual_worker)
+        # The worksheet's Recalculate payload: every saved job, or totals only for one job.
+        hours = { regular: 68, overtime: 0 }
+        if kitchen
+          hours[:wage_rates] = [
+            { employee_wage_rate_id: manual_job.id, label: "Maintenance", rate: 35, regular_hours: 68, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: false, active: true },
+            { employee_wage_rate_id: kitchen.id, label: "Kitchen", rate: 18, regular_hours: 0, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: true, active: true }
+          ]
+        end
+        post "#{url}/run_payroll", params: { hours: { manual_worker.id.to_s => hours } }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        expect(item.reload.hours_worked).to eq(68)
+        expect(item.wage_rate_hours).not_to eq(item.custom_columns_data.dig("client_change_evidence", "applied_allocations"))
+        second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("skipped" => true) })
+        data = preview(second)
+        change = data.dig("client_change_prefill", "rows").find { |row| row["employee_id"] == owner.id }
+        apply_standing(data, [ { change_index: change["change_index"], decision: "no_pay", reason: "Owner took no pay" } ])
+        expect(run.payroll_items.find_by(employee: manual_worker)&.hours_worked.to_d).to eq(0)
+        expect(run.payroll_items.find_by(employee: owner)).to be_nil
+      end
+    end
+
+    it "still refuses to restore when the worksheet moved the client hours to another job" do
+      kitchen = create(:employee_wage_rate, employee: manual_worker, label: "Kitchen", rate: 35)
+      source = standing_source
+      apply_standing(preview(source))
+      wage_rates = [
+        { employee_wage_rate_id: manual_job.id, label: "Maintenance", rate: 35, regular_hours: 0, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: false, active: true },
+        { employee_wage_rate_id: kitchen.id, label: "Kitchen", rate: 35, regular_hours: 68, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: false, active: true }
+      ]
+      post "#{url}/run_payroll", params: { hours: { manual_worker.id.to_s => { regular: 68, overtime: 0, wage_rates: wage_rates } } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("skipped" => true) })
+      data = preview(second)
+      change = data.dig("client_change_prefill", "rows").find { |row| row["employee_id"] == owner.id }
+      post "#{url}/apply_import", params: { import_id: data["import_id"], confirm_client_changes: true, portal_source_id: data.dig("portal_source", "selection_id"),
+        reviewed_changes: [ { change_index: change["change_index"], decision: "no_pay", reason: "Owner took no pay" } ] }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.body).to include("Saved hours changed")
+      expect(run.payroll_items.find_by!(employee: manual_worker).wage_rate_hours.find { |entry| entry["employee_wage_rate_id"] == kitchen.id }["regular_hours"]).to eq(68)
+    end
+
     it "explains instead of deleting when the owner's paycheck already has a check record" do
       source = standing_source
       add_source(source, PayrollImport::MosaSupplementalTemplate.new(run).generate, "changes_workbook", "changes.xlsx",
