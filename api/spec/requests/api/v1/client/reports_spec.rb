@@ -87,6 +87,59 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
   describe "expanded client report boundary" do
     let(:report_params) { { pay_period_id: pay_period.id, employee_id: employee.id, year: 2026, quarter: 2 } }
 
+    it "keeps staff Form 500 tracking details out of client packets and exports" do
+      Form500Filing.create!(company: company, pay_period: pay_period, fields: { "test" => true },
+        notes: "Private staff tracking note", confirmation_number: "STAFF-123", receipt_attached: true,
+        payment_date: Date.new(2026, 4, 20), payment_amount: 120)
+      get "/api/v1/client/reports/quarterly_compliance_packet", params: report_params
+      expect(response).to have_http_status(:ok)
+      deposit = response.parsed_body.dig("report", "form_500", "deposits").sole
+      expect(deposit).to include("amount" => 120.0, "payment_date" => "2026-04-20")
+      expect(deposit.keys & %w[notes confirmation_number receipt_attached]).to be_empty
+      %w[quarterly_compliance_packet_pdf quarterly_compliance_packet_xlsx].each do |action|
+        get "/api/v1/client/reports/#{action}", params: report_params
+        expect(response).to have_http_status(:ok)
+        text = if action.end_with?("pdf")
+          PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
+        else
+          sheet = Roo::Excelx.new(StringIO.new(response.body))
+          sheet.sheets.flat_map { |name| sheet.sheet(name).to_a.flatten }.join(" ")
+        end
+        expect(text).not_to include("Private staff tracking note", "STAFF-123")
+      end
+      staff = QuarterlyCompliancePacketBuilder.new(company, 2026, 2).generate
+      expect(staff.dig(:form_500, :deposits).sole).to include(notes: "Private staff tracking note", confirmation_number: "STAFF-123", receipt_attached: true)
+    end
+
+    it "keeps voided and reversed checks in the client Checks and Payments Register" do
+      payroll_item.update_columns(voided: true)
+      reversed = create(:payroll_item, company: company, employee: create(:employee, company: company), pay_period: pay_period, gross_pay: 50, net_pay: 40)
+      reversed.update_columns(payroll_reversed_at: Time.current)
+      get "/api/v1/client/reports/paycheck_history_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
+      expect(text.scan(/voided/i).size).to be >= 2
+    end
+
+    it "hides staff component review warnings in client JSON and PDFs while preserving staff defaults" do
+      warning = { code: PayrollReportComponentReview::CODE, message: PayrollReportComponentReview::MESSAGE }
+      allow(PayrollReportComponentReview).to receive(:for_items).and_return([ warning ])
+      %w[ytd_summary employee_pay_history].each do |action|
+        get "/api/v1/client/reports/#{action}", params: report_params.merge(start_date: "2026-01-01", end_date: "2026-12-31")
+        expect(response).to have_http_status(:ok)
+        expect(response.body).not_to include(warning[:message])
+      end
+      %w[payroll_summary_by_employee_pdf paycheck_history_pdf deductions_contributions_pdf retirement_plans_pdf payroll_register_pdf].each do |action|
+        get "/api/v1/client/reports/#{action}", params: report_params
+        expect(response).to have_http_status(:ok)
+        text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
+        expect(text).not_to include("accountant review needed")
+      end
+      expect(QuickbooksPayrollReportData.new(pay_period).review_warnings).to eq([ warning ])
+      text = PDF::Reader.new(StringIO.new(PayrollSummaryByEmployeePdfGenerator.new(pay_period).generate)).pages.map(&:text).join(" ")
+      expect(text).to include("accountant review needed")
+    end
+
     it "serves payroll_summary_by_employee_pdf for the current company and rejects a foreign company context" do
       get "/api/v1/client/reports/payroll_summary_by_employee_pdf", params: report_params
       expect(response).to have_http_status(:ok)
@@ -417,9 +470,12 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
 
     context "in a practice copy" do
       before do
-        company.update!(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox", migration_rehearsal_status: "ready")
+        source = create(:company, organization: company.organization)
+        source_period = create(:pay_period, :committed, company: source)
+        company.update!(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox",
+          migration_source_company: source, migration_rehearsal_status: "ready", test_workspace_expires_at: 1.day.from_now)
         client_user.update!(practice_company_id: company.id)
-        pay_period.update_columns(status: "approved", test_workspace_role: "baseline")
+        pay_period.update_columns(status: "approved", test_workspace_role: "baseline", test_workspace_source_pay_period_id: source_period.id)
         draft_pay_period.update_columns(status: "approved", test_workspace_role: "practice")
       end
 

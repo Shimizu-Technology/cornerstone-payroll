@@ -10,7 +10,7 @@ RSpec.describe InstallmentLoanReportPdfGenerator do
     builder = instance_double(InstallmentLoanReportBuilder, loans: [])
 
     expect(InstallmentLoanReportBuilder).to receive(:new)
-      .with(company, as_of_date: as_of_date)
+      .with(company, as_of_date: as_of_date, pay_period_scope: nil)
       .and_return(builder)
 
     bytes = described_class.new(company, as_of_date: as_of_date).generate

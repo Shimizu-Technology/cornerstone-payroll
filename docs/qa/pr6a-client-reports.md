@@ -54,3 +54,39 @@ period selection, PDF download event and no horizontal page overflow. Corrected
 the initial spec's nonexistent /companies/12/reports URL to the app's /reports.
 Run used Chromium channel from task cache. Final controller metadata adjustment
 also passed targeted RuboCop. No task-owned listeners remain after the run.
+
+## Fix-round plan — 2026-11-15
+Starting head 064d572e, verified base main. Agent-executed affected-flow QA;
+synthetic test records only. This round repairs client report privacy and
+practice fixtures, finished-period selection, employee-list recovery and loan
+opening balances. Sources: the independent review, current client/staff report
+controllers and shared builders. The existing product brief above still applies.
+
+Required cases: R1 own-company finished/baseline report routes and unfinished/
+foreign rejection; R2 deposit notes, confirmation and receipt metadata absent
+from client JSON/PDF/workbooks while staff defaults remain; R3 staff component
+review warnings absent from client JSON/PDF; R4 period selector ignores newer
+calculated/approved runs at 1440/390; R5 employee-list failure leaves other
+reports usable and retry loads every employee page; R6 scoped loans without
+transactions use opening balance. The Checks & Payments Register deliberately
+retains voided/reversed checks, labelled voided, to preserve payment history.
+
+Backend cases run on ASUS; frontend lint/TypeScript/Vitest and mocked public
+Chromium journeys run on this MacBook. Real API browser integration, native
+hardware, production records and deployment are outside this fix round.
+Results are pending below; earlier blocked backend results are historical.
+
+Fix-round frontend results (2026-11-15, working tree based on 064d572e):
+- MacBook lint, tsc -b: passed. Vitest: 1 file / 3 tests, maxWorkers=1, passed.
+- Public bundled Chromium: 4 passed, one worker; catalog/default selection,
+  PDF download, employee-list failure/retry, and overflow checks at 1440/390.
+  First run had 2 failures from a newly added incorrect filename expectation;
+  corrected to the application's payroll_summary_by_employee.pdf and reran.
+- Full RuboCop: 1835 files, no offenses. Brakeman: 0 errors, 0 warnings.
+- Impeccable advisory scan: [].
+- ASUS attempts returned 75 (another run active); no backend spec has run yet
+  in this fix round. R1/R2/R3/R6 remain pending backend execution. R4/R5 passed.
+- No inline CodeRabbit threads existed at inspection. #458's general comment
+  says rate limited; that status is not an independent review of these fixes.
+- Playwright terminated its Vite/browser children; lifecycle reports no active
+  owned resources after that phase. Existing simulators/shared services untouched.
