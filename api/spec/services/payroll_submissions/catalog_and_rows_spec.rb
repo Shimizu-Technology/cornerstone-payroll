@@ -74,13 +74,13 @@ RSpec.describe "Pay-period catalog and change rows" do
   end
 
   it "normalizes rows and reports every invalid field" do
-    employee = create(:employee, company: company)
+    employee = create(:employee, :salary, company: company, salary_type: "variable")
     rows = PayrollSubmissions::ChangeRows.normalize!([
-      { "kind" => "owner_pay", "amount" => "2400.00", "basis" => "total", "employee_ids" => [ employee.id.to_s ] },
+      { "kind" => "owner_pay", "amount" => "2400.00", "employee_id" => employee.id.to_s },
       { "kind" => "deduction", "employee_id" => employee.id, "deduction_action" => "stop", "description" => "Uniform" }
     ], company_id: company.id)
     expect(rows).to eq([
-      { "kind" => "owner_pay", "employee_ids" => [ employee.id ], "amount" => "2400.00", "basis" => "total" },
+      { "kind" => "owner_pay", "employee_id" => employee.id, "amount" => "2400.00" },
       { "kind" => "deduction", "employee_id" => employee.id, "deduction_action" => "stop", "description" => "Uniform" }
     ])
     expect do
@@ -91,7 +91,7 @@ RSpec.describe "Pay-period catalog and change rows" do
       ], company_id: company.id)
     end.to raise_error(PayrollSubmissions::ChangeRows::Invalid) { |error|
       expect(error.details.keys).to eq(%w[changes.1 changes.2 changes.3])
-      expect(error.details["changes.1"].join).to include("total or for each owner")
+      expect(error.details["changes.1"].join).to include("choose an employee")
     }
   end
 end

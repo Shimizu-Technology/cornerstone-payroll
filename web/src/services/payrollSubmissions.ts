@@ -7,6 +7,13 @@ export type ChangeKind = 'extra_hours' | 'owner_pay' | 'paid_leave' | 'new_hire'
 export type ChangeRow = {
   kind: ChangeKind;
   label?: string;
+  standing_change_id?: number;
+  skipped?: boolean;
+  employee_wage_rate_id?: number;
+  wage_rate_label?: string;
+  wage_rate?: string;
+  availability_error?: string;
+  last_period_amount?: string;
   employee_id?: number;
   employee_name?: string;
   employee_ids?: number[];
@@ -54,13 +61,14 @@ export type PeriodSummary = {
 export type PeriodAction = 'submit' | 'approve' | 'request_changes' | 'message' | 'acknowledge' | 'start_review' | 'post_draft' | 'save_draft' | 'mark_paid';
 export type PeriodDetail = PeriodSummary & {
   schedule_note: string; thread_id: number | null; allowed_actions: PeriodAction[]; file_requests?: PortalFileRequest[];
+  standing_changes?: ChangeRow[];
   submissions: SubmissionRevision[]; drafts: SubmissionDraft[]; history: SubmissionHistoryEvent[];
 };
-export type PickerEmployee = { id: number; name: string };
+export type PickerEmployee = { id: number; name: string; variable_salary?: boolean; hourly?: boolean; wage_rates?: { id: number; label: string; rate: string | number | null }[] };
 type Detail = { data: PeriodDetail };
 
 const encode = (ref: string): string => encodeURIComponent(ref);
-type EmployeeRow = { id: number; first_name: string; last_name: string };
+type EmployeeRow = { id: number; first_name: string; last_name: string; employment_type?: string; salary_type?: string; contractor_pay_type?: string; wage_rates?: { id?: number; label: string; rate: string | number | null }[] };
 type EmployeePage = { data: EmployeeRow[]; meta: PaginationMeta };
 const EMPLOYEE_PAGE_SIZE = 200;
 const MAX_EMPLOYEE_PAGES = 50;
@@ -76,7 +84,7 @@ export async function loadAllEmployees(fetchPage: (page: number) => Promise<Empl
   }
   const seen = new Set<number>();
   return rows.filter(row => !seen.has(row.id) && seen.add(row.id))
-    .map(row => ({ id: row.id, name: `${row.first_name} ${row.last_name}`.trim() }));
+    .map(row => ({ id: row.id, name: `${row.first_name} ${row.last_name}`.trim(), wage_rates: row.wage_rates?.filter((rate): rate is { id: number; label: string; rate: string | number | null } => rate.id != null), ...(row.employment_type ? { variable_salary: row.employment_type === 'salary' && row.salary_type === 'variable', hourly: row.employment_type === 'hourly' || (row.employment_type === 'contractor' && row.contractor_pay_type === 'hourly') } : {}) }));
 }
 
 type SharedPeriodApi = {
@@ -135,7 +143,7 @@ export const STATUS_STEPS: { status: SubmissionStatus; label: string }[] = [
 
 export const CHANGE_KINDS: { kind: ChangeKind; label: string; hint: string }[] = [
   { kind: 'extra_hours', label: 'Extra or manual hours', hint: 'Hours not in the Revel report' },
-  { kind: 'owner_pay', label: 'Owner pay', hint: 'Say whether the amount is the total or for each owner' },
+  { kind: 'owner_pay', label: 'Owner pay', hint: 'Each person’s pay for this period' },
   { kind: 'paid_leave', label: 'Paid leave', hint: 'Leave hours to add' },
   { kind: 'new_hire', label: 'New hire', hint: 'Name and starting wage' },
   { kind: 'wage_change', label: 'Wage change', hint: 'New wage for an employee' },

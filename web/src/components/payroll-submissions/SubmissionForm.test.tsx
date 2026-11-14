@@ -131,3 +131,53 @@ it('requires a change row or No changes independently of the workbook answer', a
   fireEvent.click(screen.getByLabelText('No changes this period')); send();
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
 });
+
+it('starts with every-period rows, blank amounts and a last-period hint; sends a filled row and explicit skip', async () => {
+  mocks.employees.mockResolvedValue([{ id: 122, name: 'Monique Owner' }, { id: 135, name: 'Sara Owner' }]);
+  const defaults: PeriodDetail = { ...period, standing_changes: [
+    { kind: 'owner_pay', standing_change_id: 1, employee_id: 122, employee_name: 'Monique Owner', last_period_amount: '8421.13' },
+    { kind: 'owner_pay', standing_change_id: 2, employee_id: 135, employee_name: 'Sara Owner' },
+  ] };
+  render(<SubmissionForm period={defaults} onSent={vi.fn()} />);
+  await screen.findByText('Every period · Monique Owner');
+  expect(screen.getByText('Last period: $8,421.13')).toBeTruthy();
+  expect((screen.getAllByLabelText('Amount ($)')[0] as HTMLInputElement).value).toBe('');
+  fireEvent.change(screen.getAllByLabelText('Amount ($)')[0], { target: { value: '8000.12' } });
+  fireEvent.click(screen.getAllByLabelText('Not this period')[1]);
+  uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period')); send();
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  const rows = JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string);
+  expect(rows[0]).toMatchObject({ employee_id: 122, standing_change_id: 1, amount: '8000.12' });
+  expect(rows[1]).toMatchObject({ employee_id: 135, standing_change_id: 2, skipped: true });
+  expect(rows[0].last_period_amount).toBeUndefined();
+});
+
+it('requires a value or skip for defaults and records No changes as skips without deleting defaults', async () => {
+  const defaults: PeriodDetail = { ...period, standing_changes: [{ kind: 'owner_pay', standing_change_id: 1, employee_id: 122, employee_name: 'Monique Owner' }] };
+  render(<SubmissionForm period={defaults} onSent={vi.fn()} />);
+  uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period')); send();
+  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert').textContent).toContain('positive amount');
+  fireEvent.click(screen.getByLabelText('No changes this period')); send();
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([expect.objectContaining({ standing_change_id: 1, skipped: true })]);
+});
+
+it('adds per-person owner pay and extra hours on an explicitly selected saved job', async () => {
+  mocks.employees.mockResolvedValue([{ id: 173, name: 'Addison Worker', wage_rates: [{ id: 7, label: 'Maintenance', rate: '35.0' }] }]);
+  render(<SubmissionForm period={period} onSent={vi.fn()} />);
+  await waitFor(() => expect(mocks.employees).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
+  fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '173' } });
+  fireEvent.change(screen.getByLabelText('Saved job and rate'), { target: { value: '7' } });
+  fireEvent.change(screen.getByLabelText('Hours'), { target: { value: '68' } });
+  uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period')); send();
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([expect.objectContaining({ employee_id: 173, employee_wage_rate_id: 7, hours: '68' })]);
+});
+
+it('shows an unavailable default without guessing another employee or rate', () => {
+  render(<SubmissionForm period={{ ...period, standing_changes: [{ kind: 'extra_hours', standing_change_id: 1, employee_id: 173, employee_name: 'Addison Worker', availability_error: 'Saved job and rate are missing or inactive.' }] }} onSent={vi.fn()} />);
+  expect(screen.getByRole('alert').textContent).toContain('missing or inactive');
+  expect((screen.getByLabelText('Saved job and rate') as HTMLSelectElement).value).toBe('');
+});

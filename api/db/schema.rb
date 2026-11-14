@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_14_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_14_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3267,6 +3267,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_090000) do
     t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'approved'::character varying::text, 'superseded'::character varying::text])", name: "payroll_review_packages_status_check"
   end
 
+  create_table "payroll_standing_changes", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "employee_wage_rate_id"
+    t.string "kind", null: false
+    t.integer "position", default: 0, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_payroll_standing_changes_on_company_id"
+    t.index [ "employee_id" ], name: "index_payroll_standing_changes_on_employee_id"
+    t.index [ "employee_wage_rate_id" ], name: "index_payroll_standing_changes_on_employee_wage_rate_id"
+    t.check_constraint "\"position\" >= 0", name: "standing_change_position"
+    t.check_constraint "kind::text = ANY (ARRAY['owner_pay'::character varying, 'extra_hours'::character varying]::text[])", name: "standing_change_kind"
+  end
+
   create_table "payroll_submission_documents", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "payroll_submission_id", null: false
@@ -3414,7 +3430,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_090000) do
     t.index [ "payroll_submission_period_id", "revision" ], name: "idx_payroll_submissions_revision", unique: true
     t.index [ "payroll_submission_period_id", "submitted_by_id", "idempotency_key" ], name: "idx_payroll_submissions_retry_key", unique: true, where: "(idempotency_key IS NOT NULL)"
     t.index [ "submitted_by_id" ], name: "index_payroll_submissions_on_submitted_by_id"
-    t.check_constraint "NOT no_changes OR change_rows = '[]'::jsonb", name: "payroll_submissions_no_changes_is_empty"
+    t.check_constraint "NOT no_changes OR jsonb_array_length(jsonb_path_query_array(change_rows, '$[*] ? (@.skipped == true)')) = jsonb_array_length(change_rows)", name: "payroll_submissions_no_changes_is_empty"
     t.check_constraint "jsonb_typeof(change_rows) = 'array'::text", name: "payroll_submissions_changes_array"
     t.check_constraint "revision > 0", name: "payroll_submissions_revision_positive"
     t.check_constraint "workbook_choice IS NULL OR (workbook_choice::text = ANY (ARRAY['attach'::character varying, 'link'::character varying, 'none'::character varying]::text[]))", name: "submission_workbook_choice"
@@ -4467,6 +4483,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_090000) do
     t.index [ "marked_ready_by_id" ], name: "index_w2_filing_readinesses_on_marked_ready_by_id"
   end
 
+  add_foreign_key "payroll_standing_changes", "companies"
+  add_foreign_key "payroll_standing_changes", "employee_wage_rates", on_delete: :nullify
+  add_foreign_key "payroll_standing_changes", "employees"
   add_foreign_key "aire_payroll_acknowledgements", "time_tracking_imports"
   add_foreign_key "aire_payroll_calendar_periods", "companies", on_delete: :restrict
   add_foreign_key "aire_payroll_calendar_periods", "pay_periods", column: [ "pay_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_aire_calendar_periods_pay_period_tenant"
