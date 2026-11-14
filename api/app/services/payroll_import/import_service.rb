@@ -220,10 +220,11 @@ module PayrollImport
                 payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
                 payroll_item.overtime_hours = row[:overtime_hours].to_f if row[:overtime_hours]
               end
-              restore_client_hours_baseline!(payroll_item) if row[:workbook_only] && !row[:client_extra_hours]
-              # Preserve workbook-only worksheet splits. Extra hours belong
+              restored = row[:workbook_only] && !row[:client_extra_hours] && restore_client_hours_baseline!(payroll_item)
+              # Preserve workbook-only worksheet splits, including one just
+              # restored from before the client's hours. Extra hours belong
               # only to their submitted job, not to every existing allocation.
-              preserve_split = row[:client_extra_hours] && row[:workbook_only] && payroll_item.wage_rate_hours.present?
+              preserve_split = (row[:client_extra_hours] || restored) && row[:workbook_only] && payroll_item.wage_rate_hours.present?
               apply_wage_rate_choice!(payroll_item, employee, row) unless preserve_split
               apply_client_hours!(payroll_item, employee, row) if row[:client_extra_hours]
               payroll_item.custom_columns_data = payroll_item.custom_columns_data.to_h.merge(
@@ -525,6 +526,7 @@ module PayrollImport
       end
       item.hours_worked = previous.fetch("baseline_regular_hours")
       item.wage_rate_hours = previous.fetch("baseline_allocations")
+      true
     end
 
     def configured_loan_due?(employee)
