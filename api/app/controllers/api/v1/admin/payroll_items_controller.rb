@@ -286,10 +286,17 @@ module Api
 
           other = %w[overtime_hours holiday_hours pto_hours]
           current = item.wage_rate_hours.map(&:to_h)
-          bucket = ->(entry) { [ entry["employee_wage_rate_id"], entry["source_bucket_key"] ] }
+          # Rows without a saved job or bucket are told apart by their rate.
+          bucket = lambda do |entry|
+            legacy = entry["employee_wage_rate_id"].blank? && entry["source_bucket_key"].blank?
+            [ entry["employee_wage_rate_id"], entry["source_bucket_key"], (entry["rate"].to_d if legacy) ]
+          end
           by_bucket = current.index_by(&bucket)
           baseline = Array(evidence["baseline_allocations"]).map(&:to_h)
-          baseline = baseline.map { |entry| entry.merge(by_bucket.fetch(bucket.call(entry), {}).slice(*other)) }
+          # Staff own every non-regular hour, so a bucket dropped from the
+          # allocations keeps none of its earlier overtime, holiday or PTO.
+          cleared = other.index_with { 0.0 }
+          baseline = baseline.map { |entry| entry.merge(cleared, by_bucket.fetch(bucket.call(entry), {}).slice(*other)) }
           current.each do |entry|
             next if baseline.any? { |row| bucket.call(row) == bucket.call(entry) }
             next if other.all? { |field| entry[field].to_d.zero? }
