@@ -84,7 +84,7 @@ module Api
             json[:payroll_items] = items.map do |item|
               {
                 id: item.id,
-                pay_stub_available: pay_period.client_finished?,
+                pay_stub_available: pay_period.client_finished? && EarningsStatementEligibility.printable?(item),
                 employee_id: item.employee_id,
                 employee_name: item.employee_full_name,
                 employment_type: item.employment_type,

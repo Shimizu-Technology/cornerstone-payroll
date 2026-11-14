@@ -11,7 +11,7 @@ module Api
         def index
           employee = Employee.where(company_id: current_company_id).find(params[:employee_id])
           items = eligible_items.where(employee_id: employee.id).includes(:pay_period).order("pay_periods.pay_date DESC", id: :desc)
-          render json: { pay_stubs: items.map { |item|
+          render json: { pay_stubs: items.select { |item| EarningsStatementEligibility.printable?(item) }.map { |item|
             { id: item.id, pay_period_id: item.pay_period_id, pay_date: item.pay_period.pay_date,
               period_description: item.pay_period.period_description, net_pay: item.net_pay }
           } }
@@ -19,13 +19,17 @@ module Api
 
         def download
           item = eligible_items.includes(:employee, :pay_period).find(params[:id])
-          generator = PayStubGenerator.new(item, pay_period_scope: finished_periods)
+          unless EarningsStatementEligibility.printable?(item)
+            return render json: { error: "This payroll item has no earnings activity to print an earnings statement." }, status: :unprocessable_entity
+          end
+
+          generator = PayStubGenerator.new(item)
           pdf = generator.generate
           # Record successful generation before sending; audit failures must not
           # silently produce an unaudited earnings-statement download.
           AuditLog.record!(
             user: current_user, company_id: current_company_id,
-            action: "client_pay_stubs#download", record_type: "PayrollItem", record_id: item.id,
+            action: "client_pay_stubs#download", event_category: "document_access", record_type: "PayrollItem", record_id: item.id,
             metadata: { employee_id: item.employee_id, pay_period_id: item.pay_period_id },
             ip_address: request.remote_ip, user_agent: request.user_agent, request_id: request.request_id
           )
