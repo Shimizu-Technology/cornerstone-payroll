@@ -62,6 +62,7 @@ module Api
             end_date: pay_period.end_date,
             pay_date: pay_period.pay_date,
             status: pay_period.status,
+            test_workspace_role: pay_period.test_workspace_role,
             run_purpose: pay_period.run_purpose,
             includes_base_salary: pay_period.includes_base_salary,
             includes_recurring_items: pay_period.includes_recurring_items,
