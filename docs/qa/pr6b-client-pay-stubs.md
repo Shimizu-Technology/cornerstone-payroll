@@ -18,8 +18,8 @@ write R2 artifacts, so older stored statements with accountant warnings cannot
 be served. Source review found company/employee information, earnings, employee
 taxes/deductions, employer contributions, payment details and current/YTD totals.
 The current generator contains no accountant review-warning output or transmittal
-notes. Client YTD queries receive the finished scope; cached YTD columns are
-refreshed only on the in-memory item, with no database save.
+notes. The original implementation supplied a client-specific finished YTD scope.
+The fix round below removes that behavior to match the staff statement.
 
 Downloads record AuditLog before sending; failure to write the audit prevents
 delivery. Responses use private, no-store. Viewing fetches the same audited PDF
@@ -62,3 +62,33 @@ checks. Lead owns CodeRabbit/independent review, merge and deployment.
 Final cleanup audit found other sessions' Vite servers on 6531/6532 and a local
 Postgres process not started by this task. Ownership was verified from command
 paths; all were left untouched. No task-owned listener or browser process remains.
+
+## Fix-round plan — 2026-11-15
+Original head dcf8a738; rebased onto #458 fix 65bc8875. Agent-executed
+required affected-flow cases: S1 valid practice lineage and baseline/archive
+boundary; S2 history, download and period controls all reject statements with
+no earnings activity; S3 document_access audit before delivery, repeated reads;
+S4 identical extracted client/staff PDF text with divergent stored YTD fixture,
+and unchanged payroll-item/period attributes after generation; S5 period and
+employee-history preview/download at 1440/390. Synthetic isolated fixtures only.
+
+Clients now call the same unmodified PayStubGenerator as staff. Client-specific
+YTD overrides in the generator, Employee and breakdown services are removed.
+Stored net/tax YTD and the staff generator's existing earnings-breakdown rules
+therefore match. A read still only creates its document audit, never saves
+payroll data. Browser transport is mocked; native devices and real API browser
+integration remain not_run. Backend cases will run on ASUS when its lock clears.
+
+Fix-round local results (2026-11-15, combined stack):
+- Lint and tsc -b passed. Affected Vitest: 3 files / 7 tests passed,
+  maxWorkers=1 (report catalog, stub preview/recovery, employee overview).
+- Public bundled Chromium: 6 passed, one worker at 1440/390. Both statement
+  entry points download; preview renders a PDF canvas and closes; report catalog
+  and employee-list recovery still work with no horizontal page overflow.
+- Full RuboCop: 1837 files, no offenses. Brakeman: 0 errors, 0 warnings.
+- ASUS remains pending: repeated exit 75 (another run owns its lock), plus one
+  interrupted SSH/rsync connection. Backend acceptance has not been claimed.
+- CodeRabbit has no inline threads; its general comment skipped the stacked
+  base. A skipped success status does not establish review of these changes.
+- Playwright cleaned its Vite/browser children. No simulators, local database
+  or containers started. Remaining runner cleanup will be verified below.
