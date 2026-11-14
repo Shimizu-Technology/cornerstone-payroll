@@ -176,7 +176,9 @@ module PayrollIntake
       return unless submission
 
       period = submission.period
-      period.lock!
+      # Lock the row without reloading it: a pay-run selection may carry an
+      # unsaved period claim that is persisted only on a successful apply.
+      PayrollSubmissionPeriod.lock.find(period.id)
       unless submission.company_id == company.id && period.pay_period_id == pay_period.id &&
           period.start_date == pay_period.start_date && period.end_date == pay_period.end_date
         raise ArgumentError, "Portal source and import must belong to the same company and period"
