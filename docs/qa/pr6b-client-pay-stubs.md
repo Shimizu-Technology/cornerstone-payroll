@@ -92,3 +92,38 @@ Fix-round local results (2026-11-15, combined stack):
   base. A skipped success status does not establish review of these changes.
 - Playwright cleaned its Vite/browser children. No simulators, local database
   or containers started. Remaining runner cleanup will be verified below.
+
+## Fix-round handback — backend blocked
+Tested combined implementation: 5245b451 (report code b3046e93). Subsequent
+rebase/ledger commits only change documentation. S5 passed at 1440/390; S1–S4
+remain blocked until the database-backed specs execute. ASUS ran 0 backend
+examples: repeated exit 75 for over 20 minutes, plus SSH banner/rsync errors
+(255). Read-only inspection confirmed another Playwright run held the lock
+for over 33 minutes. No task-owned remote database/container was started.
+
+Final local evidence: 3 Vitest files / 7 tests; 6 public Chromium scenarios;
+lint, tsc -b, full RuboCop (1837 files), Brakeman (0 errors/warnings): passed.
+These automated UI journeys use mocked transport and do not establish real API
+authorization. Full RSpec, real API browser integration and native hardware
+were not run. Required backend tests must pass before readiness.
+
+No inline CodeRabbit threads existed. The explicit review request returned
+"Review rate limited" for #459; no completed review of this fix is claimed.
+CI browser passed; backend/frontend CI were in progress at last inspection.
+Both PRs stay draft. There has been no merge, deployment or production access.
+
+Continuation command: use asus-test --postgres cornerstone_payroll_test with
+this repository root; export TEST_DATABASE_URL=postgres://postgres:postgres@
+127.0.0.1:55432/cornerstone_payroll_test (without the line break), AUTH_ENABLED=
+false; run bundle install --quiet, RAILS_ENV=test bin/rails db:prepare, then the
+six client request files reports/report_routes/pay_stubs/pay_periods/
+portal_boundary/employees, all six admin report request files, and the touched
+report/stub service and Employee regression specs. The exact executable command
+is retained in .codex/handoffs with a copy of the ASUS retry script. Do not start
+a second ASUS job. Fix observed failures and rerun; then check reviews/CI and
+mark ready only when required acceptance is green. Do not merge/deploy.
+
+Cleanup verified: no active lifecycle-owned resources. Playwright/Vite children
+and the retry wrapper ended; no runtime handoff. Baseline simulators/shared
+services remained untouched. Source worktree/branches and QA evidence remain
+available for the lead.
