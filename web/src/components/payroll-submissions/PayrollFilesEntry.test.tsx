@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 6, payroll_intake_source_types: mocks.enabled ? ['mosa_revel'] : [] } }) }));
 import { MemoryRouter } from 'react-router';
 import { PayrollFilesEntry } from './PayrollFilesEntry';
 import { currentSubmissionPeriod } from '@/lib/payrollSubmissionFormat';
 import type { PeriodSummary } from '@/services/payrollSubmissions';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), enabled: true }));
 vi.mock('@/services/payrollSubmissions', async original => ({
   ...await original<typeof import('@/services/payrollSubmissions')>(),
   clientPayrollSubmissionsApi: { list: mocks.list },
 }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); mocks.enabled = true; });
 
 const period = (overrides: Partial<PeriodSummary>): PeriodSummary => ({
   ref: '2026-10-19_2026-11-01', id: null, start_date: '2026-10-19', end_date: '2026-11-01', label: 'Oct 19 – Nov 1, 2026', pay_date: '2026-11-05',
@@ -82,4 +83,11 @@ it('picks the earliest unopened unpaid period when none is open yet', () => {
     period({ ref: 'earlier', open_for_files: false, status: 'waiting_for_files' }),
   ];
   expect(currentSubmissionPeriod(rows)?.ref).toBe('earlier');
+});
+
+it('hides the card and makes no intake request for a fixed-pay client', () => {
+  mocks.enabled = false;
+  renderEntry();
+  expect(screen.queryByRole('region')).toBeNull();
+  expect(mocks.list).not.toHaveBeenCalled();
 });

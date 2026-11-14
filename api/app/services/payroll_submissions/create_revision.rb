@@ -24,6 +24,9 @@ module PayrollSubmissions
     end
 
     def call
+      unless @company.payroll_intake_source_enabled?("mosa_revel")
+        raise FileSet::Invalid, { "company" => [ "Payroll files are not enabled for this client" ] }
+      end
       raise Closed, "This period opens for files on #{@entry.end_date.strftime('%b %-d, %Y')}." unless @catalog.open_for_files?(@entry)
 
       key = @params[:idempotency_key].presence&.to_s
@@ -32,7 +35,9 @@ module PayrollSubmissions
       answers = normalized_answers
       files = FileSet.new(company_id: @company.id, files: incoming_files).prepare!
       keep_ids = keep_document_ids
-      request_fingerprint = fingerprint(dates: [ @entry.start_date, @entry.end_date ], answers: answers, keep: keep_ids,
+      request_answers = answers
+      request_answers = answers.merge(excel_attachments_supporting: true) if ActiveModel::Type::Boolean.new.cast(@params[:excel_attachments_supporting])
+      request_fingerprint = fingerprint(dates: [ @entry.start_date, @entry.end_date ], answers: request_answers, keep: keep_ids,
         files: files.prepared.map { |item| [ item.role, item.sha256, item.file.original_filename ] }, based_on: @params[:based_on_revision].presence)
 
       if key && @entry.record && (existing = @entry.record.submissions.find_by(submitted_by_id: @actor.id, idempotency_key: key))
@@ -44,7 +49,7 @@ module PayrollSubmissions
       content = content_fingerprint(answers, kept.map { |doc| [ doc.role, doc.sha256 ] } + files.prepared.map { |item| [ item.role, item.sha256 ] })
       return Result.new(submission: current, outcome: :duplicate) if current && current.content_fingerprint == content
 
-      validate_roles!(kept, files.prepared, no_changes: answers[:no_changes])
+      validate_roles!(kept, files.prepared, answers: answers)
       files.upload!
       submission = nil
       outcome = :created
@@ -77,7 +82,7 @@ module PayrollSubmissions
         submission = period.submissions.create!(
           company_id: @company.id, revision: (latest&.revision || 0) + 1, submitted_by: @actor,
           submitted_by_name_snapshot: @actor.name, submitted_at: Time.current,
-          no_changes: answers[:no_changes], change_rows: answers[:change_rows], changes_link_url: answers[:changes_link_url],
+          workbook_choice: answers[:workbook_choice], no_changes: answers[:no_changes], change_rows: answers[:change_rows], changes_link_url: answers[:changes_link_url],
           notes: answers[:notes], content_fingerprint: content, request_fingerprint: request_fingerprint, idempotency_key: key
         )
         # Revel PDF first, then the workbook, then attachments, kept and new alike.
@@ -136,10 +141,9 @@ module PayrollSubmissions
       rows = ChangeRows.normalize!(@params[:changes], company_id: @company.id)
       raise FileSet::Invalid, { "changes" => [ "Choose either \"No changes this period\" or list the changes, not both" ] } if no_changes && rows.any?
 
+      raise FileSet::Invalid, { "changes" => [ 'List the changes this period or choose "No changes this period"' ] } unless no_changes || rows.any?
+
       link = @params[:changes_link_url].to_s.strip.presence
-      if no_changes && link
-        raise FileSet::Invalid, { "changes_link_url" => [ "Remove the template link, or untick \"No changes this period\"" ] }
-      end
       if link
         uri = URI.parse(link) rescue nil
         raise FileSet::Invalid, { "changes_link_url" => [ "Enter a full https:// link" ] } unless uri.is_a?(URI::HTTPS) && uri.host.present? && link.length <= 2000
@@ -147,7 +151,7 @@ module PayrollSubmissions
       notes = @params[:notes].to_s.strip.presence
       raise FileSet::Invalid, { "notes" => [ "Keep notes under 5,000 characters" ] } if notes && notes.length > 5000
 
-      { no_changes: no_changes, change_rows: rows, changes_link_url: link, notes: notes }
+      { workbook_choice: @params[:workbook_choice].to_s, no_changes: no_changes, change_rows: rows, changes_link_url: link, notes: notes }
     end
 
     def keep_document_ids
@@ -174,15 +178,29 @@ module PayrollSubmissions
       keep_ids.map { |id| available.fetch(id) }
     end
 
-    def validate_roles!(kept, prepared, no_changes:)
+    def validate_roles!(kept, prepared, answers:)
       roles = kept.map(&:role) + prepared.map(&:role)
       errors = {}
-      if no_changes && roles.include?("changes_workbook")
-        errors["changes_workbook"] = [ "Remove the changes workbook, or untick \"No changes this period\"" ]
+      choice = answers[:workbook_choice]
+      workbook = roles.include?("changes_workbook")
+      link = answers[:changes_link_url].present?
+      unless %w[attach link none].include?(choice)
+        errors["workbook_choice"] = [ "Choose a workbook, a link, or no tips or loans this period" ]
+      end
+      errors["changes_workbook"] = [ "Attach the tips & loans workbook" ] if choice == "attach" && !workbook
+      errors["changes_link_url"] = [ "Enter a full https:// link" ] if choice == "link" && !link
+      if (workbook && choice != "attach") || (link && choice != "link")
+        errors["workbook_choice"] = [ "Choose exactly one: attach the workbook, send a link, or no tips or loans" ]
+      end
+      new_excel = prepared.any? { |item| item.role == "attachment" && File.extname(item.file.original_filename).downcase.in?(%w[.xls .xlsx]) }
+      new_workbook = prepared.any? { |item| item.role == "changes_workbook" }
+      supporting = ActiveModel::Type::Boolean.new.cast(@params[:excel_attachments_supporting])
+      if new_excel && !new_workbook && !supporting
+        errors["attachment"] = [ "Is this the tips & loans workbook? Move the Excel file to the workbook slot or confirm it is supporting material." ]
       end
       errors["revel_payroll"] = [ "Attach the Revel payroll PDF" ] if roles.count("revel_payroll").zero?
       errors["revel_payroll"] = [ "Send one Revel payroll PDF per revision" ] if roles.count("revel_payroll") > 1
-      errors["changes_workbook"] = [ "Send one changes workbook per revision" ] if roles.count("changes_workbook") > 1
+      errors["changes_workbook"] = [ "Send one tips & loans workbook per revision" ] if roles.count("changes_workbook") > 1
       raise FileSet::Invalid, errors if errors.any?
     end
 

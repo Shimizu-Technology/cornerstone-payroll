@@ -44,6 +44,13 @@ module PayrollSubmissions
         end
         documents = source_documents!(submission)
         files = documents.map { |link| upload_for!(link) }
+        if @options[:staff_workbook].present?
+          unless submission.changes_link_url.present? && documents.none? { |link| link.role == "changes_workbook" }
+            raise ArgumentError, "A staff workbook may only supplement a revision with a workbook link and no workbook file"
+          end
+          validated = FileSet.new(company_id: @run.company_id, files: [ [ "changes_workbook", @options[:staff_workbook] ] ]).prepare!
+          files << validated.prepared.sole.file
+        end
         result = PayrollIntake::PreviewService.new(pay_period: @run, source_type: "mosa_revel", actor: @actor,
           files: files, portal_documents: documents,
           **@options.slice(:supersedes_package_id, :supersession_reason)).call

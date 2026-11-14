@@ -58,3 +58,25 @@ RSpec.describe "Pay-period submission tenancy and immutability" do
     end.to raise_error(ActiveRecord::RecordNotUnique)
   end
 end
+
+RSpec.describe PayrollSubmissionImport do
+  it "rejects incomplete staff evidence and cross-company or cross-period selections" do
+    company = create(:company)
+    run = create(:pay_period, company: company)
+    period = PayrollSubmissionPeriod.create!(company: company, pay_period: run, start_date: run.start_date, end_date: run.end_date, source: "pay_period")
+    source = period.submissions.create!(company: company, revision: 1, submitted_at: Time.current, content_fingerprint: "c", request_fingerprint: "r")
+    actor = create(:user, company: company)
+    record = PayrollImportRecord.create!(pay_period: run, status: "previewed")
+    selection = described_class.new(payroll_submission: source, current_submission: source, selected_by: actor, payroll_import: record)
+    expect(selection).to be_valid
+    selection.staff_workbook_attached_by = actor
+    selection.staff_workbook_attached_at = Time.current
+    expect(selection).not_to be_valid
+    expect(selection.errors[:staff_workbook_document]).to be_present
+    selection.staff_workbook_attached_by = nil
+    selection.staff_workbook_attached_at = nil
+    record.update!(pay_period: create(:pay_period, company: create(:company)))
+    expect(selection).not_to be_valid
+    expect(selection.errors[:base].join).to include("same company and period")
+  end
+end

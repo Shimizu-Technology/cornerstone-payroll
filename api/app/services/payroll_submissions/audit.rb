@@ -29,7 +29,7 @@ module PayrollSubmissions
     def self.submission_metadata(submission)
       links = submission.submission_documents.to_a
       { submission_id: submission.id, revision: submission.revision, document_ids: links.map(&:client_document_id),
-        document_roles: links.map(&:role).tally, no_changes: submission.no_changes, change_count: submission.change_rows.size }
+        document_roles: links.map(&:role).tally, workbook_choice: submission.workbook_choice, no_changes: submission.no_changes, change_count: submission.change_rows.size }
     end
 
     def self.feed(period)
