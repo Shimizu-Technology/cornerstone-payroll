@@ -359,35 +359,9 @@ module Api
           }
         end
 
-        # Build only: save in the successful apply transaction so a failed row
-        # never leaves a selection that can resolve the pending-source gate.
         def pay_run_selection!(record)
-          period = pending_portal_period
-          source = period&.current_submission
-          unless source && source.id.to_s == params[:use_submission_id].to_s && period.pending_source_review?
-            raise ArgumentError, "Choose the current pending client revision for this company and pay period"
-          end
-          period.lock!
-          unless @pay_period.cycle == "regular" && @pay_period.run_purpose == "regular" && @pay_period.correction_status.nil?
-            raise ArgumentError, "Only the matching regular pay run may use a client revision"
-          end
-          if period.pay_period_id.nil?
-            catalog = PayrollSubmissions::Catalog.new(company: @pay_period.company)
-            eligible = catalog.live_pay_period(catalog.resolve(period.id))
-            unless eligible&.id == @pay_period.id
-              raise ArgumentError, "Only the matching regular pay run offered by the portal may use this revision"
-            end
-            # Persist this claim together with successful apply, never on preview.
-            period.pay_period = @pay_period
-            source.period = period
-          elsif period.pay_period_id != @pay_period.id
-            raise ArgumentError, "This client revision is not linked to this pay run"
-          end
-          unless record.payroll_intake_session&.source_type == "mosa_revel"
-            raise ArgumentError, "Only a MoSa import may be linked to a client revision"
-          end
-          record.submission_imports.build(payroll_submission: source, current_submission: source,
-            selected_by: current_user, source_route: "pay_run")
+          PayrollSubmissions::PayRunSelection.new(pay_period: @pay_period, actor: current_user,
+            period: pending_portal_period, submission_id: params[:use_submission_id]).build(record)
         end
 
         def pending_portal_period

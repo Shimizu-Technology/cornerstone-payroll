@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { webcrypto } from 'node:crypto';
 import { SubmissionForm } from './SubmissionForm';
 import type { PeriodDetail, SubmissionRevision } from '@/services/payrollSubmissions';
 import type { ClientDocument } from '@/services/api';
@@ -14,8 +15,8 @@ vi.mock('@/services/payrollSubmissions', async original => ({
 const period = { ref: '9', submissions: [] } as unknown as PeriodDetail;
 const pdf = () => new File(['%PDF'], 'revel.pdf', { type: 'application/pdf' });
 const workbook = () => new File(['workbook'], 'tips.XLSX');
-beforeEach(() => { vi.clearAllMocks(); mocks.employees.mockResolvedValue([]); mocks.submit.mockResolvedValue({ data: period, outcome: 'created' }); });
-afterEach(cleanup);
+beforeEach(() => { vi.stubGlobal('crypto', webcrypto); vi.clearAllMocks(); mocks.employees.mockResolvedValue([]); mocks.submit.mockResolvedValue({ data: period, outcome: 'created' }); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const send = () => fireEvent.click(screen.getByRole('button', { name: 'Send to Cornerstone' }));
 const uploadPdf = () => fireEvent.change(screen.getByLabelText('Revel hours report (PDF)'), { target: { files: [pdf()] } });
 
@@ -69,4 +70,21 @@ it('carries both source slots forward and lets the client explicitly replace the
   fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
   expect((mocks.submit.mock.calls[1][1] as FormData).getAll('keep_document_ids[]')).toEqual(['1']);
+});
+
+it('reuses an interrupted submission key only for identical bytes', async () => {
+  mocks.submit.mockRejectedValue(new Error('Connection interrupted'));
+  render(<SubmissionForm period={period} onSent={vi.fn()} />);
+  uploadPdf();
+  fireEvent.click(screen.getByLabelText('Attach the workbook'));
+  const input = screen.getByLabelText('Tips & loans workbook (Excel)');
+  fireEvent.change(input, { target: { files: [new File(['original'], 'tips.xlsx', { lastModified: 1 })] } });
+  send(); await screen.findByText('Connection interrupted');
+  const firstKey = (mocks.submit.mock.calls[0][1] as FormData).get('idempotency_key');
+  send(); await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+  await screen.findByText('Connection interrupted');
+  expect((mocks.submit.mock.calls[1][1] as FormData).get('idempotency_key')).toBe(firstKey);
+  fireEvent.change(input, { target: { files: [new File(['correct!'], 'tips.xlsx', { lastModified: 1 })] } });
+  send(); await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(3));
+  expect((mocks.submit.mock.calls[2][1] as FormData).get('idempotency_key')).not.toBe(firstKey);
 });

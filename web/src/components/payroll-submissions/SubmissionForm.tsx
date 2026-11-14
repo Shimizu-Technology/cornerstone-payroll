@@ -15,6 +15,18 @@ function rowFields(row: ChangeRow): ChangeRow {
     .filter(([, value]) => value !== undefined && value !== '')) as unknown as ChangeRow;
 }
 
+async function fileIdentity(file: File | null): Promise<unknown> {
+  if (!file) return null;
+  const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(new Error('Could not read the selected file. Choose it again.'));
+    reader.readAsArrayBuffer(file);
+  });
+  const hash = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+  return [file.name, file.size, Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('')];
+}
+
 function FieldError({ messages }: { messages?: string[] }): ReactElement | null {
   if (!messages?.length) return null;
   return <p role="alert" className="mt-1 text-sm text-danger-700">{messages.join(' ')}</p>;
@@ -65,6 +77,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
+    if (busy) return;
     setError(null); setDetails({});
     if (!revel && !keptRevel) { setDetails({ revel_payroll: ['Attach the Revel payroll PDF'] }); return; }
     if (!workbookChoice) { setDetails({ workbook_choice: ['Choose a workbook, a link, or no tips or loans this period'] }); return; }
@@ -83,22 +96,22 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       return true;
     });
     const changes = noChanges ? [] : rows.map(rowFields);
-    const identity = JSON.stringify([revel?.name, revel?.size, revel?.lastModified, sentWorkbook?.name, sentWorkbook?.size, attachments.map(f => [f.name, f.size, f.lastModified]), keepIds, workbookChoice, noChanges, changes, sentLink, notes, current?.revision]);
-    if (retry.current?.identity !== identity) retry.current = { identity, key: crypto.randomUUID() };
-    const form = new FormData();
-    if (revel) form.append('revel_payroll', revel);
-    if (sentWorkbook) form.append('changes_workbook', sentWorkbook);
-    attachments.forEach(file => form.append('attachments[]', file));
-    keepIds.forEach(id => form.append('keep_document_ids[]', String(id)));
-    form.append('workbook_choice', workbookChoice);
-    form.append('no_changes', String(noChanges));
-    form.append('changes', JSON.stringify(changes));
-    if (sentLink) form.append('changes_link_url', sentLink);
-    if (notes.trim()) form.append('notes', notes.trim());
-    if (current) form.append('based_on_revision', String(current.revision));
-    form.append('idempotency_key', retry.current.key);
     setBusy(true);
     try {
+      const identity = JSON.stringify([await fileIdentity(revel), await fileIdentity(sentWorkbook), await Promise.all(attachments.map(fileIdentity)), keepIds, workbookChoice, noChanges, changes, sentLink, notes, current?.revision]);
+      if (retry.current?.identity !== identity) retry.current = { identity, key: crypto.randomUUID() };
+      const form = new FormData();
+      if (revel) form.append('revel_payroll', revel);
+      if (sentWorkbook) form.append('changes_workbook', sentWorkbook);
+      attachments.forEach(file => form.append('attachments[]', file));
+      keepIds.forEach(id => form.append('keep_document_ids[]', String(id)));
+      form.append('workbook_choice', workbookChoice);
+      form.append('no_changes', String(noChanges));
+      form.append('changes', JSON.stringify(changes));
+      if (sentLink) form.append('changes_link_url', sentLink);
+      if (notes.trim()) form.append('notes', notes.trim());
+      if (current) form.append('based_on_revision', String(current.revision));
+      form.append('idempotency_key', retry.current.key);
       const response = await clientPayrollSubmissionsApi.submit(period.ref, form);
       retry.current = null;
       onSent(response.data, response.outcome);
