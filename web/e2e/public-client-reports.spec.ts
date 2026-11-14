@@ -59,7 +59,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     const download = page.waitForEvent('download');
     await page.getByRole('menuitem', { name: /PDF/ }).click();
     const file = await download;
-    expect(file.suggestedFilename()).toBe('payroll_summary_by_employee.pdf');
+    expect(file.suggestedFilename()).toBe('report.pdf');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
   test(`employee-list failure and retry preserve report downloads at ${viewport.width}px`, async ({ page }) => {

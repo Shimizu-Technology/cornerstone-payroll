@@ -23,7 +23,9 @@ class InstallmentLoanReportBuilder
     all_transactions = loan.loan_transactions.chronological.to_a
     if @pay_period_scope
       allowed_ids = @pay_period_scope.where(company_id: company.id).pluck(:id)
-      balance = all_transactions.first&.balance_before || loan.opening_balance
+      # Replay from the ledger's opening state: the first recorded entry, not the
+      # earliest-dated one, since additions can be backdated.
+      balance = all_transactions.min_by(&:id)&.balance_before || loan.opening_balance
       all_transactions = all_transactions.filter_map do |txn|
         next unless txn.pay_period_id.nil? || allowed_ids.include?(txn.pay_period_id)
 

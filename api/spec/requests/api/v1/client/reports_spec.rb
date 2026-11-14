@@ -96,6 +96,8 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       deposit = response.parsed_body.dig("report", "form_500", "deposits").sole
       expect(deposit).to include("amount" => 120.0, "payment_date" => "2026-04-20")
       expect(deposit.keys & %w[notes confirmation_number receipt_attached]).to be_empty
+      report = response.parsed_body.fetch("report")
+      expect(%w[federal_941 w1 swica].map { |section| report.dig(section, "filing_steps") }).to all(be_nil)
       %w[quarterly_compliance_packet_pdf quarterly_compliance_packet_xlsx].each do |action|
         get "/api/v1/client/reports/#{action}", params: report_params
         expect(response).to have_http_status(:ok)
@@ -109,6 +111,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       end
       staff = QuarterlyCompliancePacketBuilder.new(company, 2026, 2).generate
       expect(staff.dig(:form_500, :deposits).sole).to include(notes: "Private staff tracking note", confirmation_number: "STAFF-123", receipt_attached: true)
+      expect(%i[federal_941 w1 swica].map { |section| staff.dig(section, :filing_steps) }).to all(be_present)
     end
 
     it "keeps voided and reversed checks in the client Checks and Payments Register" do
@@ -476,7 +479,8 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
           migration_source_company: source, migration_rehearsal_status: "ready", test_workspace_expires_at: 1.day.from_now)
         client_user.update!(practice_company_id: company.id)
         pay_period.update_columns(status: "approved", test_workspace_role: "baseline", test_workspace_source_pay_period_id: source_period.id)
-        draft_pay_period.update_columns(status: "approved", test_workspace_role: "practice")
+        # A run created inside the copy, like the Oct 19–Nov 1 rehearsal period: approved but never finished.
+        draft_pay_period.update_columns(status: "approved")
       end
 
       it "serves copied baseline history for payroll_summary_by_employee_pdf" do

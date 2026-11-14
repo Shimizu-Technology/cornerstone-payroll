@@ -48,8 +48,15 @@ export function ClientReports() {
     try {
       setLoading(true);
       setError(null);
-      const response = await clientPayPeriodsApi.list();
-      const sorted = response.pay_periods
+      // Older finished runs can sit past the first page, behind newer drafts.
+      const periods = [];
+      for (let page = 1; page <= 50; page += 1) {
+        const response = await clientPayPeriodsApi.list({ page, per_page: 100 });
+        periods.push(...response.pay_periods);
+        const meta = response.meta;
+        if (!meta?.total_pages || (meta.current_page ?? page) >= meta.total_pages) break;
+      }
+      const sorted = periods
         .filter((payPeriod) => payPeriod.record_type === 'native' && (payPeriod.status === 'committed' || payPeriod.test_workspace_role === 'baseline'))
         .sort((a, b) => comparePayPeriodsByPeriod(a, b, 'desc'));
       setPayPeriods(sorted);
