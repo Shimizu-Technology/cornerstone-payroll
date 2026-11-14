@@ -120,6 +120,14 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     expect(response.parsed_body.dig("meta", "statuses")).to eq("committed" => 1, "locked" => 1)
   end
 
+  it "keeps staff pay period notes out of the client detail" do
+    committed_pay_period.update_columns(notes: "TEST ONLY - staff note")
+    get "/api/v1/client/pay_periods/#{committed_pay_period.id}"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("pay_period")).not_to have_key("notes")
+    expect(response.body).not_to include("TEST ONLY - staff note")
+  end
+
   it "orders payroll history newest first" do
     march_period = create(:pay_period, :committed,
       company: company,
