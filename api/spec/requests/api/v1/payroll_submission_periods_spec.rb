@@ -5,8 +5,8 @@ require "rails_helper"
 RSpec.describe "Pay-period submissions", type: :request do
   include ActiveSupport::Testing::TimeHelpers
   let(:org) { create(:organization) }
-  let(:company) { create(:company, organization: org) }
-  let(:other_company) { create(:company, organization: org) }
+  let(:company) { create(:company, organization: org, payroll_intake_source_types: [ "mosa_revel" ]) }
+  let(:other_company) { create(:company, organization: org, payroll_intake_source_types: [ "mosa_revel" ]) }
   let(:client) { create(:user, company: company, organization: org, role: "client", created_at: 1.year.ago) }
   let(:staff) { create(:user, company: company, organization: org, role: "accountant", created_at: 1.year.ago, name: "Dafne Staff") }
   let(:employee) { create(:employee, company: company) }
@@ -35,7 +35,7 @@ RSpec.describe "Pay-period submissions", type: :request do
   end
 
   def send_package(target_ref = ref, **params)
-    post "#{client_base}/#{target_ref}/submissions", params: { revel_payroll: synthetic_pdf }.merge(params)
+    post "#{client_base}/#{target_ref}/submissions", params: { revel_payroll: synthetic_pdf, workbook_choice: params[:changes_workbook] ? "attach" : params[:changes_link_url] ? "link" : "none" }.merge(params)
   end
 
   def data
@@ -156,19 +156,19 @@ RSpec.describe "Pay-period submissions", type: :request do
     it "replays a retry, refuses a reused key and treats an identical package as a duplicate" do
       pdf_bytes = "%PDF-1.4\n% same bytes\n%%EOF\n"
       upload = -> { portal_upload("payroll.pdf", pdf_bytes, "application/pdf") }
-      post "#{client_base}/#{ref}/submissions", params: { revel_payroll: upload.call, no_changes: true, idempotency_key: "k1" }
+      post "#{client_base}/#{ref}/submissions", params: { workbook_choice: "none", revel_payroll: upload.call, no_changes: true, idempotency_key: "k1" }
       expect(response).to have_http_status(:created)
       expect do
-        post "#{client_base}/#{ref}/submissions", params: { revel_payroll: upload.call, no_changes: true, idempotency_key: "k1" }
+        post "#{client_base}/#{ref}/submissions", params: { workbook_choice: "none", revel_payroll: upload.call, no_changes: true, idempotency_key: "k1" }
       end.not_to change(ClientDocument, :count)
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body["outcome"]).to eq("replayed")
 
-      post "#{client_base}/#{ref}/submissions", params: { revel_payroll: upload.call, notes: "different", idempotency_key: "k1" }
+      post "#{client_base}/#{ref}/submissions", params: { workbook_choice: "none", revel_payroll: upload.call, notes: "different", idempotency_key: "k1" }
       expect(response).to have_http_status(:conflict)
 
       expect do
-        post "#{client_base}/#{ref}/submissions", params: { revel_payroll: upload.call, no_changes: true, idempotency_key: "k2" }
+        post "#{client_base}/#{ref}/submissions", params: { workbook_choice: "none", revel_payroll: upload.call, no_changes: true, idempotency_key: "k2" }
       end.not_to change(PayrollSubmission, :count)
       expect(response.parsed_body["outcome"]).to eq("duplicate")
       expect(data["current_revision"]).to eq(1)
@@ -200,20 +200,70 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(PayrollSubmission.count).to eq(1)
     end
 
-    it "rejects workbook or link evidence alongside \"No changes this period\", including a carried-forward workbook" do
-      send_package(no_changes: true, changes_link_url: "https://example.test/sheet")
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.dig("details", "changes_link_url").join).to include("No changes this period")
-      send_package(no_changes: true, changes_workbook: synthetic_workbook)
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.dig("details", "changes_workbook").join).to include("No changes this period")
-      expect(ClientDocument.count).to eq(0)
+    it "accepts workbook or link independently of no structured changes and carries both source slots forward" do
+      send_package(no_changes: true, workbook_choice: "attach", changes_workbook: synthetic_workbook)
+      expect(response).to have_http_status(:created), response.body
+      first = data["submissions"].first
+      ids = first["documents"].map { |doc| doc.dig("document", "id") }
+      post "#{client_base}/#{ref}/submissions", params: { no_changes: true, workbook_choice: "attach", keep_document_ids: ids, based_on_revision: 1, notes: "updated" }
+      expect(response).to have_http_status(:created), response.body
+      expect(data["submissions"].first["documents"].map { |doc| doc.dig("document", "id") }).to eq(ids)
+      expect(data["submissions"].first).to include("workbook_choice" => "attach", "no_changes" => true)
+      send_package(no_changes: true, workbook_choice: "link", changes_link_url: "https://example.test/sheet", based_on_revision: 2)
+      expect(response).to have_http_status(:created), response.body
+      expect(data["submissions"].first).to include("workbook_choice" => "link", "no_changes" => true)
+    end
 
-      send_package(changes_workbook: synthetic_workbook)
-      workbook = data["submissions"].first["documents"].find { |d| d["role"] == "changes_workbook" }.dig("document", "id")
-      send_package(no_changes: true, keep_document_ids: [ workbook ], based_on_revision: 1)
+    it "requires exactly one satisfied workbook choice" do
+      [ {}, { workbook_choice: "attach" }, { workbook_choice: "link" }, { workbook_choice: "bogus" },
+        { workbook_choice: "none", changes_workbook: synthetic_workbook },
+        { workbook_choice: "none", changes_link_url: "https://example.test/sheet" },
+        { workbook_choice: "link", changes_link_url: "http://example.test/sheet" } ].each do |answers|
+        post "#{client_base}/#{ref}/submissions", params: { revel_payroll: synthetic_pdf, **answers }
+        expect(response).to have_http_status(:unprocessable_entity), response.body
+      end
+      expect(PayrollSubmission.count).to eq(0)
+    end
+
+    it "refuses misplaced Excel without workbook evidence, including carried-forward legacy attachments" do
+      send_package(workbook_choice: nil, attachments: [ synthetic_workbook("OTHER.XLSX") ])
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(PayrollSubmission.count).to eq(1)
+      expect(response.parsed_body.dig("details", "attachment").join).to include("tips & loans workbook")
+      send_package(workbook_choice: "none", attachments: [ synthetic_workbook ])
+      expect(response).to have_http_status(:created), response.body
+      ids = data["submissions"].first["documents"].map { |doc| doc.dig("document", "id") }
+      post "#{client_base}/#{ref}/submissions", params: { keep_document_ids: ids, based_on_revision: 1, workbook_choice: "attach" }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "attachment")).to be_present
+    end
+
+    it "authenticates the client before checking its payroll-file capability" do
+      allow_any_instance_of(Api::V1::Client::PayrollSubmissionPeriodsController).to receive(:current_user).and_return(nil)
+      get client_base
+      expect(response).to have_http_status(:forbidden)
+      expect(PayrollSubmission.count).to eq(0)
+    end
+
+    it "denies the payroll files endpoints and service for a non-MoSa company" do
+      company.update!(payroll_intake_source_types: [])
+      send_package(workbook_choice: "none")
+      expect(response).to have_http_status(:forbidden)
+      get client_base
+      expect(response).to have_http_status(:forbidden)
+      catalog = PayrollSubmissions::Catalog.new(company: company)
+      expect do
+        PayrollSubmissions::CreateRevision.new(company: company, actor: client, catalog: catalog,
+          entry: catalog.resolve(ref), params: { workbook_choice: "none", revel_payroll: synthetic_pdf }).call
+      end.to raise_error(PayrollSubmissions::FileSet::Invalid, /not enabled/)
+      expect(PayrollSubmission.count).to eq(0)
+    end
+
+    it "still serializes legacy revisions without inventing a no-tips declaration" do
+      send_package(workbook_choice: "none")
+      PayrollSubmission.last.update_columns(workbook_choice: nil)
+      get "#{client_base}/#{data['id']}"
+      expect(response).to have_http_status(:ok)
+      expect(data["submissions"].first).to include("workbook_choice" => nil, "no_changes" => false)
     end
 
     it "removes every stored object when an upload fails part-way through a package" do

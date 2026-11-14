@@ -15,6 +15,14 @@ import { adminPayrollSubmissionsApi, clientPayrollSubmissionsApi, type PeriodDet
 
 type Audience = 'client' | 'staff';
 
+function submissionReceipt(detail: PeriodDetail): string {
+  const sent = detail.submissions.find(row => row.current);
+  const workbook = sent?.workbook_choice === 'none' ? 'No tips or loans'
+    : sent?.changes_link_url ? 'Link sent'
+    : sent?.documents.some(doc => doc.role === 'changes_workbook') ? 'Workbook ✓' : 'Workbook not included';
+  return `Sent. Revision ${detail.current_revision} is with Cornerstone. Revel PDF ✓ · ${workbook} · ${sent?.changes.length || 0} changes`;
+}
+
 function DraftFiles({ draft, api, audience }: { draft: SubmissionDraft; api: typeof clientPayrollSubmissionsApi | typeof adminPayrollSubmissionsApi; audience: Audience }) {
   return <ul className="divide-y divide-neutral-100">
     {draft.paycheck_document && <FileRow label="Draft paychecks" document={draft.paycheck_document} api={api} audience={audience} />}
@@ -196,7 +204,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
 
         {audience === 'client' && canSubmit && (!current || editing) && <section className="rounded-xl border border-neutral-200 bg-white p-4">
           <SubmissionForm period={period} current={current} onCancel={current ? () => setEditing(false) : undefined}
-            onSent={(detail, outcome) => { setEditing(false); setNotice(outcome === 'duplicate' ? 'Nothing changed, so no new revision was made.' : `Sent. Revision ${detail.current_revision} is with Cornerstone.`); accept(detail); }} />
+            onSent={(detail, outcome) => { setEditing(false); setNotice(outcome === 'duplicate' ? 'Nothing changed, so no new revision was made.' : submissionReceipt(detail)); accept(detail); }} />
         </section>}
         {audience === 'client' && !canSubmit && !current && <p className="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">{period.status === 'paid' ? 'This period is paid.' : `This period opens for files on ${formatDate(period.opens_on)}.`}</p>}
 

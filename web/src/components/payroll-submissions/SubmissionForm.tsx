@@ -32,6 +32,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const [keep, setKeep] = useState<number[]>(carryable.map(d => d.document!.id));
   const [noChanges, setNoChanges] = useState(current?.no_changes ?? false);
   const [rows, setRows] = useState<DraftRow[]>((current?.changes || []).map(row => ({ ...row, key: crypto.randomUUID() })));
+  const [workbookChoice, setWorkbookChoice] = useState<'attach' | 'link' | 'none' | ''>(current?.workbook_choice || (current?.documents.some(d => d.role === 'changes_workbook') ? 'attach' : current?.changes_link_url ? 'link' : ''));
   const [link, setLink] = useState(current?.changes_link_url || '');
   const [notes, setNotes] = useState(current?.notes || '');
   const [addKind, setAddKind] = useState<ChangeKind>('extra_hours');
@@ -65,28 +66,30 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
     event.preventDefault();
     setError(null); setDetails({});
     if (!revel && !keptRevel) { setDetails({ revel_payroll: ['Attach the Revel payroll PDF'] }); return; }
-    if (!noChanges && !rows.length && !workbook && !keptWorkbook && !link.trim()) {
-      setError('List the changes this period, attach the workbook or link, or choose "No changes this period".');
-      return;
+    if (!workbookChoice) { setDetails({ workbook_choice: ['Choose a workbook, a link, or no tips or loans this period'] }); return; }
+    if (workbookChoice === 'attach' && !workbook && !keptWorkbook) { setDetails({ changes_workbook: ['Attach the tips & loans workbook'] }); return; }
+    if (workbookChoice === 'link') {
+      try { const url = new URL(link.trim()); if (url.protocol !== 'https:' || !url.hostname || link.trim().length > 2000) throw new Error(); }
+      catch { setDetails({ changes_link_url: ['Enter a full https:// link'] }); return; }
     }
-    // "No changes" sends no hidden change evidence: no rows, workbook or link.
-    const sentWorkbook = noChanges ? null : workbook;
-    const sentLink = noChanges ? '' : link.trim();
+    const sentWorkbook = workbookChoice === 'attach' ? workbook : null;
+    const sentLink = workbookChoice === 'link' ? link.trim() : '';
     const keepIds = keep.filter(id => {
       const doc = carryable.find(d => d.document?.id === id);
       if (!doc) return false;
       if (doc.role === 'revel_payroll' && revel) return false;
-      if (doc.role === 'changes_workbook' && (workbook || noChanges)) return false;
+      if (doc.role === 'changes_workbook' && (workbook || workbookChoice !== 'attach')) return false;
       return true;
     });
     const changes = noChanges ? [] : rows.map(rowFields);
-    const identity = JSON.stringify([revel?.name, revel?.size, revel?.lastModified, sentWorkbook?.name, sentWorkbook?.size, attachments.map(f => [f.name, f.size, f.lastModified]), keepIds, noChanges, changes, sentLink, notes, current?.revision]);
+    const identity = JSON.stringify([revel?.name, revel?.size, revel?.lastModified, sentWorkbook?.name, sentWorkbook?.size, attachments.map(f => [f.name, f.size, f.lastModified]), keepIds, workbookChoice, noChanges, changes, sentLink, notes, current?.revision]);
     if (retry.current?.identity !== identity) retry.current = { identity, key: crypto.randomUUID() };
     const form = new FormData();
     if (revel) form.append('revel_payroll', revel);
     if (sentWorkbook) form.append('changes_workbook', sentWorkbook);
     attachments.forEach(file => form.append('attachments[]', file));
     keepIds.forEach(id => form.append('keep_document_ids[]', String(id)));
+    form.append('workbook_choice', workbookChoice);
     form.append('no_changes', String(noChanges));
     form.append('changes', JSON.stringify(changes));
     if (sentLink) form.append('changes_link_url', sentLink);
@@ -112,10 +115,31 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       {current && <p className="text-sm text-neutral-700">Your update is saved as a new revision. Revision {current.revision} stays on this page, marked superseded.</p>}
 
       <fieldset className="space-y-2">
-        <legend className="text-sm font-semibold text-neutral-900">Revel payroll PDF <span className="font-normal text-neutral-600">(required)</span></legend>
+        <legend className="text-sm font-semibold text-neutral-900">1. Revel hours report (PDF) <span className="font-normal text-neutral-600">(required)</span></legend>
+        <p className="text-sm text-neutral-600">Hours worked, including overtime, from Revel.</p>
         {keptRevel && !revel && <p className="text-sm text-neutral-700">Keeping {keptRevel.file_name} from revision {current?.revision}. Choose a file to replace it.</p>}
-        <input aria-label="Revel payroll PDF" type="file" accept="application/pdf,.pdf" onChange={e => setRevel(e.target.files?.[0] || null)} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
+        <input aria-label="Revel hours report (PDF)" type="file" accept="application/pdf,.pdf" onChange={e => setRevel(e.target.files?.[0] || null)} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
         <FieldError messages={details.revel_payroll} />
+      </fieldset>
+
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-semibold text-neutral-900">2. Tips &amp; loans workbook (Excel)</legend>
+        <p className="text-sm text-neutral-600">Tips to report and loan deductions for this payroll.</p>
+        {(['attach', 'link', 'none'] as const).map(choice => <label key={choice} className="flex min-h-11 items-center gap-2 text-sm font-medium">
+          <input type="radio" name="workbook-choice" checked={workbookChoice === choice} onChange={() => setWorkbookChoice(choice)} />
+          {{ attach: 'Attach the workbook', link: 'Send a link instead', none: 'No tips or loans this period' }[choice]}
+        </label>)}
+        <FieldError messages={details.workbook_choice} />
+        {workbookChoice === 'attach' && <div className="space-y-2">
+          {keptWorkbook && !workbook && <p className="text-sm text-neutral-700">Keeping {keptWorkbook.file_name} from revision {current?.revision}. Choose a file to replace it.</p>}
+          {workbook && <p className="break-all text-sm text-neutral-700">Selected: {workbook.name}</p>}
+          <input aria-label="Tips & loans workbook (Excel)" type="file" accept=".xlsx,.xls" onChange={e => setWorkbook(e.target.files?.[0] || null)} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
+          <FieldError messages={details.changes_workbook} />
+        </div>}
+        {workbookChoice === 'link' && <div>
+          <Input label="Workbook link (https://)" type="url" value={link} onChange={e => setLink(e.target.value)} />
+          <FieldError messages={details.changes_link_url} />
+        </div>}
       </fieldset>
 
       <fieldset className="space-y-3">
@@ -174,16 +198,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
             <Button type="button" variant="outline" onClick={() => setRows(list => [...list, blankRow(addKind)])}><Plus className="mr-1 h-4 w-4" aria-hidden />Add change</Button>
           </div>
           {changeErrors.length > 0 && !Object.keys(details).some(key => key.startsWith('changes.')) && <FieldError messages={changeErrors} />}
-          <details className="rounded-lg border border-neutral-200 p-3">
-            <summary className="cursor-pointer text-sm font-medium text-neutral-800">Using the payroll template workbook or link instead?</summary>
-            <div className="mt-3 space-y-3">
-              {keptWorkbook && !workbook && <p className="text-sm text-neutral-700">Keeping {keptWorkbook.file_name} from revision {current?.revision}.</p>}
-              <input aria-label="Changes workbook" type="file" accept=".xlsx,.xls,.csv" onChange={e => setWorkbook(e.target.files?.[0] || null)} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
-              <FieldError messages={details.changes_workbook} />
-              <Input label="Template link (https://)" type="url" value={link} onChange={e => setLink(e.target.value)} />
-              <FieldError messages={details.changes_link_url} />
-            </div>
-          </details>
+
         </>}
       </fieldset>
 
@@ -196,6 +211,12 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
           <label key={d.document!.id} className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="h-5 w-5" checked={keep.includes(d.document!.id)} onChange={e => setKeep(list => e.target.checked ? [...list, d.document!.id] : list.filter(id => id !== d.document!.id))} /><span className="break-words [overflow-wrap:anywhere]">Keep {d.file_name}</span></label>
         ))}
         <input aria-label="Other files" type="file" multiple onChange={e => setAttachments(Array.from(e.target.files || []))} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
+        {!workbook && !keptWorkbook && !(workbookChoice === 'link' && link.trim()) && attachments.filter(file => /\.xlsx?$/i.test(file.name)).map((file, index) => <div key={`${file.name}-${index}`} className="space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-3">
+          <p className="break-all text-sm font-semibold">{file.name}: Is this the tips &amp; loans workbook?</p>
+          <Button type="button" variant="outline" onClick={() => { setWorkbook(file); setWorkbookChoice('attach'); setAttachments(list => list.filter(item => item !== file)); }}>Yes, move to workbook slot</Button>
+          <p className="text-sm">If it is another file, choose a workbook option above before sending.</p>
+        </div>)}
+        {attachments.length > 0 && <ul className="text-sm text-neutral-700">{attachments.map((file, index) => <li className="break-all" key={`${file.name}-${index}`}>{file.name}</li>)}</ul>}
         <FieldError messages={[...(details.attachment || []), ...(details.files || []), ...(details.keep_document_ids || [])]} />
       </fieldset>
 

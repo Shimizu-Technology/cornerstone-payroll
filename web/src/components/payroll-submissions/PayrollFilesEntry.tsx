@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
+import { useCompany } from '@/contexts/CompanyContext';
 import { FileSpreadsheet } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,7 +23,12 @@ function detailLine(period: PeriodSummary): string {
 }
 
 /** The client Home entry to Payroll Files: the current period, its status, and how it differs from Pay Periods. */
-export function PayrollFilesEntry(): ReactElement {
+export function PayrollFilesEntry(): ReactElement | null {
+  const { activeCompany } = useCompany();
+  return activeCompany?.payroll_intake_source_types?.includes('mosa_revel') ? <EnabledPayrollFilesEntry key={activeCompany.id} /> : null;
+}
+
+function EnabledPayrollFilesEntry(): ReactElement {
   const [rows, setRows] = useState<PeriodSummary[] | null>(null);
   const [error, setError] = useState(false);
   const load = useCallback(async () => {

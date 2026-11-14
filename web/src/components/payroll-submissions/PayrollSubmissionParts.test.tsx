@@ -78,3 +78,12 @@ it('still lets staff open an archived period file, and clients open a current on
   render(<ul><FileRow label="Revel payroll PDF" document={{ ...archivedDocument, archived_at: null }} api={{} as PayrollSubmissionsApi} audience="client" /></ul>);
   expect(screen.getByRole('button', { name: 'Download revel.pdf' })).toBeTruthy();
 });
+
+
+it('keeps staff workbook provenance visible after import apply', () => {
+  const revision = { id: 9, revision: 1, current: true, superseded: false, submitted_at: '2026-11-14T00:00:00Z', no_changes: true, changes: [], documents: [],
+    imports: [{ id: 12, pay_period_id: 42, status: 'applied', source_route: 'portal', staff_workbook: { document_id: 4, filename: 'downloaded.xlsx', sha256: 'a'.repeat(64), attached_by_name: 'Synthetic Staff', attached_at: '2026-11-14T01:00:00Z' } }] } as SubmissionRevision;
+  render(<RevisionCard revision={revision} api={{} as PayrollSubmissionsApi} companyId={7} audience="staff" />);
+  expect(screen.getByText(/Staff workbook: downloaded.xlsx.*attached by Synthetic Staff/)).toBeTruthy();
+  expect(screen.getByText(/SHA-256 a{64}/)).toBeTruthy();
+});

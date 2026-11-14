@@ -104,8 +104,16 @@ module Api
             if import_record.submission_imports.exists? && !selection
               raise ArgumentError, "Reopen the portal submission in import review to confirm its source revision"
             end
+            if params[:portal_source_id].present? && !selection
+              raise ArgumentError, "Portal source selection does not belong to this import"
+            end
+            if params[:use_submission_id].present?
+              raise ArgumentError, "This import already has a portal source" if selection || import_record.submission_imports.exists?
+
+              selection = pay_run_selection!(import_record)
+            end
             if selection
-              selection.period.lock!
+              selection.period.lock! unless selection.new_record?
               selection.validate_current!
             elsif @pay_period.pending_portal_submission?
               raise ArgumentError, "Open the pending portal revision in import review or record a source disposition first"
@@ -179,6 +187,8 @@ module Api
               # This selection resolves the pending-source gate only inside the
               # same transaction as successful calculation/apply. Any failure
               # rolls it back along with every payroll row and status event.
+              selection.period.save! if selection && selection.period.changed?
+              selection&.save! if selection&.new_record?
               selection&.update!(applied_at: Time.current)
               if matched_data.any?
                 service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
@@ -216,7 +226,9 @@ module Api
                   submission: selection.payroll_submission, note: "Imported revision #{selection.payroll_submission.revision} into payroll review.")
                 PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#import",
                   metadata: { submission_id: selection.payroll_submission_id, current_submission_id: selection.current_submission_id,
-                    superseded_reason: selection.superseded_reason, import_id: import_record.id, source_package_id: source_package.id })
+                    superseded_reason: selection.superseded_reason, source_route: selection.source_route,
+                    staff_workbook_document_id: selection.staff_workbook_document_id,
+                    import_id: import_record.id, source_package_id: source_package.id })
                 PortalNotifications.payroll_period!("payroll_submission_imported", period: period, actor: current_user,
                   dedupe: "import:#{import_record.id}", metadata: { submission_id: selection.payroll_submission_id, revision: selection.payroll_submission.revision })
               end
@@ -270,15 +282,22 @@ module Api
           skip_default_audit_log!
           PayrollSubmissions::ImportBridge.new(pay_period: @pay_period, actor: current_user, submission_id: params[:submission_id],
             superseded_reason: params[:superseded_reason], supersedes_package_id: params[:supersedes_package_id],
-            supersession_reason: params[:supersession_reason]).call do |result, submission, current, reason, files|
+            supersession_reason: params[:supersession_reason], staff_workbook: params[:staff_workbook]).call do |result, submission, current, reason, files|
             record = persist_preview(result, files.first, files.second)
             selection = record.submission_imports.find_or_create_by!(payroll_submission: submission, current_submission: current) do |link|
               link.selected_by = current_user
               link.superseded_reason = reason
+              if params[:staff_workbook].present?
+                link.staff_workbook_document = record.payroll_intake_session.documents.find_by!(source_role: "supplemental_workbook")
+                link.staff_workbook_attached_by = current_user
+                link.staff_workbook_attached_at = Time.current
+              end
             end
             PayrollSubmissions::Audit.record!(actor: current_user, period: submission.period, action: "payroll_submissions#open_import",
               metadata: { submission_id: submission.id, revision: submission.revision, current_submission_id: current.id,
-                superseded_reason: reason, import_id: record.id, duplicate: result[:duplicate] })
+                superseded_reason: reason, import_id: record.id, duplicate: result[:duplicate],
+                staff_workbook_document_id: selection.staff_workbook_document_id,
+                staff_workbook_sha256: selection.staff_workbook_document&.sha256 })
             render json: preview_response(record, result, selection: selection)
           end
         rescue PayrollIntake::PreviewService::ReplacementRequiredError => e
@@ -331,10 +350,70 @@ module Api
           preview = preview_from_source_package(source_package)
           preview[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(import_record.raw_data.to_h["tips_paid_out_from_tips"])
           selection ||= import_record.submission_imports.order(id: :desc).first
+          source = selection&.payroll_submission || pending_portal_period&.current_submission
+          preview[:source_warnings] += workbook_warnings(source_package, source)
           {
             import_id: import_record.id, preview: preview, source_package: source_package_json(source_package),
-            duplicate: package_result[:duplicate], portal_source: portal_source_json(selection)
+            duplicate: package_result[:duplicate], portal_source: portal_source_json(selection),
+            pending_portal_source: pending_portal_source_json
           }
+        end
+
+        # Build only: save in the successful apply transaction so a failed row
+        # never leaves a selection that can resolve the pending-source gate.
+        def pay_run_selection!(record)
+          period = pending_portal_period
+          source = period&.current_submission
+          unless source && source.id.to_s == params[:use_submission_id].to_s && period.pending_source_review?
+            raise ArgumentError, "Choose the current pending client revision for this company and pay period"
+          end
+          period.lock!
+          unless @pay_period.cycle == "regular" && @pay_period.correction_status.nil?
+            raise ArgumentError, "Only the matching regular pay run may use a client revision"
+          end
+          if period.pay_period_id.nil?
+            catalog = PayrollSubmissions::Catalog.new(company: @pay_period.company)
+            eligible = catalog.live_pay_period(catalog.resolve(period.id))
+            unless eligible&.id == @pay_period.id
+              raise ArgumentError, "Only the matching regular pay run offered by the portal may use this revision"
+            end
+            # Persist this claim together with successful apply, never on preview.
+            period.pay_period = @pay_period
+            source.period = period
+          elsif period.pay_period_id != @pay_period.id
+            raise ArgumentError, "This client revision is not linked to this pay run"
+          end
+          unless record.payroll_intake_session&.source_type == "mosa_revel"
+            raise ArgumentError, "Only a MoSa import may be linked to a client revision"
+          end
+          record.submission_imports.build(payroll_submission: source, current_submission: source,
+            selected_by: current_user, source_route: "pay_run")
+        end
+
+        def pending_portal_period
+          @pending_portal_period ||= PayrollSubmissionPeriod.where(company_id: @pay_period.company_id,
+            pay_period_id: [ nil, @pay_period.id ]).find_by(start_date: @pay_period.start_date, end_date: @pay_period.end_date)
+        end
+
+        def pending_portal_source_json
+          period = pending_portal_period
+          return unless period&.pending_source_review?
+
+          source = period.current_submission
+          { submission_id: source.id, revision: source.revision, workbook_choice: source.workbook_choice,
+            changes_link_url: source.changes_link_url }
+        end
+
+        def workbook_warnings(package, submission)
+          unless package.documents.any? { |document| document.source_role == "supplemental_workbook" }
+            none = submission&.workbook_choice == "none"
+            return [ { code: none ? "client_no_tips_or_loans" : "missing_workbook",
+              severity: none ? "info" : "warning",
+              message: none ? "Client chose: No tips or loans this period." : "No tips or loans: the workbook wasn't included" } ]
+          end
+          return [] unless package.totals.to_h["total_reported_tips"].to_d.zero?
+
+          [ { code: "zero_workbook_tips", severity: "info", message: "The workbook is included, but its tips total $0." } ]
         end
 
         def portal_source_json(selection)
@@ -346,7 +425,8 @@ module Api
             selection_id: selection.id, submission_id: submission.id, revision: submission.revision,
             period_id: submission.payroll_submission_period_id, current: submission.id == submission.period.current_submission&.id,
             superseded_reason: selection.superseded_reason, notes: submission.notes, changes_link_url: submission.changes_link_url,
-            no_changes: submission.no_changes,
+            no_changes: submission.no_changes, workbook_choice: submission.workbook_choice,
+            staff_workbook: selection.staff_workbook_evidence,
             changes: submission.change_rows.map { |row| row.merge("label" => PayrollSubmissions::ChangeRows::LABELS[row["kind"]],
               "employee_name" => names[row["employee_id"]], "employee_names" => Array(row["employee_ids"]).filter_map { |id| names[id] }) }
           }

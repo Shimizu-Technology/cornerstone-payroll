@@ -217,6 +217,13 @@ function HistoricalPayrollRoute({ children }: HistoricalPayrollRouteProps): Reac
   return <StaffOnlyRoute>{children}</StaffOnlyRoute>;
 }
 
+function PayrollFilesRoute({ children }: { children: React.ReactNode }) {
+  const { activeCompany, loading } = useCompany();
+  if (loading) return <p role="status">Loading client…</p>;
+  if (!activeCompany?.payroll_intake_source_types?.includes('mosa_revel')) return <Navigate to="/app" replace />;
+  return <ClientOnlyRoute>{children}</ClientOnlyRoute>;
+}
+
 function ClientOnlyRoute({ children }: { children: React.ReactNode }) {
   const { isClient, isLoading } = useAuth();
 
@@ -334,8 +341,8 @@ function AppRoutes() {
         <Route path="/app" element={isClient ? <ClientDashboard /> : <Dashboard />} />
         <Route path="/app/client-inbox" element={<StaffOnlyRoute><ClientInbox /></StaffOnlyRoute>} />
         <Route path="/messages" element={<ClientOnlyRoute><ClientMessages /></ClientOnlyRoute>} />
-        <Route path="/payroll-files" element={<ClientOnlyRoute><PayrollPeriodsList audience="client" /></ClientOnlyRoute>} />
-        <Route path="/payroll-files/:ref" element={<ClientOnlyRoute><PayrollPeriodPage audience="client" /></ClientOnlyRoute>} />
+        <Route path="/payroll-files" element={<PayrollFilesRoute><PayrollPeriodsList audience="client" /></PayrollFilesRoute>} />
+        <Route path="/payroll-files/:ref" element={<PayrollFilesRoute><PayrollPeriodPage audience="client" /></PayrollFilesRoute>} />
         <Route path="/app/notifications" element={<NotificationSettings />} />
         <Route path="/app/aire-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/time-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />

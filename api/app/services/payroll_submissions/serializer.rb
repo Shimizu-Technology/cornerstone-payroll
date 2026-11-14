@@ -91,8 +91,8 @@ module PayrollSubmissions
         submitted_at: submission.submitted_at, submitted_by_name: submission.submitted_by&.name || submission.submitted_by_name_snapshot,
         acknowledged_at: submission.acknowledged_at, acknowledged_by_name: submission.acknowledged_by&.name,
         imported_at: submission.submission_imports.maximum(:applied_at),
-        imports: (@staff ? submission.submission_imports.includes(:payroll_import).map { |link| { id: link.payroll_import_id, pay_period_id: link.payroll_import.pay_period_id, status: link.payroll_import.status } } : nil),
-        no_changes: submission.no_changes, notes: submission.notes, changes_link_url: submission.changes_link_url,
+        imports: (@staff ? submission.submission_imports.includes(:payroll_import, :staff_workbook_document, :staff_workbook_attached_by).map { |link| { id: link.payroll_import_id, pay_period_id: link.payroll_import.pay_period_id, status: link.payroll_import.status, source_route: link.source_route, staff_workbook: link.staff_workbook_evidence } } : nil),
+        workbook_choice: submission.workbook_choice, no_changes: submission.no_changes, notes: submission.notes, changes_link_url: submission.changes_link_url,
         changes: submission.change_rows.map do |row|
           row.merge(
             "label" => ChangeRows::LABELS[row["kind"]],
