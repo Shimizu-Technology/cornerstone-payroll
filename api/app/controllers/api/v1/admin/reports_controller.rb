@@ -289,14 +289,14 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          report  = Form941GuAggregator.new(company, year, quarter).generate
+          report  = Form941GuAggregator.new(company, year, quarter, pay_period_scope: annual_report_pay_periods).generate
           report[:official_form_template] = QuarterlyComplianceOfficialForms::Form941.template_status(year)
           report[:filing_gate] = PayrollFilingResponsibilityGate.new(
             company: company,
             tax_year: year,
             quarter: quarter,
             filing_type: "form_941"
-          ).payload
+          ).payload unless client_report_view?
 
           render json: { report: report }
         rescue ArgumentError => e
@@ -317,7 +317,7 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          report = Form941GuAggregator.new(company, year, quarter).generate
+          report = Form941GuAggregator.new(company, year, quarter, pay_period_scope: annual_report_pay_periods).generate
           send_spreadsheet!(
             filename: "federal_form_941_#{year}_q#{quarter}.xlsx",
             sheets: form_941_gu_sheets(report)
@@ -357,7 +357,7 @@ module Api
             quarter: quarter,
             user: current_user
           )
-          report = QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate
+          report = QuarterlyCompliancePacketBuilder.new(company, year, quarter, pay_period_scope: annual_report_pay_periods, client_view: client_report_view?).generate
           report[:official_form_template] = QuarterlyComplianceOfficialForms::Form941.template_status(year)
           report[:filing_gate] = PayrollFilingResponsibilityGate.quarterly(
             company: company,
@@ -865,7 +865,7 @@ module Api
           as_of = parse_optional_iso_date(params[:as_of_date], param_name: "as_of_date")
           return if performed?
 
-          generator = InstallmentLoanReportPdfGenerator.new(company, as_of_date: as_of)
+          generator = InstallmentLoanReportPdfGenerator.new(company, as_of_date: as_of, pay_period_scope: loan_report_pay_periods)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -1629,13 +1629,13 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          report = QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate
+          report = QuarterlyCompliancePacketBuilder.new(company, year, quarter, pay_period_scope: annual_report_pay_periods, client_view: client_report_view?).generate
           report[:official_form_template] = QuarterlyComplianceOfficialForms::Form941.template_status(year)
           report[:filing_gate] = PayrollFilingResponsibilityGate.quarterly(
             company: company,
             tax_year: year,
             quarter: quarter
-          )
+          ) unless client_report_view?
           [ report, nil ]
         rescue ActiveRecord::RecordNotFound
           [ nil, render(json: { error: "Company not found" }, status: :not_found) ]
@@ -1912,7 +1912,7 @@ module Api
         end
 
         def last_payroll_summary(regular:)
-          scope = PayPeriod.reportable_for_company(current_company).where(status: "committed")
+          scope = report_pay_periods.where(status: "committed")
           scope = regular ? scope.where(run_purpose: "regular") : scope.where.not(run_purpose: "regular")
           period = scope.order(pay_date: :desc, id: :desc).first
           native = if period
@@ -1937,8 +1937,12 @@ module Api
           payroll_reporting_period
         end
 
+        def report_pay_periods
+          PayPeriod.reportable_for_company(current_company)
+        end
+
         def reportable_pay_periods(period, pay_run: nil)
-          scope = PayPeriod.reportable_for_company(current_company)
+          scope = report_pay_periods
                            .where(pay_date: period.range)
           return scope unless pay_run
           return scope.none if pay_run.fetch(:record_type) == "imported"
@@ -2070,7 +2074,7 @@ module Api
           record_type = match[1]
           record_id = match[2].to_i
           pay_date = if record_type == "native"
-            PayPeriod.reportable_for_company(current_company).where(id: record_id).pick(:pay_date)
+            report_pay_periods.where(id: record_id).pick(:pay_date)
           else
             HistoricalPayPeriod
               .joins(:historical_import_batch)
@@ -2715,7 +2719,7 @@ module Api
         end
 
         def employee_reportable_ytd_items(employee, year)
-          reportable_period_ids = PayPeriod.reportable_for_company(current_company)
+          reportable_period_ids = report_pay_periods
                                            .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                                            .select(:id)
 
@@ -2729,7 +2733,7 @@ module Api
         end
 
         def ytd_custom_totals_by_employee(year)
-          reportable_period_ids = PayPeriod.reportable_for_company(current_company)
+          reportable_period_ids = report_pay_periods
                                            .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                                            .select(:id)
 
@@ -4148,8 +4152,16 @@ module Api
           ]
         end
 
+        def client_report_view?
+          false
+        end
+
+        def annual_report_pay_periods
+          PayPeriod.reportable_committed
+        end
+
         def build_annual_payroll_summary
-          AnnualPayrollSummary.new(company: Company.find(current_company_id)).call
+          AnnualPayrollSummary.new(company: Company.find(current_company_id), pay_period_scope: annual_report_pay_periods).call
         end
 
         def annual_payroll_summary_sheets(report)
@@ -4533,10 +4545,14 @@ module Api
           ]
         end
 
+        def loan_report_pay_periods
+          nil
+        end
+
         def installment_loans_sheets(company, as_of_date: nil)
           as_of = as_of_date || Date.current
           rows = [ [ "Last Name", "First Name", "Employee Name", "Loan", "Status", "Original Amount", "Balance As Of", "As Of Date", "Date", "Type", "Amount", "Beginning Balance", "Ending Balance" ] ]
-          InstallmentLoanReportBuilder.new(company, as_of_date: as_of).loans.each do |snapshot|
+          InstallmentLoanReportBuilder.new(company, as_of_date: as_of, pay_period_scope: loan_report_pay_periods).loans.each do |snapshot|
             loan = snapshot[:loan]
             employee = snapshot[:employee]
             if snapshot[:transactions].empty?

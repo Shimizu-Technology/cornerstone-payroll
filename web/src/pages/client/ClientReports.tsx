@@ -1,5 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clientReportCatalog } from './clientReportCatalog';
 import { Eye } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
-import { clientPayPeriodsApi, clientReportsApi, type PayrollHistoryRecord } from '@/services/api';
+import { clientPayPeriodsApi, clientReportsApi, clientEmployeesApi, type PayrollHistoryRecord } from '@/services/api';
 import { comparePayPeriodsByPeriod, formatCurrency } from '@/lib/utils';
 
 function finiteAmount(value: number | string | null | undefined): number {
@@ -18,6 +19,10 @@ function finiteAmount(value: number | string | null | undefined): number {
 }
 
 export function ClientReports() {
+  const [employees, setEmployees] = useState<{ id: number; first_name: string; last_name: string }[]>([]);
+  const [employeeId, setEmployeeId] = useState('');
+  const [reportYear, setReportYear] = useState(new Date().getFullYear());
+  const [quarter, setQuarter] = useState(String(Math.floor(new Date().getMonth() / 3) + 1));
   const currentYear = new Date().getFullYear();
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +47,16 @@ export function ClientReports() {
       setLoading(true);
       setError(null);
       const response = await clientPayPeriodsApi.list();
+      const workers = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const result = await clientEmployeesApi.list({ per_page: 500, page });
+        workers.push(...result.data);
+        totalPages = result.meta?.total_pages ?? 1;
+        page += 1;
+      } while (page <= totalPages);
+      setEmployees(workers);
       const sorted = response.pay_periods
         .filter((payPeriod) => payPeriod.record_type === 'native')
         .sort((a, b) => comparePayPeriodsByPeriod(a, b, 'desc'));
@@ -264,6 +279,34 @@ export function ClientReports() {
           <div className="py-12 text-center text-sm text-gray-500">Loading reports...</div>
         ) : (
           <>
+            <section aria-label="Report catalog" className="space-y-4">
+              <h2 className="text-xl font-semibold">Report catalog</h2>
+              <p className="text-sm text-gray-600">Reports include finished payroll only. Select a pay period below for payroll reports, or a year and quarter for tax reports.</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label>Tax year<input aria-label="Tax year" type="number" value={reportYear} onChange={e => setReportYear(Number(e.target.value))} className="block h-11 w-full rounded border px-3" /></label>
+                <label>Quarter<select aria-label="Quarter" value={quarter} onChange={e => setQuarter(e.target.value)} className="block h-11 w-full rounded border px-3">{[1,2,3,4].map(q => <option key={q} value={q}>Q{q}</option>)}</select></label>
+                <label>Employee<select aria-label="Report employee" value={employeeId} onChange={e => setEmployeeId(e.target.value)} className="block h-11 w-full rounded border px-3"><option value="">Choose employee</option>{employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}</select></label>
+              </div>
+              {['Payroll', 'Taxes', 'Employees & history'].map(group => <div key={group}>
+                <h3 className="mb-3 font-semibold">{group}</h3>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {clientReportCatalog.filter(report => report.group === group).map(report => <Card key={report.key}>
+                    <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+                      <p className="min-w-0 font-medium">{report.title}</p>
+                      <ReportDownloadMenu ariaLabel={`Export ${report.title}`} disabled={exporting !== null || (report.scope === 'period' && !selectedPayPeriodId) || (report.scope === 'employee' && !employeeId)} formats={('pdfOnly' in report ? ['pdf'] : ['pdf', 'xlsx']).map(format => ({
+                        key: `${report.key}-${format}`, label: format === 'pdf' ? 'PDF' : 'Excel workbook',
+                        description: report.title, kind: format === 'pdf' ? 'pdf' as const : 'spreadsheet' as const,
+                        loading: exporting === `${report.key}-${format}`,
+                        onSelect: () => exportReport(`${report.key}-${format}`, `${report.key}.${format}`, () => clientReportsApi.download(report.key, format,
+                          report.scope === 'period' ? { pay_period_id: selectedPayPeriodId } :
+                          report.scope === 'employee' ? { employee_id: employeeId, start_date: startDate, end_date: endDate } :
+                          report.scope === 'date' ? { as_of_date: endDate } : { year: reportYear, quarter })),
+                      }))} />
+                    </CardContent>
+                  </Card>)}
+                </div>
+              </div>)}
+            </section>
             <Card>
             <CardHeader>
               <CardTitle>Payroll Register</CardTitle>

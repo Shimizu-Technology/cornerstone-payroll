@@ -50,7 +50,8 @@ class Form941GuAggregator
   # @param company [Company]
   # @param year    [Integer]
   # @param quarter [Integer] 1–4
-  def initialize(company, year, quarter, include_historical: nil)
+  def initialize(company, year, quarter, include_historical: nil, pay_period_scope: PayPeriod.reportable_committed)
+    @pay_period_scope = pay_period_scope
     @company = company
     @year    = year.to_i
     @quarter = quarter.to_i
@@ -240,7 +241,7 @@ class Form941GuAggregator
   end
 
   def committed_pay_periods
-    @committed_pay_periods ||= PayPeriod.reportable_committed
+    @committed_pay_periods ||= @pay_period_scope
                                         .where(company_id: company.id)
                                         .where(pay_date: quarter_start_date..quarter_end_date)
   end
@@ -481,7 +482,7 @@ class Form941GuAggregator
                .financially_reportable.reportable
                .where.not(employment_type: "contractor")
                .where(pay_periods: {
-                 id: PayPeriod.reportable_committed
+                 id: @pay_period_scope
                    .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
                    .select(:id)
                })
@@ -494,7 +495,7 @@ class Form941GuAggregator
                .where(company_id: company.id)
                .financially_reportable.reportable
                .where(pay_periods: {
-                 id: PayPeriod.reportable_committed
+                 id: @pay_period_scope
                    .where(company_id: company.id)
                    .where("start_date <= ? AND end_date >= ?", reference_date, reference_date)
                    .where(end_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))

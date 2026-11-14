@@ -67,6 +67,7 @@ class QuarterlyCompliancePacketPdfGenerator
       [ "SWICA wages", money(@report.dig(:swica, :totals, :total_wages)) ],
       [ "Federal 941 liability", money(@report.dig(:federal_941, :report, :lines, :line12_total_after_credits)) ]
     ]
+    overview.reject! { |label, value| label == "Internal target" && value.nil? }
     pdf.table(overview, width: pdf.bounds.width, cell_style: { padding: 6, size: 9, border_color: "CBD5E1" }) do
       column(0).background_color = "EAF1F8"
       column(0).font_style = :bold
