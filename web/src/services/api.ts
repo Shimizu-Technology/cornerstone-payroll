@@ -1697,7 +1697,7 @@ export const payPeriodsApi = {
 };
 
 export const clientPayPeriodsApi = {
-  list: (params?: { status?: string; year?: number }, companyId?: number): Promise<ClientPayrollHistoryResponse> =>
+  list: (params?: { status?: string; year?: number; page?: number; per_page?: number }, companyId?: number): Promise<ClientPayrollHistoryResponse> =>
     api.get<ClientPayrollHistoryResponse>('/client/pay_periods', params, { companyId }),
   get: (id: number, companyId?: number): Promise<PayPeriodResponse> =>
     api.get<PayPeriodResponse>(`/client/pay_periods/${id}`, undefined, { companyId }),
@@ -3475,7 +3475,22 @@ export const reportsApi = {
     }>(`/admin/reports/check_signoff_preview?pay_period_id=${payPeriodId}`),
 };
 
+export interface ClientPayStub {
+  id: number;
+  pay_period_id: number;
+  pay_date: string;
+  period_description: string;
+  net_pay: number | string;
+}
+export const clientPayStubsApi = {
+  history: (employeeId: number) => api.get<{ pay_stubs: ClientPayStub[] }>(`/client/pay_stubs/employee/${employeeId}`),
+  download: (itemId: number) => api.getBlobWithParams(`/client/pay_stubs/${itemId}/download`),
+};
+
 export const clientReportsApi = {
+  download: (report: string, format: string, params: Record<string, string | number>) =>
+    api.getBlobWithParams(`/client/reports/${report}_${format}`, params),
+
   dashboard: () =>
     api.get<DashboardResponse>('/client/reports/dashboard'),
   payrollRegister: (payPeriodId: number) =>

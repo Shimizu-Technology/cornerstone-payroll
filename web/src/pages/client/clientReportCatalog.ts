@@ -1,0 +1,15 @@
+export const clientReportCatalog = [
+  { group: 'Payroll', title: 'Payroll Summary by Employee', key: 'payroll_summary_by_employee', scope: 'period' },
+  { group: 'Payroll', title: 'Checks & Payments Register', key: 'paycheck_history', scope: 'period' },
+  { group: 'Taxes', title: 'Tax Withholding Summary', key: 'tax_summary', scope: 'quarter' },
+  { group: 'Taxes', title: 'Employer Tax Liability', key: 'employer_liability', scope: 'quarter' },
+  { group: 'Taxes', title: 'Federal Form 941', key: 'form_941_gu', scope: 'quarter' },
+  { group: 'Taxes', title: 'Quarterly Compliance Packet', key: 'quarterly_compliance_packet', scope: 'quarter' },
+  { group: 'Taxes', title: 'Schedule B', key: 'quarterly_compliance_packet_schedule_b', scope: 'quarter', pdfOnly: true },
+  { group: 'Taxes', title: 'Guam W-1', key: 'quarterly_compliance_packet_w1', scope: 'quarter', pdfOnly: true },
+  { group: 'Taxes', title: 'SWICA', key: 'quarterly_compliance_packet_swica', scope: 'quarter', pdfOnly: true },
+  { group: 'Employees & history', title: 'Employee Pay History', key: 'employee_pay_history', scope: 'employee' },
+  { group: 'Employees & history', title: 'Deductions & Contributions', key: 'deductions_contributions', scope: 'period' },
+  { group: 'Employees & history', title: 'Retirement', key: 'retirement_plans', scope: 'period' },
+  { group: 'Employees & history', title: 'Installment Loans', key: 'installment_loans', scope: 'date' },
+] as const;
