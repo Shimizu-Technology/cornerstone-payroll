@@ -85,8 +85,9 @@ module PayrollSubmissions
           row[:client_extra_hours] = { hours: value, employee_wage_rate_id: change[:employee_wage_rate_id], rate: change[:wage_rate] }
           row[:missing_revel_hours_with_deductions] = false
           # An employee absent from both files has no review job picker; the client
-          # already named the saved job for these hours.
-          row[:selected_wage_rate_id] ||= change[:employee_wage_rate_id] if row[:payroll_setup_only]
+          # already named the saved job for these hours. Hours of their own still
+          # need a staff choice, so only preselect when they have none.
+          row[:selected_wage_rate_id] ||= change[:employee_wage_rate_id] if row[:payroll_setup_only] && own_hours(change[:employee_id]).zero?
         end
         row[:client_change_evidence] = change.merge(submission_id: @submission.id, reviewed_value: value) if field == :hours || row.dig(:period_pay_evidence, :source_type) == "client_submission"
         applied_value = field == :hours ? value : (row[:period_pay].presence || change[:saved_period_pay] || value)
@@ -117,6 +118,15 @@ module PayrollSubmissions
     end
 
     private
+
+    # Hours on the worksheet apart from any earlier client contribution.
+    def own_hours(employee_id)
+      item = @period.payroll_items.find_by(employee_id: employee_id)
+      return 0.to_d unless item
+
+      evidence = item.custom_columns_data.to_h["client_change_evidence"].to_h
+      evidence["kind"] == "extra_hours" ? evidence["baseline_regular_hours"].to_d : item.hours_worked.to_d
+    end
 
     def prior_items
       @period.payroll_items.includes(:employee).select do |item|
