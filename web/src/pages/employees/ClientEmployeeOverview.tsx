@@ -1,3 +1,4 @@
+import { ClientPayStubHistory } from '@/components/client-portal/ClientPayStubHistory';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Pencil } from 'lucide-react';
@@ -78,6 +79,7 @@ export function ClientEmployeeOverview() {
             <Detail label="Pay rate" value={payRate} />
           </CardContent>
         </Card>
+        <ClientPayStubHistory key={employeeId} employeeId={employeeId} />
       </main>
     </div>
   );
