@@ -90,7 +90,8 @@ class PayrollHistoryQuery
         committed_user.name::text AS processed_by_name,
         'cornerstone'::text AS source_system,
         'Cornerstone'::text AS source_label,
-        (pp.status = 'committed') AS source_locked
+        (pp.status = 'committed') AS source_locked,
+        COALESCE(pp.test_workspace_role = 'baseline', FALSE) AS practice_history
       FROM pay_periods pp
       LEFT JOIN payroll_items pi ON pi.pay_period_id = pp.id AND pi.payroll_reversed_at IS NULL AND COALESCE(pp.correction_status, '') <> 'voided'
         AND NOT EXISTS (
@@ -123,7 +124,8 @@ class PayrollHistoryQuery
         locked_user.name::text AS processed_by_name,
         historical_batch.source_system::text AS source_system,
         historical_period.source_label::text AS source_label,
-        TRUE AS source_locked
+        TRUE AS source_locked,
+        FALSE AS practice_history
       FROM historical_pay_periods historical_period
       INNER JOIN historical_import_batches historical_batch
         ON historical_batch.id = historical_period.historical_import_batch_id
@@ -140,9 +142,11 @@ class PayrollHistoryQuery
     clauses = []
     if @register_eligible
       native_statuses = @migration_rehearsal ? "'committed', 'calculated', 'approved'" : "'committed'"
+      # Only the client register reads a practice copy's copied history.
+      practice_history = @audience == :client ? "practice_history" : "FALSE"
       clauses << <<~SQL.squish
         (record_type = 'imported' OR
-          (record_type = 'native' AND status IN (#{native_statuses})
+          (record_type = 'native' AND (status IN (#{native_statuses}) OR #{practice_history})
             AND COALESCE(correction_status, '') <> 'voided'))
       SQL
     end
@@ -182,6 +186,7 @@ class PayrollHistoryQuery
       AND (pp.correction_status IS NULL OR pp.correction_status = 'correction')
       AND (
         pp.status = 'committed'
+        OR pp.test_workspace_role = 'baseline'
         OR (
           pp.status IN ('calculated', 'approved')
           AND EXISTS (
