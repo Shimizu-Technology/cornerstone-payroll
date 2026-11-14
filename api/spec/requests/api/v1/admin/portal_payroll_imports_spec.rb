@@ -1186,6 +1186,22 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(item.wage_rate_hours.map { |entry| [ entry["employee_wage_rate_id"], entry["regular_hours"].to_d ] }).to eq([ [ manual_job.id, 68 ] ])
     end
 
+    it "keeps the client hours apart from an overtime edit sent only through job allocations" do
+      source = standing_source
+      data = preview(source)
+      apply_standing(data)
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      allocations = item.wage_rate_hours.map { |entry| entry.merge("overtime_hours" => 3.0) }
+      patch "#{url}/payroll_items/#{item.id}", params: { payroll_item: { wage_rate_hours: allocations } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.custom_columns_data["client_change_evidence"]).to be_present
+      apply_standing(corrected_standing(data, source.change_rows))
+      expect(item.reload.hours_worked).to eq(68)
+      expect(item.wage_rate_hours.sum { |entry| entry["regular_hours"].to_d }).to eq(68)
+      expect(item.wage_rate_hours.sum { |entry| entry["overtime_hours"].to_d }).to eq(3)
+    end
+
     it "records staff declines on the import and in review history" do
       source = standing_source
       manual_worker.update!(status: "inactive")
