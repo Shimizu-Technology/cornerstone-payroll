@@ -500,6 +500,12 @@ module Api
             replacement_revision: source_package.replacement_session&.package_revision,
             verified_source_count: source_package.documents.count { |document| document.verification_status == "verified" },
             source_count: source_package.documents.length,
+            # Shown beside the review; bytes come from the intake preview endpoint.
+            documents: source_package.documents.reject { |document| document.verification_status == "legacy_unverified" }
+              .sort_by(&:position).map do |document|
+                { id: document.id, source_role: document.source_role, filename: document.filename,
+                  content_type: document.content_type, byte_size: document.byte_size }
+              end,
             disposition_targets: disposition_targets_json
           }
         end
