@@ -1338,15 +1338,85 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(baseline.map { |entry| [ entry["source_bucket_key"], entry["overtime_hours"].to_d ] }).to eq([ [ "a", 1 ], [ "b", 2 ] ])
     end
 
-    it "asks for a job instead of moving a file-absent worker's own hours to the client's job" do
-      create(:employee_wage_rate, employee: manual_worker, label: "Kitchen", rate: 18)
-      create(:payroll_item, pay_period: run, company: company, employee: manual_worker, hours_worked: 10, pay_rate: 35)
-      data = preview(standing_source)
-      post "#{url}/apply_import", params: reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id"),
-        force_overwrite: true, confirm_overwrite: true), as: :json
+    [ { hours_worked: 10 }, { hours_worked: 0, overtime_hours: 3 } ].each do |own|
+      it "asks for a job instead of moving a file-absent worker's own hours (#{own}) to the client's job" do
+        create(:employee_wage_rate, employee: manual_worker, label: "Kitchen", rate: 18)
+        create(:payroll_item, pay_period: run, company: company, employee: manual_worker, pay_rate: 35, **own)
+        data = preview(standing_source)
+        post "#{url}/apply_import", params: reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id"),
+          force_overwrite: true, confirm_overwrite: true), as: :json
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.body).to include("Choose")
+        expect(run.payroll_items.find_by!(employee: manual_worker)).to have_attributes(own)
+      end
+    end
+
+    it "keeps the client hours apart from overtime added in a new job bucket with no regular hours" do
+      source = standing_source
+      data = preview(source)
+      apply_standing(data)
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      allocations = item.wage_rate_hours + [ item.wage_rate_hours.first.merge("source_bucket_key" => "staff-ot", "regular_hours" => 0.0, "overtime_hours" => 3.0) ]
+      patch "#{url}/payroll_items/#{item.id}", params: { payroll_item: { wage_rate_hours: allocations } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.custom_columns_data["client_change_evidence"]).to be_present
+      apply_standing(corrected_standing(data, source.change_rows))
+      expect(item.reload.hours_worked).to eq(68)
+      expect(item.wage_rate_hours.sum { |entry| entry["regular_hours"].to_d }).to eq(68)
+      expect(item.wage_rate_hours.sum { |entry| entry["overtime_hours"].to_d }).to eq(3)
+    end
+
+    [ :owner_only, :with_worker ].each do |files|
+      it "removes the owner's paycheck on no pay and keeps the exclusion when restored pay is declined (#{files})" do
+        owner.update!(first_name: "Mo", last_name: "Owner")
+        people = [ { name: "Owner, Mo", regular_hours: 0, regular_pay: 0 } ]
+        people << { name: "Example, Avery", regular_hours: 40, regular_pay: 400 } if files == :with_worker
+        source = revision(bytes: File.binread(build_revel_pdf(people, period_start: run.start_date, period_end: run.end_date)))
+        source.update_columns(change_rows: [ { "kind" => "owner_pay", "employee_id" => owner.id, "amount" => "4500.00" } ])
+        add_source(source, PayrollImport::MosaSupplementalTemplate.new(run).generate, "changes_workbook", "changes.xlsx",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        apply_standing(preview(source), [ { change_index: 0, amount: "4500.00" } ])
+        expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4500.00"))
+
+        second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("skipped" => true) })
+        data = preview(second)
+        expect(response).to have_http_status(:ok), response.body
+        change = data.dig("client_change_prefill", "rows").sole
+        expect(change).to include("employee_id" => owner.id, "requires_pay_decision" => true)
+        apply_standing(data, [ { change_index: change["change_index"], decision: "no_pay", reason: "Owner took no pay" } ])
+        expect(run.payroll_items.find_by(employee: owner)).to be_nil
+        exclusion = run.pay_period_excluded_employees.find_by!(employee: owner)
+        expect(exclusion.reason).to eq("Owner took no pay")
+        expect(second.submission_imports.sole.applied_at).to be_present
+
+        third = identical_revision(source, rev: 3, changes: source.change_rows)
+        restored = preview(third)
+        expect(response).to have_http_status(:ok), response.body
+        apply_standing(restored, [ { change_index: 0, decision: "decline", reason: "Keep owner pay off this run" } ])
+        expect(run.payroll_items.find_by(employee: owner)).to be_nil
+        expect(run.pay_period_excluded_employees.find_by!(employee: owner)).to eq(exclusion)
+        expect(third.submission_imports.sole.applied_at).to be_present
+        expect(PayrollImportRecord.find(restored["import_id"]).status).to eq("applied")
+      end
+    end
+
+    it "explains instead of deleting when the owner's paycheck already has a check record" do
+      source = standing_source
+      add_source(source, PayrollImport::MosaSupplementalTemplate.new(run).generate, "changes_workbook", "changes.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      apply_standing(preview(source))
+      item = run.payroll_items.find_by!(employee: owner)
+      create(:check_event, payroll_item: item, user: staff, check_number: "1001")
+      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("skipped" => true) })
+      data = preview(second)
+      change = data.dig("client_change_prefill", "rows").find { |row| row["employee_id"] == owner.id }
+      post "#{url}/apply_import", params: { import_id: data["import_id"], confirm_client_changes: true, portal_source_id: data.dig("portal_source", "selection_id"),
+        reviewed_changes: [ { change_index: change["change_index"], decision: "no_pay", reason: "Owner took no pay" } ] }, as: :json
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.body).to include("Choose")
-      expect(run.payroll_items.find_by!(employee: manual_worker).hours_worked).to eq(10)
+      expect(response.parsed_body["error"]).to include("already has a check, payment or tax record")
+      expect(item.reload).to be_present
+      expect(run.pay_period_excluded_employees).to be_empty
     end
 
     it "records staff declines on the import and in review history" do

@@ -184,7 +184,9 @@ module Api
                   confirmed: params[:confirm_client_changes], dispositions: disposition_plan.decisions, source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] })
             end
 
-            if included_decisions.any? && matched_data.empty?
+            unpaid_owners = client_changes&.unpaid_owners || {}
+            matched_data.reject! { |row| unpaid_owners.key?(row[:employee_id].to_i) }
+            if included_decisions.any? { |decision| !unpaid_owners.key?(decision.row.employee_id) } && matched_data.empty?
               return render json: {
                 error: "Keep at least one matched employee in the import.",
                 details: { remaining_matched_rows: matched_data.length }
@@ -214,10 +216,9 @@ module Api
               import_record.update!(status: "applied", validation_errors: [],
                 raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || []))
               disposition_plan.decisions.each do |decision|
-                no_pay = client_changes&.review_decisions&.find { |change| change[:employee_id] == decision.row.employee_id && change[:decision] == "no_pay" }
-                if no_pay
+                if unpaid_owners.key?(decision.row.employee_id)
                   decision.disposition = "excluded"
-                  decision.reason = no_pay[:reason]
+                  decision.reason = unpaid_owners[decision.row.employee_id]
                 end
                 if decision.included?
                   payroll_item = @pay_period.payroll_items.find_by!(employee_id: decision.row.employee_id)
