@@ -50,11 +50,11 @@ export function ClientReports() {
       setError(null);
       // Older finished runs can sit past the first page, behind newer drafts.
       const periods = [];
-      for (let page = 1; page <= 50; page += 1) {
+      for (let page = 1; ; page += 1) {
         const response = await clientPayPeriodsApi.list({ page, per_page: 100 });
         periods.push(...response.pay_periods);
         const meta = response.meta;
-        if (!meta?.total_pages || (meta.current_page ?? page) >= meta.total_pages) break;
+        if (!meta?.total_pages || response.pay_periods.length === 0 || (meta.current_page ?? page) >= meta.total_pages) break;
       }
       const sorted = periods
         .filter((payPeriod) => payPeriod.record_type === 'native' && (payPeriod.status === 'committed' || payPeriod.test_workspace_role === 'baseline'))
