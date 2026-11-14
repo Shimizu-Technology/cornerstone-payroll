@@ -53,3 +53,27 @@ it('recovers a failed defaults request without an indefinite loading state', asy
   await screen.findByLabelText('Employee');
   expect(mocks.get).toHaveBeenCalledTimes(2);
 });
+
+it('edits an existing default and renders the returned order', async () => {
+  const existing = { id: 11, kind: 'owner_pay', employee_id: 1, employee_wage_rate_id: null, position: 0, active: true };
+  mocks.get.mockResolvedValue({ ...fixture, defaults: [existing] });
+  mocks.patch.mockResolvedValue({ ...fixture, defaults: [{ ...existing, position: 2 }] });
+  render(<StandingChangesSettings />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit default for Monique Owner' }));
+  fireEvent.change(screen.getByLabelText('Order'), { target: { value: '2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save default' }));
+  await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/admin/payroll_standing_changes/11', { standing_change: { ...existing, position: 2 } }));
+  await screen.findByText(/Every-period changes saved/);
+  fireEvent.click(screen.getByRole('button', { name: 'Edit default for Monique Owner' }));
+  expect((screen.getByLabelText('Order') as HTMLInputElement).value).toBe('2');
+});
+it('deactivates an existing default and removes its rendered row', async () => {
+  const existing = { id: 11, kind: 'owner_pay', employee_id: 1, employee_wage_rate_id: null, position: 0, active: true };
+  mocks.get.mockResolvedValue({ ...fixture, defaults: [existing] });
+  mocks.patch.mockResolvedValue({ ...fixture, defaults: [{ ...existing, active: false }] });
+  render(<StandingChangesSettings />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Remove default for Monique Owner' }));
+  await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/admin/payroll_standing_changes/11', { standing_change: { ...existing, active: false } }));
+  await screen.findByText('No every-period changes configured.');
+  expect(screen.queryByRole('button', { name: 'Remove default for Monique Owner' })).toBeNull();
+});

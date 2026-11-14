@@ -294,3 +294,22 @@ it('requires overwrite confirmation for an existing worksheet employee absent fr
   fireEvent.click(screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/));
   expect(applyButton().disabled).toBe(false);
 });
+
+it('requires renewed overwrite confirmation when selecting a revision adds an existing client-only employee', () => {
+  const data = preview([]);
+  data.portal_source = null;
+  data.preview.matched[0].overwrite_required = true;
+  data.pending_portal_source = { submission_id: 20, revision: 2, period_id: 90, changes: [], no_changes: false };
+  data.pending_change_prefill = { submission_id: 20, revision: 2, rows: [
+    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Addison Worker', hours: '68', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0', overwrite_required: true, saved_regular_hours: '2.0', saved_overtime_hours: '0.0' },
+  ] };
+  open(data);
+  fireEvent.click(screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(screen.getByLabelText(/Use this import for the client’s revision/));
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
+  expect((screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/) as HTMLInputElement).checked).toBe(false);
+  expect(applyButton().disabled).toBe(true);
+  fireEvent.click(screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/));
+  expect(applyButton().disabled).toBe(false);
+});
