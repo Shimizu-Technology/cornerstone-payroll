@@ -24,7 +24,7 @@ module Api
         private
 
         def current_pay_period_summary
-          pp = PayPeriod.reportable_committed
+          pp = PayPeriod.client_finished
                         .where(company_id: current_company_id)
                         .order(pay_date: :desc)
                         .first
@@ -43,7 +43,7 @@ module Api
         end
 
         def recent_payroll_summary
-          PayPeriod.reportable_committed
+          PayPeriod.client_finished
                    .where(company_id: current_company_id)
                    .includes(:payroll_items)
                    .order(pay_date: :desc)
@@ -65,7 +65,7 @@ module Api
             return [ nil, render(json: { error: "pay_period_id is required" }, status: :unprocessable_entity) ]
           end
 
-          pay_period = PayPeriod.reportable_committed
+          pay_period = PayPeriod.client_finished
                                 .includes(payroll_items: [ :payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department } ])
                                 .find_by(id: pay_period_id, company_id: current_company_id)
 
@@ -80,7 +80,7 @@ module Api
           pay_period_id = params[:pay_period_id]
           return if pay_period_id.blank?
 
-          pay_period = PayPeriod.reportable_committed.find_by(id: pay_period_id, company_id: current_company_id)
+          pay_period = PayPeriod.client_finished.find_by(id: pay_period_id, company_id: current_company_id)
           return if pay_period
 
           render json: { error: "Pay period not found" }, status: :not_found

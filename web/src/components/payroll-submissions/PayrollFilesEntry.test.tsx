@@ -46,14 +46,14 @@ it('says when a period has not opened yet instead of offering to send', async ()
   mocks.list.mockResolvedValue({ data: [period({ open_for_files: false, opens_on: '2026-11-29', end_date: '2026-11-29' })], meta: { derives_from_schedule: true } });
   renderEntry();
   expect(await screen.findByText(/Opens for files Nov 29, 2026/)).toBeTruthy();
-  expect(screen.getByRole('link', { name: 'Open payroll files' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Open pay period files' })).toBeTruthy();
 });
 
-it('still links to Payroll Files and offers a retry when the status cannot load', async () => {
+it('still links to Pay Period Files and offers a retry when the status cannot load', async () => {
   mocks.list.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ data: [period({})], meta: { derives_from_schedule: true } });
   renderEntry();
   expect((await screen.findByRole('alert')).textContent).toMatch(/could not load your current pay period/);
-  expect(screen.getByRole('link', { name: 'Open Payroll Files' }).getAttribute('href')).toBe('/payroll-files');
+  expect(screen.getByRole('link', { name: 'Open Pay Period Files' }).getAttribute('href')).toBe('/payroll-files');
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   await waitFor(() => expect(screen.getByRole('link', { name: 'Send payroll files' })).toBeTruthy());
 });
