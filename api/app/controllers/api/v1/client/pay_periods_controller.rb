@@ -115,7 +115,7 @@ module Api
 
         def client_visible_period?(pay_period)
           return false unless pay_period
-          return true if pay_period.committed?
+          return true if pay_period.client_finished?
 
           pay_period.company.client_payroll_approval_required? &&
             pay_period.status.in?(%w[calculated approved]) &&

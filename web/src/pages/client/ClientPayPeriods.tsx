@@ -14,6 +14,18 @@ import { formatCurrency, formatDate, formatDateRange, payPeriodStatusConfig } fr
 import { currentAppPath, importedPayRunPath, payRunPath } from '@/lib/routes';
 import { parsePositiveRouteId } from '@/lib/route-params';
 
+
+// A practice copy's copied history stands for payroll the real client was
+// already paid; it is approved there only because a practice copy cannot commit.
+function PeriodStatusBadge({ period }: { period: PayrollHistoryRecord }): ReactElement {
+  if (period.test_workspace_role === 'baseline') return <Badge variant="success">Paid (copied history)</Badge>;
+  return (
+    <Badge variant={period.status === 'committed' ? 'success' : period.status === 'locked' ? 'warning' : 'default'}>
+      {period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status}
+    </Badge>
+  );
+}
+
 export function ClientPayPeriods(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
@@ -117,9 +129,7 @@ export function ClientPayPeriods(): ReactElement {
                       <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
                       <p className="mt-1 text-sm text-neutral-600">Pay date {formatDate(period.pay_date, { weekday: 'short', year: undefined })}</p>
                     </div>
-                    <Badge variant={period.status === 'committed' ? 'success' : period.status === 'locked' ? 'warning' : 'default'}>
-                      {period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status}
-                    </Badge>
+                    <PeriodStatusBadge period={period} />
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-3">
                     <MobileField label="Net pay" value={formatCurrency(period.total_net ?? 0)} />
@@ -157,9 +167,7 @@ export function ClientPayPeriods(): ReactElement {
                     <TableCell>{formatCurrency(period.total_net ?? 0)}</TableCell>
                     <TableCell><Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>{period.source.label}</Badge></TableCell>
                     <TableCell>
-                      <Badge variant={period.status === 'committed' ? 'success' : period.status === 'locked' ? 'warning' : 'default'}>
-                        {period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status}
-                      </Badge>
+                      <PeriodStatusBadge period={period} />
                     </TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="sm" onClick={() => openPeriod(period)}>
