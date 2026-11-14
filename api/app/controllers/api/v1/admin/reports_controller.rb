@@ -773,7 +773,7 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          generator = PayrollSummaryByEmployeePdfGenerator.new(pp)
+          generator = PayrollSummaryByEmployeePdfGenerator.new(pp, client_view: client_report_view?)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -798,7 +798,7 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          generator = DeductionsContributionsReportPdfGenerator.new(pp)
+          generator = DeductionsContributionsReportPdfGenerator.new(pp, client_view: client_report_view?)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -820,7 +820,7 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          generator = PaycheckHistoryPdfGenerator.new(pp)
+          generator = PaycheckHistoryPdfGenerator.new(pp, client_view: client_report_view?)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -842,7 +842,7 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          generator = RetirementPlansReportPdfGenerator.new(pp)
+          generator = RetirementPlansReportPdfGenerator.new(pp, client_view: client_report_view?)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -1458,7 +1458,7 @@ module Api
           adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
           report_data = {
             type: "payroll_register",
-            review_warnings: PayrollReportComponentReview.for_items(items),
+            review_warnings: report_component_review_warnings(items),
             simple_payroll_register_enabled: company.simple_payroll_register_enabled?,
             meta: report_meta(company, :payroll_register),
             source: {
@@ -2002,7 +2002,7 @@ module Api
 
           {
             type: "ytd_summary",
-            review_warnings: PayrollReportComponentReview.for_items(items),
+            review_warnings: report_component_review_warnings(items),
             meta: report_meta(Company.find(current_company_id), :ytd_summary),
             year: period.year,
             period: period.payload,
@@ -2523,7 +2523,7 @@ module Api
 
           {
             type: "employee_pay_history",
-            review_warnings: PayrollReportComponentReview.for_items(selected_items),
+            review_warnings: report_component_review_warnings(selected_items),
             meta: report_meta(employee.company, :employee_pay_history),
             period: period.payload,
             employee: {
@@ -2586,7 +2586,7 @@ module Api
           adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
           {
             type: "payroll_summary_by_employee",
-            review_warnings: PayrollReportComponentReview.for_items(items),
+            review_warnings: report_component_review_warnings(items),
             meta: report_meta(pay_period.company, :payroll_summary_by_employee),
             pay_period: {
               id: pay_period.id,
@@ -2893,7 +2893,7 @@ module Api
 
         def quickbooks_report_data_for(item)
           @quickbooks_report_data_by_pay_period_id ||= {}
-          @quickbooks_report_data_by_pay_period_id[item.pay_period_id] ||= QuickbooksPayrollReportData.new(item.pay_period)
+          @quickbooks_report_data_by_pay_period_id[item.pay_period_id] ||= QuickbooksPayrollReportData.new(item.pay_period, client_view: client_report_view?)
         end
 
         def consume_matching_field_contribution?(amounts_by_label, deduction)
@@ -3689,7 +3689,7 @@ module Api
         end
 
         def quickbooks_payroll_summary_sheet(pay_period)
-          qb = QuickbooksPayrollReportData.new(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period, client_view: client_report_view?)
           items = qb.items
           headers = [ "Item", "Total" ] + items.map { |item| qb.qb_employee_name(item.employee) }
           rows = [ [ pay_period.company.name ], [ "Payroll summary by employee report" ], [ qb.qb_date_range_label ], [], headers ]
@@ -4152,6 +4152,10 @@ module Api
           ]
         end
 
+        def report_component_review_warnings(items)
+          client_report_view? ? [] : PayrollReportComponentReview.for_items(items)
+        end
+
         def client_report_view?
           false
         end
@@ -4476,7 +4480,7 @@ module Api
 
         def deductions_contributions_sheets(pay_period)
           report = build_pay_period_payroll_items_report(pay_period)
-          qb = QuickbooksPayrollReportData.new(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period, client_view: client_report_view?)
           aggregate_rows = [ [ "Description", "Type", "Employee Deductions", "Company Contributions", "Plan Total" ] ] +
             qb.aggregate_deduction_contribution_rows.map do |entry|
               employee_amount = entry.employee_amount.to_f
@@ -4504,7 +4508,7 @@ module Api
 
         def paycheck_history_sheets(pay_period)
           report = build_pay_period_payroll_items_report(pay_period)
-          qb = QuickbooksPayrollReportData.new(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period, client_view: client_report_view?)
           history_rows = [ [ "Pay Date", "Name", "Total Pay", "Net Pay", "Pay Method", "Check #", "Status" ] ] +
             qb.paycheck_history_rows(include_voided: true).map do |row|
               [ row[:pay_date], row[:employee_name], row[:total_pay], row[:net_pay], row[:pay_method], row[:check_number], row[:status] ]
@@ -4526,7 +4530,7 @@ module Api
 
         def retirement_plans_sheets(pay_period)
           report = build_pay_period_payroll_items_report(pay_period)
-          qb = QuickbooksPayrollReportData.new(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period, client_view: client_report_view?)
           retirement_rows = [ [ "Plan Section", "Employee", "Employee Deductions", "Company Contributions", "Plan Total" ] ] +
             qb.retirement_rows.map do |row|
               [ PayrollReportingGroups.label(row.group) || row.group, row.employee_name, row.employee_amount, row.company_amount, row.employee_amount.to_f + row.company_amount.to_f ]

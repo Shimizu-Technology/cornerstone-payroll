@@ -35,6 +35,7 @@ class QuarterlyCompliancePacketBuilder
       component_taxability: component_taxability
     }
     if @client_view
+      report[:form_500][:deposits].each { |deposit| deposit.except!(:notes, :confirmation_number, :receipt_attached) }
       report.delete(:workflow)
       report[:federal_941].delete(:filing_steps)
       report[:federal_941][:deposit_schedule].delete(:firm_payment_policy)

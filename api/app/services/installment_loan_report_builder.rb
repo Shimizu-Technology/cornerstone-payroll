@@ -23,7 +23,7 @@ class InstallmentLoanReportBuilder
     all_transactions = loan.loan_transactions.chronological.to_a
     if @pay_period_scope
       allowed_ids = @pay_period_scope.where(company_id: company.id).pluck(:id)
-      balance = all_transactions.first&.balance_before || loan.original_amount
+      balance = all_transactions.first&.balance_before || loan.opening_balance
       all_transactions = all_transactions.filter_map do |txn|
         next unless txn.pay_period_id.nil? || allowed_ids.include?(txn.pay_period_id)
 
@@ -50,7 +50,7 @@ class InstallmentLoanReportBuilder
     return BigDecimal("0") if loan.start_date.present? && loan.start_date > as_of_date
     return all_transactions.first.balance_before if all_transactions.any?
 
-    @pay_period_scope ? loan.original_amount : loan.current_balance
+    @pay_period_scope ? loan.opening_balance : loan.current_balance
   end
 
   def status_as_of(loan, transactions)

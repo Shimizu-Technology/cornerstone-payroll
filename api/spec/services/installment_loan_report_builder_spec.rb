@@ -60,4 +60,11 @@ RSpec.describe InstallmentLoanReportBuilder do
     expect(snapshot[:transactions]).to be_empty
     expect(snapshot[:balance_as_of]).to eq(0)
   end
+  it "uses the opening balance when a scoped loan has no transactions" do
+    loan.loan_transactions.delete_all
+    loan.update!(opening_balance: 125)
+    snapshot = described_class.new(company, as_of_date: Date.new(2026, 3, 1), pay_period_scope: PayPeriod.client_finished).loans.sole
+    expect(snapshot[:balance_as_of]).to eq(125)
+    expect(snapshot[:transactions]).to be_empty
+  end
 end

@@ -23,6 +23,12 @@ async function mockPracticeClient(page: Page): Promise<void> {
   }));
   await page.route('**/api/v1/client/pay_periods**', (route) => json(route, {
     pay_periods: [{
+      key: 'native:99', record_type: 'native', id: 99, company_id: 12,
+      start_date: '2026-11-01', end_date: '2026-11-14', pay_date: '2026-11-18', status: 'approved',
+    }, {
+      key: 'native:98', record_type: 'native', id: 98, company_id: 12,
+      start_date: '2026-10-19', end_date: '2026-11-01', pay_date: '2026-11-05', status: 'calculated',
+    }, {
       key: 'native:91', record_type: 'native', id: 91, company_id: 12,
       start_date: '2026-10-05', end_date: '2026-10-18', pay_date: '2026-10-22', status: 'approved',
       run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true,
@@ -46,11 +52,40 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
     await page.goto('/reports');
     await expect(page.getByRole('region', { name: 'Report catalog' })).toBeVisible();
+    await expect(page.getByRole('option', { name: '2026-11-01 - 2026-11-14' })).toHaveCount(0);
+    await expect(page.getByRole('option', { name: '2026-10-19 - 2026-11-01' })).toHaveCount(0);
     await expect(page.getByText('Deductions & Contributions', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Export Payroll Summary by Employee' }).click();
     const download = page.waitForEvent('download');
     await page.getByRole('menuitem', { name: /PDF/ }).click();
-    await download;
+    const file = await download;
+    expect(file.suggestedFilename()).toBe('payroll_summary_by_employee.pdf');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
+  test(`employee-list failure and retry preserve report downloads at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await mockPracticeClient(page);
+    let employeeRequests = 0;
+    await page.route('**/api/v1/client/employees**', route => {
+      employeeRequests += 1;
+      if (employeeRequests === 1) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Employees unavailable' }) });
+      return json(route, { data: [{ id: 42, first_name: 'Ana', last_name: 'Perez' }], meta: { total_pages: 1 } });
+    });
+    await page.route('**/api/v1/client/reports/**', route => {
+      if (route.request().url().includes('_pdf')) return route.fulfill({ contentType: 'application/pdf', headers: { 'Content-Disposition': 'attachment; filename="report.pdf"' }, body: '%PDF-1.4 test' });
+      return json(route, { report: null });
+    });
+    await page.goto('/reports');
+    await expect(page.getByText(/Employee reports are unavailable/)).toBeVisible();
+    await page.getByRole('button', { name: 'Export Payroll Summary by Employee' }).click();
+    const download = page.waitForEvent('download');
+    await page.getByRole('menuitem', { name: /PDF/ }).click();
+    await download;
+    await page.getByRole('button', { name: 'Retry loading employees' }).click();
+    await page.getByRole('combobox', { name: 'Report employee' }).selectOption('42');
+    await expect(page.getByRole('button', { name: 'Export Employee Pay History' })).toBeEnabled();
+    await expect(page.getByText(/Employee reports are unavailable/)).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
 }

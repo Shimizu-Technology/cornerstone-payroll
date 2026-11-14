@@ -20,6 +20,8 @@ function finiteAmount(value: number | string | null | undefined): number {
 
 export function ClientReports() {
   const [employees, setEmployees] = useState<{ id: number; first_name: string; last_name: string }[]>([]);
+  const [employeeError, setEmployeeError] = useState<string | null>(null);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
   const [employeeId, setEmployeeId] = useState('');
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
   const [quarter, setQuarter] = useState(String(Math.floor(new Date().getMonth() / 3) + 1));
@@ -47,18 +49,8 @@ export function ClientReports() {
       setLoading(true);
       setError(null);
       const response = await clientPayPeriodsApi.list();
-      const workers = [];
-      let page = 1;
-      let totalPages = 1;
-      do {
-        const result = await clientEmployeesApi.list({ per_page: 500, page });
-        workers.push(...result.data);
-        totalPages = result.meta?.total_pages ?? 1;
-        page += 1;
-      } while (page <= totalPages);
-      setEmployees(workers);
       const sorted = response.pay_periods
-        .filter((payPeriod) => payPeriod.record_type === 'native')
+        .filter((payPeriod) => payPeriod.record_type === 'native' && (payPeriod.status === 'committed' || payPeriod.test_workspace_role === 'baseline'))
         .sort((a, b) => comparePayPeriodsByPeriod(a, b, 'desc'));
       setPayPeriods(sorted);
       if (sorted[0]) {
@@ -70,6 +62,27 @@ export function ClientReports() {
       setLoading(false);
     }
   }, [setError]);
+
+  const loadEmployees = useCallback(async () => {
+    setEmployeesLoading(true);
+    setEmployeeError(null);
+    try {
+      const workers = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const result = await clientEmployeesApi.list({ per_page: 500, page });
+        workers.push(...result.data);
+        totalPages = result.meta?.total_pages ?? 1;
+        page += 1;
+      } while (page <= totalPages);
+      setEmployees(workers);
+    } catch (err) {
+      setEmployeeError(err instanceof Error ? err.message : 'Failed to load employees');
+    } finally {
+      setEmployeesLoading(false);
+    }
+  }, []);
 
   const loadPayrollRegister = useCallback(async () => {
     try {
@@ -103,7 +116,8 @@ export function ClientReports() {
 
   useEffect(() => {
     void loadBaseData();
-  }, [loadBaseData]);
+    void loadEmployees();
+  }, [loadBaseData, loadEmployees]);
 
   useEffect(() => {
     if (!selectedPayPeriodId) return;
@@ -285,8 +299,12 @@ export function ClientReports() {
               <div className="grid gap-3 sm:grid-cols-3">
                 <label>Tax year<input aria-label="Tax year" type="number" value={reportYear} onChange={e => setReportYear(Number(e.target.value))} className="block h-11 w-full rounded border px-3" /></label>
                 <label>Quarter<select aria-label="Quarter" value={quarter} onChange={e => setQuarter(e.target.value)} className="block h-11 w-full rounded border px-3">{[1,2,3,4].map(q => <option key={q} value={q}>Q{q}</option>)}</select></label>
-                <label>Employee<select aria-label="Report employee" value={employeeId} onChange={e => setEmployeeId(e.target.value)} className="block h-11 w-full rounded border px-3"><option value="">Choose employee</option>{employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}</select></label>
+                <label>Employee<select disabled={employeesLoading || !!employeeError} aria-label="Report employee" value={employeeId} onChange={e => setEmployeeId(e.target.value)} className="block h-11 w-full rounded border px-3"><option value="">{employeesLoading ? 'Loading employees...' : 'Choose employee'}</option>{employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}</select></label>
               </div>
+              {employeeError && <div role="alert" className="text-sm text-red-700">
+                <p>Employee reports are unavailable: {employeeError}</p>
+                <Button variant="outline" onClick={() => void loadEmployees()}>Retry loading employees</Button>
+              </div>}
               {['Payroll', 'Taxes', 'Employees & history'].map(group => <div key={group}>
                 <h3 className="mb-3 font-semibold">{group}</h3>
                 <div className="grid gap-3 md:grid-cols-2">
