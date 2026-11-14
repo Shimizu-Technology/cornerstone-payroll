@@ -157,6 +157,56 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(run.reload.pending_portal_submission?).to be(false)
   end
 
+  [ false, true ].each do |schedule_period|
+    it "keeps a failed saved-job selection retryable (schedule period: #{schedule_period})" do
+      source = revision
+      period.update!(pay_period: nil, source: "schedule") if schedule_period
+      data = pay_run_preview(source)
+      post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id,
+        wage_rate_choices: { employee.id.to_s => 999999 } }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("saved rates")
+      expect(PayrollSubmissionImport.count).to eq(0)
+      expect(period.reload.pay_period_id).to eq(schedule_period ? nil : run.id)
+      expect(PayrollImportRecord.find(data["import_id"]).status).to eq("previewed")
+      get "#{url}/current_import"
+      expect(response.parsed_body["portal_source"]).to be_nil
+      expect(response.parsed_body.dig("pending_portal_source", "submission_id")).to eq(source.id)
+      post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(source.submission_imports.sole).to have_attributes(source_route: "pay_run", applied_at: be_present)
+      expect(period.reload.pay_period_id).to eq(run.id)
+      expect(run.reload.pending_portal_submission?).to be(false)
+    end
+  end
+
+  it "keeps a schedule revision retryable after an unexpected apply exception" do
+    source = revision
+    period.update!(pay_period: nil, source: "schedule")
+    data = pay_run_preview(source)
+    allow_any_instance_of(PayrollIntake::SourcePackageVerifier).to receive(:verify!).and_raise(StandardError, "verification interrupted")
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("verification interrupted")
+    expect(PayrollSubmissionImport.count).to eq(0)
+    expect(period.reload.pay_period_id).to be_nil
+    expect(PayrollImportRecord.find(data["import_id"]).status).to eq("previewed")
+    allow_any_instance_of(PayrollIntake::SourcePackageVerifier).to receive(:verify!).and_call_original
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(period.reload.pay_period_id).to eq(run.id)
+    expect(source.submission_imports.sole.applied_at).to be_present
+  end
+
+  it "includes the pending revision checklist, notes and workbook choice in pay-run review" do
+    source = revision
+    source.update_columns(workbook_choice: "link", changes_link_url: "https://example.test/corrected", notes: "Check owner pay and the new hire")
+    data = pay_run_preview(source)
+    expect(data["pending_portal_source"]).to include("period_id" => period.id, "workbook_choice" => "link",
+      "changes_link_url" => "https://example.test/corrected", "notes" => "Check owner pay and the new hire", "no_changes" => false)
+    expect(data.dig("pending_portal_source", "changes").sole).to include("kind" => "wage_change", "label" => "Wage change", "employee_name" => employee.full_name, "new_wage" => "99.00")
+  end
+
   it "does not consume a regular client revision after the linked run changes to a special purpose" do
     source = revision
     data = pay_run_preview(source)
@@ -194,6 +244,10 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     expect(source.submission_imports).to be_empty
     expect(run.reload.pending_portal_submission?).to be(true)
+    allow_any_instance_of(PayrollImport::ImportService).to receive(:apply!).and_call_original
+    post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(source.submission_imports.sole.applied_at).to be_present
   end
 
   it "also warns on a pay-run upload without any portal revision or workbook" do

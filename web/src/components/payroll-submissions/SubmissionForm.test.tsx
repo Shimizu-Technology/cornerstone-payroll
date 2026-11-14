@@ -52,6 +52,7 @@ it('asks about Excel in Other files and moves it into the visible workbook slot'
   expect(screen.getByLabelText('Attach the workbook')).toHaveProperty('checked', true);
   expect(screen.getByText('Selected: tips.XLSX')).toBeTruthy();
   expect(otherFiles.value).toBe('');
+  fireEvent.click(screen.getByLabelText('No changes this period'));
   send(); await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
   const form = mocks.submit.mock.calls[0][1] as FormData;
   expect(form.get('changes_workbook')).toBeTruthy(); expect(form.getAll('attachments[]')).toEqual([]);
@@ -76,6 +77,7 @@ it('reuses an interrupted submission key only for identical bytes', async () => 
   mocks.submit.mockRejectedValue(new Error('Connection interrupted'));
   render(<SubmissionForm period={period} onSent={vi.fn()} />);
   uploadPdf();
+  fireEvent.click(screen.getByLabelText('No changes this period'));
   fireEvent.click(screen.getByLabelText('Attach the workbook'));
   const input = screen.getByLabelText('Tips & loans workbook (Excel)');
   fireEvent.change(input, { target: { files: [new File(['original'], 'tips.xlsx', { lastModified: 1 })] } });
@@ -87,4 +89,45 @@ it('reuses an interrupted submission key only for identical bytes', async () => 
   fireEvent.change(input, { target: { files: [new File(['correct!'], 'tips.xlsx', { lastModified: 1 })] } });
   send(); await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(3));
   expect((mocks.submit.mock.calls[2][1] as FormData).get('idempotency_key')).not.toBe(firstKey);
+});
+
+const keptRevision = { id: 1, revision: 1, current: true, superseded: false, submitted_at: '2026-11-14T00:00:00Z', no_changes: true, workbook_choice: 'attach', changes: [], documents: [
+  { role: 'revel_payroll', file_size: 1, file_name: 'revel.pdf', document: { id: 1 } as ClientDocument },
+  { role: 'changes_workbook', file_size: 1, file_name: 'old.xlsx', document: { id: 2 } as ClientDocument },
+] } as SubmissionRevision;
+
+it('prompts for corrected Excel despite a kept workbook and replaces the kept source', async () => {
+  render(<SubmissionForm period={period} current={keptRevision} onSent={vi.fn()} />);
+  await userEvent.upload(screen.getByLabelText('Other files'), workbook());
+  fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
+  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert').textContent).toContain('confirm it is supporting material');
+  fireEvent.click(screen.getByRole('button', { name: 'Use this as the tips & loans workbook (replaces the one from revision 1)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  const form = mocks.submit.mock.calls[0][1] as FormData;
+  expect(form.getAll('keep_document_ids[]')).toEqual(['1']);
+  expect((form.get('changes_workbook') as File).name).toBe('tips.XLSX');
+  expect(form.getAll('attachments[]')).toEqual([]);
+});
+
+it('retains new Excel with the old workbook only after explicit supporting-material confirmation', async () => {
+  render(<SubmissionForm period={period} current={keptRevision} onSent={vi.fn()} />);
+  await userEvent.upload(screen.getByLabelText('Other files'), workbook());
+  fireEvent.click(screen.getByLabelText('These Excel files are supporting material, not the tips & loans workbook'));
+  fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  const form = mocks.submit.mock.calls[0][1] as FormData;
+  expect(form.get('excel_attachments_supporting')).toBe('true');
+  expect(form.getAll('keep_document_ids[]')).toEqual(['1', '2']);
+  expect(form.getAll('attachments[]')).toHaveLength(1);
+});
+
+it('requires a change row or No changes independently of the workbook answer', async () => {
+  render(<SubmissionForm period={period} onSent={vi.fn()} />);
+  uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period')); send();
+  expect(screen.getByRole('alert').textContent).toBe('List the changes this period or choose "No changes this period"');
+  expect(mocks.submit).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByLabelText('No changes this period')); send();
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
 });

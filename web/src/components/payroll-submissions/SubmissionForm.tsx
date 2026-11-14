@@ -40,6 +40,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const [revel, setRevel] = useState<File | null>(null);
   const [workbook, setWorkbook] = useState<File | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [excelSupporting, setExcelSupporting] = useState(false);
   const attachmentInput = useRef<HTMLInputElement>(null);
   const carryable = current?.documents.filter(d => d.document) || [];
   const [keep, setKeep] = useState<number[]>(carryable.map(d => d.document!.id));
@@ -66,6 +67,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   useEffect(() => { void loadEmployees(); }, [loadEmployees]);
 
   const keptRevel = carryable.find(d => d.role === 'revel_payroll' && keep.includes(d.document!.id));
+  const hasNewWorkbook = workbookChoice === 'attach' && !!workbook;
   const keptWorkbook = carryable.find(d => d.role === 'changes_workbook' && keep.includes(d.document!.id));
   const update = (key: string, patch: Partial<ChangeRow>): void => setRows(list => list.map(row => row.key === key ? { ...row, ...patch } : row));
   const employeeSelect = (row: DraftRow, label: string): ReactElement => (
@@ -86,6 +88,8 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       try { const url = new URL(link.trim()); if (url.protocol !== 'https:' || !url.hostname || link.trim().length > 2000) throw new Error(); }
       catch { setDetails({ changes_link_url: ['Enter a full https:// link'] }); return; }
     }
+    if (!noChanges && rows.length === 0) { setDetails({ changes: ['List the changes this period or choose "No changes this period"'] }); return; }
+    if (!hasNewWorkbook && attachments.some(file => /\.xlsx?$/i.test(file.name)) && !excelSupporting) { setDetails({ attachment: ['Use the Excel file as the tips & loans workbook or confirm it is supporting material.'] }); return; }
     const sentWorkbook = workbookChoice === 'attach' ? workbook : null;
     const sentLink = workbookChoice === 'link' ? link.trim() : '';
     const keepIds = keep.filter(id => {
@@ -98,7 +102,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
     const changes = noChanges ? [] : rows.map(rowFields);
     setBusy(true);
     try {
-      const identity = JSON.stringify([await fileIdentity(revel), await fileIdentity(sentWorkbook), await Promise.all(attachments.map(fileIdentity)), keepIds, workbookChoice, noChanges, changes, sentLink, notes, current?.revision]);
+      const identity = JSON.stringify([await fileIdentity(revel), await fileIdentity(sentWorkbook), await Promise.all(attachments.map(fileIdentity)), keepIds, workbookChoice, excelSupporting, noChanges, changes, sentLink, notes, current?.revision]);
       if (retry.current?.identity !== identity) retry.current = { identity, key: crypto.randomUUID() };
       const form = new FormData();
       if (revel) form.append('revel_payroll', revel);
@@ -106,6 +110,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       attachments.forEach(file => form.append('attachments[]', file));
       keepIds.forEach(id => form.append('keep_document_ids[]', String(id)));
       form.append('workbook_choice', workbookChoice);
+      form.append('excel_attachments_supporting', String(excelSupporting));
       form.append('no_changes', String(noChanges));
       form.append('changes', JSON.stringify(changes));
       if (sentLink) form.append('changes_link_url', sentLink);
@@ -128,7 +133,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       <h3 id="send-files-title" className="text-lg font-semibold text-neutral-950">{current ? `Send an update (becomes revision ${current.revision + 1})` : 'Send this period’s payroll files'}</h3>
       {current && <p className="text-sm text-neutral-700">Your update is saved as a new revision. Revision {current.revision} stays on this page, marked superseded.</p>}
 
-      <fieldset className="space-y-2">
+      <fieldset className="min-w-0 space-y-2">
         <legend className="text-sm font-semibold text-neutral-900">1. Revel hours report (PDF) <span className="font-normal text-neutral-600">(required)</span></legend>
         <p className="text-sm text-neutral-600">Hours worked, including overtime, from Revel.</p>
         {keptRevel && !revel && <p className="text-sm text-neutral-700">Keeping {keptRevel.file_name} from revision {current?.revision}. Choose a file to replace it.</p>}
@@ -136,7 +141,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
         <FieldError messages={details.revel_payroll} />
       </fieldset>
 
-      <fieldset className="space-y-3">
+      <fieldset className="min-w-0 space-y-3">
         <legend className="text-sm font-semibold text-neutral-900">2. Tips &amp; loans workbook (Excel)</legend>
         <p className="text-sm text-neutral-600">Tips to report and loan deductions for this payroll.</p>
         {(['attach', 'link', 'none'] as const).map(choice => <label key={choice} className="flex min-h-11 items-center gap-2 text-sm font-medium">
@@ -156,7 +161,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
         </div>}
       </fieldset>
 
-      <fieldset className="space-y-3">
+      <fieldset className="min-w-0 space-y-3">
         <legend className="text-sm font-semibold text-neutral-900">Changes this period</legend>
         <label className="flex min-h-11 items-center gap-2 text-sm font-medium">
           <input type="checkbox" className="h-5 w-5" checked={noChanges} onChange={e => setNoChanges(e.target.checked)} />
@@ -219,17 +224,18 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       <LabeledTextarea label="Notes for Cornerstone (optional)" value={notes} onChange={e => setNotes(e.target.value)} rows={3} />
       <FieldError messages={details.notes} />
 
-      <fieldset className="space-y-2">
+      <fieldset className="min-w-0 space-y-2">
         <legend className="text-sm font-semibold text-neutral-900">Other files <span className="font-normal text-neutral-600">(optional: new-hire documents, timesheets)</span></legend>
         {carryable.filter(d => d.role === 'attachment').map(d => (
           <label key={d.document!.id} className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="h-5 w-5" checked={keep.includes(d.document!.id)} onChange={e => setKeep(list => e.target.checked ? [...list, d.document!.id] : list.filter(id => id !== d.document!.id))} /><span className="break-words [overflow-wrap:anywhere]">Keep {d.file_name}</span></label>
         ))}
-        <input ref={attachmentInput} aria-label="Other files" type="file" multiple onChange={e => setAttachments(Array.from(e.target.files || []))} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
-        {!workbook && !keptWorkbook && !(workbookChoice === 'link' && link.trim()) && attachments.filter(file => /\.xlsx?$/i.test(file.name)).map((file, index) => <div key={`${file.name}-${index}`} className="space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-3">
-          <p className="break-all text-sm font-semibold">{file.name}: Is this the tips &amp; loans workbook?</p>
-          <Button type="button" variant="outline" onClick={() => { setWorkbook(file); setWorkbookChoice('attach'); setAttachments(list => list.filter(item => item !== file)); if (attachmentInput.current) attachmentInput.current.value = '';  }}>Yes, move to workbook slot</Button>
-          <p className="text-sm">If it is another file, choose a workbook option above before sending.</p>
+        <input ref={attachmentInput} aria-label="Other files" type="file" multiple onChange={e => { setAttachments(Array.from(e.target.files || [])); setExcelSupporting(false); }} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
+        {!hasNewWorkbook && attachments.filter(file => /\.xlsx?$/i.test(file.name)).map((file, index) => <div key={`${file.name}-${index}`} className="space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-3">
+          <p className="break-words text-sm font-semibold [overflow-wrap:anywhere]">{file.name}: Is this the tips &amp; loans workbook?</p>
+          <Button type="button" variant="outline" className="h-auto min-h-11 max-w-full text-left" onClick={() => { setWorkbook(file); setWorkbookChoice('attach'); setAttachments(list => list.filter(item => item !== file)); if (attachmentInput.current) attachmentInput.current.value = '';  }}><span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{keptWorkbook ? `Use this as the tips & loans workbook (replaces the one from revision ${current?.revision})` : 'Yes, move to workbook slot'}</span></Button>
+
         </div>)}
+        {!hasNewWorkbook && attachments.some(file => /\.xlsx?$/i.test(file.name)) && <label className="flex min-h-11 items-start gap-2 text-sm"><input type="checkbox" className="mt-1 shrink-0" checked={excelSupporting} onChange={e => setExcelSupporting(e.target.checked)} /><span className="min-w-0">These Excel files are supporting material, not the tips &amp; loans workbook</span></label>}
         {attachments.length > 0 && <ul className="text-sm text-neutral-700">{attachments.map((file, index) => <li className="break-all" key={`${file.name}-${index}`}>{file.name}</li>)}</ul>}
         <FieldError messages={[...(details.attachment || []), ...(details.files || []), ...(details.keep_document_ids || [])]} />
       </fieldset>

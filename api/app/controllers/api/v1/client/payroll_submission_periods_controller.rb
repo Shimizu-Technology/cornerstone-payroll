@@ -4,7 +4,7 @@ module Api
   module V1
     module Client
       class PayrollSubmissionPeriodsController < BaseController
-        before_action :require_payroll_files
+        before_action :require_payroll_files, only: :submissions
         include PayrollSubmissionPeriodActions
 
         # Send a new revision: Revel payroll PDF, changes, notes, attachments.
@@ -13,7 +13,7 @@ module Api
           result = PayrollSubmissions::CreateRevision.new(
             company: payroll_catalog_company, actor: current_user, entry: @entry, catalog: payroll_catalog,
             params: params.permit(:revel_payroll, :changes_workbook, :workbook_choice, :no_changes, :changes_link_url, :notes,
-              :idempotency_key, :based_on_revision, attachments: [], keep_document_ids: []).to_h.merge(changes: params[:changes]),
+              :idempotency_key, :based_on_revision, :excel_attachments_supporting, attachments: [], keep_document_ids: []).to_h.merge(changes: params[:changes]),
             request_context: payroll_request_context
           ).call
           @entry = payroll_catalog.resolve(result.submission.payroll_submission_period_id)

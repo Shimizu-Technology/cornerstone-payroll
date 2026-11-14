@@ -55,10 +55,10 @@ it('highlights only Client Inbox when visiting its route', () => {
   expect(screen.getByRole('link', { name: 'Client Inbox' }).getAttribute('aria-current')).toBe('page');
 });
 
-it('shows Pay Period Files only to portal clients with MoSa intake', () => {
+it('shows Pay Period Files to every portal client', () => {
   actor.role = 'client';
   const view = render(<MemoryRouter><Sidebar /></MemoryRouter>);
-  expect(screen.queryByRole('link', { name: 'Pay Period Files' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'Pay Period Files' })).toBeTruthy();
   actor.mosa = true;
   view.rerender(<MemoryRouter><Sidebar /></MemoryRouter>);
   expect(screen.getByRole('link', { name: 'Pay Period Files' })).toBeTruthy();
