@@ -7,7 +7,8 @@ class AnnualPayrollSummary
   ].freeze
   TOTAL_FIELDS = ([ :hours ] + MONEY_FIELDS).freeze
 
-  def initialize(company:)
+  def initialize(company:, pay_period_scope: PayPeriod.reportable_committed)
+    @pay_period_scope = pay_period_scope
     @company = company
   end
 
@@ -71,7 +72,7 @@ class AnnualPayrollSummary
   end
 
   def native_years
-    PayPeriod.reportable_committed.where(company_id: company.id).where.not(pay_date: nil).distinct.pluck(Arel.sql("EXTRACT(YEAR FROM pay_date)::integer"))
+    @pay_period_scope.where(company_id: company.id).where.not(pay_date: nil).distinct.pluck(Arel.sql("EXTRACT(YEAR FROM pay_date)::integer"))
   end
 
   def historical_years
@@ -93,7 +94,7 @@ class AnnualPayrollSummary
                .includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type)
                .financially_reportable.reportable
                .where(company_id: company.id, pay_periods: {
-                 id: PayPeriod.reportable_committed.where(company_id: company.id, pay_date: period.range).select(:id)
+                 id: @pay_period_scope.where(company_id: company.id, pay_date: period.range).select(:id)
                })
   end
 
@@ -210,7 +211,7 @@ class AnnualPayrollSummary
     native_ids = PayrollItem.joins(:pay_period)
                             .financially_reportable.reportable
                             .where(company_id: company.id, pay_periods: {
-                              id: PayPeriod.reportable_committed.where(company_id: company.id).where.not(pay_date: nil).select(:id)
+                              id: @pay_period_scope.where(company_id: company.id).where.not(pay_date: nil).select(:id)
                             })
                             .distinct
                             .pluck(:employee_id)

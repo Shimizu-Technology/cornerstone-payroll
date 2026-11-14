@@ -13,10 +13,10 @@ class PaycheckHistoryPdfGenerator
 
   attr_reader :pay_period, :company, :data
 
-  def initialize(pay_period)
+  def initialize(pay_period, client_view: false)
     @pay_period = pay_period
     @company = pay_period.company
-    @data = QuickbooksPayrollReportData.new(pay_period)
+    @data = QuickbooksPayrollReportData.new(pay_period, client_view: client_view)
   end
 
   def generate
