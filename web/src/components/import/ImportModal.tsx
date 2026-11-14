@@ -318,7 +318,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         ...(clientChanges.length ? { confirm_client_changes: reviewedClientChanges,
           reviewed_changes: clientChanges.map(row => ({ change_index: row.change_index,
             [row.kind === 'owner_pay' ? 'amount' : 'hours']: clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '',
-            ...(clientDeclines[row.change_index] ? { decision: 'decline', reason: clientDeclineReasons[row.change_index] || '' } : {}),
+            ...(isNoPay(row) ? { decision: 'no_pay', reason: noPayReason(row) } : clientDeclines[row.change_index] ? { decision: 'decline', reason: clientDeclineReasons[row.change_index] || '' } : {}),
             ...(clientPayChoices[row.change_index] ? { pay_choice: clientPayChoices[row.change_index], saved_period_pay: row.saved_period_pay, workbook_period_pay: row.workbook_period_pay } : {}) })) } : {}),
       });
       setResults({
@@ -335,19 +335,28 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   const updateSourceRow = (rowId: number, patch: Partial<EditableSourceRow>) => {
     setReviewedOverwrite(false);
+    const source = sourceRows.find(row => row.id === rowId);
+    const owner = clientChanges.find(change => change.requires_pay_decision && change.employee_id === source?.employee_id);
+    if (owner) {
+      setReviewedClientChanges(false);
+      if (patch.disposition) setClientDeclines(current => ({ ...current, [owner.change_index]: false }));
+    }
     setSourceRows((current) => current.map((row) => row.id === rowId ? { ...row, ...patch } : row));
   };
 
   const activeChangePrefill = previewData?.client_change_prefill || (usePendingRevision ? previewData?.pending_change_prefill : null);
   const clientChanges = activeChangePrefill?.rows || [];
+  const isNoPay = (change: (typeof clientChanges)[number]) => !!change.requires_pay_decision && (!!clientDeclines[change.change_index] || sourceRows.some(row => row.employee_id === change.employee_id && row.disposition === 'excluded'));
+  const noPayReason = (change: (typeof clientChanges)[number]) => sourceRows.find(row => row.employee_id === change.employee_id && row.disposition === 'excluded')?.disposition_reason || clientDeclineReasons[change.change_index] || '';
   const hasPayConflict = (row: (typeof clientChanges)[number]) => row.kind === 'owner_pay' && [row.saved_period_pay, row.workbook_period_pay].some(amount => amount !== undefined && Number(amount) !== Number(clientChangeDrafts[row.change_index] ?? row.amount));
   const clientChangesInvalid = clientChanges.some(row => {
+    if (isNoPay(row)) return !noPayReason(row).trim() || noPayReason(row).length > 1000;
     if (clientDeclines[row.change_index]) return !clientDeclineReasons[row.change_index]?.trim() || clientDeclineReasons[row.change_index].length > 1000;
     const value = clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '';
     return row.error || !/^\d+(\.\d{1,2})?$/.test(value) || Number(value) <= 0 || Number(value) > (row.kind === 'owner_pay' ? 10_000_000 : 1000) || (hasPayConflict(row) && !clientPayChoices[row.change_index]);
   });
   const matched = (previewData?.preview.matched || []).map(row => {
-    const owner = clientChanges.find(change => change.kind === 'owner_pay' && change.employee_id === row.employee_id && !change.error && !clientDeclines[change.change_index]);
+    const owner = clientChanges.find(change => change.kind === 'owner_pay' && change.employee_id === row.employee_id && !change.error && !clientDeclines[change.change_index] && !isNoPay(change));
     if (!owner) return row;
     const choice = clientPayChoices[owner.change_index];
     const amount = choice === 'saved' ? owner.saved_period_pay : choice === 'workbook' ? owner.workbook_period_pay : clientChangeDrafts[owner.change_index] ?? owner.amount;
@@ -356,12 +365,12 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const includedSourceRows = sourceRows.filter((row) => row.disposition === 'included');
   const includedSourceRowIds = new Set(includedSourceRows.map((row) => row.id));
   const included = matched.filter((row) => includedSourceRowIds.has(row.source_row_id));
-  const clientOnlyEmployees = new Set(clientChanges.filter(change => change.employee_id && !change.error && !clientDeclines[change.change_index] && !matched.some(row => row.employee_id === change.employee_id)).map(change => change.employee_id));
+  const clientOnlyEmployees = new Set(clientChanges.filter(change => change.employee_id && !change.error && !clientDeclines[change.change_index] && !isNoPay(change) && !matched.some(row => row.employee_id === change.employee_id)).map(change => change.employee_id));
   const reviewedEmployeeCount = included.length + clientOnlyEmployees.size;
   const missingPeriodPay = included.filter((row) => row.period_pay_missing);
   const missingRateChoices = included.filter((row) => row.wage_rate_options?.length && !(rateChoices[row.employee_id] ?? row.selected_wage_rate_id));
   const overwriteRows = [...included.filter((row) => row.overwrite_required),
-    ...clientChanges.filter(change => change.overwrite_required && !clientDeclines[change.change_index] && !matched.some(row => row.employee_id === change.employee_id))];
+    ...clientChanges.filter(change => change.overwrite_required && !clientDeclines[change.change_index] && !isNoPay(change) && !matched.some(row => row.employee_id === change.employee_id))];
   const incompleteSourceRows = sourceRows.filter((row) => (
     row.disposition === 'pending'
       || (['excluded', 'deferred', 'informational'].includes(row.disposition) && !row.disposition_reason?.trim())
@@ -703,12 +712,13 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               <h3 className="font-semibold">From the client’s changes · revision {activeChangePrefill?.revision}</h3>
               <p className="text-sm">Review each person’s figures. You can edit them here before applying. Other submitted changes still need staff review.</p>
               {clientChanges.map(change => <div key={change.change_index} className="space-y-2 rounded-lg border border-neutral-200 bg-white p-3">
-                <label className="flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!clientDeclines[change.change_index]} onChange={event => { setClientDeclines(current => ({ ...current, [change.change_index]: event.target.checked })); setReviewedClientChanges(false); setReviewedOverwrite(false); }} />Don’t apply this change for {change.employee_name || 'missing employee'}</label>
-                {clientDeclines[change.change_index] && <Input label={`Reason for declining ${change.employee_name || 'this change'}`} value={clientDeclineReasons[change.change_index] || ''} maxLength={1000} onChange={event => { setClientDeclineReasons(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />}
+                {change.requires_pay_decision && <p className="text-sm font-medium text-warning-900">Earlier client pay is no longer selected. Enter new pay for this period, or choose No pay this period and record why. Exclude from payroll below has the same effect: no paycheck for this run.</p>}
+                <label className="flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={isNoPay(change) || !!clientDeclines[change.change_index]} onChange={event => { setClientDeclines(current => ({ ...current, [change.change_index]: event.target.checked })); setReviewedClientChanges(false); setReviewedOverwrite(false); if (change.requires_pay_decision) setSourceRows(current => current.map(row => row.employee_id === change.employee_id ? { ...row, disposition: event.target.checked ? 'excluded' : 'included', disposition_reason: event.target.checked ? noPayReason(change) : '' } : row)); }} />{change.requires_pay_decision ? 'No pay this period for' : 'Don’t apply this change for'} {change.employee_name || 'missing employee'}</label>
+                {(isNoPay(change) || clientDeclines[change.change_index]) && <Input label={`Reason for ${change.requires_pay_decision ? 'no pay for' : 'declining'} ${change.employee_name || 'this change'}`} value={isNoPay(change) ? noPayReason(change) : clientDeclineReasons[change.change_index] || ''} maxLength={1000} onChange={event => { setClientDeclineReasons(current => ({ ...current, [change.change_index]: event.target.value })); if (change.requires_pay_decision) setSourceRows(current => current.map(row => row.employee_id === change.employee_id && row.disposition === 'excluded' ? { ...row, disposition_reason: event.target.value } : row)); setReviewedClientChanges(false); }} />}
                 {change.error && <p role={clientDeclines[change.change_index] ? undefined : 'alert'} className={clientDeclines[change.change_index] ? 'text-sm text-neutral-600' : 'text-sm text-danger-700'}>{clientDeclines[change.change_index] ? `Will not be applied: ${change.error}` : change.error}</p>}
                 <Input label={change.kind === 'owner_pay' ? `Pay for ${change.employee_name || 'owner'} this period` : `Extra hours for ${change.employee_name || 'employee'}`}
                   inputMode="decimal" value={clientChangeDrafts[change.change_index] ?? change.amount ?? change.hours ?? ''}
-                  disabled={!!change.error || !!clientDeclines[change.change_index]} onChange={event => { setClientPayChoices(current => ({ ...current, [change.change_index]: '' })); setClientChangeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />
+                  disabled={!!change.error || !!clientDeclines[change.change_index] || isNoPay(change)} onChange={event => { setClientPayChoices(current => ({ ...current, [change.change_index]: '' })); setClientChangeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />
                 {change.kind === 'extra_hours' && change.saved_regular_hours !== undefined && <p className="text-xs text-neutral-600">Baseline before client hours: {change.saved_regular_hours} regular hours · {change.saved_overtime_hours || '0'} overtime hours.</p>}
                 {change.kind === 'owner_pay' && (change.saved_period_pay !== undefined || change.workbook_period_pay !== undefined) && <div className="space-y-2 text-sm">
                   {change.saved_period_pay !== undefined && <p>Existing pay: {formatCurrency(change.saved_period_pay)}</p>}

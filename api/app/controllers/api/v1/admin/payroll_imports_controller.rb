@@ -146,7 +146,8 @@ module Api
             ).validate!
             included_decisions = disposition_plan.decisions.select(&:included?)
 
-            validate_mosa_included_rows!(included_decisions)
+            client_changes = PayrollSubmissions::ImportChanges.new(submission: selection.payroll_submission, pay_period: @pay_period) if selection
+            validate_mosa_included_rows!(included_decisions, restorable_owner_ids: client_changes&.restorable_owner_ids || [])
             included_employee_ids = included_decisions.map { |decision| decision.row.employee_id }.compact.to_set
 
             low_confidence_matches = import_record.raw_data.to_h.fetch("low_confidence_matches", []).to_a
@@ -179,9 +180,8 @@ module Api
             end
 
             if selection
-              client_changes = PayrollSubmissions::ImportChanges.new(submission: selection.payroll_submission, pay_period: @pay_period)
               matched_data = client_changes.apply_to(matched_data, reviewed: params.permit(reviewed_changes: [ :change_index, :amount, :hours, :decision, :reason, :pay_choice, :saved_period_pay, :workbook_period_pay ])[:reviewed_changes],
-                  confirmed: params[:confirm_client_changes], source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] })
+                  confirmed: params[:confirm_client_changes], dispositions: disposition_plan.decisions, source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] })
             end
 
             if included_decisions.any? && matched_data.empty?
@@ -204,6 +204,7 @@ module Api
               selection.period.save! if selection && selection.period.changed?
               selection&.save! if selection&.new_record?
               selection&.update!(applied_at: Time.current)
+              client_changes&.apply_period_decisions!(actor: current_user)
               if matched_data.any?
                 service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
                 results = service.apply!(matched: matched_data, force_overwrite: force_overwrite, tips_paid_out_from_tips: tips_paid_out_from_tips)
@@ -213,6 +214,11 @@ module Api
               import_record.update!(status: "applied", validation_errors: [],
                 raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || []))
               disposition_plan.decisions.each do |decision|
+                no_pay = client_changes&.review_decisions&.find { |change| change[:employee_id] == decision.row.employee_id && change[:decision] == "no_pay" }
+                if no_pay
+                  decision.disposition = "excluded"
+                  decision.reason = no_pay[:reason]
+                end
                 if decision.included?
                   payroll_item = @pay_period.payroll_items.find_by!(employee_id: decision.row.employee_id)
                   disposition_plan.apply!(
@@ -237,8 +243,8 @@ module Api
                 period = selection.period
                 # Keep Imported tied to the actual selected revision; choosing
                 # an old source does not label the newer files as imported.
-                decline_notes = client_changes.review_decisions.select { |row| row[:decision] == "decline" }
-                  .map { |row| "#{row[:employee_name] || 'Missing employee'}: Don't apply — #{row[:reason]}" }
+                decline_notes = client_changes.review_decisions.select { |row| %w[decline no_pay].include?(row[:decision]) }
+                  .map { |row| "#{row[:employee_name] || 'Missing employee'}: #{row[:decision] == 'no_pay' ? 'No pay this period' : "Don't apply"} — #{row[:reason]}" }
                 period.transition!("import", actor: current_user,
                   submission: selection.payroll_submission, note: ([ "Imported revision #{selection.payroll_submission.revision} into payroll review." ] + decline_notes).join(" "))
                 PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#import",
@@ -560,14 +566,14 @@ module Api
           end
         end
 
-        def validate_mosa_included_rows!(decisions)
+        def validate_mosa_included_rows!(decisions, restorable_owner_ids: [])
           duplicate_ids = decisions.filter_map { |decision| decision.row.employee_id }.tally.select { |_id, count| count > 1 }.keys
           excluded_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
           errors = decisions.flat_map do |decision|
             row = decision.row
             messages = []
             messages << "#{row.source_employee_name} must be matched to a Cornerstone employee or given a non-payroll outcome." if row.employee.blank?
-            if excluded_ids.include?(row.employee_id)
+            if excluded_ids.include?(row.employee_id) && !restorable_owner_ids.include?(row.employee_id)
               messages << "#{row.source_employee_name} is excluded from this pay period; choose Excluded and record why."
             end
             row.errors_payload.each do |payload|
