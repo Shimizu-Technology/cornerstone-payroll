@@ -3,12 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { ImportModal } from './ImportModal';
+import { ApiError } from '@/services/api';
 import type { ImportPreviewResponse } from '@/services/api';
 
-const mocks = vi.hoisted(() => ({ apply: vi.fn(), preview: vi.fn() }));
+const mocks = vi.hoisted(() => ({ apply: vi.fn(), preview: vi.fn(), upload: vi.fn() }));
 vi.mock('@/services/api', async original => ({
   ...await original<typeof import('@/services/api')>(),
-  payPeriodsApi: { applyImport: mocks.apply, previewPortalSubmission: mocks.preview },
+  payPeriodsApi: { applyImport: mocks.apply, previewImport: mocks.upload, previewPortalSubmission: mocks.preview },
   payrollIntakeImportsApi: { list: vi.fn().mockResolvedValue({ imports: [] }) },
 }));
 beforeEach(() => { vi.clearAllMocks(); });
@@ -79,4 +80,24 @@ it.each(['resolve', 'reject'] as const)('locks Apply and Back until workbook att
   else reject(new Error('Attachment failed'));
   await waitFor(() => expect(apply).toHaveProperty('disabled', false));
   expect(back).toHaveProperty('disabled', false);
+});
+
+it('offers an explicit pending-revision retry after refusing duplicate files', async () => {
+  mocks.upload.mockRejectedValueOnce(new ApiError('These files were already applied.', 422, { pending_submission_id: 20, pending_revision: 2 }));
+  mocks.upload.mockResolvedValueOnce({
+    import_id: 31,
+    pending_portal_source: { submission_id: 20, revision: 2, period_id: 90, no_changes: true, changes: [] },
+    source_package: { id: 2, package_id: 'replacement', package_revision: 2, package_schema_version: '1', current: true, verified_source_count: 1, source_count: 1, disposition_targets: [] },
+    preview: { matched: [], unmatched_pdf_names: [], unmatched_excel_names: [], duplicate_employee_matches: [], low_confidence_matches: [], pdf_count: 0, excel_count: 0, matched_count: 0, can_apply: true, tips_paid_out_from_tips: false, source_rows: [] },
+  });
+  render(<MemoryRouter><ImportModal open payPeriodId={9} companyId={7} onOpenChange={vi.fn()} onImportComplete={vi.fn()} /></MemoryRouter>);
+  const file = new File(['same bytes'], 'revel.pdf', { type: 'application/pdf' });
+  fireEvent.change(document.querySelector('input[type="file"][accept=".pdf"]')!, { target: { files: [file] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Import' }));
+  const retry = await screen.findByRole('button', { name: 'Use this import for the client’s revision 2' });
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByText('These files were already applied. Review them with the changes from the pending client revision.')).toBeTruthy();
+  fireEvent.click(retry);
+  await waitFor(() => expect(mocks.upload).toHaveBeenLastCalledWith(9, file, undefined, false, undefined, 20));
+  expect(await screen.findByLabelText('Use this import for the client’s revision 2')).toHaveProperty('checked', true);
 });

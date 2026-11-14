@@ -49,11 +49,13 @@ module Api
           end
 
           begin
+            selected_source = pay_run_selection.source! if params[:use_submission_id].present?
             package_result = PayrollIntake::PreviewService.new(
               pay_period: @pay_period,
               source_type: "mosa_revel",
               files: [ pdf_file, excel_file ].compact,
               actor: current_user,
+              portal_submission: selected_source,
               supersedes_package_id: params[:supersedes_package_id],
               supersession_reason: params[:supersession_reason]
             ).call
@@ -65,7 +67,9 @@ module Api
                 "This exact Revel package was already applied. Upload a corrected source only when something changed."
               end
               return render json: {
-                error: message
+                error: message,
+                details: { pending_submission_id: pending_portal_source_json&.fetch(:submission_id),
+                  pending_revision: pending_portal_source_json&.fetch(:revision) }
               }, status: :unprocessable_entity
             end
 
@@ -128,6 +132,10 @@ module Api
                   "This source package was replaced by a corrected revision. Review and apply the current package." :
                   "Only the current previewed source package can be applied."
               }, status: :unprocessable_entity
+            end
+            revision_id = source_package.evidence_snapshot["payroll_submission_id"]
+            if revision_id && selection&.payroll_submission_id != revision_id
+              raise ArgumentError, "Select the client revision used to create this replacement review."
             end
             PayrollIntake::SourcePackageVerifier.new(session: source_package).verify!
 
@@ -378,8 +386,12 @@ module Api
         end
 
         def pay_run_selection!(record)
+          pay_run_selection.build(record)
+        end
+
+        def pay_run_selection
           PayrollSubmissions::PayRunSelection.new(pay_period: @pay_period, actor: current_user,
-            period: pending_portal_period, submission_id: params[:use_submission_id]).build(record)
+            period: pending_portal_period, submission_id: params[:use_submission_id])
         end
 
         def pending_portal_period

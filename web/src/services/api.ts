@@ -1576,9 +1576,11 @@ export const payPeriodsApi = {
     excelFile?: File,
     tipsPaidOutFromTips = false,
     replacement?: { supersedesPackageId: string; reason: string },
+    submissionId?: number,
   ): Promise<ImportPreviewResponse> => {
     const formData = new FormData();
     formData.append('pdf_file', pdfFile);
+    if (submissionId) formData.append('use_submission_id', String(submissionId));
     if (excelFile) formData.append('excel_file', excelFile);
     formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
     if (replacement?.supersedesPackageId) formData.append('supersedes_package_id', replacement.supersedesPackageId);
