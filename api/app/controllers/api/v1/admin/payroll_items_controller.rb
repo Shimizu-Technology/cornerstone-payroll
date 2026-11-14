@@ -109,10 +109,16 @@ module Api
 
           attrs = payroll_item_params
           PayrollCorrectionPayBasisGuard.validate!(@payroll_item, proposed_attributes: attrs)
+          saved_hours = @payroll_item.attributes.slice("hours_worked", "overtime_hours", "holiday_hours", "pto_hours")
+          saved_allocations = @payroll_item.wage_rate_hours
           wage_rate_hours = attrs.delete(:wage_rate_hours)
           attrs[:employment_type] = @payroll_item.employee.employment_type
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
+          if saved_hours.any? { |field, value| attrs.key?(field.to_sym) && attrs[field.to_sym].to_d != value.to_d } ||
+              saved_allocations != @payroll_item.wage_rate_hours
+            @payroll_item.custom_columns_data = @payroll_item.custom_columns_data.to_h.merge("client_change_evidence" => nil)
+          end
           @payroll_item.mark_payroll_adjustments_overridden! if attrs.key?(:payroll_adjustments)
           # Pay saved from the import review is entered by hand even when it equals
           # the amount an earlier workbook import wrote.

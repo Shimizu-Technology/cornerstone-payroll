@@ -46,4 +46,14 @@ RSpec.describe PayrollStandingChange do
     expect(described_class.new(company: company, employee: owner, kind: "owner_pay")).to be_valid
     expect(described_class.new(company: company, employee: employee, kind: "owner_pay")).not_to be_valid
   end
+  it "rejects duplicate active defaults and permits replacement after deactivation" do
+    first = described_class.create!(attributes)
+    expect(described_class.new(attributes)).not_to be_valid
+    expect do
+      described_class.transaction(requires_new: true) { described_class.new(attributes).save!(validate: false) }
+    end.to raise_error(ActiveRecord::RecordNotUnique)
+    first.update!(active: false)
+    expect(described_class.create!(attributes)).to be_persisted
+    expect(first.update(active: true)).to be(false)
+  end
 end

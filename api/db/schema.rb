@@ -3281,6 +3281,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_130000) do
     t.index [ "employee_wage_rate_id" ], name: "index_payroll_standing_changes_on_employee_wage_rate_id"
     t.check_constraint "\"position\" >= 0", name: "standing_change_position"
     t.check_constraint "kind::text = ANY (ARRAY['owner_pay'::character varying, 'extra_hours'::character varying]::text[])", name: "standing_change_kind"
+    t.index [ "company_id", "kind", "employee_id" ], name: "idx_standing_changes_active_employee_kind", unique: true, where: "active"
   end
 
   create_table "payroll_submission_documents", force: :cascade do |t|

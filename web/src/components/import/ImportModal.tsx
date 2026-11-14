@@ -54,6 +54,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
   const [reviewedClientChanges, setReviewedClientChanges] = useState(false);
   const [clientChangeDrafts, setClientChangeDrafts] = useState<Record<number, string>>({});
+  const [clientDeclines, setClientDeclines] = useState<Record<number, boolean>>({});
+  const [clientDeclineReasons, setClientDeclineReasons] = useState<Record<number, string>>({});
+  const [clientPayChoices, setClientPayChoices] = useState<Record<number, string>>({});
   const [usePendingRevision, setUsePendingRevision] = useState(false);
   const [staffWorkbook, setStaffWorkbook] = useState<File | null>(null);
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
@@ -79,7 +82,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     reviewGeneration.current += 1;
     setStep('upload');
     setUsePendingRevision(false); setStaffWorkbook(null);
-    setReviewedClientChanges(false); setClientChangeDrafts({});
+    setReviewedClientChanges(false); setClientChangeDrafts({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
     setPdfFile(null);
     setExcelFile(null);
     setLoading(false);
@@ -136,7 +139,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   const openPreview = (data: ImportPreviewResponse) => {
     setPreviewData(data);
-    setReviewedClientChanges(false); setClientChangeDrafts({});
+    setReviewedClientChanges(false); setClientChangeDrafts({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
     setUsePendingRevision(false);
     setRateChoices({});
     setSourceRows(data.preview.source_rows.map((row) => ({
@@ -302,7 +305,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         wage_rate_choices: rateChoices,
         ...(clientChanges.length ? { confirm_client_changes: reviewedClientChanges,
           reviewed_changes: clientChanges.map(row => ({ change_index: row.change_index,
-            [row.kind === 'owner_pay' ? 'amount' : 'hours']: clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '' })) } : {}),
+            [row.kind === 'owner_pay' ? 'amount' : 'hours']: clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '',
+            ...(clientDeclines[row.change_index] ? { decision: 'decline', reason: clientDeclineReasons[row.change_index] || '' } : {}),
+            ...(clientPayChoices[row.change_index] ? { pay_choice: clientPayChoices[row.change_index], saved_period_pay: row.saved_period_pay, workbook_period_pay: row.workbook_period_pay } : {}) })) } : {}),
       });
       setResults({
         success: response.results.success.length,
@@ -323,20 +328,28 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   const activeChangePrefill = previewData?.client_change_prefill || (usePendingRevision ? previewData?.pending_change_prefill : null);
   const clientChanges = activeChangePrefill?.rows || [];
-  const clientChangesInvalid = clientChanges.some(row => row.error || !/^\d+(\.\d{1,2})?$/.test(clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '') || Number(clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours) <= 0 || Number(clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours) > (row.kind === 'owner_pay' ? 10_000_000 : 1000));
+  const hasPayConflict = (row: (typeof clientChanges)[number]) => row.kind === 'owner_pay' && [row.saved_period_pay, row.workbook_period_pay].some(amount => amount !== undefined && Number(amount) !== Number(clientChangeDrafts[row.change_index] ?? row.amount));
+  const clientChangesInvalid = clientChanges.some(row => {
+    if (clientDeclines[row.change_index]) return !clientDeclineReasons[row.change_index]?.trim() || clientDeclineReasons[row.change_index].length > 1000;
+    const value = clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '';
+    return row.error || !/^\d+(\.\d{1,2})?$/.test(value) || Number(value) <= 0 || Number(value) > (row.kind === 'owner_pay' ? 10_000_000 : 1000) || (hasPayConflict(row) && !clientPayChoices[row.change_index]);
+  });
   const matched = (previewData?.preview.matched || []).map(row => {
-    const owner = clientChanges.find(change => change.kind === 'owner_pay' && change.employee_id === row.employee_id && !change.error);
-    return owner ? { ...row, period_pay_missing: false, period_pay_source: 'client_changes' as const, current_period_pay: clientChangeDrafts[owner.change_index] ?? owner.amount } : row;
+    const owner = clientChanges.find(change => change.kind === 'owner_pay' && change.employee_id === row.employee_id && !change.error && !clientDeclines[change.change_index]);
+    if (!owner) return row;
+    const choice = clientPayChoices[owner.change_index];
+    const amount = choice === 'saved' ? owner.saved_period_pay : choice === 'workbook' ? owner.workbook_period_pay : clientChangeDrafts[owner.change_index] ?? owner.amount;
+    return { ...row, period_pay_missing: false, period_pay_source: 'client_changes' as const, current_period_pay: amount };
   });
   const includedSourceRows = sourceRows.filter((row) => row.disposition === 'included');
   const includedSourceRowIds = new Set(includedSourceRows.map((row) => row.id));
   const included = matched.filter((row) => includedSourceRowIds.has(row.source_row_id));
-  const clientOnlyEmployees = new Set(clientChanges.filter(change => change.employee_id && !change.error && !matched.some(row => row.employee_id === change.employee_id)).map(change => change.employee_id));
+  const clientOnlyEmployees = new Set(clientChanges.filter(change => change.employee_id && !change.error && !clientDeclines[change.change_index] && !matched.some(row => row.employee_id === change.employee_id)).map(change => change.employee_id));
   const reviewedEmployeeCount = included.length + clientOnlyEmployees.size;
   const missingPeriodPay = included.filter((row) => row.period_pay_missing);
   const missingRateChoices = included.filter((row) => row.wage_rate_options?.length && !(rateChoices[row.employee_id] ?? row.selected_wage_rate_id));
   const overwriteRows = [...included.filter((row) => row.overwrite_required),
-    ...clientChanges.filter(change => change.overwrite_required && !matched.some(row => row.employee_id === change.employee_id))];
+    ...clientChanges.filter(change => change.overwrite_required && !clientDeclines[change.change_index] && !matched.some(row => row.employee_id === change.employee_id))];
   const incompleteSourceRows = sourceRows.filter((row) => (
     row.disposition === 'pending'
       || (['excluded', 'deferred', 'informational'].includes(row.disposition) && !row.disposition_reason?.trim())
@@ -505,7 +518,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <ul className="list-disc space-y-1 pl-5 text-sm">{previewData.pending_portal_source.changes.map((row, index) => <li className="break-words [overflow-wrap:anywhere]" key={index}>{row.label}: {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
           {previewData.pending_portal_source.notes && <p className="whitespace-pre-wrap break-words text-sm">{previewData.pending_portal_source.notes}</p>}
           {previewData.pending_portal_source.changes_link_url && <a className="break-all text-sm underline" href={previewData.pending_portal_source.changes_link_url} target="_blank" rel="noopener noreferrer">Client’s tips &amp; loans workbook link</a>}
-          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={usePendingRevision} onChange={e => { setUsePendingRevision(e.target.checked); setReviewedClientChanges(false); setClientChangeDrafts({}); setReviewedOverwrite(false); }} />Use this import for the client’s revision {previewData.pending_portal_source.revision}</label>
+          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={usePendingRevision} onChange={e => { setUsePendingRevision(e.target.checked); setReviewedClientChanges(false); setClientChangeDrafts({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({}); setReviewedOverwrite(false); }} />Use this import for the client’s revision {previewData.pending_portal_source.revision}</label>
         </section>}
         {previewData?.portal_source && <section aria-label="Portal change checklist" className="min-w-0 space-y-2 rounded-lg border border-primary-200 bg-primary-50 p-4">
           <h3 className="font-semibold">Client revision {previewData.portal_source.revision} · changes for this period</h3>
@@ -668,16 +681,29 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 pb-4 pt-1 text-sm">{ownerPayFeedback}</div>
             )}
             {activeChangePrefill?.manual_review_warnings?.map(message => <p key={message} className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">{message}</p>)}
+            {activeChangePrefill?.removals?.map(message => <p key={message} className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">{message}</p>)}
             {clientChanges.length > 0 && <section data-attention="client-changes" tabIndex={-1} aria-label="From the client's changes" className="space-y-3 rounded-lg border border-info-200 bg-info-50 p-4">
               <h3 className="font-semibold">From the client’s changes · revision {activeChangePrefill?.revision}</h3>
               <p className="text-sm">Review each person’s figures. You can edit them here before applying. Other submitted changes still need staff review.</p>
               {clientChanges.map(change => <div key={change.change_index} className="space-y-2 rounded-lg border border-neutral-200 bg-white p-3">
-                {change.error && <p role="alert" className="text-sm text-danger-700">{change.error}</p>}
+                <label className="flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!clientDeclines[change.change_index]} onChange={event => { setClientDeclines(current => ({ ...current, [change.change_index]: event.target.checked })); setReviewedClientChanges(false); setReviewedOverwrite(false); }} />Don’t apply this change for {change.employee_name || 'missing employee'}</label>
+                {clientDeclines[change.change_index] && <Input label={`Reason for declining ${change.employee_name || 'this change'}`} value={clientDeclineReasons[change.change_index] || ''} maxLength={1000} onChange={event => { setClientDeclineReasons(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />}
+                {change.error && <p role={clientDeclines[change.change_index] ? undefined : 'alert'} className={clientDeclines[change.change_index] ? 'text-sm text-neutral-600' : 'text-sm text-danger-700'}>{clientDeclines[change.change_index] ? `Will not be applied: ${change.error}` : change.error}</p>}
                 <Input label={change.kind === 'owner_pay' ? `Pay for ${change.employee_name || 'owner'} this period` : `Extra hours for ${change.employee_name || 'employee'}`}
                   inputMode="decimal" value={clientChangeDrafts[change.change_index] ?? change.amount ?? change.hours ?? ''}
-                  disabled={!!change.error} onChange={event => { setClientChangeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />
-                {change.kind === 'extra_hours' && change.saved_regular_hours !== undefined && <p className="text-xs text-neutral-600">Saved worksheet: {change.saved_regular_hours} regular hours · {change.saved_overtime_hours || '0'} overtime hours.</p>}
-                <p className="text-xs text-neutral-600">{change.kind === 'owner_pay' ? 'This person only · from the client’s changes' : `${change.wage_rate_label || 'Missing job'} · $${change.wage_rate || '?'} /hr · added to the imported or saved hours`}</p>
+                  disabled={!!change.error || !!clientDeclines[change.change_index]} onChange={event => { setClientPayChoices(current => ({ ...current, [change.change_index]: '' })); setClientChangeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />
+                {change.kind === 'extra_hours' && change.saved_regular_hours !== undefined && <p className="text-xs text-neutral-600">Baseline before client hours: {change.saved_regular_hours} regular hours · {change.saved_overtime_hours || '0'} overtime hours.</p>}
+                {change.kind === 'owner_pay' && (change.saved_period_pay !== undefined || change.workbook_period_pay !== undefined) && <div className="space-y-2 text-sm">
+                  {change.saved_period_pay !== undefined && <p>Existing pay: {formatCurrency(change.saved_period_pay)}</p>}
+                  {change.workbook_period_pay !== undefined && <p>Workbook pay: {formatCurrency(change.workbook_period_pay)}</p>}
+                  {hasPayConflict(change) && <p className="font-medium text-warning-900">These amounts differ. Choose which pay to use.</p>}
+                  {hasPayConflict(change) && <label className="block">Pay choice for {change.employee_name}<select className="mt-1 min-h-11 w-full rounded-md border border-neutral-300 bg-white p-2" value={clientPayChoices[change.change_index] || ''} disabled={!!clientDeclines[change.change_index]} onChange={event => { setClientPayChoices(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }}>
+                    <option value="">Choose pay</option><option value="client">Use client pay</option>
+                    {change.saved_period_pay !== undefined && <option value="saved">Keep existing pay</option>}
+                    {change.workbook_period_pay !== undefined && <option value="workbook">Use workbook pay</option>}
+                  </select></label>}
+                </div>}
+                <p className="text-xs text-neutral-600">{change.kind === 'owner_pay' ? 'This person only · from the client’s changes' : `${change.wage_rate_label || 'Missing job'} · $${change.wage_rate || '?'} /hr · added to Revel hours, or the baseline above when absent from Revel`}</p>
               </div>)}
               <label className="flex min-h-11 items-start gap-2 text-sm font-medium"><input type="checkbox" className="mt-1 shrink-0" disabled={clientChangesInvalid} checked={reviewedClientChanges} onChange={event => setReviewedClientChanges(event.target.checked)} /><span>I checked the owner pay and extra hours from the client’s changes, including any edits above.</span></label>
             </section>}
@@ -985,7 +1011,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                   if (initialPreview) { handleClose(); return; }
                   setStep('upload');
                   setUsePendingRevision(false); setStaffWorkbook(null);
-    setReviewedClientChanges(false); setClientChangeDrafts({});
+    setReviewedClientChanges(false); setClientChangeDrafts({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
                   setPreviewData(null);
                   setSourceRows([]);
                   setReviewedSuggestedMatches(false);

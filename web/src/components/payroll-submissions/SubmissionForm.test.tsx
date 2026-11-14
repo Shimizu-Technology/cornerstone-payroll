@@ -181,3 +181,12 @@ it('shows an unavailable default without guessing another employee or rate', () 
   expect(screen.getByRole('alert').textContent).toContain('missing or inactive');
   expect((screen.getByLabelText('Saved job and rate') as HTMLSelectElement).value).toBe('');
 });
+
+
+it('renders a deactivated default from an older revision as an ordinary removable row', () => {
+  const current = { changes: [{ kind: 'owner_pay', employee_id: 122, standing_change_id: 9, employee_name: 'Morgan Owner', amount: '5000' }], documents: [] } as unknown as SubmissionRevision;
+  render(<SubmissionForm period={{ ...period, standing_changes: [] }} current={current} onSent={vi.fn()} />);
+  expect(screen.queryByText(/Every period/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /Remove change 1/ }));
+  expect(screen.queryByLabelText('Amount ($)')).toBeNull();
+});

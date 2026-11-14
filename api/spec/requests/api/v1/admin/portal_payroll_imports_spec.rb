@@ -922,6 +922,114 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(item.reload.hours_worked).to eq(66)
     end
 
+    def apply_standing(data, changes = reviewed_standing_params(data)[:reviewed_changes])
+      post "#{url}/apply_import", params: { import_id: data.fetch("import_id"), confirm_client_changes: true,
+        reviewed_changes: changes, portal_source_id: data.dig("portal_source", "selection_id") }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+    end
+
+    def corrected_standing(data, changes)
+      bytes = File.binread(build_revel_pdf([ { name: "Example, Avery", regular_hours: 0, overtime_hours: 0, regular_pay: 0 } ],
+        period_start: run.start_date, period_end: run.end_date))
+      second = revision(rev: 2, bytes: bytes)
+      second.update_columns(change_rows: changes)
+      period.transition!("submit", actor: create(:user, company: company, role: "client"), submission: second)
+      preview(second, supersedes_package_id: data.dig("source_package", "package_id"), supersession_reason: "Corrected revision")
+    end
+
+    it "clears old allocations when corrected Revel hours drop to zero" do
+      job = create(:employee_wage_rate, employee: employee, label: "Service", rate: 10, is_primary: true)
+      source = standing_source
+      changes = source.change_rows + [ { "kind" => "extra_hours", "employee_id" => employee.id,
+        "employee_wage_rate_id" => job.id, "wage_rate" => "10.0", "hours" => "5" } ]
+      source.update_columns(change_rows: changes)
+      data = preview(source)
+      reviewed = reviewed_standing_params(data)[:reviewed_changes] + [ { change_index: 2, hours: "5" } ]
+      apply_standing(data, reviewed)
+      latest = corrected_standing(data, changes)
+      apply_standing(latest, reviewed)
+      item = run.payroll_items.find_by!(employee: employee)
+      expect(item.hours_worked).to eq(5)
+      expect(item.wage_rate_hours.sum { |entry| entry["regular_hours"].to_d }).to eq(5)
+      expect(item.regular_pay).to eq(50)
+    end
+
+    %w[skipped dropped].each do |mode|
+      it "removes absent Addison's earlier hours when #{mode}, even with no active proposals" do
+        source = standing_source
+        data = preview(source)
+        apply_standing(data)
+        owner_item = run.payroll_items.find_by!(employee: owner)
+        owner_item.clear_imported_period_pay_evidence!
+        owner_item.save!
+        changes = mode == "skipped" ? source.change_rows.map { |row| row.merge("skipped" => true) } : []
+        latest = corrected_standing(data, changes)
+        removal_text = Array(latest.dig("client_change_prefill", "removals")).join
+        apply_standing(latest, [])
+        item = run.payroll_items.find_by!(employee: manual_worker)
+        expect(item.hours_worked).to eq(0)
+        expect(item.wage_rate_hours).to be_empty
+        expect(item.custom_columns_data["client_change_evidence"]).to be_nil
+        expect(removal_text).to include("68", manual_worker.full_name)
+      end
+    end
+
+    %w[skipped dropped].each do |mode|
+      it "marks #{mode} owner pay missing instead of relabelling an earlier client's pay as manual" do
+        source = standing_source
+        data = preview(source)
+        apply_standing(data)
+        latest = corrected_standing(data, mode == "skipped" ? source.change_rows.map { |row| row.merge("skipped" => true) } : [])
+        row = latest.dig("preview", "matched").find { |item| item["employee_id"] == owner.id }
+        expect(row).to include("period_pay_missing" => true, "current_period_pay" => nil)
+        post "#{url}/apply_import", params: { import_id: latest["import_id"], portal_source_id: latest.dig("portal_source", "selection_id") }, as: :json
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body["error"]).to include(owner.full_name)
+      end
+    end
+
+    it "accepts a worksheet edit as the new baseline for a corrected revision" do
+      source = standing_source
+      data = preview(source)
+      apply_standing(data)
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      patch "#{url}/payroll_items/#{item.id}", params: { payroll_item: { hours_worked: 2 } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.custom_columns_data["client_change_evidence"]).to be_nil
+      latest = corrected_standing(data, source.change_rows)
+      expect(latest.dig("client_change_prefill", "rows").last["saved_regular_hours"]).to eq("2.0")
+      apply_standing(latest)
+      expect(item.reload.hours_worked).to eq(70)
+      expect(item.wage_rate_hours.sum { |entry| entry["regular_hours"].to_d }).to eq(70)
+    end
+
+    it "retains the client-hours baseline when a worksheet save sends unchanged hours" do
+      source = standing_source
+      data = preview(source)
+      apply_standing(data)
+      item = run.payroll_items.find_by!(employee: manual_worker)
+      evidence = item.custom_columns_data["client_change_evidence"]
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      patch "#{url}/payroll_items/#{item.id}", params: { payroll_item: { hours_worked: 68, bonus: 10 } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.custom_columns_data["client_change_evidence"]).to eq(evidence)
+    end
+
+    it "records staff declines on the import and in review history" do
+      source = standing_source
+      manual_worker.update!(status: "inactive")
+      data = preview(source)
+      reviewed = reviewed_standing_params(data)[:reviewed_changes]
+      reviewed.last.merge!(decision: "decline", reason: "Not working this period")
+      apply_standing(data, reviewed)
+      expect(run.payroll_items.find_by(employee: manual_worker)).to be_nil
+      record = PayrollImportRecord.find(data["import_id"])
+      expect(record.raw_data.fetch("client_change_decisions").last).to include("decision" => "decline", "reason" => "Not working this period")
+      event = PayrollSubmissions::Audit.feed(period).find_by!(action: "payroll_submission_periods#import")
+      expect(event.metadata.fetch("client_change_decisions").last).to include("reason" => "Not working this period")
+    end
+
     it "keeps legacy total/each instructions on the manual per-person period-pay path" do
       source = revision
       source.update_columns(change_rows: [ { "kind" => "owner_pay", "amount" => "16842.26", "basis" => "total", "employee_ids" => [ owner.id ], "note" => "Both owners" } ])

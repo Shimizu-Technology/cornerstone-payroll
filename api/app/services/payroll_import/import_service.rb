@@ -169,6 +169,15 @@ module PayrollImport
       ActiveRecord::Base.transaction(requires_new: true) do
         matched.each do |row|
           employee_id = row[:employee_id]
+          if row[:restore_client_hours_only]
+            item = pay_period.payroll_items.find_by!(employee_id: employee_id)
+            restore_client_hours_baseline!(item)
+            item.custom_columns_data = item.custom_columns_data.to_h.merge("client_change_evidence" => nil)
+            item.calculate!
+            results[:success] << { employee_id: employee_id, name: employees_by_id[employee_id]&.full_name }
+            next
+          end
+
           if excluded_employee_ids.include?(employee_id)
             results[:skipped] << {
               employee_id: employee_id,
@@ -215,8 +224,7 @@ module PayrollImport
               # Preserve workbook-only worksheet splits. Extra hours belong
               # only to their submitted job, not to every existing allocation.
               preserve_split = row[:client_extra_hours] && row[:workbook_only] && payroll_item.wage_rate_hours.present?
-              has_base_hours = [ payroll_item.hours_worked, payroll_item.overtime_hours, payroll_item.holiday_hours, payroll_item.pto_hours ].any? { |hours| hours.to_d.positive? }
-              apply_wage_rate_choice!(payroll_item, employee, row) if !preserve_split && (!row[:client_extra_hours] || has_base_hours)
+              apply_wage_rate_choice!(payroll_item, employee, row) unless preserve_split
               apply_client_hours!(payroll_item, employee, row) if row[:client_extra_hours]
               payroll_item.custom_columns_data = payroll_item.custom_columns_data.to_h.merge(
                 "mosa_missing_revel_hours" => row[:missing_revel_hours_with_deductions] == true,
@@ -513,7 +521,7 @@ module PayrollImport
 
       unless previous.key?("baseline_regular_hours") && item.hours_worked.to_d == previous["applied_regular_hours"].to_d &&
           item.wage_rate_hours == previous["applied_allocations"] && client_hours_inputs(item) == previous["applied_hours"]
-        raise ArgumentError, "Saved hours changed after the client's hours were imported for #{item.employee.full_name}. Reconcile the worksheet hours before importing again."
+        raise ArgumentError, "Saved hours changed after the client's hours were imported for #{item.employee.full_name}. Applied regular hours: #{previous["applied_regular_hours"]}; baseline: #{previous["baseline_regular_hours"]}; current: #{item.hours_worked}. Save the intended hours against each job on the worksheet, then reopen this import. Reconcile the worksheet hours before importing again."
       end
       item.hours_worked = previous.fetch("baseline_regular_hours")
       item.wage_rate_hours = previous.fetch("baseline_allocations")
@@ -560,7 +568,7 @@ module PayrollImport
       return if payroll_item.blank? || payroll_item.salary_override.to_d <= 0
 
       evidence = payroll_item.custom_columns_data.to_h["period_pay_evidence"].to_h
-      return if evidence["source_type"] == "mosa_change_workbook"
+      return if %w[mosa_change_workbook client_submission].include?(evidence["source_type"])
 
       payroll_item.salary_override.to_d.to_s("F")
     end
@@ -569,7 +577,7 @@ module PayrollImport
       amount = decimal_or_zero(row[:period_pay])
       if amount.zero?
         evidence = payroll_item.custom_columns_data.to_h["period_pay_evidence"].to_h
-        if evidence["source_type"] == "mosa_change_workbook"
+        if %w[mosa_change_workbook client_submission].include?(evidence["source_type"])
           payroll_item.salary_override = nil
           payroll_item.clear_imported_period_pay_evidence!
         end
