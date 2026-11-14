@@ -126,7 +126,7 @@ function StaffActions({ period, onDone }: { period: PeriodDetail; onDone: (detai
 export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactElement {
   const { ref = '', companyId } = useParams();
   const navigate = useNavigate();
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany } = useCompany();
   const api = audience === 'client' ? clientPayrollSubmissionsApi : adminPayrollSubmissionsApi;
   const [period, setPeriod] = useState<PeriodDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -167,7 +167,8 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
   const current = period.submissions.find(s => s.current);
   const currentDraft = period.drafts.find(d => d.current);
   const otherDrafts = period.drafts.filter(d => d !== currentDraft);
-  const canSubmit = period.allowed_actions.includes('submit');
+  const canSendFiles = activeCompany?.payroll_intake_source_types?.includes('mosa_revel');
+  const canSubmit = canSendFiles && period.allowed_actions.includes('submit');
   return (
     <div>
       <Header title={`Payroll ${period.label}`} description={period.pay_date ? `Pay date ${formatDate(period.pay_date)}` : 'Pay date set by Cornerstone'} />
@@ -206,7 +207,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
           <SubmissionForm period={period} current={current} onCancel={current ? () => setEditing(false) : undefined}
             onSent={(detail, outcome) => { setEditing(false); setNotice(outcome === 'duplicate' ? 'Nothing changed, so no new revision was made.' : submissionReceipt(detail)); accept(detail); }} />
         </section>}
-        {audience === 'client' && !canSubmit && !current && <p className="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">{period.status === 'paid' ? 'This period is paid.' : `This period opens for files on ${formatDate(period.opens_on)}.`}</p>}
+        {audience === 'client' && canSendFiles && !canSubmit && !current && <p className="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">{period.status === 'paid' ? 'This period is paid.' : `This period opens for files on ${formatDate(period.opens_on)}.`}</p>}
 
         <section aria-labelledby="revisions" className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">

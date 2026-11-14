@@ -218,9 +218,6 @@ function HistoricalPayrollRoute({ children }: HistoricalPayrollRouteProps): Reac
 }
 
 function PayrollFilesRoute({ children }: { children: React.ReactNode }) {
-  const { activeCompany, loading } = useCompany();
-  if (loading) return <p role="status">Loading client…</p>;
-  if (!activeCompany?.payroll_intake_source_types?.includes('mosa_revel')) return <Navigate to="/app" replace />;
   return <ClientOnlyRoute>{children}</ClientOnlyRoute>;
 }
 

@@ -8,7 +8,7 @@ import type { ClientDocument } from '@/services/api';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(), submit: vi.fn(), decide: vi.fn(), acknowledge: vi.fn(), createDraft: vi.fn(), seen: vi.fn(), employees: vi.fn(),
-  threadGet: vi.fn(), message: vi.fn(),
+  threadGet: vi.fn(), message: vi.fn(), mosa: true,
 }));
 vi.mock('@/services/payrollSubmissions', async original => {
   const actual = await original<typeof import('@/services/payrollSubmissions')>();
@@ -20,7 +20,7 @@ vi.mock('@/services/payrollSubmissions', async original => {
     adminPayrollSubmissionsApi: { get: mocks.get, acknowledge: mocks.acknowledge, createDraft: mocks.createDraft, seen: mocks.seen, employees: mocks.employees, message: mocks.message, threads, documents },
   };
 });
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 2 }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 2, activeCompany: { payroll_intake_source_types: mocks.mosa ? ['mosa_revel'] : [] } }) }));
 vi.mock('@/components/layout/Header', () => ({ Header: ({ title, description }: { title: string; description?: string }) => <header><h1>{title}</h1><p>{description}</p></header> }));
 
 const doc = (id: number, name: string): ClientDocument => ({ id, title: name, file_name: name, content_type: 'application/pdf', file_size: 10, category: 'payroll_source', created_at: '2026-11-17T00:00:00Z', visible_to_client: true, shared_by_staff: false, uploaded_by_id: 1, preview_status: 'not_required', preview_available: true, scan_status: 'clean' } as ClientDocument);
@@ -43,6 +43,7 @@ const renderAt = (audience: 'client' | 'staff', path = audience === 'client' ? '
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.mosa = true;
   mocks.employees.mockResolvedValue([{ id: 5, name: 'Sam Worker' }]);
   mocks.seen.mockResolvedValue(undefined);
   mocks.get.mockResolvedValue({ data: period() });
@@ -147,4 +148,19 @@ it('shows an employee-list failure with a retry instead of an empty picker', asy
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   await waitFor(() => expect(screen.queryByText(/employee list did not load/)).toBeNull());
   expect(mocks.employees).toHaveBeenCalledTimes(2);
+});
+
+it('keeps a posted draft and approval available without a Send form for clients without intake', async () => {
+  mocks.mosa = false;
+  const draft = { id: 4, revision: 1, current: true, superseded: false, posted: true, paycheck_document: doc(201, 'Fixed pay draft.pdf') };
+  mocks.get.mockResolvedValue({ data: period({ status: 'draft_ready', status_label: 'Draft ready', submissions: [], current_revision: null, drafts: [draft], allowed_actions: ['approve', 'request_changes', 'message'] }) });
+  mocks.decide.mockResolvedValue({ data: period({ status: 'approved', status_label: 'Approved', submissions: [], drafts: [draft], allowed_actions: ['message'] }) });
+  renderAt('client');
+  expect(await screen.findByRole('button', { name: 'Approve draft 1' })).toBeTruthy();
+  expect(screen.getByText('Fixed pay draft.pdf')).toBeTruthy();
+  expect(screen.queryByRole('form', { name: /Send/ })).toBeNull();
+  expect(screen.queryByText(/This period opens for files/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Send an update or replace a file' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Approve draft 1' }));
+  await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith('9', expect.objectContaining({ decision: 'approve', draft_id: 4 })));
 });

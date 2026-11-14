@@ -31,7 +31,11 @@ it('keeps retained evidence in the import company even from an unscoped route', 
 it('requires a deliberate pending revision selection and sends it with apply', async () => {
   const preview: ImportPreviewResponse = {
     import_id: 30,
-    pending_portal_source: { submission_id: 20, revision: 2 },
+    pending_portal_source: { submission_id: 20, revision: 2, period_id: 90, no_changes: false, workbook_choice: 'link', changes_link_url: 'https://example.test/tips', notes: 'Please check all three changes', changes: [
+      { kind: 'owner_pay', label: 'Owner pay', amount: '1200', basis: 'each', note: 'Both owners' },
+      { kind: 'new_hire', label: 'New hire', name: 'New Colleague', starting_wage: '12', wage_unit: 'hourly' },
+      { kind: 'extra_hours', label: 'Extra hours', employee_name: 'Avery', hours: '6' },
+    ] },
     source_package: { id: 1, package_id: 'synthetic', package_revision: 1, package_schema_version: '1', current: true, verified_source_count: 1, source_count: 1, disposition_targets: [] },
     preview: { matched: [], unmatched_pdf_names: [], unmatched_excel_names: [], duplicate_employee_matches: [], low_confidence_matches: [], pdf_count: 0, excel_count: 0, matched_count: 0, can_apply: true, tips_paid_out_from_tips: false, source_rows: [{ id: 1, position: 1, source_employee_name: 'Avery', employee_id: 1, row_kind: 'matched', disposition: 'included', errors: [], warnings: [] }], source_warnings: [ { code: 'missing_workbook', severity: 'warning', message: "No tips or loans: the workbook wasn't included" } ] },
   };
@@ -40,6 +44,13 @@ it('requires a deliberate pending revision selection and sends it with apply', a
   const choice = screen.getByLabelText('Use this import for the client’s revision 2');
   expect(choice).toHaveProperty('checked', false);
   expect(screen.getByRole('alert').textContent).toContain("No tips or loans: the workbook wasn't included");
+  expect(screen.getByText(/Both owners/)).toBeTruthy();
+  expect(screen.getByText(/New Colleague/)).toBeTruthy();
+  expect(screen.getByText(/Avery · 6/)).toBeTruthy();
+  expect(screen.getByText('Please check all three changes')).toBeTruthy();
+  expect(screen.getByText('Workbook choice: Link sent')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Open retained portal submission' }).getAttribute('href')).toBe('/companies/7/payroll-submissions/90');
+  expect(screen.getByRole('link', { name: 'Client’s tips & loans workbook link' }).getAttribute('href')).toBe('https://example.test/tips');
   fireEvent.click(choice);
   fireEvent.click(screen.getByRole('button', { name: /Apply/ }));
   await waitFor(() => expect(mocks.apply).toHaveBeenCalledWith(9, expect.objectContaining({ use_submission_id: 20 })));

@@ -2121,7 +2121,7 @@ export interface MosaSourceRow {
 }
 
 export interface ImportPreviewResponse {
-  pending_portal_source?: { submission_id: number; revision: number; workbook_choice?: 'attach' | 'link' | 'none' | null; changes_link_url?: string } | null;
+  pending_portal_source?: { submission_id: number; revision: number; period_id: number; workbook_choice?: 'attach' | 'link' | 'none' | null; changes_link_url?: string | null; notes?: string | null; no_changes: boolean; changes: import('./payrollSubmissions').ChangeRow[] } | null;
   portal_source?: {
     selection_id: number; submission_id: number; revision: number; period_id: number; current: boolean;
     superseded_reason?: string; notes?: string; changes_link_url?: string; no_changes: boolean;

@@ -70,7 +70,7 @@ module PayrollSubmissions
         actions
       else
         actions = []
-        actions << "submit" if status != "paid" && @catalog.open_for_files?(entry)
+        actions << "submit" if @catalog.company.payroll_intake_source_enabled?("mosa_revel") && status != "paid" && @catalog.open_for_files?(entry)
         actions += %w[approve request_changes] if status == "draft_ready"
         actions << "message"
         actions

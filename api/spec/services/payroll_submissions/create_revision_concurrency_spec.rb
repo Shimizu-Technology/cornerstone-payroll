@@ -47,7 +47,7 @@ RSpec.describe PayrollSubmissions::CreateRevision, :postgres_concurrency do
           catalog = PayrollSubmissions::Catalog.new(company: Company.find(company.id))
           entry = catalog.resolve("2026-11-02_2026-11-15")
           result = described_class.new(company: Company.find(company.id), actor: User.find(client.id), entry: entry, catalog: catalog,
-            params: { workbook_choice: "none", revel_payroll: synthetic_pdf, notes: "sender #{index}" }.with_indifferent_access).call
+            params: { workbook_choice: "none", no_changes: true, revel_payroll: synthetic_pdf, notes: "sender #{index}" }.with_indifferent_access).call
           results << [ :ok, result.submission.revision ]
         rescue StandardError => error
           results << [ :error, error ]

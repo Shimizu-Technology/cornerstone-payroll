@@ -35,7 +35,7 @@ RSpec.describe "Pay-period submissions", type: :request do
   end
 
   def send_package(target_ref = ref, **params)
-    post "#{client_base}/#{target_ref}/submissions", params: { revel_payroll: synthetic_pdf, workbook_choice: params[:changes_workbook] ? "attach" : params[:changes_link_url] ? "link" : "none" }.merge(params)
+    post "#{client_base}/#{target_ref}/submissions", params: { revel_payroll: synthetic_pdf, no_changes: !params.key?(:changes), workbook_choice: params[:changes_workbook] ? "attach" : params[:changes_link_url] ? "link" : "none" }.merge(params)
   end
 
   def data
@@ -131,7 +131,7 @@ RSpec.describe "Pay-period submissions", type: :request do
       post "#{client_base}/#{ref}/submissions", params: { no_changes: true }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.dig("details", "revel_payroll")).to eq([ "Attach the Revel payroll PDF" ])
-      post "#{client_base}/#{ref}/submissions", params: { revel_payroll: synthetic_workbook("payroll.xlsx") }
+      post "#{client_base}/#{ref}/submissions", params: { no_changes: true, revel_payroll: synthetic_workbook("payroll.xlsx") }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.dig("details", "revel_payroll").join).to include("must be a PDF")
       expect(ClientDocument.count).to eq(0)
@@ -164,7 +164,7 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body["outcome"]).to eq("replayed")
 
-      post "#{client_base}/#{ref}/submissions", params: { workbook_choice: "none", revel_payroll: upload.call, notes: "different", idempotency_key: "k1" }
+      post "#{client_base}/#{ref}/submissions", params: { workbook_choice: "none", revel_payroll: upload.call, no_changes: true, notes: "different", idempotency_key: "k1" }
       expect(response).to have_http_status(:conflict)
 
       expect do
@@ -219,22 +219,43 @@ RSpec.describe "Pay-period submissions", type: :request do
         { workbook_choice: "none", changes_workbook: synthetic_workbook },
         { workbook_choice: "none", changes_link_url: "https://example.test/sheet" },
         { workbook_choice: "link", changes_link_url: "http://example.test/sheet" } ].each do |answers|
-        post "#{client_base}/#{ref}/submissions", params: { revel_payroll: synthetic_pdf, **answers }
+        post "#{client_base}/#{ref}/submissions", params: { revel_payroll: synthetic_pdf, no_changes: true, **answers }
         expect(response).to have_http_status(:unprocessable_entity), response.body
       end
       expect(PayrollSubmission.count).to eq(0)
     end
 
-    it "refuses misplaced Excel without workbook evidence, including carried-forward legacy attachments" do
-      send_package(workbook_choice: nil, attachments: [ synthetic_workbook("OTHER.XLSX") ])
+    it "requires changes or an explicit no-changes answer independently of workbook evidence" do
+      send_package(no_changes: false)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "changes")).to include('List the changes this period or choose "No changes this period"')
+      expect(PayrollSubmission.count).to eq(0)
+      send_package(no_changes: true)
+      expect(response).to have_http_status(:created), response.body
+    end
+
+    it "refuses a new Excel attachment even when the old workbook is kept, then accepts a replacement" do
+      send_package(changes_workbook: synthetic_workbook)
+      ids = data["submissions"].first["documents"].map { |doc| doc.dig("document", "id") }
+      post "#{client_base}/#{ref}/submissions", params: { no_changes: true, keep_document_ids: ids, based_on_revision: 1,
+        workbook_choice: "attach", attachments: [ synthetic_workbook("corrected.xlsx") ] }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.dig("details", "attachment").join).to include("tips & loans workbook")
-      send_package(workbook_choice: "none", attachments: [ synthetic_workbook ])
+      expect(PayrollSubmission.count).to eq(1)
+      post "#{client_base}/#{ref}/submissions", params: { no_changes: true, keep_document_ids: [ ids.first ], based_on_revision: 1,
+        workbook_choice: "attach", changes_workbook: portal_upload("corrected.xlsx", office_zip(extra: { "correction.txt" => "corrected tips" }), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") }
       expect(response).to have_http_status(:created), response.body
+      expect(data["submissions"].first["documents"].map { |doc| doc["file_name"] }).to include("corrected.xlsx")
+      expect(data["submissions"].second["documents"].map { |doc| doc.dig("document", "id") }).to eq(ids)
+    end
+
+    it "allows Excel supporting material only with an explicit answer when keeping the workbook" do
+      send_package(changes_workbook: synthetic_workbook)
       ids = data["submissions"].first["documents"].map { |doc| doc.dig("document", "id") }
-      post "#{client_base}/#{ref}/submissions", params: { keep_document_ids: ids, based_on_revision: 1, workbook_choice: "attach" }
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.dig("details", "attachment")).to be_present
+      post "#{client_base}/#{ref}/submissions", params: { no_changes: true, keep_document_ids: ids, based_on_revision: 1,
+        workbook_choice: "attach", attachments: [ synthetic_workbook("timesheet.xlsx") ], excel_attachments_supporting: true }
+      expect(response).to have_http_status(:created), response.body
+      expect(data["submissions"].first["documents"].map { |doc| doc["role"] }).to eq(%w[revel_payroll changes_workbook attachment])
     end
 
     it "authenticates the client before checking its payroll-file capability" do
@@ -244,12 +265,15 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(PayrollSubmission.count).to eq(0)
     end
 
-    it "denies the payroll files endpoints and service for a non-MoSa company" do
+    it "allows non-MoSa clients to read periods but refuses sending files through the API and service" do
       company.update!(payroll_intake_source_types: [])
       send_package(workbook_choice: "none")
       expect(response).to have_http_status(:forbidden)
       get client_base
-      expect(response).to have_http_status(:forbidden)
+      expect(response).to have_http_status(:ok)
+      get "#{client_base}/#{ref}"
+      expect(response).to have_http_status(:ok)
+      expect(data["allowed_actions"]).to eq([ "message" ])
       catalog = PayrollSubmissions::Catalog.new(company: company)
       expect do
         PayrollSubmissions::CreateRevision.new(company: company, actor: client, catalog: catalog,
@@ -258,9 +282,30 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(PayrollSubmission.count).to eq(0)
     end
 
+    it "lets a non-MoSa client message and approve a posted draft without a submission" do
+      company.update!(payroll_intake_source_types: [])
+      as_staff
+      post "#{staff_base}/#{ref}/drafts", params: { paycheck_pdf: synthetic_pdf("fixed-pay-draft.pdf"), post: true }
+      expect(response).to have_http_status(:created), response.body
+      period_id = data["id"]
+      draft_id = data["drafts"].first["id"]
+      as_client
+      get "#{client_base}/#{period_id}"
+      expect(response).to have_http_status(:ok)
+      expect(data["submissions"]).to be_empty
+      expect(data["drafts"].first["id"]).to eq(draft_id)
+      expect(data["allowed_actions"]).to contain_exactly("approve", "request_changes", "message")
+      post "#{client_base}/#{period_id}/messages", params: { body: "Checking this draft", idempotency_key: "fixed-message" }
+      expect(response).to have_http_status(:created), response.body
+      expect(PayrollSubmissionPeriod.find(period_id).client_portal_thread.messages.last.body).to eq("Checking this draft")
+      post "#{client_base}/#{period_id}/decision", params: { decision: "approve", draft_id: draft_id }
+      expect(response).to have_http_status(:ok), response.body
+      expect(data["status"]).to eq("approved")
+    end
+
     it "still serializes legacy revisions without inventing a no-tips declaration" do
       send_package(workbook_choice: "none")
-      PayrollSubmission.last.update_columns(workbook_choice: nil)
+      PayrollSubmission.last.update_columns(workbook_choice: nil, no_changes: false)
       get "#{client_base}/#{data['id']}"
       expect(response).to have_http_status(:ok)
       expect(data["submissions"].first).to include("workbook_choice" => nil, "no_changes" => false)

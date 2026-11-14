@@ -374,8 +374,7 @@ module Api
           return unless period&.pending_source_review?
 
           source = period.current_submission
-          { submission_id: source.id, revision: source.revision, workbook_choice: source.workbook_choice,
-            changes_link_url: source.changes_link_url }
+          submission_review_json(source)
         end
 
         def workbook_warnings(package, submission)
@@ -394,13 +393,18 @@ module Api
           return unless selection
 
           submission = selection.payroll_submission
+          submission_review_json(submission).merge(
+            selection_id: selection.id, current: submission.id == submission.period.current_submission&.id,
+            superseded_reason: selection.superseded_reason, staff_workbook: selection.staff_workbook_evidence
+          )
+        end
+
+        def submission_review_json(submission)
           names = Employee.where(company_id: @pay_period.company_id).pluck(:id, :first_name, :last_name).to_h { |id, first, last| [ id, [ first, last ].join(" ") ] }
           {
-            selection_id: selection.id, submission_id: submission.id, revision: submission.revision,
-            period_id: submission.payroll_submission_period_id, current: submission.id == submission.period.current_submission&.id,
-            superseded_reason: selection.superseded_reason, notes: submission.notes, changes_link_url: submission.changes_link_url,
+            submission_id: submission.id, revision: submission.revision, period_id: submission.payroll_submission_period_id,
+            notes: submission.notes, changes_link_url: submission.changes_link_url,
             no_changes: submission.no_changes, workbook_choice: submission.workbook_choice,
-            staff_workbook: selection.staff_workbook_evidence,
             changes: submission.change_rows.map { |row| row.merge("label" => PayrollSubmissions::ChangeRows::LABELS[row["kind"]],
               "employee_name" => names[row["employee_id"]], "employee_names" => Array(row["employee_ids"]).filter_map { |id| names[id] }) }
           }
