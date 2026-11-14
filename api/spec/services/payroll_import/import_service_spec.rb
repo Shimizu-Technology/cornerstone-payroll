@@ -46,6 +46,38 @@ RSpec.describe PayrollImport::ImportService do
     end
   end
 
+  describe "removing previously imported client hours" do
+    let!(:worker) { create(:employee, company: company, pay_rate: 35) }
+    let!(:job) { create(:employee_wage_rate, employee: worker, rate: 35, label: "Maintenance", is_primary: true) }
+    let!(:item) { create(:payroll_item, company: company, employee: worker, pay_period: pay_period, pay_rate: 35, hours_worked: 2, import_source: "mosa_revel") }
+
+    before do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |paycheck| paycheck.save! }
+      row = { employee_id: worker.id, workbook_only: true, total_tips: 0,
+        client_extra_hours: { hours: "68", employee_wage_rate_id: job.id, rate: "35" },
+        client_change_evidence: { kind: "extra_hours", submission_id: 1 } }
+      expect(service.apply!(matched: [ row ])[:errors]).to be_empty
+      expect(item.reload.hours_worked).to eq(70)
+    end
+
+    it "restores workbook-only baseline hours and allocations when the change is skipped or removed" do
+      result = service.apply!(matched: [ { employee_id: worker.id, workbook_only: true, total_tips: 0 } ])
+      expect(result[:errors]).to be_empty
+      expect(item.reload.hours_worked).to eq(2)
+      expect(item.wage_rate_hours).to be_empty
+      expect(item.custom_columns_data["client_change_evidence"]).to be_nil
+    end
+
+    it "refuses removal after a worksheet edit and retains the evidence and saved hours" do
+      item.update!(hours_worked: 69)
+      evidence = item.custom_columns_data["client_change_evidence"]
+      result = service.apply!(matched: [ { employee_id: worker.id, workbook_only: true, total_tips: 0 } ])
+      expect(result[:errors].sole[:error]).to include("Reconcile the worksheet hours")
+      expect(item.reload.hours_worked).to eq(69)
+      expect(item.custom_columns_data["client_change_evidence"]).to eq(evidence)
+    end
+  end
+
   describe "#apply!" do
     it "snapshots the delivery method before issuing review so profile edits cannot change imported payroll" do
       employee = create(:employee, company: company, payment_delivery_method: "direct_deposit")

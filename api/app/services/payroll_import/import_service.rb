@@ -211,6 +211,7 @@ module PayrollImport
                 payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
                 payroll_item.overtime_hours = row[:overtime_hours].to_f if row[:overtime_hours]
               end
+              restore_client_hours_baseline!(payroll_item) if row[:workbook_only] && !row[:client_extra_hours]
               # Preserve workbook-only worksheet splits. Extra hours belong
               # only to their submitted job, not to every existing allocation.
               preserve_split = row[:client_extra_hours] && row[:workbook_only] && payroll_item.wage_rate_hours.present?
