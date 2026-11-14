@@ -29,7 +29,7 @@ class InstallmentLoanReportBuilder
 
         visible = txn.dup
         visible.balance_before = balance
-        balance += txn.transaction_type == "addition" ? txn.amount : -txn.amount
+        balance += txn.balance_after - txn.balance_before
         visible.balance_after = balance
         visible
       end
@@ -55,6 +55,7 @@ class InstallmentLoanReportBuilder
 
   def status_as_of(loan, transactions)
     return "paid_off" if transactions.any? && transactions.last.balance_after.to_d.zero?
+    return "active" if @pay_period_scope && loan.status == "paid_off"
     return "active" if loan.paid_off_date.present? && loan.paid_off_date > as_of_date
 
     loan.status
