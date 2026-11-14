@@ -84,6 +84,588 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(company.id)
   end
 
+  describe "expanded client report boundary" do
+    let(:report_params) { { pay_period_id: pay_period.id, employee_id: employee.id, year: 2026, quarter: 2 } }
+
+    it "keeps staff Form 500 tracking details out of client packets and exports" do
+      Form500Filing.create!(company: company, pay_period: pay_period, fields: { "test" => true },
+        notes: "Private staff tracking note", confirmation_number: "STAFF-123", receipt_attached: true,
+        payment_date: Date.new(2026, 4, 20), payment_amount: 120)
+      get "/api/v1/client/reports/quarterly_compliance_packet", params: report_params
+      expect(response).to have_http_status(:ok)
+      deposit = response.parsed_body.dig("report", "form_500", "deposits").sole
+      expect(deposit).to include("amount" => 120.0, "payment_date" => "2026-04-20")
+      expect(deposit.keys & %w[notes confirmation_number receipt_attached]).to be_empty
+      report = response.parsed_body.fetch("report")
+      expect(%w[federal_941 w1 swica].map { |section| report.dig(section, "filing_steps") }).to all(be_nil)
+      expect(report).not_to have_key("review_checks")
+      expect(%w[w1 swica].map { |section| report.fetch(section).key?("tie_out") }).to all(be(false))
+      %w[quarterly_compliance_packet_pdf quarterly_compliance_packet_xlsx].each do |action|
+        get "/api/v1/client/reports/#{action}", params: report_params
+        expect(response).to have_http_status(:ok)
+        text = if action.end_with?("pdf")
+          PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
+        else
+          sheet = Roo::Excelx.new(StringIO.new(response.body))
+          sheet.sheets.flat_map { |name| sheet.sheet(name).to_a.flatten }.join(" ")
+        end
+        expect(text).not_to include("Private staff tracking note", "STAFF-123")
+      end
+      staff = QuarterlyCompliancePacketBuilder.new(company, 2026, 2).generate
+      expect(staff.dig(:form_500, :deposits).sole).to include(notes: "Private staff tracking note", confirmation_number: "STAFF-123", receipt_attached: true)
+      expect(%i[federal_941 w1 swica].map { |section| staff.dig(section, :filing_steps) }).to all(be_present)
+      expect(staff[:review_checks]).to be_present
+      expect(%i[w1 swica].map { |section| staff.dig(section, :tie_out) }).to all(be_present)
+    end
+
+    it "keeps voided and reversed checks in the client Checks and Payments Register" do
+      payroll_item.update_columns(voided: true)
+      reversed = create(:payroll_item, company: company, employee: create(:employee, company: company), pay_period: pay_period, gross_pay: 50, net_pay: 40)
+      reversed.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: client_user.id, payroll_reversal_reason: "Synthetic reversal")
+      get "/api/v1/client/reports/paycheck_history_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
+      expect(text.scan(/voided/i).size).to be >= 2
+    end
+
+    it "hides staff component review warnings in client JSON and PDFs while preserving staff defaults" do
+      warning = { code: PayrollReportComponentReview::CODE, message: PayrollReportComponentReview::MESSAGE }
+      allow(PayrollReportComponentReview).to receive(:for_items).and_return([ warning ])
+      %w[ytd_summary employee_pay_history].each do |action|
+        get "/api/v1/client/reports/#{action}", params: report_params.merge(start_date: "2026-01-01", end_date: "2026-12-31")
+        expect(response).to have_http_status(:ok)
+        expect(response.body).not_to include(warning[:message])
+      end
+      %w[payroll_summary_by_employee_pdf paycheck_history_pdf deductions_contributions_pdf retirement_plans_pdf payroll_register_pdf].each do |action|
+        get "/api/v1/client/reports/#{action}", params: report_params
+        expect(response).to have_http_status(:ok)
+        text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
+        expect(text).not_to include("accountant review needed")
+      end
+      expect(QuickbooksPayrollReportData.new(pay_period).review_warnings).to eq([ warning ])
+      text = PDF::Reader.new(StringIO.new(PayrollSummaryByEmployeePdfGenerator.new(pay_period).generate)).pages.map(&:text).join(" ")
+      expect(text).to include("accountant review needed")
+    end
+
+    it "serves payroll_summary_by_employee_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/payroll_summary_by_employee_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/payroll_summary_by_employee_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves payroll_summary_by_employee_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/payroll_summary_by_employee_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/payroll_summary_by_employee_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves tax_summary for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/tax_summary", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/tax_summary", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves tax_summary_csv for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/tax_summary_csv", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/tax_summary_csv", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves tax_summary_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/tax_summary_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/tax_summary_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves tax_summary_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/tax_summary_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/tax_summary_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves employer_liability for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/employer_liability", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/employer_liability", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves employer_liability_csv for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/employer_liability_csv", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/employer_liability_csv", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves employer_liability_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/employer_liability_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/employer_liability_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves employer_liability_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/employer_liability_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/employer_liability_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves form_941_gu for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/form_941_gu", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/form_941_gu", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves form_941_gu_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/form_941_gu_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/form_941_gu_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves form_941_gu_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/form_941_gu_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/form_941_gu_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves quarterly_compliance_packet for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/quarterly_compliance_packet", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/quarterly_compliance_packet", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves quarterly_compliance_packet_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/quarterly_compliance_packet_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/quarterly_compliance_packet_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves quarterly_compliance_packet_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/quarterly_compliance_packet_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/quarterly_compliance_packet_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves quarterly_compliance_packet_form_941_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/quarterly_compliance_packet_form_941_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/quarterly_compliance_packet_form_941_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves quarterly_compliance_packet_schedule_b_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/quarterly_compliance_packet_schedule_b_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/quarterly_compliance_packet_schedule_b_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves quarterly_compliance_packet_w1_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/quarterly_compliance_packet_w1_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/quarterly_compliance_packet_w1_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves quarterly_compliance_packet_swica_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/quarterly_compliance_packet_swica_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/quarterly_compliance_packet_swica_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves employee_pay_history for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/employee_pay_history", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/employee_pay_history", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves employee_pay_history_csv for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/employee_pay_history_csv", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/employee_pay_history_csv", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves employee_pay_history_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/employee_pay_history_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/employee_pay_history_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves employee_pay_history_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/employee_pay_history_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/employee_pay_history_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves paycheck_history_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/paycheck_history_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/paycheck_history_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves paycheck_history_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/paycheck_history_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/paycheck_history_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves deductions_contributions_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/deductions_contributions_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/deductions_contributions_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves deductions_contributions_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/deductions_contributions_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/deductions_contributions_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves retirement_plans_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/retirement_plans_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/retirement_plans_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves retirement_plans_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/retirement_plans_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/retirement_plans_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves installment_loans_pdf for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/installment_loans_pdf", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/installment_loans_pdf", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "serves installment_loans_xlsx for the current company and rejects a foreign company context" do
+      get "/api/v1/client/reports/installment_loans_xlsx", params: report_params
+      expect(response).to have_http_status(:ok)
+      other = create(:company)
+      allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(other.id)
+      get "/api/v1/client/reports/installment_loans_xlsx", params: report_params
+      expect(response.status).to be_in([ 403, 404 ])
+    end
+
+    it "refuses unfinished payroll for payroll_summary_by_employee_pdf" do
+      get "/api/v1/client/reports/payroll_summary_by_employee_pdf", params: report_params.merge(pay_period_id: draft_pay_period.id)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "refuses unfinished payroll for payroll_summary_by_employee_xlsx" do
+      get "/api/v1/client/reports/payroll_summary_by_employee_xlsx", params: report_params.merge(pay_period_id: draft_pay_period.id)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "refuses unfinished payroll for paycheck_history_pdf" do
+      get "/api/v1/client/reports/paycheck_history_pdf", params: report_params.merge(pay_period_id: draft_pay_period.id)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "refuses unfinished payroll for paycheck_history_xlsx" do
+      get "/api/v1/client/reports/paycheck_history_xlsx", params: report_params.merge(pay_period_id: draft_pay_period.id)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "refuses unfinished payroll for deductions_contributions_pdf" do
+      get "/api/v1/client/reports/deductions_contributions_pdf", params: report_params.merge(pay_period_id: draft_pay_period.id)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "refuses unfinished payroll for deductions_contributions_xlsx" do
+      get "/api/v1/client/reports/deductions_contributions_xlsx", params: report_params.merge(pay_period_id: draft_pay_period.id)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "refuses unfinished payroll for retirement_plans_pdf" do
+      get "/api/v1/client/reports/retirement_plans_pdf", params: report_params.merge(pay_period_id: draft_pay_period.id)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "refuses unfinished payroll for retirement_plans_xlsx" do
+      get "/api/v1/client/reports/retirement_plans_xlsx", params: report_params.merge(pay_period_id: draft_pay_period.id)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    context "in a practice copy" do
+      before do
+        source = create(:company, organization: company.organization)
+        source_period = create(:pay_period, :committed, company: source)
+        company.update!(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox",
+          migration_source_company: source, migration_rehearsal_status: "ready", test_workspace_expires_at: 1.day.from_now)
+        client_user.update!(practice_company_id: company.id)
+        pay_period.update_columns(status: "approved", test_workspace_role: "baseline", test_workspace_source_pay_period_id: source_period.id)
+        # A run created inside the copy, like the Oct 19–Nov 1 rehearsal period: approved but never finished.
+        draft_pay_period.update_columns(status: "approved")
+      end
+
+      it "serves copied baseline history for payroll_summary_by_employee_pdf" do
+        get "/api/v1/client/reports/payroll_summary_by_employee_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for payroll_summary_by_employee_xlsx" do
+        get "/api/v1/client/reports/payroll_summary_by_employee_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for tax_summary" do
+        get "/api/v1/client/reports/tax_summary", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for tax_summary_csv" do
+        get "/api/v1/client/reports/tax_summary_csv", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for tax_summary_pdf" do
+        get "/api/v1/client/reports/tax_summary_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for tax_summary_xlsx" do
+        get "/api/v1/client/reports/tax_summary_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for employer_liability" do
+        get "/api/v1/client/reports/employer_liability", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for employer_liability_csv" do
+        get "/api/v1/client/reports/employer_liability_csv", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for employer_liability_pdf" do
+        get "/api/v1/client/reports/employer_liability_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for employer_liability_xlsx" do
+        get "/api/v1/client/reports/employer_liability_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for form_941_gu" do
+        get "/api/v1/client/reports/form_941_gu", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for form_941_gu_pdf" do
+        get "/api/v1/client/reports/form_941_gu_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for form_941_gu_xlsx" do
+        get "/api/v1/client/reports/form_941_gu_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for quarterly_compliance_packet" do
+        get "/api/v1/client/reports/quarterly_compliance_packet", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for quarterly_compliance_packet_pdf" do
+        get "/api/v1/client/reports/quarterly_compliance_packet_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for quarterly_compliance_packet_xlsx" do
+        get "/api/v1/client/reports/quarterly_compliance_packet_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for quarterly_compliance_packet_form_941_pdf" do
+        get "/api/v1/client/reports/quarterly_compliance_packet_form_941_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for quarterly_compliance_packet_schedule_b_pdf" do
+        get "/api/v1/client/reports/quarterly_compliance_packet_schedule_b_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for quarterly_compliance_packet_w1_pdf" do
+        get "/api/v1/client/reports/quarterly_compliance_packet_w1_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for quarterly_compliance_packet_swica_pdf" do
+        get "/api/v1/client/reports/quarterly_compliance_packet_swica_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for employee_pay_history" do
+        get "/api/v1/client/reports/employee_pay_history", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for employee_pay_history_csv" do
+        get "/api/v1/client/reports/employee_pay_history_csv", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for employee_pay_history_pdf" do
+        get "/api/v1/client/reports/employee_pay_history_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for employee_pay_history_xlsx" do
+        get "/api/v1/client/reports/employee_pay_history_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for paycheck_history_pdf" do
+        get "/api/v1/client/reports/paycheck_history_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for paycheck_history_xlsx" do
+        get "/api/v1/client/reports/paycheck_history_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for deductions_contributions_pdf" do
+        get "/api/v1/client/reports/deductions_contributions_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for deductions_contributions_xlsx" do
+        get "/api/v1/client/reports/deductions_contributions_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for retirement_plans_pdf" do
+        get "/api/v1/client/reports/retirement_plans_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for retirement_plans_xlsx" do
+        get "/api/v1/client/reports/retirement_plans_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for installment_loans_pdf" do
+        get "/api/v1/client/reports/installment_loans_pdf", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "serves copied baseline history for installment_loans_xlsx" do
+        get "/api/v1/client/reports/installment_loans_xlsx", params: report_params
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "includes baselines and excludes approved practice drafts in annual and period totals" do
+        %w[ytd_summary tax_summary annual_payroll_summary].each do |action|
+          get "/api/v1/client/reports/#{action}", params: report_params
+          expect(response).to have_http_status(:ok)
+          report = response.parsed_body.fetch("report")
+          gross = report.dig("company_totals", "gross_pay") || report.dig("totals", "gross_wages") || report.dig("totals", "gross_pay")
+          expect(gross.to_f).to eq(1450)
+        end
+      end
+    end
+
+    it "uses only finished payroll for tax and annual totals" do
+      get "/api/v1/client/reports/tax_summary", params: report_params
+      expect(response.parsed_body.dig("report", "totals", "gross_wages").to_f).to eq(1450)
+      get "/api/v1/client/reports/annual_payroll_summary"
+      expect(response.parsed_body.dig("report", "totals", "gross_pay").to_f).to eq(1450)
+    end
+  end
+
   def create_client_historical_paycheck(employee:, suffix:, gross_pay: 400, net_pay: 290)
     batch = HistoricalImportBatch.create!(
       company: company,

@@ -24,17 +24,22 @@ class QuickbooksPayrollReportData
 
   attr_reader :pay_period, :company
 
-  def initialize(pay_period, for_reporting: true)
+  def initialize(pay_period, for_reporting: true, client_view: false)
+    @client_view = client_view
     @for_reporting = for_reporting
     @pay_period = pay_period
     @company = pay_period.company
   end
 
   def review_warnings(include_voided: false)
+    return [] if @client_view
+
     PayrollReportComponentReview.for_items(items(include_voided: include_voided))
   end
 
   def review_warnings_for_item(item)
+    return [] if @client_view
+
     PayrollReportComponentReview.for_item(item)
   end
 
@@ -259,7 +264,7 @@ class QuickbooksPayrollReportData
         net_pay: item.net_pay.to_f,
         pay_method: PayrollPaymentLabel.for(item),
         check_number: item.check_number,
-        status: item.check_status || "—",
+        status: @client_view && !item.payroll_included? ? "voided" : (item.check_status || "—"),
         taxes: employee_tax_total(item),
         deductions: item.total_deductions.to_f,
         employer_cost: total_payroll_cost(item)

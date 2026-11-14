@@ -1693,7 +1693,7 @@ export const payPeriodsApi = {
 };
 
 export const clientPayPeriodsApi = {
-  list: (params?: { status?: string; year?: number }, companyId?: number): Promise<ClientPayrollHistoryResponse> =>
+  list: (params?: { status?: string; year?: number; page?: number; per_page?: number }, companyId?: number): Promise<ClientPayrollHistoryResponse> =>
     api.get<ClientPayrollHistoryResponse>('/client/pay_periods', params, { companyId }),
   get: (id: number, companyId?: number): Promise<PayPeriodResponse> =>
     api.get<PayPeriodResponse>(`/client/pay_periods/${id}`, undefined, { companyId }),
@@ -3468,6 +3468,9 @@ export const reportsApi = {
 };
 
 export const clientReportsApi = {
+  download: (report: string, format: string, params: Record<string, string | number>) =>
+    api.getBlobWithParams(`/client/reports/${report}_${format}`, params),
+
   dashboard: () =>
     api.get<DashboardResponse>('/client/reports/dashboard'),
   payrollRegister: (payPeriodId: number) =>
