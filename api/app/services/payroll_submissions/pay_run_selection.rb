@@ -12,6 +12,17 @@ module PayrollSubmissions
     end
 
     def build(record)
+      source = source!
+      package = record.payroll_intake_session
+      unless record.pay_period_id == @run.id && package&.company_id == @run.company_id && package&.source_type == "mosa_revel"
+        raise ArgumentError, "Only a MoSa import may be linked to a client revision"
+      end
+      PayrollSubmissionImport.new(payroll_import: record, payroll_submission: source, current_submission: source,
+        selected_by: @actor, source_route: "pay_run")
+    end
+
+    # Preview can validate an explicit source before an import record exists.
+    def source!
       @period&.lock!
       source = @period&.current_submission
       unless source && source.id.to_s == @submission_id.to_s && @period.pending_source_review? &&
@@ -32,12 +43,7 @@ module PayrollSubmissions
       elsif @period.pay_period_id != @run.id
         raise ArgumentError, "This client revision is not linked to this pay run"
       end
-      package = record.payroll_intake_session
-      unless record.pay_period_id == @run.id && package&.company_id == @run.company_id && package&.source_type == "mosa_revel"
-        raise ArgumentError, "Only a MoSa import may be linked to a client revision"
-      end
-      PayrollSubmissionImport.new(payroll_import: record, payroll_submission: source, current_submission: source,
-        selected_by: @actor, source_route: "pay_run")
+      source
     end
   end
 end

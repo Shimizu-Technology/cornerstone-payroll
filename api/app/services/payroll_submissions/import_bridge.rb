@@ -52,7 +52,7 @@ module PayrollSubmissions
           files << validated.prepared.sole.file
         end
         result = PayrollIntake::PreviewService.new(pay_period: @run, source_type: "mosa_revel", actor: @actor,
-          files: files, portal_documents: documents,
+          files: files, portal_documents: documents, portal_submission: submission,
           **@options.slice(:supersedes_package_id, :supersession_reason)).call
         retained_keys = result[:session].documents.filter_map(&:storage_reference) unless result[:duplicate]
         begin

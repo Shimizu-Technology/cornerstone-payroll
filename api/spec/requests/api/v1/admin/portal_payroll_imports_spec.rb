@@ -928,6 +928,151 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(response).to have_http_status(:ok), response.body
     end
 
+    def identical_revision(source, rev:, changes:)
+      next_source = period.submissions.create!(company: company, revision: rev, submitted_by: staff, submitted_at: Time.current,
+        content_fingerprint: SecureRandom.hex(32), request_fingerprint: SecureRandom.hex(32),
+        change_rows: changes, no_changes: changes.empty?, workbook_choice: source.workbook_choice)
+      source.submission_documents.each do |link|
+        add_source(next_source, objects.fetch(link.client_document.file_key), link.role, link.file_name_snapshot, link.client_document.content_type)
+      end
+      period.transition!("submit", actor: create(:user, company: company, role: "client"), submission: next_source)
+      next_source
+    end
+
+    %w[skipped dropped].each do |mode|
+      it "reviews byte-identical files with #{mode} changes and reapplies revision 1 exactly once" do
+        source = standing_source
+        add_source(source, PayrollImport::MosaSupplementalTemplate.new(run).generate, "changes_workbook", "changes.xlsx",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        create(:payroll_item, company: company, pay_period: run, employee: manual_worker, hours_worked: 2,
+          import_source: "mosa_revel", wage_rate_hours: [ { employee_wage_rate_id: manual_job.id, label: "Maintenance", rate: 35, regular_hours: 2, overtime_hours: 0 } ])
+        first = preview(source)
+        apply_standing(first)
+        snapshot = -> { run.payroll_items.order(:employee_id).map { |item| item.attributes.slice("employee_id", "hours_worked", "overtime_hours", "wage_rate_hours", "salary_override", "gross_pay", "net_pay", "loan_deduction", "reported_tips") } }
+        original = snapshot.call
+        changes = mode == "skipped" ? source.change_rows.map { |row| row.merge("skipped" => true).except("amount", "hours") } : []
+        second = identical_revision(source, rev: 2, changes: changes)
+        data = preview(second)
+        expect(response).to have_http_status(:ok), response.body
+        package = PayrollImportRecord.find(data.fetch("import_id")).payroll_intake_session
+        expect(package).to have_attributes(supersedes_id: PayrollImportRecord.find(first["import_id"]).payroll_intake_session_id,
+          supersession_reason: "client revision 2: changes only")
+        expect(package.documents.pluck(:sha256)).to match_array(source.submission_documents.pluck(:sha256))
+        expect(data.dig("client_change_prefill", "removals").join).to include("68", manual_worker.full_name)
+        expect(data.dig("preview", "matched").find { |row| row["employee_id"] == owner.id }).to include("period_pay_missing" => true)
+        apply(data)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(snapshot.call).to eq(original)
+        stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+        item = run.payroll_items.find_by!(employee: owner)
+        patch "#{url}/payroll_items/#{item.id}", params: { expected_import_id: data["import_id"], payroll_item: { salary_override: "100" } }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        apply_standing(data, [])
+        worker = run.payroll_items.find_by!(employee: manual_worker)
+        expect(worker.hours_worked).to eq(2)
+        expect(worker.wage_rate_hours.sum { |row| row["regular_hours"].to_d }).to eq(2)
+        third = identical_revision(source, rev: 3, changes: source.change_rows)
+        final = preview(third)
+        expect(response).to have_http_status(:ok), response.body
+        reviewed = reviewed_standing_params(final)[:reviewed_changes]
+        reviewed.first.merge!(pay_choice: "client", saved_period_pay: "100.0")
+        apply_standing(final, reviewed)
+        expect(snapshot.call).to eq(original)
+        expect(worker.reload.hours_worked).to eq(70)
+        expect(worker.wage_rate_hours.sum { |row| row["regular_hours"].to_d }).to eq(70)
+        preview(third)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body["error"]).to include("revision was already applied")
+        expect(PayrollIntakeSession.count).to eq(3)
+      end
+    end
+
+    it "refuses an identical-files identical-changes resend without a replacement" do
+      source = standing_source
+      first = preview(source)
+      apply_standing(first)
+      second = identical_revision(source, rev: 2, changes: source.change_rows)
+      expect { preview(second) }.not_to change(PayrollIntakeSession, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("repeats the already-applied files and changes")
+      expect(run.payroll_items.find_by!(employee: manual_worker).hours_worked).to eq(68)
+    end
+
+    it "keeps plain duplicate protection and explicitly links an identical-files pay-run correction" do
+      source = standing_source
+      add_source(source, PayrollImport::MosaSupplementalTemplate.new(run).generate, "changes_workbook", "changes.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      first = preview(source)
+      apply_standing(first)
+      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row["kind"] == "extra_hours" ? row.merge("hours" => "32") : row })
+      files = -> { source.submission_documents.order(:position).map { |link| portal_upload(link.file_name_snapshot, objects.fetch(link.client_document.file_key), link.client_document.content_type) } }
+      pdf, workbook = files.call
+      post "#{url}/preview_import", params: { pdf_file: pdf, excel_file: workbook }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("already applied")
+      expect(response.parsed_body.dig("details", "pending_submission_id")).to eq(second.id)
+      pdf, workbook = files.call
+      post "#{url}/preview_import", params: { pdf_file: pdf, excel_file: workbook, use_submission_id: second.id }
+      expect(response).to have_http_status(:ok), response.body
+      data = response.parsed_body
+      reviewed = reviewed_standing_params(data)[:reviewed_changes]
+      reviewed.last[:hours] = "32"
+      post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: second.id,
+        confirm_client_changes: true, reviewed_changes: reviewed }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(second.submission_imports.sole).to have_attributes(source_route: "pay_run", applied_at: be_present)
+      expect(run.payroll_items.find_by!(employee: manual_worker).hours_worked).to eq(32)
+      pdf, workbook = files.call
+      post "#{url}/preview_import", params: { pdf_file: pdf, excel_file: workbook }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("superseded")
+    end
+
+    it "refuses a changes-only review after another client revision arrives" do
+      source = standing_source
+      first = preview(source)
+      apply_standing(first)
+      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("hours" => "32") })
+      data = preview(second)
+      expect(response).to have_http_status(:ok), response.body
+      identical_revision(source, rev: 3, changes: source.change_rows)
+      post "#{url}/apply_import", params: reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id")), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("newer portal revision")
+      expect(run.payroll_items.find_by!(employee: manual_worker).hours_worked).to eq(68)
+      expect(second.submission_imports.sole.applied_at).to be_nil
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      patch "#{url}/payroll_items/#{run.payroll_items.find_by!(employee: owner).id}",
+        params: { expected_import_id: data["import_id"], payroll_item: { salary_override: "100" } }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4500.00"))
+    end
+
+    it "guards pay-run replacement selection even after source disposition and a newer revision" do
+      source = standing_source
+      first = pay_run_preview(source)
+      post "#{url}/apply_import", params: reviewed_standing_params(first).merge(use_submission_id: source.id), as: :json
+      expect(response).to have_http_status(:ok), response.body
+      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("skipped" => true) })
+      retained_workbook = PayrollImportRecord.find(first["import_id"]).payroll_intake_session.documents.find_by!(source_role: "supplemental_workbook")
+      post "#{url}/preview_import", params: { pdf_file: portal_upload("revel.pdf", objects.fetch(source.revel_document.client_document.file_key), "application/pdf"),
+        excel_file: portal_upload("downloaded.xlsx", objects.fetch(retained_workbook.storage_reference), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        use_submission_id: second.id }
+      expect(response).to have_http_status(:ok), response.body
+      data = response.parsed_body
+      post "#{url}/resolve_portal_source", params: { submission_id: second.id, reason: "Will review the changes separately" }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      apply(data)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("Select the client revision")
+      identical_revision(source, rev: 3, changes: source.change_rows)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      patch "#{url}/payroll_items/#{run.payroll_items.find_by!(employee: owner).id}",
+        params: { expected_import_id: data["import_id"], payroll_item: { salary_override: "100" } }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4500.00"))
+    end
+
     def corrected_standing(data, changes)
       bytes = File.binread(build_revel_pdf([ { name: "Example, Avery", regular_hours: 0, overtime_hours: 0, regular_pay: 0 } ],
         period_start: run.start_date, period_end: run.end_date))

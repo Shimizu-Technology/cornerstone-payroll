@@ -58,6 +58,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [clientDeclineReasons, setClientDeclineReasons] = useState<Record<number, string>>({});
   const [clientPayChoices, setClientPayChoices] = useState<Record<number, string>>({});
   const [usePendingRevision, setUsePendingRevision] = useState(false);
+  const [duplicateRevision, setDuplicateRevision] = useState<{ id: number; revision: number } | null>(null);
   const [staffWorkbook, setStaffWorkbook] = useState<File | null>(null);
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
   const [reviewedOverwrite, setReviewedOverwrite] = useState(false);
@@ -83,6 +84,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setStep('upload');
     setUsePendingRevision(false); setStaffWorkbook(null);
     setReviewedClientChanges(false); setClientChangeDrafts({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
+    setDuplicateRevision(null);
     setPdfFile(null);
     setExcelFile(null);
     setLoading(false);
@@ -260,7 +262,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     onOpenChange(false);
   };
 
-  const handlePreview = async () => {
+  const handlePreview = async (submissionId?: number) => {
     if (!pdfFile) return;
     try {
       setLoading(true);
@@ -275,14 +277,21 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         currentPackage && replacementConfirmed
           ? { supersedesPackageId: currentPackage.package_id, reason: replacementReason.trim() }
           : undefined,
+        submissionId,
       );
       openPreview(data);
+      setUsePendingRevision(!!submissionId);
+      setDuplicateRevision(null);
       onSourcePreviewed?.();
       void payrollIntakeImportsApi.list(payPeriodId).then((history) => {
         setCurrentPackage(history.imports.find((entry) => entry.source_type === 'mosa_revel' && entry.current) || null);
       }).catch(() => undefined);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse files');
+      const id = err instanceof ApiError ? err.details?.pending_submission_id : undefined;
+      const revision = err instanceof ApiError ? err.details?.pending_revision : undefined;
+      const duplicate = typeof id === 'number' && typeof revision === 'number' ? { id, revision } : null;
+      setDuplicateRevision(duplicate);
+      setError(duplicate ? null : err instanceof Error ? err.message : 'Failed to parse files');
     } finally {
       setLoading(false);
     }
@@ -510,6 +519,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         {error && (
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
+
+        {step === 'upload' && duplicateRevision && <div className="space-y-2 rounded-lg border border-warning-200 p-4">
+          <p>These files were already applied. Review them with the changes from the pending client revision.</p>
+          <Button disabled={loading} onClick={() => void handlePreview(duplicateRevision.id)}>Use this import for the client’s revision {duplicateRevision.revision}</Button>
+        </div>}
 
         {previewData?.pending_portal_source && !previewData.portal_source && <section className="space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-4" aria-label="Pending client revision">
           <p className="text-sm">A client revision is waiting. Confirm that this import uses the files and changes for that revision. The selection is recorded only when this import applies successfully.</p>
@@ -1002,7 +1016,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             {step === 'upload' && (
               <>
                 <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
-                <Button onClick={handlePreview} disabled={!pdfFile || loading || !replacementReady}>
+                <Button onClick={() => void handlePreview()} disabled={!pdfFile || loading || !replacementReady}>
                   {loading ? 'Parsing...' : 'Preview Import'}
                 </Button>
               </>

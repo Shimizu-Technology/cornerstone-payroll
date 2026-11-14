@@ -26,13 +26,14 @@ module PayrollIntake
     MAX_FILE_BYTES = PayrollIntake::AiExtractor::MAX_FILE_BYTES
 
     def initialize(pay_period:, source_type:, pasted_text: nil, files: [], actor: nil, storage: nil,
-                   supersedes_package_id: nil, supersession_reason: nil, portal_documents: [])
+                   supersedes_package_id: nil, supersession_reason: nil, portal_documents: [], portal_submission: nil)
       @pay_period = pay_period
       @company = pay_period.company
       @source_type = source_type.to_s
       @pasted_text = pasted_text.to_s
       @files = Array(files).compact
       @portal_documents = portal_documents
+      @portal_submission = portal_submission
       @actor = actor
       @storage = storage
       @supersedes_package_id = supersedes_package_id.to_s.strip.presence
@@ -54,6 +55,7 @@ module PayrollIntake
       capture_workweek_evidence!
 
       snapshot_files!
+      prepare_portal_revision!
       duplicate = existing_duplicate_session
       return duplicate_session_result(duplicate) if duplicate
 
@@ -83,7 +85,7 @@ module PayrollIntake
             package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION,
             supersedes: predecessor,
             supersession_reason: supersession_reason,
-            evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence),
+            evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence).merge(@revision_evidence || {}),
             status: "draft",
             created_by: actor
           )
@@ -164,6 +166,52 @@ module PayrollIntake
         end
         digest.hexdigest
       end
+    end
+
+    # File identity remains the default idempotency key. Only a selected newer
+    # client revision may replace an applied package with the same source bytes.
+    # The new key, predecessor and reason retain the correction as separate evidence.
+    def prepare_portal_revision!
+      submission = @portal_submission
+      return unless submission
+
+      period = submission.period
+      period.lock!
+      unless submission.company_id == company.id && period.pay_period_id == pay_period.id &&
+          period.start_date == pay_period.start_date && period.end_date == pay_period.end_date
+        raise ArgumentError, "Portal source and import must belong to the same company and period"
+      end
+      if submission.submission_imports.where.not(applied_at: nil).exists?
+        raise ArgumentError, "This client revision was already applied. Send a newer revision to correct its changes."
+      end
+
+      source_hash = import_hash
+      revision_hash = Digest::SHA256.hexdigest("#{source_hash}\nclient-revision:#{submission.id}")
+      if PayrollIntakeSession.exists?(pay_period: pay_period, source_type: source_type, import_hash: revision_hash)
+        @import_hash = revision_hash
+        return
+      end
+      current = PayrollIntakeSession.current.find_by(pay_period: pay_period, source_type: source_type)
+      return unless current&.applied_at && (current.evidence_snapshot["source_import_hash"] || current.import_hash) == source_hash
+
+      prior = PayrollSubmissionImport.joins(:payroll_import)
+        .where(payroll_imports: { payroll_intake_session_id: current.id }).where.not(applied_at: nil)
+        .order(id: :desc).first&.payroll_submission
+      unless prior && prior.payroll_submission_period_id == period.id && prior.revision < submission.revision &&
+          period.current_submission.id == submission.id
+        raise ArgumentError, "Identical applied files require a newer current client revision linked to the earlier import."
+      end
+      if prior.change_rows == submission.change_rows && prior.no_changes == submission.no_changes
+        raise ArgumentError, "This client revision repeats the already-applied files and changes. No payroll changes were imported. Send a revision with corrected changes."
+      end
+      if supersedes_package_id && !supersedes_package_id.in?([ current.id.to_s, current.package_id ])
+        raise ReplacementRequiredError.new("The selected source is no longer current. Refresh the review.", current_session: current)
+      end
+
+      @import_hash = revision_hash
+      @supersedes_package_id = current.package_id
+      @supersession_reason = "client revision #{submission.revision}: changes only"
+      @revision_evidence = { "source_import_hash" => source_hash, "payroll_submission_id" => submission.id }
     end
 
     def existing_duplicate_session

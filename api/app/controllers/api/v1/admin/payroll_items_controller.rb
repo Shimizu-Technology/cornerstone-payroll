@@ -209,6 +209,14 @@ module Api
         # A newer portal revision replaces the review even though the retained
         # import record is unchanged; apply refuses it, so the pay save must too.
         def portal_selections_current?(import_record)
+          revision_id = import_record.payroll_intake_session.evidence_snapshot["payroll_submission_id"]
+          if revision_id
+            source = PayrollSubmission.find_by(id: revision_id, company_id: @pay_period.company_id)
+            return false unless source && source.period.pay_period_id == @pay_period.id
+
+            source.period.lock!
+            return false unless source.period.current_submission.id == source.id
+          end
           import_record.submission_imports.all? do |selection|
             selection.period.lock!
             selection.validate_current!
