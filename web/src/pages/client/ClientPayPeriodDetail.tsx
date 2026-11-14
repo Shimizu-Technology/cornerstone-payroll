@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
+import { ClientPayStubButton } from '@/components/client-portal/ClientPayStubButton';
 import type { PayrollItem } from '@/types';
 import { payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import { parsePositiveRouteId } from '@/lib/route-params';
@@ -266,6 +267,7 @@ function PayrollItemMobileCard({ item }: PayrollItemRowProps): ReactElement {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-neutral-950">{item.employee_name}</p>
+          {item.pay_stub_available && <ClientPayStubButton itemId={item.id} />}
           <p className="mt-1 text-xs uppercase tracking-wide text-neutral-500">{item.employment_type}</p>
         </div>
         <div className="text-left sm:text-right">
@@ -293,6 +295,7 @@ function PayrollItemRow({ item }: PayrollItemRowProps): ReactElement {
       <TableCell stickyLeft className="bg-inherit">
         <div>
           <p className="font-medium text-gray-900">{item.employee_name}</p>
+          {item.pay_stub_available && <ClientPayStubButton itemId={item.id} />}
           <p className="text-xs uppercase tracking-wide text-gray-500">{item.employment_type}</p>
         </div>
       </TableCell>

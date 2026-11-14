@@ -1542,6 +1542,7 @@ export interface PayPeriodComparisonResponse {
 // ----------------
 
 export interface PayrollItem {
+  pay_stub_available?: boolean;
   draft_earning_sources?: {
     custom_earnings?: string | null;
     payroll_adjustments?: string | null;
