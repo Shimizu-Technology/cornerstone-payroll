@@ -99,6 +99,13 @@ RSpec.describe "Practice portal invitations and assignments", type: :request do
     expect(response).to have_http_status(:forbidden)
     expect(source.employees.where(last_name: "Cruz")).to be_empty
 
+    workspace.update_columns(test_workspace_sealed_at: Time.current)
+    expect {
+      post "/api/v1/client/employees", headers: { "X-Company-Id" => workspace.id.to_s }, params: params
+    }.not_to change(Employee, :count)
+    expect(response).to have_http_status(:forbidden)
+    workspace.update_columns(test_workspace_sealed_at: nil)
+
     TestWorkspace::Lifecycle.new(company: workspace, actor: admin).archive!
     allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:current_user).and_return(User.find(user.id))
     expect {
