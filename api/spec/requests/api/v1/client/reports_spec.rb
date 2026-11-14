@@ -114,7 +114,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     it "keeps voided and reversed checks in the client Checks and Payments Register" do
       payroll_item.update_columns(voided: true)
       reversed = create(:payroll_item, company: company, employee: create(:employee, company: company), pay_period: pay_period, gross_pay: 50, net_pay: 40)
-      reversed.update_columns(payroll_reversed_at: Time.current)
+      reversed.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: client_user.id, payroll_reversal_reason: "Synthetic reversal")
       get "/api/v1/client/reports/paycheck_history_pdf", params: report_params
       expect(response).to have_http_status(:ok)
       text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
