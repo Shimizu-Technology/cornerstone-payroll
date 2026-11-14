@@ -28,6 +28,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const [revel, setRevel] = useState<File | null>(null);
   const [workbook, setWorkbook] = useState<File | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const attachmentInput = useRef<HTMLInputElement>(null);
   const carryable = current?.documents.filter(d => d.document) || [];
   const [keep, setKeep] = useState<number[]>(carryable.map(d => d.document!.id));
   const [noChanges, setNoChanges] = useState(current?.no_changes ?? false);
@@ -210,10 +211,10 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
         {carryable.filter(d => d.role === 'attachment').map(d => (
           <label key={d.document!.id} className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="h-5 w-5" checked={keep.includes(d.document!.id)} onChange={e => setKeep(list => e.target.checked ? [...list, d.document!.id] : list.filter(id => id !== d.document!.id))} /><span className="break-words [overflow-wrap:anywhere]">Keep {d.file_name}</span></label>
         ))}
-        <input aria-label="Other files" type="file" multiple onChange={e => setAttachments(Array.from(e.target.files || []))} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
+        <input ref={attachmentInput} aria-label="Other files" type="file" multiple onChange={e => setAttachments(Array.from(e.target.files || []))} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
         {!workbook && !keptWorkbook && !(workbookChoice === 'link' && link.trim()) && attachments.filter(file => /\.xlsx?$/i.test(file.name)).map((file, index) => <div key={`${file.name}-${index}`} className="space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-3">
           <p className="break-all text-sm font-semibold">{file.name}: Is this the tips &amp; loans workbook?</p>
-          <Button type="button" variant="outline" onClick={() => { setWorkbook(file); setWorkbookChoice('attach'); setAttachments(list => list.filter(item => item !== file)); }}>Yes, move to workbook slot</Button>
+          <Button type="button" variant="outline" onClick={() => { setWorkbook(file); setWorkbookChoice('attach'); setAttachments(list => list.filter(item => item !== file)); if (attachmentInput.current) attachmentInput.current.value = '';  }}>Yes, move to workbook slot</Button>
           <p className="text-sm">If it is another file, choose a workbook option above before sending.</p>
         </div>)}
         {attachments.length > 0 && <ul className="text-sm text-neutral-700">{attachments.map((file, index) => <li className="break-all" key={`${file.name}-${index}`}>{file.name}</li>)}</ul>}
