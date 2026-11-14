@@ -99,6 +99,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       report = response.parsed_body.fetch("report")
       expect(%w[federal_941 w1 swica].map { |section| report.dig(section, "filing_steps") }).to all(be_nil)
       expect(report).not_to have_key("review_checks")
+      expect(%w[w1 swica].map { |section| report.fetch(section).key?("tie_out") }).to all(be(false))
       %w[quarterly_compliance_packet_pdf quarterly_compliance_packet_xlsx].each do |action|
         get "/api/v1/client/reports/#{action}", params: report_params
         expect(response).to have_http_status(:ok)
@@ -114,6 +115,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       expect(staff.dig(:form_500, :deposits).sole).to include(notes: "Private staff tracking note", confirmation_number: "STAFF-123", receipt_attached: true)
       expect(%i[federal_941 w1 swica].map { |section| staff.dig(section, :filing_steps) }).to all(be_present)
       expect(staff[:review_checks]).to be_present
+      expect(%i[w1 swica].map { |section| staff.dig(section, :tie_out) }).to all(be_present)
     end
 
     it "keeps voided and reversed checks in the client Checks and Payments Register" do
