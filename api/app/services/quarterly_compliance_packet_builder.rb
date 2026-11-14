@@ -39,8 +39,8 @@ class QuarterlyCompliancePacketBuilder
       report.delete(:workflow)
       report.delete(:review_checks)
       report[:federal_941].delete(:filing_steps)
-      report[:w1].delete(:filing_steps)
-      report[:swica].delete(:filing_steps)
+      report[:w1].except!(:filing_steps, :tie_out)
+      report[:swica].except!(:filing_steps, :tie_out)
       report[:federal_941][:deposit_schedule].delete(:firm_payment_policy)
       report[:federal_941][:deposit_schedule].delete(:note)
     end

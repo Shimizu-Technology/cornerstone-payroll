@@ -70,9 +70,10 @@ RSpec.describe InstallmentLoanReportBuilder do
 
   it "replays a scoped ledger from its first recorded entry when an addition is backdated" do
     loan.loan_transactions.delete_all
-    loan.update!(current_balance: 225)
+    # The first recorded entry (Jan 20) is not the earliest-dated one (Jan 10),
+    # so a date-ordered start would replay from 150 and report 175.
+    loan.update!(opening_balance: 200, current_balance: 225)
     [
-      [ "addition", 200, 0, 200, Date.new(2026, 1, 1) ],
       [ "payment", 50, 200, 150, Date.new(2026, 1, 20) ],
       [ "addition", 100, 150, 250, Date.new(2026, 1, 10) ],
       [ "payment", 25, 250, 225, Date.new(2026, 2, 1) ]
