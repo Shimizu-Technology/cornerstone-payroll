@@ -349,3 +349,44 @@ it('lets staff decline an invalid client row with a required reason and records 
   fireEvent.click(applyButton());
   await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ reviewed_changes: [{ change_index: 0, hours: '68', decision: 'decline', reason: 'Not working this period' }] })));
 });
+
+function skippedOwnerPreview() {
+  const data = preview([ownerMissing]);
+  data.client_change_prefill = { submission_id: 20, revision: 2, rows: [
+    { change_index: -2, kind: 'owner_pay', employee_id: 2, employee_name: 'Morgan Owner', requires_pay_decision: true },
+  ] };
+  return data;
+}
+
+it('requires a fresh amount or reasoned no-pay decision for earlier client owner pay', async () => {
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
+  open(skippedOwnerPreview());
+  expect(ownerInput().value).toBe('');
+  expect(applyButton().disabled).toBe(true);
+  expect(screen.getByText(/Earlier client pay is no longer selected/)).toBeTruthy();
+  fireEvent.change(ownerInput(), { target: { value: '3000' } });
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ reviewed_changes: [{ change_index: -2, amount: '3000' }] })));
+  expect(mocks.updateItem).not.toHaveBeenCalled();
+});
+
+it.each(['no-pay choice', 'row exclusion'])('applies %s as a reasoned no-pay decision inside the review', async mode => {
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
+  open(skippedOwnerPreview());
+  if (mode === 'no-pay choice') {
+    fireEvent.click(screen.getByLabelText('No pay this period for Morgan Owner'));
+  } else {
+    fireEvent.change(screen.getAllByLabelText('Outcome for Owner, Morgan')[0], { target: { value: 'excluded' } });
+  }
+  expect(applyButton().disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Reason for no pay for Morgan Owner'), { target: { value: 'Client confirmed no pay' } });
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
+    reviewed_changes: [{ change_index: -2, amount: '', decision: 'no_pay', reason: 'Client confirmed no pay' }],
+    rows: expect.arrayContaining([expect.objectContaining({ id: 2, disposition: 'excluded', disposition_reason: 'Client confirmed no pay' })]),
+  })));
+});

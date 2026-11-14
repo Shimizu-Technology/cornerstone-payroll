@@ -1162,6 +1162,97 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       end
     end
 
+    def linked_identical_preview(source)
+      pdf, workbook = source.submission_documents.order(:position).map do |link|
+        portal_upload(link.file_name_snapshot, objects.fetch(link.client_document.file_key), link.client_document.content_type)
+      end
+      post "#{url}/preview_import", params: { pdf_file: pdf, excel_file: workbook, use_submission_id: source.id }
+      response.parsed_body
+    end
+
+    %w[portal pay_run].each do |route|
+      %w[no_pay excluded fresh undecided restore missing_reason rollback].each do |outcome|
+        it "resolves skipped prior owner pay with #{outcome} through #{route} on identical files" do
+          source = standing_source
+          add_source(source, PayrollImport::MosaSupplementalTemplate.new(run).generate, "changes_workbook", "changes.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+          apply_standing(preview(source))
+          financial_fields = PayrollItem.columns.select { |column| column.type == :decimal }.map(&:name) + %w[wage_rate_hours employment_type import_source]
+          original = run.payroll_items.find_by!(employee: owner).attributes.slice(*financial_fields)
+          second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("skipped" => true) })
+          data = route == "portal" ? preview(second) : linked_identical_preview(second)
+          expect(response).to have_http_status(:ok), response.body
+          change = (data["client_change_prefill"] || data["pending_change_prefill"]).fetch("rows").find { |row| row["employee_id"] == owner.id }
+          expect(change).to include("requires_pay_decision" => true)
+          expect(change["saved_period_pay"]).to be_nil
+          params = { import_id: data["import_id"], confirm_client_changes: true,
+            portal_source_id: data.dig("portal_source", "selection_id"),
+            reviewed_changes: [ { change_index: change["change_index"], decision: "no_pay", reason: "Client confirmed no pay this period" } ] }
+          params[:use_submission_id] = second.id if route == "pay_run"
+          if outcome == "fresh"
+            params[:reviewed_changes] = [ { change_index: change["change_index"], amount: "3000" } ]
+          elsif outcome == "undecided"
+            params[:reviewed_changes] = []
+          elsif outcome == "missing_reason"
+            params[:reviewed_changes].first[:reason] = " "
+          elsif outcome == "excluded"
+            params[:reviewed_changes] = []
+            params[:rows] = data.dig("preview", "source_rows").map do |row|
+              { id: row["id"], disposition: row["employee_id"] == owner.id ? "excluded" : "included",
+                disposition_reason: row["employee_id"] == owner.id ? "Client confirmed no pay this period" : nil }
+            end
+          end
+          if outcome == "rollback"
+            allow_any_instance_of(PayrollItem).to receive(:calculate!).and_raise(StandardError, "Synthetic calculation failure")
+          end
+          post "#{url}/apply_import", params: params, as: :json
+          if outcome == "rollback"
+            expect(response).to have_http_status(:unprocessable_entity)
+            expect(run.payroll_items.find_by!(employee: owner).attributes.slice(*financial_fields)).to eq(original)
+            expect(run.pay_period_excluded_employees).to be_empty
+            expect(PayrollImportRecord.find(data["import_id"]).status).to eq("previewed")
+            expect(second.submission_imports.where.not(applied_at: nil)).to be_empty
+            next
+          end
+          if %w[undecided missing_reason].include?(outcome)
+            expect(response).to have_http_status(:unprocessable_entity)
+            expect(response.parsed_body["error"]).to include(outcome == "undecided" ? "in this review" : "reason")
+            expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4500.00"))
+            expect(run.pay_period_excluded_employees).to be_empty
+            next
+          end
+          expect(response).to have_http_status(:ok), response.body
+          record = PayrollImportRecord.find(data["import_id"])
+          decision = record.raw_data.fetch("client_change_decisions").find { |row| row["employee_id"] == owner.id }
+          if outcome == "fresh"
+            expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(3000)
+            expect(decision).to include("decision" => "apply", "applied_value" => "3000")
+          else
+            expect(run.payroll_items.find_by(employee: owner)).to be_nil
+            exclusion = run.pay_period_excluded_employees.find_by!(employee: owner)
+            expect(exclusion).to have_attributes(reason: "Client confirmed no pay this period", excluded_by: staff)
+            expect(decision).to include("decision" => "no_pay", "reason" => exclusion.reason, "exclusion_id" => exclusion.id)
+            event = PayrollSubmissions::Audit.feed(period).find_by!(action: "payroll_submission_periods#import")
+            expect(event.metadata.fetch("client_change_decisions")).to include(include("reason" => exclusion.reason))
+            expect(period.status_events.order(:id).last.note).to include("No pay this period", exclusion.reason)
+            expect(PayPeriodDefaultRoster.new(run).employee_ids).not_to include(owner.id)
+          end
+          next unless outcome == "restore"
+
+          third = identical_revision(source, rev: 3, changes: source.change_rows)
+          restored = route == "portal" ? preview(third) : linked_identical_preview(third)
+          expect(response).to have_http_status(:ok), response.body
+          restored_params = reviewed_standing_params(restored).merge(portal_source_id: restored.dig("portal_source", "selection_id"))
+          restored_params[:use_submission_id] = third.id if route == "pay_run"
+          post "#{url}/apply_import", params: restored_params, as: :json
+          expect(response).to have_http_status(:ok), response.body
+          expect(run.pay_period_excluded_employees.where(employee: owner)).to be_empty
+          expect(run.payroll_items.find_by!(employee: owner).attributes.slice(*original.keys)).to eq(original)
+          expect(run.payroll_items.find_by!(employee: manual_worker).hours_worked).to eq(68)
+        end
+      end
+    end
+
     it "accepts a worksheet edit as the new baseline for a corrected revision" do
       source = standing_source
       data = preview(source)

@@ -13,7 +13,7 @@ module PayrollSubmissions
     end
 
     def proposals(source_rows: [])
-      @submission.change_rows.each_with_index.filter_map do |row, index|
+      submitted = @submission.change_rows.each_with_index.filter_map do |row, index|
         next unless %w[owner_pay extra_hours].include?(row["kind"]) && !row["skipped"]
         next if legacy_manual_row?(row)
 
@@ -31,6 +31,7 @@ module PayrollSubmissions
           saved_overtime_hours: existing&.overtime_hours&.to_s("F"),
           **(row["kind"] == "owner_pay" ? pay.merge(pay_conflict: pay.values.compact.any? { |amount| amount.to_d != row["amount"].to_d }) : {}) }.compact
       end
+      submitted + missing_owner_pay(submitted)
     end
 
     def removals
@@ -43,10 +44,20 @@ module PayrollSubmissions
       end
     end
 
-    def apply_to(rows, reviewed:, confirmed:, source_employee_ids: rows.map { |row| row[:employee_id] })
+    def apply_to(rows, reviewed:, confirmed:, source_employee_ids: rows.map { |row| row[:employee_id] }, dispositions: [])
       changes = proposals(source_rows: rows)
       @review_decisions = []
       reviewed = Array(reviewed).map { |row| row.to_h.with_indifferent_access }
+      changes.select { |change| change[:requires_pay_decision] }.each do |change|
+        next if reviewed.any? { |input| input[:change_index].to_s == change[:change_index].to_s }
+
+        exclusions = dispositions.select { |decision| decision.row.employee_id == change[:employee_id] }
+        if exclusions.any? && exclusions.all? { |decision| decision.disposition == "excluded" }
+          reviewed << { change_index: change[:change_index], decision: "no_pay", reason: exclusions.map(&:reason).uniq.join("; ") }.with_indifferent_access
+        else
+          raise ArgumentError, "#{change[:employee_name]}: earlier client owner pay is no longer selected. Enter new pay in this review, or choose No pay this period / Exclude from payroll and record a reason."
+        end
+      end
       if changes.any? && !ActiveModel::Type::Boolean.new.cast(confirmed)
         raise ArgumentError, "Confirm the amounts and hours from the client's changes before applying."
       end
@@ -56,11 +67,15 @@ module PayrollSubmissions
       changes.each do |change|
         input = reviewed.find { |value| value[:change_index].to_s == change[:change_index].to_s }
         decision = input[:decision].presence || "apply"
-        raise ArgumentError, "Choose Apply or Don't apply for #{change[:employee_name]}." unless %w[apply decline].include?(decision)
+        allowed = change[:requires_pay_decision] ? %w[apply no_pay] : %w[apply decline]
+        raise ArgumentError, "Choose a valid pay decision for #{change[:employee_name]}." unless allowed.include?(decision)
         reason = input[:reason].to_s.strip
-        if decision == "decline"
-          raise ArgumentError, "Enter a reason (up to 1000 characters) for declining #{change[:employee_name]}." unless reason.present? && reason.length <= 1000
+        if %w[decline no_pay].include?(decision)
+          raise ArgumentError, "Enter a reason (up to 1000 characters) for #{decision == "no_pay" ? "no pay this period for" : "declining"} #{change[:employee_name]}." unless reason.present? && reason.length <= 1000
 
+          if decision == "no_pay"
+            rows.reject! { |row| row[:employee_id].to_s == change[:employee_id].to_s }
+          end
           @review_decisions << change.merge(decision: decision, reason: reason)
           next
         end
@@ -97,14 +112,34 @@ module PayrollSubmissions
       # These cleanup rows restore only client hours; workbook money is retained.
       prior_items.each do |item|
         next if rows.any? { |row| row[:employee_id].to_s == item.employee_id.to_s }
-        if item.custom_columns_data.to_h.dig("client_change_evidence", "kind") == "owner_pay"
-          raise ArgumentError, "#{item.employee.full_name}: earlier client owner pay is no longer selected. Enter current pay on the worksheet or explicitly resolve this employee before importing."
-        end
+        next if @review_decisions.any? { |decision| decision[:employee_id] == item.employee_id && decision[:decision] == "no_pay" }
         next unless item.custom_columns_data.to_h.dig("client_change_evidence", "kind") == "extra_hours"
 
         rows << { employee_id: item.employee_id, restore_client_hours_only: true }
       end
       rows
+    end
+
+    # Called only inside the successful import transaction. Match the worksheet's
+    # exclusion semantics: remove the paycheck item, keep a reasoned roster exclusion.
+    def apply_period_decisions!(actor:)
+      @review_decisions.each do |decision|
+        if decision[:decision] == "no_pay"
+          exclusion = @period.pay_period_excluded_employees.find_or_initialize_by(employee_id: decision[:employee_id])
+          exclusion.update!(reason: decision[:reason], excluded_by: actor)
+          @period.payroll_items.where(employee_id: decision[:employee_id]).find_each(&:destroy!)
+          decision[:exclusion_id] = exclusion.id
+          @period.invalidate_calculation!(reason: "Owner excluded after a reviewed no-pay decision.")
+        elsif decision[:decision] == "apply" && decision[:kind] == "owner_pay"
+          managed_owner_exclusion(decision[:employee_id])&.destroy!
+        end
+      end
+    end
+
+    def restorable_owner_ids
+      @submission.change_rows.filter_map do |row|
+        row["employee_id"].to_i if row["kind"] == "owner_pay" && !row["skipped"] && managed_owner_exclusion(row["employee_id"])
+      end
     end
 
     def manual_review_warnings
@@ -118,6 +153,34 @@ module PayrollSubmissions
     end
 
     private
+
+    def missing_owner_pay(submitted)
+      prior_items.filter_map do |item|
+        next unless item.custom_columns_data.to_h.dig("client_change_evidence", "kind") == "owner_pay"
+        # A deliberate worksheet/review save clears period-pay provenance and
+        # already supplies a fresh staff amount, even if the client tag remains.
+        next unless item.custom_columns_data.to_h.dig("period_pay_evidence", "source_type") == "client_submission"
+        next if submitted.any? { |change| change[:kind] == "owner_pay" && change[:employee_id].to_s == item.employee_id.to_s }
+
+        { change_index: -item.employee_id, kind: "owner_pay", employee_id: item.employee_id,
+          employee_name: item.employee.full_name, requires_pay_decision: true,
+          overwrite_required: item.import_source != "mosa_revel",
+          error: availability_error({ "kind" => "owner_pay" }, item.employee) }.compact
+      end
+    end
+
+    # An unrelated worksheet exclusion must never be undone by a client revision.
+    def managed_owner_exclusion(employee_id)
+      exclusion = @period.pay_period_excluded_employees.find_by(employee_id: employee_id)
+      return unless exclusion
+
+      managed = PayrollImportRecord.where(pay_period_id: @period.id, status: "applied").any? do |record|
+        record.raw_data.to_h.fetch("client_change_decisions", []).any? do |decision|
+          decision["decision"] == "no_pay" && decision["employee_id"].to_s == employee_id.to_s && decision["exclusion_id"] == exclusion.id && decision["reason"] == exclusion.reason
+        end
+      end
+      exclusion if managed
+    end
 
     # Hours on the worksheet apart from any earlier client contribution.
     def own_hours(employee_id)
@@ -188,7 +251,7 @@ module PayrollSubmissions
       unless Employee.where(id: employee.id).eligible_for_period(@period.start_date, @period.end_date).exists?
         return "#{employee.full_name} is not eligible for this pay period. Resolve this client change before applying."
       end
-      if @period.pay_period_excluded_employees.exists?(employee_id: employee.id)
+      if @period.pay_period_excluded_employees.exists?(employee_id: employee.id) && !(row["kind"] == "owner_pay" && managed_owner_exclusion(employee.id))
         return "#{employee.full_name} is excluded from this pay period. Resolve this client change before applying."
       end
       return "#{employee.full_name} no longer uses variable salary." if row["kind"] == "owner_pay" && !employee.variable_salary?
