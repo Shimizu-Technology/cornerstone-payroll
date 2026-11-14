@@ -277,3 +277,47 @@ Harness corrections: a baseline job fixture initially omitted its required label
 ### Cleanup and handback
 
 Lifecycle session `01a1db04-1d0c-7ad2-b266-b0ee7ca7ed91`. Owned preview tab closed; Rails, Vite/esbuild and proxy stopped by verified PID/ancestry. The helper treated exec-renamed Rails/npm records as cleaned before those processes exited; the independent listener check caught this, and exact owned processes were stopped. Ports 3662/5662/5664 have no listeners. Shared/baseline services were untouched; no runtime handoff. The two disposable test databases are dropped after verification. The held worktree and local evidence remain for the lead. CI and final-head CodeRabbit coverage remain separate from local acceptance; all pre-existing CodeRabbit threads were resolved at inspection.
+
+## Mac mini financial rehearsal, run 5 — November 15, 2026
+
+**Blocked at revision-2 Apply; leave PR #457 draft.** Agent-executed desktop bundled Chromium acceptance tested clean product head `51210e61` in the dedicated clone. The inherited product brief and runs 3–4 method apply. No product code changed. No merge, deployment, production write, external invitation delivery or provider call was performed. The staged throwaway database branch remains the lead's deletion responsibility.
+
+Containment: every database-client launch checked the password-free URL host against staged branch metadata, with `PGPASSFILE` and required TLS. Test/E2E mode, supplied encryption keys (read probe passed), random secret, disabled provider credentials, local private storage, inline jobs, Ruby outbound guard and browser external-request refusal contained the run. Shared preview open failed with connection refused; local Chromium performed the UI journeys. The missing installed lifecycle profile was replaced only for this task by a private protection profile and the synced helper.
+
+| Step | Observed result | Status |
+| --- | --- | --- |
+| 1 | Company-6 baseline: 9,548 records | passed |
+| Cable gate before 2 | Global ticket count 1 before and 1 after authenticated staff load; actual singular cable-ticket requests refused with 503 | passed |
+| 2 | UI-created practice copy verified ready with 220 historical paychecks across four periods; new regular October 19–November 1 period paid November 5 | passed |
+| 3 | UI saved two owner-pay defaults and one extra-hours default on the required saved $35 job | passed |
+| 4 | UI invited a practice-only client restricted to the copy; revision 1 saved three change rows, required values and two direct-deposit notes, attach choice, 2/2 matching source checksums | passed |
+| 5 | Staff verified both $8,421.13 prefills and 68 extra hours, confirmed figures and suggested matches, applied without typing payroll numbers; 52 rows saved; explicit Recalculate returned HTTP 200 | passed |
+| 6 | 52/52 counterparts, 36 financial fields, 51 exact, one expected +$0.01 exception; required loan $219.70 | passed |
+| 7a | Revision 2 saved the same files, three rows with two explicit skips, retained owner amount, attach choice and 2/2 matching source checksums | passed |
+| 7b review | Identical-file review opened, clearly named revision 1's 68-hour removal and required a fresh decision for the skipped owner's period pay | passed |
+| 7b apply | Staff chose Exclude from payroll with a reason to clear earlier client pay. Apply returned HTTP 422 despite the documented outcome | failed |
+| 7c | Corrected import/calculation did not occur. Baseline restoration, cleared owner pay, allocation consistency and unchanged-other-employee acceptance remain unverified | blocked / not_run |
+| 7d–7f | Stop-on-defect: revision 3, final reconciliation and applied-revision reopening refusal were not run | blocked / not_run |
+| 8 | Final company-6 fingerprint: 9,548 records, zero added, zero removed, zero changed | passed |
+
+Step 6's exception is the expected historical paycheck: gross, net, FIT taxable wages, Social Security taxable wages and Medicare taxable wages are each +$0.01. All compared tax amounts match. Hours, tips, loans, gross, employee/employer taxes, retirement, insurance, additions, deductions and net were compared. There are zero unexplained financial differences in revision 1. After the revision-2 refusal, an independent saved snapshot of all 52 paycheck results, including hours and allocations, was identical to revision 1. This proves refusal did not alter those results; it does not pass the corrected revision.
+
+### Blocking defect
+
+The skipped owner was explicitly resolved using **Exclude from payroll**, with reason **“Client marked not this period; clear earlier client pay.”** The UI enabled Apply and showed 51 ready employees. The actual apply request contained both the excluded disposition and that reason, but returned HTTP 422:
+
+> earlier client owner pay is no longer selected. Enter current pay on the worksheet or explicitly resolve this employee before importing.
+
+The UI's Action needs attention panel displayed this refusal. No payroll amount was typed, no alternative outcome or backend bypass was attempted, and the financial sequence stopped. Read-only inspection of `PayrollSubmissions::ImportChanges#apply_to` shows its final prior-item loop rejects a prior owner-pay item absent from the included rows, without accounting for the explicitly excluded source outcome. The identical-file identity fix reached review successfully; the fresh no-pay resolution remains blocked at apply. No product fix was made.
+
+### Execution limits and cleanup
+
+Browser harness corrections covered route prefixes, sidebar disclosure, change-row container selection and asynchronous readiness. A browser wait expired during the single practice-copy request; creation was not retried, and the eventual ready copy/history was independently verified. All staff financial applies were submitted once. The successful revision-1 Apply and explicit calculation completed before reconciliation; the revision-2 failure is a real HTTP 422, not a timeout. Private browser text, request logs, source originals, keys and financial snapshots were not committed.
+
+Final global cable-ticket count: **1**. Proxy refusal records: **823**. Rails cable-controller hits: **0**. The proxy refused paths beginning `/api/v1/cable_ticket` or `/cable`, and WebSocket upgrades. Fingerprints were captured before practice creation and after server/browser shutdown; no source-company restoration was performed.
+
+Lifecycle session `01a1db25-af58-7f92-be66-703d370f8a74` reports **no active owned resources**. Exact API/Vite/proxy processes and task Chromium trees were stopped; ports 3633/5658/5660 have no listeners and shared preview lists no task tab. OS-temp Playwright profiles observed during cleanup belonged to a separate project's active QA worker, verified by process ancestry, and were preserved. No runtime handoff. Shared/protected services remain untouched.
+
+Only desktop Chromium financial coverage ran. Mobile/Safari/native-device coverage, broad suites, external delivery and direct-deposit activation were not run. Tested-source backend/frontend/browser CI was successful at inspection, with GitHub review decision **changes requested**. These do not override the failed required rehearsal. `gh pr ready` was not run; no merge or deploy.
+
+Wipe proof: deleted the entire private rehearsal tree, task Rails test log and 23 newly created cache files. **`ls -A ~/private` returned no entries; entry count 0.** Exact-host `grep -r -l -F` over `~/work` and `~/private` returned **zero matching files, zero diagnostics, exit 1**. The OS `$TMPDIR` scan returned **zero matching files, 21 diagnostics, exit 2**; unreadable OS entries prevent a complete-temp absence claim. Task browser temporary data was confined to the deleted private tree; unrelated verified worker profiles were preserved. The dedicated clone is returned to clean `main` after this aggregate-only ledger commit and push. The lead still owns deleting the throwaway Neon branch.
