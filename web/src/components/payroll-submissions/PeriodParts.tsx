@@ -122,7 +122,7 @@ export function RevisionCard({ revision, api, companyId, audience }: { revision:
   );
   if (revision.current) {
     return <section aria-labelledby={`revision-${revision.id}`} className="space-y-3">
-      <div className="mb-2 flex flex-wrap items-center gap-2"><h3 id={`revision-${revision.id}`} className="font-semibold text-neutral-950">Revision {revision.revision}</h3><Badge variant="info">Current</Badge></div>
+      <div className="mb-2 flex flex-wrap items-center gap-2"><h3 id={`revision-${revision.id}`} className="scroll-mt-52 font-semibold text-neutral-950">Revision {revision.revision}</h3><Badge variant="info">Current</Badge></div>
       {body}
     </section>;
   }

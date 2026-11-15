@@ -2,7 +2,11 @@ import type { ReactNode } from 'react';
 import type { ClientDocument } from '@/services/api';
 import { Button } from '@/components/ui/button';
 
-export function SubmissionDocumentGroups({ documents, onPreview, onDownload, allowArchived = false, extraActions }: {
+// Pass openGroups/onToggleGroup when the page reloads its list after an action,
+// so a group the user expanded stays open across the reload.
+export function SubmissionDocumentGroups({ documents, onPreview, onDownload, allowArchived = false, extraActions, openGroups, onToggleGroup }: {
+  openGroups?: ReadonlySet<number>;
+  onToggleGroup?: (id: number, open: boolean) => void;
   allowArchived?: boolean;
   documents: ClientDocument[];
   onPreview: (document: ClientDocument) => Promise<void>;
@@ -16,7 +20,7 @@ export function SubmissionDocumentGroups({ documents, onPreview, onDownload, all
       groups.get(group.id)!.files.push(document);
     }
   }
-  return <div className="space-y-3">{[...groups].map(([id, group]) => <details key={id} className="rounded-lg border border-neutral-200 p-3">
+  return <div className="space-y-3">{[...groups].map(([id, group]) => <details key={id} open={openGroups?.has(id)} onToggle={event => onToggleGroup?.(id, event.currentTarget.open)} className="rounded-lg border border-neutral-200 p-3">
     <summary className="min-h-11 cursor-pointer break-words font-semibold">{group.label}
       <span className="ml-2 text-sm font-normal text-neutral-600">{group.files.length} {group.files.length === 1 ? 'file' : 'files'} · sent {new Date(group.files[0].created_at).toLocaleDateString()}</span>
     </summary>

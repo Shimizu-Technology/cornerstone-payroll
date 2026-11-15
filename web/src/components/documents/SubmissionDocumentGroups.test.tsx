@@ -27,3 +27,12 @@ it('shows archived files and the staff actions passed in', () => {
   expect(screen.getByRole('button', { name: 'Unarchive hours.pdf' })).toBeTruthy();
   expect((screen.getByRole('button', { name: 'Download hours.pdf' }) as HTMLButtonElement).disabled).toBe(false);
 });
+
+it('keeps a group the page has marked open expanded when it remounts after a reload', () => {
+  const onToggleGroup = vi.fn();
+  const view = () => <SubmissionDocumentGroups openGroups={new Set([ group.id ])} onToggleGroup={onToggleGroup} documents={[ file(1, 'hours.pdf') ]} onPreview={vi.fn()} onDownload={vi.fn()} />;
+  const first = render(view());
+  first.unmount();
+  const { container } = render(view());
+  expect(container.querySelector('details')?.open).toBe(true);
+});
