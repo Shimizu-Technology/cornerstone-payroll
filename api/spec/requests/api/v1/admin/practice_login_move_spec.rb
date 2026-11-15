@@ -164,6 +164,49 @@ RSpec.describe "Moving a practice-only login between practice copies", type: :re
     expect(login.reload.practice_company_id).to eq(old_copy.id)
   end
 
+  it "denies a copy of a different real client, since each copy holds that client's payroll data" do
+    archive_old_copy!
+    other_source = create(:company, organization: organization, name: "Synthetic Garage")
+    other_copy = practice_copy("Synthetic Garage practice", migration_source_company: other_source)
+
+    expect { move!(company_id: other_copy.id) }.not_to change(AuditLog, :count)
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["code"]).to eq("target_other_client")
+    expect(response.parsed_body["error"]).to include("another copy of Synthetic Bakery")
+    expect(login.reload).to have_attributes(practice_company_id: old_copy.id, company_id: old_copy.id, active: false)
+    expect(login.company_assignments.pluck(:company_id)).to eq([ old_copy.id ])
+  end
+
+  it "revokes a pending invitation when the login is moved without activating" do
+    archive_old_copy!
+    login.update_columns(invitation_status: "pending", clerk_invitation_id: "inv_old")
+    clerk = instance_double(ClerkInvitationService, configured?: true)
+    allow(ClerkInvitationService).to receive(:new).and_return(clerk)
+    expect(clerk).to receive(:revoke_invitation).with("inv_old").and_return(success: true)
+
+    move!(activate: false)
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body).not_to have_key("invitation_delivery_status")
+    expect(login.reload).to have_attributes(practice_company_id: new_copy.id, active: false, clerk_invitation_id: nil)
+  end
+
+  it "rolls the whole move back when a step fails, and leaves ordinary updates blocked" do
+    archive_old_copy!
+    allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::StatementInvalid, "synthetic failure")
+    service = TestWorkspace::MovePracticeLogin.new(user: login, target_company: new_copy, actor: admin, activate: true)
+
+    expect { service.call }.to raise_error(ActiveRecord::StatementInvalid)
+
+    expect(login.reload).to have_attributes(practice_company_id: old_copy.id, company_id: old_copy.id, active: false)
+    expect(login.company_assignments.pluck(:company_id)).to eq([ old_copy.id ])
+    login.practice_company = new_copy
+    login.company = new_copy
+    expect(login).not_to be_valid
+    expect(login.errors[:practice_company]).to include("cannot be changed for a practice-only login")
+  end
+
   it "denies the move while the login's current copy is still open" do
     login
 
@@ -227,7 +270,7 @@ RSpec.describe "Moving a practice-only login between practice copies", type: :re
 
       row = response.parsed_body.fetch("data").find { |user| user["id"] == login.id }
       expect(row).to include("practice_company_id" => old_copy.id, "practice_company_name" => old_copy.name,
-        "practice_copy_closed_reason" => "archived")
+        "practice_copy_closed_reason" => "archived", "practice_company_source_id" => source.id)
     end
   end
 end

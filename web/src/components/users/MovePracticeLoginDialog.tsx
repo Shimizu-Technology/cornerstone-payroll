@@ -19,7 +19,7 @@ interface MovePracticeLoginDialogProps {
 // Moves a practice-only login whose copy has closed to a ready practice copy.
 // The server re-checks every rule; this dialog only offers eligible copies.
 export function MovePracticeLoginDialog({ user, companies, loadingCompanies, onRefreshCompanies, onClose, onMoved }: MovePracticeLoginDialogProps) {
-  const targets = practiceMoveTargets(companies, user.organization_id, user.practice_company_id);
+  const targets = practiceMoveTargets(companies, user.organization_id, user.practice_company_id, user.practice_company_source_id);
   const [chosenId, setTargetId] = useState<number | null>(null);
   // One eligible copy is chosen for the admin, including after a refresh.
   const targetId = chosenId ?? (targets.length === 1 ? targets[0].id : null);
@@ -61,10 +61,10 @@ export function MovePracticeLoginDialog({ user, companies, loadingCompanies, onR
         <div className="space-y-4 py-4">
           {error && <ActionFeedback tone="error" message={error} />}
           <fieldset>
-            <legend className="text-sm font-medium text-neutral-700">Ready practice copies</legend>
+            <legend className="text-sm font-medium text-neutral-700">Ready copies of the same client</legend>
             {targets.length === 0 ? (
               <div className="mt-2 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
-                <p>No ready practice copy is available. Make one from Client Management, then refresh.</p>
+                <p>No ready practice copy of the same client is available. Make one from Client Management, then refresh.</p>
                 <Button className="mt-3" size="sm" variant="outline" onClick={onRefreshCompanies} disabled={loadingCompanies}>
                   <RefreshCw className={`mr-1 h-4 w-4 ${loadingCompanies ? 'animate-spin' : ''}`} aria-hidden="true" />
                   {loadingCompanies ? 'Refreshing…' : 'Refresh'}

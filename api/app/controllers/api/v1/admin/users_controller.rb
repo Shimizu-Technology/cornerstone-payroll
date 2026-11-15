@@ -13,7 +13,7 @@ module Api
         # GET /api/v1/admin/users
         # Organization admins see users in their firm; super admins can see all firms.
         def index
-          users = manageable_users.includes(:organization, :invited_by, :practice_company, company_assignments: :company, company: :organization).order(:name)
+          users = manageable_users.includes(:organization, :invited_by, practice_company: :organization, company_assignments: :company, company: :organization).order(:name)
           if params[:search].present?
             query = "%#{params[:search]}%"
             users = users.where("name ILIKE ? OR email ILIKE ?", query, query)
@@ -246,7 +246,7 @@ module Api
             invitation_delivery = refresh_practice_invitation!(@user, activate: activate)
           end
 
-          @user = User.includes(:organization, :invited_by, :practice_company, company_assignments: :company).find(@user.id)
+          @user = User.includes(:organization, :invited_by, practice_company: :organization, company_assignments: :company).find(@user.id)
           render json: {
             data: user_json(@user),
             moved_from: { id: service.source_company.id, name: service.source_company.name },
@@ -321,7 +321,7 @@ module Api
         end
 
         def set_user
-          @user = manageable_users.includes(:organization, :invited_by, :practice_company, company_assignments: :company).find_by(id: params[:id])
+          @user = manageable_users.includes(:organization, :invited_by, practice_company: :organization, company_assignments: :company).find_by(id: params[:id])
           return if @user
 
           render json: { error: "User not found" }, status: :not_found
@@ -497,6 +497,7 @@ module Api
             copy = user.practice_company
             data[:practice_company_id] = user.practice_company_id
             data[:practice_company_name] = copy&.name
+            data[:practice_company_source_id] = copy&.migration_source_company_id
             data[:practice_copy_closed_reason] = TestWorkspace::MovePracticeLogin.closed_reason(copy)
           end
 

@@ -101,6 +101,7 @@ export function Users() {
   const [availableCompanies, setAvailableCompanies] = useState<CompanyListItem[]>([]);
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
   const [companiesLoadError, setCompaniesLoadError] = useState<string | null>(null);
+  const [companiesLoadCount, setCompaniesLoadCount] = useState(0);
   const companiesRequestIdRef = useRef(0);
 
   // Edit user
@@ -158,6 +159,7 @@ export function Users() {
     } finally {
       if (shouldUpdate && requestId === companiesRequestIdRef.current) {
       setIsLoadingCompanies(false);
+      setCompaniesLoadCount(count => count + 1);
       }
     }
   }, []);
@@ -367,14 +369,22 @@ export function Users() {
     });
   }, [availableCompanies, newRole]);
 
-  // While the picker shows a copy that is still being prepared, check again shortly.
+  // While the picker shows a copy that is still being prepared, check again
+  // after each load (failed ones included), for up to about three minutes.
   const pickerOpen = isAddingNew || editingId !== null;
   const hasPreparingCopy = availableCompanies.some(isPreparingPracticeCopy);
+  const preparingPollsRef = useRef(0);
   useEffect(() => {
-    if (!pickerOpen || !hasPreparingCopy) return;
-    const timer = window.setTimeout(() => void loadCompanies(), 5000);
+    if (!pickerOpen) preparingPollsRef.current = 0;
+  }, [pickerOpen]);
+  useEffect(() => {
+    if (!pickerOpen || !hasPreparingCopy || preparingPollsRef.current >= 36) return;
+    const timer = window.setTimeout(() => {
+      preparingPollsRef.current += 1;
+      void loadCompanies();
+    }, 5000);
     return () => window.clearTimeout(timer);
-  }, [pickerOpen, hasPreparingCopy, availableCompanies, loadCompanies]);
+  }, [pickerOpen, hasPreparingCopy, companiesLoadCount, loadCompanies]);
 
   const assignedCompaniesForUser = (user: User) =>
     needsClientAssignment(user.role) ? (user.assigned_companies || []) : [];

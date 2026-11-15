@@ -42,7 +42,7 @@ const realClient = { id: 1, organization_id: 7, name: 'Synthetic Bakery', active
 const copyB = {
   id: 3, organization_id: 7, name: 'Synthetic Bakery practice B', active: true, active_employees: 4,
   payroll_environment: 'migration_rehearsal', test_workspace: true, test_workspace_purpose: 'sandbox',
-  migration_rehearsal_status: 'pending', test_workspace_expires_at: '2027-02-12T00:00:00Z',
+  migration_rehearsal_status: 'pending', test_workspace_expires_at: '2027-02-12T00:00:00Z', migration_source_company_id: 1,
 } as CompanyListItem;
 const archivedCopyA = {
   ...copyB, id: 2, name: 'Synthetic Bakery practice A', active: false, migration_rehearsal_status: 'ready',
@@ -54,7 +54,7 @@ const practiceLogin: User = {
   id: 5, name: 'Practice Login', email: 'practice-login@example.invalid', role: 'client', organization_id: 7,
   active: false, assigned_company_ids: [2], assigned_companies: [{ id: 2, name: archivedCopyA.name, test_workspace: true }],
   practice_company_id: 2, practice_company_name: archivedCopyA.name, practice_copy_closed_reason: 'archived',
-  invitation_status: 'accepted', invitation_pending: false,
+  practice_company_source_id: 1, invitation_status: 'accepted', invitation_pending: false,
   created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-14T00:00:00Z',
 };
 
@@ -95,6 +95,31 @@ describe('Invite User with a practice copy', () => {
     await waitFor(() => expect(apiMocks.users.create).toHaveBeenCalledExactlyOnceWith({
       email: 'practice-b@example.invalid', name: 'practice-b', role: 'client', company_ids: [3],
     }));
+  });
+
+  it('keeps checking a preparing copy after a failed reload until it is ready', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      apiMocks.companies.list.mockResolvedValueOnce({ companies: [realClient, copyB] })
+        .mockResolvedValueOnce({ companies: [realClient, copyB] })
+        .mockResolvedValueOnce({ companies: [realClient, copyB] })
+        .mockRejectedValueOnce(new Error('Network down'))
+        .mockResolvedValue({ companies: [realClient, readyB] });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<Users />);
+
+      await user.click(await screen.findByRole('button', { name: 'Invite User' }));
+      await user.selectOptions(screen.getByRole('combobox', { name: 'Role' }), 'client');
+      await waitFor(() => expect((screen.getByRole('checkbox', { name: /practice B/ }) as HTMLInputElement).disabled).toBe(true));
+      // Mount, Invite and the role change each loaded the list; the next load is the poll's, and it fails.
+      await waitFor(() => expect(apiMocks.companies.list).toHaveBeenCalledTimes(3));
+
+      for (let attempt = 0; attempt < 3; attempt += 1) await vi.advanceTimersByTimeAsync(5000);
+
+      await waitFor(() => expect((screen.getByRole('checkbox', { name: /practice B/ }) as HTMLInputElement).disabled).toBe(false));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('lists a copy that is still being prepared as disabled, groups the picker and hides archived copies', async () => {

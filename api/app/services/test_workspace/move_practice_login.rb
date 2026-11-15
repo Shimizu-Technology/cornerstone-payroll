@@ -47,6 +47,8 @@ module TestWorkspace
 
       User.transaction do
         user.lock!
+        # Holds off an archive of the target until the move commits.
+        target_company&.lock!
         @source_company = user.practice_company
         validate_source!
         validate_target!
@@ -102,6 +104,13 @@ module TestWorkspace
         refuse!(
           "#{target_company.name} is a #{target_company.test_workspace_purpose_label.to_s.downcase}, not a practice copy. Choose a general test workspace.",
           :target_not_practice_copy
+        )
+      end
+      unless target_company.migration_source_company_id == source_company.migration_source_company_id
+        refuse!(
+          "#{target_company.name} is a copy of a different client. A practice login can move only to another copy of " \
+          "#{source_company.migration_source_company&.name || 'the same client'}, because each copy holds that client's payroll data.",
+          :target_other_client
         )
       end
       reason = self.class.closed_reason(target_company)

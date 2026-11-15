@@ -113,7 +113,14 @@ export function toggleAssignment(
   return selected ? realIds.filter(id => id !== company.id) : [...realIds, company.id];
 }
 
-// Ready practice copies a closed practice login can move to.
-export const practiceMoveTargets = (companies: CompanyListItem[], organizationId: number | undefined, currentCopyId?: number | null): CompanyListItem[] =>
-  companies.filter(company => isOpenPracticeCopy(company) && company.id !== currentCopyId &&
+// Ready practice copies a closed practice login can move to: other copies of
+// the same real client, since each copy holds that client's payroll data.
+export const practiceMoveTargets = (
+  companies: CompanyListItem[],
+  organizationId: number | undefined,
+  currentCopyId: number | null | undefined,
+  sourceCompanyId: number | null | undefined
+): CompanyListItem[] =>
+  sourceCompanyId == null ? [] : companies.filter(company => isOpenPracticeCopy(company) && company.id !== currentCopyId &&
+    company.migration_source_company_id === sourceCompanyId &&
     (organizationId === undefined || company.organization_id === organizationId));

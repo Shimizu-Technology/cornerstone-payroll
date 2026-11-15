@@ -47,7 +47,7 @@ describe('user company access', () => {
 
 const sandbox = (id: number, extra: Partial<CompanyListItem> = {}) => ({
   id, name: `Copy ${id}`, organization_id: 7, active: true, payroll_environment: 'migration_rehearsal', test_workspace: true,
-  test_workspace_purpose: 'sandbox', migration_rehearsal_status: 'ready', ...extra,
+  test_workspace_purpose: 'sandbox', migration_rehearsal_status: 'ready', migration_source_company_id: 1, ...extra,
 }) as CompanyListItem;
 const live = { ...production, organization_id: 7, active_employees: 3 } as CompanyListItem;
 const ready = sandbox(10);
@@ -88,9 +88,13 @@ describe('assignment picker grouping', () => {
     expect(toggleAssignment('accountant', [1, 10], ready, all)).toEqual([1]);
   });
 
-  it('offers only ready practice copies in the login organization as move targets', () => {
+  it('offers only ready copies of the same client in the login organization as move targets', () => {
     const otherFirm = sandbox(20, { organization_id: 8 });
-    expect(practiceMoveTargets([...all, otherFirm], 7, 13).map(company => company.id)).toEqual([10]);
-    expect(practiceMoveTargets([...all, otherFirm], 7, 10)).toEqual([]);
+    const otherClient = sandbox(21, { migration_source_company_id: 2 });
+    const candidates = [...all, otherFirm, otherClient];
+    expect(practiceMoveTargets(candidates, 7, 13, 1).map(company => company.id)).toEqual([10]);
+    expect(practiceMoveTargets(candidates, 7, 13, 2).map(company => company.id)).toEqual([21]);
+    expect(practiceMoveTargets(candidates, 7, 10, 1)).toEqual([]);
+    expect(practiceMoveTargets(candidates, 7, 13, null)).toEqual([]);
   });
 });
