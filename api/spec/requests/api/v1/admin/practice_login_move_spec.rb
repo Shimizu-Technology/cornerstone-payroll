@@ -251,6 +251,19 @@ RSpec.describe "Moving a practice-only login between practice copies", type: :re
       expect(login.reload).not_to be_active
     end
 
+    it "renews a lapsed grant when Activate is used on a login whose copy is still open" do
+      login.update_columns(active: false)
+      login.company_assignments.update_all(expires_at: 1.day.ago)
+
+      expect { post "/api/v1/admin/users/#{login.id}/activate" }
+        .to change { AuditLog.where(action: "test_workspace#portal_access_granted").count }.by(1)
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(login.reload).to be_active
+      expect(login.company_assignments.active_access.pluck(:company_id)).to eq([ old_copy.id ])
+      expect(login.company_assignments.sole.expires_at).to be_within(1.second).of(old_copy.test_workspace_expires_at)
+    end
+
     it "explains a refused Delete of a practice login with retained history" do
       archive_old_copy!
       create(:client_document, company: old_copy, uploaded_by: admin, reviewed_by: login, reviewed_at: Time.current)

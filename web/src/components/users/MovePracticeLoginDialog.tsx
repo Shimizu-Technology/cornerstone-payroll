@@ -11,6 +11,7 @@ interface MovePracticeLoginDialogProps {
   user: User;
   companies: CompanyListItem[];
   loadingCompanies: boolean;
+  loadError?: string | null;
   onRefreshCompanies: () => void;
   onClose: () => void;
   onMoved: (result: { user: User; fromName: string; toName: string; invitation?: InvitationDeliveryResponse }) => void;
@@ -18,7 +19,7 @@ interface MovePracticeLoginDialogProps {
 
 // Moves a practice-only login whose copy has closed to a ready practice copy.
 // The server re-checks every rule; this dialog only offers eligible copies.
-export function MovePracticeLoginDialog({ user, companies, loadingCompanies, onRefreshCompanies, onClose, onMoved }: MovePracticeLoginDialogProps) {
+export function MovePracticeLoginDialog({ user, companies, loadingCompanies, loadError, onRefreshCompanies, onClose, onMoved }: MovePracticeLoginDialogProps) {
   const targets = practiceMoveTargets(companies, user.organization_id, user.practice_company_id, user.practice_company_source_id);
   const [chosenId, setTargetId] = useState<number | null>(null);
   // One eligible copy is chosen for the admin, including after a refresh.
@@ -64,10 +65,12 @@ export function MovePracticeLoginDialog({ user, companies, loadingCompanies, onR
             <legend className="text-sm font-medium text-neutral-700">Ready copies of the same client</legend>
             {targets.length === 0 ? (
               <div className="mt-2 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
-                <p>No ready practice copy of the same client is available. Make one from Client Management, then refresh.</p>
+                {loadError
+                  ? <p className="text-danger-700">The practice copies could not be loaded: {loadError}</p>
+                  : <p>No ready practice copy of the same client is available. Make one from Client Management, then refresh.</p>}
                 <Button className="mt-3" size="sm" variant="outline" onClick={onRefreshCompanies} disabled={loadingCompanies}>
                   <RefreshCw className={`mr-1 h-4 w-4 ${loadingCompanies ? 'animate-spin' : ''}`} aria-hidden="true" />
-                  {loadingCompanies ? 'Refreshing…' : 'Refresh'}
+                  {loadingCompanies ? 'Refreshing…' : loadError ? 'Try again' : 'Refresh'}
                 </Button>
               </div>
             ) : (

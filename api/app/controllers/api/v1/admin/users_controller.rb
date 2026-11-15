@@ -124,6 +124,7 @@ module Api
 
           before_values = user_audit_snapshot(@user)
           ActiveRecord::Base.transaction do
+            restore_practice_grant!(@user)
             @user.update!(active: true)
             record_user_audit!("activated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
@@ -197,6 +198,8 @@ module Api
         def resend_invitation
           return if reject_closed_practice_copy!
 
+          restore_practice_grant!(@user)
+
           unless @user.invitation_pending?
             return render json: { error: "User has already accepted their invitation" }, status: :unprocessable_entity
           end
@@ -263,27 +266,34 @@ module Api
 
         # A practice login's copy closed (archived, expired, sealed). Activation
         # and invitations would fail model validation with an opaque message, so
-        # say what happened and offer the move instead.
+        # say what happened and offer the move instead. An open copy whose grant
+        # lapsed is not refused; restore_practice_grant! renews it.
         def reject_closed_practice_copy!
           return false unless @user.practice_company_id? && !@user.practice_portal_open?
 
           copy = @user.practice_company
           reason = TestWorkspace::MovePracticeLogin.closed_reason(copy)
-          if reason
-            render json: {
-              error: "#{user_display_name(@user)} belongs to practice copy #{copy&.name || 'that was removed'}, which is #{reason}. " \
-                     "To use this login again, choose Move and pick a current practice copy.",
-              code: "practice_copy_closed",
-              practice_company_id: @user.practice_company_id
-            }, status: :unprocessable_entity
-          else
-            render json: {
-              error: "#{user_display_name(@user)} no longer has access to practice copy #{copy.name}. " \
-                     "Choose Edit and save to restore that copy, then activate the login.",
-              code: "practice_copy_unassigned"
-            }, status: :unprocessable_entity
-          end
+          return false unless reason
+
+          render json: {
+            error: "#{user_display_name(@user)} belongs to practice copy #{copy&.name || 'that was removed'}, which is #{reason}. " \
+                   "To use this login again, choose Move and pick a current practice copy.",
+            code: "practice_copy_closed",
+            practice_company_id: @user.practice_company_id
+          }, status: :unprocessable_entity
           true
+        end
+
+        # A practice login may only ever hold a grant to its own copy. When that
+        # copy is open but the grant lapsed or was removed, an administrator's
+        # Activate or Resend renews it (expiring with the copy) instead of failing.
+        def restore_practice_grant!(user)
+          return unless user.practice_company_id? && TestWorkspace::MovePracticeLogin.open_copy?(user.practice_company)
+          return if user.company_assignments.active_access.exists?(company_id: user.practice_company_id)
+
+          user.company_assignments.where(company_id: user.practice_company_id).destroy_all
+          user.company_assignments.create!(company: user.practice_company, granted_by: current_user)
+          user.association(:company_assignments).reset
         end
 
         # Mirrors resend_invitation: a pending invitation is revoked and, when

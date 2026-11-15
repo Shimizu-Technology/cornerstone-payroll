@@ -189,6 +189,56 @@ describe('Practice login whose copy was archived', () => {
     expect(within(alert).getByRole('button', { name: 'Move Practice Login to another practice copy' })).toBeTruthy();
   });
 
+  it('offers Move from a refused Activate even when the loaded row predates the copy closing', async () => {
+    const { ApiError } = await import('@/services/api');
+    const message = 'Practice Login belongs to practice copy Synthetic Bakery practice A, which is expired. To use this login again, choose Move and pick a current practice copy.';
+    apiMocks.users.list.mockResolvedValue({ data: [{ ...practiceLogin, practice_copy_closed_reason: null }] });
+    apiMocks.users.activate.mockRejectedValue(new ApiError(message, 422, undefined, { error: message, code: 'practice_copy_closed' }));
+    const user = userEvent.setup();
+    render(<Users />);
+
+    const table = await screen.findByRole('table');
+    expect(within(table).queryByRole('button', { name: 'Move Practice Login to another practice copy' })).toBeNull();
+    await user.click(within(table).getByRole('button', { name: /Activate/ }));
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByRole('button', { name: 'Move Practice Login to another practice copy' })).toBeTruthy();
+  });
+
+  it('keeps an invitation failure visible after the move refreshes the list', async () => {
+    apiMocks.users.movePracticeCopy.mockResolvedValue({
+      data: { ...practiceLogin, active: true, practice_company_id: 3, practice_company_name: readyB.name, practice_copy_closed_reason: null },
+      moved_from: { id: 2, name: archivedCopyA.name },
+      invitation_delivery_status: 'failed', invitation_sent: false, invitation_error: 'Clerk is unavailable',
+    });
+    const user = userEvent.setup();
+    render(<Users />);
+
+    const [moveButton] = await screen.findAllByRole('button', { name: 'Move Practice Login to another practice copy' });
+    await user.click(moveButton);
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Move and activate' }));
+
+    await waitFor(() => expect(apiMocks.users.list).toHaveBeenCalledTimes(2));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('now uses Synthetic Bakery practice B');
+    expect(alert.textContent).toContain('Use Resend');
+  });
+
+  it('says the copies could not be loaded instead of claiming none exist', async () => {
+    apiMocks.companies.list.mockResolvedValueOnce({ companies: [realClient, archivedCopyA] })
+      .mockRejectedValue(new Error('Network down'));
+    const user = userEvent.setup();
+    render(<Users />);
+
+    const [moveButton] = await screen.findAllByRole('button', { name: 'Move Practice Login to another practice copy' });
+    await user.click(moveButton);
+    const dialog = await screen.findByRole('dialog');
+
+    expect(await within(dialog).findByText(/could not be loaded: Network down/)).toBeTruthy();
+    expect(within(dialog).queryByText(/No ready practice copy/)).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
   it('offers Deactivate and Move when Delete is refused for retained history', async () => {
     const { ApiError } = await import('@/services/api');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
