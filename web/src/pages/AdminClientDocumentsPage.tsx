@@ -276,6 +276,13 @@ export function AdminClientDocumentsPage() {
     }
   };
 
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<number>>(() => new Set());
+  const toggleGroup = useCallback((id: number, open: boolean) => setOpenGroups(current => {
+    if (current.has(id) === open) return current;
+    const next = new Set(current);
+    if (open) next.add(id); else next.delete(id);
+    return next;
+  }), []);
   const unarchiveDocument = async (document: ClientDocument): Promise<void> => {
     setError(null);
     try {
@@ -456,7 +463,7 @@ export function AdminClientDocumentsPage() {
               </div>
             ) : (
               <>
-                <SubmissionDocumentGroups allowArchived documents={documents} onPreview={previewDocumentFile} onDownload={downloadDocument} extraActions={document => <>
+                <SubmissionDocumentGroups allowArchived openGroups={openGroups} onToggleGroup={toggleGroup} documents={documents} onPreview={previewDocumentFile} onDownload={downloadDocument} extraActions={document => <>
                   {document.archived_at && <Button variant="outline" size="sm" onClick={() => void unarchiveDocument(document)}>Unarchive</Button>}
                   <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void deleteDocument(document)} aria-label={`Delete ${document.file_name}`}>Delete</Button>
                 </>} />
