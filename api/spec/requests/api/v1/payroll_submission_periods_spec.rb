@@ -32,8 +32,8 @@ RSpec.describe "Pay-period submissions", type: :request do
       stub_portal_user(controller, actor, company)
       get path
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.fetch("data").flat_map { |row| row.fetch("submission_groups") }).to include(
-        "id" => submission.id, "label" => "Pay period files · #{submission.period.label} · revision 1")
+      expect(response.parsed_body.fetch("data").flat_map { |row| row.fetch("submission_groups") }).to include(a_hash_including(
+        "id" => submission.id, "label" => "Pay period files · #{submission.period.label} · revision 1", "submitted_at" => submission.submitted_at.as_json))
       stub_portal_user(controller, actor, other_company)
       get path
       expect(response).to have_http_status(:forbidden)
