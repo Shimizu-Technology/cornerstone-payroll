@@ -118,3 +118,18 @@ describe('RecordActivityTimeline', () => {
     expect(await screen.findByText('Morgan Manager updated Ada Payroll')).toBeTruthy();
   });
 });
+
+it('shows an explicit empty history and unknown creator', async () => {
+  apiMocks.list.mockResolvedValue({ data: [], creator: null, meta: { current_page: 1, total_pages: 0 } });
+  render(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
+  expect(await screen.findByText('No recorded activity yet')).toBeTruthy();
+  expect(screen.getByText('Unknown (before tracking)')).toBeTruthy();
+  cleanup();
+});
+
+it('exposes an accessible loading state while history is pending', () => {
+  apiMocks.list.mockReturnValue(new Promise(() => {}));
+  render(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
+  expect(screen.getByRole('status', { name: 'Loading activity history' })).toBeTruthy();
+  cleanup();
+});

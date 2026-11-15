@@ -17,6 +17,8 @@ import { HelpTip } from '@/components/ui/help-tip';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { TestWorkspaceGuide, WorkspaceRoleGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { companiesApi, ApiError } from '@/services/api';
+import { RecordCreatorLine } from '@/components/records/RecordCreatorLine';
+import { RecordHistoryPanel } from '@/components/records/RecordHistoryPanel';
 import type { CompanyListItem, CompanyFormData, MigrationPromotionPreview, MigrationRehearsalPreview, PromotionPaymentDisposition, TestWorkspaceCopyMode, TestWorkspacePreview } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -1367,6 +1369,8 @@ export function Clients() {
                 </>
               )}
 
+              {editingId && <RecordHistoryPanel companyId={editingId} recordId={editingId} recordType="companies" />}
+
               {/* Active toggle (edit only) */}
               {editingId && canEditField('active') && (
                 <SettingToggle
@@ -1427,6 +1431,8 @@ export function Clients() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="break-words font-semibold text-neutral-950">{c.name}</p>
+                          <RecordCreatorLine creator={c.creator} />
+                          <RecordHistoryPanel companyId={c.id} recordId={c.id} recordType="companies" />
                           {isTestWorkspace(c) && (
                             <p className="mt-0.5 text-xs font-semibold text-amber-700">{testWorkspaceLabel(c)} · {c.migration_rehearsal_status}</p>
                           )}
@@ -1545,6 +1551,8 @@ export function Clients() {
                           {isTestWorkspace(c) ? <FlaskConical className="h-4 w-4 text-amber-700" /> : <Building2 className="w-4 h-4 text-neutral-400" />}
                           <div>
                             <span className="font-medium text-neutral-900">{c.name}</span>
+                            <RecordCreatorLine creator={c.creator} />
+                            <RecordHistoryPanel companyId={c.id} recordId={c.id} recordType="companies" />
                             {isTestWorkspace(c) && (
                               <p className="text-xs font-medium text-amber-700">{testWorkspaceLabel(c)} · source: {c.migration_source_company_name || 'linked client'}</p>
                             )}
