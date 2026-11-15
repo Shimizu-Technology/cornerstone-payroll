@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FicaHistoryReviewNotice, PayRunBlockers } from './PayRunBlockers';
+import { FicaHistoryReviewNotice, PayRunBlockers, PayRunClientFiles } from './PayRunBlockers';
 import { PayRunSteps } from './PayRunWorkflowSteps';
 
 vi.mock('./PayRunProcessingActions', () => ({ PayRunStepAction: () => null }));
@@ -51,4 +51,13 @@ describe('FICA history disclosure', () => {
     expect(screen.getAllByText(note)).toHaveLength(1);
     expect(screen.queryByText('Review settings')).toBeNull();
   });
+});
+
+it('links a waiting client revision directly and hides the panel without a submission', () => {
+  const files = { period_id: 9, revision: 2, submission_id: 22, submitted_at: '2026-11-01T00:00:00Z', status: 'waiting', blocks_calculation: true };
+  const view = render(<MemoryRouter><PayRunClientFiles payPeriod={{ ...props.payPeriod, company_id: 2, client_files: files }} /><PayRunBlockers {...props} payPeriod={{ ...props.payPeriod, company_id: 2, client_files: files }} /></MemoryRouter>);
+  expect(screen.getByRole('region', { name: 'Files from the client' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'review this revision' }).getAttribute('href')).toBe('/companies/2/payroll-submissions/9#revision-22');
+  view.rerender(<MemoryRouter><PayRunClientFiles payPeriod={props.payPeriod} /><PayRunBlockers {...props} /></MemoryRouter>);
+  expect(screen.queryByRole('region', { name: 'Files from the client' })).toBeNull();
 });

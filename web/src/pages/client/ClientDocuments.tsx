@@ -1,3 +1,4 @@
+import { SubmissionDocumentGroups } from '@/components/documents/SubmissionDocumentGroups';
 import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -421,8 +422,9 @@ export function ClientDocuments() {
               </div>
             ) : (
               <>
+                <SubmissionDocumentGroups documents={documents} onPreview={handlePreview} onDownload={handleDownload} />
                 <div className="space-y-3 lg:hidden">
-                  {documents.map((document) => (
+                  {documents.filter(document => !document.submission_groups?.length).map((document) => (
                     <MobileRecordCard key={document.id}>
                       <div className="flex items-start gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
@@ -470,7 +472,7 @@ export function ClientDocuments() {
                   </TableRow>
                 </TableHeader>
                 <TableBody striped>
-                  {documents.map((document) => (
+                  {documents.filter(document => !document.submission_groups?.length).map((document) => (
                     <TableRow key={document.id}>
                       <TableCell>
                         <div>

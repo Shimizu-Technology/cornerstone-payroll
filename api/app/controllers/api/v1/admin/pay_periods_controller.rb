@@ -41,7 +41,7 @@ module Api
           preload_pay_period_pay_date_corrections!(loaded)
           preload_pay_period_created_users!(loaded)
           render json: {
-            pay_periods: loaded.map { |pp| pay_period_json(pp) },
+            pay_periods: loaded.map { |pp| pay_period_json(pp, list: true) },
             meta: {
               total: loaded.size,
               statuses: PayPeriod.where(company_id: current_company_id).group(:status).count
@@ -1315,12 +1315,24 @@ module Api
           company.update!(next_check_number: number)
         end
 
-        def pay_period_json(pay_period, include_items: false)
+        def client_files_summary(pay_period)
+          period = pay_period.client_submission_period
+          source = period&.current_submission
+          return unless source
+
+          imported = PayrollSubmissionImport.where(current_submission_id: source.id).where.not(applied_at: nil).exists?
+          { period_id: period.id, revision: source.revision, submission_id: source.id,
+            submitted_at: source.submitted_at, status: imported ? "imported" : period.pending_source_review? ? "waiting" : "set aside",
+            blocks_calculation: pay_period.pending_portal_submission? }
+        end
+
+        def pay_period_json(pay_period, include_items: false, list: false)
           agg = pay_period_aggregates(pay_period)
           lifecycle = pay_period_lifecycle_summary(pay_period)
 
           json = {
             id: pay_period.id,
+            client_files: list ? nil : client_files_summary(pay_period),
             source_correction_required: include_items && pay_period.committed? && !pay_period.voided? && TimeTracking::FinancialCorrectionService.required_for?(pay_period),
             company_id: pay_period.company_id,
             start_date: pay_period.start_date,

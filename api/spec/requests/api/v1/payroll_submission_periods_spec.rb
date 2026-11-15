@@ -24,6 +24,35 @@ RSpec.describe "Pay-period submissions", type: :request do
     as_client
   end
 
+  it "exposes revision grouping only in the authorized company document list" do
+    send_package(workbook_choice: "none")
+    submission = PayrollSubmission.last
+    [ [ Api::V1::Client::DocumentsController, client, "/api/v1/client/documents" ],
+      [ Api::V1::Admin::ClientDocumentsController, staff, "/api/v1/admin/client_documents" ] ].each do |controller, actor, path|
+      stub_portal_user(controller, actor, company)
+      get path
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("data").flat_map { |row| row.fetch("submission_groups") }).to include(a_hash_including(
+        "id" => submission.id, "label" => "Pay period files · #{submission.period.label} · revision 1", "submitted_at" => submission.submitted_at.as_json))
+      stub_portal_user(controller, actor, other_company)
+      get path
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).not_to have_key("data")
+    end
+  end
+
+  it "scopes pay run client file details to the authorized company" do
+    send_package(workbook_choice: "none")
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    get "/api/v1/admin/pay_periods/#{pay_period.id}"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("pay_period", "client_files")).to include("revision" => 1, "status" => "waiting", "blocks_calculation" => true)
+    create(:company_assignment, user: staff, company: other_company)
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, other_company)
+    get "/api/v1/admin/pay_periods/#{pay_period.id}"
+    expect(response).to have_http_status(:not_found)
+  end
+
   after { travel_back }
 
   def as_client(user = client, target = company)
@@ -273,6 +302,8 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(response).to have_http_status(:ok)
       get "#{client_base}/#{ref}"
       expect(response).to have_http_status(:ok)
+      expect(data["accepts_files"]).to be(false)
+      expect(data["status_label"]).to eq("Messages and drafts")
       expect(data["allowed_actions"]).to eq([ "message" ])
       catalog = PayrollSubmissions::Catalog.new(company: company)
       expect do

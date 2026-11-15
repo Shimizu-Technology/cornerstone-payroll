@@ -18,7 +18,8 @@ module PayrollSubmissions
         ref: entry.ref, id: record&.id, start_date: entry.start_date, end_date: entry.end_date,
         label: PeriodLabel.call(entry.start_date, entry.end_date), pay_date: @catalog.pay_date_for(entry),
         status: record&.status || "waiting_for_files",
-        status_label: PayrollSubmissionPeriod::STATUS_LABELS.fetch(record&.status || "waiting_for_files"),
+        status_label: !@catalog.company.payroll_intake_source_enabled?("mosa_revel") && (!record || record.status == "waiting_for_files") ? "Messages and drafts" : PayrollSubmissionPeriod::STATUS_LABELS.fetch(record&.status || "waiting_for_files"),
+        accepts_files: @catalog.company.payroll_intake_source_enabled?("mosa_revel"),
         open_for_files: @catalog.open_for_files?(entry), opens_on: entry.end_date,
         current_revision: current&.revision, last_submitted_at: current&.submitted_at,
         status_changed_at: record&.status_changed_at
@@ -122,7 +123,7 @@ module PayrollSubmissions
     def history(event)
       {
         id: event.id, event: event.event, from_status: event.from_status, to_status: event.to_status,
-        to_status_label: PayrollSubmissionPeriod::STATUS_LABELS.fetch(event.to_status),
+        to_status_label: event.to_status == "waiting_for_files" && !@catalog.company.payroll_intake_source_enabled?("mosa_revel") ? "Messages and drafts" : PayrollSubmissionPeriod::STATUS_LABELS.fetch(event.to_status),
         actor_name: event.actor&.name || event.actor_name_snapshot || "Former portal user", actor_audience: event.actor_audience,
         note: event.note, submission_id: event.payroll_submission_id, draft_id: event.payroll_submission_draft_id,
         created_at: event.created_at

@@ -54,7 +54,7 @@ export type SubmissionHistoryEvent = {
 };
 export type PeriodSummary = {
   ref: string; id: number | null; start_date: string; end_date: string; label: string; pay_date: string | null;
-  status: SubmissionStatus; status_label: string; open_for_files: boolean; opens_on: string;
+  accepts_files?: boolean; status: SubmissionStatus; status_label: string; open_for_files: boolean; opens_on: string;
   current_revision: number | null; last_submitted_at: string | null; status_changed_at: string | null;
   pay_period_id?: number | null; source?: 'pay_period' | 'schedule'; unread?: boolean; latest_client_event_id?: number;
 };

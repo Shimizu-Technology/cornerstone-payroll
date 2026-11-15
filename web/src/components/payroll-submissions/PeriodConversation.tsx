@@ -57,7 +57,7 @@ export function PeriodConversation({ api, periodRef, threadId, onThreadCreated }
 
   return (
     <section aria-labelledby="period-conversation" className="rounded-xl border border-neutral-200 bg-white p-4">
-      <h2 id="period-conversation" className="text-base font-semibold text-neutral-950">Questions about this period</h2>
+      <h2 id="period-conversation" className="text-base font-semibold text-neutral-950">Messages</h2>
       <p className="text-sm text-neutral-600">Messages here stay with this pay period.</p>
       {staff && outstanding > 0 && (
         <p role="status" className="mt-2 rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-950">
