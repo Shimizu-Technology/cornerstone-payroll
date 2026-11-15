@@ -95,6 +95,7 @@ function StaffActions({ period, onDone, mode = 'draft' }: { mode?: 'status' | 'd
   };
   return <div className="space-y-4">
     {mode === 'status' && can('acknowledge') && current && <div className="space-y-2">
+      <p className="text-sm text-neutral-700">Confirming tells the client you have revision {current.revision}.</p>
       <Button type="button" disabled={busy} onClick={() => void run(() => api.acknowledge(period.ref, current.id))}>Confirm receipt of revision {current.revision}</Button>
     </div>}
     {mode === 'status' && can('start_review') && <Button type="button" variant="outline" disabled={busy} onClick={() => void run(() => api.startReview(period.ref))}>Start review</Button>}
@@ -146,6 +147,11 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
     try { setError(null); accept((await api.get(ref)).data); } catch (err) { setError(err instanceof Error ? err.message : 'Could not load this pay period'); }
   }, [api, ref, accept]);
   useEffect(() => { void load(); }, [load]);
+  // Links from the pay run point at a revision; bring it into view once loaded.
+  const loaded = Boolean(period);
+  useEffect(() => {
+    if (loaded && window.location.hash) document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: 'start' });
+  }, [loaded]);
   // Staff mark a period seen only once it is actually shown in the
   // foreground, and only through the latest client update on screen.
   useEffect(() => {
@@ -210,6 +216,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
           <DraftFiles draft={currentDraft} api={api} audience={audience} />
           {audience === 'client' && period.allowed_actions.includes('approve') && <ClientDecision period={period} draft={currentDraft} onDone={detail => { setNotice(detail.status === 'approved' ? 'Approved. Cornerstone has been told.' : 'Change request sent to Cornerstone.'); accept(detail); }} />}
         </div>}
+        {audience === 'client' && !currentDraft && !otherDrafts.length && <p className="text-sm text-neutral-600">Cornerstone hasn’t posted a draft for this period yet.</p>}
         {otherDrafts.map(draft => <details key={draft.id} className="py-3">
           <summary className="cursor-pointer font-semibold text-neutral-800">Draft {draft.revision} {draft.posted ? <Badge variant="outline" className="ml-2">Superseded</Badge> : <Badge variant="warning" className="ml-2">Staff only, not shared</Badge>}</summary>
           <div className="mt-3"><DraftFiles draft={draft} api={api} audience={audience} /></div>
@@ -225,14 +232,14 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
 
         <PeriodConversation api={api} periodRef={period.id ? String(period.id) : period.ref} threadId={period.thread_id} onThreadCreated={() => void load()} />
 
-        <section aria-labelledby="history" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
+        {(period.history.length > 0 || period.submissions.length > 1) && <section aria-labelledby="history" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
           <h2 id="history" className="text-base font-semibold text-neutral-950">History</h2>
           {period.submissions.filter(revision => !revision.current).map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} />)}
           <ol className="mt-2 space-y-2">{[...period.history].reverse().map(event => <li key={event.id} className="text-sm text-neutral-800">
             <span className="font-medium">{event.to_status_label}</span> · {event.actor_name} ({event.actor_audience === 'staff' ? 'Cornerstone' : 'client'}) · <time dateTime={event.created_at}>{formatGuam(event.created_at)}</time>
             {event.note && <span className="block whitespace-pre-wrap break-words text-neutral-700">{event.note}</span>}
           </li>)}</ol>
-        </section>
+        </section>}
       </div>
     </div>
   );

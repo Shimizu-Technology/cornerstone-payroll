@@ -177,7 +177,7 @@ it('counts explicit skips separately from changes in the sent receipt', async ()
 });
 
 it('orders the six staff sections and hides the single-revision picker', async () => {
-  mocks.get.mockResolvedValue({ data: period({ pay_period_id: 12, submissions: [revision(2, true)] }) });
+  mocks.get.mockResolvedValue({ data: period({ pay_period_id: 12, submissions: [revision(2, true)], history: [{ id: 1, event: 'submit', from_status: 'waiting_for_files', to_status: 'submitted', to_status_label: 'Sent to Cornerstone', actor_name: 'Emma', actor_audience: 'client', note: null, submission_id: 2, draft_id: null, created_at: '2026-11-15T00:00:00Z' }] }) });
   renderAt('staff');
   await screen.findByRole('heading', { name: 'Status' });
   expect(screen.getAllByRole('heading', { level: 2 }).map(node => node.textContent)).toEqual([
