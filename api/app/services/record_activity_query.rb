@@ -4,6 +4,7 @@ class RecordActivityQuery
   class RecordNotFoundError < StandardError; end
 
   RECORD_TYPES = {
+    "companies" => { model: Company, audit_aliases: %w[Company companies test_workspace migration_rehearsal training_replay] },
     "employees" => {
       model: Employee,
       audit_aliases: %w[Employee employees client_employees]
@@ -21,12 +22,20 @@ class RecordActivityQuery
     @company_id = company_id
   end
 
+  def record
+    definition = RECORD_TYPES[record_type]
+    raise RecordNotFoundError unless definition
+
+    scope = definition.fetch(:model).where(id: record_id)
+    scope = record_type == "companies" ? scope.where(id: company_id) : scope.where(company_id: company_id)
+    scope.first || raise(RecordNotFoundError)
+  end
+
   def call
     definition = RECORD_TYPES[record_type]
     raise RecordNotFoundError unless definition
 
-    record = definition.fetch(:model).find_by(id: record_id, company_id: company_id)
-    raise RecordNotFoundError unless record
+    record = self.record
 
     logs = AuditLog.where(company_id: company_id)
     linked_report_aliases = definition[:linked_report_aliases]

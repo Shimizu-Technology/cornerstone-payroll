@@ -3,6 +3,9 @@
 require "set"
 
 class Company < ApplicationRecord
+  include TracksRecordCreation
+
+  belongs_to :created_by, class_name: "User", optional: true
   CHECK_STOCK_TYPES = %w[bottom_check top_check first_hawaiian_4up].freeze
   PAYROLL_INTAKE_SOURCE_TYPES = %w[spike_email mosa_revel].freeze
   PAYROLL_ENVIRONMENTS = %w[live migration_rehearsal].freeze

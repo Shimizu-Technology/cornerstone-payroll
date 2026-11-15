@@ -4,6 +4,7 @@ module MigrationPromotion
   class SetupSynchronizer
     EMPLOYEE_COLUMNS_EXCLUDED = %w[
       id company_id department_id previous_employee_id test_workspace_source_employee_id created_at updated_at
+      created_by_id
     ].freeze
 
     def initialize(rehearsal:, target_company:, actor:, mapping:)
@@ -84,7 +85,7 @@ module MigrationPromotion
           target.allow_tax_classification_change = true
           target.update!(attributes)
         else
-          target = Employee.create!(attributes)
+          target = Employee.create!(attributes.merge(created_by: actor))
           employee_map[source.id] = target
         end
       end
