@@ -101,3 +101,25 @@ it('offers an explicit pending-revision retry after refusing duplicate files', a
   await waitFor(() => expect(mocks.upload).toHaveBeenLastCalledWith(9, file, undefined, false, undefined, 20));
   expect(await screen.findByLabelText('Use this import for the client’s revision 2')).toHaveProperty('checked', true);
 });
+
+it('puts the retained source files beside the review only when there are files to show', () => {
+  const base: ImportPreviewResponse = {
+    import_id: 31,
+    source_package: { id: 5, package_id: 'synthetic', package_revision: 1, package_schema_version: '1', current: true, verified_source_count: 1, source_count: 1, disposition_targets: [] },
+    portal_source: { selection_id: 1, submission_id: 20, revision: 2, period_id: 90, current: true, no_changes: true, changes: [] },
+    preview: { matched: [], unmatched_pdf_names: [], unmatched_excel_names: [], duplicate_employee_matches: [], low_confidence_matches: [], pdf_count: 0, excel_count: 0, matched_count: 0, can_apply: false, tips_paid_out_from_tips: false, source_rows: [] },
+  };
+  const withPdf = { ...base, source_package: { ...base.source_package, documents: [{ id: 3, source_role: 'revel_hours', filename: 'revel.pdf', content_type: 'application/pdf', byte_size: 9 }] } };
+  const view = (preview: ImportPreviewResponse) => <MemoryRouter><ImportModal open payPeriodId={9} companyId={7} initialPreview={preview} onOpenChange={vi.fn()} onImportComplete={vi.fn()} /></MemoryRouter>;
+
+  const rendered = render(view(withPdf));
+  expect(screen.getByRole('complementary', { name: 'Source files' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: /Show source files \(Revel PDF\)/ })).toBeTruthy();
+  expect(screen.getByRole('dialog').className).toContain('dialog-full');
+  expect(screen.getByRole('button', { name: /Apply Import/ })).toBeTruthy();
+
+  rendered.unmount();
+  render(view(base));
+  expect(screen.queryByRole('complementary', { name: 'Source files' })).toBeNull();
+  expect(screen.getByRole('dialog').className).toContain('dialog-wide');
+});
