@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { RecordCreatorLine } from './RecordCreatorLine';
+import type { RecordCreatorInfo } from '@/services/api';
 import { Activity, ChevronDown, Clock3, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,7 +15,7 @@ import {
 import { formatGuamDateTime } from '@/lib/utils';
 import { recordActivitiesApi, type AuditLogEntry } from '@/services/api';
 
-type RecordActivityType = 'employees' | 'pay_periods';
+type RecordActivityType = 'employees' | 'pay_periods' | 'companies';
 
 interface RecordActivityTimelineProps {
   companyId: number;
@@ -32,6 +34,7 @@ export function RecordActivityTimeline({
   title = 'Complete activity history',
   description = 'Every recorded change to this record, with the person, time, and values involved.',
 }: RecordActivityTimelineProps): ReactElement {
+  const [creator, setCreator] = useState<RecordCreatorInfo | null>(null);
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -53,6 +56,7 @@ export function RecordActivityTimeline({
       }, companyId);
       if (requestId !== requestIdRef.current) return;
 
+      setCreator(response.creator ?? null);
       setLogs((current) => {
         if (!append) return response.data;
 
@@ -94,6 +98,8 @@ export function RecordActivityTimeline({
           </span>
           <div>
             <CardTitle>{title}</CardTitle>
+            {!loading && !error && <RecordCreatorLine creator={creator} />}
+            <a className="mt-2 inline-block text-sm font-medium text-primary-700 underline" href={`/settings/audit-logs?record_type=${recordType}&record_id=${recordId}&company_id=${companyId}`}>View in Activity History</a>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-500">{description}</p>
           </div>
         </div>
