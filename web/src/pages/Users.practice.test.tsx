@@ -224,6 +224,24 @@ describe('Practice login whose copy was archived', () => {
     expect(alert.textContent).toContain('Use Resend');
   });
 
+  it('keeps the invitation failure when the list refresh after a move also fails', async () => {
+    apiMocks.users.list.mockResolvedValueOnce({ data: [practiceLogin] }).mockRejectedValue(new Error('Network down'));
+    apiMocks.users.movePracticeCopy.mockResolvedValue({
+      data: { ...practiceLogin, active: true, practice_company_id: 3, practice_company_name: readyB.name, practice_copy_closed_reason: null },
+      moved_from: { id: 2, name: archivedCopyA.name },
+      invitation_delivery_status: 'failed', invitation_sent: false, invitation_error: 'Clerk is unavailable',
+    });
+    const user = userEvent.setup();
+    render(<Users />);
+
+    const [moveButton] = await screen.findAllByRole('button', { name: 'Move Practice Login to another practice copy' });
+    await user.click(moveButton);
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Move and activate' }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('could not be refreshed: Network down'));
+    expect(screen.getByRole('alert').textContent).toContain('Use Resend');
+  });
+
   it('says the copies could not be loaded instead of claiming none exist', async () => {
     apiMocks.companies.list.mockResolvedValueOnce({ companies: [realClient, archivedCopyA] })
       .mockRejectedValue(new Error('Network down'));

@@ -124,15 +124,19 @@ export function Users() {
   const [activityUser, setActivityUser] = useState<User | null>(null);
   const handleCloseActivity = useCallback(() => setActivityUser(null), []);
 
-  // keepFeedback refreshes the list without clearing a result the caller just showed.
-  const fetchUsers = useCallback(async ({ keepFeedback = false }: { keepFeedback?: boolean } = {}) => {
+  // keepFeedback refreshes the list without touching a result the caller just
+  // showed; a failure is returned so the caller can add it to that result.
+  const fetchUsers = useCallback(async ({ keepFeedback = false }: { keepFeedback?: boolean } = {}): Promise<string | null> => {
     setIsLoading(true);
     if (!keepFeedback) setError(null);
     try {
       const response = await usersApi.list();
       setUsers(response.data);
+      return null;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load users');
+      const message = err instanceof Error ? err.message : 'Failed to load users';
+      if (!keepFeedback) setError(message);
+      return message;
     } finally {
       setIsLoading(false);
     }
@@ -336,13 +340,17 @@ export function Users() {
     setError(null);
     setInviteWarning(null);
     const moved = `${user.name} now uses ${toName}. Their history in ${fromName} keeps their name.`;
-    if (invitation && invitationNeedsRetry(invitation)) {
+    const inviteFailure = invitation && invitationNeedsRetry(invitation)
+      ? `${moved} ${inviteFailureReason(invitation)} Use Resend on their row to try again.` : null;
+    if (inviteFailure) {
       setSuccessMessage(null);
-      setError(`${moved} ${inviteFailureReason(invitation)} Use Resend on their row to try again.`);
+      setError(inviteFailure);
     } else {
       setSuccessMessage(`${moved}${user.active === false ? ' The login is still inactive.' : ''}${invitation ? ` ${invitationOutcomeMessage(invitation)}` : ''}`);
     }
-    void fetchUsers({ keepFeedback: true });
+    void fetchUsers({ keepFeedback: true }).then(refreshError => {
+      if (refreshError) setError([inviteFailure, `The user list could not be refreshed: ${refreshError}`].filter(Boolean).join(' '));
+    });
   };
 
   const openMove = (user: User) => {
