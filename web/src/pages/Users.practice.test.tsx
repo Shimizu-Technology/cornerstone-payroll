@@ -167,7 +167,7 @@ describe('Practice login whose copy was archived', () => {
   it('offers Deactivate and Move when Delete is refused for retained history', async () => {
     const { ApiError } = await import('@/services/api');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const message = "Practice Login can't be deleted because their name is on payroll submissions, uploaded files or other history that has to be kept.";
+    const message = "Practice Login can't be deleted because their name is on payroll submissions, uploaded files, review history or other records that have to be kept.";
     apiMocks.users.delete.mockRejectedValue(new ApiError(message, 422, undefined, { error: message, code: 'user_has_retained_history' }));
     apiMocks.users.list.mockResolvedValue({ data: [{ ...practiceLogin, active: true }] });
     const user = userEvent.setup();
