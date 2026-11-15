@@ -124,9 +124,10 @@ export function Users() {
   const [activityUser, setActivityUser] = useState<User | null>(null);
   const handleCloseActivity = useCallback(() => setActivityUser(null), []);
 
-  const fetchUsers = useCallback(async () => {
+  // keepFeedback refreshes the list without clearing a result the caller just showed.
+  const fetchUsers = useCallback(async ({ keepFeedback = false }: { keepFeedback?: boolean } = {}) => {
     setIsLoading(true);
-    setError(null);
+    if (!keepFeedback) setError(null);
     try {
       const response = await usersApi.list();
       setUsers(response.data);
@@ -242,7 +243,8 @@ export function Users() {
       if (invitationNeedsRetry(response)) setInviteWarning({ user, reason: inviteFailureReason(response), confirmedFailure: response.invitation_delivery_status === 'failed' });
       else setSuccessMessage(invitationOutcomeMessage(response));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resend invitation');
+      const message = err instanceof Error ? err.message : 'Failed to resend invitation';
+      setError(message, errorCode(err) === 'practice_copy_closed' ? { user, move: true } : null);
     } finally {
       setResendingId(null);
     }
@@ -340,7 +342,7 @@ export function Users() {
     } else {
       setSuccessMessage(`${moved}${user.active === false ? ' The login is still inactive.' : ''}${invitation ? ` ${invitationOutcomeMessage(invitation)}` : ''}`);
     }
-    void fetchUsers();
+    void fetchUsers({ keepFeedback: true });
   };
 
   const openMove = (user: User) => {
@@ -421,7 +423,9 @@ export function Users() {
     );
   };
 
-  const moveAction = (user: User, size: 'full' | 'compact' = 'full') => user.practice_copy_closed_reason ? (
+  // A server refusal (practice_copy_closed) offers Move even when the loaded row
+  // predates the copy closing; row actions rely on the loaded reason.
+  const moveAction = (user: User, size: 'full' | 'compact' = 'full', refused = false) => refused || user.practice_copy_closed_reason ? (
     <Button size="sm" variant="outline" aria-label={`Move ${user.name} to another practice copy`} onClick={() => openMove(user)}>
       <ArrowRightLeft className="mr-1 h-4 w-4" aria-hidden="true" />
       {size === 'full' ? 'Move to practice copy' : 'Move'}
@@ -584,7 +588,7 @@ export function Users() {
               <p className="flex gap-2 text-danger-700"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-danger-600" aria-hidden="true" />{error}</p>
               {errorActions && (errorActions.move || errorActions.deactivate) && (
                 <div className="flex flex-wrap gap-2">
-                  {errorActions.move && moveAction(errorActions.user)}
+                  {errorActions.move && moveAction(errorActions.user, 'full', true)}
                   {errorActions.deactivate && (
                     <Button size="sm" variant="outline" onClick={() => void handleToggleActive(errorActions.user)} disabled={togglingId === errorActions.user.id}>
                       <UserX className="mr-1 h-4 w-4" aria-hidden="true" />Deactivate instead
@@ -896,6 +900,7 @@ export function Users() {
           user={moveUser}
           companies={availableCompanies}
           loadingCompanies={isLoadingCompanies}
+          loadError={companiesLoadError}
           onRefreshCompanies={() => void loadCompanies()}
           onClose={() => setMoveUser(null)}
           onMoved={handleMoved}
