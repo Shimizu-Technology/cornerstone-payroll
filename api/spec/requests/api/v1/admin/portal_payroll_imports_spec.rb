@@ -129,6 +129,20 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(evidence.reload.verification_status).to eq("failed")
   end
 
+  it "points the pay run at the same-date revision that blocks it after its dates move, in the update response too" do
+    later = PayrollSubmissionPeriod.create!(company: company, source: "schedule", start_date: run.end_date + 1, end_date: run.end_date + 14)
+    waiting = later.submissions.create!(company: company, revision: 1, submitted_by: staff, submitted_at: Time.current,
+      content_fingerprint: SecureRandom.hex(32), request_fingerprint: SecureRandom.hex(32), change_rows: [])
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    get url
+    expect(response.parsed_body.dig("pay_period", "client_files")).to be_nil
+    patch url, params: { pay_period: { start_date: later.start_date, end_date: later.end_date, pay_date: later.end_date + 5 } }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("pay_period", "client_files")).to include("period_id" => later.id, "submission_id" => waiting.id, "status" => "waiting", "blocks_calculation" => true)
+    get "/api/v1/admin/pay_periods"
+    expect(response.parsed_body.fetch("pay_periods").pluck("client_files").compact).to be_empty
+  end
+
   it "explicitly links pay-run Import MoSa to the current pending revision only on successful apply" do
     source = revision
     data = pay_run_preview(source)
