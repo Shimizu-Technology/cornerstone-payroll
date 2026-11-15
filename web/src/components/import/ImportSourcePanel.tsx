@@ -12,11 +12,13 @@ type TabKey = 'pdf' | 'workbook';
 type Loaded =
   | { status: 'loading' }
   | { status: 'error'; message: string }
+  | { status: 'unavailable'; message: string }
   | { status: 'pdf'; blob: Blob }
   | { status: 'sheet'; data: SheetPreviewData };
 
-// Matches the lg breakpoint where the panel sits beside the review.
-const SIDE_BY_SIDE_QUERY = '(min-width: 1024px)';
+// Matches the xl breakpoint where the panel sits beside the review. Narrower
+// screens keep the review table readable and open the files as a toggle.
+const SIDE_BY_SIDE_QUERY = '(min-width: 1280px)';
 
 function startsOpen() {
   try {
@@ -65,9 +67,9 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
     let current = true;
     setEntry(activeId, { status: 'loading' });
     payrollIntakeImportsApi.previewSource(payPeriodId, importId, activeId).then(async ({ blob }) => {
-      const sheet = await readSheetPreview(blob);
-      const next: Loaded = sheet ? { status: 'sheet', data: sheet }
-        : isJsonBlob(blob) ? { status: 'error', message: 'This file could not be shown here. Download it to open it.' }
+      const result = await readSheetPreview(blob);
+      const next: Loaded = result ? ('sheet' in result ? { status: 'sheet', data: result.sheet } : { status: 'unavailable', message: result.unavailable })
+        : isJsonBlob(blob) ? { status: 'unavailable', message: 'This file could not be shown here. Download it to open it.' }
           : { status: 'pdf', blob };
       if (current) setEntry(activeId, next);
     }).catch((error: unknown) => {
@@ -104,15 +106,15 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
 
   if (!open) {
     return (
-      <aside aria-label="Source files" className={cn('min-w-0 rounded-2xl border border-neutral-200 bg-white lg:sticky lg:top-0 lg:shrink-0', className)}>
+      <aside aria-label="Source files" className={cn('min-w-0 rounded-2xl border border-neutral-200 bg-white xl:sticky xl:top-0 xl:shrink-0', className)}>
         <button
           type="button"
           aria-expanded={false}
           aria-controls={contentId}
           onClick={() => setOpen(true)}
-          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium text-primary-700 hover:bg-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 lg:w-11 lg:px-0 lg:py-4 lg:[writing-mode:vertical-rl]"
+          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium text-primary-700 hover:bg-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 xl:w-11 xl:px-0 xl:py-4 xl:[writing-mode:vertical-rl]"
         >
-          <PanelRightOpen className="h-4 w-4 shrink-0 lg:rotate-90" aria-hidden="true" />
+          <PanelRightOpen className="h-4 w-4 shrink-0 xl:rotate-90" aria-hidden="true" />
           <span>Show source files</span>{' '}
           <span className="font-normal text-neutral-600">({summary})</span>
         </button>
@@ -125,7 +127,7 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
       aria-label="Source files"
       className={cn(
         'flex h-[min(75vh,75dvh)] min-w-0 flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white',
-        'lg:sticky lg:top-0 lg:h-[calc(100vh-17rem)] lg:min-h-[28rem] lg:w-[42%] lg:shrink-0',
+        'xl:sticky xl:top-0 xl:h-[calc(100vh-17rem)] xl:min-h-[28rem] xl:w-[40%] xl:shrink-0',
         className
       )}
     >
@@ -172,6 +174,11 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
             <p role="alert" className="max-w-sm text-sm text-neutral-700">{state.message}</p>
             <Button type="button" variant="outline" size="sm" onClick={() => { setEntry(active.file.id, null); setAttempt((count) => count + 1); }}>Try again</Button>
+          </div>
+        ) : state.status === 'unavailable' ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+            <p className="font-medium text-neutral-900">Preview not available</p>
+            <p className="max-w-sm text-sm text-neutral-700">{state.message}</p>
           </div>
         ) : state.status === 'pdf' ? (
           <PdfDocumentView blob={state.blob} className="flex-1" />

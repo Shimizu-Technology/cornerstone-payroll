@@ -33,9 +33,11 @@ export async function prepareDocumentPreview(
   const contentType = blob.type || document.content_type;
   const extension = extensionOf(document.file_name);
 
-  // The server answers .xlsx and .csv previews with sheet tables.
-  const sheet = await readSheetPreview(blob);
-  if (sheet) return { kind: 'sheet', sheet };
+  // The server answers .xlsx and .csv previews with sheet tables, or the reason it can't.
+  const sheetResult = await readSheetPreview(blob);
+  if (sheetResult) {
+    return 'sheet' in sheetResult ? { kind: 'sheet', sheet: sheetResult.sheet } : { kind: 'unsupported', message: sheetResult.unavailable };
+  }
 
   if (contentType === 'application/pdf' || extension === 'pdf') {
     return { kind: 'pdf', objectUrl: URL.createObjectURL(blob) };

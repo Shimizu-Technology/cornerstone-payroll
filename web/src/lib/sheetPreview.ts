@@ -18,11 +18,16 @@ export function isJsonBlob(blob: Blob) {
   return blob.type.toLowerCase().startsWith('application/json');
 }
 
-// Preview endpoints answer a spreadsheet with JSON sheet tables instead of file bytes.
-export async function readSheetPreview(blob: Blob): Promise<SheetPreviewData | null> {
+export type SheetPreviewResult = { sheet: SheetPreviewData } | { unavailable: string };
+
+// Preview endpoints answer a spreadsheet with JSON sheet tables instead of file
+// bytes, or with the reason a damaged or unsupported file can't be shown.
+export async function readSheetPreview(blob: Blob): Promise<SheetPreviewResult | null> {
   if (!isJsonBlob(blob)) return null;
-  const parsed = JSON.parse(await blob.text()) as { sheet_preview?: SheetPreviewData };
-  return parsed.sheet_preview && Array.isArray(parsed.sheet_preview.sheets) ? parsed.sheet_preview : null;
+  const parsed = JSON.parse(await blob.text()) as { sheet_preview?: SheetPreviewData | null; sheet_preview_unavailable?: string };
+  if (parsed.sheet_preview && Array.isArray(parsed.sheet_preview.sheets)) return { sheet: parsed.sheet_preview };
+  if (parsed.sheet_preview_unavailable) return { unavailable: parsed.sheet_preview_unavailable };
+  return null;
 }
 
 export function columnLetter(index: number) {

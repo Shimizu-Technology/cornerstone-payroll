@@ -91,3 +91,12 @@ it('explains a file that cannot be shown and retries', async () => {
   await waitFor(() => expect(screen.getByRole('cell', { name: 'Ava Cruz' })).toBeTruthy());
   expect(mocks.previewSource).toHaveBeenCalledTimes(2);
 });
+
+it('says why a damaged workbook is not shown', async () => {
+  mocks.previewSource.mockResolvedValueOnce({ blob: new Blob([JSON.stringify({ sheet_preview: null, sheet_preview_unavailable: 'This spreadsheet could not be read.' })], { type: 'application/json' }) });
+  render(<ImportSourcePanel payPeriodId={9} importId={30} documents={[workbook]} />);
+
+  expect(await screen.findByText('Preview not available')).toBeTruthy();
+  expect(screen.getByText('This spreadsheet could not be read.')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Download changes.xlsx' })).toBeTruthy();
+});
