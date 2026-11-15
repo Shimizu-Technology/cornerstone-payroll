@@ -5,6 +5,7 @@ module Api
     module Admin
       class ClientDocumentsController < BaseController
         include PortalDocumentTracking
+        include SheetPreviewResponse
         include ClientDocumentUploadRateLimit
         rescue_from ClientDocument::SharedForReview do |error|
           render json: { error: error.message }, status: :unprocessable_entity
@@ -102,6 +103,8 @@ module Api
 
         def preview
           @document.ensure_usable_for!(:preview, staff_read: true)
+          return preview_sheet if @document.sheet_preview?
+
           ensure_generated_preview!(@document)
           data, content_type, filename = preview_payload_for(@document)
           return render json: { error: @document.preview_error.presence || "Preview is unavailable for this file" }, status: :unprocessable_entity unless data
@@ -145,6 +148,15 @@ module Api
         end
 
         private
+
+        # Spreadsheets preview as JSON sheet tables read from the original file,
+        # after the same document lookup and usability checks as any preview.
+        def preview_sheet
+          data = R2StorageService.new.download(@document.file_key)
+          return render json: { error: "File not found" }, status: :not_found unless data
+
+          render_sheet_preview(bytes: data, filename: @document.download_filename) { audit_portal_document!("portal_documents#preview") }
+        end
 
         def private_document_response!
           response.set_header("Cache-Control", "private, no-store")

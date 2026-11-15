@@ -30,9 +30,9 @@ RSpec.describe ClientDocumentPreviewGenerator do
       create(
         :client_document,
         company: company,
-        file_name: "timecard.xlsx",
-        content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        file_key: "client_documents/test/timecard.xlsx",
+        file_name: "timecard.docx",
+        content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_key: "client_documents/test/timecard.docx",
         preview_status: "pending",
         preview_file_key: "client_documents/test/old-preview.pdf"
       )
