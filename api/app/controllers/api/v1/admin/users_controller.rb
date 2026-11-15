@@ -8,12 +8,12 @@ module Api
         include InvitationDeliveryOutcome
         audit_actions :activate, :deactivate, :resend_invitation, :destroy
         before_action :require_admin!
-        before_action :set_user, only: [ :show, :update, :destroy, :activate, :deactivate, :resend_invitation ]
+        before_action :set_user, only: [ :show, :update, :destroy, :activate, :deactivate, :resend_invitation, :move_practice_copy ]
 
         # GET /api/v1/admin/users
         # Organization admins see users in their firm; super admins can see all firms.
         def index
-          users = manageable_users.includes(:organization, :invited_by, company_assignments: :company, company: :organization).order(:name)
+          users = manageable_users.includes(:organization, :invited_by, :practice_company, company_assignments: :company, company: :organization).order(:name)
           if params[:search].present?
             query = "%#{params[:search]}%"
             users = users.where("name ILIKE ? OR email ILIKE ?", query, query)
@@ -120,6 +120,8 @@ module Api
 
         # POST /api/v1/admin/users/:id/activate
         def activate
+          return if reject_closed_practice_copy!
+
           before_values = user_audit_snapshot(@user)
           ActiveRecord::Base.transaction do
             @user.update!(active: true)
@@ -178,14 +180,22 @@ module Api
           end
           head :no_content
         rescue ActiveRecord::RecordNotDestroyed, ActiveRecord::InvalidForeignKey
-          render json: { error: "This user has retained records, including portal review history, and cannot be deleted. Deactivate the account to preserve its history." }, status: :unprocessable_entity
+          next_step = if @user.practice_company_id?
+            "Deactivate the login instead, or move it to a current practice copy to use it again."
+          else
+            "Deactivate the login instead; their history stays attached to their name."
+          end
+          render json: {
+            error: "#{user_display_name(@user)} can't be deleted because their name is on payroll submissions, " \
+                   "uploaded files or other history that has to be kept. #{next_step}",
+            code: "user_has_retained_history",
+            practice_login: @user.practice_company_id?
+          }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/users/:id/resend_invitation
         def resend_invitation
-          if @user.practice_company_id? && !@user.practice_portal_open?
-            return render json: { error: "Restore the practice copy before inviting its client login" }, status: :unprocessable_entity
-          end
+          return if reject_closed_practice_copy!
 
           unless @user.invitation_pending?
             return render json: { error: "User has already accepted their invitation" }, status: :unprocessable_entity
@@ -220,7 +230,88 @@ module Api
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
         end
 
+        # POST /api/v1/admin/users/:id/move_practice_copy
+        # Re-points a practice-only login whose copy has closed to another open
+        # practice copy. Its history in the old copy stays attributed to it.
+        def move_practice_copy
+          target = Company.find_by(id: params[:company_id])
+          activate = ActiveModel::Type::Boolean.new.cast(params[:activate]) == true
+          service = TestWorkspace::MovePracticeLogin.new(user: @user, target_company: target, actor: current_user, activate: activate)
+          service.call
+          skip_default_audit_log!
+
+          @user.reload
+          invitation_delivery = {}
+          if @user.invitation_pending?
+            invitation_delivery = refresh_practice_invitation!(@user, activate: activate)
+          end
+
+          @user = User.includes(:organization, :invited_by, :practice_company, company_assignments: :company).find(@user.id)
+          render json: {
+            data: user_json(@user),
+            moved_from: { id: service.source_company.id, name: service.source_company.name },
+            **invitation_delivery
+          }
+        rescue TestWorkspace::MovePracticeLogin::Refused => e
+          status = e.code == :forbidden ? :forbidden : :unprocessable_entity
+          render json: { error: e.message, code: e.code.to_s }, status: status
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
+        end
+
         private
+
+        # A practice login's copy closed (archived, expired, sealed). Activation
+        # and invitations would fail model validation with an opaque message, so
+        # say what happened and offer the move instead.
+        def reject_closed_practice_copy!
+          return false unless @user.practice_company_id? && !@user.practice_portal_open?
+
+          copy = @user.practice_company
+          reason = TestWorkspace::MovePracticeLogin.closed_reason(copy)
+          if reason
+            render json: {
+              error: "#{user_display_name(@user)} belongs to practice copy #{copy&.name || 'that was removed'}, which is #{reason}. " \
+                     "Move the login to a current practice copy to use it again.",
+              code: "practice_copy_closed",
+              practice_company_id: @user.practice_company_id
+            }, status: :unprocessable_entity
+          else
+            render json: {
+              error: "#{user_display_name(@user)} no longer has access to practice copy #{copy.name}. " \
+                     "Edit the login, select that copy again and save, then activate it.",
+              code: "practice_copy_unassigned"
+            }, status: :unprocessable_entity
+          end
+          true
+        end
+
+        # Mirrors resend_invitation: a pending invitation is revoked and, when
+        # the moved login is activated, replaced so it opens the new copy.
+        # An inactive login keeps no live invitation.
+        def refresh_practice_invitation!(user, activate:)
+          unless activate
+            TestWorkspace::PortalAccess.revoke_pending_invitation!(user)
+            return {}
+          end
+
+          if user.clerk_invitation_id.present?
+            service = ClerkInvitationService.new
+            service.revoke_invitation(user.clerk_invitation_id) if service.configured?
+          end
+          clerk_result = create_clerk_invitation(user, ignore_existing: true)
+          user.update!(invited_at: Time.current) if clerk_result[:success] && clerk_result[:url].present?
+          invitation_response = invitation_delivery_response(user, clerk_result)
+          user.reload
+          invitation_response
+        rescue StandardError => e
+          Rails.logger.error("[UsersController] Practice login moved but its invitation could not be refreshed for user #{user.id}: #{e.class}")
+          invitation_status_response("failed", error: "The login was moved, but its invitation could not be sent. Use Resend.")
+        end
+
+        def user_display_name(user)
+          user.name.presence || user.email
+        end
 
         def reject_platform_owner_mutation!
           return false unless @user&.platform_owner?
@@ -230,7 +321,7 @@ module Api
         end
 
         def set_user
-          @user = manageable_users.includes(:organization, :invited_by, company_assignments: :company).find_by(id: params[:id])
+          @user = manageable_users.includes(:organization, :invited_by, :practice_company, company_assignments: :company).find_by(id: params[:id])
           return if @user
 
           render json: { error: "User not found" }, status: :not_found
@@ -401,6 +492,13 @@ module Api
             updated_at: user.updated_at,
             platform_owner: user.platform_owner?
           }
+
+          if user.practice_company_id?
+            copy = user.practice_company
+            data[:practice_company_id] = user.practice_company_id
+            data[:practice_company_name] = copy&.name
+            data[:practice_copy_closed_reason] = TestWorkspace::MovePracticeLogin.closed_reason(copy)
+          end
 
           assigned = current_assignment_ids_for(user)
           data[:assigned_company_ids] = assigned if assigned.any?
