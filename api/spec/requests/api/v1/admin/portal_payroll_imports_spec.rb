@@ -130,12 +130,15 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
   end
 
   it "points the pay run at the same-date revision that blocks it after its dates move, in the update response too" do
+    set_aside = revision
+    period.transition!("resolve_source", actor: staff, submission: set_aside, note: "Used the emailed files")
+    expect(run.reload.pending_portal_submission?).to be(false)
     later = PayrollSubmissionPeriod.create!(company: company, source: "schedule", start_date: run.end_date + 1, end_date: run.end_date + 14)
     waiting = later.submissions.create!(company: company, revision: 1, submitted_by: staff, submitted_at: Time.current,
       content_fingerprint: SecureRandom.hex(32), request_fingerprint: SecureRandom.hex(32), change_rows: [])
     stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
     get url
-    expect(response.parsed_body.dig("pay_period", "client_files")).to be_nil
+    expect(response.parsed_body.dig("pay_period", "client_files")).to include("period_id" => period.id, "status" => "set aside", "blocks_calculation" => false)
     patch url, params: { pay_period: { start_date: later.start_date, end_date: later.end_date, pay_date: later.end_date + 5 } }, as: :json
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("pay_period", "client_files")).to include("period_id" => later.id, "submission_id" => waiting.id, "status" => "waiting", "blocks_calculation" => true)
