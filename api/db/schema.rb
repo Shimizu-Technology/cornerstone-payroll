@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_14_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_15_080000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -603,6 +603,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_130000) do
     t.datetime "test_workspace_sealed_at"
     t.datetime "updated_at", null: false
     t.string "zip"
+    t.bigint "created_by_id"
     t.index [ "active_printer_profile_id" ], name: "index_companies_on_active_printer_profile_id"
     t.index [ "employee_intake_enabled_by_id" ], name: "index_companies_on_employee_intake_enabled_by_id"
     t.index [ "ein" ], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
@@ -617,6 +618,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_130000) do
     t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL AND test_workspace_purpose IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND migration_source_company_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL AND test_workspace_purpose IS NOT NULL AND (test_workspace_purpose::text <> 'migration_rehearsal'::text OR migration_source_batch_id IS NOT NULL)", name: "companies_test_workspace_shape_check"
     t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
     t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['sandbox'::character varying::text, 'migration_rehearsal'::character varying::text, 'training_replay'::character varying::text, 'backup_snapshot'::character varying::text]))", name: "companies_test_workspace_purpose_check"
+    t.index [ "created_by_id" ], name: "index_companies_on_created_by_id"
   end
 
   create_table "company_assignments", force: :cascade do |t|
@@ -1282,6 +1284,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_130000) do
     t.decimal "w4_step4b_deductions", precision: 10, scale: 2, default: "0.0", null: false
     t.boolean "w9_on_file", default: false, null: false
     t.string "zip"
+    t.bigint "created_by_id"
     t.index [ "company_id", "last_name", "first_name" ], name: "index_employees_on_company_id_and_last_name_and_first_name"
     t.index [ "company_id", "test_workspace_source_employee_id" ], name: "idx_employees_training_source_unique", unique: true, where: "(test_workspace_source_employee_id IS NOT NULL)"
     t.index [ "company_id" ], name: "index_employees_on_company_id"
@@ -1296,6 +1299,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_130000) do
     t.check_constraint "jsonb_typeof(configuration_review_items) = 'array'::text", name: "employees_configuration_review_items_array"
     t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying::text, 'direct_deposit'::character varying::text]))", name: "employees_payment_delivery_method_check"
     t.check_constraint "portal_pending_approval = false OR status::text = 'inactive'::text", name: "employees_portal_pending_inactive_check"
+    t.index [ "created_by_id" ], name: "index_employees_on_created_by_id"
   end
 
   create_table "expense_artifacts", force: :cascade do |t|
@@ -2610,6 +2614,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_130000) do
     t.check_constraint "run_purpose::text = ANY (ARRAY['regular'::character varying::text, 'off_cycle_tips'::character varying::text, 'bonus'::character varying::text, 'commission'::character varying::text, 'correction'::character varying::text, 'final'::character varying::text, 'adjustment'::character varying::text])", name: "pay_periods_run_purpose_check"
     t.check_constraint "run_purpose_source::text = ANY (ARRAY['operator_selected'::character varying::text, 'system_correction'::character varying::text, 'production_migration'::character varying::text, 'legacy_system_default'::character varying::text])", name: "pay_periods_run_purpose_source_check"
     t.check_constraint "test_workspace_role IS NULL OR (test_workspace_role::text = ANY (ARRAY['baseline'::character varying::text, 'practice'::character varying::text]))", name: "pay_periods_test_workspace_role_check"
+    t.index [ "created_by_id" ], name: "index_pay_periods_on_created_by_id"
   end
 
   create_table "payroll_field_definitions", force: :cascade do |t|

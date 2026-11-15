@@ -40,7 +40,7 @@ module QuickbooksHistory
         definition_cache = {}
         created_employee_count = 0
         plan.profiles.each do |profile|
-          employee = bootstrap.company.employees.create!(profile.employee_attributes)
+          employee = bootstrap.company.employees.create!(profile.employee_attributes.merge(created_by: actor))
           create_w4_election!(employee)
           create_wage_rates!(employee, profile.wage_rates)
           create_payroll_fields!(employee, profile.payroll_fields, definition_cache)

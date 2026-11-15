@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 class PayPeriod < ApplicationRecord
+  include TracksRecordCreation
+
+  belongs_to :created_by, class_name: "User", optional: true
   TAX_SYNC_STATUSES = %w[pending syncing synced failed].freeze
   MAX_SYNC_ATTEMPTS = 5
 
