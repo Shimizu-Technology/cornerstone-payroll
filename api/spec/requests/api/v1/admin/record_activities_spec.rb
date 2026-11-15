@@ -184,6 +184,9 @@ RSpec.describe "Api::V1::Admin::RecordActivities", type: :request do
     tracked = create(:company, organization: organization)
     create(:company_assignment, user: actor, company: tracked)
     Current.reset
+    # The creating request's audit row (Auditable) is what history shows.
+    AuditLog.record!(user: actor, company_id: tracked.id, organization_id: organization.id, action: "companies#create",
+      record_type: "companies", record_id: tracked.id, subject_name: tracked.name)
     allow_any_instance_of(Api::V1::Admin::RecordActivitiesController).to receive(:current_company_id).and_return(tracked.id)
     get "/api/v1/admin/record_activities/companies/#{tracked.id}"
     expect(response).to have_http_status(:ok)
