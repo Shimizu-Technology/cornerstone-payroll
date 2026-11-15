@@ -13,16 +13,16 @@ export function SubmissionDocumentGroups({ documents, onPreview, onDownload, all
   onDownload: (document: ClientDocument) => Promise<void>;
   extraActions?: (document: ClientDocument) => ReactNode;
 }) {
-  const groups = new Map<number, { label: string; files: ClientDocument[] }>();
+  const groups = new Map<number, { label: string; sentAt?: string | null; files: ClientDocument[] }>();
   for (const document of documents) {
     for (const group of document.submission_groups || []) {
-      if (!groups.has(group.id)) groups.set(group.id, { label: group.label, files: [] });
+      if (!groups.has(group.id)) groups.set(group.id, { label: group.label, sentAt: group.submitted_at, files: [] });
       groups.get(group.id)!.files.push(document);
     }
   }
   return <div className="space-y-3">{[...groups].map(([id, group]) => <details key={id} open={openGroups?.has(id)} onToggle={event => onToggleGroup?.(id, event.currentTarget.open)} className="rounded-lg border border-neutral-200 p-3">
     <summary className="min-h-11 cursor-pointer break-words font-semibold">{group.label}
-      <span className="ml-2 text-sm font-normal text-neutral-600">{group.files.length} {group.files.length === 1 ? 'file' : 'files'} · sent {new Date(group.files[0].created_at).toLocaleDateString()}</span>
+      <span className="ml-2 text-sm font-normal text-neutral-600">{group.files.length} {group.files.length === 1 ? 'file' : 'files'} · sent {new Date(group.sentAt || group.files[0].created_at).toLocaleDateString()}</span>
     </summary>
     <ul className="divide-y divide-neutral-100">{group.files.map(file => <li key={file.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
       <span className="min-w-0 text-sm">

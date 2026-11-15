@@ -52,7 +52,7 @@ class ClientDocument < ApplicationRecord
       submission = membership.submission
       next unless membership.company_id == company_id && submission.company_id == company_id && submission.period.company_id == company_id
 
-      { id: submission.id, label: "Pay period files · #{submission.period.label} · revision #{submission.revision}" }
+      { id: submission.id, label: "Pay period files · #{submission.period.label} · revision #{submission.revision}", submitted_at: submission.submitted_at }
     end
   end
 

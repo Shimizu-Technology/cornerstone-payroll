@@ -36,3 +36,9 @@ it('keeps a group the page has marked open expanded when it remounts after a rel
   const { container } = render(view());
   expect(container.querySelector('details')?.open).toBe(true);
 });
+
+it('dates a group by when the revision was sent, not when a retained file was first uploaded', () => {
+  const retained = { ...group, submitted_at: '2026-11-15T02:00:00Z' };
+  render(<SubmissionDocumentGroups documents={[ file(1, 'hours.pdf', { created_at: '2026-11-01T02:00:00Z', submission_groups: [ retained ] }) ]} onPreview={vi.fn()} onDownload={vi.fn()} />);
+  expect(screen.getByText(new RegExp(`sent ${new Date('2026-11-15T02:00:00Z').toLocaleDateString().replace(/[/.]/g, '\\$&')}`))).toBeTruthy();
+});
