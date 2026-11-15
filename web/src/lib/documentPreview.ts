@@ -1,11 +1,13 @@
 import type { ClientDocument } from '@/services/api';
+import { readSheetPreview, type SheetPreviewData } from '@/lib/sheetPreview';
 
-export type DocumentPreviewKind = 'pdf' | 'image' | 'text' | 'unsupported';
+export type DocumentPreviewKind = 'pdf' | 'image' | 'text' | 'sheet' | 'unsupported';
 
 export interface DocumentPreviewPayload {
   kind: DocumentPreviewKind;
   objectUrl?: string;
   textContent?: string;
+  sheet?: SheetPreviewData;
   message?: string;
 }
 
@@ -31,6 +33,10 @@ export async function prepareDocumentPreview(
   const contentType = blob.type || document.content_type;
   const extension = extensionOf(document.file_name);
 
+  // The server answers .xlsx and .csv previews with sheet tables.
+  const sheet = await readSheetPreview(blob);
+  if (sheet) return { kind: 'sheet', sheet };
+
   if (contentType === 'application/pdf' || extension === 'pdf') {
     return { kind: 'pdf', objectUrl: URL.createObjectURL(blob) };
   }
@@ -46,14 +52,16 @@ export async function prepareDocumentPreview(
   if (SPREADSHEET_TYPES.has(contentType) || ['csv', 'xls', 'xlsx'].includes(extension)) {
     return {
       kind: 'unsupported',
-      message: 'Spreadsheet preview is being prepared as a print-quality PDF. If it does not appear yet, close this window and try previewing again.',
+      message: extension === 'xls'
+        ? 'Older Excel files (.xls) can’t be previewed here yet. Download the file to open it in Excel.'
+        : 'This spreadsheet can’t be previewed here. Download the file to open it in Excel.',
     };
   }
 
   if (WORD_TYPES.has(contentType) || ['doc', 'docx'].includes(extension)) {
     return {
       kind: 'unsupported',
-      message: 'Document preview is being prepared as a print-quality PDF. If it does not appear yet, close this window and try previewing again.',
+      message: 'Word documents can’t be previewed here yet. Download the file to open it in Word.',
     };
   }
 
