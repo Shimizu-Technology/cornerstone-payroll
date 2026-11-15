@@ -1,0 +1,39 @@
+# frozen_string_literal: true
+
+require "rails_helper"
+
+RSpec.describe TracksRecordCreation do
+  let!(:company) { create(:company) }
+  let!(:actor) { create(:user, company: company, organization: company.organization) }
+
+  after { Current.reset }
+
+  %i[company employee pay_period].each do |type|
+    it "records #{type} creation with immutable actor snapshots in the same transaction" do
+      Current.user = actor
+      attrs = type == :company ? { organization: company.organization } : { company: company, organization: company.organization }
+      attrs.delete(:organization) if %i[employee pay_period].include?(type)
+      record = create(type, **attrs)
+      log = AuditLog.find_by!(record_type: record.class.table_name, record_id: record.id, action: "#{record.class.table_name}#create")
+      expect(log.actor_name).to eq(actor.name)
+      expect(log.actor_role).to eq(actor.role)
+      expect(record.created_by_id).to eq(actor.id) if record.has_attribute?(:created_by_id)
+    end
+  end
+
+  it "rolls the created record back if auditing fails" do
+    allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid)
+    expect { create(:employee, company: company) }.to raise_error(ActiveRecord::RecordInvalid)
+    expect(company.employees.count).to eq(0)
+  end
+
+  it "rolls audit evidence back with a failed outer transaction" do
+    Current.user = actor
+    expect do
+      Employee.transaction do
+        create(:employee, company: company)
+        raise ActiveRecord::Rollback
+      end
+    end.not_to change { AuditLog.count }
+  end
+end

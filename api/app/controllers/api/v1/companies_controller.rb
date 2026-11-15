@@ -6,9 +6,10 @@ module Api
       def index
         return render json: { error: "Not authenticated" }, status: :unauthorized unless current_user
 
-        companies = Company.includes(:organization).where(id: current_user.accessible_company_ids)
+        companies = Company.includes(:organization, :migration_source_company, :created_by).where(id: current_user.accessible_company_ids)
                            .yield_self { |scope| params[:active].present? ? scope.where(active: ActiveModel::Type::Boolean.new.cast(params[:active])) : scope }
                            .order(:name)
+        @creators = RecordCreator.for_companies(companies.to_a) if StaffRolePolicy.allowed?(current_user, :staff_workspace)
         company_ids = companies.pluck(:id)
         total_employee_counts = employee_counts_by_company(company_ids)
         active_employee_counts = employee_counts_by_company(company_ids, active_only: true)
@@ -30,7 +31,7 @@ module Api
       private
 
       def company_summary(company, total_employee_counts:, active_employee_counts:)
-        {
+        summary = {
           id: company.id,
           organization_id: company.organization_id,
           organization_name: company.organization&.name,
@@ -62,6 +63,8 @@ module Api
           migration_rehearsal_completed_at: company.migration_rehearsal_completed_at,
           migration_rehearsal_error: company.migration_rehearsal_error
         }
+        summary[:creator] = @creators[company.id] if @creators
+        summary
       end
 
       def company_write_allowed?(company)

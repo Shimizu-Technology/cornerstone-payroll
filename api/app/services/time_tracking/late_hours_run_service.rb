@@ -192,6 +192,7 @@ module TimeTracking
       raise Error, "Confirm the legal workweek before paying late hours" unless workweek&.confirmed?
       PayrollGoLiveGate.new(company: origin.company, pay_date: request.fetch("pay_date")).require_live_payroll!(parallel_run: false)
       adjustment = PayPeriod.create!(company: origin.company, company_workweek: workweek,
+        created_by: actor,
         start_date: origin.start_date, end_date: origin.end_date, pay_date: request.fetch("pay_date"),
         run_purpose: "adjustment", run_purpose_source: "operator_selected", status: "draft",
         includes_base_salary: false, includes_recurring_items: false)

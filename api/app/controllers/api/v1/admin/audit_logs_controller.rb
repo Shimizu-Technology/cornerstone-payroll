@@ -98,7 +98,10 @@ module Api
             end
           end
           logs = logs.where("action ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:action_filter])}%") if params[:action_filter].present?
-          logs = logs.where("record_type ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:record_type])}%") if params[:record_type].present?
+          if params[:record_type].present?
+            definition = RecordActivityQuery::RECORD_TYPES[params[:record_type]]
+            logs = definition ? logs.where(record_type: definition.fetch(:audit_aliases)) : logs.where("record_type ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:record_type])}%")
+          end
           logs = logs.where(record_id: params[:record_id]) if params[:record_id].present?
           logs = logs.where("created_at >= ?", Time.zone.parse(params[:from])) if params[:from].present?
           logs = logs.where("created_at <= ?", Time.zone.parse(params[:to])) if params[:to].present?

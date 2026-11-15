@@ -10,12 +10,14 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
   let!(:foreign_admin) { create(:user, organization: foreign_organization, company: foreign_company, role: :admin) }
 
   before do
+    AuditLog.delete_all
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(admin)
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(admin.id)
   end
 
   it "returns complete paginated organization history without leaking other organizations" do
     second_company = create(:company, organization: organization, name: "Second Audit Client")
+    AuditLog.where(company_id: second_company.id).delete_all
     3.times do |index|
       AuditLog.record!(
         user: admin,
@@ -249,6 +251,7 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
 
   it "filters listing and export by a query-only client selector" do
     second_company = create(:company, organization: organization, name: "Selected Audit Client")
+    AuditLog.where(company_id: second_company.id).delete_all
     selected_log = create(
       :audit_log,
       user: admin,

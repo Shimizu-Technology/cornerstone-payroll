@@ -856,6 +856,7 @@ class IssueCorrectivePaycheckService
   def create_supplemental_period!(original)
     PayPeriod.create!(
       company_id:              original.company_id,
+      created_by: @actor,
       start_date:              original.start_date,
       end_date:                original.end_date,
       pay_date:                @pay_date,
