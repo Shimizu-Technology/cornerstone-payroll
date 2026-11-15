@@ -261,7 +261,7 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, p
         {placement === 'left' ? <div className="pointer-events-auto h-full w-[86vw] max-w-[320px]">{children}</div> : (
           <div className="flex min-h-full items-end justify-center py-0 sm:items-center sm:py-4 [&:has(.dialog-center-mobile)]:items-center [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12"
             onClick={(event) => { if (event.target === event.currentTarget) onOpenChange(false); }}>
-            <div className="relative w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
+            <div className="relative w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl [&:has(.dialog-full)]:max-w-none">{children}</div>
           </div>
         )}
       </div>

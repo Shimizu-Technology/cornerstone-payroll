@@ -3,7 +3,11 @@
 require "rails_helper"
 
 RSpec.describe GenerateClientDocumentPreviewJob, type: :job do
-  let(:document) { create(:client_document) }
+  # Spreadsheets preview as sheet tables; Word files still use the converter.
+  let(:document) do
+    create(:client_document, file_name: "notes.docx", file_key: "client_documents/test/notes.docx",
+      content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+  end
   let(:generator) { instance_double(ClientDocumentPreviewGenerator) }
 
   before { allow(ClientDocumentPreviewGenerator).to receive(:new).and_return(generator) }

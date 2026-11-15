@@ -28,7 +28,9 @@ class ClientDocument < ApplicationRecord
     text/csv
   ].freeze
   ORIGINAL_INLINE_PREVIEW_EXTENSIONS = %w[pdf png jpg jpeg webp].freeze
-  GENERATED_PREVIEW_EXTENSIONS = %w[doc docx xls xlsx csv txt].freeze
+  GENERATED_PREVIEW_EXTENSIONS = %w[doc docx xls txt].freeze
+  # Shown as sheet tables read straight from the original (SpreadsheetPreview).
+  SHEET_PREVIEW_EXTENSIONS = SpreadsheetPreview::SUPPORTED_EXTENSIONS
   SCAN_STATUSES = %w[not_scanned pending clean infected error].freeze
   PREVIEW_STATUSES = %w[pending processing ready failed not_required].freeze
 
@@ -149,8 +151,12 @@ class ClientDocument < ApplicationRecord
     ORIGINAL_INLINE_PREVIEW_EXTENSIONS.include?(file_extension)
   end
 
+  def sheet_preview?
+    SHEET_PREVIEW_EXTENSIONS.include?(file_extension)
+  end
+
   def preview_available?(staff_read: false)
-    (staff_read || !archived?) && (preview_ready? || preview_served_from_original?)
+    (staff_read || !archived?) && (preview_ready? || preview_served_from_original? || sheet_preview?)
   end
 
   def preview_filename
@@ -165,7 +171,7 @@ class ClientDocument < ApplicationRecord
 
   def self.initial_preview_status_for(file)
     extension = File.extname(file.original_filename.to_s).delete(".").downcase
-    return "not_required" if ORIGINAL_INLINE_PREVIEW_EXTENSIONS.include?(extension)
+    return "not_required" if ORIGINAL_INLINE_PREVIEW_EXTENSIONS.include?(extension) || SHEET_PREVIEW_EXTENSIONS.include?(extension)
     return "pending" if GENERATED_PREVIEW_EXTENSIONS.include?(extension)
 
     "failed"
