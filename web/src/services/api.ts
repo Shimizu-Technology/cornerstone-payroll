@@ -354,9 +354,10 @@ class ApiClient {
   // GET raw Blob with query params (for authenticated file downloads with year/filters)
   async getBlobWithParams(
     endpoint: string,
-    params?: Record<string, string | number | boolean | undefined>
+    params?: Record<string, string | number | boolean | undefined>,
+    options: Pick<RequestOptions, "companyId"> = {},
   ): Promise<BlobDownload> {
-    const initiatingCompanyId = this.activeCompanyId;
+    const initiatingCompanyId = options.companyId === undefined ? this.activeCompanyId : options.companyId;
     const token = await this.resolveAuthToken();
     const headers: Record<string, string> = this.financeHeaders(endpoint);
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -917,7 +918,7 @@ export const auditLogsApi = {
     sort_direction?: 'asc' | 'desc';
     company_id?: number;
   }): Promise<{ data: AuditLogEntry[]; meta: PaginationMeta }> =>
-    api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>('/admin/audit_logs', params),
+    api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>('/admin/audit_logs', params, { companyId: params?.company_id }),
   exportCsv: (params?: {
     user_id?: number;
     event_action?: string;
@@ -930,16 +931,18 @@ export const auditLogsApi = {
     to?: string;
     sort_direction?: 'asc' | 'desc';
     company_id?: number;
-  }): Promise<BlobDownload> => api.getBlobWithParams('/admin/audit_logs/export', params),
+  }): Promise<BlobDownload> => api.getBlobWithParams('/admin/audit_logs/export', params, { companyId: params?.company_id }),
 };
+
+export interface RecordCreatorInfo { name: string; role: string | null; created_at: string }
 
 export const recordActivitiesApi = {
   list: (
-    recordType: 'employees' | 'pay_periods',
+    recordType: 'employees' | 'pay_periods' | 'companies',
     recordId: number,
     params: { page?: number; per_page?: number } = {},
     companyId?: number,
-  ): Promise<{ data: AuditLogEntry[]; meta: PaginationMeta }> => api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>(
+  ): Promise<{ creator?: RecordCreatorInfo | null; data: AuditLogEntry[]; meta: PaginationMeta }> => api.get<{ creator?: RecordCreatorInfo | null; data: AuditLogEntry[]; meta: PaginationMeta }>(
     `/admin/record_activities/${recordType}/${recordId}`,
     params,
     { companyId },
@@ -3904,6 +3907,7 @@ export const printerProfilesApi = {
 // Companies API (Multi-tenant company switching)
 // ============================================================
 export interface CompanyListItem {
+  creator?: RecordCreatorInfo | null;
   payroll_intake_source_types?: string[];
   client_capabilities?: string[];
   client_management?: boolean;

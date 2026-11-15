@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 class Employee < ApplicationRecord
+  include TracksRecordCreation
+
+  belongs_to :created_by, class_name: "User", optional: true
   include PayrollAdjustable
   attr_accessor :ssn_confirmation, :require_ssn_confirmation, :allow_tax_classification_change
 

@@ -4,16 +4,20 @@ module Api
   module V1
     module Admin
       class RecordActivitiesController < BaseController
+        # Company history remains readable while a copy is preparing or needs repair.
+        skip_before_action :enforce_test_workspace_safety!, if: -> { params[:record_type] == "companies" }
+
         DEFAULT_PER_PAGE = 25
         MAX_PER_PAGE = 100
         LIMITED_TECHNICAL_FIELDS = %i[actor_email ip_address request_id user_agent].freeze
 
         def index
-          scope = RecordActivityQuery.new(
+          query = RecordActivityQuery.new(
             record_type: params[:record_type],
             record_id: params[:record_id],
             company_id: current_company_id
-          ).call
+          )
+          scope = query.call
           page = [ params.fetch(:page, 1).to_i, 1 ].max
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
           total = scope.count
@@ -26,6 +30,7 @@ module Api
           pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(logs)
 
           render json: {
+            creator: RecordCreator.call(query.record),
             data: logs.map { |log| record_activity_json(log, pay_period_subjects) },
             meta: {
               current_page: page,
