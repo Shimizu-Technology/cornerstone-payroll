@@ -187,7 +187,7 @@ module Api
           end
           render json: {
             error: "#{user_display_name(@user)} can't be deleted because their name is on payroll submissions, " \
-                   "uploaded files or other history that has to be kept. #{next_step}",
+                   "uploaded files, review history or other records that have to be kept. #{next_step}",
             code: "user_has_retained_history",
             practice_login: @user.practice_company_id?
           }, status: :unprocessable_entity
