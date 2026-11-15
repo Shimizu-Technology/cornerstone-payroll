@@ -181,9 +181,9 @@ module Api
           head :no_content
         rescue ActiveRecord::RecordNotDestroyed, ActiveRecord::InvalidForeignKey
           next_step = if @user.practice_company_id?
-            "Deactivate the login instead, or move it to a current practice copy to use it again."
+            "Choose Deactivate instead, or choose Move to use the login with a current practice copy."
           else
-            "Deactivate the login instead; their history stays attached to their name."
+            "Choose Deactivate instead; their history stays attached to their name."
           end
           render json: {
             error: "#{user_display_name(@user)} can't be deleted because their name is on payroll submissions, " \
@@ -272,14 +272,14 @@ module Api
           if reason
             render json: {
               error: "#{user_display_name(@user)} belongs to practice copy #{copy&.name || 'that was removed'}, which is #{reason}. " \
-                     "Move the login to a current practice copy to use it again.",
+                     "To use this login again, choose Move and pick a current practice copy.",
               code: "practice_copy_closed",
               practice_company_id: @user.practice_company_id
             }, status: :unprocessable_entity
           else
             render json: {
               error: "#{user_display_name(@user)} no longer has access to practice copy #{copy.name}. " \
-                     "Edit the login, select that copy again and save, then activate it.",
+                     "Choose Edit and save to restore that copy, then activate the login.",
               code: "practice_copy_unassigned"
             }, status: :unprocessable_entity
           end

@@ -202,7 +202,7 @@ RSpec.describe "Moving a practice-only login between practice copies", type: :re
       expect(response.parsed_body["code"]).to eq("practice_copy_closed")
       expect(response.parsed_body["error"]).to eq(
         "Practice Login belongs to practice copy Synthetic Bakery practice A, which is archived. " \
-        "Move the login to a current practice copy to use it again."
+        "To use this login again, choose Move and pick a current practice copy."
       )
       expect(response.parsed_body["error"]).not_to include("must be a ready")
       expect(login.reload).not_to be_active
@@ -217,7 +217,7 @@ RSpec.describe "Moving a practice-only login between practice copies", type: :re
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body).to include("code" => "user_has_retained_history", "practice_login" => true)
       expect(response.parsed_body["error"]).to include("can't be deleted because their name is on")
-      expect(response.parsed_body["error"]).to include("move it to a current practice copy")
+      expect(response.parsed_body["error"]).to include("choose Move to use the login with a current practice copy")
     end
 
     it "lists the practice copy state for the Users page" do
