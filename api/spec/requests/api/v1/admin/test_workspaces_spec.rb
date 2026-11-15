@@ -55,7 +55,9 @@ RSpec.describe "General test workspace administration", type: :request do
     expect(response).to have_http_status(:accepted)
     workspace = Company.find(response.parsed_body.dig("company", "id"))
     expect(workspace).to have_attributes(name: "Spike Anything Goes Test", test_workspace_purpose: "sandbox")
-    creation = AuditLog.find_by!(record_type: "companies", record_id: workspace.id, action: "companies#create")
+    creation = AuditLog.find_by!(record_type: "companies", record_id: workspace.id, action: "test_workspace#create")
+    expect(AuditLog.where(record_type: "companies", record_id: workspace.id, action: "companies#create")).to be_empty
+    expect(workspace.created_by_id).to eq(admin.id)
     expect(creation.user_id).to eq(admin.id)
     expect(creation.metadata).to include("source_company_id" => source_company.id, "copy_mode" => "exclude_recent")
     expect(workspace.payroll_intake_source_types).to eq([ "mosa_revel" ])
