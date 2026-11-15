@@ -24,7 +24,9 @@ import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
-import { formatCurrency } from '@/lib/utils';
+import { cn, formatCurrency } from '@/lib/utils';
+import { importSourceFiles } from '@/lib/importSources';
+import { ImportSourcePanel } from './ImportSourcePanel';
 import { ApiError, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
@@ -508,9 +510,13 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     </div>
   );
 
+  // Review uses the full width with the retained source files beside it.
+  const sourceFiles = importSourceFiles(previewData?.source_package.documents);
+  const showSources = step === 'preview' && Boolean(previewData) && Boolean(sourceFiles.pdf || sourceFiles.workbook);
+
   return (
     <Dialog open={open} onOpenChange={handleClose} dismissOnEscape={!loading && step !== 'applying'}>
-      <DialogContent className="dialog-top dialog-wide max-w-6xl max-h-[calc(100vh-8rem)] overflow-y-auto">
+      <DialogContent className={cn('dialog-top max-h-[calc(100vh-8rem)] overflow-y-auto', showSources ? 'dialog-full' : 'dialog-wide max-w-6xl')}>
         <DialogHeader>
           <DialogTitle>Import Payroll Data</DialogTitle>
           <DialogDescription>
@@ -534,6 +540,12 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <Button disabled={loading} onClick={() => void handlePreview(duplicateRevision.id)}>Use this import for the client’s revision {duplicateRevision.revision}</Button>
         </div>}
 
+        <div className={showSources ? 'flex flex-col gap-4 xl:flex-row xl:items-start' : 'contents'}>
+        {showSources && previewData && (
+          <ImportSourcePanel key={previewData.source_package.id} className="xl:order-2" payPeriodId={payPeriodId}
+            importId={previewData.source_package.id} documents={previewData.source_package.documents} />
+        )}
+        <div className={showSources ? 'min-w-0 flex-1 xl:order-1' : 'contents'}>
         {previewData?.pending_portal_source && !previewData.portal_source && <section className="space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-4" aria-label="Pending client revision">
           <p className="text-sm">A client revision is waiting. Confirm that this import uses the files and changes for that revision. The selection is recorded only when this import applies successfully.</p>
           <h3 className="font-semibold">Client revision {previewData.pending_portal_source.revision} · changes for this period</h3>
@@ -991,6 +1003,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             </div>
           </div>
         )}
+
+        </div>
+        </div>
 
         {/* Done Step */}
         {step === 'done' && results && (

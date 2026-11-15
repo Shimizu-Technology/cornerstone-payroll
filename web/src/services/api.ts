@@ -2005,6 +2005,11 @@ export const payrollIntakeImportsApi = {
     api.get<{ imports: PayrollIntakeImportData[]; disposition_targets: PayrollIntakeDispositionTarget[] }>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports`),
   show: (payPeriodId: number, importId: number) =>
     api.get<{ import: PayrollIntakeImportData }>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}`),
+  // A PDF comes back as bytes; a workbook as JSON sheet tables.
+  previewSource: (payPeriodId: number, importId: number, documentId: number) =>
+    api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}/documents/${documentId}/preview`),
+  downloadSource: (payPeriodId: number, importId: number, documentId: number) =>
+    api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}/documents/${documentId}/download`),
 };
 
 export const punchEntriesApi = {
@@ -2126,6 +2131,14 @@ export interface MosaSourceRow {
 
 export type ClientChangePrefill = { submission_id: number; revision: number; manual_review_warnings?: string[]; removals?: string[]; rows: { change_index: number; kind: 'owner_pay' | 'extra_hours'; requires_pay_decision?: boolean; employee_id?: number; employee_name?: string; amount?: string; hours?: string; employee_wage_rate_id?: number; wage_rate_label?: string; wage_rate?: string; error?: string; overwrite_required?: boolean; saved_regular_hours?: string; saved_overtime_hours?: string; saved_period_pay?: string; workbook_period_pay?: string; pay_conflict?: boolean }[] };
 
+export interface ImportSourceDocument {
+  id: number;
+  source_role: string;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+}
+
 export interface ImportPreviewResponse {
   client_change_prefill?: ClientChangePrefill | null;
   pending_change_prefill?: ClientChangePrefill | null;
@@ -2153,6 +2166,8 @@ export interface ImportPreviewResponse {
     replacement_revision?: number | null;
     verified_source_count: number;
     source_count: number;
+    // Retained files shown beside import review (Revel PDF, change workbook).
+    documents?: ImportSourceDocument[];
     disposition_targets: PayrollIntakeDispositionTarget[];
   };
   preview: {

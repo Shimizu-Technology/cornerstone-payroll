@@ -10,10 +10,18 @@ RSpec.describe ScanClientDocumentJob, type: :job do
   end
 
   it "resumes preview generation after a real adapter returns clean" do
-    document = create(:client_document, scan_status: "pending")
+    document = create(:client_document, scan_status: "pending", file_name: "notes.docx", file_key: "client_documents/test/notes.docx",
+      content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     adapter = double(scan: "clean")
     allow(ClientDocumentScanner).to receive(:adapter).and_return(adapter)
     expect { described_class.perform_now(document.id) }.to have_enqueued_job(GenerateClientDocumentPreviewJob).with(document.id)
+    expect(document.reload.scan_status).to eq("clean")
+  end
+
+  it "does not queue a converted preview for a spreadsheet, which previews as sheet tables" do
+    document = create(:client_document, scan_status: "pending")
+    allow(ClientDocumentScanner).to receive(:adapter).and_return(double(scan: "clean"))
+    expect { described_class.perform_now(document.id) }.not_to have_enqueued_job(GenerateClientDocumentPreviewJob)
     expect(document.reload.scan_status).to eq("clean")
   end
 
