@@ -773,6 +773,8 @@ export const usersApi = {
     api.post<{ data: User }>(`/admin/users/${id}/deactivate`),
   resendInvitation: (id: number) =>
     api.post<UserCreateResponse>(`/admin/users/${id}/resend_invitation`),
+  movePracticeCopy: (id: number, data: { company_id: number; activate: boolean }) =>
+    api.post<Partial<UserCreateResponse> & { data: User; moved_from: { id: number; name: string } }>(`/admin/users/${id}/move_practice_copy`, data),
   delete: (id: number) =>
     api.delete(`/admin/users/${id}`),
 };
