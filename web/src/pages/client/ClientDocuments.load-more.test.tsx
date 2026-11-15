@@ -145,3 +145,17 @@ it.each([false, true])('resets metadata only after complete success (failure: %s
   if (visibility) expect(visibility.checked).toBe(!fails);
   expect(screen.queryByText('test.pdf') !== null).toBe(fails);
 });
+
+it('keeps a revision grouped across loaded pages', async () => {
+  const group = { id: 42, label: 'Pay period files · Oct 19 – Nov 1 · revision 2' };
+  mocks.list.mockImplementation((params?: { page?: number }) => Promise.resolve({
+    data: [{ ...doc(params?.page === 2 ? 1 : 2), submission_groups: [group] }], meta: meta(params?.page || 1),
+  }));
+  render(<ClientDocuments />);
+  fireEvent.click(await screen.findByText(group.label));
+  fireEvent.click(screen.getByRole('button', { name: 'Load more documents' }));
+  await screen.findByText('w4-1.pdf');
+  expect(screen.getAllByText(group.label)).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Preview w4-1.pdf' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Download w4-2.pdf' })).toBeTruthy();
+});

@@ -58,7 +58,7 @@ it('shows the current revision and keeps the superseded one visible', async () =
   expect(within(current).getByText('Current')).toBeTruthy();
   expect(within(current).getByText(/Sam Worker · 35 hours paid leave/)).toBeTruthy();
   expect(screen.getByText('Superseded')).toBeTruthy();
-  expect(screen.getByText('Sent, waiting for Cornerstone to confirm')).toBeTruthy();
+  expect(screen.getByText('Sent to Cornerstone')).toBeTruthy();
 });
 
 it('sends an update as a new revision carrying the Revel PDF forward with a stable retry key', async () => {
@@ -174,4 +174,14 @@ it('counts explicit skips separately from changes in the sent receipt', async ()
   fireEvent.click(screen.getByLabelText('No tips or loans this period'));
   fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
   await screen.findByText(/0 changes · 1 not this period/);
+});
+
+it('orders the six staff sections and hides the single-revision picker', async () => {
+  mocks.get.mockResolvedValue({ data: period({ pay_period_id: 12, submissions: [revision(2, true)] }) });
+  renderAt('staff');
+  await screen.findByRole('heading', { name: 'Status' });
+  expect(screen.getAllByRole('heading', { level: 2 }).map(node => node.textContent)).toEqual([
+    'Status', 'What the client sent', 'Next step', 'Draft for client review', 'Messages', 'History',
+  ]);
+  expect(screen.queryByLabelText('Client’s revision')).toBeNull();
 });
