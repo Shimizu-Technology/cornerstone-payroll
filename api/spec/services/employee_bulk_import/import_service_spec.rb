@@ -66,7 +66,7 @@ RSpec.describe EmployeeBulkImport::ImportService, type: :service do
     ])
 
     expect(result).to include(created: 1, failed: 0)
-    expect(AuditLog.find_by!(record_type: "employees", record_id: company.employees.sole.id, action: "employees#create").user_id).to eq(actor.id)
+    expect(company.employees.sole.created_by_id).to eq(actor.id)
     expect(company.employees.sole.employee_w4_elections.sole).to have_attributes(
       effective_on: Date.new(2026, 1, 15),
       source: "employee_creation",

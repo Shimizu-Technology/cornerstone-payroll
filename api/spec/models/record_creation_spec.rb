@@ -22,9 +22,29 @@ RSpec.describe TracksRecordCreation do
   end
 
   it "rolls the created record back if auditing fails" do
+    Current.user = actor
     allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid)
     expect { create(:employee, company: company) }.to raise_error(ActiveRecord::RecordInvalid)
     expect(company.employees.count).to eq(0)
+  end
+
+  it "keeps a creator but writes no audit row without a signed-in user" do
+    employee = create(:employee, company: company, created_by: actor)
+    expect(employee.created_by_id).to eq(actor.id)
+    expect(AuditLog.where(record_type: "employees", record_id: employee.id)).to be_empty
+  end
+
+  it "keeps a creator the code set explicitly" do
+    other = create(:user, company: company, organization: company.organization)
+    Current.user = actor
+    expect(create(:employee, company: company, created_by: other).created_by_id).to eq(other.id)
+  end
+
+  it "does not audit employees copied into a test workspace" do
+    Current.user = actor
+    source = create(:employee, company: company)
+    copy = create(:employee, company: company, test_workspace_source_employee_id: source.id)
+    expect(AuditLog.where(record_type: "employees", record_id: copy.id)).to be_empty
   end
 
   it "rolls audit evidence back with a failed outer transaction" do
