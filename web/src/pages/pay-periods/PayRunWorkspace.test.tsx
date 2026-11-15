@@ -35,7 +35,7 @@ vi.mock('@/contexts/CompanyContext', () => ({
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ isAdmin: apiMocks.isAdmin }),
+  useAuth: () => ({ isAdmin: apiMocks.isAdmin, hasCapability: () => true }),
 }));
 
 vi.mock('@/services/api', () => ({

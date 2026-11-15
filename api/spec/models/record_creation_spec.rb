@@ -43,9 +43,12 @@ RSpec.describe TracksRecordCreation do
   end
 
   it "does not audit employees copied into a test workspace" do
-    Current.user = actor
+    workspace = create(:company, organization: company.organization, payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "sandbox", migration_source_company: company, migration_rehearsal_status: "ready",
+      test_workspace_expires_at: 1.day.from_now)
     source = create(:employee, company: company)
-    copy = create(:employee, company: company, test_workspace_source_employee_id: source.id)
+    Current.user = actor
+    copy = create(:employee, company: workspace, test_workspace_source_employee_id: source.id)
     expect(AuditLog.where(record_type: "employees", record_id: copy.id)).to be_empty
   end
 
