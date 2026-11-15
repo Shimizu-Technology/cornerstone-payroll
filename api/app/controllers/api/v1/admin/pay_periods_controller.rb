@@ -1315,12 +1315,25 @@ module Api
           company.update!(next_check_number: number)
         end
 
+        def client_files_summary(pay_period)
+          scope = PayrollSubmissionPeriod.where(company_id: pay_period.company_id)
+          period = scope.find_by(pay_period_id: pay_period.id) || scope.find_by(start_date: pay_period.start_date, end_date: pay_period.end_date)
+          source = period&.current_submission
+          return unless source
+
+          imported = PayrollSubmissionImport.where(current_submission_id: source.id).where.not(applied_at: nil).exists?
+          { period_id: period.id, revision: source.revision, submission_id: source.id,
+            submitted_at: source.submitted_at, status: imported ? "imported" : period.pending_source_review? ? "waiting" : "set aside",
+            blocks_calculation: pay_period.pending_portal_submission? }
+        end
+
         def pay_period_json(pay_period, include_items: false)
           agg = pay_period_aggregates(pay_period)
           lifecycle = pay_period_lifecycle_summary(pay_period)
 
           json = {
             id: pay_period.id,
+            client_files: include_items ? client_files_summary(pay_period) : nil,
             source_correction_required: include_items && pay_period.committed? && !pay_period.voided? && TimeTracking::FinancialCorrectionService.required_for?(pay_period),
             company_id: pay_period.company_id,
             start_date: pay_period.start_date,

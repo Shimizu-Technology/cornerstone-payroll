@@ -45,6 +45,15 @@ class ClientDocument < ApplicationRecord
   has_many :payroll_filing_events, foreign_key: :evidence_document_id, dependent: :restrict_with_error
   has_many :payroll_submission_documents, dependent: :restrict_with_error
 
+  def submission_groups
+    payroll_submission_documents.filter_map do |membership|
+      submission = membership.submission
+      next unless membership.company_id == company_id && submission.company_id == company_id && submission.period.company_id == company_id
+
+      { id: submission.id, label: "Pay period files · #{submission.period.label} · revision #{submission.revision}" }
+    end
+  end
+
   validates :title, :category, :file_name, :file_key, :content_type, presence: true
   validates :uploaded_by, presence: true, on: :create
   validates :category, inclusion: { in: CATEGORIES }
