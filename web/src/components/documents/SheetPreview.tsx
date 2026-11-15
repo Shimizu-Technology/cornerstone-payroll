@@ -78,7 +78,7 @@ export function SheetPreview({ data, className, tableClassName }: { data: SheetP
                     <td
                       key={column}
                       className={cn(
-                        'max-w-72 border-b border-r border-neutral-100 px-2 py-1 align-top whitespace-pre-wrap break-words',
+                        'min-w-24 max-w-72 border-b border-r border-neutral-100 px-2 py-1 align-top whitespace-pre-wrap break-words',
                         cell && NUMERIC_CELL.test(cell) && 'whitespace-nowrap text-right tabular-nums'
                       )}
                     >

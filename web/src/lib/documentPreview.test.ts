@@ -20,3 +20,11 @@ it('never promises a PDF that is not coming for spreadsheets or Word files', asy
   expect(docx).toEqual({ kind: 'unsupported', message: expect.stringContaining('Word documents can’t be previewed here yet') });
   expect(`${xls.message} ${docx.message}`).not.toMatch(/PDF/);
 });
+
+it('explains a damaged spreadsheet inside the preview instead of failing', async () => {
+  const blob = new Blob([JSON.stringify({ sheet_preview: null, sheet_preview_unavailable: 'This spreadsheet could not be read.' })], { type: 'application/json' });
+
+  const payload = await prepareDocumentPreview({ file_name: 'damaged.xlsx', content_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, blob);
+
+  expect(payload).toEqual({ kind: 'unsupported', message: 'This spreadsheet could not be read.' });
+});

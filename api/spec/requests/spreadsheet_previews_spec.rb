@@ -138,9 +138,9 @@ RSpec.describe "Spreadsheet and import source previews", type: :request do
 
       get "/api/v1/client/documents/#{corrupt.id}/preview", headers: headers
 
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body).to include("code" => "sheet_preview_unavailable")
-      expect(response.parsed_body.fetch("error")).to include("could not be read")
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body).to include("sheet_preview" => nil)
+      expect(response.parsed_body.fetch("sheet_preview_unavailable")).to include("could not be read")
       expect(AuditLog.where(action: "portal_documents#preview", record_type: "client_documents", record_id: corrupt.id)).not_to exist
     end
   end
