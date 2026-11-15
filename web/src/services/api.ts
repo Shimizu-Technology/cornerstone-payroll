@@ -4286,6 +4286,7 @@ export interface ClientDocumentListMeta extends BoundedListMeta {
 export type BoundedListParams = { page?: number; per_page?: number };
 
 export interface ClientDocument {
+  submission_groups?: { id: number; label: string }[];
   reviewed_at?: string | null;
   reviewed_by_id?: number | null;
   id: number;

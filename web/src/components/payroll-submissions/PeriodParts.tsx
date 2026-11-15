@@ -121,12 +121,12 @@ export function RevisionCard({ revision, api, companyId, audience }: { revision:
     </div>
   );
   if (revision.current) {
-    return <section aria-labelledby={`revision-${revision.id}`} className="rounded-xl border border-primary-200 bg-white p-4">
+    return <section aria-labelledby={`revision-${revision.id}`} className="space-y-3">
       <div className="mb-2 flex flex-wrap items-center gap-2"><h3 id={`revision-${revision.id}`} className="font-semibold text-neutral-950">Revision {revision.revision}</h3><Badge variant="info">Current</Badge></div>
       {body}
     </section>;
   }
-  return <details className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+  return <details className="py-3">
     <summary className="cursor-pointer font-semibold text-neutral-800">Revision {revision.revision} <Badge variant="outline" className="ml-2">Superseded</Badge> <span className="ml-1 text-sm font-normal text-neutral-600">{formatGuam(revision.submitted_at)}</span></summary>
     <div className="mt-3">{body}</div>
   </details>;

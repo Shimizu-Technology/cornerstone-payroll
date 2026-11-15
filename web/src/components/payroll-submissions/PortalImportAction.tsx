@@ -48,12 +48,12 @@ export function PortalImportAction({ period, companyId, onApplied }: { period: P
     catch (err) { setError(err instanceof Error ? err.message : 'Could not record why this submission is not being used'); }
     finally { setBusy(false); }
   };
-  return <section aria-label="Portal import" className="space-y-3 rounded-lg border border-neutral-200 p-3">
+  return <section aria-label="Portal import" className="space-y-3">
     <h3 className="font-semibold">Review the client’s payroll files</h3>
     <p className="text-sm text-neutral-700">The client’s revision number counts each time they sent files. The import version is separate: it counts the sets of files loaded into import review.</p>
-    <label className="block text-sm">Client’s revision<select className="mt-1 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3" value={selectedId} onChange={e => { setSelectedId(Number(e.target.value)); setStaffWorkbook(null); setSupersededReason(''); setReplacementId(null); setReplacementVersion(null); setReplace(false); }}>
+    {period.submissions.length > 1 && <label className="block text-sm">Client’s revision<select className="mt-1 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3" value={selectedId} onChange={e => { setSelectedId(Number(e.target.value)); setStaffWorkbook(null); setSupersededReason(''); setReplacementId(null); setReplacementVersion(null); setReplace(false); }}>
       {period.submissions.map(row => <option key={row.id} value={row.id}>Revision {row.revision}{row.current ? ' (latest)' : ' (older, replaced by a newer one)'}</option>)}
-    </select></label>
+    </select></label>}
     {!selected.current && <label className="block text-sm">Why use an older revision instead of the latest?<textarea className="mt-1 block min-h-20 w-full rounded-md border border-neutral-300 p-2" maxLength={2000} value={supersededReason} onChange={e => setSupersededReason(e.target.value)} /></label>}
     {selected.changes_link_url && !selected.documents.some(doc => doc.role === 'changes_workbook') && <div className="space-y-2 rounded-lg border border-primary-200 bg-primary-50 p-3">
       <a className="break-all text-sm underline" href={selected.changes_link_url} target="_blank" rel="noopener noreferrer">Client’s tips &amp; loans workbook link</a>

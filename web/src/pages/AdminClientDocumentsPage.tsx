@@ -1,3 +1,4 @@
+import { SubmissionDocumentGroups } from '@/components/documents/SubmissionDocumentGroups';
 import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useSearchParams } from 'react-router';
 import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
@@ -455,8 +456,9 @@ export function AdminClientDocumentsPage() {
               </div>
             ) : (
               <>
+                <SubmissionDocumentGroups allowArchived documents={documents} onPreview={previewDocumentFile} onDownload={downloadDocument} />
                 <div className="space-y-3 sm:hidden">
-                  {documents.map((document) => (
+                  {documents.filter(document => !document.submission_groups?.length).map((document) => (
                     <MobileRecordCard key={document.id}>
                       <div className="flex items-start gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
@@ -509,7 +511,7 @@ export function AdminClientDocumentsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody striped>
-                  {documents.map((document) => (
+                  {documents.filter(document => !document.submission_groups?.length).map((document) => (
                     <TableRow key={document.id}>
                       <TableCell>
                         <div>
