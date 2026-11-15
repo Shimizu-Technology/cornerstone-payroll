@@ -179,16 +179,30 @@ class User < ApplicationRecord
       (new_record? || company_assignments.active_access.exists?(company_id: practice_company_id))
   end
 
+  # TestWorkspace::MovePracticeLogin is the only path that may re-point a
+  # practice-only login, and only after it has checked both copies.
+  def allow_practice_company_move!
+    @practice_company_move_allowed = true
+  end
+
+  def reset_practice_company_move!
+    @practice_company_move_allowed = false
+  end
+
   private
 
   def practice_scope_is_isolated
     if practice_company_id_in_database.present? && will_save_change_to_practice_company_id?
-      errors.add(:practice_company, "cannot be changed for a practice-only login")
+      if !@practice_company_move_allowed
+        errors.add(:practice_company, "cannot be changed for a practice-only login")
+      elsif practice_company_id.blank?
+        errors.add(:practice_company, "must remain a practice copy")
+      end
     end
     return unless practice_company_id?
 
     errors.add(:base, "A practice-only login must remain a client of its practice copy") unless client? && company_id == practice_company_id
-    errors.add(:practice_company, "must be a ready, active practice copy") if active? && !practice_portal_open?
+    errors.add(:base, "This practice login can't be active while its practice copy is archived, expired or not ready") if active? && !practice_portal_open?
     if company_assignments.where.not(company_id: practice_company_id).exists?
       errors.add(:base, "A practice-only login cannot be assigned to another client")
     end

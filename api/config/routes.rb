@@ -224,6 +224,7 @@ Rails.application.routes.draw do
             post :activate
             post :deactivate
             post :resend_invitation
+            post :move_practice_copy
           end
         end
         resources :audit_logs, only: [ :index ] do
