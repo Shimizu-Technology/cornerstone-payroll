@@ -12,6 +12,7 @@ module TracksRecordCreation
     before_create :assign_record_creator
     after_create :audit_record_creation
     after_rollback :restore_domain_audit_marker
+    after_commit :forget_domain_audit_marker
   end
 
   private
@@ -54,5 +55,10 @@ module TracksRecordCreation
     return unless defined?(@domain_audit_marker_before_creation)
 
     Current.domain_audit_recorded = @domain_audit_marker_before_creation
+    forget_domain_audit_marker
+  end
+
+  def forget_domain_audit_marker
+    remove_instance_variable(:@domain_audit_marker_before_creation) if defined?(@domain_audit_marker_before_creation)
   end
 end
