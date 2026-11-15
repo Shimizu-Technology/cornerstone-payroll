@@ -34,7 +34,7 @@ module Api
         # Organization admins see their firm's companies; non-admin staff see assigned clients.
         def index
           accessible_ids = current_user&.accessible_company_ids || []
-          companies = Company.where(id: accessible_ids).includes(:organization, :migration_source_company).order(:name)
+          companies = Company.where(id: accessible_ids).includes(:organization, :migration_source_company, :created_by).order(:name)
           companies = companies.where(active: true) if params[:active] == "true"
 
           company_ids = companies.pluck(:id)
@@ -356,8 +356,14 @@ module Api
           company.active_printer_profile = nil
         end
 
+        def company_creator_payload(company)
+          @company_creators ||= RecordCreator.for_companies(Company.where(id: current_user.accessible_company_ids).includes(:created_by))
+          @company_creators[company.id]
+        end
+
         def company_payload(company, detailed: false, total_employee_counts: nil, active_employee_counts: nil)
           payload = {
+            creator: company_creator_payload(company),
             id: company.id,
             organization_id: company.organization_id,
             organization_name: company.organization.name,

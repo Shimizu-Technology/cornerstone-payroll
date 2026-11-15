@@ -195,6 +195,7 @@ class PayPeriodCorrectionService
       # Build the new correction pay period
       correction_run = PayPeriod.create!(
         company_id:         locked_source.company_id,
+        created_by: actor,
         company_workweek_id: locked_source.company_workweek_id,
         company_pay_schedule_id: locked_source.company_pay_schedule_id,
         start_date:         new_start_date || locked_source.start_date,

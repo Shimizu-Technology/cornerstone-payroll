@@ -11,6 +11,7 @@ RSpec.describe "Api::V1::Admin::RecordActivities", type: :request do
   let!(:pay_period) { create(:pay_period, company: company) }
 
   before do
+    AuditLog.where(record_type: %w[employees pay_periods], action: %w[employees#create pay_periods#create]).delete_all
     allow_any_instance_of(Api::V1::Admin::RecordActivitiesController).to receive(:current_user).and_return(actor)
     allow_any_instance_of(Api::V1::Admin::RecordActivitiesController).to receive(:current_user_id).and_return(actor.id)
     allow_any_instance_of(Api::V1::Admin::RecordActivitiesController).to receive(:current_company_id).and_return(company.id)
@@ -177,5 +178,35 @@ RSpec.describe "Api::V1::Admin::RecordActivities", type: :request do
 
     expect(response).to have_http_status(:forbidden)
     expect(response.parsed_body.fetch("error")).to eq("Staff access required")
+  end
+  it "returns the company creator and exact company history" do
+    Current.user = actor
+    tracked = create(:company, organization: organization)
+    create(:company_assignment, user: actor, company: tracked)
+    Current.reset
+    allow_any_instance_of(Api::V1::Admin::RecordActivitiesController).to receive(:current_company_id).and_return(tracked.id)
+    get "/api/v1/admin/record_activities/companies/#{tracked.id}"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("creator", "name")).to eq(actor.name)
+    expect(response.parsed_body.dig("data", 0, "action")).to eq("companies#create")
+  end
+
+  it "does not infer a creator for pre-tracking records" do
+    get "/api/v1/admin/record_activities/employees/#{employee.id}"
+    expect(response.parsed_body["creator"]).to be_nil
+  end
+
+  it "denies unauthenticated requests" do
+    allow_any_instance_of(Api::V1::Admin::RecordActivitiesController).to receive(:auth_disabled?).and_return(false)
+    allow_any_instance_of(Api::V1::Admin::RecordActivitiesController).to receive(:current_user).and_return(nil)
+    allow_any_instance_of(Api::V1::Admin::RecordActivitiesController).to receive(:current_user_id).and_return(nil)
+    get "/api/v1/admin/record_activities/employees/#{employee.id}"
+    expect(response).to have_http_status(:unauthorized)
+  end
+  it "keeps company history readable while a workspace copy is preparing" do
+    company.update!(migration_source_company: other_company, payroll_environment: "migration_rehearsal", migration_rehearsal_status: "pending", test_workspace_purpose: "sandbox")
+    create(:company_assignment, user: actor, company: company, workspace_access_level: "reviewer")
+    get "/api/v1/admin/record_activities/companies/#{company.id}"
+    expect(response).to have_http_status(:ok)
   end
 end
