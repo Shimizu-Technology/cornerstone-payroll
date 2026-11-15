@@ -62,6 +62,11 @@ export interface User {
   last_login_at?: string | null;
   last_active_at?: string | null;
   platform_owner?: boolean;
+  /** Set only for a practice-only client login. */
+  practice_company_id?: number | null;
+  practice_company_name?: string | null;
+  /** Why the login's practice copy is closed (for example "archived"); null while it is open. */
+  practice_copy_closed_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
