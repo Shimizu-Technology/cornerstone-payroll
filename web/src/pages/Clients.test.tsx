@@ -28,7 +28,7 @@ const apiMocks = vi.hoisted(() => ({
   archiveTestWorkspace: vi.fn(),
   restoreTestWorkspace: vi.fn(),
   activeCompanyId: 6,
-  auth: { isAdmin: true, isAccountant: false, isManager: false },
+  auth: { isAdmin: true, isAccountant: false, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' },
 }));
 
 const refreshCompanies = vi.fn();
@@ -119,7 +119,7 @@ afterEach(() => cleanup());
 describe('Clients migration promotion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false };
+    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' };
     apiMocks.list.mockResolvedValue({ companies: [target, rehearsal] });
     apiMocks.testWorkspacePreview.mockResolvedValue({ test_workspace: generalWorkspacePreview });
     refreshCompanies.mockResolvedValue(undefined);
@@ -243,7 +243,7 @@ describe('Clients migration promotion', () => {
   });
 
   it('keeps test-workspace creation and its admin guide out of accountant access', async () => {
-    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false };
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' };
     apiMocks.list.mockResolvedValue({ companies: [target] });
 
     render(<Clients />);
@@ -392,7 +392,7 @@ describe('Clients name-only rename', () => {
     vi.clearAllMocks();
     // jsdom reports no rendered offsetParent; finish dialog focus before typing.
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { callback(0); return 0; });
-    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false };
+    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' };
     apiMocks.list.mockResolvedValue({ companies: [target] });
     apiMocks.update.mockResolvedValue({ company: target });
     refreshCompanies.mockResolvedValue(undefined);
@@ -513,7 +513,7 @@ describe('Clients name-only rename', () => {
     apiMocks.update.mockImplementation(() => new Promise<void>(resolve => { resolveSave = resolve; }));
     const rendered = renderClients();
     await changeName(user, await openRename(user));
-    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false };
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' };
     rendered.rerender(<FeedbackProvider scopeKey="rename-test"><Clients /></FeedbackProvider>);
     resolveSave();
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -524,12 +524,12 @@ describe('Clients name-only rename', () => {
   });
 
   it('hides rename from non-admin staff and read-only workspaces', async () => {
-    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false };
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' };
     const rendered = renderClients();
     await screen.findAllByText(target.name);
     expect(screen.queryByRole('button', { name: `Rename ${target.name}` })).toBeNull();
     rendered.unmount();
-    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false };
+    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' };
     apiMocks.list.mockResolvedValue({ companies: [{ ...rehearsal, test_workspace_sealed_at: '2026-10-07T00:00:00Z' }] });
     renderClients();
     await screen.findAllByText(rehearsal.name);
@@ -541,7 +541,7 @@ describe('Clients name-only rename', () => {
 describe('Client create/edit field labels', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false };
+    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' };
     apiMocks.list.mockResolvedValue({ companies: [target] });
     apiMocks.get.mockResolvedValue({ company: { ...target, phone: '(671) 555-0100' } });
     apiMocks.create.mockResolvedValue({ company: target });
@@ -609,7 +609,7 @@ describe('Client create/edit field labels', () => {
   });
   it('uses the client-specific editable fields for a delegated accountant and sends only those fields', async () => {
     const user = userEvent.setup();
-    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false };
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' };
     apiMocks.get.mockResolvedValue({ company: { ...target, editable_fields: ['name', 'ein', 'phone'] } });
     apiMocks.update.mockResolvedValue({ company: target });
     render(<Clients />);

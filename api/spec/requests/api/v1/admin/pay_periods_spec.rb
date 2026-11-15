@@ -473,6 +473,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:created)
       json = JSON.parse(response.body)
       expect(json["pay_period"]["status"]).to eq("draft")
+      creation = AuditLog.find_by!(record_type: "pay_periods", record_id: json["pay_period"]["id"], action: "pay_periods#create")
+      expect(creation.user_id).to eq(admin_user.id)
       expect(json["pay_period"]["run_purpose"]).to eq("regular")
       expect(json["pay_period"]["includes_base_salary"]).to be(true)
       expect(json["pay_period"]["includes_recurring_items"]).to be(true)

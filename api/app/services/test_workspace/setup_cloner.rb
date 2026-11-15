@@ -64,7 +64,8 @@ module TestWorkspace
           department: source.department_id && department_map.fetch(source.department_id),
           previous_employee_id: nil,
           portal_pending_approval: false,
-          test_workspace_source_employee: employee_lineage ? source : nil
+          test_workspace_source_employee: employee_lineage ? source : nil,
+          created_by: actor
         )
       end
 

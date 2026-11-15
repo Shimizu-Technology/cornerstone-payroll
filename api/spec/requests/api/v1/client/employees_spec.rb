@@ -92,6 +92,8 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       end.to change(Employee, :count).by(1).and change(EmployeeChangeRequest, :count).by(1)
 
       expect(response).to have_http_status(:created)
+      expect(AuditLog.find_by!(record_type: "employees", record_id: Employee.last.id, action: "client_employees#create").user_id).to eq(client_user.id)
+      expect(Employee.last.created_by_id).to eq(client_user.id)
       json = JSON.parse(response.body)
       created = Employee.order(:id).last
       expect(created.company_id).to eq(company.id)

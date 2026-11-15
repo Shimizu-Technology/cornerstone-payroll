@@ -86,6 +86,7 @@ module EmployeeBulkImport
           end
 
           employee = company.employees.new(attrs)
+          employee.created_by = actor
           EmployeeIntakePolicy.prepare!(employee, actor: actor)
           if employee.save
             create_w4_election!(employee)

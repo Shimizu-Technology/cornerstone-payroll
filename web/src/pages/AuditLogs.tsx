@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { Header } from '@/components/layout/Header';
@@ -29,11 +30,17 @@ import { formatGuamDateTime } from '@/lib/utils';
 
 export function AuditLogs(): ReactElement {
   const { activeCompanyId } = useCompany();
+  const [searchParams] = useSearchParams();
 
-  return <CompanyActivityHistory key={activeCompanyId ?? 'unselected'} />;
+  // Record links carry their filters in the URL; remount when it changes so
+  // plain navigation back to Activity History drops them.
+  return <CompanyActivityHistory key={`${activeCompanyId ?? 'unselected'}:${searchParams.toString()}`} />;
 }
 
 function CompanyActivityHistory(): ReactElement {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [recordIdFilter, setRecordIdFilter] = useState<number | undefined>(Number(searchParams.get("record_id")) || undefined);
+  const companyIdFilter = Number(searchParams.get("company_id")) || undefined;
   const { isAdmin } = useAuth();
   const { activeCompany } = useCompany();
   const activeCompanyId = activeCompany?.id ?? null;
@@ -43,7 +50,7 @@ function CompanyActivityHistory(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [actionFilter, setActionFilter] = useState('');
-  const [recordTypeFilter, setRecordTypeFilter] = useState('');
+  const [recordTypeFilter, setRecordTypeFilter] = useState(searchParams.get('record_type') || '');
   const [userFilter, setUserFilter] = useState<string>('');
   const [fromFilter, setFromFilter] = useState<string>('');
   const [toFilter, setToFilter] = useState<string>('');
@@ -73,6 +80,7 @@ function CompanyActivityHistory(): ReactElement {
       const response = await auditLogsApi.list({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
+        record_id: recordIdFilter,
         event_category: activityView === 'documents' ? 'document_access' : undefined,
         exclude_event_category: activityView === 'important' ? 'document_access' : undefined,
         user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
@@ -81,7 +89,7 @@ function CompanyActivityHistory(): ReactElement {
         page,
         per_page: 50,
         sort_direction: sortDirection,
-        company_id: isAdmin ? undefined : activeCompanyId ?? undefined,
+        company_id: companyIdFilter ?? (isAdmin ? undefined : activeCompanyId ?? undefined),
       });
       if (requestId !== latestRequestId.current) return;
 
@@ -108,7 +116,7 @@ function CompanyActivityHistory(): ReactElement {
         setIsLoadingMore(false);
       }
     }
-  }, [actionFilter, activeCompanyId, activityView, isAdmin, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
+  }, [actionFilter, activeCompanyId, companyIdFilter, recordIdFilter, activityView, isAdmin, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -117,13 +125,14 @@ function CompanyActivityHistory(): ReactElement {
       const result = await auditLogsApi.exportCsv({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
+        record_id: recordIdFilter,
         event_category: activityView === 'documents' ? 'document_access' : undefined,
         exclude_event_category: activityView === 'important' ? 'document_access' : undefined,
         user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
         sort_direction: sortDirection,
-        company_id: isAdmin ? undefined : activeCompanyId ?? undefined,
+        company_id: companyIdFilter ?? (isAdmin ? undefined : activeCompanyId ?? undefined),
       });
       const url = URL.createObjectURL(result.blob);
       const anchor = document.createElement('a');
@@ -163,12 +172,14 @@ function CompanyActivityHistory(): ReactElement {
   }, [fetchUsers]);
 
   const hasActiveFilters = Boolean(
-    actionFilter || recordTypeFilter || (isAdmin && userFilter) || fromFilter || toFilter || activityView !== 'important'
+    actionFilter || recordTypeFilter || recordIdFilter || companyIdFilter || (isAdmin && userFilter) || fromFilter || toFilter || activityView !== 'important'
   );
 
   const clearFilters = (): void => {
     setActionFilter('');
     setRecordTypeFilter('');
+    setRecordIdFilter(undefined);
+    if (searchParams.toString()) setSearchParams({}, { replace: true });
     setUserFilter('');
     setFromFilter('');
     setToFilter('');
@@ -257,6 +268,8 @@ function CompanyActivityHistory(): ReactElement {
                 setPage(1);
               }}
             />
+            <Input id="audit-record-id-filter" label="Record ID" inputMode="numeric" value={recordIdFilter ?? ''}
+              onChange={(event) => { setRecordIdFilter(Number(event.target.value) || undefined); setPage(1); }} />
             {isAdmin && <label className="space-y-1.5 text-sm font-medium text-neutral-700">
               <span>Person</span>
               <select

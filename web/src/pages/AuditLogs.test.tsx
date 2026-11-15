@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuditLogEntry } from '@/services/api';
+import { MemoryRouter } from 'react-router';
 import { AuditLogs } from './AuditLogs';
 
 const apiMocks = vi.hoisted(() => ({
@@ -102,7 +103,7 @@ describe('AuditLogs pagination', () => {
         { ...access, id: 102, request_id: 'request-102', created_at: '2026-09-23T04:17:42Z' },
       ], 2, 2));
 
-    render(<AuditLogs />);
+    render(<MemoryRouter><AuditLogs /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: 'Load more activity' }));
 
     expect(await screen.findAllByText('Morgan Manager downloaded the payroll register · 2 access records')).toHaveLength(2);
@@ -117,7 +118,7 @@ describe('AuditLogs pagination', () => {
         { ...access, id: 102, request_id: 'request-102', created_at: '2026-09-23T04:17:42Z' },
       ], 2, 2));
 
-    render(<AuditLogs />);
+    render(<MemoryRouter><AuditLogs /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: 'Load more activity' }));
 
     expect(await screen.findByText('Older activity could not be loaded')).toBeTruthy();
@@ -136,7 +137,7 @@ describe('AuditLogs pagination', () => {
       return Promise.resolve(response([access], 1, 2));
     });
 
-    render(<AuditLogs />);
+    render(<MemoryRouter><AuditLogs /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: 'Load more activity' }));
     await waitFor(() => expect(apiMocks.list).toHaveBeenCalledWith(expect.objectContaining({ page: 2 })));
 
@@ -152,5 +153,16 @@ describe('AuditLogs pagination', () => {
 
     expect(screen.queryByText('Morgan Manager downloaded the payroll register · 2 access records')).toBeNull();
     expect(screen.getAllByText('Morgan Manager updated Ada Payroll')).toHaveLength(2);
+  });
+
+  it('applies record filters from a record history link and clears them with the URL', async () => {
+    apiMocks.list.mockResolvedValue({ data: [], meta: { current_page: 1, total_pages: 0, total_count: 0 } });
+    render(<MemoryRouter initialEntries={['/settings/audit-logs?record_type=companies&record_id=13&company_id=7']}><AuditLogs /></MemoryRouter>);
+
+    await waitFor(() => expect(apiMocks.list).toHaveBeenCalled());
+    expect(apiMocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ record_type: 'companies', record_id: 13, company_id: 7 }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /clear filters/i }));
+    await waitFor(() => expect(apiMocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ record_type: undefined, record_id: undefined, company_id: undefined })));
   });
 });
