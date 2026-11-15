@@ -456,7 +456,10 @@ export function AdminClientDocumentsPage() {
               </div>
             ) : (
               <>
-                <SubmissionDocumentGroups allowArchived documents={documents} onPreview={previewDocumentFile} onDownload={downloadDocument} />
+                <SubmissionDocumentGroups allowArchived documents={documents} onPreview={previewDocumentFile} onDownload={downloadDocument} extraActions={document => <>
+                  {document.archived_at && <Button variant="outline" size="sm" onClick={() => void unarchiveDocument(document)}>Unarchive</Button>}
+                  <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void deleteDocument(document)} aria-label={`Delete ${document.file_name}`}>Delete</Button>
+                </>} />
                 <div className="space-y-3 sm:hidden">
                   {documents.filter(document => !document.submission_groups?.length).map((document) => (
                     <MobileRecordCard key={document.id}>

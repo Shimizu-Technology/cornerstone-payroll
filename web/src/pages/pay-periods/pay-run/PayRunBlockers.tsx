@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
 
 import type { PayPeriod } from '@/types';
+import { formatGuam } from '@/lib/payrollSubmissionFormat';
 import type { PayRunSectionProps } from './usePayRunController';
 
 export function FicaHistoryReviewNotice({ note }: { note?: string | null }) {
@@ -17,12 +18,14 @@ export function FicaHistoryReviewNotice({ note }: { note?: string | null }) {
   </Alert>;
 }
 
+const CLIENT_FILE_STATUS: Record<string, string> = { waiting: 'Waiting for review', imported: 'Imported', 'set aside': 'Set aside' };
+
 export function PayRunClientFiles({ payPeriod }: { payPeriod: PayPeriod }) {
   const files = payPeriod.client_files;
   if (!files) return null;
   return <section aria-label="Files from the client" className="rounded-lg border border-neutral-200 bg-white p-3 text-sm">
     <h3 className="font-semibold">Files from the client</h3>
-    <p>Revision {files.revision} · {files.status} · Sent {new Date(files.submitted_at).toLocaleString()}</p>
+    <p>Revision {files.revision} · {CLIENT_FILE_STATUS[files.status] || files.status} · Sent {formatGuam(files.submitted_at)}</p>
     <Link className="inline-flex min-h-11 items-center text-primary-800 underline" to={`/companies/${payPeriod.company_id}/payroll-submissions/${files.period_id}#revision-${files.submission_id}`}>Open Pay Period Files</Link>
   </section>;
 }
