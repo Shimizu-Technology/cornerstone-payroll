@@ -400,16 +400,18 @@ class PayPeriod < ApplicationRecord
   end
 
   def pending_portal_submission?
-    periods = PayrollSubmissionPeriod.where(company_id: company_id)
-    linked = periods.find_by(pay_period_id: id) if persisted?
+    linked, matching = portal_submission_candidates
     return true if linked&.pending_source_review?
 
-    # A duplicate regular run cannot escape another run's pending same-date
-    # source. Linked evidence remains authoritative even after run date edits.
-    matching = periods.where(start_date: start_date, end_date: end_date)
-    eligible = cycle == "regular" && run_purpose == "regular" && correction_status.nil? && test_workspace_role.nil?
-    matching = matching.where(pay_period_id: nil) unless eligible
     matching.any?(&:pending_source_review?)
+  end
+
+  # The client period whose files the pay run shows: the one blocking
+  # calculation when there is one, so its link leads to what clears it.
+  def client_submission_period
+    linked, matching = portal_submission_candidates
+    candidates = [ linked, *matching ].compact.uniq
+    candidates.find(&:pending_source_review?) || linked || candidates.first
   end
 
   def intake_stale?
@@ -643,6 +645,17 @@ class PayPeriod < ApplicationRecord
   end
 
   private
+
+  # A duplicate regular run cannot escape another run's pending same-date
+  # source. Linked evidence remains authoritative even after run date edits.
+  def portal_submission_candidates
+    periods = PayrollSubmissionPeriod.where(company_id: company_id)
+    linked = periods.find_by(pay_period_id: id) if persisted?
+    matching = periods.where(start_date: start_date, end_date: end_date)
+    eligible = cycle == "regular" && run_purpose == "regular" && correction_status.nil? && test_workspace_role.nil?
+    matching = matching.where(pay_period_id: nil) unless eligible
+    [ linked, matching.to_a ]
+  end
 
   def training_replay_lineage_is_valid
     if test_workspace_role.blank? != test_workspace_source_pay_period.blank?

@@ -60,9 +60,10 @@ function ClientDecision({ period, draft, onDone }: { period: PeriodDetail; draft
   </div>;
 }
 
-function StaffActions({ period, onDone, mode = 'draft' }: { mode?: 'status' | 'draft'; period: PeriodDetail; onDone: (detail: PeriodDetail) => void }) {
+// The status and draft sections render separate StaffActions; they share one
+// busy flag so an older response can't overwrite a newer period state.
+function StaffActions({ period, onDone, mode = 'draft', busy, setBusy }: { mode?: 'status' | 'draft'; period: PeriodDetail; onDone: (detail: PeriodDetail) => void; busy: boolean; setBusy: (busy: boolean) => void }) {
   const api = adminPayrollSubmissionsApi;
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [paycheck, setPaycheck] = useState<File | null>(null);
   const [deposits, setDeposits] = useState<File | null>(null);
@@ -136,6 +137,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [staffBusy, setStaffBusy] = useState(false);
   const listPath = audience === 'client' ? '/payroll-files' : companyId ? `/companies/${companyId}/payroll-submissions` : '/settings/payroll-submissions';
 
   const accept = useCallback((detail: PeriodDetail) => {
@@ -186,7 +188,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
         <section aria-labelledby="period-status" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
           <div className="flex flex-wrap items-center gap-2"><h2 id="period-status" className="text-base font-semibold text-neutral-950">Status</h2><Badge variant={statusVariant(period.status)}>{!canSendFiles && period.status === 'waiting_for_files' ? 'Messages and drafts' : period.status_label}</Badge>
             {audience === 'staff' && period.pay_period_id && <Link className="text-sm font-medium text-primary-800 underline" to={`/companies/${companyId || activeCompanyId}/pay-runs/${period.pay_period_id}`}>Open pay run</Link>}</div>
-          {audience === 'staff' && <StaffActions mode="status" period={period} onDone={detail => { setNotice(null); accept(detail); }} />}
+          {audience === 'staff' && <StaffActions mode="status" busy={staffBusy} setBusy={setStaffBusy} period={period} onDone={detail => { setNotice(null); accept(detail); }} />}
           {notice && <p role="status" className="rounded-lg bg-success-50 p-3 text-sm text-success-800">{notice}</p>}
           {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
         </section>
@@ -207,7 +209,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
         </section>}
         <section aria-labelledby="draft-section" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
           <h2 id="draft-section" className="text-base font-semibold">Draft for client review</h2>
-          {audience === 'staff' && <StaffActions period={period} onDone={detail => { setNotice(null); accept(detail); }} />}
+          {audience === 'staff' && <StaffActions busy={staffBusy} setBusy={setStaffBusy} period={period} onDone={detail => { setNotice(null); accept(detail); }} />}
 
         {currentDraft && <div aria-labelledby="draft-review" className="space-y-3">
           <div className="flex flex-wrap items-center gap-2"><h3 id="draft-review" className="text-base font-semibold text-neutral-950">Draft {currentDraft.revision} for review</h3><Badge variant="info">Current</Badge></div>

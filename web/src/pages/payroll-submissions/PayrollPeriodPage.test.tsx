@@ -108,6 +108,17 @@ it('lets staff confirm the exact current revision and records the page as seen',
   expect(await screen.findByRole('button', { name: 'Post draft for review' })).toBeTruthy();
 });
 
+it('holds the draft actions while a receipt confirmation is still saving', async () => {
+  mocks.get.mockResolvedValue({ data: period({ allowed_actions: ['acknowledge', 'save_draft', 'message'] }) });
+  let finish: (value: { data: ReturnType<typeof period> }) => void = () => {};
+  mocks.acknowledge.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  renderAt('staff');
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm receipt of revision 2' }));
+  expect((screen.getByRole('button', { name: 'Save staff-only' }) as HTMLButtonElement).disabled).toBe(true);
+  finish({ data: period({ status: 'received', status_label: 'Received', allowed_actions: ['save_draft', 'message'] }) });
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Save staff-only' }) as HTMLButtonElement).disabled).toBe(false));
+});
+
 it('marks a period seen only once it is shown in the foreground, through the displayed update', async () => {
   const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
   mocks.get.mockResolvedValue({ data: period({ latest_client_event_id: 77 }) });
