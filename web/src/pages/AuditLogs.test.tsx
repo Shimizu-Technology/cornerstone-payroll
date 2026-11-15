@@ -154,4 +154,15 @@ describe('AuditLogs pagination', () => {
     expect(screen.queryByText('Morgan Manager downloaded the payroll register · 2 access records')).toBeNull();
     expect(screen.getAllByText('Morgan Manager updated Ada Payroll')).toHaveLength(2);
   });
+
+  it('applies record filters from a record history link and clears them with the URL', async () => {
+    apiMocks.list.mockResolvedValue({ data: [], meta: { current_page: 1, total_pages: 0, total_count: 0 } });
+    render(<MemoryRouter initialEntries={['/settings/audit-logs?record_type=companies&record_id=13&company_id=7']}><AuditLogs /></MemoryRouter>);
+
+    await waitFor(() => expect(apiMocks.list).toHaveBeenCalled());
+    expect(apiMocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ record_type: 'companies', record_id: 13, company_id: 7 }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /clear filters/i }));
+    await waitFor(() => expect(apiMocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ record_type: undefined, record_id: undefined, company_id: undefined })));
+  });
 });

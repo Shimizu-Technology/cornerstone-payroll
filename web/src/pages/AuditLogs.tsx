@@ -30,12 +30,15 @@ import { formatGuamDateTime } from '@/lib/utils';
 
 export function AuditLogs(): ReactElement {
   const { activeCompanyId } = useCompany();
+  const [searchParams] = useSearchParams();
 
-  return <CompanyActivityHistory key={activeCompanyId ?? 'unselected'} />;
+  // Record links carry their filters in the URL; remount when it changes so
+  // plain navigation back to Activity History drops them.
+  return <CompanyActivityHistory key={`${activeCompanyId ?? 'unselected'}:${searchParams.toString()}`} />;
 }
 
 function CompanyActivityHistory(): ReactElement {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [recordIdFilter, setRecordIdFilter] = useState<number | undefined>(Number(searchParams.get("record_id")) || undefined);
   const companyIdFilter = Number(searchParams.get("company_id")) || undefined;
   const { isAdmin } = useAuth();
@@ -169,13 +172,14 @@ function CompanyActivityHistory(): ReactElement {
   }, [fetchUsers]);
 
   const hasActiveFilters = Boolean(
-    actionFilter || recordTypeFilter || recordIdFilter || (isAdmin && userFilter) || fromFilter || toFilter || activityView !== 'important'
+    actionFilter || recordTypeFilter || recordIdFilter || companyIdFilter || (isAdmin && userFilter) || fromFilter || toFilter || activityView !== 'important'
   );
 
   const clearFilters = (): void => {
     setActionFilter('');
     setRecordTypeFilter('');
     setRecordIdFilter(undefined);
+    if (searchParams.toString()) setSearchParams({}, { replace: true });
     setUserFilter('');
     setFromFilter('');
     setToFilter('');

@@ -11,6 +11,7 @@ module TracksRecordCreation
   included do
     before_create :assign_record_creator
     after_create :audit_record_creation
+    after_rollback :restore_domain_audit_marker
   end
 
   private
@@ -41,8 +42,17 @@ module TracksRecordCreation
     return if copied_or_test_workspace_record?
 
     company = is_a?(Company) ? self : try(:company)
+    @domain_audit_marker_before_creation = Current.domain_audit_recorded
     AuditLog.record!(user: Current.user, company_id: company&.id, organization_id: try(:organization_id) || company&.organization_id,
       action: "#{type}#create", record_type: type, record_id: id,
       subject_name: try(:name).presence || try(:full_name))
+  end
+
+  # A rolled-back creation leaves no audit row, so the request-level audit
+  # must not be suppressed on its account.
+  def restore_domain_audit_marker
+    return unless defined?(@domain_audit_marker_before_creation)
+
+    Current.domain_audit_recorded = @domain_audit_marker_before_creation
   end
 end

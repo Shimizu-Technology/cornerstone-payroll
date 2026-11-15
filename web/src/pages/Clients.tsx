@@ -143,7 +143,8 @@ export function Clients() {
   const renameNameId = useId();
   const clientFormId = useId();
   const { refreshCompanies, switchCompany, activeOrganizationId, activeCompanyId } = useCompany();
-  const { user, isAdmin: canManageClients, isAccountant, isManager } = useAuth();
+  const { user, isAdmin: canManageClients, isAccountant, isManager, hasCapability } = useAuth();
+  const canSeeRecordHistory = hasCapability('staff_workspace');
   const { notify } = useFeedback();
   const renameScope = `${user?.id ?? ''}:${activeOrganizationId ?? ''}:${activeCompanyId ?? ''}:${canManageClients}`;
   const renamePermissionScope = `${user?.id ?? ''}:${activeOrganizationId ?? ''}:${canManageClients}`;
@@ -1369,7 +1370,7 @@ export function Clients() {
                 </>
               )}
 
-              {editingId && <RecordHistoryPanel companyId={editingId} recordId={editingId} recordType="companies" />}
+              {editingId && canSeeRecordHistory && <RecordHistoryPanel companyId={editingId} recordId={editingId} recordType="companies" />}
 
               {/* Active toggle (edit only) */}
               {editingId && canEditField('active') && (
@@ -1431,8 +1432,10 @@ export function Clients() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="break-words font-semibold text-neutral-950">{c.name}</p>
-                          <RecordCreatorLine creator={c.creator} />
-                          <RecordHistoryPanel companyId={c.id} recordId={c.id} recordType="companies" />
+                          {canSeeRecordHistory && <>
+                            <RecordCreatorLine creator={c.creator} />
+                            <RecordHistoryPanel companyId={c.id} recordId={c.id} recordType="companies" />
+                          </>}
                           {isTestWorkspace(c) && (
                             <p className="mt-0.5 text-xs font-semibold text-amber-700">{testWorkspaceLabel(c)} · {c.migration_rehearsal_status}</p>
                           )}
@@ -1551,8 +1554,10 @@ export function Clients() {
                           {isTestWorkspace(c) ? <FlaskConical className="h-4 w-4 text-amber-700" /> : <Building2 className="w-4 h-4 text-neutral-400" />}
                           <div>
                             <span className="font-medium text-neutral-900">{c.name}</span>
-                            <RecordCreatorLine creator={c.creator} />
-                            <RecordHistoryPanel companyId={c.id} recordId={c.id} recordType="companies" />
+                            {canSeeRecordHistory && <>
+                              <RecordCreatorLine creator={c.creator} />
+                              <RecordHistoryPanel companyId={c.id} recordId={c.id} recordType="companies" />
+                            </>}
                             {isTestWorkspace(c) && (
                               <p className="text-xs font-medium text-amber-700">{testWorkspaceLabel(c)} · source: {c.migration_source_company_name || 'linked client'}</p>
                             )}
