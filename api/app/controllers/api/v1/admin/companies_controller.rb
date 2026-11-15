@@ -40,6 +40,7 @@ module Api
           company_ids = companies.pluck(:id)
           total_employee_counts = employee_counts_by_company(company_ids)
           active_employee_counts = employee_counts_by_company(company_ids, active_only: true)
+          @company_creators = RecordCreator.for_companies(companies.to_a)
 
           render json: {
             companies: companies.map do |company|
@@ -357,8 +358,10 @@ module Api
         end
 
         def company_creator_payload(company)
-          @company_creators ||= RecordCreator.for_companies(Company.where(id: current_user.accessible_company_ids).includes(:created_by))
-          @company_creators[company.id]
+          return unless StaffRolePolicy.allowed?(current_user, :staff_workspace)
+          return @company_creators[company.id] if @company_creators&.key?(company.id)
+
+          RecordCreator.call(company)
         end
 
         def company_payload(company, detailed: false, total_employee_counts: nil, active_employee_counts: nil)

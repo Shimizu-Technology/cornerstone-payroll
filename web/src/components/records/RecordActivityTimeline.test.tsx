@@ -2,9 +2,16 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router';
 import { RecordActivityTimeline } from './RecordActivityTimeline';
 
 const apiMocks = vi.hoisted(() => ({ list: vi.fn() }));
+const authState = vi.hoisted(() => ({ capabilities: ['view_audit_history'] as string[] }));
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ hasCapability: (capability: string) => authState.capabilities.includes(capability) }),
+}));
 
 vi.mock('@/services/api', () => ({
   recordActivitiesApi: { list: apiMocks.list },
@@ -40,6 +47,8 @@ const activity = {
   created_at: '2026-09-23T01:30:00Z',
 };
 
+const renderTimeline = (element: ReactElement) => render(<MemoryRouter>{element}</MemoryRouter>);
+
 describe('RecordActivityTimeline', () => {
   afterEach(cleanup);
 
@@ -52,7 +61,7 @@ describe('RecordActivityTimeline', () => {
   });
 
   it('shows plain-language activity, before-and-after values, and redaction guidance', async () => {
-    render(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
 
     expect(await screen.findByText('Morgan Manager updated Ada Payroll')).toBeTruthy();
     expect(screen.getByText('morgan@example.com')).toBeTruthy();
@@ -79,7 +88,7 @@ describe('RecordActivityTimeline', () => {
       meta: { current_page: 1, per_page: 20, total_count: 1, total_pages: 1 },
     });
 
-    render(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
 
     expect(await screen.findByText(/processed payroll/)).toBeTruthy();
     expect(screen.queryByText('Hours 104')).toBeNull();
@@ -98,7 +107,7 @@ describe('RecordActivityTimeline', () => {
         meta: { current_page: 2, per_page: 20, total_count: 2, total_pages: 2 },
       });
 
-    render(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Load older activity' }));
 
     expect(await screen.findByText('Morgan Manager added Ada Payroll')).toBeTruthy();
@@ -109,7 +118,7 @@ describe('RecordActivityTimeline', () => {
   it('offers a retry when the initial request fails', async () => {
     apiMocks.list.mockRejectedValueOnce(new Error('History service unavailable'));
 
-    render(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
 
     expect(await screen.findByText('History service unavailable')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
@@ -121,7 +130,7 @@ describe('RecordActivityTimeline', () => {
 
 it('shows an explicit empty history and unknown creator', async () => {
   apiMocks.list.mockResolvedValue({ data: [], creator: null, meta: { current_page: 1, total_pages: 0 } });
-  render(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
+  renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
   expect(await screen.findByText('No recorded activity yet')).toBeTruthy();
   expect(screen.getByText('Unknown (before tracking)')).toBeTruthy();
   cleanup();
@@ -129,7 +138,23 @@ it('shows an explicit empty history and unknown creator', async () => {
 
 it('exposes an accessible loading state while history is pending', () => {
   apiMocks.list.mockReturnValue(new Promise(() => {}));
-  render(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
+  renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
   expect(screen.getByRole('status', { name: 'Loading activity history' })).toBeTruthy();
+  cleanup();
+});
+
+it('links to Activity History only for people who can open it', async () => {
+  apiMocks.list.mockResolvedValue({ data: [], creator: null, meta: { current_page: 1, total_pages: 0 } });
+  authState.capabilities = ['view_audit_history'];
+  renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="companies" />);
+  const link = await screen.findByRole('link', { name: 'View in Activity History' });
+  expect(link.getAttribute('href')).toBe('/settings/audit-logs?record_type=companies&record_id=12&company_id=7');
+  cleanup();
+
+  authState.capabilities = ['staff_workspace'];
+  renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="companies" />);
+  expect(await screen.findByText('No recorded activity yet')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'View in Activity History' })).toBeNull();
+  authState.capabilities = ['view_audit_history'];
   cleanup();
 });

@@ -15,8 +15,10 @@ RSpec.describe TracksRecordCreation do
       attrs.delete(:organization) if %i[employee pay_period].include?(type)
       record = create(type, **attrs)
       log = AuditLog.find_by!(record_type: record.class.table_name, record_id: record.id, action: "#{record.class.table_name}#create")
-      expect(log.actor_name).to eq(actor.name)
-      expect(log.actor_role).to eq(actor.role)
+      original_name = actor.name
+      original_role = actor.role
+      actor.update_columns(name: "Renamed Person", role: User.roles.fetch(original_role == "manager" ? "accountant" : "manager"))
+      expect(log.reload).to have_attributes(actor_name: original_name, actor_role: original_role)
       expect(record.created_by_id).to eq(actor.id) if record.has_attribute?(:created_by_id)
     end
   end
