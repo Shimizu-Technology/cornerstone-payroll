@@ -17,6 +17,8 @@ module PayrollSubmissions
       unless record.pay_period_id == @run.id && package&.company_id == @run.company_id && package&.source_type == "mosa_revel"
         raise ArgumentError, "Only a MoSa import may be linked to a client revision"
       end
+      # No inverse on PayrollSubmissionImport: saving the claimed period must not
+      # autosave this selection before the payroll apply transaction succeeds.
       PayrollSubmissionImport.new(payroll_import: record, payroll_submission: source, current_submission: source,
         selected_by: @actor, source_route: "pay_run")
     end

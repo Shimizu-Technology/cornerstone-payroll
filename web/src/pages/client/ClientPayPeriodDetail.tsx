@@ -1,6 +1,6 @@
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { CheckCircle2, ShieldCheck } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -10,12 +10,26 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
+import { clientPayrollSubmissionsApi } from '@/services/payrollSubmissions';
 import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
 import { ClientPayStubButton } from '@/components/client-portal/ClientPayStubButton';
 import type { PayrollItem } from '@/types';
 import { payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import { parsePositiveRouteId } from '@/lib/route-params';
+
+export function ClientPeriodFilesLink({ startDate, endDate }: { startDate: string; endDate: string }) {
+  const [filesRef, setFilesRef] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    setFilesRef(null);
+    void clientPayrollSubmissionsApi.get(`${startDate}_${endDate}`).then(result => {
+      if (active) setFilesRef(result.data.ref);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [startDate, endDate]);
+  return filesRef ? <Link className="inline-flex min-h-11 items-center px-4 text-primary-800 underline" to={`/payroll-files/${filesRef}`}>Pay Period Files</Link> : null;
+}
 
 export function ClientPayPeriodDetail(): ReactElement {
   const navigate = useNavigate();
@@ -118,7 +132,7 @@ export function ClientPayPeriodDetail(): ReactElement {
       <Header
         title={resolvedPayPeriod ? `Pay Period: ${formatDateRange(resolvedPayPeriod.start_date, resolvedPayPeriod.end_date)}` : 'Pay Period'}
         description={resolvedPayPeriod ? `Pay Date: ${formatDate(resolvedPayPeriod.pay_date)}` : 'Review employee payroll for this period.'}
-        actions={<Button variant="outline" onClick={() => navigate(returnTo)}>Back to List</Button>}
+        actions={<>{resolvedPayPeriod && <ClientPeriodFilesLink key={routeKey} startDate={resolvedPayPeriod.start_date} endDate={resolvedPayPeriod.end_date} />}<Button variant="outline" onClick={() => navigate(returnTo)}>Back to List</Button></>}
       />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">

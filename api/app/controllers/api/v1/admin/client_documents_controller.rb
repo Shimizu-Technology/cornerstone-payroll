@@ -19,7 +19,7 @@ module Api
 
         def index
           documents = ClientDocument.where(company_id: current_company_id)
-                                    .includes(:employee, :uploaded_by)
+                                    .includes(:employee, :uploaded_by, payroll_submission_documents: { submission: :period })
                                     .recent_first
 
           if params[:search].present?
@@ -172,6 +172,7 @@ module Api
 
         def serialize_document(document)
           {
+            submission_groups: document.submission_groups,
             id: document.id,
             title: document.title,
             category: document.category,

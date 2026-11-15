@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 
 import { Alert } from '@/components/ui/alert';
 
+import type { PayPeriod } from '@/types';
+import { formatGuam } from '@/lib/payrollSubmissionFormat';
 import type { PayRunSectionProps } from './usePayRunController';
 
 export function FicaHistoryReviewNotice({ note }: { note?: string | null }) {
@@ -14,6 +16,18 @@ export function FicaHistoryReviewNotice({ note }: { note?: string | null }) {
     <p className="font-semibold">Prior-period payroll review remains open</p>
     <p className="mt-1 text-sm leading-6">{note}</p>
   </Alert>;
+}
+
+const CLIENT_FILE_STATUS: Record<string, string> = { waiting: 'Waiting for review', imported: 'Imported', 'set aside': 'Set aside' };
+
+export function PayRunClientFiles({ payPeriod }: { payPeriod: PayPeriod }) {
+  const files = payPeriod.client_files;
+  if (!files) return null;
+  return <section aria-label="Files from the client" className="rounded-lg border border-neutral-200 bg-white p-3 text-sm">
+    <h3 className="font-semibold">Files from the client</h3>
+    <p>Revision {files.revision} · {CLIENT_FILE_STATUS[files.status] || files.status} · Sent {formatGuam(files.submitted_at)}</p>
+    <Link className="inline-flex min-h-11 items-center text-primary-800 underline" to={`/companies/${payPeriod.company_id}/payroll-submissions/${files.period_id}#revision-${files.submission_id}`}>Open Pay Period Files</Link>
+  </section>;
 }
 
 export function PayRunBlockers({
@@ -31,6 +45,9 @@ export function PayRunBlockers({
 }: PayRunSectionProps<'blockers'> & { part?: 'all' | 'hours' | 'approval' }) {
   const ficaNote = payPeriod.annual_fica_review_note;
   return (<>
+{part !== 'approval' && payPeriod.client_files?.blocks_calculation && <Alert>
+  <p>Calculate is blocked until you <Link className="text-primary-800 underline" to={`/companies/${payPeriod.company_id}/payroll-submissions/${payPeriod.client_files.period_id}#revision-${payPeriod.client_files.submission_id}`}>review this revision</Link> and import it or record why it is set aside.</p>
+</Alert>}
 {part !== 'approval' && hasPendingCalculationChanges && (
           <Alert>
             <p className="font-semibold">Recalculate to include your changes</p>

@@ -1,3 +1,4 @@
+import { SubmissionDocumentGroups } from '@/components/documents/SubmissionDocumentGroups';
 import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useSearchParams } from 'react-router';
 import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
@@ -275,6 +276,13 @@ export function AdminClientDocumentsPage() {
     }
   };
 
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<number>>(() => new Set());
+  const toggleGroup = useCallback((id: number, open: boolean) => setOpenGroups(current => {
+    if (current.has(id) === open) return current;
+    const next = new Set(current);
+    if (open) next.add(id); else next.delete(id);
+    return next;
+  }), []);
   const unarchiveDocument = async (document: ClientDocument): Promise<void> => {
     setError(null);
     try {
@@ -455,8 +463,12 @@ export function AdminClientDocumentsPage() {
               </div>
             ) : (
               <>
+                <SubmissionDocumentGroups allowArchived openGroups={openGroups} onToggleGroup={toggleGroup} documents={documents} onPreview={previewDocumentFile} onDownload={downloadDocument} extraActions={document => <>
+                  {document.archived_at && <Button variant="outline" size="sm" onClick={() => void unarchiveDocument(document)}>Unarchive</Button>}
+                  <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void deleteDocument(document)} aria-label={`Delete ${document.file_name}`}>Delete</Button>
+                </>} />
                 <div className="space-y-3 sm:hidden">
-                  {documents.map((document) => (
+                  {documents.filter(document => !document.submission_groups?.length).map((document) => (
                     <MobileRecordCard key={document.id}>
                       <div className="flex items-start gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
@@ -509,7 +521,7 @@ export function AdminClientDocumentsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody striped>
-                  {documents.map((document) => (
+                  {documents.filter(document => !document.submission_groups?.length).map((document) => (
                     <TableRow key={document.id}>
                       <TableCell>
                         <div>
