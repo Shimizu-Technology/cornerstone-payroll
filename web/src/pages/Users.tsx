@@ -1,9 +1,10 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
 import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
-import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck } from 'lucide-react';
+import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck, ArrowRightLeft, FlaskConical, ChevronDown } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
@@ -22,22 +23,17 @@ import type { CompanyListItem, InvitationDeliveryResponse } from '@/services/api
 import { useAuth } from '@/contexts/AuthContext';
 import { ClientManagementDialog } from '@/components/users/ClientManagementDialog';
 import { UserActivityPanel } from '@/components/users/UserActivityPanel';
+import { MovePracticeLoginDialog } from '@/components/users/MovePracticeLoginDialog';
+import { RoleGuide, RoleHint, type RoleOption } from '@/components/users/RoleGuide';
 import {
   assignmentCompanyIdsForRole,
+  groupAssignmentCompanies,
+  isPreparingPracticeCopy,
   isTestWorkspaceCompany,
   needsClientAssignment,
+  toggleAssignment,
+  type AssignmentOption,
 } from '@/lib/user-company-access';
-
-interface RoleOption {
-  value: UserRole;
-  label: string;
-  scope: string;
-  can: string;
-  cannot: string;
-  assignment: string;
-  legacy?: boolean;
-  exceptional?: boolean;
-}
 
 const allRoleOptions: RoleOption[] = [
   { value: 'super_admin', label: 'Super Admin', scope: 'Every organization and client', can: 'Manage platform organizations, recover access, and perform every organization-admin action.', cannot: 'This is an exceptional platform role and should not be used for normal payroll work.', assignment: 'No client assignment required.', exceptional: true },
@@ -54,6 +50,15 @@ function invitationNeedsRetry(response: InvitationDeliveryResponse): boolean {
   return response.invitation_delivery_status === 'failed'
     || !['captured', 'queued', 'submitted', 'not_requested'].includes(response.invitation_delivery_status);
 }
+
+function errorCode(err: unknown): string | undefined {
+  if (!(err instanceof ApiError) || !err.data || typeof err.data !== 'object') return undefined;
+  const code = (err.data as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+const sameIds = (left: number[], right: number[]) =>
+  left.length === right.length && left.every((id, index) => id === right[index]);
 
 function inviteFailureReason(response: InvitationDeliveryResponse): string {
   if (response.invitation_delivery_status === 'failed') {
@@ -73,7 +78,13 @@ export function Users() {
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const [error, setErrorMessage, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  // Next steps offered beside a refused action, such as Move for a login whose practice copy closed.
+  const [errorActions, setErrorActions] = useState<{ user: User; deactivate?: boolean; move?: boolean } | null>(null);
+  const setError = useCallback((message: string | null, actions: { user: User; deactivate?: boolean; move?: boolean } | null = null) => {
+    setErrorMessage(message);
+    setErrorActions(actions);
+  }, [setErrorMessage]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   // The account exists but the sign-in invitation did not go out. Kept apart from
   // success so it reads as unfinished work, with a retry beside it.
@@ -105,6 +116,7 @@ export function Users() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [managementUser, setManagementUser] = useState<User | null>(null);
+  const [moveUser, setMoveUser] = useState<User | null>(null);
   const canDelegate = ['admin', 'org_admin', 'super_admin'].includes(currentUser?.role ?? '');
   const managementAction = (user: User) => canDelegate && user.role === 'accountant' && user.id !== currentUser?.id
     ? <Button size="sm" variant="outline" onClick={() => setManagementUser(user)}>Client management</Button> : null;
@@ -170,9 +182,9 @@ export function Users() {
     setIsAddingNew(true);
     setNewError(null);
     setNewClientIds([]);
-    if (availableCompanies.length === 0) {
-      await loadCompanies();
-    }
+    // Practice copies finish preparing in the background, so a list loaded
+    // earlier can be stale. Refresh whenever the picker opens.
+    await loadCompanies();
   };
 
   const handleCancelAddNew = () => {
@@ -241,10 +253,7 @@ export function Users() {
     setEditRole(user.role);
     setEditClientIds(user.assigned_company_ids || []);
     setEditError(null);
-
-    if (availableCompanies.length === 0) {
-      void loadCompanies();
-    }
+    void loadCompanies();
   };
 
   const handleSaveEdit = async (): Promise<void> => {
@@ -257,7 +266,14 @@ export function Users() {
         role: editRole,
       };
 
-      payload.company_ids = assignmentCompanyIdsForRole(editRole, editClientIds, availableCompanies);
+      const editingUser = users.find(user => user.id === editingId);
+      if (editingUser?.practice_company_id) {
+        // A practice-only login keeps exactly its own copy. A closed copy is
+        // changed with Move, so a rename never touches its assignment.
+        if (!editingUser.practice_copy_closed_reason) payload.company_ids = [editingUser.practice_company_id];
+      } else {
+        payload.company_ids = assignmentCompanyIdsForRole(editRole, editClientIds, availableCompanies);
+      }
 
       await usersApi.update(editingId, payload);
       setEditingId(null);
@@ -282,9 +298,11 @@ export function Users() {
     try {
       if (user.active === false) { await usersApi.activate(user.id); }
       else { await usersApi.deactivate(user.id); }
+      setError(null);
       fetchUsers();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update user');
+      const message = err instanceof Error ? err.message : 'Failed to update user';
+      setError(message, errorCode(err) === 'practice_copy_closed' ? { user, move: true } : null);
     } finally {
       setTogglingId(null);
     }
@@ -296,38 +314,82 @@ export function Users() {
     setDeletingId(user.id);
     try {
       await usersApi.delete(user.id);
+      setError(null);
       setSuccessMessage(`${user.name} has been deleted`);
       fetchUsers();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete user');
+      const message = err instanceof Error ? err.message : 'Failed to delete user';
+      setError(message, errorCode(err) === 'user_has_retained_history'
+        ? { user, deactivate: user.active !== false, move: Boolean(user.practice_copy_closed_reason) }
+        : null);
     } finally {
       setDeletingId(null);
     }
   };
 
-  const toggleCompanySelection = (
-    companyId: number,
-    setSelectedIds: Dispatch<SetStateAction<number[]>>
-  ): void => {
-    setSelectedIds(prev =>
-      prev.includes(companyId) ? prev.filter(id => id !== companyId) : [...prev, companyId]
-    );
+  const handleMoved = ({ user, fromName, toName, invitation }: { user: User; fromName: string; toName: string; invitation?: InvitationDeliveryResponse }) => {
+    setMoveUser(null);
+    setError(null);
+    setInviteWarning(null);
+    const moved = `${user.name} now uses ${toName}. Their history in ${fromName} keeps their name.`;
+    if (invitation && invitationNeedsRetry(invitation)) {
+      setSuccessMessage(null);
+      setError(`${moved} ${inviteFailureReason(invitation)} Use Resend on their row to try again.`);
+    } else {
+      setSuccessMessage(`${moved}${user.active === false ? ' The login is still inactive.' : ''}${invitation ? ` ${invitationOutcomeMessage(invitation)}` : ''}`);
+    }
+    void fetchUsers();
+  };
+
+  const openMove = (user: User) => {
+    setError(null);
+    setMoveUser(user);
+    void loadCompanies();
   };
 
   const handleNewRoleChange = (role: UserRole): void => {
     setNewRole(role);
     setNewClientIds(selectedIds => assignmentCompanyIdsForRole(role, selectedIds, availableCompanies));
+    if (role === 'client') void loadCompanies();
   };
 
   const handleEditRoleChange = (role: UserRole): void => {
     setEditRole(role);
     setEditClientIds(selectedIds => assignmentCompanyIdsForRole(role, selectedIds, availableCompanies));
+    if (role === 'client') void loadCompanies();
   };
+
+  // A refreshed list can close a selected copy; keep only what is still valid.
+  useEffect(() => {
+    setNewClientIds(ids => {
+      const next = assignmentCompanyIdsForRole(newRole, ids, availableCompanies);
+      return sameIds(ids, next) ? ids : next;
+    });
+  }, [availableCompanies, newRole]);
+
+  // While the picker shows a copy that is still being prepared, check again shortly.
+  const pickerOpen = isAddingNew || editingId !== null;
+  const hasPreparingCopy = availableCompanies.some(isPreparingPracticeCopy);
+  useEffect(() => {
+    if (!pickerOpen || !hasPreparingCopy) return;
+    const timer = window.setTimeout(() => void loadCompanies(), 5000);
+    return () => window.clearTimeout(timer);
+  }, [pickerOpen, hasPreparingCopy, availableCompanies, loadCompanies]);
 
   const assignedCompaniesForUser = (user: User) =>
     needsClientAssignment(user.role) ? (user.assigned_companies || []) : [];
 
   const renderAssignedCompanies = (user: User) => {
+    if (user.practice_company_id && user.practice_copy_closed_reason) {
+      return (
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 [overflow-wrap:anywhere]">
+            <FlaskConical className="h-3 w-3" aria-hidden="true" />
+            {user.practice_company_name || 'Practice copy'} · {user.practice_copy_closed_reason}
+          </span>
+        </div>
+      );
+    }
     const assignedCompanies = assignedCompaniesForUser(user);
     if (assignedCompanies.length === 0) {
       return needsClientAssignment(user.role) ? (
@@ -340,12 +402,72 @@ export function Users() {
         {assignedCompanies.map((company) => (
           <span
             key={company.id}
-            className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600"
+            className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600 [overflow-wrap:anywhere]"
           >
             {company.name}{company.test_workspace ? user.role === 'client' ? ' · Practice copy only' : ` · ${company.workspace_access_level?.replace('_', ' ') || 'operator'}` : ''}
           </span>
         ))}
       </div>
+    );
+  };
+
+  const moveAction = (user: User, size: 'full' | 'compact' = 'full') => user.practice_copy_closed_reason ? (
+    <Button size="sm" variant="outline" aria-label={`Move ${user.name} to another practice copy`} onClick={() => openMove(user)}>
+      <ArrowRightLeft className="mr-1 h-4 w-4" aria-hidden="true" />
+      {size === 'full' ? 'Move to practice copy' : 'Move'}
+    </Button>
+  ) : null;
+
+  // A practice-only login is fixed to one copy. Edit shows that copy instead of
+  // the picker; a closed copy is changed with Move.
+  const renderPracticeLoginPanel = (user: User) => (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm text-neutral-700">
+      <p className="flex items-center gap-2 font-medium text-neutral-900">
+        <FlaskConical className="h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
+        Practice-only login for {user.practice_company_name || 'its practice copy'}
+      </p>
+      {user.practice_copy_closed_reason ? (
+        <>
+          <p className="mt-1">That copy is {user.practice_copy_closed_reason}. Move this login to a current practice copy to use it again.</p>
+          <div className="mt-3">{moveAction(user)}</div>
+        </>
+      ) : (
+        <p className="mt-1">It can reach only this copy, never a real client. Use a different email for anyone who needs real client access.</p>
+      )}
+    </div>
+  );
+
+  const renderAssignmentOption = (
+    option: AssignmentOption,
+    selectedIds: number[],
+    setSelectedIds: Dispatch<SetStateAction<number[]>>,
+    role: UserRole
+  ) => {
+    const { company } = option;
+    const selected = selectedIds.includes(company.id);
+    const disabled = !option.selectable && !selected;
+    const isTest = isTestWorkspaceCompany(company);
+    return (
+      <label
+        key={company.id}
+        className={`flex items-center gap-2 rounded-lg border p-2 text-xs transition-colors ${
+          disabled ? 'cursor-not-allowed border-neutral-200 bg-neutral-50 opacity-80'
+            : selected ? 'cursor-pointer border-primary-300 bg-primary-50'
+              : 'cursor-pointer border-neutral-200 bg-white hover:bg-neutral-50'
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          disabled={disabled}
+          onChange={() => setSelectedIds(current => toggleAssignment(role, current, company, availableCompanies))}
+          className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+        />
+        <div className="min-w-0">
+          <p className="truncate font-medium text-neutral-900">{company.name}</p>
+          <p className={`text-xs ${option.preparing ? 'text-primary-700' : isTest ? 'font-medium text-amber-700' : 'text-neutral-600'}`}>{option.detail}</p>
+        </div>
+      </label>
     );
   };
 
@@ -355,9 +477,6 @@ export function Users() {
     role: UserRole,
     summaryLabel?: string
   ) => {
-    const assignableCompanies = role === 'client'
-      ? availableCompanies.filter(company => !isTestWorkspaceCompany(company) || (company.test_workspace_purpose === 'sandbox' && company.migration_rehearsal_status === 'ready' && company.active !== false && !company.test_workspace_read_only && !company.test_workspace_expired && !company.test_workspace_archived_at))
-      : availableCompanies;
     if (companiesLoadError && availableCompanies.length === 0) {
       return (
         <div className="rounded-lg border border-danger-200 bg-danger-50 p-3">
@@ -375,51 +494,59 @@ export function Users() {
       return <p className="text-sm text-neutral-500">Loading payroll clients...</p>;
     }
 
-    if (assignableCompanies.length === 0) {
+    const groups = groupAssignmentCompanies(availableCompanies, role, selectedIds);
+    if (groups.production.length + groups.practice.length + groups.unavailable.length === 0) {
       return <p className="text-sm text-neutral-500">No payroll clients available.</p>;
     }
+    const grid = 'grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3';
+    const refreshing = isLoadingCompanies && availableCompanies.length > 0;
 
     return (
-      <>
-        {role === 'client' && <p className="mb-2 text-sm text-neutral-600">For practice, use a separate email and choose one practice copy. This login cannot access real clients and is deactivated when the copy is archived or expires.</p>}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {assignableCompanies.map(company => {
-            const testWorkspace = isTestWorkspaceCompany(company);
-            return (
-              <label
-                key={company.id}
-                className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors text-xs ${
-                  selectedIds.includes(company.id)
-                    ? 'border-primary-300 bg-primary-50'
-                    : 'border-neutral-200 bg-white hover:bg-neutral-50'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(company.id)}
-                  onChange={() => {
-                    if (role !== 'client') return toggleCompanySelection(company.id, setSelectedIds);
-                    if (testWorkspace) setSelectedIds(selectedIds.includes(company.id) ? [] : [company.id]);
-                    else setSelectedIds(current => current.filter(id => !availableCompanies.find(c => c.id === id && isTestWorkspaceCompany(c))).includes(company.id)
-                      ? current.filter(id => id !== company.id)
-                      : [...current.filter(id => !availableCompanies.find(c => c.id === id && isTestWorkspaceCompany(c))), company.id]);
-                  }}
-                  className="h-4 w-4 text-primary-600 rounded border-neutral-300 focus:ring-primary-500"
-                />
-                <div className="min-w-0">
-                  <p className="font-medium text-neutral-900 truncate">{company.name}</p>
-                  <p className={`text-xs ${testWorkspace ? 'font-medium text-amber-700' : 'text-neutral-600'}`}>
-                    {testWorkspace ? role === 'client' ? 'Practice copy · separate client login only' : `${company.test_workspace_purpose_label || 'Test workspace'} · operator access` : `${company.active_employees} employees`}
-                  </p>
-                </div>
-              </label>
-            );
-          })}
-        </div>
-        {summaryLabel && (
-          <p className="text-xs text-neutral-600 mt-2">{summaryLabel}</p>
+      <div className="space-y-4" aria-busy={refreshing || undefined}>
+        {groups.production.length > 0 && (
+          <section>
+            <h4 className="mb-2 text-xs font-bold text-neutral-600">Production clients</h4>
+            <div className={grid}>{groups.production.map(option => renderAssignmentOption(option, selectedIds, setSelectedIds, role))}</div>
+          </section>
         )}
-      </>
+        <section>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-xs font-bold text-neutral-600">Test / practice workspaces</h4>
+            <div className="flex items-center gap-2">
+              <span role="status" className="text-xs text-neutral-500">{refreshing ? 'Checking for updates…' : ''}</span>
+              <Button size="sm" variant="ghost" onClick={() => void loadCompanies()} disabled={isLoadingCompanies} aria-label="Refresh test and practice workspaces">
+                <RefreshCw className={`mr-1 h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+                Refresh
+              </Button>
+            </div>
+          </div>
+          {role === 'client' && (
+            <p className="mb-2 text-xs leading-5 text-neutral-600">
+              For practice, use a separate email and choose one practice copy. This login cannot access real clients and is deactivated when the copy is archived or expires.
+            </p>
+          )}
+          {groups.practice.length > 0 ? (
+            <div className={grid}>{groups.practice.map(option => renderAssignmentOption(option, selectedIds, setSelectedIds, role))}</div>
+          ) : (
+            <p className="text-xs text-neutral-500">
+              {role === 'client' ? 'No ready practice copies. Make one from Client Management.' : 'No open test workspaces.'}
+            </p>
+          )}
+        </section>
+        {groups.unavailable.length > 0 && (
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-semibold text-neutral-600 marker:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
+              <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+              Archived, expired or read-only ({groups.unavailable.length})
+            </summary>
+            <p className="mb-2 mt-2 text-xs text-neutral-500">These can’t take new access.</p>
+            <div className={grid}>{groups.unavailable.map(option => renderAssignmentOption(option, selectedIds, setSelectedIds, role))}</div>
+          </details>
+        )}
+        {summaryLabel && (
+          <p className="text-xs text-neutral-600">{summaryLabel}</p>
+        )}
+      </div>
     );
   };
 
@@ -439,52 +566,24 @@ export function Users() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
-        {/* Role guide */}
-        <section className="mb-6 overflow-hidden rounded-2xl border border-neutral-200 bg-white">
-          <div className="border-b border-neutral-200 bg-neutral-950 px-4 py-4 text-white">
-            <h2 className="font-semibold">Choose the narrowest role that fits</h2>
-            <p className="mt-1 text-sm leading-5 text-neutral-300">Permissions are enforced by capability and organization scope. Client assignments further limit managers, accountants, and client portal users.</p>
-          </div>
-          <div className="divide-y divide-neutral-200 sm:hidden">
-            {roleGuideOptions.map((role) => (
-              <details key={role.value} className="group bg-white px-4 py-4">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
-                  <span>
-                    <span className="block font-semibold text-neutral-950">{role.label}</span>
-                    <span className="mt-0.5 block text-xs text-neutral-600">{role.scope}</span>
-                  </span>
-                  <span className="text-xs font-semibold text-primary-700 group-open:hidden">View</span>
-                  <span className="hidden text-xs font-semibold text-primary-700 group-open:inline">Close</span>
-                </summary>
-                <dl className="space-y-4 pb-2 pt-4 text-xs leading-5">
-                  <div><dt className="font-semibold text-emerald-700">Can</dt><dd className="text-neutral-700">{role.can}</dd></div>
-                  <div><dt className="font-semibold text-rose-700">Cannot</dt><dd className="text-neutral-700">{role.cannot}</dd></div>
-                  <div><dt className="font-semibold text-neutral-600">Assignment</dt><dd className="text-neutral-700">{role.assignment}</dd></div>
-                </dl>
-              </details>
-            ))}
-          </div>
-          <div className="hidden gap-px bg-neutral-200 sm:grid sm:grid-cols-2 xl:grid-cols-3">
-            {roleGuideOptions.map((role) => (
-              <article key={role.value} className="bg-white p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <h3 className="font-semibold text-neutral-950">{role.label}</h3>
-                  {role.exceptional && <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">Exceptional</span>}
-                </div>
-                <dl className="mt-4 space-y-4 text-xs leading-5">
-                  <div><dt className="font-semibold text-neutral-600">Scope</dt><dd className="text-neutral-700">{role.scope}</dd></div>
-                  <div><dt className="font-semibold text-emerald-700">Can</dt><dd className="text-neutral-700">{role.can}</dd></div>
-                  <div><dt className="font-semibold text-rose-700">Cannot</dt><dd className="text-neutral-700">{role.cannot}</dd></div>
-                  <div><dt className="font-semibold text-neutral-600">Assignment</dt><dd className="text-neutral-700">{role.assignment}</dd></div>
-                </dl>
-              </article>
-            ))}
-          </div>
-        </section>
+        <RoleGuide roles={roleGuideOptions} />
 
         {error && (
-          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
-            <p className="text-danger-700">{error}</p></ActionFeedback>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}>
+            <div className="space-y-2">
+              <p className="flex gap-2 text-danger-700"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-danger-600" aria-hidden="true" />{error}</p>
+              {errorActions && (errorActions.move || errorActions.deactivate) && (
+                <div className="flex flex-wrap gap-2">
+                  {errorActions.move && moveAction(errorActions.user)}
+                  {errorActions.deactivate && (
+                    <Button size="sm" variant="outline" onClick={() => void handleToggleActive(errorActions.user)} disabled={togglingId === errorActions.user.id}>
+                      <UserX className="mr-1 h-4 w-4" aria-hidden="true" />Deactivate instead
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          </ActionFeedback>
         )}
 
         {inviteWarning && (
@@ -526,6 +625,7 @@ export function Users() {
                 ))}
               </Select>
             </div>
+            <RoleHint role={roleOptions.find((role) => role.value === newRole)} />
 
             {needsClientAssignment(newRole) && (
               <div className="mt-4 pt-4 border-t border-neutral-200">
@@ -573,12 +673,12 @@ export function Users() {
                       {editingId === user.id ? (
                         <div className="space-y-3">
                           <Input aria-label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
-                          <Select aria-label="Role" value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
+                          <Select aria-label="Role" value={editRole} disabled={Boolean(user.practice_company_id)} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
                           </Select>
-                          {needsClientAssignment(editRole) ? renderClientAssignmentPicker(editClientIds, setEditClientIds, editRole) : (
+                          {user.practice_company_id ? renderPracticeLoginPanel(user) : needsClientAssignment(editRole) ? renderClientAssignmentPicker(editClientIds, setEditClientIds, editRole) : (
                             <p className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-500">
                               This role does not use payroll client assignments. Saving will clear any existing client assignments.
                             </p>
@@ -602,14 +702,8 @@ export function Users() {
                               </p>
                               <p className="break-all text-sm text-neutral-500">{user.email}</p>
                             </div>
-                            {user.active === false ? <span className="text-sm text-neutral-500">Inactive</span> : <span className="text-sm font-medium text-green-600">Active</span>}
+                            <StatusBadges user={user} />
                           </div>
-                          {user.invitation_pending && (
-                            <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
-                              <Mail className="h-3 w-3" />
-                              Pending invite
-                            </span>
-                          )}
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Role" value={roleLabel(user.role)} />
                             <MobileField label="Last active" value={user.last_active_at ? new Date(user.last_active_at).toLocaleDateString() : '—'} />
@@ -618,6 +712,7 @@ export function Users() {
                           <MobileCardActions>
                             <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
                             {managementAction(user)}
+                            {moveAction(user, 'compact')}
                             {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
                               <Button size="sm" variant="outline" onClick={() => handleResendInvitation(user)} disabled={resendingId === user.id}>
@@ -644,11 +739,10 @@ export function Users() {
               ))}
             </div>
             <Card className="hidden sm:block">
-              <Table>
+              <Table className="[&_td]:px-4 [&_th]:px-4">
                 <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
+                  <TableHead>User</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last Active</TableHead>
@@ -659,26 +753,20 @@ export function Users() {
                 {users.map((user) => (
                   <Fragment key={user.id}>
                     <TableRow>
-                      <TableCell>
+                      <TableCell className="min-w-[11rem] whitespace-normal">
                         {editingId === user.id ? (
                           <Input aria-label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
                         ) : (
-                          <span className="flex items-center gap-2">
+                          <span className="flex flex-wrap items-center gap-2 font-medium text-neutral-900">
                             {user.name}
                             {user.platform_owner && <OwnerBadge />}
-                            {user.invitation_pending && (
-                              <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">
-                                <Mail className="w-3 h-3" />
-                                Pending
-                              </span>
-                            )}
                           </span>
                         )}
+                        <span className="mt-0.5 block break-all text-xs text-neutral-600">{user.email}</span>
                       </TableCell>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>
+                      <TableCell className="min-w-[10rem] whitespace-normal">
                         {editingId === user.id ? (
-                          <Select aria-label="Role" value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
+                          <Select aria-label="Role" value={editRole} disabled={Boolean(user.practice_company_id)} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
@@ -693,14 +781,12 @@ export function Users() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {user.active === false ? (
-                          <span className="text-sm text-neutral-500">Inactive</span>
-                        ) : (
-                          <span className="text-sm text-green-600">Active</span>
-                        )}
+                        <StatusBadges user={user} />
                       </TableCell>
-                      <TableCell>
-                        {user.last_active_at ? new Date(user.last_active_at).toLocaleString() : '\u2014'}
+                      <TableCell className="whitespace-nowrap text-neutral-600">
+                        {user.last_active_at ? (
+                          <span title={new Date(user.last_active_at).toLocaleString()}>{new Date(user.last_active_at).toLocaleDateString()}</span>
+                        ) : '\u2014'}
                       </TableCell>
                       <TableCell className="text-right">
                         {editingId === user.id ? (
@@ -714,9 +800,10 @@ export function Users() {
                             </Button>
                           </div>
                         ) : (
-                          <div className="flex justify-end gap-2">
+                          <div className="ml-auto flex min-w-[15rem] max-w-[24rem] flex-wrap justify-end gap-1.5 [&_button]:text-xs">
                             <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
                             {managementAction(user)}
+                            {moveAction(user, 'compact')}
                             {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
                               <Button
@@ -760,9 +847,9 @@ export function Users() {
                     {/* Inline edit details row */}
                     {editingId === user.id && (
                       <TableRow>
-                        <TableCell colSpan={6} className="bg-neutral-50 p-0">
+                        <TableCell colSpan={5} className="bg-neutral-50 p-0">
                           <div className="px-6 py-4">
-                            {needsClientAssignment(editRole) ? (
+                            {user.practice_company_id ? renderPracticeLoginPanel(user) : needsClientAssignment(editRole) ? (
                               <>
                                 <div className="mb-3 flex items-center justify-between">
                                   <p className="text-sm font-medium text-neutral-700">
@@ -793,8 +880,30 @@ export function Users() {
         )}
       </div>
       {managementUser && <ClientManagementDialog key={managementUser.id} accountant={managementUser} onClose={() => setManagementUser(null)} />}
+      {moveUser && (
+        <MovePracticeLoginDialog
+          key={moveUser.id}
+          user={moveUser}
+          companies={availableCompanies}
+          loadingCompanies={isLoadingCompanies}
+          onRefreshCompanies={() => void loadCompanies()}
+          onClose={() => setMoveUser(null)}
+          onMoved={handleMoved}
+        />
+      )}
       {activityUser && <UserActivityPanel user={activityUser} onClose={handleCloseActivity} />}
     </div>
+  );
+}
+
+function StatusBadges({ user }: { user: User }) {
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      {user.active === false ? <Badge>Inactive</Badge> : <Badge variant="success">Active</Badge>}
+      {user.invitation_pending && (
+        <Badge variant="warning"><Mail className="mr-1 h-3 w-3" aria-hidden="true" />Pending invite</Badge>
+      )}
+    </span>
   );
 }
 
