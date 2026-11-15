@@ -42,6 +42,16 @@ RSpec.describe SpreadsheetPreview do
     expect(first).to include(truncated_rows: true, truncated_columns: true)
   end
 
+  it "places a far-right cell without padding to it, and shows elapsed hours as hours" do
+    rows = %(<row r="1">#{preview_text_cell('A1', 'Hours')}<c r="B1" s="5"><v>1.5</v></c><c r="C1" s="5"><v>0.25</v></c>#{preview_text_cell('ZZZZ1', 'far')}</row>)
+
+    expect(Roo::Excelx::Cell::Empty).not_to receive(:new)
+    sheet = preview(preview_workbook({ "A" => rows }))[:sheets].sole
+
+    expect(sheet[:rows].sole[:cells]).to eq([ "Hours", "36:00", "6:00" ])
+    expect(sheet).to include(columns: 3, truncated_columns: true)
+  end
+
   it "reads CSV as one sheet" do
     result = preview("﻿name,hours\nAvery Sample,40\n\n\"Reyes, Bo\",12.5\n", "hours.csv")
 

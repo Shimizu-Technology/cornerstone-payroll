@@ -89,21 +89,34 @@ class SpreadsheetPreview
     end
   end
 
+  # Cells are placed by their own coordinates into a fixed-width row, so a
+  # single far-right cell (say ZZZZ1) can't make roo pad a huge array.
   def workbook_sheet(workbook, name)
     rows = []
     truncated_rows = false
     truncated_columns = false
-    workbook.each_row_streaming(sheet: name, pad_cells: true) do |cells|
-      values = cells.map { |cell| cell_text(cell) }
+    workbook.each_row_streaming(sheet: name) do |cells|
+      values = Array.new(MAX_COLUMNS)
+      row_number = nil
+      cells.each do |cell|
+        text = cell_text(cell)
+        next if text.blank?
+
+        column = cell.coordinate.column
+        row_number ||= cell.coordinate.row
+        if column > MAX_COLUMNS
+          truncated_columns = true
+        else
+          values[column - 1] = text
+        end
+      end
       next if values.all?(&:blank?)
 
       if rows.length >= MAX_ROWS
         truncated_rows = true
         break
       end
-      row_number = cells.compact.first&.coordinate&.row || (rows.last&.fetch(:number, 0).to_i + 1)
-      truncated_columns ||= values.drop(MAX_COLUMNS).any?(&:present?)
-      rows << { number: row_number, cells: values.first(MAX_COLUMNS) }
+      rows << { number: row_number, cells: values }
     end
     sheet_result(name, rows, truncated_rows:, truncated_columns:)
   end
@@ -136,7 +149,7 @@ class SpreadsheetPreview
     {
       name: name.to_s,
       columns: width,
-      rows: rows.map { |row| { number: row[:number], cells: row[:cells].first(width).fill(nil, row[:cells].length...width) } },
+      rows: rows.map { |row| cells = row[:cells].first(width); { number: row[:number], cells: cells.fill(nil, cells.length...width) } },
       truncated_rows: truncated_rows,
       truncated_columns: truncated_columns
     }
@@ -154,6 +167,8 @@ class SpreadsheetPreview
   def cell_text(cell)
     return nil if cell.nil? || cell.empty?
 
+    return clip(format_elapsed(cell.cell_value.to_s.to_f)) if elapsed_format?(cell)
+
     text = case cell
     when Roo::Excelx::Cell::Time then format_time_of_day(cell.value)
     when Roo::Excelx::Cell::DateTime then format_date_cell(cell) # includes Date
@@ -162,6 +177,17 @@ class SpreadsheetPreview
     else cell.value.to_s
     end
     clip(text)
+  end
+
+  # Durations like [h]:mm count total hours past 24, so read them from the
+  # stored serial (days) instead of as a date or a time of day.
+  def elapsed_format?(cell)
+    cell.respond_to?(:format) && cell.format.to_s.match?(/\[(h+|m+|s+)\]/i) && cell.cell_value.to_s.match?(/\A-?\d+(\.\d+)?\z/)
+  end
+
+  def format_elapsed(days)
+    minutes = (days.abs * 1440).round
+    format("%s%d:%02d", days.negative? && minutes.positive? ? "-" : "", minutes / 60, minutes % 60)
   end
 
   # roo files some time-only formats ("h:mm AM/PM") as dates, so read the
