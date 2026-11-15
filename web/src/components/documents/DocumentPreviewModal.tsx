@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import type { ClientDocument } from '@/services/api';
 import type { DocumentPreviewPayload } from '@/lib/documentPreview';
+import { SheetPreview } from './SheetPreview';
 
 export function DocumentPreviewModal({
   open,
@@ -89,6 +90,10 @@ export function DocumentPreviewModal({
           ) : payload?.kind === 'image' && payload.objectUrl ? (
             <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50 p-6">
               <img src={payload.objectUrl} alt={document?.title || 'Document preview'} className="max-h-[70vh] rounded-xl shadow-sm" />
+            </div>
+          ) : payload?.kind === 'sheet' && payload.sheet ? (
+            <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-50">
+              <SheetPreview data={payload.sheet} tableClassName="max-h-[min(65vh,65dvh)]" />
             </div>
           ) : payload?.kind === 'text' ? (
             <div className="min-h-[420px] overflow-auto rounded-2xl border border-neutral-200 bg-white p-5">

@@ -1288,7 +1288,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(`/pay-periods/${fixture.safe_payroll_import_period_id}`);
     await openPayrollActions(page);
     await page.getByRole('button', { name: 'Import (MoSa)' }).click();
-    const safeDialog = page.locator('.dialog-wide');
+    const safeDialog = page.getByRole('dialog', { name: 'Import Payroll Data', exact: true });
     await expect(safeDialog.getByText('Revel pay rates and pay amounts are ignored.', { exact: false })).toBeVisible();
     await safeDialog.locator('input[type="file"]').nth(0).setInputFiles(fixture.safe_payroll_import_pdf_path);
     await safeDialog.locator('input[type="file"]').nth(1).setInputFiles(fixture.safe_payroll_import_workbook_path);
@@ -1328,7 +1328,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(`/pay-periods/${fixture.blocked_payroll_import_period_id}`);
     await openPayrollActions(page);
     await page.getByRole('button', { name: 'Import (MoSa)' }).click();
-    const blockedDialog = page.locator('.dialog-wide');
+    const blockedDialog = page.getByRole('dialog', { name: 'Import Payroll Data', exact: true });
     await blockedDialog.locator('input[type="file"]').nth(0).setInputFiles(fixture.blocked_payroll_import_pdf_path);
     await blockedDialog.locator('input[type="file"]').nth(1).setInputFiles(fixture.blocked_payroll_import_workbook_path);
     await blockedDialog.getByRole('button', { name: 'Preview Import' }).click();
