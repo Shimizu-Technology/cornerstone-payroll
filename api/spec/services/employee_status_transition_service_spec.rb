@@ -122,7 +122,7 @@ RSpec.describe EmployeeStatusTransitionService do
     end
 
     it "rejects future and pre-hire dates without changing status" do
-      [ Date.current + 1, Date.new(2023, 12, 31) ].each do |date|
+      [ PayrollBusinessClock.today + 1, Date.new(2023, 12, 31) ].each do |date|
         expect { described_class.deactivate!(employee: employee, actor: actor, attributes: { effective_date: date }) }.to raise_error(described_class::Error)
       end
       expect(employee.reload.status).to eq("active")
@@ -139,6 +139,15 @@ RSpec.describe EmployeeStatusTransitionService do
       described_class.deactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-03-15" })
       expect(employee.reload.status).to eq("inactive")
       expect(employee.employee_status_events.sole).to have_attributes(event_type: "deactivated", actor_id: actor.id)
+    end
+  end
+
+  it "accepts today's Guam date while UTC is still on the previous day" do
+    travel_to Time.utc(2026, 11, 16, 22, 31) do # 8:31 a.m. Nov 17 in Guam
+      event = described_class.deactivate!(employee: employee, actor: actor, attributes: { effective_date: "2026-11-17" })
+      expect(event.effective_date).to eq(Date.new(2026, 11, 17))
+      expect { described_class.reactivate!(employee: employee, actor: actor, attributes: { effective_date: "2026-11-18" }) }
+        .to raise_error(described_class::Error, /cannot be in the future/)
     end
   end
 

@@ -539,7 +539,7 @@ module Api
 
           if include_lifecycle
             data["open_pay_runs"] = EmployeeStatusTransitionService.open_run_groups(
-              employee, effective_date: params[:status_effective_date].presence || Date.current
+              employee, effective_date: params[:status_effective_date].presence || PayrollBusinessClock.today
             ).flat_map do |action, runs|
               runs.map { |run| { id: run.id, status: run.status, start_date: run.start_date, end_date: run.end_date, action: action } }
             end
