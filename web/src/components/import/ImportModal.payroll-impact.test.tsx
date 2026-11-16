@@ -71,7 +71,7 @@ it.each(['unmatched_revel', 'unmatched_workbook'])('links an unmatched non-activ
   expect(link.getAttribute('href')).toBe('/companies/7/employees/139/edit');
   expect(link.getAttribute('target')).toBe('_blank');
   expect((screen.getByRole('button', { name: /Apply Import/ }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.queryByRole('option', { name: /Include in pay/ })).toBeNull();
+  expect(screen.queryByRole('option', { name: 'Include in this payroll' })).toBeNull();
 });
 it('does not show a profile link for a source row with no identified worker', () => {
   const data = preview();
