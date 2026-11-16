@@ -2632,6 +2632,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_090000) do
     t.index [ "pay_period_id", "payroll_standing_change_id" ], name: "idx_entry_resolution_field", unique: true, where: "(payroll_standing_change_id IS NOT NULL)"
     t.index [ "pay_period_id" ], name: "index_payroll_entry_resolutions_on_pay_period_id"
     t.index [ "payroll_standing_change_id" ], name: "index_payroll_entry_resolutions_on_payroll_standing_change_id"
+    t.jsonb "source_evidence", default: {}, null: false
   end
 
   create_table "payroll_field_definitions", force: :cascade do |t|
@@ -3457,7 +3458,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_090000) do
     t.index [ "payroll_submission_period_id", "revision" ], name: "idx_payroll_submissions_revision", unique: true
     t.index [ "payroll_submission_period_id", "submitted_by_id", "idempotency_key" ], name: "idx_payroll_submissions_retry_key", unique: true, where: "(idempotency_key IS NOT NULL)"
     t.index [ "submitted_by_id" ], name: "index_payroll_submissions_on_submitted_by_id"
-    t.check_constraint "NOT no_changes OR jsonb_array_length(jsonb_path_query_array(change_rows, '$[*] ? (@.skipped == true)')) = jsonb_array_length(change_rows)", name: "payroll_submissions_no_changes_is_empty"
+    t.check_constraint "NOT no_changes OR jsonb_array_length(jsonb_path_query_array(change_rows, '$[*] ? (@.skipped == true || exists(@.standing_change_id))')) = jsonb_array_length(change_rows)", name: "payroll_submissions_no_changes_is_empty"
     t.check_constraint "jsonb_typeof(change_rows) = 'array'::text", name: "payroll_submissions_changes_array"
     t.check_constraint "revision > 0", name: "payroll_submissions_revision_positive"
     t.check_constraint "workbook_choice IS NULL OR (workbook_choice::text = ANY (ARRAY['attach'::character varying, 'link'::character varying, 'none'::character varying]::text[]))", name: "submission_workbook_choice"
