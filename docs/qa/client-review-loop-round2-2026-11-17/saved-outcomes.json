@@ -1,0 +1,283 @@
+{
+  "tested_head": "7d53a241ffa9778951b2210d57fa6489c94549ed",
+  "environment": "local Rails test / cp_test_p2_loop",
+  "viewports": [
+    "1280x800",
+    "390x844"
+  ],
+  "email_delivery_enabled": false,
+  "periods": [
+    {
+      "id": 1200,
+      "setting_during_approval": true,
+      "viewport": "1280x800",
+      "status": "committed",
+      "gross": "1230.0",
+      "net": "1064.66",
+      "revisions": [
+        {
+          "id": 249,
+          "revision": 1,
+          "status": "superseded",
+          "published_at": "2026-11-16 17:07:56 UTC",
+          "approved_at": null,
+          "approved_by_id": null,
+          "changes_requested_at": "2026-11-16 17:09:40 UTC",
+          "change_request_note": "Add two hours",
+          "superseded_at": "2026-11-16 17:10:17 UTC"
+        },
+        {
+          "id": 250,
+          "revision": 2,
+          "status": "approved",
+          "published_at": "2026-11-16 17:11:01 UTC",
+          "approved_at": "2026-11-16 17:11:18 UTC",
+          "approved_by_id": 1149,
+          "changes_requested_at": null,
+          "change_request_note": null,
+          "superseded_at": null
+        }
+      ]
+    },
+    {
+      "id": 1201,
+      "setting_during_approval": true,
+      "viewport": "390x844",
+      "status": "committed",
+      "gross": "1230.0",
+      "net": "1064.66",
+      "revisions": [
+        {
+          "id": 251,
+          "revision": 1,
+          "status": "superseded",
+          "published_at": "2026-11-16 17:12:06 UTC",
+          "approved_at": null,
+          "approved_by_id": null,
+          "changes_requested_at": "2026-11-16 17:12:41 UTC",
+          "change_request_note": "Add two hours",
+          "superseded_at": "2026-11-16 17:13:01 UTC"
+        },
+        {
+          "id": 252,
+          "revision": 2,
+          "status": "approved",
+          "published_at": "2026-11-16 17:13:18 UTC",
+          "approved_at": "2026-11-16 17:13:40 UTC",
+          "approved_by_id": 1149,
+          "changes_requested_at": null,
+          "change_request_note": null,
+          "superseded_at": null
+        }
+      ]
+    },
+    {
+      "id": 1202,
+      "setting_during_approval": false,
+      "viewport": "1280x800",
+      "status": "committed",
+      "gross": "1200.0",
+      "net": "1040.56",
+      "revisions": [
+        {
+          "id": 253,
+          "revision": 1,
+          "status": "pending",
+          "published_at": null,
+          "approved_at": null,
+          "approved_by_id": null,
+          "changes_requested_at": null,
+          "change_request_note": null,
+          "superseded_at": null
+        }
+      ]
+    },
+    {
+      "id": 1203,
+      "setting_during_approval": false,
+      "viewport": "390x844",
+      "status": "committed",
+      "gross": "1200.0",
+      "net": "1040.56",
+      "revisions": [
+        {
+          "id": 254,
+          "revision": 1,
+          "status": "pending",
+          "published_at": null,
+          "approved_at": null,
+          "approved_by_id": null,
+          "changes_requested_at": null,
+          "change_request_note": null,
+          "superseded_at": null
+        }
+      ]
+    }
+  ],
+  "off_run_review_notification_count": 0,
+  "review_events_before_stale_fixture": 8,
+  "review_events_including_stale_fixture": [
+    {
+      "id": 381,
+      "event_type": "payroll_review_published",
+      "metadata": {
+        "revision": 1,
+        "pay_period_id": 1200
+      },
+      "deliveries": [
+        {
+          "user_id": 1149,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    },
+    {
+      "id": 382,
+      "event_type": "payroll_review_decided",
+      "metadata": {
+        "decision": "changes_requested",
+        "revision": 1,
+        "pay_period_id": 1200
+      },
+      "deliveries": [
+        {
+          "user_id": 1148,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    },
+    {
+      "id": 383,
+      "event_type": "payroll_review_published",
+      "metadata": {
+        "revision": 2,
+        "pay_period_id": 1200
+      },
+      "deliveries": [
+        {
+          "user_id": 1149,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    },
+    {
+      "id": 384,
+      "event_type": "payroll_review_decided",
+      "metadata": {
+        "decision": "approved",
+        "revision": 2,
+        "pay_period_id": 1200
+      },
+      "deliveries": [
+        {
+          "user_id": 1148,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    },
+    {
+      "id": 385,
+      "event_type": "payroll_review_published",
+      "metadata": {
+        "revision": 1,
+        "pay_period_id": 1201
+      },
+      "deliveries": [
+        {
+          "user_id": 1149,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    },
+    {
+      "id": 386,
+      "event_type": "payroll_review_decided",
+      "metadata": {
+        "decision": "changes_requested",
+        "revision": 1,
+        "pay_period_id": 1201
+      },
+      "deliveries": [
+        {
+          "user_id": 1148,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    },
+    {
+      "id": 387,
+      "event_type": "payroll_review_published",
+      "metadata": {
+        "revision": 2,
+        "pay_period_id": 1201
+      },
+      "deliveries": [
+        {
+          "user_id": 1149,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    },
+    {
+      "id": 388,
+      "event_type": "payroll_review_decided",
+      "metadata": {
+        "decision": "approved",
+        "revision": 2,
+        "pay_period_id": 1201
+      },
+      "deliveries": [
+        {
+          "user_id": 1148,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    },
+    {
+      "id": 389,
+      "event_type": "payroll_review_published",
+      "metadata": {
+        "revision": 1,
+        "pay_period_id": 1204
+      },
+      "deliveries": [
+        {
+          "user_id": 1149,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "event_type": "payroll_review_published",
+      "metadata": {
+        "revision": 2,
+        "pay_period_id": 1204
+      },
+      "deliveries": [
+        {
+          "user_id": 1149,
+          "status": "skipped",
+          "skip_reason": "email_delivery_disabled"
+        }
+      ]
+    }
+  ],
+  "client_preview_access_count": 2,
+  "stale_fixture": {
+    "period_id": 1204,
+    "purpose": "supplementary stale-card recovery only; fixture lifecycle reset outside UI",
+    "current_revision": 2,
+    "current_status": "pending"
+  },
+  "schema_version": "20261117150000"
+}
