@@ -49,9 +49,8 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
     const defaults = (period.standing_changes || []).filter(row => !row.availability_error);
     const previous = (current?.changes || []).filter(row => !row.availability_error);
     return [...defaults.map(row => ({ ...previous.find(item => item.standing_change_id === row.standing_change_id && item.kind === row.kind && item.employee_id === row.employee_id && item.employee_wage_rate_id === row.employee_wage_rate_id), ...row })),
-      // A skipped default that was later deactivated has nothing to carry forward.
-      ...previous.filter(row => !(row.standing_change_id && period.standing_changes?.some(item => item.standing_change_id === row.standing_change_id && item.availability_error)) && !defaults.some(item => item.standing_change_id === row.standing_change_id) && !(row.standing_change_id && row.skipped))
-        .map(row => ({ ...row, standing_change_id: undefined, skipped: undefined }))]
+      // Configured answers carry forward only through currently available fields.
+      ...previous.filter(row => !row.standing_change_id)]
       .map(row => ({ ...row, skipped: row.allow_none === false ? undefined : row.skipped, key: crypto.randomUUID() }));
   });
   const [workbookChoice, setWorkbookChoice] = useState<'attach' | 'link' | 'none' | ''>(current?.workbook_choice || (current?.documents.some(d => d.role === 'changes_workbook') ? 'attach' : current?.changes_link_url ? 'link' : ''));
