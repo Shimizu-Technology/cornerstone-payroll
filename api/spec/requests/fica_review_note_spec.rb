@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe "Annual FICA review disclosure", type: :request do
+  include FicaHistoryHelpers
+
   let!(:tax_table) { create(:tax_table, tax_year: 2026, ss_wage_base: 184500) }
   let(:company) { create(:company, auto_create_fit_check: false) }
   let(:actor) { create(:user, company: company, role: "admin") }
@@ -10,6 +12,7 @@ RSpec.describe "Annual FICA review disclosure", type: :request do
     create(:employee, company: company, department: create(:department, company: company),
       first_name: "Maya", last_name: "Cruz", pay_rate: 15, hire_date: "2026-01-01", payment_delivery_method: "paper_check")
   end
+  let(:batch) { create(:historical_import_batch, company: company, status: "locked", locked_at: Time.current) }
   let(:run) do
     create(:pay_period, company: company, start_date: "2026-10-16", end_date: "2026-10-31", pay_date: "2026-11-15")
   end
@@ -56,8 +59,46 @@ RSpec.describe "Annual FICA review disclosure", type: :request do
     expect(payload.fetch("compliance_warnings").join).not_to include("filing review", "Prior-period")
     context = BelowThresholdFicaContext.new(employee: employee, company: company, year: 2026, excluding_pay_period_id: run.id)
     expect(context.applicable?).to be(false)
-    expect(context.send(:disputed_history?)).to be(false)
+    expect(context.unresolved_history?).to be(false)
     expect(empty.reload.attributes).to eq(saved_history)
+  end
+
+  it "clears the note for reconciled imported history with an applied bridge and verified-empty native item" do
+    empty = verified_empty_history
+    opening(gross: 11000)
+    imports = Array.new(11) { imported }
+    reconciliation = ImportedPaycheckFicaReconciliation.new(company: company, year: 2026)
+    plan = reconciliation.inventory
+    expect(reconciliation.apply!(actor: actor, review_reference: "Reviewed production-shaped synthetic imports",
+      expected_digest: plan.fetch(:plan_digest))[:applied_proofs]).to eq(11)
+    rules = PayrollFicaLegacyRecovery.new(company: company, year: 2026).verified_year_rules
+    imports.each do |row|
+      expect(ImportedPaycheckFicaEvidence.verified_bases(row.reload, rules: rules, year: 2026)).to be_present
+    end
+    ordinary = EmployeeYearFicaContext.new(employee: employee, year: 2026, excluding_pay_period_id: run.id)
+      .increment(wages_delta: 500, tips_delta: 50, rules: rules)
+    history = [ empty, *imports ].to_h { |row| [ row, row.reload.attributes ] }
+
+    payload = calculate
+    expect(item.reload.attributes.symbolize_keys.slice(*ordinary.keys)).to eq(ordinary)
+    expect(item.tax_rule_snapshot.fetch("annual_fica_context")).not_to have_key("history_review_open")
+    expect(payload["annual_fica_review_note"]).to be_nil
+    expect(run.annual_fica_review_note).to be_nil
+    expect(payload.fetch("compliance_warnings").join).not_to include("filing review", "Prior-period", "imported paycheck history")
+    context = BelowThresholdFicaContext.new(employee: employee, company: company, year: 2026, excluding_pay_period_id: run.id)
+    expect(context.applicable?).to be(true)
+    expect(context.unresolved_history?).to be(false)
+    # The same conservative proof is available; it must not replace the ordinary snapshot.
+    expect(context.snapshot(current_item: item, rules: rules)).to include("history_review_open" => true)
+
+    post "/api/v1/admin/pay_periods/#{run.id}/approve"
+    expect(response).to have_http_status(:ok), response.body
+    post "/api/v1/admin/pay_periods/#{run.id}/commit"
+    expect(response).to have_http_status(:ok), response.body
+    expect(run.reload).to be_committed
+    expect(run.annual_fica_review_note).to be_nil
+    expect(item.reload.attributes.symbolize_keys.slice(*ordinary.keys)).to eq(ordinary)
+    history.each { |row, attributes| expect(row.reload.attributes).to eq(attributes) }
   end
 
   it "renders older committed snapshots with a missing note using a named fallback" do
