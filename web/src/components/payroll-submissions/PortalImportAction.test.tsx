@@ -7,6 +7,7 @@ import type { PeriodDetail } from '@/services/payrollSubmissions';
 import { ApiError } from '@/services/api';
 const mocks = vi.hoisted(() => ({ preview: vi.fn(), resolve: vi.fn() }));
 vi.mock('@/services/api', async original => ({ ...await original<typeof import('@/services/api')>(), payPeriodsApi: { previewPortalSubmission: mocks.preview, resolvePortalSource: mocks.resolve } }));
+vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: () => false, useOptionalSelectedCompanyCapability: () => false }));
 vi.mock('@/components/import/ImportModal', () => ({ ImportModal: ({ initialPreview }: { initialPreview: { portal_source: { revision: number } } }) => <div role="dialog">Review portal revision {initialPreview.portal_source.revision}</div> }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const period = { pay_period_id: 9, submissions: [{ id: 20, revision: 2, current: true }, { id: 10, revision: 1, current: false }] } as PeriodDetail;

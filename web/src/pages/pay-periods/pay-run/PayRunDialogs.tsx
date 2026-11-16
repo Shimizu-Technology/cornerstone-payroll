@@ -10,6 +10,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
 import { ImportModal } from '@/components/import/ImportModal';
+import { useOptionalSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
 
 import { PayrollItemEditModal } from '@/components/payroll/PayrollItemEditModal';
@@ -89,6 +90,7 @@ export function PayRunDialogs({
   timeTrackingImportOpen,
   totalNet
 }: PayRunSectionProps<'dialogs'>) {
+  const canReactivateWorkers = useOptionalSelectedCompanyCapability('manage_client_configuration', Number(companyId));
   return (<>
 <ImportModal
         open={importModalOpen}
@@ -97,6 +99,7 @@ export function PayRunDialogs({
         companyId={Number(companyId)}
         onSourcePreviewed={() => void loadPayPeriod(payPeriod.id, true)}
         onImportComplete={handleImportComplete}
+        canReactivateWorkers={canReactivateWorkers}
       />
 <PayrollIntakeImportModal
         open={payrollIntakeImportOpen}

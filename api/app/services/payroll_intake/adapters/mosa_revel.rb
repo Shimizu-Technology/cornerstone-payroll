@@ -291,11 +291,10 @@ module PayrollIntake
         employee = @non_active_employees.find { |candidate| candidate.id == match&.dig(:employee_id) }
         return error(code, fallback) unless employee
 
-        error(
-          code,
-          "#{employee.full_name} is #{employee.status} in Cornerstone. A manager or admin can reactivate them from their profile, " \
-          "then upload the files again. Or choose an outcome below."
-        ).merge(employee_id: employee.id)
+        # Import review offers Reactivate to managers and admins, then matches
+        # the same files again; everyone else is told who can do it.
+        error(code, "#{employee.full_name} is #{employee.status} in Cornerstone.")
+          .merge(employee_id: employee.id, employee_name: employee.full_name, employee_status: employee.status)
       end
 
       def round(value)
