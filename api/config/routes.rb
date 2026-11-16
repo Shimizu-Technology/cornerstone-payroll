@@ -479,6 +479,7 @@ Rails.application.routes.draw do
             get :current_import, to: "payroll_imports#current"
             post :resolve_portal_source, to: "payroll_imports#resolve_portal_source"
             post :preview_import, to: "payroll_imports#preview"
+            post :rematch_import, to: "payroll_imports#rematch"
             post :apply_import, to: "payroll_imports#apply"
             # Timecard OCR CSV import
             post :preview_timecard_import, to: "timecard_imports#preview"

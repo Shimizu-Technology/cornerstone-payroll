@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { ImportModal } from './ImportModal';
@@ -44,7 +44,10 @@ it('requires a deliberate pending revision selection and sends it with apply', a
   render(<MemoryRouter><ImportModal open payPeriodId={9} companyId={7} initialPreview={preview} onOpenChange={vi.fn()} onImportComplete={vi.fn()} /></MemoryRouter>);
   const choice = screen.getByLabelText('Use this import for the client’s revision 2');
   expect(choice).toHaveProperty('checked', false);
-  expect(screen.getByRole('alert').textContent).toContain("No tips or loans: the workbook wasn't included");
+  const notices = screen.getByRole('region', { name: 'For your information' });
+  expect(within(notices).getByRole('heading', { name: 'For your information (1)' })).toBeTruthy();
+  expect(within(notices).getByText('The tips & loans workbook isn’t included')).toBeTruthy();
+  expect(within(notices).getByText("No tips or loans: the workbook wasn't included")).toBeTruthy();
   expect(screen.getByText(/Both owners/)).toBeTruthy();
   expect(screen.getByText(/New Colleague/)).toBeTruthy();
   expect(screen.getByText(/Avery · 6/)).toBeTruthy();
