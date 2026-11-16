@@ -18,7 +18,7 @@ module Api
             employee = Employee.where(company: current_company).lock.find(params[:employee_id])
             exclusion = period.pay_period_excluded_employees.find_by(employee: employee)
             if exclusion
-              unless Employee.eligible_for_period(period.start_date, period.end_date).exists?(id: employee.id)
+              unless Employee.where(company: current_company).eligible_for_payroll_run(period, explicitly_selected: true).exists?(id: employee.id)
                 return render json: { error: "This employee is not eligible for this run's dates. Review their employment status before adding them back." }, status: :unprocessable_entity
               end
 

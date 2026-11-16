@@ -45,6 +45,7 @@ it('restores excluded fields and regulars while retaining the original reasons',
   const actions = screen.getAllByRole('button', { name: 'Add back to this run' });
   fireEvent.click(actions[0]);
   await waitFor(() => expect(restore).toHaveBeenCalledWith(7));
+  expect(await screen.findByText("Imported hours aren't brought back. Enter hours or import again.")).toBeTruthy();
   await waitFor(() => expect(actions[1]).toHaveProperty('disabled', false));
   fireEvent.click(actions[1]);
   await waitFor(() => expect(restore).toHaveBeenCalledWith(8));
@@ -92,6 +93,15 @@ it('offers amount-free resolutions and undo on approved runs while pay entry req
   fireEvent.click(screen.getByRole('button', { name: 'Undo not paid for Regular Worker' }));
   await waitFor(() => expect(mocks.delete).toHaveBeenCalledWith('/admin/pay_periods/1/entry_resolutions', { data: expect.objectContaining({ employee_id: 8 }) }));
   await waitFor(() => expect(saved).toHaveBeenCalledTimes(4));
+  expect(screen.queryByRole('button', { name: 'Unapprove to enter pay' })).toBeNull();
+  view.rerender(<ExpectedEntriesPanel {...props} payPeriod={{ ...period, status: 'approved' }} />);
   fireEvent.click(screen.getByRole('button', { name: 'Unapprove to enter pay' }));
   expect(unapprove).toHaveBeenCalledOnce();
+});
+
+it('does not prompt for unapproval when approved fields are filled and no entries are outstanding', () => {
+  render(<ExpectedEntriesPanel onUnapprove={vi.fn()} onRestore={vi.fn()} onCalculate={vi.fn()} onSaved={vi.fn()} onEnterPay={vi.fn()} disabled={false} payPeriod={{ ...period, status: 'approved', expected_entries: { fields: [{ ...period.expected_entries!.fields[0], status: 'filled', value: '16' }], missing_regulars: [], outstanding: [] } }} />);
+  expect(screen.getByText('All expected entries are resolved.')).toBeTruthy();
+  expect(screen.queryByText('To enter pay, unapprove first.')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Unapprove to enter pay' })).toBeNull();
 });

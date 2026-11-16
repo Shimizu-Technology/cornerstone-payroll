@@ -64,3 +64,13 @@ it.each(['approved', 'calculated'] as const)('shows the %s header blocker with a
   expect(screen.getByRole('link', { name: 'Resolve expected entries' }).getAttribute('href')).toContain('#expected-payroll-entries');
   expect(screen.getByRole('button', { name: status === 'approved' ? 'Commit' : 'Approve' })).toHaveProperty('disabled', true);
 });
+
+it('links the unapproved commit reason directly to results and opens collapsed approval controls', async () => {
+  const props = { step: 'commit', companyId: 1, payPeriod: { id: 2, status: 'calculated', run_purpose: 'regular' }, isCalculated: true, calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [] } as unknown as ComponentProps<typeof PayRunStepAction>;
+  render(<MemoryRouter><details id="payroll-results"><summary>Results</summary><button>Approve reviewed payroll</button></details><PayRunStepAction {...props} /></MemoryRouter>);
+  const link = screen.getByRole('link', { name: 'Review and approve payroll' });
+  expect(link.getAttribute('href')).toContain('#payroll-results');
+  await userEvent.click(link);
+  expect(document.querySelector<HTMLDetailsElement>('#payroll-results')?.open).toBe(true);
+  expect(screen.getByRole('button', { name: 'Approve reviewed payroll' })).toBeTruthy();
+});

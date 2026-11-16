@@ -106,11 +106,12 @@ export function PayRunStepAction({ step, header = false, ...props }: PayRunSecti
     : calculationFailures.length ? ['payroll-feedback', 'Review payroll errors']
     : standaloneLoanConflicts.length ? ['payroll-loan-inputs', 'Review loan inputs']
     : hasPendingCalculationChanges || !payrollItems.length ? ['payroll-loan-inputs', 'Review hours and pay']
+    : step === 'commit' && !isApproved && !payPeriod.parallel_run ? ['payroll-results', 'Review and approve payroll']
     : ['payroll-blockers', 'Review payroll requirements'];
   const visibleReason = (message: string, kind: 'approval' | 'commit') => <p id={`${header ? 'header-' : ''}${kind}-required-reason`} className={`${header ? 'order-1 w-full' : 'mt-1'} break-words text-sm font-normal text-neutral-600`}>
     {message}{' '}{!processing && <Link className="ml-1 font-semibold text-primary-700 underline" to={`${payRunPath(props.companyId, payPeriod.id, 'work', { returnTo: props.returnTo })}#${fixTarget[0]}`} onClick={() => {
       const target = document.getElementById(fixTarget[0]);
-      for (let parent = target?.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
+      for (let parent = target; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
       target?.scrollIntoView?.({ block: 'start' }); target?.focus({ preventScroll: true });
     }}>{fixTarget[1]}</Link>}
   </p>;
