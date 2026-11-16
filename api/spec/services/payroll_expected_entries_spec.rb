@@ -126,6 +126,14 @@ RSpec.describe PayrollExpectedEntries do
       expect(data[:outstanding]).to be_empty
     end
 
+    it "still flags an active regular whose configured field became unavailable" do
+      field
+      rate.update!(active: false)
+      expect(data[:fields].sole[:availability_error]).to be_present
+      expect(data[:missing_regulars].pluck(:employee_id)).to eq([ employee.id ])
+      expect(data[:outstanding]).to eq([ employee.full_name ])
+    end
+
     %i[reported_tips service_charge_wages bonus].each do |earning|
       it "counts a reportable #{earning}-only item as covered" do
         create(:payroll_item, pay_period: period, employee: employee, gross_pay: 0, hours_worked: 0, earning => 50)
