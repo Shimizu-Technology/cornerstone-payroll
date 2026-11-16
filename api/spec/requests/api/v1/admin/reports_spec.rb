@@ -26,6 +26,20 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(admin_user)
   end
 
+  %w[draft calculated approved].each do |status|
+    it "marks every #{status} workbook sheet and the signoff sheet as preview" do
+      run = create(:pay_period, company: company, status: status)
+      create(:payroll_item, company: company, employee: employee, pay_period: run)
+      get "/api/v1/admin/reports/payroll_summary_by_employee_xlsx", params: { pay_period_id: run.id }
+      expect(response).to have_http_status(:ok)
+      workbook = Roo::Excelx.new(StringIO.new(response.body))
+      workbook.sheets.each { |sheet| expect(workbook.sheet(sheet).cell(1, 1)).to eq(PayrollReportPreview::LABEL) }
+      post "/api/v1/admin/reports/check_signoff_sheet", params: { pay_period_id: run.id }
+      expect(response).to have_http_status(:ok)
+      expect(Roo::Excelx.new(StringIO.new(response.body)).cell(1, 1)).to eq(PayrollReportPreview::LABEL)
+    end
+  end
+
   def create_locked_historical_paycheck(employee:, suffix:, pay_date:, period_type: "regular", gross_pay: 500, net_pay: 300,
                                        hours_breakdown: [], pretax_deduction_breakdown: nil, after_tax_deduction_breakdown: nil, payment_method: nil)
     batch = HistoricalImportBatch.create!(

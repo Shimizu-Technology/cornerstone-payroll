@@ -1015,7 +1015,7 @@ module Api
           custom_entries, notes = resolve_signoff_params(pp)
           save_signoff_state!(pp, custom_entries, notes) if params[:entries].present?
 
-          generator = CheckSignoffSheetGenerator.new(pp, notes: notes, custom_entries: custom_entries)
+          generator = CheckSignoffSheetGenerator.new(pp, notes: notes, custom_entries: custom_entries, preview: preview_download?)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2914,7 +2914,7 @@ module Api
         end
 
         def preview_download?
-          @download_pay_period && %w[calculated approved].include?(@download_pay_period.status)
+          @download_pay_period && !@download_pay_period.committed? && !@download_pay_period.company.test_workspace?
         end
 
         def send_data(data, options = {})
@@ -2926,10 +2926,7 @@ module Api
         end
 
         def send_spreadsheet!(filename:, sheets:)
-          if preview_download?
-            sheets = [ { name: "Preview notice", rows: [ [ PayrollReportPreview::LABEL ] ] }, *sheets ]
-          end
-          exporter = SpreadsheetReportExporter.new(filename: filename, sheets: sheets)
+          exporter = SpreadsheetReportExporter.new(filename: filename, sheets: sheets, preview: preview_download?)
           send_data exporter.generate,
             filename: exporter.filename,
             type: SpreadsheetReportExporter::CONTENT_TYPE,
