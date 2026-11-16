@@ -341,6 +341,7 @@ Rails.application.routes.draw do
 
         resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
           member do
+            post :deactivate
             post :terminate
             post :reactivate
             post :transition_tax_classification

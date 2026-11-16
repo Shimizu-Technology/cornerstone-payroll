@@ -370,7 +370,7 @@ module Api
 
           eligible_scope = Employee.where(id: employee_ids, company_id: current_company_id)
           eligible_scope = if params[:employee_ids].present? && %w[final correction adjustment].include?(@pay_period.run_purpose)
-            eligible_scope.where(status: %w[active terminated])
+            eligible_scope.where("status IN (?) OR (status = ? AND EXISTS (SELECT 1 FROM employee_status_events WHERE employee_id = employees.id AND event_type = ?))", %w[active terminated], "inactive", "deactivated")
           else
             eligible_scope.eligible_for_period(@pay_period.start_date, @pay_period.end_date)
           end
@@ -1381,6 +1381,7 @@ module Api
             tax_sync_last_error: tax_sync_visible? ? pay_period.tax_sync_last_error : nil,
             tax_synced_at: tax_sync_visible? ? pay_period.tax_synced_at : nil,
             lifecycle: lifecycle,
+            ineligible_workers: list ? nil : PayrollRunEligibility.new(pay_period).payload,
             expected_entries: list ? nil : PayrollExpectedEntries.new(pay_period).payload,
             pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields
