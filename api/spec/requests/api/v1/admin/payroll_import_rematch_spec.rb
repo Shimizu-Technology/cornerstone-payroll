@@ -62,6 +62,11 @@ RSpec.describe "Matching a MoSa import again after a worker returns", type: :req
     expect(second.dig("source_package", "package_revision")).to eq(2)
     expect(second.dig("source_package", "supersession_reason")).to eq("Matched the same files again after the employee list changed")
     expect(second.dig("source_package", "sources").map { |source| source["present"] }).to all(be(true))
+    # The review compares these to keep row outcomes only for the same files.
+    fingerprints = ->(data) { data.dig("source_package", "documents").to_h { |document| [ document["source_role"], document["sha256"] ] } }
+    expect(fingerprints.call(second).keys).to contain_exactly("revel_hours", "supplemental_workbook")
+    expect(fingerprints.call(second).values).to all(match(/\A\h{64}\z/))
+    expect(fingerprints.call(second)).to eq(fingerprints.call(first))
     expect(blake_row(second)).to include("row_kind" => "matched", "employee_id" => blake.id, "errors" => [])
     expect(second.dig("preview", "tips_paid_out_from_tips")).to be(true)
 

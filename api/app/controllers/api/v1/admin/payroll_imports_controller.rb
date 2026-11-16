@@ -633,7 +633,7 @@ module Api
             documents: source_package.documents.reject { |document| document.verification_status == "legacy_unverified" }
               .sort_by(&:position).map do |document|
                 { id: document.id, source_role: document.source_role, filename: document.filename,
-                  content_type: document.content_type, byte_size: document.byte_size }
+                  content_type: document.content_type, byte_size: document.byte_size, sha256: document.sha256 }
               end,
             disposition_targets: disposition_targets_json,
             sources: completeness.sources,

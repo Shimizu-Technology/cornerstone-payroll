@@ -25,7 +25,7 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
 import { cn, formatCurrency } from '@/lib/utils';
-import { carryRowOutcomes, defaultDisposition, fileSha256, importSourceFiles, MOSA_SOURCE_ACCEPT, noticeTitle } from '@/lib/importSources';
+import { carryRowOutcomes, defaultDisposition, fileSha256, importSourceFiles, MOSA_SOURCE_ACCEPT, noticeTitle, sameSourceFiles } from '@/lib/importSources';
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { ImportSourcePanel } from './ImportSourcePanel';
 import { ImportSourceChecklist } from './ImportSourceChecklist';
@@ -183,10 +183,12 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     }
   };
 
-  const openPreview = (data: ImportPreviewResponse, keepOutcomesFrom?: MosaSourceRow[]) => {
+  // keepPendingSubmissionId keeps the client revision staff selected, when the
+  // new review still offers that same revision.
+  const openPreview = (data: ImportPreviewResponse, keepOutcomesFrom?: MosaSourceRow[], keepPendingSubmissionId?: number) => {
     setPreviewData(data);
     setReviewedClientChanges(false); setClientChangeDrafts({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
-    setUsePendingRevision(false);
+    setUsePendingRevision(keepPendingSubmissionId !== undefined && data.pending_portal_source?.submission_id === keepPendingSubmissionId);
     setRateChoices({});
     setSourceRows(keepOutcomesFrom
       ? carryRowOutcomes(keepOutcomesFrom, data.preview.source_rows)
@@ -350,15 +352,18 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   };
 
   const startReactivation = async (employeeId: number) => {
+    // Back or close while the worker loads must not open the dialog later.
+    const generation = reviewGeneration.current;
+    const stillOpen = () => generation === reviewGeneration.current;
     try {
       setOpeningWorker(employeeId);
       setError(null);
       const { data } = await employeesApi.get(employeeId, companyId);
-      setReactivating(data);
+      if (stillOpen()) setReactivating(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not open this worker');
+      if (stillOpen()) setError(err instanceof Error ? err.message : 'Could not open this worker');
     } finally {
-      setOpeningWorker(null);
+      if (stillOpen()) setOpeningWorker(null);
     }
   };
 
@@ -369,6 +374,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     if (!previewData) return;
     const name = `${employee.first_name} ${employee.last_name}`.trim();
     const previousRows = sourceRows;
+    const previousDocuments = previewData.source_package.documents;
+    const pendingSubmissionId = usePendingRevision ? previewData.pending_portal_source?.submission_id : undefined;
     try {
       setLoading(true);
       setError(null);
@@ -380,9 +387,13 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             supersession_reason: `Matched again after ${name} was reactivated`, tips_paid_out_from_tips: previewData.preview.tips_paid_out_from_tips,
           })
         : await payPeriodsApi.rematchImport(payPeriodId);
-      openPreview(data, previousRows);
+      // Another window may have replaced the review with different files; outcomes
+      // chosen here apply only to a review of the same files.
+      const sameFiles = sameSourceFiles(previousDocuments, data.source_package.documents);
+      openPreview(data, sameFiles ? previousRows : undefined, pendingSubmissionId);
       const ready = data.preview.source_rows.some((row) => row.employee_id === employee.id && row.row_kind === 'matched' && row.errors.length === 0);
-      setNotice(ready ? `${name} is active again and is now matched in this import.` : `${name} is active again. Their row still needs attention below.`);
+      const status = ready ? `${name} is active again and is now matched in this import.` : `${name} is active again. Their row still needs attention below.`;
+      setNotice(sameFiles ? status : `${status} The import’s files changed since this review opened, so choose each row’s outcome again.`);
       onSourcePreviewed?.();
       void refreshCurrentPackage();
     } catch (err) {
@@ -397,6 +408,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const addSourceFile = async (role: string, file: File) => {
     if (!previewData || loading) return;
     const previousRows = sourceRows;
+    const pendingSubmissionId = usePendingRevision ? previewData.pending_portal_source?.submission_id : undefined;
     try {
       setLoading(true);
       setAddingSource(true);
@@ -409,7 +421,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         // its own choice, and one already saved for the same workbook is kept.
         undefined,
       );
-      openPreview(data, previousRows);
+      openPreview(data, previousRows, pendingSubmissionId);
       onSourcePreviewed?.();
       void refreshCurrentPackage();
     } catch (err) {
@@ -425,11 +437,12 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const removeSourceFile = async (role: string, reason: string) => {
     if (!previewData || loading) return false;
     const previousRows = sourceRows;
+    const pendingSubmissionId = usePendingRevision ? previewData.pending_portal_source?.submission_id : undefined;
     try {
       setLoading(true);
       setError(null);
       const data = await payPeriodsApi.removeImportSource(payPeriodId, role, reason);
-      openPreview(data, previousRows);
+      openPreview(data, previousRows, pendingSubmissionId);
       if (role === 'supplemental_workbook') setNoTipsOrLoans(false);
       onSourcePreviewed?.();
       void refreshCurrentPackage();
@@ -698,6 +711,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       <Select
         aria-label={`Outcome for ${row.source_employee_name}`}
         value={row.disposition}
+        // Matching again restores outcomes from when it started; a change made meanwhile would be lost.
+        disabled={loading}
         onChange={(event) => {
           const disposition = event.target.value as EditableSourceRow['disposition'];
           updateSourceRow(row.id, {
@@ -718,6 +733,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <Input
             aria-label={`Reason for ${row.source_employee_name}`}
             value={row.disposition_reason || ''}
+            disabled={loading}
             onChange={(event) => updateSourceRow(row.id, { disposition_reason: event.target.value })}
             placeholder="Required reason"
           />
@@ -725,6 +741,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             <Select
               aria-label={`Future payroll for ${row.source_employee_name}`}
               value={row.target_pay_period_id ? String(row.target_pay_period_id) : ''}
+              disabled={loading}
               onChange={(event) => updateSourceRow(row.id, { target_pay_period_id: event.target.value ? Number(event.target.value) : null })}
             >
               <option value="">Choose future payroll</option>
@@ -1383,6 +1400,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 <Button variant="outline" disabled={loading} onClick={() => {
                   if (loading) return;
                   if (initialPreview) { handleClose(); return; }
+                  // A worker still loading for this review must not open over the upload step.
+                  reviewGeneration.current += 1;
+                  setOpeningWorker(null);
                   setStep('upload');
                   setUsePendingRevision(false); setStaffWorkbook(null);
     setReviewedClientChanges(false); setClientChangeDrafts({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});

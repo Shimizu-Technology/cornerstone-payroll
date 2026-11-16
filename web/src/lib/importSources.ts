@@ -32,6 +32,18 @@ export function carryRowOutcomes(previous: MosaSourceRow[], next: MosaSourceRow[
   });
 }
 
+// Whether two reviews were matched from the same retained files, compared by
+// each file's SHA-256 per role. A rematch of unchanged files can get a new
+// package, so IDs alone can't tell. False when any file has no fingerprint.
+export function sameSourceFiles(a?: ImportSourceDocument[], b?: ImportSourceDocument[]): boolean {
+  const fingerprint = (documents?: ImportSourceDocument[]) => {
+    if (!documents?.length || documents.some((document) => !document.sha256)) return null;
+    return documents.map((document) => `${document.source_role}:${document.sha256}`).sort().join('|');
+  };
+  const left = fingerprint(a);
+  return left !== null && left === fingerprint(b);
+}
+
 const WARNING_TITLES: Record<string, string> = {
   workbook_period_end_differs: 'The workbook’s period end differs from Revel',
   pay_period_workweek_offset: 'This pay period and the overtime workweek start on different days',
