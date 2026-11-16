@@ -241,10 +241,11 @@ it('fills per-owner boxes from client changes, permits edits and requires explic
   expect((screen.getByLabelText('Extra hours for Avery Server') as HTMLInputElement).value).toBe('68');
   expect(applyButton().disabled).toBe(true);
   fireEvent.change(ownerInput(), { target: { value: '8421.12' } });
+  fireEvent.change(screen.getByLabelText("Reason for changing Monique Owner's entry"), { target: { value: 'Client confirmed correction' } });
   fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
   expect(applyButton().disabled).toBe(false);
   fireEvent.click(applyButton());
-  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ confirm_client_changes: true, reviewed_changes: [{ change_index: 0, amount: '8421.12' }, { change_index: 1, hours: '68' }] })));
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ confirm_client_changes: true, reviewed_changes: [{ change_index: 0, amount: '8421.12', reason: 'Client confirmed correction' }, { change_index: 1, hours: '68' }] })));
   expect(mocks.createItem).not.toHaveBeenCalled(); expect(mocks.updateItem).not.toHaveBeenCalled();
 });
 
@@ -260,6 +261,7 @@ it('offers prefill only after selecting the pending revision on the pay-run rout
   fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
   expect(applyButton().disabled).toBe(false);
   fireEvent.change(ownerInput(), { target: { value: '8421.12' } });
+  fireEvent.change(screen.getByLabelText("Reason for changing Monique Owner's entry"), { target: { value: 'Client confirmed correction' } });
   expect(applyButton().disabled).toBe(true);
 });
 
@@ -326,6 +328,8 @@ it('requires a deliberate pay choice when client and existing or workbook pay di
   expect(screen.getByText('Workbook pay: $4,000.00')).toBeTruthy();
   expect((screen.getByLabelText(/I checked the owner pay and extra hours/) as HTMLInputElement).disabled).toBe(true);
   fireEvent.change(screen.getByLabelText('Pay choice for Monique Owner'), { target: { value: 'workbook' } });
+  expect((screen.getByLabelText(/I checked the owner pay and extra hours/) as HTMLInputElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("Reason for changing Monique Owner's entry"), { target: { value: 'Verified workbook pay' } });
   fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
   fireEvent.click(screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/));
   expect(applyButton().disabled).toBe(false);
@@ -389,4 +393,18 @@ it.each(['no-pay choice', 'row exclusion'])('applies %s as a reasoned no-pay dec
     reviewed_changes: [{ change_index: -2, amount: '', decision: 'no_pay', reason: 'Client confirmed no pay' }],
     rows: expect.arrayContaining([expect.objectContaining({ id: 2, disposition: 'excluded', disposition_reason: 'Client confirmed no pay' })]),
   })));
+});
+
+it('keeps adjustment and decline reasons independent', () => {
+  const data = preview([ownerMissing]);
+  data.client_change_prefill = { submission_id: 20, revision: 2, rows: [{ change_index: 0, kind: 'owner_pay', employee_id: 2, employee_name: 'Monique Owner', amount: '5000' }] };
+  open(data);
+  fireEvent.change(ownerInput(), { target: { value: '4900' } });
+  fireEvent.change(screen.getByLabelText("Reason for changing Monique Owner's entry"), { target: { value: 'Corrected amount' } });
+  fireEvent.click(screen.getByLabelText('Don’t apply this change for Monique Owner'));
+  const decline = screen.getByLabelText('Reason for declining Monique Owner');
+  expect(decline).toHaveProperty('value', '');
+  fireEvent.change(decline, { target: { value: 'Not applicable' } });
+  fireEvent.click(screen.getByLabelText('Don’t apply this change for Monique Owner'));
+  expect(screen.getByLabelText("Reason for changing Monique Owner's entry")).toHaveProperty('value', 'Corrected amount');
 });

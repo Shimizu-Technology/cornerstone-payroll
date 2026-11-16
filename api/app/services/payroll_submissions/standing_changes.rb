@@ -12,6 +12,7 @@ module PayrollSubmissions
         { standing_change_id: item.id, kind: item.kind, employee_id: item.employee_id, employee_name: item.employee.full_name,
           employee_wage_rate_id: item.employee_wage_rate_id, wage_rate_label: item.employee_wage_rate&.label,
           wage_rate: item.employee_wage_rate&.rate&.to_s("F"), position: item.position,
+          label: item.display_label, help_text: item.help_text, required: item.required?, allow_none: item.allow_none?,
           availability_error: item.availability_error, last_period_amount: previous_amount(item) }.compact
       end
     end

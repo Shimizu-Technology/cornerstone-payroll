@@ -38,7 +38,7 @@ module PayrollSubmissions
       record = entry.record
       payload = summary(entry).merge(
         schedule_note: schedule_note,
-        standing_changes: StandingChanges.new(company: @catalog.company, before_pay_date: @catalog.pay_date_for(entry)).rows,
+        standing_changes: StandingChanges.new(company: @catalog.company, before_pay_date: @catalog.pay_date_for(entry)).rows.reject { |row| !@staff && row[:availability_error].present? },
         thread_id: record&.client_portal_thread_id,
         file_requests: record ? file_requests(record) : [],
         submissions: [], drafts: [], history: [],
@@ -47,6 +47,12 @@ module PayrollSubmissions
       return payload unless record
 
       submissions = record.submissions.includes(:submitted_by, :acknowledged_by, submission_documents: { client_document: %i[employee uploaded_by] }).to_a
+      @standing_fields = if @staff
+        PayrollStandingChange.where(company_id: record.company_id, id: submissions.flat_map { |s| s.change_rows.pluck("standing_change_id") }.compact.uniq)
+          .includes(:employee, :employee_wage_rate).index_by(&:id)
+      else
+        {}
+      end
       employee_names = Employee.where(company_id: record.company_id, id: submissions.flat_map { |s| s.change_rows.flat_map { |row| [ row["employee_id"], *Array(row["employee_ids"]) ] } }.compact.uniq)
         .to_h { |employee| [ employee.id, employee.full_name ] }
       payload[:submissions] = submissions.each_with_index.map { |submission, index| submission(submission, current: index.zero?, employee_names: employee_names) }
@@ -96,8 +102,9 @@ module PayrollSubmissions
         imports: (@staff ? submission.submission_imports.includes(:payroll_import, :staff_workbook_document, :staff_workbook_attached_by).map { |link| { id: link.payroll_import_id, pay_period_id: link.payroll_import.pay_period_id, status: link.payroll_import.status, source_route: link.source_route, staff_workbook: link.staff_workbook_evidence } } : nil),
         workbook_choice: submission.workbook_choice, no_changes: submission.no_changes, notes: submission.notes, changes_link_url: submission.changes_link_url,
         changes: submission.change_rows.map do |row|
-          row.merge(
-            "label" => ChangeRows::LABELS[row["kind"]],
+          row.except("availability_error").merge(
+            "availability_error" => (@standing_fields[row["standing_change_id"]]&.availability_error if @staff),
+            "label" => row["label"].presence || ChangeRows::LABELS[row["kind"]],
             "employee_name" => row["employee_id"] && employee_names[row["employee_id"]],
             "employee_names" => row["employee_ids"] && row["employee_ids"].map { |id| employee_names[id] }
           ).compact
