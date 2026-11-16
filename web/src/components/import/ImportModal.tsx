@@ -450,7 +450,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   );
   // Upload step: which files the current package already has, and whether the
   // chosen files only add what is missing or replace something received.
-  const currentRoles = new Set((currentPackage?.documents || []).filter((document) => document.verification_status !== 'legacy_unverified').map((document) => document.source_role));
+  const currentRoles = new Set<string>((currentPackage?.documents || []).filter((document) => document.verification_status !== 'legacy_unverified').map((document) => document.source_role));
   const currentOpen = Boolean(currentPackage && ['previewed', 'reviewed'].includes(currentPackage.status));
   const chosenRoles = [pdfFile ? 'revel_hours' : null, excelFile ? 'supplemental_workbook' : null].filter((role): role is string => role !== null);
   const replacing = Boolean(currentPackage) && chosenRoles.length > 0 && (!currentOpen || chosenRoles.some((role) => currentRoles.has(role)));
