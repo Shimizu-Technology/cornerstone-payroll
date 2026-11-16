@@ -907,8 +907,9 @@ export function usePayRunController({
   }, [payPeriod?.id, payPeriod?.status, payPeriod?.correction_status]);
 
   const handleCommit = async (confirmedPeriodId: number, snapshot: PayrollCommitSnapshot) => {
+    if (processing || commitInFlightRef.current) throw new Error('This payroll is already being committed. Wait for it to finish.');
     if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
-        payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || processing || commitInFlightRef.current) {
+        payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided') {
       throw new Error('This pay run changed. Close this dialog and reopen the current run before committing.');
     }
     commitInFlightRef.current = true;
