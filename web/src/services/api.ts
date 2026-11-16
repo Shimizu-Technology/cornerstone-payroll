@@ -1525,7 +1525,7 @@ export const payPeriodsApi = {
       client_approval_required: boolean;
       authorized_client_approvers: Array<{ id: number; name: string; email: string }>;
     }>(`/admin/pay_periods/${id}/client_review`),
-  recordClientApproval: (id: number, data: { client_approver_id: number; acknowledgement: string; evidence_reference: string; notes?: string }) =>
+  recordClientApproval: (id: number, data: { revision_id: number; client_approver_id: number; acknowledgement: string; evidence_reference: string; notes?: string }) =>
     api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/admin/pay_periods/${id}/record_client_approval`, data),
   liabilities: (id: number) =>
     api.get<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
@@ -1706,8 +1706,12 @@ export const clientPayPeriodsApi = {
     api.get<ClientPayrollHistoryResponse>('/client/pay_periods', params, { companyId }),
   get: (id: number, companyId?: number): Promise<PayPeriodResponse> =>
     api.get<PayPeriodResponse>(`/client/pay_periods/${id}`, undefined, { companyId }),
-  approveReview: (id: number, companyId: number, data: { acknowledgement: string; notes?: string }) =>
+  approveReview: (id: number, companyId: number, data: { revision_id: number; acknowledgement: string; notes?: string }) =>
     api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/client/pay_periods/${id}/approve_review`, data, { companyId }),
+  requestChanges: (id: number, companyId: number, data: { revision_id: number; note: string }) =>
+    api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/client/pay_periods/${id}/request_changes`, data, { companyId }),
+  previewPdf: (id: number, companyId: number, revisionId: number) =>
+    api.getBlobWithParams(`/client/pay_periods/${id}/preview_pdf`, { revision_id: revisionId }, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },

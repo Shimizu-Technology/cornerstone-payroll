@@ -81,6 +81,8 @@ Rails.application.routes.draw do
         resources :employee_change_requests, only: [ :index, :show ]
         resources :pay_periods, only: [ :index, :show ] do
           post :approve_review, on: :member
+          post :request_changes, on: :member
+          get :preview_pdf, on: :member
         end
         resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
           member do

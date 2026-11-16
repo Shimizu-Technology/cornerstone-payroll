@@ -2044,7 +2044,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload).to be_calculated
     end
 
-    it "requires the current client-approved review revision when the client setting is enabled" do
+    it "publishes the current revision at staff approval and gates commit instead" do
       company.update!(client_payroll_approval_required: true)
       payroll_item = create(:payroll_item, pay_period: pay_period, company: company, employee: employee, gross_pay: 100, net_pay: 90)
       pay_period.update!(status: "calculated", calculated_at: Time.current)
@@ -2053,6 +2053,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       review_package = PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).issue!
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+      expect(response).to have_http_status(:ok), response.body
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
       expect(response).to have_http_status(:unprocessable_content)
       expect(response.parsed_body.fetch("error")).to include("Client approval is still required")
 
@@ -2062,14 +2064,13 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         approver: client_approver,
         recorded_by: client_approver,
         method: "client_portal",
+        revision_id: review_package.id,
         acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
       )
-      payroll_item.reload
-
-      post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
       expect(response).to have_http_status(:ok), response.body
       expect(review_package.reload).to be_approved
-      expect(pay_period.reload).to be_approved
+      expect(pay_period.reload).to be_committed
     end
   end
 
@@ -2079,10 +2080,13 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       create(:payroll_item, pay_period: pay_period, company: company, employee: employee)
       pay_period.update!(status: "calculated", calculated_at: Time.current)
       review_package = PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).issue!
+      pay_period.update!(status: "approved")
+      PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).publish!
       client_approver = create(:user, company: company, organization: organization, role: "client", active: true)
       CompanyAssignment.create!(user: client_approver, company: company)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/record_client_approval", params: {
+        revision_id: review_package.id,
         client_approver_id: client_approver.id,
         acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT,
         evidence_reference: "gmail-message-456",

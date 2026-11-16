@@ -188,16 +188,12 @@ class PayrollHistoryQuery
         pp.status = 'committed'
         OR pp.test_workspace_role = 'baseline'
         OR (
-          pp.status IN ('calculated', 'approved')
-          AND EXISTS (
-            SELECT 1 FROM companies review_company
-            WHERE review_company.id = pp.company_id
-              AND review_company.client_payroll_approval_required = TRUE
-          )
+          pp.status = 'approved'
           AND EXISTS (
             SELECT 1 FROM payroll_review_packages review_package
             WHERE review_package.pay_period_id = pp.id
               AND review_package.superseded_at IS NULL
+              AND review_package.published_at IS NOT NULL
           )
         )
       )
@@ -295,8 +291,8 @@ class PayrollHistoryQuery
         delete: editable,
         enter_hours: editable && status == "draft",
         run: editable && %w[draft calculated].include?(status),
-        approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided" && client_review_ready,
-        commit: @audience == :staff && !imported && !parallel_run && status == "approved" && correction_status != "voided"
+        approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided",
+        commit: @audience == :staff && !imported && !parallel_run && status == "approved" && correction_status != "voided" && client_review_ready
       }
     }
   end

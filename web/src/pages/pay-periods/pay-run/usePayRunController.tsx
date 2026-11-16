@@ -864,6 +864,7 @@ export function usePayRunController({
     try {
       const response = await payPeriodsApi.recordClientApproval(payPeriod.id, {
         client_approver_id: Number(clientApproverId),
+        revision_id: payPeriod.payroll_review.id,
         acknowledgement: clientApprovalConfirmed ? payPeriod.payroll_review.acknowledgement : '',
         evidence_reference: clientApprovalEvidence.trim(),
         notes: clientApprovalNotes.trim() || undefined,

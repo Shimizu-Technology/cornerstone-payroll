@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "digest"
-
 module PayrollSubmissions
   # Status changes, drafts and period messages. Each runs in one transaction
   # with the period row locked: status, history, audit entry and notification
@@ -37,6 +35,7 @@ module PayrollSubmissions
 
     def start_review!(period, note: nil)
       locked(period) do
+        raise PayrollSubmissionPeriod::TransitionError, "This pay run is committed. Continue the conversation in messages." if period.pay_period&.client_finished?
         next if period.status == "in_review"
 
         period.transition!("start_review", actor: @actor, note: note)
@@ -45,124 +44,20 @@ module PayrollSubmissions
     end
 
     def mark_paid!(period, note: nil)
-      locked(period) do
-        next if period.status == "paid"
-
-        # File requests for this period lock the period row first, so this
-        # check cannot miss one being created at the same moment.
-        if (open_requests = period.outstanding_file_requests.count).positive?
-          raise PayrollSubmissionPeriod::TransitionError,
-            "#{open_requests == 1 ? 'A requested file is' : "#{open_requests} requested files are"} still outstanding. Accept or withdraw #{open_requests == 1 ? 'it' : 'them'} first."
-        end
-
-        period.transition!("mark_paid", actor: @actor, note: note, draft: period.current_draft)
-        audit!(period, "payroll_submission_periods#mark_paid", note_present: note.present?)
-      end
+      raise PayrollSubmissionPeriod::TransitionError, "Review the preview on the pay run. Payroll files finish when the pay run is committed."
     end
 
-    # The client approves the current posted draft or asks for a change. The
-    # note also goes into the period conversation so the discussion stays there.
+    # Retired write routes give older clients a clear recovery path.
     def decide!(period, decision:, draft_id:, note:)
-      event = { "approve" => "approve", "request_changes" => "request_changes" }[decision.to_s]
-      raise PayrollSubmissionPeriod::TransitionError, "Choose approve or request a change" unless event
-
-      note = note.to_s.strip
-      raise PayrollSubmissionPeriod::TransitionError, "Describe the change you need" if event == "request_changes" && note.blank?
-      raise PayrollSubmissionPeriod::TransitionError, "Keep the note under 5,000 characters" if note.length > 5000
-
-      locked(period) do
-        draft = period.current_draft
-        raise ActiveRecord::RecordNotFound, "Draft not found" unless draft && draft.id == draft_id.to_s.to_i
-
-        target = PayrollSubmissionPeriod::EVENTS.fetch(event)[:to]
-        last = period.status_events.last
-        if period.status == target && last&.payroll_submission_draft_id == draft.id && last.actor_id == @actor.id
-          next draft
-        end
-
-        period.transition!(event, actor: @actor, draft: draft, note: note)
-        post_message_locked!(period, note) if note.present?
-        audit!(period, "payroll_submission_periods##{event}", draft_id: draft.id, draft_revision: draft.revision, note_present: note.present?)
-        PortalNotifications.payroll_period!("payroll_draft_decided", period: period, actor: @actor,
-          dedupe: "draft:#{draft.id}:#{event}:#{period.status_events.last.id}", metadata: { draft_id: draft.id, decision: event })
-        draft
-      end
+      raise PayrollSubmissionPeriod::TransitionError, "Review the preview on the pay run. Payroll files finish when the pay run is committed."
     end
 
-    # Staff upload draft paycheck and direct-deposit PDFs. Posted drafts are
-    # shared with the client; a saved draft stays staff-only until posted.
     def create_draft!(entry, params:)
-      key = params[:idempotency_key].presence&.to_s
-      raise FileSet::Invalid, { "idempotency_key" => [ "is too long" ] } if key && key.length > 128
-
-      incoming = []
-      incoming << [ "paycheck", params[:paycheck_pdf] ] if params[:paycheck_pdf].present?
-      incoming << [ "direct_deposit", params[:direct_deposit_pdf] ] if params[:direct_deposit_pdf].present?
-      raise FileSet::Invalid, { "files" => [ "Attach the draft paychecks, the direct deposits, or both" ] } if incoming.empty?
-
-      note = params[:note].to_s.strip.presence
-      raise FileSet::Invalid, { "note" => [ "Keep the note under 5,000 characters" ] } if note && note.length > 5000
-
-      post = ActiveModel::Type::Boolean.new.cast(params.fetch(:post, true))
-      # Bound before any upload so the rescue below can always discard keys.
-      files = FileSet.new(company_id: @company.id, files: incoming)
-      files.prepare!
-      fingerprint = Digest::SHA256.hexdigest(JSON.generate([ files.fingerprint_parts, note, post ]))
-      if key && entry.record && (existing = entry.record.drafts.find_by(created_by_id: @actor.id, idempotency_key: key))
-        return replay_draft(existing, fingerprint)
-      end
-
-      files.upload!
-      draft = nil
-      created = false
-      PayrollSubmissionPeriod.transaction do
-        period = @catalog.materialize!(entry)
-        period.lock!
-        if key && (draft = period.drafts.find_by(created_by_id: @actor.id, idempotency_key: key))
-          raise ActiveRecord::Rollback
-        end
-        raise PayrollSubmissionPeriod::TransitionError, "This period is paid, so a new draft cannot be posted" if period.status == "paid"
-        if post && !period.can?("post_draft", "staff")
-          raise PayrollSubmissionPeriod::TransitionError, "Confirm receipt of the latest files before posting a draft"
-        end
-
-        revision = (period.drafts.maximum(:revision) || 0) + 1
-        documents = files.prepared.to_h do |item|
-          title = "#{item.role == 'paycheck' ? 'Draft paychecks' : 'Draft direct deposits'} · #{period.label} · draft #{revision}"
-          [ item.role, files.create_document!(item, actor: @actor, title: title, category: "payroll_review", visible_to_client: post) ]
-        end
-        draft = period.drafts.create!(company_id: @company.id, revision: revision, note: note, created_by: @actor,
-          paycheck_document: documents["paycheck"], direct_deposit_document: documents["direct_deposit"],
-          idempotency_key: key, request_fingerprint: fingerprint, posted_at: (Time.current if post), posted_by: (@actor if post))
-        if post
-          publish!(period, draft)
-        else
-          audit!(period, "payroll_submission_drafts#create", draft_id: draft.id, draft_revision: draft.revision)
-        end
-        created = true
-      end
-      unless created
-        files.discard!
-        return replay_draft(draft, fingerprint)
-      end
-      draft
-    rescue StandardError
-      files&.discard!
-      raise
+      raise PayrollSubmissionPeriod::TransitionError, "Review the preview on the pay run. Payroll files finish when the pay run is committed."
     end
 
     def post_draft!(period, draft_id:)
-      locked(period) do
-        draft = period.drafts.find_by(id: draft_id.to_s.to_i)
-        raise ActiveRecord::RecordNotFound, "Draft not found" unless draft
-        next draft if draft.posted?
-        raise Conflict, "A newer draft exists. Post the latest draft instead." if draft != period.drafts.first
-
-        draft.documents.each { |document| document.update!(visible_to_client: true) }
-        draft.update!(posted_at: Time.current, posted_by: @actor)
-        publish!(period, draft)
-        draft
-      end
+      raise PayrollSubmissionPeriod::TransitionError, "Review the preview on the pay run. Payroll files finish when the pay run is committed."
     end
 
     # A question or answer about this period, in its own conversation.
@@ -198,24 +93,6 @@ module PayrollSubmissions
         period.lock!
         yield
       end
-    end
-
-    def replay_draft(existing, fingerprint)
-      raise Conflict, "This retry key was used for a different draft" unless existing.request_fingerprint == fingerprint
-
-      existing
-    end
-
-    def publish!(period, draft)
-      period.transition!("post_draft", actor: @actor, draft: draft)
-      audit!(period, "payroll_submission_drafts#post", draft_id: draft.id, draft_revision: draft.revision,
-        document_ids: draft.documents.map(&:id))
-      PortalNotifications.payroll_period!("payroll_draft_posted", period: period, actor: @actor,
-        dedupe: "draft:#{draft.id}", metadata: { draft_id: draft.id, revision: draft.revision })
-    end
-
-    def post_message_locked!(period, body)
-      create_message!(period, body, nil)
     end
 
     def create_message!(period, body, key)

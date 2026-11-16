@@ -16,6 +16,7 @@ class PayrollReviewPackage < ApplicationRecord
   belongs_to :company
   belongs_to :pay_period
   belongs_to :generated_by, class_name: "User", optional: true
+  belongs_to :changes_requested_by, class_name: "User", optional: true
   belongs_to :approved_by, class_name: "User", optional: true
   belongs_to :approval_recorded_by, class_name: "User", optional: true
 
@@ -24,6 +25,8 @@ class PayrollReviewPackage < ApplicationRecord
   validates :calculation_checksum, format: { with: /\A[0-9a-f]{64}\z/ }
   validates :status, inclusion: { in: STATUSES }
   validates :approval_method, inclusion: { in: APPROVAL_METHODS }, allow_nil: true
+  validates :change_request_note, length: { maximum: 2_000 }, allow_blank: true
+  validate :change_request_evidence
   validates :approval_notes, length: { maximum: 2_000 }, allow_blank: true
   validates :approval_evidence_reference, length: { maximum: 500 }, allow_blank: true
   validate :company_matches_pay_period
@@ -51,7 +54,7 @@ class PayrollReviewPackage < ApplicationRecord
   # New automatic revisions can be discarded. Shared, client-authored and
   # unverified legacy evidence must be retained.
   def retained_client_evidence?
-    client_review_history_unknown? || sent_for_client_approval_at.present? || approved? ||
+    client_review_history_unknown? || sent_for_client_approval_at.present? || changes_requested_at.present? || approved? ||
       APPROVAL_EVIDENCE_FIELDS.any? { |field| self[field].present? }
   end
 
@@ -59,7 +62,19 @@ class PayrollReviewPackage < ApplicationRecord
 
   private
 
+  def change_request_evidence
+    if changes_requested_at && (change_request_note.to_s.strip.blank? || changes_requested_by_id.nil?)
+      errors.add(:base, "Change requests require a client, time and note")
+    end
+    if changes_requested_at_in_database && (changes_to_save.keys & %w[changes_requested_at changes_requested_by_id change_request_note]).any?
+      errors.add(:base, "Change request evidence cannot be changed")
+    end
+  end
+
   def shared_review_history_immutable
+    if published_at_in_database && will_save_change_to_published_at?
+      errors.add(:published_at, "cannot change after publication")
+    end
     return unless sent_for_client_approval_at_in_database.present? && will_save_change_to_sent_for_client_approval_at?
 
     errors.add(:sent_for_client_approval_at, "cannot change after the review was shared")
