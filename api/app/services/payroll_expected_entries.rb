@@ -7,7 +7,9 @@ class PayrollExpectedEntries
   end
 
   def payload
-    return { fields: [], missing_regulars: [], outstanding: [] } unless @period.regular_cycle? && @period.regular_run?
+    # Only open runs need entries: commit checks them while the run is still approved.
+    return { fields: [], missing_regulars: [], outstanding: [] } unless @period.regular_cycle? && @period.regular_run? &&
+      @period.status.in?(%w[draft calculated approved])
 
     fields = PayrollStandingChange.where(company_id: @period.company_id).active.ordered.includes(:employee, :employee_wage_rate).map do |field|
       value = field_value(field)
