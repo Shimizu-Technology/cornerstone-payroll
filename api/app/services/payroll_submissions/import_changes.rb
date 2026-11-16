@@ -24,7 +24,8 @@ module PayrollSubmissions
         source = source_rows.find { |item| item[:employee_id].to_s == row["employee_id"].to_s }
         pay = pay_state(existing, source)
         { change_index: index, kind: row["kind"], employee_id: row["employee_id"], employee_name: employee&.full_name,
-          amount: row["amount"], hours: row["hours"], employee_wage_rate_id: row["employee_wage_rate_id"],
+          standing_change_id: row["standing_change_id"], revision: @submission.revision,
+          previous_value: previous["reviewed_value"], amount: row["amount"], hours: row["hours"], employee_wage_rate_id: row["employee_wage_rate_id"],
           wage_rate_label: rate&.label, wage_rate: rate&.rate&.to_s("F"), error: availability_error(row, employee),
           overwrite_required: existing.present? && existing.import_source != "mosa_revel",
           saved_regular_hours: previous["kind"] == "extra_hours" ? previous["baseline_regular_hours"] : existing&.hours_worked&.to_s("F"),
@@ -96,6 +97,10 @@ module PayrollSubmissions
         unless value.match?(/\A\d{1,9}(\.\d{1,2})?\z/) && value.to_d.positive? && value.to_d <= (field == :hours ? 1000 : 10_000_000)
           raise ArgumentError, "Enter a valid #{field} greater than zero for #{change[:employee_name]}."
         end
+        if !change[:requires_pay_decision] && value.to_d != change[field].to_d
+          reason = input[:reason].to_s.strip
+          raise ArgumentError, "Enter a reason (up to 1000 characters) for changing #{change[:employee_name]}'s client entry." unless reason.present? && reason.length <= 1000
+        end
         if field == :amount
           apply_owner_pay!(row, change, input, value)
         else
@@ -108,7 +113,7 @@ module PayrollSubmissions
         end
         row[:client_change_evidence] = change.merge(submission_id: @submission.id, reviewed_value: value) if field == :hours || row.dig(:period_pay_evidence, :source_type) == "client_submission"
         applied_value = field == :hours ? value : (row[:period_pay].presence || change[:saved_period_pay] || value)
-        @review_decisions << change.merge(decision: decision, reviewed_value: value, applied_value: applied_value, pay_choice: input[:pay_choice])
+        @review_decisions << change.merge(decision: decision, reviewed_value: value, applied_value: applied_value, pay_choice: input[:pay_choice], reason: input[:reason])
       end
       # Also process employees absent from BOTH source files and this revision.
       # These cleanup rows restore only client hours; workbook money is retained.
@@ -125,6 +130,7 @@ module PayrollSubmissions
     # Called only inside the successful import transaction. Match the worksheet's
     # exclusion semantics: remove the paycheck item, keep a reasoned roster exclusion.
     def apply_period_decisions!(actor:)
+      apply_entry_resolutions!
       @review_decisions.each do |decision|
         if decision[:decision] == "no_pay"
           # Keep an exclusion staff already recorded; only one this decision
@@ -170,6 +176,29 @@ module PayrollSubmissions
     end
 
     private
+
+    # Revision-owned resolutions are replaced transactionally with the payroll writes.
+    # Staff resolutions are never removed by a client revision.
+    def apply_entry_resolutions!
+      PayrollEntryResolution.where(pay_period: @period).find_each do |resolution|
+        next unless resolution.source_evidence["submission_id"].present?
+
+        source = PayrollSubmission.find_by(id: resolution.source_evidence["submission_id"])
+        resolution.destroy! if source&.payroll_submission_period_id == @submission.payroll_submission_period_id
+      end
+      @submission.change_rows.each do |row|
+        next unless row["standing_change_id"] && row["skipped"]
+
+        field = PayrollStandingChange.find_by(id: row["standing_change_id"], company_id: @period.company_id)
+        raise ArgumentError, "Configured entry changed. Review this revision before applying." unless field && field.active? && field.allow_none? && field.employee_id == row["employee_id"] && field.kind == row["kind"] && field.employee_wage_rate_id == row["employee_wage_rate_id"] && field.availability_error.nil?
+
+        resolution = PayrollEntryResolution.find_or_initialize_by(pay_period: @period, payroll_standing_change: field)
+        next if resolution.persisted? # Preserve an explicit staff answer.
+
+        resolution.update!(employee_id: field.employee_id, note: row["note"],
+          source_evidence: { submission_id: @submission.id, revision: @submission.revision })
+      end
+    end
 
     def missing_owner_pay(submitted, source_rows)
       prior_items.filter_map do |item|
@@ -266,6 +295,12 @@ module PayrollSubmissions
     end
 
     def availability_error(row, employee)
+      if row["standing_change_id"]
+        field = PayrollStandingChange.find_by(id: row["standing_change_id"], company_id: @period.company_id)
+        unless field&.active? && field.employee_id == row["employee_id"] && field.kind == row["kind"] && field.employee_wage_rate_id == row["employee_wage_rate_id"]
+          return "Configured entry changed. Resolve this client change before applying."
+        end
+      end
       return "The employee for this client change is missing or belongs to another company." unless employee
       return "#{employee.full_name} is #{employee.status}. Resolve this client change before applying." unless employee.active?
       unless Employee.where(id: employee.id).eligible_for_period(@period.start_date, @period.end_date).exists?
