@@ -2454,6 +2454,32 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
   # ─── CPR-70: Payroll Register CSV Export ────────────────────────────────────
 
+  describe "uncommitted report download marking" do
+    let!(:preview_period) { create(:pay_period, company: company, status: "calculated") }
+    before { create(:payroll_item, pay_period: preview_period, employee: employee) }
+
+    %w[calculated approved committed].each do |status|
+      it "marks PDF, CSV and spreadsheet reports only for #{status} payroll" do
+        preview_period.update_columns(status: status)
+        get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: preview_period.id }
+        expect(response).to have_http_status(:ok)
+        expect(response.body.include?(PayrollReportPreview::LABEL)).to eq(status != "committed")
+        %w[payroll_register_pdf payroll_summary_by_employee_pdf deductions_contributions_pdf paycheck_history_pdf retirement_plans_pdf transmittal_log_pdf full_print_package_pdf].each do |endpoint|
+          get "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: preview_period.id }
+          expect(response).to have_http_status(:ok), "#{endpoint}: #{response.status}"
+          pages = PDF::Reader.new(StringIO.new(response.body)).pages
+          pages.each { |page| expect(page.text.include?(PayrollReportPreview::LABEL)).to eq(status != "committed"), endpoint }
+        end
+        get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: preview_period.id }
+        expect(response).to have_http_status(:ok)
+        Zip::File.open_buffer(response.body) do |zip|
+          xml = zip.entries.select { |entry| entry.name.end_with?(".xml") }.map { |entry| entry.get_input_stream.read }.join
+          expect(xml.include?(PayrollReportPreview::LABEL)).to eq(status != "committed")
+        end
+      end
+    end
+  end
+
   describe "GET /api/v1/admin/reports/payroll_register_csv" do
     let!(:pay_period) do
       create(:pay_period, :committed,

@@ -50,3 +50,12 @@ describe('Payroll commit confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' })); expect(state.onConfirm).not.toHaveBeenCalled();
   });
 });
+
+it('shows the numbering summary and limits the settings link to permitted staff', () => {
+  const state = { ...props(), payPeriod: { ...period, check_number_summary: { next_check_number: 1200, last_used_check_number: 1199, can_change: true } } };
+  const { rerender } = render(<PayrollCommitDialog {...state} />);
+  expect(screen.getByText('Paper checks will be numbered from 1200 (last used: 1199)')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Review check settings' }).getAttribute('href')).toBe('/check-settings');
+  rerender(<PayrollCommitDialog {...state} payPeriod={{ ...state.payPeriod, check_number_summary: { ...state.payPeriod.check_number_summary, can_change: false } }} />);
+  expect(screen.queryByRole('link', { name: 'Review check settings' })).toBeNull();
+});

@@ -54,6 +54,28 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(1)
   end
 
+  describe "check numbering permissions and summary" do
+    it "rejects a starting number from an accountant without changing the company" do
+      admin_user.update!(role: "accountant")
+      original = company.next_check_number
+      post "/api/v1/admin/pay_periods", params: { pay_period: { start_date: Date.today, end_date: Date.today + 14, pay_date: Date.today + 17, starting_check_number: "1250" } }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(company.reload.next_check_number).to eq(original)
+      expect(response.parsed_body["error"]).to include("access required")
+    end
+
+    it "reports the company counter and highest numeric check across both sources" do
+      create(:payroll_item, employee: employee, pay_period: pay_period, check_number: "1234")
+      create(:non_employee_check, company: company, check_number: "1500")
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("pay_period", "check_number_summary")).to include("next_check_number" => company.next_check_number, "last_used_check_number" => 1500, "can_change" => true)
+      admin_user.update!(role: "accountant")
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response.parsed_body.dig("pay_period", "check_number_summary", "can_change")).to be(false)
+    end
+  end
+
   describe "GET /api/v1/admin/pay_periods" do
     it "returns all pay periods for the company" do
       get "/api/v1/admin/pay_periods"

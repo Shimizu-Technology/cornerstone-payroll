@@ -33,6 +33,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { HelpTip } from '@/components/ui/help-tip';
 import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany } from '@/lib/company-write-access';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
@@ -143,6 +144,8 @@ function PayPeriodMobileCard({
 }
 
 export function PayPeriods() {
+  const { hasCapability } = useAuth();
+  const canChangeCheckNumber = hasCapability('manage_client_check_settings');
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1346,13 +1349,14 @@ export function PayPeriods() {
                 <Label htmlFor="starting_check_number">Starting Check Number (optional)</Label>
                 <Input
                   id="starting_check_number"
+                  disabled={!canChangeCheckNumber}
                   inputMode="numeric"
                   value={formData.starting_check_number}
                   onChange={(e) => setFormData({ ...formData, starting_check_number: e.target.value })}
                   placeholder="Use current check settings"
                 />
                 <p className="text-xs text-neutral-600">
-                  {loadingCheckSettings
+                  {!canChangeCheckNumber ? 'A manager or admin can change the starting check number in check settings.' : loadingCheckSettings
                     ? 'Checking current company check settings...'
                     : checkSettingsError
                       ? 'Could not load the current next check number. You can still enter an unused check number; the server will reject duplicates.'
