@@ -209,4 +209,47 @@ RSpec.describe "Published payroll review loop", type: :request do
     expect(package.reload.changes_requested_at).to be_nil
     expect(PortalNotificationEvent.where(event_type: "payroll_review_decided")).to be_empty
   end
+  it "treats a published review as unavailable while disabled, including stale services, without decision notifications" do
+    staff_approve
+    package = review
+    service = PayrollReview::RevisionService.new(pay_period: period, actor: client)
+    period.company # prime the old enabled setting
+    company.update!(client_payroll_approval_required: false)
+    @actor = client
+    get base
+    expect(response).to have_http_status(:not_found)
+    get "/api/v1/client/pay_periods"
+    expect(response.parsed_body.fetch("pay_periods").map { |row| row["id"] }).not_to include(period.id)
+    expect do
+      expect { service.request_changes!(revision_id: package.id, note: "Add hours") }.to raise_error(PayrollReview::RevisionService::Error, /disabled/)
+      expect { service.approve!(approver: client, recorded_by: client, method: "client_portal", revision_id: package.id,
+        acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT) }.to raise_error(PayrollReview::RevisionService::Error, /disabled/)
+      client_approve(package.id)
+      expect(response).to have_http_status(:not_found)
+      post "#{base}/request_changes", params: { revision_id: package.id, note: "Add hours" }
+      expect(response).to have_http_status(:not_found)
+    end.not_to change { PortalNotificationEvent.where(event_type: "payroll_review_decided").count }
+    expect(package.reload).to have_attributes(status: "pending", changes_requested_at: nil, published_at: be_present)
+    @actor = staff
+    post "#{admin}/commit"
+    expect(response).to have_http_status(:ok), response.body
+    @actor = client
+    get base
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("pay_period", "payroll_review")).to be_nil
+    expect(response.parsed_body.dig("pay_period", "payroll_review_history")).to eq([])
+  end
+
+  it "codes stale revisions separately from validation errors" do
+    staff_approve
+    @actor = client
+    post "#{base}/request_changes", params: { revision_id: review.id, note: " " }
+    expect(response.parsed_body).not_to have_key("code")
+    post "#{base}/request_changes", params: { revision_id: -1, note: "Add hours" }
+    expect(response.parsed_body["code"]).to eq("stale_payroll_review_revision")
+    get "#{base}/preview_pdf", params: { revision_id: -1 }
+    expect(response.parsed_body["code"]).to eq("stale_payroll_review_revision")
+    client_approve(-1)
+    expect(response.parsed_body["code"]).to eq("stale_payroll_review_revision")
+  end
 end

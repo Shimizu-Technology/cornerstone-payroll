@@ -65,7 +65,9 @@ class PayPeriodLifecycleService
     pay_period
   end
 
-  def commit!
+  attr_reader :acknowledged_outstanding_file_requests
+
+  def commit!(acknowledge_outstanding_file_requests: false)
     acknowledgement_ids = { batch: [], entries: [] }
     with_financial_pay_period_lock do
       validate_prior_provider_source!
@@ -89,6 +91,11 @@ class PayPeriodLifecycleService
       validate_annual_fica_context!
       validate_employer_contribution_tracking!
       validate_client_approval!
+      requests = pay_period.outstanding_client_file_requests.lock.to_a
+      if requests.any? && !acknowledge_outstanding_file_requests.in?([ true, "true", "1", 1 ])
+        raise InvalidTransitionError, "Acknowledge the outstanding client file requests before committing payroll."
+      end
+      @acknowledged_outstanding_file_requests = requests.map { |request| { id: request.id, title: request.title, status: request.status } }
       validate_payment_delivery!
       validate_source_earnings!
       committed_items = pay_period.payroll_items.includes(

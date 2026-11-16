@@ -39,6 +39,8 @@ module Api
             revision_id: params[:revision_id]
           )
           render json: { payroll_review: PayrollReview::PackagePresenter.call(review_package) }
+        rescue PayrollReview::RevisionService::StaleRevisionError => e
+          render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
         rescue PayrollReview::RevisionService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
@@ -49,6 +51,8 @@ module Api
           package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user)
             .request_changes!(revision_id: params[:revision_id], note: params[:note])
           render json: { payroll_review: PayrollReview::PackagePresenter.call(package) }
+        rescue PayrollReview::RevisionService::StaleRevisionError => e
+          render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
         rescue PayrollReview::RevisionService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
@@ -60,11 +64,11 @@ module Api
           @pay_period.with_lock do
             begin
               current = current_preview_package!
-              raise PayrollReview::RevisionService::Error, "Revision changed" unless current.id == package.id
+              raise PayrollReview::RevisionService::StaleRevisionError, "Revision changed" unless current.id == package.id
 
               PayrollReview::RevisionService.new(pay_period: @pay_period).verify_current_checksum!(current)
-            rescue PayrollReview::RevisionService::Error
-              return render json: { error: "This payroll changed while the preview was being prepared. Review the latest preview." }, status: :conflict
+            rescue PayrollReview::RevisionService::StaleRevisionError
+              return render json: { error: "This payroll changed while the preview was being prepared. Review the latest preview.", code: "stale_payroll_review_revision" }, status: :conflict
             end
             AuditLog.record!(user: current_user, company_id: @pay_period.company_id,
               action: "client_payroll_review#preview_pdf", record_type: "PayrollReviewPackage", record_id: package.id,
@@ -74,6 +78,8 @@ module Api
           response.headers["Cache-Control"] = "private, no-store"
           send_data pdf, type: "application/pdf", disposition: "attachment",
             filename: "Payroll_PREVIEW_#{@pay_period.pay_date.iso8601}_rev#{package.revision}.pdf"
+        rescue PayrollReview::RevisionService::StaleRevisionError => e
+          render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
         rescue PayrollReview::RevisionService::Error, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::ActiveRecordError
@@ -83,11 +89,14 @@ module Api
         private
 
         def current_preview_package!
+          unless Company.find(@pay_period.company_id).client_payroll_approval_required?
+            raise PayrollReview::RevisionService::Error, "Client payroll review is disabled for this company."
+          end
           raise PayrollReview::RevisionService::Error, "Preview is available only while payroll is approved." unless @pay_period.approved? && @pay_period.correction_status != "voided"
 
           package = @pay_period.payroll_review_packages.current.first
           unless package && package.published_at && package.id.to_s == params[:revision_id].to_s
-            raise PayrollReview::RevisionService::Error, "This preview revision changed. Reload the pay run."
+            raise PayrollReview::RevisionService::StaleRevisionError, "This preview revision changed. Reload the pay run."
           end
           package
         end
@@ -124,15 +133,16 @@ module Api
           }
 
           json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
-          json[:payroll_review] = PayrollReview::PackagePresenter.call(
+          json[:payroll_review] = pay_period.company.client_payroll_approval_required? ? PayrollReview::PackagePresenter.call(
             pay_period.payroll_review_packages.summary.current.where.not(published_at: nil).includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
-          )
+          ) : nil
 
           if include_items
             json[:payroll_review_history] = pay_period.payroll_review_packages.where.not(published_at: nil)
               .select(PayrollReviewPackage.column_names - %w[calculation_snapshot source_manifest])
               .includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
               .map { |package| PayrollReview::PackagePresenter.call(package, include_source_manifest: false) }
+            json[:payroll_review_history] = [] unless pay_period.company.client_payroll_approval_required?
             json[:payroll_items] = items.map do |item|
               {
                 id: item.id,
@@ -170,7 +180,7 @@ module Api
           return false unless pay_period
           return true if pay_period.client_finished?
 
-          pay_period.approved? &&
+          pay_period.company.client_payroll_approval_required? && pay_period.approved? &&
             pay_period.payroll_review_packages.current.where.not(published_at: nil).exists?
         end
       end

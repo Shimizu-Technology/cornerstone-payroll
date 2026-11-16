@@ -907,7 +907,7 @@ export function usePayRunController({
     if (payPeriod?.status !== 'approved' || payPeriod.correction_status === 'voided') setCommitPeriodId(null);
   }, [payPeriod?.id, payPeriod?.status, payPeriod?.correction_status]);
 
-  const handleCommit = async (confirmedPeriodId: number) => {
+  const handleCommit = async (confirmedPeriodId: number, acknowledgeOutstandingFileRequests?: boolean) => {
     if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
         payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || payrollClientCommitReason(payPeriod) || processing || commitInFlightRef.current) return;
     commitInFlightRef.current = true;
@@ -917,7 +917,7 @@ export function usePayRunController({
     setProcessing(true);
     setError(null);
     try {
-      const response = await payPeriodsApi.commit(confirmedPeriodId);
+      const response = await (acknowledgeOutstandingFileRequests ? payPeriodsApi.commit(confirmedPeriodId, true) : payPeriodsApi.commit(confirmedPeriodId));
       if (!isCurrentRoute()) return;
       setPayPeriod(response.pay_period);
       await loadPayPeriod(confirmedPeriodId, true);

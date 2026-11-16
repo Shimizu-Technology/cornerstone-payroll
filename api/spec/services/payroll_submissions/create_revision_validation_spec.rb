@@ -41,4 +41,17 @@ RSpec.describe PayrollSubmissions::CreateRevision do
     expect(result.submission.submission_documents.find_by!(role: "changes_workbook").client_document_id).to eq(first.submission_documents.find_by!(role: "changes_workbook").client_document_id)
     expect(result.submission.submission_documents.find_by!(role: "attachment").file_name_snapshot).to eq("support.xlsx")
   end
+  it "allows source correction after a legacy paid marker until the live run is finalized" do
+    first = send_revision(revel_payroll: synthetic_pdf, workbook_choice: "none", no_changes: true).submission
+    first.period.update!(status: "paid")
+    second = send_revision(revel_payroll: synthetic_pdf, workbook_choice: "none", no_changes: true,
+      notes: "Correction before commit", based_on_revision: first.revision).submission
+    expect(second.revision).to eq(2)
+    expect(second.period.reload.status).to eq("submitted")
+    run.update_columns(status: "committed", committed_at: Time.current)
+    expect do
+      send_revision(revel_payroll: synthetic_pdf, workbook_choice: "none", no_changes: true,
+        notes: "Correction after commit", based_on_revision: second.revision)
+    end.to raise_error(PayrollSubmissionPeriod::TransitionError, /paid/)
+  end
 end

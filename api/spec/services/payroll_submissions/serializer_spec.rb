@@ -33,4 +33,10 @@ RSpec.describe PayrollSubmissions::Serializer do
     4.times { |index| add_period(index + 2) }
     expect(list_query_count - small).to be <= 1
   end
+  it "labels legacy paid periods with open runs as payroll in progress when client review is disabled" do
+    record = add_period(0)
+    catalog = PayrollSubmissions::Catalog.new(company: company, today: Date.new(2026, 11, 17))
+    serializer = described_class.new(current_user: staff, catalog: catalog)
+    expect(serializer.summary(catalog.resolve(record.id.to_s))).to include(status: "in_review", status_label: "Payroll in progress")
+  end
 end

@@ -189,6 +189,7 @@ class PayrollHistoryQuery
         OR pp.test_workspace_role = 'baseline'
         OR (
           pp.status = 'approved'
+          AND EXISTS (SELECT 1 FROM companies WHERE companies.id = pp.company_id AND companies.client_payroll_approval_required)
           AND EXISTS (
             SELECT 1 FROM payroll_review_packages review_package
             WHERE review_package.pay_period_id = pp.id
@@ -254,8 +255,9 @@ class PayrollHistoryQuery
     correction_status = row["correction_status"]
     native_period = native_periods[row.fetch("id").to_i] unless imported
     editable = @audience == :staff && !imported && native_period&.can_edit?
-    client_review_ready = !native_period&.company&.client_payroll_approval_required? ||
-      native_period.payroll_review_packages.find { |review_package| review_package.superseded_at.nil? }&.approved?
+    current_package = native_period&.payroll_review_packages&.find { |review_package| review_package.superseded_at.nil? }
+    client_review_ready = !current_package&.changes_requested_at &&
+      (!native_period&.company&.client_payroll_approval_required? || (current_package&.approved? && current_package.published_at.present?))
 
     {
       key: row.fetch("key"),

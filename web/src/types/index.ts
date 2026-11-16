@@ -1339,6 +1339,7 @@ export interface PayPeriod {
   intake_stale_at?: string | null;
   intake_stale_reason?: string | null;
   intake_stale_session_id?: number | null;
+  outstanding_file_requests?: { id: number; title: string; status: string; status_label: string }[];
   client_payroll_approval_required?: boolean;
   payroll_review?: PayrollReviewPackage | null;
   payroll_review_history?: PayrollReviewPackage[];

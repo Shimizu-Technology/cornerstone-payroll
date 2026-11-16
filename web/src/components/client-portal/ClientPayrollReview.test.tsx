@@ -42,7 +42,7 @@ it('offers the audited current preview and keeps a prior request visible in hist
 });
 
 it.each(['approve', 'changes', 'preview'])('reloads stale %s and asks for a fresh review while retaining the note', async action => {
-  const stale = Object.assign(new Error('Revision changed'), { status: 422 });
+  const stale = Object.assign(new Error('Revision changed'), { status: 422, data: { code: 'stale_payroll_review_revision' } });
   vi.mocked(clientPayPeriodsApi.approveReview).mockRejectedValueOnce(stale);
   vi.mocked(clientPayPeriodsApi.requestChanges).mockRejectedValueOnce(stale);
   vi.mocked(clientPayPeriodsApi.previewPdf).mockRejectedValueOnce(stale);
@@ -59,5 +59,19 @@ it.each(['approve', 'changes', 'preview'])('reloads stale %s and asks for a fres
 it('shows no review card for an unpublished internal revision after setting-off payroll commits', () => {
   const { container } = render(<ClientPayrollReview payPeriod={{ ...period, status: 'committed', client_payroll_approval_required: false,
     payroll_review: { ...period.payroll_review!, published_at: null }, payroll_review_history: [] }} companyId={3} onDone={onDone} />);
+  expect(container.textContent).toBe('');
+});
+
+it.each([422, 409])('shows an ordinary %s error without reloading or resetting acknowledgement', async status => {
+  vi.mocked(clientPayPeriodsApi.approveReview).mockRejectedValueOnce(Object.assign(new Error('Select an active client portal user.'), { status, data: { code: 'invalid_approver' } }));
+  render(<ClientPayrollReview payPeriod={period} companyId={3} onDone={onDone} />);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Approve this revision' }));
+  expect(await screen.findByText('Select an active client portal user.')).toBeTruthy();
+  expect(onDone).not.toHaveBeenCalled();
+  expect(screen.getByRole('checkbox')).toHaveProperty('checked', true);
+});
+it('hides an already published review when the setting is disabled', () => {
+  const { container } = render(<ClientPayrollReview payPeriod={{ ...period, client_payroll_approval_required: false }} companyId={3} onDone={onDone} />);
   expect(container.textContent).toBe('');
 });

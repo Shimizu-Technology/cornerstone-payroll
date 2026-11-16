@@ -2114,7 +2114,7 @@ it('clears staff email attestation when the reviewed revision changes', async ()
   }
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<AttestationHarness />} /></Routes></MemoryRouter>);
   await screen.findByText('unconfirmed:');
-  act(() => { controller.dialogs.setClientApprovalConfirmed(true); controller.dialogs.setClientApprovalEvidence('Email for revision 1'); });
+  act(() => { controller.dialogs.setClientApprovalOpen(true); controller.dialogs.setClientApprovalConfirmed(true); controller.dialogs.setClientApprovalEvidence('Email for revision 1'); });
   expect(screen.getByText('confirmed:Email for revision 1')).toBeTruthy();
   act(() => { controller.dialogs.setPayPeriod(current => current && { ...current, payroll_review: { ...current.payroll_review!, id: 92, revision: 2 } }); });
   await screen.findByText('unconfirmed:');

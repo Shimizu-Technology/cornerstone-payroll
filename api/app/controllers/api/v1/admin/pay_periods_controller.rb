@@ -650,7 +650,9 @@ module Api
         # POST /api/v1/admin/pay_periods/:id/commit
         # Final lock - no more changes allowed
         def commit
-          lifecycle_service.commit!
+          service = lifecycle_service
+          service.commit!(acknowledge_outstanding_file_requests: params[:acknowledge_outstanding_file_requests])
+          @acknowledged_outstanding_file_requests = service.acknowledged_outstanding_file_requests
           render json: { pay_period: pay_period_json(@pay_period) }
         rescue PayPeriodCorrectionService::CorrectionError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -1074,6 +1076,10 @@ module Api
           end
 
           metadata = { business_summary: summary }
+          if action_name == "commit" && @acknowledged_outstanding_file_requests.present?
+            metadata[:acknowledge_outstanding_file_requests] = true
+            metadata[:outstanding_file_requests] = @acknowledged_outstanding_file_requests
+          end
           if %w[run_payroll refresh_setup].include?(action_name) && params[:source_coverage_reason].present?
             metadata[:source_coverage_reason] = params[:source_coverage_reason].to_s.strip.truncate(1000)
             metadata[:source_coverage_acknowledged] = params[:source_coverage_acknowledged] == true
@@ -1431,6 +1437,9 @@ module Api
             json[:last_preview_download] = last_preview && {
               revision: last_preview.metadata["revision"], downloaded_at: last_preview.created_at.iso8601
             }
+            json[:outstanding_file_requests] = (pay_period.approved? ? pay_period.outstanding_client_file_requests : []).map do |request|
+              { id: request.id, title: request.title, status: request.status, status_label: request.status_label }
+            end
             json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
             reviews = pay_period.payroll_review_packages.summary.includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
             # Fetch only current/shared rows in one query, preserving the detail

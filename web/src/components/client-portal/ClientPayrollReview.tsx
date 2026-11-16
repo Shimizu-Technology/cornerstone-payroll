@@ -25,7 +25,8 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
 
   const handleFailure = async (cause: unknown, fallback: string) => {
     if (!active.current) return;
-    const stale = cause instanceof Error && 'status' in cause && (cause.status === 422 || cause.status === 409);
+    const stale = cause instanceof Error && 'data' in cause && !!cause.data && typeof cause.data === 'object' &&
+      'code' in cause.data && cause.data.code === 'stale_payroll_review_revision';
     if (stale) {
       setConfirmed(false); setArtifact(null);
       setError('This payroll was updated. Review the latest preview.');
@@ -63,7 +64,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
     } catch (cause) { await handleFailure(cause, 'Could not send your decision. Your note is still here.'); }
     finally { setBusy(false); }
   };
-  if (!review?.published_at && !payPeriod.payroll_review_history?.length) return null;
+  if (payPeriod.client_payroll_approval_required === false || (!review?.published_at && !payPeriod.payroll_review_history?.length)) return null;
   return <Card className="border-primary-200">
     <CardContent className="space-y-4 pt-6 [&_button]:min-h-11">
       <div>

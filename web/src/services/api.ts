@@ -1557,8 +1557,8 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
   unapprove: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
-  commit: (id: number) =>
-    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
+  commit: (id: number, acknowledgeOutstandingFileRequests?: boolean) =>
+    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`, acknowledgeOutstandingFileRequests ? { acknowledge_outstanding_file_requests: true } : undefined),
   promotedPaymentPreview: (id: number) =>
     api.get<{ promoted_payment: PromotedPaymentPreview }>(`/admin/pay_periods/${id}/promoted_payment_preview`),
   preparePromotedPayment: (id: number, data: { acknowledgement: string; starting_check_number: string; check_date: string }) =>
