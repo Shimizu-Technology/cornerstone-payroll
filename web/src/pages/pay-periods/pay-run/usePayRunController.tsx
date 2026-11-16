@@ -22,8 +22,8 @@ import { useCompany } from '@/contexts/CompanyContext';
 
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
-import { type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, unavailableSavedWageRateLabels, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, taxSyncStatusConfig, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
+import type { ExpectedEntries, PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
+import { preservesWorksheetJobHours, type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, unavailableSavedWageRateLabels, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, taxSyncStatusConfig, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
 
 export function usePayRunController({
   active = true,
@@ -531,7 +531,26 @@ export function usePayRunController({
     setSourceCoverageOpen(true);
   };
 
-  const handleRunPayroll = async (coverage?: CoverageAcknowledgement) => {
+  const handleRunPayroll = async (coverage?: CoverageAcknowledgement, entry?: { field: ExpectedEntries['fields'][number]; value: number }) => {
+    const entryFieldEmployeeId = entry?.field.employee_id;
+    let calculationHours = hoursMap;
+    let calculationSalaries = salaryOverrideMap;
+    const calculationAdditionalIds = new Set(additionalEmployeeIds);
+    if (entry) {
+      const { field, value } = entry;
+      calculationAdditionalIds.add(field.employee_id);
+      setAdditionalEmployeeIds(calculationAdditionalIds);
+      if (field.kind === 'owner_pay') {
+        calculationSalaries = { ...salaryOverrideMap, [field.employee_id]: value };
+        setSalaryOverrideMap(calculationSalaries);
+      } else {
+        const previous = hoursMap[String(field.employee_id)];
+        const rows = (previous?.wage_rates || field.saved_wage_rate_hours || []).filter(row => row.employee_wage_rate_id !== field.employee_wage_rate_id);
+        rows.push({ employee_wage_rate_id: field.employee_wage_rate_id!, rate: Number(field.wage_rate), label: field.wage_rate_label || '', regular_hours: value, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 });
+        calculationHours = { ...hoursMap, [field.employee_id]: { regular: rows.reduce((sum, row) => sum + Number(row.regular_hours || 0), 0), overtime: rows.reduce((sum, row) => sum + Number(row.overtime_hours || 0), 0), wage_rates: rows } };
+        setHoursMap(calculationHours);
+      }
+    }
     if (savedImportReloadRequiredRef.current || !payPeriod) return;
     if (needsSourceCoverageAcknowledgement(payPeriod) && !coverage) {
       requestSourceCoverage('calculate');
@@ -558,7 +577,7 @@ export function usePayRunController({
         setError(`Saved hours for ${name} use an inactive or removed job (${unavailableJob.labels.join(', ')}). Restore or recreate that job in the employee’s pay setup, then reload this run before calculating. Saved payroll has not changed.`);
         return;
       }
-      const invalidHours = Object.entries(hoursMap).find(([employeeId, entry]) => worksheetHoursInvalid(
+      const invalidHours = Object.entries(calculationHours).find(([employeeId, entry]) => worksheetHoursInvalid(
         entry, payrollItems.find(item => item.employee_id === Number(employeeId)), MAX_HOURS_PER_PERIOD,
       ));
       if (invalidHours) {
@@ -566,16 +585,16 @@ export function usePayRunController({
         return;
       }
 
-      const selectedEmployeeIds = new Set([...(payPeriod.default_employee_ids || []), ...payrollItems.map(item => item.employee_id), ...additionalEmployeeIds]);
+      const selectedEmployeeIds = new Set([...(payPeriod.default_employee_ids || []), ...payrollItems.map(item => item.employee_id), ...calculationAdditionalIds]);
       if (!Array.isArray(payPeriod.default_employee_ids) && payPeriod.status === 'draft' && payrollItems.length === 0 && payPeriod.run_purpose === 'regular') {
         employees.forEach(employee => {
           if (!(payPeriod.excluded_employee_ids || []).includes(employee.id)) selectedEmployeeIds.add(employee.id);
         });
       }
-      Object.entries(hoursMap).forEach(([employeeId, entry]) => {
+      Object.entries(calculationHours).forEach(([employeeId, entry]) => {
         if (entry.regular > 0 || entry.overtime > 0) selectedEmployeeIds.add(Number(employeeId));
       });
-      [salaryOverrideMap, bonusMap, tipsPaidOutMap].forEach(values => {
+      [calculationSalaries, bonusMap, tipsPaidOutMap].forEach(values => {
         Object.entries(values).forEach(([employeeId, amount]) => {
           if (toNumber(amount) > 0) selectedEmployeeIds.add(Number(employeeId));
         });
@@ -599,12 +618,12 @@ export function usePayRunController({
 
       // Build hours payload
       const hours: Record<string, { regular?: number; overtime?: number; wage_rates?: PayrollItemWageRateHours[] }> = {};
-      Object.entries(hoursMap).forEach(([empId, entry]) => {
+      Object.entries(calculationHours).forEach(([empId, entry]) => {
         if (!selectedEmployeeIds.has(Number(empId))) return;
         const preservesSourceRates = payrollItems.some(item => item.employee_id === Number(empId)
           && (item.timekeeping_source === 'correction_reference' || item.import_source?.startsWith('time_tracking:')));
         hours[empId] = entry.wage_rates && entry.wage_rates.length > 0
-          && (entry.wage_rates.length > 1 || preservesSourceRates)
+          && (preservesWorksheetJobHours(employees.find(employee => employee.id === Number(empId)), entry.wage_rates) || preservesSourceRates || Number(empId) === entryFieldEmployeeId)
           ? {
               regular: entry.regular,
               overtime: entry.overtime,
@@ -617,13 +636,13 @@ export function usePayRunController({
       // Send zeroes too so clearing a variable salary amount removes stale overrides.
       const includedEmployeeIds = new Set([
         ...payrollItems.map((pi) => pi.employee_id),
-        ...additionalEmployeeIds,
+        ...calculationAdditionalIds,
       ]);
       const salary_overrides: Record<string, number> = {};
       const missingVariableSalaryEmployees: string[] = [];
       employees.forEach((employee) => {
         if (employee.employment_type === 'salary' && employee.salary_type === 'variable') {
-          const amount = Math.max(0, toNumber(salaryOverrideMap[String(employee.id)]));
+          const amount = Math.max(0, toNumber(calculationSalaries[String(employee.id)]));
           if (!includedEmployeeIds.has(employee.id) && amount <= 0) return;
           salary_overrides[String(employee.id)] = amount;
           if (amount <= 0 && payPeriod.includes_base_salary !== false) {
@@ -712,8 +731,8 @@ export function usePayRunController({
       const failedBonuses = Object.fromEntries(Object.entries(bonusEdits).filter(([employeeId]) => failedEmployeeIds.has(employeeId)));
       setBonusEdits(failedBonuses);
       setBonusMap((previous) => ({ ...previous, ...failedBonuses }));
-      setHoursMap((previous) => ({ ...previous, ...Object.fromEntries(Object.entries(hoursMap).filter(([employeeId]) => failedEmployeeIds.has(employeeId))) }));
-      setAdditionalEmployeeIds(new Set([...additionalEmployeeIds].filter((employeeId) => failedEmployeeIds.has(String(employeeId)))));
+      setHoursMap((previous) => ({ ...previous, ...Object.fromEntries(Object.entries(calculationHours).filter(([employeeId]) => failedEmployeeIds.has(employeeId))) }));
+      setAdditionalEmployeeIds(new Set([...calculationAdditionalIds].filter((employeeId) => failedEmployeeIds.has(String(employeeId)))));
       await payPeriodsApi.payrollFieldInputs(payPeriod.id)
         .then((updatedPayrollFieldResponse) => {
           syncPayrollFieldInputs(updatedPayrollFieldResponse.payroll_field_inputs);
@@ -1514,7 +1533,7 @@ export function usePayRunController({
     refreshDialog: { error, handleRefreshSetup, processing, refreshBaseSalary, refreshRecurring, refreshSetupOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, sourceCoverageOpen },
     loans: { additionalEmployeeIds, canEditPayPeriod, employees, isCalculated, isDraft, namedLoanDrafts, namedLoanOptions, payPeriod, payrollItems, setNamedLoanDrafts, standaloneLoanConflicts },
     comparison: { comparison, comparisonError, comparisonFlagTone, comparisonHiddenRows, comparisonHighlights, comparisonLoading, comparisonRows, comparisonTotalRows, isApproved, isCalculated, isCommitted, loadComparison, payPeriod, payrollItems },
-    roster: { additionalEmployeeIds, employees, financialActionsHeld, handleRunPayroll, isCalculated, isDraft, payPeriod, payrollItems, processing, setAdditionalEmployeeIds, setBonusEdits, setBonusMap, setHoursMap, setLoansMap, setNamedLoanDrafts, setPayrollFieldDrafts, setSalaryOverrideMap, setTipsMap, setTipsPaidOutMap },
+    roster: { onCalculateExpectedEntry: (field: ExpectedEntries['fields'][number], value: number) => handleRunPayroll(undefined, { field, value }), loadPayPeriod, hasStagedWorksheetChanges, canEditPayPeriod, additionalEmployeeIds, employees, financialActionsHeld, handleRunPayroll, isCalculated, isDraft, payPeriod, payrollItems, processing, setAdditionalEmployeeIds, setBonusEdits, setBonusMap, setHoursMap, setLoansMap, setNamedLoanDrafts, setPayrollFieldDrafts, setSalaryOverrideMap, setTipsMap, setTipsPaidOutMap },
     hours: { hasStagedWorksheetChanges, additionalEmployeeIds, bonusEdits, bonusMap, companyId, currentPath, departmentFilter, departmentOptions, displayEmployeesForHours, employeeTypeFilter, employees, employmentGroupKey, employmentGroupLabel, employmentGroupTone, estimateWorksheetGross, hoursMap, hoursSortBy, hoursSortDirection, hoursTableOpen, isCalculated, isDraft, loansMap, namedLoanDrafts, namedLoanOptions, payPeriod, payrollFieldAssignmentLookup, payrollFieldDrafts, payrollItemByEmployeeId, payrollItems, resetPayrollFieldDraft, retainedRetirementEntries, salaryOverrideMap, searchTerm, setBonusEdits, setBonusMap, setDepartmentFilter, setEmployeeTypeFilter, setHoursSortBy, setHoursSortDirection, setHoursTableOpen, setNamedLoanDrafts, setSearchTerm, setShowPayrollFields, setShowTipsLoans, showPayrollFields, showTipsLoans, tipsLoansVisibilityModeRef, tipsMap, tipsPaidOutMap, updateHours, updateLoan, updatePayrollFieldDraft, updateSalaryOverride, updateTip, updateTipsPaidOut, updateWageRateHours, worksheetPayrollFields },
     results: { companyId, currentPath, departmentFilter, departmentOptions, employeeLookup, employeeTypeFilter, employmentGroupKey, employmentGroupLabel, employmentGroupTone, isCalculated, isCommitted, isDraft, payPeriod, payrollItemDisplayedHours, payrollItemNameParts, payrollItems, registerPayrollFieldTotals, registerTotals, resultsSortBy, resultsSortDirection, searchTerm, setCorrectingItem, setDepartmentFilter, setEditingItem, setEmployeeTypeFilter, setReplacingItem, setResultsSortBy, setResultsSortDirection, setReviewingItem, setSearchTerm, sortPayrollItems, visiblePayrollFields },
     employerTaxes: { fitDivergence, isDraft, payrollItems, totalDRTDeposit, totalEmployerMedicare, totalEmployerSS, totalMedicare, totalSS, totalWithholding },
