@@ -29,7 +29,7 @@ This is the approved staff authorization contract for Cornerstone Payroll. The b
 
 “Payroll operations” includes employee maintenance, departments, pay periods and items, imports, calculate/approve/unapprove/commit, checks and corrections, reports and filing preparation, loans, transmittals, portal documents, and assigned-client contact details. This is intentionally available to accountants because it is their core job.
 
-“Client configuration” includes pay schedule/legal workweek confirmation, check stock/layout/sequence, reusable payroll-field definitions, reminder configuration, printer-profile creation/editing/deletion/application, every-period entry setup (Standing Changes), employee mark-inactive/termination/reactivation and work-profile changes, and approval or rejection of client payroll-sensitive employee changes.
+“Client configuration” includes pay schedule/legal workweek confirmation, check stock/layout/sequence, reminder configuration, the shared printer-profile library, every-period entry setup (Standing Changes), employee mark-inactive/termination/reactivation and work-profile changes, and approval or rejection of client payroll-sensitive employee changes. Reusable payroll-field definitions (`manage_payroll_fields`) and creating or using printer profiles (`create_printer_profiles`, `use_printer_profiles`) are separate capabilities that accountants also hold. Managing the shared printer-profile library (`manage_printer_profile_library`) stays with managers and admins.
 
 “Organization administration” includes users and invitations, client assignments and creation, audit history, tax configuration and effective-dated pay-component tax rules, external time-source secrets, and the organization-wide invoice center.
 
@@ -47,7 +47,8 @@ Every endpoint below is registered in `StaffRolePolicy` and is enforced by `Admi
 | --- | --- |
 | Platform administration | all organization endpoints; employee tax-classification record transition |
 | Organization administration | all user, invitation, company-assignment, audit-log, tax-config, and invoice controllers; client creation; time-source create/update/delete/test; pay-component tax-rule create/update |
-| Client configuration | pay-schedule update; payroll-field definition create/update/archive; reminder update/test; check settings and next-number update; printer-profile create/update/delete/apply/clear/apply-to-all; employee-change review/approve/reject; terminate/reactivate; work-profile create |
+| Client configuration | pay-schedule update; reminder update/test; check settings and next-number update; employee-change review/approve/reject; terminate/reactivate; work-profile create |
+| Payroll fields and printer profiles (accountants included) | payroll-field definition create/update/archive (`manage_payroll_fields`); printer-profile create/clone (`create_printer_profiles`); printer-profile apply/clear and selection (`use_printer_profiles`); apply-to-all-companies and library defaults (`manage_printer_profile_library`, managers and admins only) |
 
 Read access remains narrower than a mutation response suggests:
 

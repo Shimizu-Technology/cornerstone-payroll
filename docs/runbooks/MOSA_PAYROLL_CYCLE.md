@@ -58,9 +58,9 @@ The text above the footer says why Apply is off, for example **Apply is off: …
 
 If an unmatched row is someone who is inactive or terminated in Cornerstone, the row says *"Name is inactive in Cornerstone."*
 
-- **Managers and admins** see **Reactivate Name**. It opens the reactivation window with the pay period start as the default **Reactivation effective date**. Use the first day they're working again.
+- **Managers, admins, and accountants with client-management delegation** see **Reactivate Name**. It opens the reactivation window with the pay period start as the default **Reactivation effective date**. Use the first day they're working again.
 - **After reactivation**, the import matches the same files again by itself. There's no re-upload and no reason to type. The row becomes ready, other outcomes stay, and a status line says **Matched again after Name was reactivated**.
-- **Everyone else** sees *"A manager or admin can reactivate Name."* and **Open profile**, which opens the worker's profile in a new tab.
+- **Everyone else** sees *"A manager or admin can reactivate Name."* (the message names managers and admins, but a delegated accountant can also do it) and **Open profile**, which opens the worker's profile in a new tab.
 
 For a review that came from a client portal revision, reactivating reopens that client revision instead.
 
@@ -158,7 +158,7 @@ Choose **Commit**. The **Commit and finalize payroll?** dialog shows the company
 
 - **Check numbering.** If anyone is paid by paper check, it says **Paper checks will be numbered from N (last used: M)**.
   - If N is at or below M, a warning asks you to check the stock first.
-  - Managers and admins get a **Review check settings** link.
+  - Managers, admins, and accountants with check-settings delegation get a **Review check settings** link.
   - Fix the number before committing if it doesn't match the next check on the stock.
 - **Warnings.** Any compliance warnings are listed under **Review these warnings before committing**.
 - **Confirm.** Choose **Confirm commit**, or **Keep reviewing** to back out.
@@ -179,11 +179,11 @@ Direct-deposit stubs are separate from paper checks. Printing a stub doesn't sta
 
 Use **Mark inactive** on an employee's profile when the person still works for MoSa but won't be paid for a while: leave of absence, seasonal, or no hours scheduled. Inactive workers aren't paid until they're reactivated. Use **Terminate Employee** when employment has ended.
 
-- **Who:** managers and admins.
+- **Who:** managers, admins, and accountants with client-management delegation.
 - **How:**
   1. Open the employee, choose **Mark inactive**, and set the **Inactive effective date**. It can't be in the future.
   2. Pick a reason and add notes if useful, then confirm with **Mark inactive**.
-  3. If the person is on open pay runs, the window lists them. Remove them from runs that start after the date before approving. Runs that start earlier keep them for the days they worked.
+  3. If the person is on open pay runs, the window lists them. Remove them from runs that start on or after the date before approving. Runs that start earlier keep them for the days they worked.
 - **Undo:** choose **Reactivate** on the inactive profile banner, or reactivate them from the import review (see [Reactivating an inactive worker](#reactivating-an-inactive-worker-from-the-import)).
 
 Every change is recorded in the employee's status history and the audit log.
@@ -210,7 +210,7 @@ Every change is recorded in the employee's status history and the audit log.
 | **Remove draft check numbers for direct-deposit employees before approving payroll for …** | A direct-deposit employee has a check number. | Clear the check number for those employees. |
 | **This payroll changed while the preview was being prepared. Download it again.** | The run changed during the download. | Download the preview again. |
 | **Preview is only available for calculated or approved pay runs …** | The run is a draft, committed or voided. | Calculate a draft first. Use **Print checks** for committed runs. |
-| Starting check number field is disabled | Only managers and admins can change check numbering. | Ask a manager or admin, or use **My Printer & Checks** with the right access. |
+| Starting check number field is disabled | Only managers, admins, and accountants with check-settings delegation can change check numbering. | Ask someone with that access. |
 
 ## Related
 
