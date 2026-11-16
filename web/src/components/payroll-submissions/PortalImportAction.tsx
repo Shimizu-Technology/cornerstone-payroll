@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ImportModal } from '@/components/import/ImportModal';
-import { useOptionalSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { useOptionalWorkerStatusAccess } from '@/hooks/useSelectedCompanyCapability';
 import { payPeriodsApi, type ImportPreviewResponse } from '@/services/api';
 import type { PeriodDetail } from '@/services/payrollSubmissions';
 
 export function PortalImportAction({ period, companyId, onApplied }: { period: PeriodDetail; companyId: number; onApplied: () => void }) {
-  const canReactivateWorkers = useOptionalSelectedCompanyCapability('manage_client_configuration', companyId);
+  const workerStatusAccess = useOptionalWorkerStatusAccess(companyId);
   const [selectedId, setSelectedId] = useState(period.submissions.find(row => row.current)?.id);
   const [supersededReason, setSupersededReason] = useState('');
   const [dispositionReason, setDispositionReason] = useState('');
@@ -76,6 +76,6 @@ export function PortalImportAction({ period, companyId, onApplied }: { period: P
     </div>
     {resolve && <Button variant="outline" disabled={busy || !dispositionReason.trim()} onClick={() => void disposition()}>Save: don’t use the latest revision</Button>}
     {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
-    {preview && <ImportModal key={`${preview.import_id}-${preview.portal_source?.selection_id}`} open initialPreview={preview} payPeriodId={runId} companyId={companyId} onOpenChange={open => { if (!open) setPreview(null); }} onImportComplete={onApplied} canReactivateWorkers={canReactivateWorkers} />}
+    {preview && <ImportModal key={`${preview.import_id}-${preview.portal_source?.selection_id}`} open initialPreview={preview} payPeriodId={runId} companyId={companyId} onOpenChange={open => { if (!open) setPreview(null); }} onImportComplete={onApplied} canReactivateWorkers={workerStatusAccess.canReactivate} canRehireWorkers={workerStatusAccess.canRehire} />}
   </section>;
 }

@@ -128,6 +128,18 @@ RSpec.describe EmployeeStatusTransitionService do
       expect(employee.reload.status).to eq("active")
       expect(employee.employee_status_events).to be_empty
     end
+
+    it "lets an accountant mark a worker inactive but not terminate one" do
+      actor.update!(role: "accountant")
+      expect {
+        described_class.terminate!(employee: employee, actor: actor, attributes: { effective_date: "2024-03-15" })
+      }.to raise_error(described_class::Error, /Client configuration access required/)
+      expect(employee.reload.status).to eq("active")
+
+      described_class.deactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-03-15" })
+      expect(employee.reload.status).to eq("inactive")
+      expect(employee.employee_status_events.sole).to have_attributes(event_type: "deactivated", actor_id: actor.id)
+    end
   end
 
   it "accepts today's Guam date while UTC is still on the previous day" do
@@ -199,12 +211,33 @@ RSpec.describe EmployeeStatusTransitionService do
       expect(employee.employee_status_events).to be_empty
     end
 
-    it "does not let an accountant reactivate an inactive worker" do
+    it "lets an accountant reactivate an inactive worker" do
       employee.update!(status: "inactive")
+      actor.update!(role: "accountant")
+      described_class.reactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-04-01" })
+      expect(employee.reload.status).to eq("active")
+      expect(employee.employee_status_events.sole).to have_attributes(event_type: "reactivated", actor_id: actor.id)
+    end
+
+    it "keeps rehiring a terminated worker with client configuration" do
+      employee.update!(status: "terminated", termination_date: "2024-03-15")
       actor.update!(role: "accountant")
       expect {
         described_class.reactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-04-01" })
-      }.to raise_error(described_class::Error, /Client configuration access required/)
+      }.to raise_error(described_class::Forbidden, "A manager or admin can rehire a terminated worker")
+      expect(employee.reload.status).to eq("terminated")
+
+      actor.update!(role: "manager")
+      described_class.reactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-04-01" })
+      expect(employee.reload.status).to eq("active")
+    end
+
+    it "does not let a client user reactivate an inactive worker" do
+      employee.update!(status: "inactive")
+      actor.update!(role: "client")
+      expect {
+        described_class.reactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-04-01" })
+      }.to raise_error(described_class::Error, /Payroll staff access required/)
       expect(employee.reload.status).to eq("inactive")
       expect(employee.employee_status_events).to be_empty
     end
