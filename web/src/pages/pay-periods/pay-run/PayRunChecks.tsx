@@ -1,5 +1,6 @@
 
 
+import { PayrollPreviewCard } from '@/components/payroll/PayrollPreviewCard';
 import { Link } from 'react-router';
 
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ export function PayRunChecks({
   setCheckPrintOpen
 }: PayRunSectionProps<'checks'>) {
   return (<>
+<PayrollPreviewCard payPeriod={payPeriod} onDownloaded={loadPayPeriod} />
 {isCommitted && (
           <Card>
             <div className="p-4 border-b flex items-center justify-between gap-3">

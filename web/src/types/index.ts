@@ -1331,6 +1331,7 @@ export interface PayPeriod {
   intake_stale_session_id?: number | null;
   client_payroll_approval_required?: boolean;
   payroll_review?: PayrollReviewPackage | null;
+  last_preview_download?: { revision: number; downloaded_at: string } | null;
   time_tracking?: {
     connected_payroll?: { mode: 'enabled' | 'paused'; enabled: boolean; message: string | null };
     active_source_types: string[];
