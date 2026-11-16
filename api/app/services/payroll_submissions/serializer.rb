@@ -2,13 +2,25 @@
 
 module PayrollSubmissions
   # One projection for both audiences. Client output never includes staff-only
-  # drafts or their files, the linked pay run, or any calculated amounts.
+  # drafts or their files. Published review links expose no calculated amounts.
   class Serializer
     def initialize(current_user:, catalog:)
       @user = current_user
       @catalog = catalog
       @staff = current_user&.staff_member?
       @documents = ClientPortalThreadSerializer.new(current_user: current_user)
+    end
+
+    def summaries(entries)
+      @catalog.preload_live_pay_periods(entries)
+      ids = entries.filter_map { |entry| @catalog.live_pay_period(entry)&.id }
+      @published_reviews = ids.index_with { nil }
+      PayrollReviewPackage.summary.current.where(pay_period_id: ids).where.not(published_at: nil).find_each do |package|
+        @published_reviews[package.pay_period_id] = package
+      end
+      ActiveRecord::Associations::Preloader.new(records: entries.filter_map(&:record),
+        associations: [ :submissions, :status_events, :read_receipts, :file_requests ]).call
+      entries.map { |entry| summary(entry) }
     end
 
     def summary(entry)
@@ -24,8 +36,39 @@ module PayrollSubmissions
         current_revision: current&.revision, last_submitted_at: current&.submitted_at,
         status_changed_at: record&.status_changed_at
       }
+      pay_period = @catalog.live_pay_period(entry)
+      if pay_period && record&.status.in?(%w[draft_ready approved changes_requested paid]) && !pay_period.client_finished?
+        payload[:status] = "in_review"
+        payload[:status_label] = @catalog.company.client_payroll_approval_required? ? "Awaiting payroll preview" : "Payroll in progress"
+      end
+      if pay_period
+        @published_reviews ||= {}
+        published = if @published_reviews.key?(pay_period.id)
+          @published_reviews[pay_period.id]
+        else
+          @published_reviews[pay_period.id] = pay_period.payroll_review_packages.summary.current.where.not(published_at: nil).first
+        end
+        published = nil unless @catalog.company.client_payroll_approval_required?
+        visible = @staff || pay_period.client_finished? || (pay_period.approved? && published)
+        payload[:review_pay_period_id] = pay_period.id if visible
+        if pay_period.client_finished?
+          payload[:status] = "paid"
+          payload[:status_label] = "Paid"
+        elsif pay_period.approved? && published
+          payload[:status], payload[:status_label] = if published.changes_requested_at
+            [ "changes_requested", "Changes requested on payroll preview" ]
+          elsif published.approved?
+            [ "approved", "Client approved payroll preview" ]
+          else
+            [ "draft_ready", "Payroll preview ready for review" ]
+          end
+        end
+      end
+      if payload[:status] == "paid" && record && record.file_requests.any?(&:outstanding?)
+        payload[:status] = "in_review"
+        payload[:status_label] = "Requested files outstanding"
+      end
       if @staff
-        pay_period = @catalog.live_pay_period(entry)
         payload[:pay_period_id] = pay_period&.id
         payload[:source] = entry.source
         payload[:unread] = record ? unread?(record) : false
@@ -67,19 +110,19 @@ module PayrollSubmissions
     def allowed_actions(entry)
       record = entry.record
       status = record&.status || "waiting_for_files"
+      run = @catalog.live_pay_period(entry)
+      finished = run ? run.client_finished? : status == "paid"
+      return [ "message" ] if finished
+
       if @staff
         actions = []
         actions << "acknowledge" if status == "submitted"
         actions << "start_review" if %w[received changes_requested].include?(status)
-        actions << "post_draft" if PayrollSubmissionPeriod::EVENTS["post_draft"][:from].include?(status)
-        actions << "save_draft" unless status == "paid"
-        actions << "mark_paid" if %w[draft_ready approved].include?(status) && !record&.outstanding_file_requests&.exists?
         actions << "message"
         actions
       else
         actions = []
-        actions << "submit" if @catalog.company.payroll_intake_source_enabled?("mosa_revel") && status != "paid" && @catalog.open_for_files?(entry)
-        actions += %w[approve request_changes] if status == "draft_ready"
+        actions << "submit" if @catalog.company.payroll_intake_source_enabled?("mosa_revel") && !finished && @catalog.open_for_files?(entry)
         actions << "message"
         actions
       end

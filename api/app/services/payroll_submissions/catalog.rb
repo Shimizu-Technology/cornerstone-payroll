@@ -47,7 +47,7 @@ module PayrollSubmissions
 
     # Newest first: saved periods and offered ones, without duplicates.
     def entries
-      records = PayrollSubmissionPeriod.where(company_id: @company.id).order(end_date: :desc, id: :desc).limit(LIST_LIMIT).to_a
+      records = PayrollSubmissionPeriod.includes(:pay_period, :company_pay_schedule).where(company_id: @company.id).order(end_date: :desc, id: :desc).limit(LIST_LIMIT).to_a
       offered = offered_entries
       by_dates = records.index_by { |record| [ record.start_date, record.end_date ] }
       offered.each { |entry| entry.record ||= by_dates.delete([ entry.start_date, entry.end_date ]) }
@@ -99,8 +99,29 @@ module PayrollSubmissions
       pay_period&.pay_date || entry.record&.pay_date || entry.pay_date
     end
 
+    def preload_live_pay_periods(entries)
+      periods = offerable_pay_periods.where(start_date: entries.map(&:start_date), end_date: entries.map(&:end_date)).order(id: :desc)
+      @live_pay_periods = {}
+      periods.each { |period| @live_pay_periods[[ period.start_date, period.end_date ]] ||= period }
+      entries.each do |entry|
+        key = [ entry.start_date, entry.end_date ]
+        linked = entry.record&.pay_period || entry.pay_period
+        @live_pay_periods[key] = linked if linked && linked.correction_status != "voided"
+        @live_pay_periods[key] = nil unless @live_pay_periods.key?(key)
+      end
+    end
+
     def live_pay_period(entry)
-      entry.record&.pay_period || entry.pay_period || matching_pay_period(entry.start_date, entry.end_date)
+      @live_pay_periods ||= {}
+      key = [ entry.start_date, entry.end_date ]
+      return @live_pay_periods[key] if @live_pay_periods.key?(key)
+
+      linked = entry.record&.pay_period || entry.pay_period
+      @live_pay_periods[key] = if linked && linked.correction_status != "voided"
+        linked
+      else
+        matching_pay_period(entry.start_date, entry.end_date)
+      end
     end
 
     private

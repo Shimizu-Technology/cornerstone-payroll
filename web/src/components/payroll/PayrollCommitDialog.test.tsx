@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PayrollItem } from '@/types';
+import type { PayPeriod, PayrollItem } from '@/types';
 import { PayrollCommitDialog } from './PayrollCommitDialog';
 const period = { id: 12, status: 'approved' as const, start_date: '2026-09-01', end_date: '2026-09-15',
   pay_date: '2026-09-30', compliance_warnings: ['Review overtime classification', '<script>not markup</script>'] };
@@ -52,6 +52,15 @@ describe('Payroll commit confirmation', () => {
   });
 });
 
+it.each([true, false])('blocks a pending client change request with setting %s', required => {
+  const state = { ...props(), payPeriod: { ...period, client_payroll_approval_required: required,
+    payroll_review: { status: 'changes_requested', changes_requested_by_name: 'MoSa Approver', change_request_note: 'Add two hours' } as PayPeriod['payroll_review'] } };
+  render(<PayrollCommitDialog {...state} />);
+  expect(screen.getByRole('alert').textContent).toBe('MoSa Approver requested changes: Add two hours. Unapprove to make changes.');
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
+  expect(state.onConfirm).not.toHaveBeenCalled();
+});
+
 it('shows the numbering summary and limits the settings link to permitted staff', () => {
   const state = { ...props(), payPeriod: { ...period, payroll_items: [{ payment_delivery_method: 'paper_check' } as PayrollItem], check_number_summary: { next_check_number: 1200, last_used_check_number: 1199, can_change: true } } };
   const { rerender } = render(<PayrollCommitDialog {...state} />);
@@ -68,4 +77,20 @@ it('warns about reused stock and hides numbering for bank-only runs', () => {
   rerender(<PayrollCommitDialog {...props()} payPeriod={{ ...payPeriod, payroll_items: [{ payment_delivery_method: 'direct_deposit' } as PayrollItem] }} />);
   expect(screen.queryByText(/Paper checks will/)).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('requires acknowledgement of every outstanding request and resets it for changed requests', () => {
+  const request = { id: 1, title: "Riley's timesheet", status: 'requested', status_label: 'Waiting for the file' };
+  const state = { ...props(), payPeriod: { ...period, outstanding_file_requests: [request] } };
+  const { rerender } = render(<PayrollCommitDialog {...state} />);
+  const confirm = screen.getByRole('button', { name: 'Confirm commit' });
+  expect(screen.getByText(/Riley's timesheet/)).toBeTruthy();
+  expect(confirm).toHaveProperty('disabled', true);
+  fireEvent.click(confirm);
+  expect(state.onConfirm).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(confirm);
+  expect(state.onConfirm).toHaveBeenCalledExactlyOnceWith(12, true);
+  rerender(<PayrollCommitDialog {...state} payPeriod={{ ...state.payPeriod, outstanding_file_requests: [request, { ...request, id: 2, title: 'Signed W-4' }] }} />);
+  expect(confirm).toHaveProperty('disabled', true);
 });

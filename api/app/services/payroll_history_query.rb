@@ -188,16 +188,13 @@ class PayrollHistoryQuery
         pp.status = 'committed'
         OR pp.test_workspace_role = 'baseline'
         OR (
-          pp.status IN ('calculated', 'approved')
-          AND EXISTS (
-            SELECT 1 FROM companies review_company
-            WHERE review_company.id = pp.company_id
-              AND review_company.client_payroll_approval_required = TRUE
-          )
+          pp.status = 'approved'
+          AND EXISTS (SELECT 1 FROM companies WHERE companies.id = pp.company_id AND companies.client_payroll_approval_required)
           AND EXISTS (
             SELECT 1 FROM payroll_review_packages review_package
             WHERE review_package.pay_period_id = pp.id
               AND review_package.superseded_at IS NULL
+              AND review_package.published_at IS NOT NULL
           )
         )
       )
@@ -258,8 +255,9 @@ class PayrollHistoryQuery
     correction_status = row["correction_status"]
     native_period = native_periods[row.fetch("id").to_i] unless imported
     editable = @audience == :staff && !imported && native_period&.can_edit?
-    client_review_ready = !native_period&.company&.client_payroll_approval_required? ||
-      native_period.payroll_review_packages.find { |review_package| review_package.superseded_at.nil? }&.approved?
+    current_package = native_period&.payroll_review_packages&.find { |review_package| review_package.superseded_at.nil? }
+    client_review_ready = !current_package&.changes_requested_at &&
+      (!native_period&.company&.client_payroll_approval_required? || (current_package&.approved? && current_package.published_at.present?))
 
     {
       key: row.fetch("key"),
@@ -295,8 +293,8 @@ class PayrollHistoryQuery
         delete: editable,
         enter_hours: editable && status == "draft",
         run: editable && %w[draft calculated].include?(status),
-        approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided" && client_review_ready,
-        commit: @audience == :staff && !imported && !parallel_run && status == "approved" && correction_status != "voided"
+        approve: @audience == :staff && !imported && status == "calculated" && correction_status != "voided",
+        commit: @audience == :staff && !imported && !parallel_run && status == "approved" && correction_status != "voided" && client_review_ready
       }
     }
   end

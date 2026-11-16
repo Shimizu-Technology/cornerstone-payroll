@@ -37,3 +37,14 @@ it('explains a loan conflict beside disabled approval and links to its inputs', 
   expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Review loan inputs' }).getAttribute('href')).toContain('#payroll-loan-inputs');
 });
+
+it.each([true, false])('blocks Commit over client changes with setting %s', required => {
+  const commit = vi.fn();
+  const props = { step: 'commit', companyId: 1, payPeriod: { id: 2, status: 'approved', run_purpose: 'regular', client_payroll_approval_required: required,
+    payroll_review: { status: 'changes_requested', changes_requested_by_name: 'MoSa Approver', change_request_note: 'Add two hours' } }, isApproved: true,
+    calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [], setCommitPeriodId: commit } as unknown as ComponentProps<typeof PayRunStepAction>;
+  render(<MemoryRouter><PayRunStepAction {...props} /></MemoryRouter>);
+  expect(screen.getByRole('button', { name: 'Commit' })).toHaveProperty('disabled', true);
+  expect(screen.getByText('MoSa Approver requested changes: Add two hours. Unapprove to make changes.')).toBeTruthy();
+  expect(commit).not.toHaveBeenCalled();
+});

@@ -1339,8 +1339,10 @@ export interface PayPeriod {
   intake_stale_at?: string | null;
   intake_stale_reason?: string | null;
   intake_stale_session_id?: number | null;
+  outstanding_file_requests?: { id: number; title: string; status: string; status_label: string }[];
   client_payroll_approval_required?: boolean;
   payroll_review?: PayrollReviewPackage | null;
+  payroll_review_history?: PayrollReviewPackage[];
   last_preview_download?: { revision: number; downloaded_at: string } | null;
   time_tracking?: {
     connected_payroll?: { mode: 'enabled' | 'paused'; enabled: boolean; message: string | null };
@@ -1408,8 +1410,14 @@ export interface PayrollReviewPackage {
   schema_version: string;
   calculation_checksum: string;
   checksum_short: string;
-  status: 'pending' | 'approved' | 'superseded';
-  source_manifest: Record<string, unknown>;
+  status: 'pending' | 'approved' | 'superseded' | 'changes_requested';
+  published_at?: string | null;
+  superseded_at?: string | null;
+  supersession_reason?: string | null;
+  changes_requested_at?: string | null;
+  changes_requested_by_name?: string | null;
+  change_request_note?: string | null;
+  source_manifest?: Record<string, unknown>;
   generated_at: string;
   generated_by_name?: string | null;
   approved_at?: string | null;

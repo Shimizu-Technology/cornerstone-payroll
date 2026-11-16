@@ -41,4 +41,36 @@ RSpec.describe PayrollSubmissions::CreateRevision do
     expect(result.submission.submission_documents.find_by!(role: "changes_workbook").client_document_id).to eq(first.submission_documents.find_by!(role: "changes_workbook").client_document_id)
     expect(result.submission.submission_documents.find_by!(role: "attachment").file_name_snapshot).to eq("support.xlsx")
   end
+  it "relinks a legacy paid period from a voided run to its open replacement before submitting" do
+    first = send_revision(revel_payroll: synthetic_pdf, workbook_choice: "none", no_changes: true).submission
+    first.period.update!(status: "paid")
+    run.update_columns(correction_status: "voided")
+    replacement = create(:pay_period, company: company, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    fresh_catalog = PayrollSubmissions::Catalog.new(company: company, today: Date.new(2026, 11, 14))
+
+    result = described_class.new(company: company, actor: client, catalog: fresh_catalog,
+      entry: fresh_catalog.resolve("2026-10-19_2026-11-01"), params: {
+        revel_payroll: synthetic_pdf, workbook_choice: "none", no_changes: true,
+        notes: "Correction for replacement run", based_on_revision: first.revision
+      }).call
+
+    expect(result.submission.revision).to eq(2)
+    expect(first.period.reload).to have_attributes(status: "submitted", pay_period_id: replacement.id)
+    expect(first.period.status_events.last).to have_attributes(event: "submit", from_status: "paid", to_status: "submitted")
+    expect(run.reload.correction_status).to eq("voided")
+  end
+
+  it "allows source correction after a legacy paid marker until the live run is finalized" do
+    first = send_revision(revel_payroll: synthetic_pdf, workbook_choice: "none", no_changes: true).submission
+    first.period.update!(status: "paid")
+    second = send_revision(revel_payroll: synthetic_pdf, workbook_choice: "none", no_changes: true,
+      notes: "Correction before commit", based_on_revision: first.revision).submission
+    expect(second.revision).to eq(2)
+    expect(second.period.reload.status).to eq("submitted")
+    run.update_columns(status: "committed", committed_at: Time.current)
+    expect do
+      send_revision(revel_payroll: synthetic_pdf, workbook_choice: "none", no_changes: true,
+        notes: "Correction after commit", based_on_revision: second.revision)
+    end.to raise_error(PayrollSubmissionPeriod::TransitionError, /paid/)
+  end
 end

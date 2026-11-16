@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_17_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_17_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3276,6 +3276,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_090000) do
     t.datetime "superseded_at"
     t.text "supersession_reason"
     t.datetime "updated_at", null: false
+    t.datetime "published_at"
+    t.bigint "changes_requested_by_id"
+    t.datetime "changes_requested_at"
+    t.text "change_request_note"
+    t.index [ "changes_requested_by_id" ], name: "index_payroll_review_packages_on_changes_requested_by_id"
+    t.check_constraint "changes_requested_at IS NULL AND changes_requested_by_id IS NULL AND change_request_note IS NULL OR changes_requested_at IS NOT NULL AND changes_requested_by_id IS NOT NULL AND NULLIF(btrim(change_request_note), ''::text) IS NOT NULL AND length(change_request_note) <= 2000 AND status::text <> 'approved'::text", name: "payroll_review_change_request_shape"
     t.index [ "approval_recorded_by_id" ], name: "index_payroll_review_packages_on_approval_recorded_by_id"
     t.index [ "approved_by_id" ], name: "index_payroll_review_packages_on_approved_by_id"
     t.index [ "calculation_checksum" ], name: "idx_payroll_review_packages_checksum"
@@ -5124,4 +5130,5 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_090000) do
   add_foreign_key "payroll_submission_imports", "payroll_submissions", column: "current_submission_id"
   add_foreign_key "payroll_submission_imports", "users", column: "selected_by_id"
   add_foreign_key "users", "companies", column: "practice_company_id"
+  add_foreign_key "payroll_review_packages", "users", column: "changes_requested_by_id"
 end

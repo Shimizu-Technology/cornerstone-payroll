@@ -22,6 +22,7 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
   end
 
   before do
+    ensure_verified_test_tax_years(2024, 2026)
     CompanyAssignment.create!(user: client_user, company: company)
     create(:employee, company: company, first_name: "Nina", last_name: "Cruz")
     create(:payroll_item, pay_period: committed_pay_period, company: company, gross_pay: 1000, net_pay: 810)
@@ -223,10 +224,12 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     expect(response.parsed_body).to eq("error" => "Pay period not found")
   end
 
-  it "shows a calculated review revision and lets the assigned client approve only that revision" do
+  it "shows an approved review revision and lets the assigned client approve only that revision" do
     company.update!(client_payroll_approval_required: true)
     draft_pay_period.update!(status: "calculated", calculated_at: Time.current)
     review_package = PayrollReview::RevisionService.new(pay_period: draft_pay_period, actor: nil).issue!
+    draft_pay_period.update!(status: "approved")
+    PayrollReview::RevisionService.new(pay_period: draft_pay_period).publish!
 
     get "/api/v1/client/pay_periods"
     expect(response.parsed_body.fetch("pay_periods").map { |record| record.fetch("key") })
@@ -245,6 +248,7 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     )
 
     post "/api/v1/client/pay_periods/#{draft_pay_period.id}/approve_review", params: {
+      revision_id: review_package.id,
       acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT,
       notes: "Reviewed against our submitted hours."
     }
@@ -262,8 +266,11 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     company.update!(client_payroll_approval_required: true)
     draft_pay_period.update!(status: "calculated", calculated_at: Time.current)
     review_package = PayrollReview::RevisionService.new(pay_period: draft_pay_period, actor: nil).issue!
+    draft_pay_period.update!(status: "approved")
+    PayrollReview::RevisionService.new(pay_period: draft_pay_period).publish!
 
     post "/api/v1/client/pay_periods/#{draft_pay_period.id}/approve_review", params: {
+      revision_id: review_package.id,
       acknowledgement: "Received, thank you!"
     }
 

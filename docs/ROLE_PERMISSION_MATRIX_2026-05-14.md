@@ -72,3 +72,19 @@ High-impact authorization does not replace company scoping, payroll lifecycle lo
 - The frontend must not advertise client-configuration or sensitive-approval pages to accountants.
 - Cross-company and cross-organization request tests remain mandatory.
 - Any new high-impact action must be added to the policy registry, this matrix, and focused authorization tests in the same PR.
+
+## Published payroll preview review (November 17, 2026)
+
+Assigned payroll staff (`super_admin`, `org_admin`, `admin`, `manager`, `accountant`) calculate, review and approve a run first. Staff approval publishes its PREVIEW checks and pay stubs to assigned client portal users. Client approval gates **commit**, only when the company's `client_payroll_approval_required` setting is enabled.
+
+| Action | Assigned staff | Assigned client |
+| --- | --- | --- |
+| Approve/unapprove the payroll run | Yes | No |
+| View/download the current published preview | Staff preview endpoint | Own company's approved run and current revision only; audited |
+| Approve the published revision | Record an explicit email attestation for an assigned client user, with evidence reference | Acknowledge the exact revision; optional note |
+| Request changes | Review the client's request and unapprove before editing | Required note; actor, time and revision retained |
+| Commit | Yes; current client approval required when enabled | No |
+| Upload/post/decide a manual draft PDF or manually mark Payroll files paid | Retired | Retired |
+| Read earlier Payroll files drafts/history | Yes | Previously posted drafts only |
+
+Unapprove supersedes the client revision and withdraws its approval without deleting evidence. Re-approval publishes a new revision. Publication notifies assigned portal clients; client decisions notify configured staff recipients through the existing portal notification system. Existing email enablement and preferences apply. Payroll files paid status follows the actual commit. See the [MoSa runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md#6-publish-the-preview-and-obtain-exact-client-approval) for existing approved-run handling.

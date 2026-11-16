@@ -577,7 +577,7 @@ describe('Client create/edit field labels', () => {
     await user.type(number, '5001');
     expect(screen.getByRole('switch', { name: 'Simple payroll register Excel format' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Historical payroll workspace' })).toBeTruthy();
-    expect(screen.getByRole('switch', { name: 'Require client approval before payroll approval' })).toBeTruthy();
+    expect(screen.getByRole('switch', { name: 'Require client approval before payroll commit' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Create Client' }));
     await waitFor(() => expect(apiMocks.create).toHaveBeenCalledTimes(1));
     expect(apiMocks.create).toHaveBeenCalledWith(expect.objectContaining({
