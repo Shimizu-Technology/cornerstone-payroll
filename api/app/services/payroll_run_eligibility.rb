@@ -17,6 +17,11 @@ class PayrollRunEligibility
     )
     workers = status_affected.where(id: @period.payroll_items.select(:employee_id)).where.not(id: eligible)
       .includes(:employee_status_events).order(:last_name, :first_name)
+    workers = workers.to_a
+    return [] if workers.empty?
+
+    items = @period.payroll_items.where(employee_id: workers.map(&:id)).includes(:employee, :fica_basis_proof, :time_tracking_entry_allocations,
+      :time_tracking_manual_allocations, :aire_payroll_entry_acknowledgements).index_by(&:employee_id)
     workers.map do |worker|
       event = worker.employee_status_events.select { |row| row.event_type.in?(%w[deactivated terminated]) && row.effective_date <= @period.start_date }
         .max_by { |row| [ row.effective_date, row.id ] }
@@ -27,7 +32,7 @@ class PayrollRunEligibility
       else
         "#{worker.full_name} is not eligible for this run's dates"
       end
-      { employee_id: worker.id, reason: reason, status: status, effective_date: date }
+      { employee_id: worker.id, reason: reason, status: status, effective_date: date, resolution: items.fetch(worker.id).status_removal_resolution }
     end
   end
 end

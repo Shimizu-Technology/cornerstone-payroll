@@ -45,6 +45,9 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     get "/api/v1/admin/employees/#{worker.id}", params: { status_effective_date: "2026-11-15" }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("data", "open_pay_runs").pluck("id")).to eq(runs.map(&:id))
+    expect(response.parsed_body.dig("data", "open_pay_runs").pluck("action")).to eq(%w[remove remove remove])
+    get "/api/v1/admin/employees/#{worker.id}", params: { status_effective_date: "2026-11-20" }
+    expect(response.parsed_body.dig("data", "open_pay_runs").pluck("action")).to eq(%w[check check check])
   end
 
   describe "editing incomplete existing employees" do

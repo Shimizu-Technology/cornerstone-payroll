@@ -69,7 +69,9 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
   const reactivateMin = latestDate ? new Date(new Date(`${latestDate}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10) : employee.hire_date;
   const affectedRuns = runCheck?.date === effectiveDate ? runCheck.runs : [];
   const checkingRuns = mode !== 'reactivate' && runCheck?.date !== effectiveDate;
-  const approvedRun = affectedRuns.find(run => run.status === 'approved');
+  const removeRuns = affectedRuns.filter(run => run.action === 'remove');
+  const checkRuns = affectedRuns.filter(run => run.action === 'check');
+  const approvedRun = removeRuns.find(run => run.status === 'approved');
   const workerLabel = employee.employment_type === 'contractor' ? 'contractor' : 'employee';
   const canSubmit = useMemo(() => {
     if (!effectiveDate || saving || checkingRuns || (mode !== 'reactivate' && approvedRun)) return false;
@@ -142,11 +144,14 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
           </div>
 
           {checkingRuns && <p role="status">{runCheckError ? 'Unable to check open pay runs. Close and reopen to retry.' : 'Checking open pay runs...'}</p>}
-          {mode !== 'reactivate' && affectedRuns.length > 0 && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm">
-            <p className="font-semibold">Open pay runs including this worker</p>
-            <ul>{affectedRuns.map(run => <li key={run.id}><Link className="underline" to={payRunPath(employee.company_id, run.id, 'work')}>Pay run #{run.id}: {run.start_date} – {run.end_date} ({run.status})</Link></li>)}</ul>
-            {approvedRun && <p role="alert">Unapprove pay run #{approvedRun.id} first</p>}<p>Remove {employee.first_name} from these runs before approving them. No paychecks are removed automatically.</p>
-          </div>}
+          {mode !== 'reactivate' && ([{ title: 'Remove from these runs', runs: removeRuns, remove: true }, { title: 'Check these runs', runs: checkRuns, remove: false }].map(group => group.runs.length > 0 && <div key={group.title} className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm">
+            <p className="font-semibold">{group.title}</p>
+            <ul>{group.runs.map(run => <li key={run.id}><Link className="underline" to={payRunPath(employee.company_id, run.id, 'work')}>Pay run #{run.id}: {run.start_date} – {run.end_date} ({run.status})</Link></li>)}</ul>
+            {group.remove ? <>
+              {approvedRun && <p role="alert">Unapprove pay run #{approvedRun.id} first</p>}
+              <p>Remove {employee.first_name} from these runs before approving them. No paychecks are removed automatically.</p>
+            </> : <p>{employee.first_name} stays on these runs for days worked before {effectiveDate}. Recalculate if their hours or pay changed.</p>}
+          </div>))}
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
           <div className={`grid gap-4 ${isTermination ? 'sm:grid-cols-2' : ''}`}>

@@ -3,14 +3,15 @@
 require "rails_helper"
 
 RSpec.describe EmployeeStatusTransitionService do
+  include ActiveSupport::Testing::TimeHelpers
   let(:employee) { create(:employee, hire_date: Date.new(2024, 1, 1)) }
   let(:actor) { create(:user, company: employee.company, organization: employee.company.organization, role: :manager) }
 
   %w[deactivate terminate].each do |action|
-    it "blocks #{action} while a covering run is approved" do
+    it "blocks #{action} while a run starting on the effective date is approved" do
       run = create(:pay_period, :approved, company: employee.company, start_date: Date.new(2024, 3, 1), end_date: Date.new(2024, 3, 15), pay_date: Date.new(2024, 3, 20))
       create(:payroll_item, employee: employee, company: employee.company, pay_period: run)
-      expect { described_class.public_send("#{action}!", employee: employee, actor: actor, attributes: { effective_date: "2024-03-15" }) }
+      expect { described_class.public_send("#{action}!", employee: employee, actor: actor, attributes: { effective_date: "2024-03-01" }) }
         .to raise_error(described_class::Error, "Unapprove pay run ##{run.id} first")
       expect(employee.reload.status).to eq("active")
       expect(employee.employee_status_events).to be_empty
@@ -42,6 +43,24 @@ RSpec.describe EmployeeStatusTransitionService do
       described_class.public_send("#{action}!", employee: employee, actor: actor, attributes: { effective_date: "2024-01-01" })
       expect(described_class.open_runs(employee)).to be_empty
       expect(PayrollRunEligibility.new(run).payload).to be_empty
+    end
+  end
+
+  %w[deactivate terminate].each do |action|
+    %w[calculated approved].each do |status|
+      it "only asks to check the Nov 16–30 #{status} run for #{action} effective Nov 20" do
+        travel_to(Time.utc(2026, 11, 21, 12)) do
+          run = create(:pay_period, company: employee.company, status: status,
+            start_date: "2026-11-16", end_date: "2026-11-30", pay_date: "2026-12-04")
+          item = create(:payroll_item, employee: employee, company: employee.company, pay_period: run)
+          groups = described_class.open_run_groups(employee, effective_date: "2026-11-20")
+          expect(groups[:check]).to include(run)
+          expect(groups[:remove]).to be_empty
+          described_class.public_send("#{action}!", employee: employee, actor: actor, attributes: { effective_date: "2026-11-20" })
+          expect(PayrollRunEligibility.new(run).payload).to be_empty
+          expect(item.reload).to be_persisted
+        end
+      end
     end
   end
 
