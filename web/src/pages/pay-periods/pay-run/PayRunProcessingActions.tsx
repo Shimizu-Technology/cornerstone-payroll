@@ -90,7 +90,7 @@ export function PayRunStepAction({ step, header = false, ...props }: PayRunSecti
     : standaloneLoanConflicts.length ? 'Clear the standalone one-time deduction and use the linked loan repayment, then recalculate'
     : hasPendingCalculationChanges ? 'Recalculate the staged payroll changes before approval' : payPeriod.client_payroll_approval_required && payPeriod.payroll_review?.status !== 'approved' ? 'Client approval is required for this revision' : undefined);
   const hoursReason = financialReason || (missingInputs ? 'Add source hours or enter manual hours before calculating. Missing time tracking coverage still requires acknowledgement.' : undefined);
-  const expectedReason = payPeriod.expected_entries?.outstanding.length ? 'Resolve expected entries: ' + payPeriod.expected_entries.outstanding.join('; ') : undefined;
+  const expectedReason = payPeriod.ineligible_workers?.length ? 'Resolve ineligible workers: ' + payPeriod.ineligible_workers.map(worker => worker.reason).join('; ') : payPeriod.expected_entries?.outstanding.length ? 'Resolve expected entries: ' + payPeriod.expected_entries.outstanding.join('; ') : undefined;
   const approvalReason = expectedReason || reason;
   const commitReason = expectedReason || financialReason || (payPeriod.parallel_run ? 'Parallel comparison · cannot commit.' : !isApproved ? 'Approve the reviewed payroll before commitment.' : undefined);
   const loanLink = <Link className="ml-1 font-semibold text-primary-700 underline" to={`${payRunPath(props.companyId, payPeriod.id, 'work', { returnTo: props.returnTo })}#payroll-loan-inputs`} onClick={() => {

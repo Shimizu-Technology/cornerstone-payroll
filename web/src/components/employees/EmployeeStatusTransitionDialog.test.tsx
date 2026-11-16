@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
 import type { Employee } from '@/types';
 import { EmployeeStatusTransitionDialog } from './EmployeeStatusTransitionDialog';
 const deactivate = vi.hoisted(() => vi.fn());
+const get = vi.hoisted(() => vi.fn().mockResolvedValue({ data: { open_pay_runs: [] } }));
 const reactivate = vi.hoisted(() => vi.fn());
-vi.mock('@/services/api', () => ({ employeesApi: { reactivate, deactivate } }));
+vi.mock('@/services/api', () => ({ employeesApi: { get, reactivate, deactivate } }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 function view(status: Employee['status'], termination_date: string | null = null) {
   const onCompleted = vi.fn();
@@ -39,15 +41,21 @@ it('marks an active worker inactive with an effective date', async () => {
   render(<EmployeeStatusTransitionDialog employee={{ id: 7, first_name: 'Avery', employment_type: 'hourly', status: 'active' } as Employee} mode="deactivate" open onOpenChange={vi.fn()} onCompleted={completed} />);
   expect(screen.getByText('Inactive: not paid until reactivated. Use Terminate when employment has ended.')).toBeTruthy();
   fireEvent.change(screen.getByLabelText(/Inactive effective date/), { target: { value: '2024-03-15' } });
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Mark inactive' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'Mark inactive' }));
   await waitFor(() => expect(completed).toHaveBeenCalledWith(inactive));
   expect(deactivate).toHaveBeenCalledWith(7, { effective_date: '2024-03-15', reason_category: undefined, internal_notes: undefined });
 });
 
-it('lists covering approved runs and blocks deactivation with dedicated reasons', () => {
-  render(<EmployeeStatusTransitionDialog employee={{ id: 7, first_name: 'Avery', employment_type: 'hourly', status: 'active', open_pay_runs: [{ id: 42, status: 'approved', start_date: '2000-01-01', end_date: '2099-12-31' }] } as Employee} mode="deactivate" open onOpenChange={vi.fn()} onCompleted={vi.fn()} />);
-  expect(screen.getByText('Unapprove pay run #42 first')).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Mark inactive' }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByRole('option', { name: 'Leave of absence' })).toBeTruthy();
-  expect(screen.queryByRole('option', { name: 'Voluntary resignation' })).toBeNull();
+it.each(['deactivate', 'terminate'] as const)('lists a later approved run and calculated run for %s', async mode => {
+  get.mockResolvedValue({ data: { open_pay_runs: [
+    { id: 42, status: 'approved', start_date: '2026-11-16', end_date: '2026-11-30' },
+    { id: 43, status: 'calculated', start_date: '2026-12-01', end_date: '2026-12-15' },
+  ] } });
+  render(<MemoryRouter><EmployeeStatusTransitionDialog employee={{ id: 7, company_id: 1, first_name: 'Dana', employment_type: 'hourly', status: 'active' } as Employee} mode={mode} open onOpenChange={vi.fn()} onCompleted={vi.fn()} /></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText(/effective date/), { target: { value: '2026-11-15' } });
+  await screen.findByText('Unapprove pay run #42 first');
+  expect(get).toHaveBeenLastCalledWith(7, 1, '2026-11-15');
+  expect(screen.getByRole('link', { name: /Pay run #43/ }).getAttribute('href')).toBe('/companies/1/pay-runs/43/work');
+  expect((screen.getByRole('button', { name: mode === 'deactivate' ? 'Mark inactive' : 'Terminate employee' }) as HTMLButtonElement).disabled).toBe(true);
 });

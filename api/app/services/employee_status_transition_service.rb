@@ -5,10 +5,11 @@ class EmployeeStatusTransitionService
 
   REACTIVATABLE_STATUSES = %w[inactive terminated].freeze
 
-  def self.open_runs(employee)
-    PayPeriod.where(company_id: employee.company_id, status: %w[draft calculated approved])
+  def self.open_runs(employee, effective_date: nil)
+    runs = PayPeriod.where(company_id: employee.company_id, status: %w[draft calculated approved], run_purpose: "regular")
       .where(id: PayrollItem.where(employee_id: employee.id).select(:pay_period_id))
       .order(:id)
+    effective_date ? runs.where("end_date >= ?", effective_date) : runs
   end
 
   def self.terminate!(employee:, actor:, attributes:)
@@ -124,7 +125,7 @@ class EmployeeStatusTransitionService
   private
 
   def block_approved_runs!(effective_date)
-    runs = self.class.open_runs(@employee).where("start_date <= ? AND end_date >= ?", effective_date, effective_date).lock.to_a
+    runs = self.class.open_runs(@employee, effective_date: effective_date).lock.to_a
     approved = runs.find(&:approved?)
     raise Error, "Unapprove pay run ##{approved.id} first" if approved
   end

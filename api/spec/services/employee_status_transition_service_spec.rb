@@ -17,6 +17,34 @@ RSpec.describe EmployeeStatusTransitionService do
     end
   end
 
+  %w[deactivate terminate].each do |action|
+    it "blocks #{action} effective Nov 15 for an approved Nov 16-30 run and lists calculated runs" do
+      run = create(:pay_period, :approved, company: employee.company, start_date: "2026-11-16", end_date: "2026-11-30", pay_date: "2026-12-04")
+      create(:payroll_item, employee: employee, company: employee.company, pay_period: run)
+      expect { described_class.public_send("#{action}!", employee: employee, actor: actor, attributes: { effective_date: "2026-11-15" }) }
+        .to raise_error(described_class::Error, "Unapprove pay run ##{run.id} first")
+      run.update!(status: "calculated")
+      expect(described_class.open_runs(employee, effective_date: "2026-11-15")).to include(run)
+      described_class.public_send("#{action}!", employee: employee, actor: actor, attributes: { effective_date: "2026-11-15" })
+      service = PayPeriodLifecycleService.new(pay_period: run, actor: actor)
+      expect { service.approve! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Resolve ineligible workers/)
+      run.update_columns(status: "approved")
+      expect { service.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Resolve ineligible workers/)
+      run.update_columns(status: "calculated")
+      run.payroll_items.destroy_all
+      expect { service.approve! }.to raise_error(PayPeriodLifecycleService::EmptyPayPeriodError)
+      expect(PayrollRunEligibility.new(run).payload).to be_empty
+    end
+
+    it "exempts explicit special runs from #{action} blocking and eligibility warnings" do
+      run = create(:pay_period, :approved, company: employee.company, run_purpose: "final")
+      create(:payroll_item, employee: employee, company: employee.company, pay_period: run)
+      described_class.public_send("#{action}!", employee: employee, actor: actor, attributes: { effective_date: "2024-01-01" })
+      expect(described_class.open_runs(employee)).to be_empty
+      expect(PayrollRunEligibility.new(run).payload).to be_empty
+    end
+  end
+
   it "accepts a dedicated inactive reason and refuses same-day reactivation" do
     described_class.deactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-03-15", reason_category: "seasonal" })
     expect { described_class.reactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-03-15" }) }

@@ -30,6 +30,23 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(admin_user)
   end
 
+  it "lists exactly the server-side affected regular runs for the selected status date" do
+    worker = create(:employee, company: company)
+    runs = %w[draft calculated approved].map do |status|
+      run = create(:pay_period, company: company, status: status, start_date: "2026-11-16", end_date: "2026-11-30", pay_date: "2026-12-04")
+      create(:payroll_item, company: company, employee: worker, pay_period: run)
+      run
+    end
+    [ { run_purpose: "final" }, { run_purpose: "correction" }, { run_purpose: "adjustment" },
+      { start_date: "2026-11-01", end_date: "2026-11-14", pay_date: "2026-11-18" }, { status: "committed" } ].each do |attributes|
+      run = create(:pay_period, company: company, **attributes)
+      create(:payroll_item, company: company, employee: worker, pay_period: run)
+    end
+    get "/api/v1/admin/employees/#{worker.id}", params: { status_effective_date: "2026-11-15" }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("data", "open_pay_runs").pluck("id")).to eq(runs.map(&:id))
+  end
+
   describe "editing incomplete existing employees" do
     it "saves a name and wage change without requiring missing SSN, hire date or address" do
       employee = create(:employee, company: company, department: department)
