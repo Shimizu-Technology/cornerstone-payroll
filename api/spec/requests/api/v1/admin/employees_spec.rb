@@ -30,6 +30,26 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(admin_user)
   end
 
+  it "lists exactly the server-side affected regular runs for the selected status date" do
+    worker = create(:employee, company: company)
+    runs = %w[draft calculated approved].map do |status|
+      run = create(:pay_period, company: company, status: status, start_date: "2026-11-16", end_date: "2026-11-30", pay_date: "2026-12-04")
+      create(:payroll_item, company: company, employee: worker, pay_period: run)
+      run
+    end
+    [ { run_purpose: "final" }, { run_purpose: "correction" }, { run_purpose: "adjustment" },
+      { start_date: "2026-11-01", end_date: "2026-11-14", pay_date: "2026-11-18" }, { status: "committed" } ].each do |attributes|
+      run = create(:pay_period, company: company, **attributes)
+      create(:payroll_item, company: company, employee: worker, pay_period: run)
+    end
+    get "/api/v1/admin/employees/#{worker.id}", params: { status_effective_date: "2026-11-15" }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("data", "open_pay_runs").pluck("id")).to eq(runs.map(&:id))
+    expect(response.parsed_body.dig("data", "open_pay_runs").pluck("action")).to eq(%w[remove remove remove])
+    get "/api/v1/admin/employees/#{worker.id}", params: { status_effective_date: "2026-11-20" }
+    expect(response.parsed_body.dig("data", "open_pay_runs").pluck("action")).to eq(%w[check check check])
+  end
+
   describe "editing incomplete existing employees" do
     it "saves a name and wage change without requiring missing SSN, hire date or address" do
       employee = create(:employee, company: company, department: department)
@@ -1010,6 +1030,27 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
       expect(response).to have_http_status(:forbidden)
       expect(employee.reload).to be_active
+    end
+  end
+
+  describe "POST /api/v1/admin/employees/:id/deactivate" do
+    let!(:employee) { create(:employee, company: company, status: "active", hire_date: "2024-01-01") }
+    let(:payload) { { deactivation: { effective_date: "2024-03-15", reason_category: "other", internal_notes: "Seasonal pause" } } }
+
+    it "saves history and audits the inactive status" do
+      post "/api/v1/admin/employees/#{employee.id}/deactivate", params: payload, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload.status).to eq("inactive")
+      expect(response.parsed_body.dig("data", "status_history", 0)).to include("event_type" => "deactivated", "previous_status" => "active", "resulting_status" => "inactive")
+      expect(AuditLog.find_by!(action: "employees#deactivate", record_id: employee.id).metadata).to include("after_values" => include("status" => "inactive"))
+    end
+
+    it "refuses staff without configuration permission" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+      post "/api/v1/admin/employees/#{employee.id}/deactivate", params: payload, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(employee.reload.status).to eq("active")
+      expect(employee.employee_status_events).to be_empty
     end
   end
 

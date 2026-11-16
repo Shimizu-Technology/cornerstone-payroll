@@ -998,6 +998,32 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(pay_period.payroll_items.where(employee_id: employee.id)).not_to exist
     end
 
+    %w[aire tax].each do |evidence|
+      it "returns actionable 422 and preserves #{evidence} evidence" do
+        retained = if evidence == "tax"
+          PayrollItemFicaBasisProof.create!(payroll_item: payroll_item, company: company, created_by: admin_user,
+            review_reference: "Synthetic reviewed proof", plan_digest: "a" * 64, tax_year: pay_period.pay_date.year, evidence: { "reviewed" => true })
+        else
+          source = create(:time_tracking_source, company: company, source_type: "aire_services")
+          import = create(:time_tracking_import, pay_period: pay_period, time_tracking_source: source)
+          TimeTrackingEntryAllocation.create!(company: company, time_tracking_source: source,
+            time_tracking_import: import, pay_period: pay_period, payroll_item: payroll_item, employee: employee,
+            source_user_id: "91", source_time_entry_id: "41", line_key: "flight:41", source_kind: "current",
+            original_work_date: pay_period.start_date, total_hours: 6, regular_hours: 5, overtime_hours: 1)
+        end
+        employee.update!(status: "inactive")
+        message = "This paycheck has AIRE time allocated or tax evidence. Reactivate #{employee.full_name} or correct the source time first."
+        expect(PayrollRunEligibility.new(pay_period).payload.sole[:resolution]).to eq(message)
+        expect {
+          delete "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
+        }.not_to change(PayPeriodExcludedEmployee, :count)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body["errors"]).to include(message)
+        expect(payroll_item.reload).to be_persisted
+        expect(retained.reload).to be_persisted
+      end
+    end
+
     it "rolls back the exclusion if removing the payroll item fails" do
       allow_any_instance_of(PayrollItem).to receive(:destroy!)
         .and_raise(ActiveRecord::RecordNotDestroyed.new("Could not remove payroll item", payroll_item))
