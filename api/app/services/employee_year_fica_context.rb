@@ -121,11 +121,13 @@ class EmployeeYearFicaContext
 
       return below_threshold_increment(current_item, rules)
     end
-    # An already verified annual calculation remains authoritative. Where the
-    # independent bound is also provable, retain the unresolved review notice.
+    # Keep ordinary amounts authoritative. Retain a bound snapshot only for
+    # genuinely disputed history, with exactly the same current-check amounts.
+    # Verified-empty legacy dispositions alone never require this review.
     if current_item && correcting_bases.nil? && below_threshold_context.applicable?
       begin
-        return below_threshold_increment(current_item, rules)
+        evidence = below_threshold_context.snapshot(current_item: current_item, rules: rules, lock_rules: true)
+        @below_threshold_snapshot = evidence if below_threshold_components(evidence, rules) == ordinary
       rescue UnreconciledLedgerError
         # No new relaxation is needed; preserve the established annual path.
       end

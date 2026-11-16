@@ -64,7 +64,7 @@ RSpec.describe BelowThresholdFicaContext do
       medicare_tax: "7.25".to_d, employer_medicare_tax: "7.25".to_d, additional_medicare_tax: 0.to_d, net_pay: "461.75".to_d)
     expect(context(item)).to include("mode" => "calculable_below_thresholds", "history_review_open" => true,
       "filing_review_open" => true, "bounds" => { "ss" => "2500.0", "medicare" => "2500.0" })
-    expect(item.pay_period.compliance_warnings.join).to include("Prior-period void history", "filing review remains open")
+    expect(item.pay_period.compliance_warnings.join).to include(employee.full_name, "voided pay period ##{original.pay_period_id}", "filing review remains open")
     lifecycle = PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor)
     lifecycle.approve!
     lifecycle.commit!
@@ -83,6 +83,32 @@ RSpec.describe BelowThresholdFicaContext do
     item = calculate
     expect(context(item)["history_review_open"]).to be(true)
     expect(item.social_security_tax).to eq(31)
+  end
+
+  [ :reversal, :void ].each do |reason|
+    it "retains a specific #{reason} note with identical FICA amounts on an already verified annual path" do
+      baseline = calculate(tips: 50)
+      fields = %w[social_security_tax employer_social_security_tax medicare_tax employer_medicare_tax additional_medicare_tax
+        social_security_taxable_wages social_security_taxable_tips medicare_taxable_wages additional_medicare_taxable_wages]
+      expected = baseline.attributes.slice(*fields)
+      prior = history(legacy: false, voided: reason == :void)
+      if reason == :reversal
+        prior.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: actor.id, payroll_reversal_reason: "Synthetic financial reversal")
+      end
+      source_review
+      item = calculate(tips: 50)
+      expect(item.attributes.slice(*fields)).to eq(expected)
+      evidence = context(item)
+      expect(evidence).to include("history_review_open" => true, "filing_review_open" => true)
+      detail = reason == :void ? "voided pay period ##{prior.pay_period_id}" : "reversed paycheck ##{prior.id}"
+      expect(evidence.fetch("note")).to include(detail)
+      expect(evidence.fetch("note")).not_to include("imported paycheck history")
+      expect(item.pay_period.annual_fica_review_note).to include(employee.full_name, detail)
+      lifecycle = PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(item.reload.attributes.slice(*fields)).to eq(expected)
+    end
   end
 
   it "counts a retired instrument's retained earned wages and disposed originals conservatively" do
