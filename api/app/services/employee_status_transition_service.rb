@@ -12,6 +12,14 @@ class EmployeeStatusTransitionService
     effective_date ? runs.where("end_date >= ?", effective_date) : runs
   end
 
+  def self.open_run_groups(employee, effective_date:)
+    runs = open_runs(employee, effective_date: effective_date)
+    {
+      remove: runs.where("start_date >= ?", effective_date),
+      check: runs.where("start_date < ?", effective_date)
+    }
+  end
+
   def self.terminate!(employee:, actor:, attributes:)
     new(employee:, actor:).terminate!(attributes)
   end
@@ -125,7 +133,7 @@ class EmployeeStatusTransitionService
   private
 
   def block_approved_runs!(effective_date)
-    runs = self.class.open_runs(@employee, effective_date: effective_date).lock.to_a
+    runs = self.class.open_run_groups(@employee, effective_date: effective_date).fetch(:remove).lock.to_a
     approved = runs.find(&:approved?)
     raise Error, "Unapprove pay run ##{approved.id} first" if approved
   end

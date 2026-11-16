@@ -49,8 +49,8 @@ it('marks an active worker inactive with an effective date', async () => {
 
 it.each(['deactivate', 'terminate'] as const)('lists a later approved run and calculated run for %s', async mode => {
   get.mockResolvedValue({ data: { open_pay_runs: [
-    { id: 42, status: 'approved', start_date: '2026-11-16', end_date: '2026-11-30' },
-    { id: 43, status: 'calculated', start_date: '2026-12-01', end_date: '2026-12-15' },
+    { action: 'remove', id: 42, status: 'approved', start_date: '2026-11-16', end_date: '2026-11-30' },
+    { action: 'remove', id: 43, status: 'calculated', start_date: '2026-12-01', end_date: '2026-12-15' },
   ] } });
   render(<MemoryRouter><EmployeeStatusTransitionDialog employee={{ id: 7, company_id: 1, first_name: 'Dana', employment_type: 'hourly', status: 'active' } as Employee} mode={mode} open onOpenChange={vi.fn()} onCompleted={vi.fn()} /></MemoryRouter>);
   fireEvent.change(screen.getByLabelText(/effective date/), { target: { value: '2026-11-15' } });
@@ -58,4 +58,20 @@ it.each(['deactivate', 'terminate'] as const)('lists a later approved run and ca
   expect(get).toHaveBeenLastCalledWith(7, 1, '2026-11-15');
   expect(screen.getByRole('link', { name: /Pay run #43/ }).getAttribute('href')).toBe('/companies/1/pay-runs/43/work');
   expect((screen.getByRole('button', { name: mode === 'deactivate' ? 'Mark inactive' : 'Terminate employee' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+
+it.each(['deactivate', 'terminate'] as const)('keeps an approved partial-period run under Check without blocking %s', async mode => {
+  get.mockResolvedValue({ data: { open_pay_runs: [
+    { action: 'check', id: 42, status: 'approved', start_date: '2026-11-16', end_date: '2026-11-30' },
+    { action: 'remove', id: 43, status: 'calculated', start_date: '2026-12-01', end_date: '2026-12-15' },
+  ] } });
+  render(<MemoryRouter><EmployeeStatusTransitionDialog employee={{ id: 7, company_id: 1, first_name: 'Dana', employment_type: 'hourly', status: 'active' } as Employee} mode={mode} open onOpenChange={vi.fn()} onCompleted={vi.fn()} /></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText(/effective date/), { target: { value: '2026-11-20' } });
+  await screen.findByText('Check these runs');
+  expect(screen.getByText('Check these runs').parentElement?.textContent).toContain('Pay run #42');
+  expect(screen.getByText('Remove from these runs').parentElement?.textContent).not.toContain('Pay run #42');
+  expect(screen.getByText(/stays on these runs for days worked before 2026-11-20/)).toBeTruthy();
+  expect(screen.queryByText(/Unapprove/)).toBeNull();
+  expect((screen.getByRole('button', { name: mode === 'deactivate' ? 'Mark inactive' : 'Terminate employee' }) as HTMLButtonElement).disabled).toBe(false);
 });
