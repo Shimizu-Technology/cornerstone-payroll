@@ -6,6 +6,20 @@ module PayrollIntake
       PARSER_VERSION = "mosa_revel:v1"
       SOURCE_TYPE = "mosa_revel"
       SOURCE_LABEL = "MoSa Revel hours and payroll changes"
+      SOURCE_ROLES = {
+        "revel_hours" => { label: "Revel hours PDF" },
+        "supplemental_workbook" => { label: "Tips & loans workbook", waiver_label: "No tips or loans this period" }
+      }.freeze
+
+      def self.source_roles
+        SOURCE_ROLES
+      end
+
+      # Each file can arrive on its own; a package is applied only once both
+      # are present, or staff record that there are no tips or loans.
+      def self.default_required_source_roles
+        SOURCE_ROLES.keys
+      end
 
       def self.source_role_for(filename:, content_type:, **)
         extension = File.extname(filename.to_s).downcase
@@ -26,16 +40,20 @@ module PayrollIntake
       end
 
       def extract(files:, pasted_text: nil)
-        raise ArgumentError, "MoSa intake does not accept pasted text. Upload the original Revel PDF and optional change workbook." if pasted_text.present?
+        raise ArgumentError, "MoSa intake does not accept pasted text. Upload the original Revel PDF, the change workbook, or both." if pasted_text.present?
 
         pdf_files = files.select { |file| pdf?(file) }
         workbook_files = files.select { |file| workbook?(file) }
         unsupported = files - pdf_files - workbook_files
-        raise ArgumentError, "Upload only one Revel PDF and, optionally, one Cornerstone change workbook." if unsupported.any? || pdf_files.length != 1 || workbook_files.many?
+        if unsupported.any? || pdf_files.many? || workbook_files.many? || (pdf_files.empty? && workbook_files.empty?)
+          raise ArgumentError, "Upload one Revel PDF, one Cornerstone change workbook, or one of each."
+        end
 
-        revel = PayrollImport::RevelPdfParser.parse_file_with_metadata(pdf_files.first)
-        validate_revel_period!(revel.dig(:metadata, :period))
-        raise ArgumentError, "No employee hours were found in the Revel PDF." if revel.fetch(:rows).empty?
+        revel = pdf_files.first && PayrollImport::RevelPdfParser.parse_file_with_metadata(pdf_files.first)
+        if revel
+          validate_revel_period!(revel.dig(:metadata, :period))
+          raise ArgumentError, "No employee hours were found in the Revel PDF." if revel.fetch(:rows).empty?
+        end
 
         workbook = workbook_files.first && PayrollImport::LoanTipExcelParser.parse_file_with_metadata(workbook_files.first)
         date_warnings = []
@@ -45,14 +63,14 @@ module PayrollIntake
         end
 
         preview = PayrollImport::ImportService.new(pay_period).preview(
-          pdf_records: revel.fetch(:rows),
+          pdf_records: revel&.fetch(:rows) || [],
           excel_records: workbook&.fetch(:rows, []) || []
         )
 
         {
           rows: tagged_rows(preview, workbook_rows: workbook&.fetch(:rows, []) || []),
           detected_period: {
-            revel: revel.dig(:metadata, :period),
+            revel: revel&.dig(:metadata, :period),
             workbook: workbook&.fetch(:metadata, {}) || {},
             preview: preview.except(:matched)
           },

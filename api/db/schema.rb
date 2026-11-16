@@ -592,6 +592,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_090000) do
     t.bigint "organization_id", null: false
     t.string "pay_frequency", default: "biweekly"
     t.string "payroll_environment", default: "live", null: false
+    t.jsonb "payroll_intake_settings", default: {}, null: false
     t.jsonb "payroll_intake_source_types", default: [], null: false
     t.string "phone"
     t.boolean "simple_payroll_register_enabled", default: false, null: false

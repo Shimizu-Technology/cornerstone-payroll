@@ -2,6 +2,7 @@
 
 require "digest"
 require "securerandom"
+require "tempfile"
 
 module PayrollIntake
   class PreviewService
@@ -26,7 +27,8 @@ module PayrollIntake
     MAX_FILE_BYTES = PayrollIntake::AiExtractor::MAX_FILE_BYTES
 
     def initialize(pay_period:, source_type:, pasted_text: nil, files: [], actor: nil, storage: nil,
-                   supersedes_package_id: nil, supersession_reason: nil, portal_documents: [], portal_submission: nil)
+                   supersedes_package_id: nil, supersession_reason: nil, portal_documents: [], portal_submission: nil,
+                   carry_forward: false, remove_roles: [])
       @pay_period = pay_period
       @company = pay_period.company
       @source_type = source_type.to_s
@@ -38,6 +40,10 @@ module PayrollIntake
       @storage = storage
       @supersedes_package_id = supersedes_package_id.to_s.strip.presence
       @supersession_reason = supersession_reason.to_s.strip.presence
+      @carry_forward = carry_forward
+      @remove_roles = Array(remove_roles).map(&:to_s)
+      @carry_warnings = []
+      @carried_tempfiles = []
       @file_snapshots = []
       @stored_references = []
       @retention_committed = false
@@ -50,11 +56,13 @@ module PayrollIntake
         raise ArgumentError, "Payroll intake adapter is missing extraction configuration"
       end
       raise ArgumentError, "Payroll intake source is not enabled for this company" unless company.payroll_intake_source_enabled?(source_type)
-      raise ArgumentError, "Paste text or upload at least one source file" if pasted_text.blank? && files.empty?
+      raise ArgumentError, "Paste text or upload at least one source file" if pasted_text.blank? && files.empty? && !@carry_forward
 
       capture_workweek_evidence!
 
       snapshot_files!
+      carry_forward_sources! if @carry_forward
+      raise ArgumentError, "Upload at least one source file" if pasted_text.blank? && file_snapshots.empty?
       prepare_portal_revision!
       duplicate = existing_duplicate_session
       return duplicate_session_result(duplicate) if duplicate
@@ -87,7 +95,8 @@ module PayrollIntake
             supersession_reason: supersession_reason,
             evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence)
               .merge(import_hash == source_files_hash ? {} : { "source_import_hash" => source_files_hash })
-              .merge(@revision_evidence || {}),
+              .merge(@revision_evidence || {})
+              .merge(@source_changes ? { "source_changes" => @source_changes } : {}),
             status: "draft",
             created_by: actor
           )
@@ -121,6 +130,8 @@ module PayrollIntake
       cleanup_uploaded_sources! unless @retention_committed
       session&.mark_failed!(e.message) if session&.id && PayrollIntakeSession.exists?(session.id)
       raise
+    ensure
+      @carried_tempfiles.each(&:close!)
     end
 
     private
@@ -248,7 +259,7 @@ module PayrollIntake
     # hash. A plain retry still reuses one until a worker's status changes or
     # a new active worker is added.
     def legacy_duplicate_session
-      return if import_hash == source_files_hash || @revision_evidence
+      return if import_hash == source_files_hash || @revision_evidence || @follows_current
 
       session = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: source_files_hash)
       return unless session
@@ -271,11 +282,120 @@ module PayrollIntake
       { session: session.reload, duplicate: true }
     end
 
+    def latest_current_package
+      PayrollIntakeSession.current
+                          .where(pay_period: pay_period, source_type: source_type)
+                          .order(package_revision: :desc, id: :desc)
+                          .first
+    end
+
+    # A source's files can arrive separately. The new package keeps every file
+    # of the current package that was not uploaded again, re-verified against
+    # its retained fingerprint and stored as this package's own copy. Adding a
+    # missing file, or matching the same files again after the roster changed,
+    # completes an unapplied package without a typed reason. A file whose bytes
+    # differ from one already received is a correction and still needs one.
+    def carry_forward_sources!
+      current = latest_current_package
+      return unless current
+
+      known_roles = PayrollIntake::SourceCompleteness.roles_for(source_type).keys
+      uploaded_roles = file_snapshots.map { |snapshot| snapshot_role(snapshot) }
+      existing = current.documents.in_package_order.select do |document|
+        document.source_role.in?(known_roles) && document.verification_status != "legacy_unverified"
+      end
+      carried = existing.reject { |document| document.source_role.in?(uploaded_roles + @remove_roles) }
+      removed = existing.map(&:source_role) & @remove_roles
+      # A file saved before files were fingerprinted cannot be re-verified, so
+      # it is not carried. Say so, rather than quietly dropping it.
+      unverified = current.documents.in_package_order.select do |document|
+        document.source_role.in?(known_roles) && document.verification_status == "legacy_unverified" &&
+          !document.source_role.in?(uploaded_roles + @remove_roles)
+      end
+      completeness = PayrollIntake::SourceCompleteness.new(session: current, company: company)
+      unverified_labels = completeness.labels_for(unverified.map(&:source_role).uniq)
+      if unverified_labels.any?
+        @carry_warnings << {
+          code: "unverified_source_not_kept",
+          message: "The #{unverified_labels.to_sentence} in import version #{current.package_revision} was saved before files were " \
+                   "verified, so it was not kept in this version. Upload it again.",
+          severity: "warning"
+        }
+      end
+      verifier = PayrollIntake::SourcePackageVerifier.new(session: current, storage: storage_service)
+      carried_snapshots = carried.map { |document| carried_snapshot(document, verifier.verified_bytes!(document)) }
+      replaced = file_snapshots.filter_map do |snapshot|
+        document = existing.find { |candidate| candidate.source_role == snapshot_role(snapshot) }
+        document.source_role if document && document.sha256 != snapshot[:sha256]
+      end
+      added = uploaded_roles - existing.map(&:source_role)
+
+      # Package order stays the same however the files arrived, so a package
+      # completed in two steps has the same identity as one uploaded at once.
+      @file_snapshots = (file_snapshots + carried_snapshots).each_with_index
+        .sort_by { |snapshot, index| [ known_roles.index(snapshot_role(snapshot)) || known_roles.length, index ] }
+        .map(&:first)
+      @files = file_snapshots.map { |snapshot| snapshot[:file] }
+      @source_changes = {
+        "added" => added, "replaced" => replaced, "removed" => removed,
+        "not_kept_unverified" => unverified.map { |document| { "role" => document.source_role, "document_id" => document.id } },
+        "carried" => carried.map { |document| { "role" => document.source_role, "document_id" => document.id, "sha256" => document.sha256 } }
+      }
+
+      return unless current.applyable? && replaced.empty?
+      return if supersedes_package_id.present? && !supersedes_package_id.in?([ current.id.to_s, current.package_id ])
+
+      @supersedes_package_id = current.package_id
+      @supersession_reason ||= [
+        added.any? ? "Added: #{completeness.labels_for(added).to_sentence}" : "Matched the same files again after the employee list changed",
+        unverified_labels.any? ? "Not kept (saved before files were verified): #{unverified_labels.to_sentence}" : nil
+      ].compact.join(". ")
+      follow_current_package!(current)
+    end
+
+    # Adding or removing a file can return to the exact files of a superseded
+    # version, which can no longer be applied. Those files then become a new
+    # version after the current one instead of matching the old version.
+    def follow_current_package!(current)
+      return if @portal_submission
+
+      earlier = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: import_hash)
+      return unless earlier&.superseded?
+
+      # The current version may already be these same files following its
+      # predecessor. Reuse it, so a retry doesn't create version after version.
+      if current.supersedes && current.import_hash == Digest::SHA256.hexdigest("#{import_hash}\nafter-package:#{current.supersedes.package_id}")
+        @import_hash = current.import_hash
+        return
+      end
+
+      @follows_current = true
+      @import_hash = Digest::SHA256.hexdigest("#{import_hash}\nafter-package:#{current.package_id}")
+    end
+
+    def carried_snapshot(document, data)
+      tempfile = Tempfile.new([ "payroll-intake-source", File.extname(document.filename.to_s) ])
+      @carried_tempfiles << tempfile
+      tempfile.binmode
+      tempfile.write(data)
+      tempfile.rewind
+      {
+        file: ActionDispatch::Http::UploadedFile.new(tempfile: tempfile, filename: document.filename, type: document.content_type),
+        data: data,
+        filename: document.filename,
+        content_type: document.content_type,
+        sha256: Digest::SHA256.hexdigest(data),
+        carried_from_document_id: document.id,
+        portal_document: document.payroll_submission_document
+      }
+    end
+
+    def snapshot_role(snapshot)
+      source_role_for(filename: snapshot[:filename], content_type: snapshot[:content_type], position: 0, pasted: false)
+    end
+
     def replacement_predecessor!
-      current = PayrollIntakeSession.current
-                                    .where(pay_period: pay_period, source_type: source_type)
-                                    .order(package_revision: :desc, id: :desc)
-                                    .first
+      current = latest_current_package
       if current.blank?
         if supersedes_package_id.present?
           raise ArgumentError, "The source package selected for replacement is no longer current. Refresh and review the latest package."
@@ -325,7 +445,7 @@ module PayrollIntake
         extracted_rows: extraction[:rows],
         detected_period: extraction[:detected_period]
       )
-      warnings = Array(extraction[:warnings]) + Array(normalized[:warnings])
+      warnings = Array(extraction[:warnings]) + Array(normalized[:warnings]) + @carry_warnings
       if workweek_evidence["aligned_with_pay_period"] == false
         warnings << {
           code: "pay_period_workweek_offset",
@@ -380,7 +500,7 @@ module PayrollIntake
         storage_service.upload(key, snapshot[:data], content_type: snapshot[:content_type])
         verify_retained_source!(key, snapshot)
         {
-          payroll_submission_document: @portal_documents[index],
+          payroll_submission_document: snapshot[:portal_document] || @portal_documents[index],
           document_type: document_type_for(snapshot),
           source_role: source_role_for(
             filename: snapshot[:filename],
@@ -396,7 +516,7 @@ module PayrollIntake
           sha256: snapshot[:sha256],
           verification_status: "verified",
           verified_at: Time.current,
-          metadata: { bytes: snapshot[:data].bytesize }
+          metadata: { bytes: snapshot[:data].bytesize, carried_from_document_id: snapshot[:carried_from_document_id] }.compact
         }
       end
     end

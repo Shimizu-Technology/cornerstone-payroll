@@ -3,7 +3,12 @@
 require "rails_helper"
 
 RSpec.describe "Portal-origin MoSa import review", type: :request do
-  let!(:company) { create(:company, payroll_intake_source_types: [ "mosa_revel" ]) }
+  # These portal revisions send only the Revel PDF. This client is set to
+  # need only that file; the default MoSa rule is covered separately.
+  let!(:company) do
+    create(:company, payroll_intake_source_types: [ "mosa_revel" ],
+      payroll_intake_settings: { "mosa_revel" => { "required_sources" => [ "revel_hours" ] } })
+  end
   let!(:staff) { create(:user, company: company, role: "admin") }
   let!(:employee) { create(:employee, company: company, first_name: "Avery", last_name: "Example", pay_rate: 10) }
   let!(:run) { create(:pay_period, company: company) }
@@ -769,11 +774,12 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       get "#{url}/current_import"
       expect(response).to have_http_status(:ok), response.body
       expect(owner_row(response.parsed_body)).to include(
-        "period_pay_missing" => false, "current_period_pay" => "4500.0", "period_pay_source" => "payroll_worksheet", "overwrite_required" => true
+        "period_pay_missing" => false, "current_period_pay" => "4500.0", "period_pay_source" => "payroll_worksheet", "overwrite_required" => false
       )
       expect(response.parsed_body.dig("portal_source", "selection_id")).to eq(data.dig("portal_source", "selection_id"))
 
-      post "#{url}/apply_import", params: { import_id: data["import_id"], portal_source_id: data.dig("portal_source", "selection_id"), force_overwrite: true }, as: :json
+      # Saved owner pay is kept, not replaced, so apply needs no overwrite confirmation.
+      post "#{url}/apply_import", params: { import_id: data["import_id"], portal_source_id: data.dig("portal_source", "selection_id") }, as: :json
       expect(response).to have_http_status(:ok), response.body
       expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(4500)
       expect(run.reload.pending_portal_submission?).to be(false)
