@@ -30,12 +30,12 @@ RSpec.describe "Manual client payroll with prior financial voids", type: :reques
     expect(response).to have_http_status(:ok), response.body
     expect(run.reload.status).to eq("calculated"), response.body
     expect(item.reload).to have_attributes(gross_pay: 500.to_d, social_security_tax: 31.to_d, medicare_tax: "7.25".to_d, net_pay: "461.75".to_d)
-    expect(JSON.parse(response.body).dig("pay_period", "compliance_warnings").join).to include("Prior-period void history")
+    expect(JSON.parse(response.body).dig("pay_period", "compliance_warnings").join).to include(employee.full_name, "voided pay period #")
     post "/api/v1/admin/pay_periods/#{run.id}/approve"
     expect(response).to have_http_status(:ok), response.body
     post "/api/v1/admin/pay_periods/#{run.id}/commit"
     expect(response).to have_http_status(:ok), response.body
-    expect(JSON.parse(response.body).dig("pay_period", "annual_fica_review_note")).to include("Prior-period void history")
+    expect(JSON.parse(response.body).dig("pay_period", "annual_fica_review_note")).to include(employee.full_name, "voided pay period #")
     expect(run.reload).to be_committed
     expect(item.reload).to have_attributes(social_security_tax: 31.to_d, employer_social_security_tax: 31.to_d,
       medicare_tax: "7.25".to_d, employer_medicare_tax: "7.25".to_d, net_pay: "461.75".to_d)
