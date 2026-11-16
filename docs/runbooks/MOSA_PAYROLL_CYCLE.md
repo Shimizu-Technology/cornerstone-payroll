@@ -7,6 +7,14 @@ This guide covers one biweekly MoSa run, from the client's email to printed chec
 
 Use your own login. Every import, entry, approval, preview download and commit is recorded under the person who did it.
 
+## MoSa's settings (November 17, 2026)
+
+- **Pay schedule:** biweekly, Monday to Sunday, paid Thursday (4 days after the period ends), starting with the period that begins November 16, 2026. New pay runs suggest these dates.
+- **Overtime workweek:** Monday 12:00 AM, matching the pay periods.
+- **Next check number:** 22026, after run #117 printed through 22025.
+- **Expected entries** (Standing Changes): Mo's pay, Sarah's pay and Addison Moyer's maintenance hours. Each is required, with **None this period** allowed.
+- **Require client approval before payroll commit:** off.
+
 ## Before you start
 
 - Select MoSa in the company picker and open the pay run for the period's dates. Check the work dates and pay date before entering anything.
@@ -127,7 +135,7 @@ If MoSa asks for changes: **More payroll actions** → **Roll Back Approval**, f
 
 ## 6. Client approval in the portal (only when turned on)
 
-This step applies only when the client's **Require client approval before payroll commit** setting is on. The setting is on the client's edit page and needs client-administration access to change. When it's off, staff approve and commit, and the client isn't notified. MoSa had it off as of November 16, 2026. Check the setting before each cycle.
+This step applies only when the client's **Require client approval before payroll commit** setting is on. The setting is on the client's edit page and needs client-administration access to change. When it's off, staff approve and commit, and the client isn't notified. MoSa had it off as of November 17, 2026. Check the setting before each cycle.
 
 When it's on:
 
