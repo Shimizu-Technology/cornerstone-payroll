@@ -119,7 +119,8 @@ module TestWorkspace
           exclusions: payload.fetch(:warnings)
         },
         auto_create_fit_check: false,
-        payroll_intake_source_types: source_company.payroll_intake_source_types
+        payroll_intake_source_types: source_company.payroll_intake_source_types,
+        payroll_intake_settings: source_company.payroll_intake_settings
       ))
     end
 
