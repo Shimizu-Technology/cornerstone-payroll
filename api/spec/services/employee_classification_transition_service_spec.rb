@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe EmployeeClassificationTransitionService, type: :service do
+  include ActiveSupport::Testing::TimeHelpers
+
   let(:company) { create(:company) }
   let(:super_admin) { create(:user, company: company, role: "super_admin") }
   let(:contractor) do
@@ -89,6 +91,18 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     expect {
       described_class.new(employee: contractor, attributes: attributes, actor: admin).call
     }.to raise_error(described_class::Error, "Only a super admin can transition W-2/1099 classification")
+  end
+
+  it "accepts today's Guam date while UTC is still on the previous day" do
+    travel_to Time.utc(2026, 11, 16, 22, 31) do # 8:31 a.m. Nov 17 in Guam
+      attributes[:effective_date] = "2026-11-18"
+      expect {
+        described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+      }.to raise_error(described_class::Error, /cannot be in the future/)
+
+      attributes[:effective_date] = "2026-11-17"
+      expect(described_class.new(employee: contractor.reload, attributes: attributes, actor: super_admin).call).to be_present
+    end
   end
 
   it "requires the W-2 SSN to be entered twice and match" do
