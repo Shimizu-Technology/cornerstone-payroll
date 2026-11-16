@@ -100,28 +100,23 @@ module PayrollSubmissions
     end
 
     def preload_live_pay_periods(entries)
-      periods = offerable_pay_periods.where(start_date: entries.map(&:start_date), end_date: entries.map(&:end_date)).order(id: :desc)
-      @live_pay_periods = {}
-      periods.each { |period| @live_pay_periods[[ period.start_date, period.end_date ]] ||= period }
-      entries.each do |entry|
-        key = [ entry.start_date, entry.end_date ]
-        linked = entry.record&.pay_period || entry.pay_period
-        @live_pay_periods[key] = linked if linked && linked.correction_status != "voided"
-        @live_pay_periods[key] = nil unless @live_pay_periods.key?(key)
-      end
+      @candidates_by_dates = offerable_pay_periods.where(start_date: entries.map(&:start_date), end_date: entries.map(&:end_date))
+        .order(:id).to_a.group_by { |period| [ period.start_date, period.end_date ] }
     end
 
     def live_pay_period(entry)
-      @live_pay_periods ||= {}
-      key = [ entry.start_date, entry.end_date ]
-      return @live_pay_periods[key] if @live_pay_periods.key?(key)
+      # A retained explicit link must never switch to a different run by dates.
+      linked = entry.record ? entry.record.pay_period : entry.pay_period
+      return linked.correction_status == "voided" ? nil : linked if linked
 
-      linked = entry.record&.pay_period || entry.pay_period
-      @live_pay_periods[key] = if linked && linked.correction_status != "voided"
-        linked
-      else
-        matching_pay_period(entry.start_date, entry.end_date)
-      end
+      matching_pay_period(entry.start_date, entry.end_date)
+    end
+
+    def ambiguous_pay_period_ids(entry)
+      return [] if entry.record&.pay_period_id || (!entry.record && entry.pay_period)
+
+      candidates = matching_candidates(entry.start_date, entry.end_date)
+      candidates.many? ? candidates.map(&:id) : []
     end
 
     private
@@ -201,18 +196,35 @@ module PayrollSubmissions
     end
 
     def created_entries
-      @created_entries ||= created_pay_periods.map do |pay_period|
-        Entry.new(start_date: pay_period.start_date, end_date: pay_period.end_date, pay_date: pay_period.pay_date,
-          pay_period: pay_period, schedule: pay_period.company_pay_schedule, source: "pay_period")
-      end.uniq { |entry| [ entry.start_date, entry.end_date ] }
+      @created_entries ||= begin
+        created = created_pay_periods.to_a
+        candidates = offerable_pay_periods.where(start_date: created.map(&:start_date), end_date: created.map(&:end_date))
+          .order(:id).to_a.group_by { |run| [ run.start_date, run.end_date ] }
+        @matching_candidates ||= {}
+        created.group_by { |run| [ run.start_date, run.end_date ] }.map do |key, runs|
+          @matching_candidates[key] = candidates.fetch(key, [])
+          pay_period = runs.first
+          Entry.new(start_date: pay_period.start_date, end_date: pay_period.end_date, pay_date: pay_period.pay_date,
+            pay_period: matching_pay_period(pay_period.start_date, pay_period.end_date), schedule: pay_period.company_pay_schedule, source: "pay_period")
+        end
+      end
     end
 
     def created_pay_periods
       offerable_pay_periods.where("end_date >= ?", @today - CREATED_PERIOD_LOOKBACK).order(end_date: :desc, id: :desc).limit(LIST_LIMIT)
     end
 
+    def matching_candidates(start_date, end_date)
+      key = [ start_date, end_date ]
+      return @candidates_by_dates[key] if @candidates_by_dates&.key?(key)
+
+      @matching_candidates ||= {}
+      @matching_candidates[key] ||= offerable_pay_periods.where(start_date: start_date, end_date: end_date).order(:id).to_a
+    end
+
     def matching_pay_period(start_date, end_date)
-      offerable_pay_periods.where(start_date: start_date, end_date: end_date).order(id: :desc).first
+      candidates = matching_candidates(start_date, end_date)
+      candidates.first if candidates.one?
     end
 
     def offerable_pay_periods

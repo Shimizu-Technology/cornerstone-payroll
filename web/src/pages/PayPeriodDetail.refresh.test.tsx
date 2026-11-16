@@ -195,6 +195,7 @@ it.each(['commit', 'rollback'] as const)('brings a new %s error from Reports to 
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
   try {
     const period = { ...initialPayPeriod, status: 'approved' } as PayPeriod;
+    apiMocks.get.mockResolvedValue({ pay_period: period });
     apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
     apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
     apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
@@ -204,6 +205,7 @@ it.each(['commit', 'rollback'] as const)('brings a new %s error from Reports to 
     const processing = await screen.findByRole('region', { name: 'Payroll processing actions' });
     for (const attempt of [1, 2]) {
       if (attempt === 2) {
+        if (action === 'commit') await user.click(screen.getByRole('button', { name: 'Keep reviewing' }));
         await user.click(screen.getByRole('link', { name: 'Go to reports' }));
         expect(screen.getByLabelText('Current payroll path').textContent).toBe('/companies/7/pay-runs/12/reports');
       }
@@ -216,6 +218,11 @@ it.each(['commit', 'rollback'] as const)('brings a new %s error from Reports to 
       }
       const feedback = await screen.findByText(`New ${action} rejected`);
       expect(apiAction).toHaveBeenCalledTimes(attempt);
+      if (action === 'commit') {
+        expect(apiAction).toHaveBeenLastCalledWith(12, { acknowledged_outstanding_file_request_ids: [] });
+        expect(feedback.closest('[role="dialog"]')).toBeTruthy();
+        continue;
+      }
       expect(apiAction).toHaveBeenLastCalledWith(12);
       await waitFor(() => expect(screen.getByLabelText('Current payroll path').textContent).toBe('/companies/7/pay-runs/12/work'));
       expect(feedback.closest('details')?.id).toBe('payroll-commit');
@@ -688,27 +695,28 @@ it('requires explicit React confirmation and lets an operator cancel without an 
   fireEvent.click(payRunButton('Keep reviewing'));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(apiMocks.commit).not.toHaveBeenCalled();
 });
-it('closes before the API completes, blocks duplicate writes and leaves a failed commit visible', async () => {
+it('keeps the dialog open, blocks duplicate writes and leaves a failed commit visible', async () => {
   vi.clearAllMocks();
   let rejectCommit!: (error: Error) => void;
   apiMocks.commit.mockReturnValue(new Promise((_resolve, reject) => { rejectCommit = reject; }));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'approved' } });
   render(approvedCommitView());
   fireEvent.click(await findPayRunButton('Commit'));
+  await waitFor(() => expect(screen.queryByText(/Loading current requests/)).toBeNull());
   const confirm = await screen.findByRole('button', { name: 'Confirm commit' });
   fireEvent.click(confirm); fireEvent.click(confirm);
-  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect((payRunButton('Committing...') as HTMLButtonElement).disabled).toBe(true);
+  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12, { acknowledged_outstanding_file_request_ids: [] });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Committing…' })).toHaveProperty('disabled', true);
   await act(async () => rejectCommit(new Error('Commit rejected: stale approval')));
   const feedback = await screen.findByText('Commit rejected: stale approval');
-  expect(feedback.closest('details')?.id).toBe('payroll-commit');
-  await waitFor(() => expect(document.activeElement?.id).toBe('payroll-feedback'));
-  expect((payRunButton('Commit') as HTMLButtonElement).disabled).toBe(false);
+  expect(feedback.closest('[role="dialog"]')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Confirm commit' })).toHaveProperty('disabled', false);
 });
 
 it('drops an open confirmation when navigating to another approved run', async () => {
   vi.clearAllMocks(); approvedCommitView();
-  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, id: 13, status: 'approved' } });
+  apiMocks.get.mockResolvedValueOnce({ pay_period: { ...initialPayPeriod, status: 'approved' } }).mockResolvedValue({ pay_period: { ...initialPayPeriod, id: 13, status: 'approved' } });
   function NavigateRuns() {
     const navigate = useNavigate();
     return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Other run</button>
@@ -731,16 +739,17 @@ it('settles a commit after a same-run sibling refresh and reloads the committed 
   const committed = { ...initialPayPeriod, status: 'committed' as const };
   let finishCommit!: (response: { pay_period: PayPeriod }) => void;
   apiMocks.commit.mockReturnValue(new Promise(resolve => { finishCommit = resolve; }));
-  apiMocks.get.mockResolvedValueOnce({ pay_period: approved }).mockResolvedValue({ pay_period: committed });
+  apiMocks.get.mockResolvedValueOnce({ pay_period: approved }).mockResolvedValueOnce({ pay_period: approved }).mockResolvedValue({ pay_period: committed });
   const view = render(approvedCommitView());
   fireEvent.click(await findPayRunButton('Commit'));
+  await waitFor(() => expect(screen.queryByText(/Loading current requests/)).toBeNull());
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   view.rerender(approvedCommitView(1));
-  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
-  await act(async () => finishCommit({ pay_period: committed }));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(2));
+  await act(async () => finishCommit({ pay_period: committed }));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(3));
   expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
-  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
+  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12, { acknowledged_outstanding_file_request_ids: [] });
 });
 it('preserves a commit rejection after a same-run sibling refresh', async () => {
   vi.clearAllMocks();
@@ -749,12 +758,13 @@ it('preserves a commit rejection after a same-run sibling refresh', async () => 
   apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'approved' } });
   const view = render(approvedCommitView());
   fireEvent.click(await findPayRunButton('Commit'));
+  await waitFor(() => expect(screen.queryByText(/Loading current requests/)).toBeNull());
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   view.rerender(approvedCommitView(1));
-  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(2));
   await act(async () => rejectCommit(new Error('Commit rejected after sibling refresh')));
   expect(await screen.findByText('Commit rejected after sibling refresh')).toBeTruthy();
-  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
+  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12, { acknowledged_outstanding_file_request_ids: [] });
 });
 
 it.each(['success', 'error'])('ignores a previous-route commit %s after navigating to another run', async outcome => {
@@ -762,7 +772,7 @@ it.each(['success', 'error'])('ignores a previous-route commit %s after navigati
   let finishCommit!: (response: { pay_period: PayPeriod }) => void;
   let rejectCommit!: (error: Error) => void;
   apiMocks.commit.mockReturnValue(new Promise((resolve, reject) => { finishCommit = resolve; rejectCommit = reject; }));
-  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, id: 13, status: 'approved' } });
+  apiMocks.get.mockResolvedValueOnce({ pay_period: { ...initialPayPeriod, status: 'approved' } }).mockResolvedValue({ pay_period: { ...initialPayPeriod, id: 13, status: 'approved' } });
   function NavigateRuns() {
     const navigate = useNavigate();
     return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Other run</button>
@@ -772,9 +782,10 @@ it.each(['success', 'error'])('ignores a previous-route commit %s after navigati
     <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<NavigateRuns />} />
   </Routes></MemoryRouter>);
   fireEvent.click(await findPayRunButton('Commit'));
+  await waitFor(() => expect(screen.queryByText(/Loading current requests/)).toBeNull());
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   fireEvent.click(payRunButton('Other run'));
-  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(13));
   await act(async () => {
     if (outcome === 'success') finishCommit({ pay_period: initialPayPeriod });
     else rejectCommit(new Error('Previous run failed'));
@@ -782,7 +793,7 @@ it.each(['success', 'error'])('ignores a previous-route commit %s after navigati
   fireEvent.click(await findPayRunButton('Commit'));
   expect(within(await screen.findByRole('dialog')).getByText('#13')).toBeTruthy();
   expect(screen.queryByText('Previous run failed')).toBeNull();
-  expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13);
+  expect(apiMocks.get).toHaveBeenCalledWith(13);
 });
 
 it('shows partial calculation failures by employee and keeps failed worksheet hours', async () => {
@@ -943,17 +954,20 @@ it('refreshes committed source receipt and history panels once after the canonic
   const committed = { ...initialPayPeriod, time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [],
     aire_calendar: sourceCalendar } } as PayPeriod;
   apiMocks.commit.mockResolvedValue({ pay_period: committed });
-  apiMocks.get.mockResolvedValue({ pay_period: committed });
+  apiMocks.get.mockResolvedValueOnce({ pay_period: { ...committed, status: 'approved' } }).mockResolvedValue({ pay_period: committed });
   render(approvedCommitView(0, true));
   fireEvent.click(await findPayRunButton('Commit'));
+  await waitFor(() => expect(screen.queryByText(/Loading current requests/)).toBeNull());
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   await waitFor(() => {
     for (const id of ['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision']) {
       expect(screen.getByTestId(id).getAttribute('data-revision')).toBe('1');
     }
   });
-  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
-  expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(12);
+  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12, { acknowledged_outstanding_file_request_ids: [] });
+  expect(apiMocks.get).toHaveBeenCalledWith(12, 7);
+  expect(apiMocks.get).toHaveBeenLastCalledWith(12);
+  expect(apiMocks.get).toHaveBeenCalledTimes(2);
 });
 
 

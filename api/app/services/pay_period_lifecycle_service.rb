@@ -8,6 +8,14 @@ class PayPeriodLifecycleService
   class Error < StandardError; end
   class InvalidTransitionError < Error; end
   class EmptyPayPeriodError < Error; end
+  class CommitConflict < Error
+    attr_reader :code
+
+    def initialize(code, message)
+      @code = code
+      super(message)
+    end
+  end
 
   def initialize(pay_period:, actor:, ip_address: nil)
     @pay_period = pay_period
@@ -67,7 +75,7 @@ class PayPeriodLifecycleService
 
   attr_reader :acknowledged_outstanding_file_requests
 
-  def commit!(acknowledge_outstanding_file_requests: false)
+  def commit!(acknowledged_outstanding_file_request_ids: nil, expected_next_check_number: nil)
     acknowledgement_ids = { batch: [], entries: [] }
     with_financial_pay_period_lock do
       validate_prior_provider_source!
@@ -91,10 +99,12 @@ class PayPeriodLifecycleService
       validate_annual_fica_context!
       validate_employer_contribution_tracking!
       validate_client_approval!
+      link_error = pay_period.client_file_link_error
+      raise InvalidTransitionError, link_error if link_error
+
       requests = pay_period.outstanding_client_file_requests.lock.to_a
-      if requests.any? && !acknowledge_outstanding_file_requests.in?([ true, "true", "1", 1 ])
-        raise InvalidTransitionError, "Acknowledge the outstanding client file requests before committing payroll."
-      end
+      validate_file_request_snapshot!(requests, acknowledged_outstanding_file_request_ids)
+      validate_check_number_snapshot!(expected_next_check_number)
       @acknowledged_outstanding_file_requests = requests.map { |request| { id: request.id, title: request.title, status: request.status } }
       validate_payment_delivery!
       validate_source_earnings!
@@ -136,6 +146,29 @@ class PayPeriodLifecycleService
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def validate_file_request_snapshot!(requests, acknowledged_ids)
+    if acknowledged_ids.nil? && requests.any?
+      raise InvalidTransitionError, "Acknowledge the outstanding client file requests by ID before committing payroll."
+    end
+    unless acknowledged_ids.nil? || (acknowledged_ids.is_a?(Array) && acknowledged_ids.all? { |id| id.to_s.match?(/\A[1-9]\d*\z/) })
+      raise InvalidTransitionError, "Choose the outstanding client file request IDs you reviewed."
+    end
+    return if Array(acknowledged_ids).map(&:to_i).uniq.sort == requests.map(&:id).sort
+
+    raise CommitConflict.new("outstanding_file_requests_changed", "The outstanding client file requests changed. Review the updated list and confirm again.")
+  end
+
+  def validate_check_number_snapshot!(expected)
+    return if expected.nil?
+
+    unless expected.to_s.match?(/\A[1-9]\d*\z/)
+      raise InvalidTransitionError, "Choose the next check number you reviewed."
+    end
+    return if expected.to_i == @locked_company.next_check_number
+
+    raise CommitConflict.new("check_number_changed", "The next check number changed. Review the updated number and confirm again.")
+  end
 
   def validate_run_eligibility!
     workers = PayrollRunEligibility.new(pay_period).payload
@@ -222,7 +255,7 @@ class PayPeriodLifecycleService
 
   def with_financial_pay_period_lock
     ApplicationRecord.transaction do
-      Company.lock.find(pay_period.company_id)
+      @locked_company = Company.lock.find(pay_period.company_id)
       pay_period.lock!
       yield
     end

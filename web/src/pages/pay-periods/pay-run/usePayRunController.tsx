@@ -16,7 +16,7 @@ import { formatDate, payPeriodStatusConfig } from '@/lib/utils';
 import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
 import { capturedSourceHoursLocked, worksheetHoursInvalid, worksheetPayBasisHold } from '@/lib/captured-source-worksheet';
 import { parsePayRunId } from '@/lib/pay-run-filters';
-import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
+import { ApiError, payPeriodsApi, employeesApi, type PayrollCommitSnapshot } from '@/services/api';
 
 import { useAireCalendarRefresh } from '@/hooks/useAireCalendarRefresh';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -907,22 +907,22 @@ export function usePayRunController({
     if (payPeriod?.status !== 'approved' || payPeriod.correction_status === 'voided') setCommitPeriodId(null);
   }, [payPeriod?.id, payPeriod?.status, payPeriod?.correction_status]);
 
-  const handleCommit = async (confirmedPeriodId: number, acknowledgeOutstandingFileRequests?: boolean) => {
+  const handleCommit = async (confirmedPeriodId: number, snapshot: PayrollCommitSnapshot) => {
     if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
         payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || payrollClientCommitReason(payPeriod) || processing || commitInFlightRef.current) return;
     commitInFlightRef.current = true;
     const currentRouteGeneration = commitRouteGenerationRef.current;
     const isCurrentRoute = () => currentRouteGeneration === commitRouteGenerationRef.current;
-    setCommitPeriodId(null);
     setProcessing(true);
     setError(null);
     try {
-      const response = await (acknowledgeOutstandingFileRequests ? payPeriodsApi.commit(confirmedPeriodId, true) : payPeriodsApi.commit(confirmedPeriodId));
+      const response = await payPeriodsApi.commit(confirmedPeriodId, snapshot);
       if (!isCurrentRoute()) return;
+      setCommitPeriodId(null);
       setPayPeriod(response.pay_period);
       await loadPayPeriod(confirmedPeriodId, true);
     } catch (err) {
-      if (isCurrentRoute()) setError(err instanceof Error ? err.message : 'Failed to commit');
+      if (isCurrentRoute()) throw err;
     } finally {
       commitInFlightRef.current = false;
       setProcessing(false);

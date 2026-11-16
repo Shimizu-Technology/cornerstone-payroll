@@ -60,6 +60,7 @@ export type PeriodSummary = {
   accepts_files?: boolean; status: SubmissionStatus; status_label: string; open_for_files: boolean; opens_on: string;
   current_revision: number | null; last_submitted_at: string | null; status_changed_at: string | null;
   review_pay_period_id?: number | null;
+  pay_period_link_error?: string;
   pay_period_id?: number | null; source?: 'pay_period' | 'schedule'; unread?: boolean; latest_client_event_id?: number;
 };
 export type PeriodAction = 'submit' | 'approve' | 'request_changes' | 'message' | 'acknowledge' | 'start_review' | 'post_draft' | 'save_draft' | 'mark_paid';

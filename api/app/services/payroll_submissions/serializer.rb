@@ -69,6 +69,10 @@ module PayrollSubmissions
         payload[:status_label] = "Requested files outstanding"
       end
       if @staff
+        ambiguous_ids = @catalog.ambiguous_pay_period_ids(entry)
+        if ambiguous_ids.any?
+          payload[:pay_period_link_error] = "Payroll files match multiple pay runs (#{ambiguous_ids.join(', ')}). Link the files period to the correct run before importing or committing."
+        end
         payload[:pay_period_id] = pay_period&.id
         payload[:source] = entry.source
         payload[:unread] = record ? unread?(record) : false
