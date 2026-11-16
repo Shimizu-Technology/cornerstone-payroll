@@ -45,3 +45,8 @@ Owned Rails/Vite processes and browser tab were cleaned after browser QA using l
 ## PR review status
 
 PR #478 is held for the lead. CodeRabbit's automatic review was rate-limited at 2026-11-16 22:19:50 UTC; it reported the next included review in 40 minutes. No CodeRabbit review or inline findings exist yet. Its success-labelled check is a skipped review, not approval. No independent reviewer was started because the worker brief forbids subagents. Required backend/frontend/browser CI remains a separate gate. The lead can request `@coderabbitai review` after the limit resets; no merge or deployment is authorized for this worker.
+
+
+## Main integration
+
+After PR creation, main advanced to `2d4085ed` (#477), changing only the default development database name in `api/config/database.yml` to `cornerstone_payroll_development`. This branch merges that commit. Explicit test and development overrides were verified through Rails configuration without opening database connections: `cp_test_known_issues` and `cp_dev_known_issues` remain selected. No product code or test database configuration changed; the earlier isolated test and browser evidence therefore exercises the same product paths. Both owned databases remain dropped, with no new runtime resources. Final-head CI must assess the merged tree.
