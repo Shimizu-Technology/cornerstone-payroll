@@ -83,14 +83,38 @@ it('groups what blocks Apply apart from notices, each notice one line with detai
   ]), true);
 
   const needs = screen.getByRole('region', { name: 'Needs your action' });
-  expect(within(needs).getByRole('heading', { name: 'Needs your action (1)' })).toBeTruthy();
+  expect(within(needs).getByRole('heading', { name: 'Needs your action (2)' })).toBeTruthy();
   expect(within(needs).getByRole('button', { name: 'Next row needing attention (1)' })).toBeTruthy();
+  // The older-workbook notice stays with its required tip choice until that is saved.
+  expect(within(needs).getByText(/This is the legacy MoSa workbook/)).toBeTruthy();
+  expect(within(needs).getByRole('button', { name: 'Choose how the workbook’s tips were paid' })).toBeTruthy();
 
   const notices = screen.getByRole('region', { name: 'For your information' });
-  expect(within(notices).getByRole('heading', { name: 'For your information (2)' })).toBeTruthy();
+  expect(within(notices).getByRole('heading', { name: 'For your information (1)' })).toBeTruthy();
   const workweek = within(notices).getByText('This pay period and the overtime workweek start on different days').closest('details')!;
   expect(workweek.open).toBe(false);
   fireEvent.click(within(workweek).getByText('This pay period and the overtime workweek start on different days'));
   expect(workweek.open).toBe(true);
   expect(within(workweek).getByText(/Overtime is used exactly as the source reports it/)).toBeTruthy();
+});
+
+it('moves the older-workbook notice to the information group once its tip choice is saved', () => {
+  const data = preview([averyRow(1)], [avery], 1, [
+    { code: 'legacy_mosa_workbook', severity: 'warning', message: 'This is the legacy MoSa workbook. Use the generated template next payroll.' },
+  ]);
+  data.preview.tip_treatment_confirmed = true;
+  open(data, true);
+
+  expect(screen.queryByRole('region', { name: 'Needs your action' })).toBeNull();
+  const notices = screen.getByRole('region', { name: 'For your information' });
+  expect(within(notices).getByText('Older MoSa workbook format')).toBeTruthy();
+});
+
+it('shows a serious notice on its own without counting it as something that keeps Apply off', () => {
+  open(preview([averyRow(1)], [avery], 1, [
+    { code: 'duplicate_source', severity: 'error', message: 'This exact payroll source is retained as superseded revision 1.' },
+  ]), true);
+
+  expect(screen.getByRole('alert').textContent).toContain('retained as superseded revision 1');
+  expect(screen.queryByRole('region', { name: 'Needs your action' })).toBeNull();
 });

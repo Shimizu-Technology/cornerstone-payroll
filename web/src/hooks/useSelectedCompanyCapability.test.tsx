@@ -2,22 +2,25 @@
 import { cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CompanyListItem } from '@/services/api';
-import { useSelectedCompanyCapability } from './useSelectedCompanyCapability';
+import { useOptionalSelectedCompanyCapability, useSelectedCompanyCapability } from './useSelectedCompanyCapability';
 
 const state = vi.hoisted(() => ({
   company: null as CompanyListItem | null, id: 1 as number | null, loading: false, authLoading: false,
-  map: {} as Record<string, string[]>,
+  map: {} as Record<string, string[]>, noProvider: false,
 }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: state.company, activeCompanyId: state.id, loading: state.loading }) }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({
-  isLoading: state.authLoading,
-  // Global admin-like data must never be a fallback for a missing client grant.
-  isAdmin: true, isManager: true, hasCapability: () => true,
-  user: { role: 'accountant', company_capabilities: state.map },
-}) }));
+vi.mock('@/contexts/AuthContext', () => {
+  const auth = () => ({
+    isLoading: state.authLoading,
+    // Global admin-like data must never be a fallback for a missing client grant.
+    isAdmin: true, isManager: true, hasCapability: () => true,
+    user: { role: 'accountant', company_capabilities: state.map },
+  });
+  return { useAuth: auth, useOptionalAuth: () => (state.noProvider ? undefined : auth()) };
+});
 const capability = 'manage_client_configuration';
 const company = (id: number, capabilities?: string[]) => ({ id, client_capabilities: capabilities } as CompanyListItem);
-beforeEach(() => { state.id = 1; state.company = company(1, [capability]); state.loading = false; state.authLoading = false; state.map = {}; });
+beforeEach(() => { state.id = 1; state.company = company(1, [capability]); state.loading = false; state.authLoading = false; state.map = {}; state.noProvider = false; });
 afterEach(cleanup);
 
 describe('selected client capability isolation', () => {
@@ -65,5 +68,16 @@ describe('selected client capability isolation', () => {
   it('does not infer client administration from configuration or the grant boolean', () => {
     state.company = { ...company(1, [capability]), client_management: true };
     expect(renderHook(() => useSelectedCompanyCapability('manage_client_administration')).result.current).toBe(false);
+  });
+});
+
+describe('optional selected client capability', () => {
+  it('matches the required check inside the auth provider', () => {
+    expect(renderHook(() => useOptionalSelectedCompanyCapability(capability, 1)).result.current).toBe(true);
+    expect(renderHook(() => useOptionalSelectedCompanyCapability(capability, 2)).result.current).toBe(false);
+  });
+  it('fails closed outside the auth provider, even when company data grants it', () => {
+    state.noProvider = true;
+    expect(renderHook(() => useOptionalSelectedCompanyCapability(capability, 1)).result.current).toBe(false);
   });
 });

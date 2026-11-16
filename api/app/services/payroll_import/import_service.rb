@@ -161,6 +161,15 @@ module PayrollImport
 
     private
 
+    # What an earlier import wrote, or no hours at all when none did.
+    def hours_imported_before(payroll_item)
+      recorded = payroll_item.custom_columns_data.to_h["mosa_imported_hours"]
+      return recorded if recorded.is_a?(Hash)
+
+      @applied_hours ||= LivePreviewRowState.applied_hours_by_employee(pay_period)
+      @applied_hours[payroll_item.employee_id] || { "regular_hours" => "0.0", "overtime_hours" => "0.0" }
+    end
+
     def apply_locked!(matched:, force_overwrite:, tips_paid_out_from_tips:)
       raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
 
@@ -251,7 +260,9 @@ module PayrollImport
                 "client_change_evidence" => row[:client_change_evidence],
                 # The hours this import left on the row. A later import compares
                 # them with the saved row to find hours staff changed by hand.
-                "mosa_imported_hours" => {
+                # A workbook-only row keeps the hours staff entered, so they are
+                # not recorded as imported and a later Revel PDF asks first.
+                "mosa_imported_hours" => row[:workbook_only] ? hours_imported_before(payroll_item) : {
                   "regular_hours" => payroll_item.hours_worked.to_d.to_s("F"),
                   "overtime_hours" => payroll_item.overtime_hours.to_d.to_s("F")
                 }
