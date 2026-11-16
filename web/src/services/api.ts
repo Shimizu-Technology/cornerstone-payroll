@@ -2183,6 +2183,7 @@ export interface ImportSourceDocument {
   filename: string;
   content_type: string;
   byte_size: number;
+  sha256?: string | null;
 }
 
 export interface ImportPreviewResponse {

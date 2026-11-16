@@ -49,3 +49,19 @@ imported-hours snapshot, so their hand edits are flagged only after one more imp
 
 The preview tab was closed and the Rails and Vite processes were stopped through
 `dev-lifecycle`. Both disposable databases are dropped before handback.
+
+## Round 3: CodeRabbit fixes
+
+Affected-flow QA after the third review round. Synthetic fixture in the disposable database
+`cp_test_473_r3` (Rails test env on 127.0.0.1:3473, Vite on 127.0.0.1:5473, local auth bypass).
+One company with `mosa_revel` (Revel PDF required) and a pending client revision 1 on each run.
+T3 preview browser (Chromium; viewport resize, not a phone).
+
+| # | Viewport | Steps and expected saved result | Result |
+| --- | --- | --- | --- |
+| 9 | 1280×800 | Upload the Revel PDF, select "Use this import for the client’s revision 1", reactivate Blake (date defaults to the period start). The revision stays selected after matching again, Blake is matched and Apply is on. Apply. | passed; DB: the client revision's import is linked through the pay run and applied, Avery 40 h, Blake 12 h and active |
+| 10 | 390×844 | Same on a second run with Dana. No horizontal overflow; the revision stays selected; apply. | passed; DB: revision linked and applied, Avery 40 h, Dana 20 h and active |
+
+Covered by component tests rather than the browser: outcomes are not carried into a review of
+different files, outcome controls are locked while matching runs, and a worker that loads after
+Back does not open the reactivation dialog.

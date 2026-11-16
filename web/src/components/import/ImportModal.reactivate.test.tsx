@@ -5,11 +5,11 @@ import { MemoryRouter } from 'react-router';
 import { ImportModal } from './ImportModal';
 import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow } from '@/services/api';
 
-const mocks = vi.hoisted(() => ({ rematchImport: vi.fn(), applyImport: vi.fn(), getEmployee: vi.fn(), reactivate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rematchImport: vi.fn(), applyImport: vi.fn(), previewImport: vi.fn(), getEmployee: vi.fn(), reactivate: vi.fn() }));
 vi.mock('@/services/api', async original => ({
   ...await original<typeof import('@/services/api')>(),
   payrollIntakeImportsApi: { list: vi.fn().mockResolvedValue({ imports: [] }) },
-  payPeriodsApi: { rematchImport: mocks.rematchImport, applyImport: mocks.applyImport },
+  payPeriodsApi: { rematchImport: mocks.rematchImport, applyImport: mocks.applyImport, previewImport: mocks.previewImport },
   employeesApi: { get: mocks.getEmployee, reactivate: mocks.reactivate },
 }));
 
@@ -24,11 +24,16 @@ const inactiveBlake: MosaSourceRow = {
   errors: [{ code: 'unmatched_revel_employee', severity: 'error', employee_id: 22, employee_name: 'Blake Returning', employee_status: 'inactive', message: 'Blake Returning is inactive in Cornerstone.' }],
 };
 
-function preview(rows: MosaSourceRow[], matched: ImportPreviewRow[], revision = 1, warnings: ImportPreviewResponse['preview']['source_warnings'] = []): ImportPreviewResponse {
+const documents = (pdfSha = 'pdf-sha') => [
+  { id: 1, source_role: 'revel_hours', filename: 'revel.pdf', content_type: 'application/pdf', byte_size: 10, sha256: pdfSha },
+  { id: 2, source_role: 'supplemental_workbook', filename: 'mosa.xlsx', content_type: 'application/vnd.ms-excel', byte_size: 10, sha256: 'workbook-sha' },
+];
+
+function preview(rows: MosaSourceRow[], matched: ImportPreviewRow[], revision = 1, warnings: ImportPreviewResponse['preview']['source_warnings'] = [], pdfSha = 'pdf-sha'): ImportPreviewResponse {
   return {
     import_id: 40 + revision,
     pay_period: { start_date: '2026-11-02', end_date: '2026-11-15' },
-    source_package: { id: revision, package_id: `package-${revision}`, package_revision: revision, package_schema_version: '1', current: true, verified_source_count: 2, source_count: 2, disposition_targets: [] },
+    source_package: { id: revision, package_id: `package-${revision}`, package_revision: revision, package_schema_version: '1', current: true, verified_source_count: 2, source_count: 2, disposition_targets: [], documents: documents(pdfSha) },
     preview: {
       matched, unmatched_pdf_names: [], unmatched_excel_names: [], duplicate_employee_matches: [], low_confidence_matches: [],
       pdf_count: rows.length, excel_count: 0, matched_count: matched.length, can_apply: true, tips_paid_out_from_tips: false, source_rows: rows, source_warnings: warnings,
@@ -117,6 +122,7 @@ it('shows a serious notice on its own without counting it as something that keep
 
   expect(screen.getByRole('alert').textContent).toContain('retained as superseded revision 1');
   expect(screen.queryByRole('region', { name: 'Needs your action' })).toBeNull();
+  expect((screen.getByRole('button', { name: /Apply Import/ }) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('does not offer "No tips or loans" when the client sent a workbook link', () => {
@@ -134,4 +140,104 @@ it('does not offer "No tips or loans" when the client sent a workbook link', () 
   expect(within(checklist).getByText('The client sent a link to the workbook. Attach the workbook from the link above.')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Add the Tips & loans workbook' })).toBeTruthy();
   expect((screen.getByRole('button', { name: /Apply Import/ }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+const blake = { id: 22, first_name: 'Blake', last_name: 'Returning', status: 'inactive', employment_type: 'hourly' };
+const blakeMatchedRow = (id: number): MosaSourceRow => ({ ...inactiveBlake, id, employee_id: 22, row_kind: 'matched', errors: [] });
+const blakeMatched = { ...avery, source_row_id: 12, employee_id: 22, employee_name: 'Blake Returning', pdf_employee_name: 'Returning, Blake', regular_hours: 12 };
+
+async function reactivateBlake() {
+  fireEvent.click(screen.getByRole('button', { name: 'Reactivate Blake Returning' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Reactivate Blake' });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Reactivate employee' }));
+  await waitFor(() => expect(mocks.rematchImport).toHaveBeenCalledWith(9));
+}
+
+it('does not carry outcomes into a review of different files, and says why', async () => {
+  mocks.getEmployee.mockResolvedValue({ data: blake });
+  mocks.reactivate.mockResolvedValue({ data: { ...blake, status: 'active' } });
+  // Another window replaced the Revel PDF while this review was open.
+  mocks.rematchImport.mockResolvedValue(preview([averyRow(11), blakeMatchedRow(12)], [{ ...avery, source_row_id: 11 }, blakeMatched], 3, [], 'other-pdf-sha'));
+  open(preview([averyRow(1), inactiveBlake], [avery]), true);
+
+  fireEvent.change(screen.getAllByLabelText('Outcome for Server, Avery')[0], { target: { value: 'excluded' } });
+  fireEvent.change(screen.getAllByLabelText('Reason for Server, Avery')[0], { target: { value: 'Paid on another run' } });
+  await reactivateBlake();
+
+  expect(await screen.findByText(/The import’s files changed since this review opened, so choose each row’s outcome again/)).toBeTruthy();
+  expect((screen.getAllByLabelText('Outcome for Server, Avery')[0] as HTMLSelectElement).value).toBe('included');
+});
+
+it('locks outcomes while matching runs again, so a change made meanwhile is not lost', async () => {
+  mocks.getEmployee.mockResolvedValue({ data: blake });
+  mocks.reactivate.mockResolvedValue({ data: { ...blake, status: 'active' } });
+  let finish: (value: ImportPreviewResponse) => void = () => undefined;
+  mocks.rematchImport.mockReturnValue(new Promise<ImportPreviewResponse>((resolve) => { finish = resolve; }));
+  open(preview([averyRow(1), inactiveBlake], [avery]), true);
+
+  fireEvent.change(screen.getAllByLabelText('Outcome for Server, Avery')[0], { target: { value: 'excluded' } });
+  await reactivateBlake();
+
+  expect((screen.getAllByLabelText('Outcome for Server, Avery')[0] as HTMLSelectElement).disabled).toBe(true);
+  expect((screen.getAllByLabelText('Reason for Server, Avery')[0] as HTMLInputElement).disabled).toBe(true);
+  finish(preview([averyRow(11), blakeMatchedRow(12)], [{ ...avery, source_row_id: 11 }, blakeMatched], 2));
+  await screen.findByText('Blake Returning is active again and is now matched in this import.');
+  expect((screen.getAllByLabelText('Outcome for Server, Avery')[0] as HTMLSelectElement).disabled).toBe(false);
+});
+
+it('ignores a worker that finishes loading after staff went Back', async () => {
+  let finish: (value: { data: typeof blake }) => void = () => undefined;
+  mocks.getEmployee.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  mocks.previewImport.mockResolvedValue(preview([averyRow(1), inactiveBlake], [avery]));
+  render(<MemoryRouter><ImportModal open payPeriodId={9} companyId={7} canReactivateWorkers onOpenChange={vi.fn()} onImportComplete={vi.fn()} /></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText('Revel hours PDF'), { target: { files: [new File(['pdf'], 'revel.pdf', { type: 'application/pdf' })] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Import' }));
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Reactivate Blake Returning' }));
+  await waitFor(() => expect(mocks.getEmployee).toHaveBeenCalledWith(22, 7));
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  finish({ data: blake });
+
+  await screen.findByRole('button', { name: 'Preview Import' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(screen.queryByRole('dialog', { name: 'Reactivate Blake' })).toBeNull();
+});
+
+const pendingRevision = (submissionId: number): ImportPreviewResponse['pending_portal_source'] => ({ submission_id: submissionId, revision: 2, period_id: 3, no_changes: true, changes: [] });
+
+it('keeps the selected client revision after matching again when it is still the one offered', async () => {
+  mocks.getEmployee.mockResolvedValue({ data: blake });
+  mocks.reactivate.mockResolvedValue({ data: { ...blake, status: 'active' } });
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
+  const rematched = preview([averyRow(11), blakeMatchedRow(12)], [{ ...avery, source_row_id: 11 }, blakeMatched], 2);
+  rematched.pending_portal_source = pendingRevision(5);
+  mocks.rematchImport.mockResolvedValue(rematched);
+  const initial = preview([averyRow(1), inactiveBlake], [avery]);
+  initial.pending_portal_source = pendingRevision(5);
+  open(initial, true);
+
+  fireEvent.click(screen.getByLabelText('Use this import for the client’s revision 2'));
+  await reactivateBlake();
+  await screen.findByText('Blake Returning is active again and is now matched in this import.');
+
+  expect((screen.getByLabelText('Use this import for the client’s revision 2') as HTMLInputElement).checked).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: /Apply Import/ }));
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ use_submission_id: 5 })));
+});
+
+it('clears the client revision selection when matching again offers a different revision', async () => {
+  mocks.getEmployee.mockResolvedValue({ data: blake });
+  mocks.reactivate.mockResolvedValue({ data: { ...blake, status: 'active' } });
+  const rematched = preview([averyRow(11), blakeMatchedRow(12)], [{ ...avery, source_row_id: 11 }, blakeMatched], 2);
+  rematched.pending_portal_source = pendingRevision(6);
+  mocks.rematchImport.mockResolvedValue(rematched);
+  const initial = preview([averyRow(1), inactiveBlake], [avery]);
+  initial.pending_portal_source = pendingRevision(5);
+  open(initial, true);
+
+  fireEvent.click(screen.getByLabelText('Use this import for the client’s revision 2'));
+  await reactivateBlake();
+  await screen.findByText('Blake Returning is active again and is now matched in this import.');
+
+  expect((screen.getByLabelText('Use this import for the client’s revision 2') as HTMLInputElement).checked).toBe(false);
 });
