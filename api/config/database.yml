@@ -24,7 +24,9 @@ default: &default
 
 development:
   <<: *default
-  database: api_development
+  # Generic names like api_development are shared with other local apps that
+  # also live in an api/ folder; reloading the schema there drops their tables.
+  database: cornerstone_payroll_development
 
   # The specified database role being used to connect to PostgreSQL.
   # To create additional roles in PostgreSQL see `$ createuser --help`.
