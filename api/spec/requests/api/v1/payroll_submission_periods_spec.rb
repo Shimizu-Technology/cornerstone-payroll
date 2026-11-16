@@ -526,6 +526,18 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(data["allowed_actions"]).to eq([ "message" ])
     end
 
+    it "rejects corrected source files once the linked run is committed" do
+      period.update!(status: "paid", pay_period: pay_period)
+      pay_period.update_columns(status: "committed", committed_at: Time.current)
+      as_client
+      expect {
+        send_package(notes: "Too late", based_on_revision: period.current_submission.revision, idempotency_key: "post-commit-correction")
+      }.not_to change { period.reload.submissions.count }
+      expect(response).not_to have_http_status(:created)
+      expect(response.status).to be_between(400, 499)
+      expect(period.reload.status).to eq("paid")
+    end
+
     it "rolls back an acknowledgement when its audit write fails" do
       allow(PayrollSubmissions::Audit).to receive(:record!).and_raise(ActiveRecord::StatementInvalid, "audit unavailable")
       expect do
