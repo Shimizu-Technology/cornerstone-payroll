@@ -28,6 +28,14 @@ class PayrollStandingChange < ApplicationRecord
     nil
   end
 
+  def display_label
+    label.presence || "#{employee.full_name} · #{kind == 'owner_pay' ? 'Pay this period' : 'Hours'}"
+  end
+
+  validates :required, :allow_none, inclusion: { in: [ true, false ] }
+  validates :label, length: { maximum: 200 }
+  validates :help_text, length: { maximum: 1000 }
+
   private
 
   def same_company_and_job
