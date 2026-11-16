@@ -1404,6 +1404,14 @@ module Api
           }
 
           unless action_name == "index"
+            # Previews exist only for calculated or approved runs.
+            last_preview = if pay_period.status.in?(%w[calculated approved])
+              AuditLog.where(company_id: pay_period.company_id, action: "checks#preview_pdf",
+                record_type: "PayPeriod", record_id: pay_period.id).newest_first.first
+            end
+            json[:last_preview_download] = last_preview && {
+              revision: last_preview.metadata["revision"], downloaded_at: last_preview.created_at.iso8601
+            }
             json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
             json[:payroll_review] = PayrollReview::PackagePresenter.call(
               pay_period.payroll_review_packages.current.includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
