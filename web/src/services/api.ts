@@ -3699,6 +3699,9 @@ export const checksApi = {
       `/admin/pay_periods/${payPeriodId}/check_print_generations/${generationId}`
     ),
 
+  previewPdf: (payPeriodId: number, companyId?: number, part?: 'checks' | 'stubs') =>
+    api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/checks/preview_pdf`, { part }, { companyId }),
+
   rehearsalPreviewPdf: (payPeriodId: number, startingSlot?: number) =>
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/checks/rehearsal_preview_pdf`, {
       starting_slot: startingSlot,

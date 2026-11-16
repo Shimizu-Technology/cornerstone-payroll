@@ -338,3 +338,8 @@ export interface PayPeriodDetailProps {
 export type CoverageAcknowledgement = { source_coverage_reason: string; source_coverage_acknowledged: true };
 
 export type EmploymentGroup = 'w2' | 'contractor';
+
+// Keep explicit job attribution even when only one of several saved jobs has hours.
+export function preservesWorksheetJobHours(employee: Employee | undefined, rows: PayrollItemWageRateHours[]) {
+  return rows.length > 1 || (employee?.wage_rates || []).filter(rate => rate.active !== false).length > 1;
+}
