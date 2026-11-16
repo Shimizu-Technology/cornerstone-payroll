@@ -1,3 +1,4 @@
+import { PayrollPreviewCard } from '@/components/payroll/PayrollPreviewCard';
 import { PriorProviderHistoryNotice } from '@/components/payroll/PriorProviderHistoryNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
@@ -495,6 +496,7 @@ function PayRunChecks({ externalRefreshToken = 0, showDraftPaymentControls = tru
 
   return (
     <>
+      <PayrollPreviewCard key={payRun.id} payPeriod={payRun} onDownloaded={refreshPayRunSummary} />
       <PayrollItemReviewDialog companyId={companyId} payRunId={payRun.id} item={reviewingItem} returnTo={returnTo} onClose={() => setReviewingItem(null)} />
       {!readOnly && <Link to="/check-settings" className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-700">Check Settings ›</Link>}
       <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />

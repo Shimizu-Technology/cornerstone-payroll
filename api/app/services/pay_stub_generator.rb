@@ -25,7 +25,8 @@ class PayStubGenerator
 
   attr_reader :payroll_item, :employee, :pay_period, :company
 
-  def initialize(payroll_item)
+  def initialize(payroll_item, preview: false)
+    @preview = preview
     @payroll_item = payroll_item
     @employee = payroll_item.employee
     @pay_period = payroll_item.pay_period
@@ -59,9 +60,10 @@ class PayStubGenerator
     # Keep current and YTD summaries together when the statement paginates.
     render_summaries(pdf)
 
+    PdfPreviewWatermark.apply(pdf) if @preview
     render_with_footer(
       pdf,
-      "This is your official earnings statement. Please retain for your records.\nGenerated on #{guam_generated_timestamp}",
+      @preview ? "PREVIEW" : "This is your official earnings statement. Please retain for your records.\nGenerated on #{guam_generated_timestamp}",
       font_size: 7,
       height: 30
     )
@@ -133,14 +135,14 @@ class PayStubGenerator
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
         [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
         if !payroll_item.net_pay.to_d.positive?
-          [ "Payment:", "Earnings statement only - no payment issued" ]
+          [ "Payment:", @preview ? "Earnings statement only" : "Earnings statement only - no payment issued" ]
         elsif payroll_item.effective_payment_delivery_method == "direct_deposit"
-          [ "Payment:", "Direct deposit (stub only; transfer not confirmed)" ]
+          [ "Payment:", @preview ? "Direct deposit" : "Direct deposit (stub only; transfer not confirmed)" ]
         else
-          [ "Check #:", payroll_item.check_number.presence || "No check issued" ]
+          [ "Check #:", @preview ? "" : payroll_item.check_number.presence || "No check issued" ]
         end
       ]
-      if !payroll_item.net_pay.to_d.positive? && payroll_item.check_number.present?
+      if !@preview && !payroll_item.net_pay.to_d.positive? && payroll_item.check_number.present?
         data << [ "Check reference:", payroll_item.check_number ]
       end
 
