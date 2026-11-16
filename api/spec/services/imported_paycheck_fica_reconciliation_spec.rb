@@ -4,6 +4,8 @@ require "rails_helper"
 require "rake"
 
 RSpec.describe ImportedPaycheckFicaReconciliation do
+  include FicaHistoryHelpers
+
   let!(:tax_table) { create(:tax_table, tax_year: 2026, ss_wage_base: 184500) }
   let(:company) { create(:company, auto_create_fit_check: false) }
   let(:actor) { create(:user, company: company, role: "admin") }
@@ -25,22 +27,6 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
     EmployeeYearFicaSourceReview.record!(employee: person, actor: actor, tax_year: 2026,
       through_pay_date: through, external_ss_wage_bound: ss, external_medicare_wage_bound: ss,
       review_reference: "Synthetic review of all employer and predecessor wage sources")
-  end
-
-  def imported(person = employee, gross: 1000, tips: 0, employer: true)
-    period = HistoricalPayPeriod.create!(historical_import_batch: batch, company: company,
-      external_key: SecureRandom.uuid, source_label: "Synthetic import", start_date: "2026-01-01",
-      end_date: "2026-01-14", pay_date: "2026-01-16", paycheck_count: 1, totals: {})
-    worker = create(:historical_worker, company: company, historical_import_batch: batch, employee: person, mapping_status: "exact_match")
-    ss = (gross.to_d * "0.062".to_d).round(2)
-    med = (gross.to_d * "0.0145".to_d).round(2)
-    HistoricalPaycheck.create!(historical_import_batch: batch, historical_pay_period: period, historical_worker: worker,
-      company: company, employee: person, external_key: SecureRandom.uuid, source_employee_name: "Synthetic worker",
-      source_row_number: 1, reconciliation_status: "matched", period_start: period.start_date, period_end: period.end_date,
-      pay_date: period.pay_date, gross_pay: gross, adjusted_gross: gross, social_security_tax: ss, medicare_tax: med,
-      earnings_breakdown: [ { label: "Regular", amount: (gross.to_d - tips.to_d).to_s("F") }, { label: "PayTip", amount: tips.to_s } ],
-      employee_tax_breakdown: [ { label: "SS", amount: ss.to_s("F") }, { label: "Med", amount: med.to_s("F") } ],
-      employer_tax_breakdown: employer ? [ { label: "SS", amount: ss.to_s("F") }, { label: "Med", amount: med.to_s("F") } ] : [])
   end
 
   # Shift stored taxes by signed cents from the rule-computed amounts while
@@ -102,6 +88,56 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
       lifecycle.commit!
       expect(item.pay_period.reload).to be_committed
       expect(PayrollFicaLegacyRecovery.new(company: company, year: 2026).inventory[:employee_year_counts]).not_to have_key("held")
+    end
+  end
+
+  it "retains an imported-history note when the ordinary annual calculation actually fails" do
+    imported
+    review
+    apply
+    rules = PayrollFicaLegacyRecovery.new(company: company, year: 2026).verified_year_rules
+    context = BelowThresholdFicaContext.new(employee: employee, company: company, year: 2026)
+    expect(context.unresolved_history?).to be(false)
+    expect(context.applicable?).to be(true)
+    expect { EmployeeYearFicaContext.new(employee: employee, year: 2026).increment(wages_delta: 500, tips_delta: 50, rules: rules) }
+      .to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /lacks verified/)
+
+    item = calculate
+    expect(item.tax_rule_snapshot.fetch("annual_fica_context")).to include("history_review_open" => true,
+      "note" => a_string_including("imported paycheck history"))
+    expect(item.pay_period.annual_fica_review_note).to include(employee.full_name, "imported paycheck history")
+    lifecycle = PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor)
+    lifecycle.approve!
+    lifecycle.commit!
+    expect(item.pay_period.reload.annual_fica_review_note).to include("imported paycheck history")
+  end
+
+  [ :reversal, :void ].each do |reason|
+    it "names only the unresolved #{reason} when reconciled imports accompany a successful ordinary calculation" do
+      imported
+      original = company.payroll_items.sole
+      if reason == :reversal
+        original.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: actor.id,
+          payroll_reversal_reason: "Synthetic reviewed financial reversal")
+      else
+        original.pay_period.update_columns(correction_status: "voided")
+      end
+      review
+      apply
+      rules = PayrollFicaLegacyRecovery.new(company: company, year: 2026).verified_year_rules
+      ordinary = EmployeeYearFicaContext.new(employee: employee, year: 2026)
+        .increment(wages_delta: 500, tips_delta: 50, rules: rules)
+      item = calculate
+      expect(item.attributes.symbolize_keys.slice(*ordinary.keys)).to eq(ordinary)
+      detail = reason == :void ? "voided pay period ##{original.pay_period_id}" : "reversed paycheck ##{original.id}"
+      note = item.tax_rule_snapshot.dig("annual_fica_context", "note")
+      expect(note).to include(detail)
+      expect(note).not_to include("imported paycheck history")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(item.pay_period.reload.annual_fica_review_note).to include(detail)
+      expect(item.reload.attributes.symbolize_keys.slice(*ordinary.keys)).to eq(ordinary)
     end
   end
 
@@ -278,7 +314,14 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
       item = calculate(person)
       PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor).approve!
       expect(item.pay_period.reload).to be_approved
-      expect(item.tax_rule_snapshot["annual_fica_context"]).to include("mode" => "calculable_below_thresholds", "history_review_open" => true, "filing_review_open" => true)
+      if person == employee
+        # Only this employee has the unresolved native legacy row from batch.
+        expect(item.tax_rule_snapshot["annual_fica_context"]).to include("mode" => "calculable_below_thresholds", "history_review_open" => true)
+        expect(item.pay_period.annual_fica_review_note).to include("imported paycheck history")
+      else
+        expect(item.tax_rule_snapshot["annual_fica_context"]).not_to have_key("history_review_open")
+        expect(item.pay_period.annual_fica_review_note).to be_nil
+      end
     end
     expect(PayrollFicaLegacyRecovery.new(company: company, year: 2026).inventory[:employee_year_counts].fetch("held", 0)).to eq(0)
     expect(service.inventory[:counts]).to include("held" => 0, "proven" => 36)
