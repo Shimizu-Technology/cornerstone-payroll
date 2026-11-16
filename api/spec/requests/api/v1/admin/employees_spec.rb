@@ -1013,6 +1013,27 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/employees/:id/deactivate" do
+    let!(:employee) { create(:employee, company: company, status: "active", hire_date: "2024-01-01") }
+    let(:payload) { { deactivation: { effective_date: "2024-03-15", reason_category: "other", internal_notes: "Seasonal pause" } } }
+
+    it "saves history and audits the inactive status" do
+      post "/api/v1/admin/employees/#{employee.id}/deactivate", params: payload, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload.status).to eq("inactive")
+      expect(response.parsed_body.dig("data", "status_history", 0)).to include("event_type" => "deactivated", "previous_status" => "active", "resulting_status" => "inactive")
+      expect(AuditLog.find_by!(action: "employees#deactivate", record_id: employee.id).metadata).to include("after_values" => include("status" => "inactive"))
+    end
+
+    it "refuses staff without configuration permission" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+      post "/api/v1/admin/employees/#{employee.id}/deactivate", params: payload, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(employee.reload.status).to eq("active")
+      expect(employee.employee_status_events).to be_empty
+    end
+  end
+
   describe "POST /api/v1/admin/employees/:id/reactivate" do
     let!(:employee) { create(:employee, company: company, status: "inactive", termination_date: nil) }
     let(:payload) { { reactivation: { effective_date: "2024-04-01", internal_notes: "Returned to work" } } }

@@ -487,7 +487,7 @@ export interface EmployeeWorkProfileInput {
 
 export interface EmployeeStatusEvent {
   id: number;
-  event_type: 'terminated' | 'reactivated';
+  event_type: 'terminated' | 'reactivated' | 'deactivated';
   previous_status: EmployeeStatus;
   resulting_status: EmployeeStatus;
   effective_date: string;
