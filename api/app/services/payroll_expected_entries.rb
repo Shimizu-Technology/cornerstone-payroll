@@ -20,7 +20,9 @@ class PayrollExpectedEntries
         allow_none: field.allow_none?, availability_error: field.availability_error, status: status, value: value,
         note: exclusion&.reason || resolution&.note, inline_save_error: inline_save_error(field) }
     end
-    regulars = missing_regulars(fields.map { |field| field[:employee_id] })
+    # A field that can't be filled (deactivated job, changed pay setup) no
+    # longer covers its employee, so the missing-regulars check still applies.
+    regulars = missing_regulars(fields.select { |field| field[:availability_error].blank? }.map { |field| field[:employee_id] })
     outstanding = fields.select { |field| field[:required] && field[:status] == "missing" && field[:availability_error].blank? }.map { |field| field[:label] } +
       regulars.reject { |row| row[:resolved] }.map { |row| row[:label] }
     { fields: fields, missing_regulars: regulars, outstanding: outstanding }
