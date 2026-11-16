@@ -245,6 +245,28 @@ it('keeps the selected client revision after matching again when it is still the
   await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ use_submission_id: 5 })));
 });
 
+it('locks the client revision choice while matching runs again', async () => {
+  mocks.getEmployee.mockResolvedValue({ data: blake });
+  mocks.reactivate.mockResolvedValue({ data: { ...blake, status: 'active' } });
+  let finish: (value: ImportPreviewResponse) => void = () => undefined;
+  mocks.rematchImport.mockReturnValue(new Promise<ImportPreviewResponse>((resolve) => { finish = resolve; }));
+  const initial = preview([averyRow(1), inactiveBlake], [avery]);
+  initial.pending_portal_source = pendingRevision(5);
+  open(initial, true);
+
+  fireEvent.click(screen.getByLabelText('Use this import for the client’s revision 2'));
+  await reactivateBlake();
+
+  expect((screen.getByLabelText('Use this import for the client’s revision 2') as HTMLInputElement).disabled).toBe(true);
+  const rematched = preview([averyRow(11), blakeMatchedRow(12)], [{ ...avery, source_row_id: 11 }, blakeMatched], 2);
+  rematched.pending_portal_source = pendingRevision(5);
+  finish(rematched);
+  await screen.findByText('Blake Returning is active again and is now matched in this import.');
+  const checkbox = screen.getByLabelText('Use this import for the client’s revision 2') as HTMLInputElement;
+  expect(checkbox.disabled).toBe(false);
+  expect(checkbox.checked).toBe(true);
+});
+
 it('clears the client revision selection when matching again offers a different revision', async () => {
   mocks.getEmployee.mockResolvedValue({ data: blake });
   mocks.reactivate.mockResolvedValue({ data: { ...blake, status: 'active' } });
