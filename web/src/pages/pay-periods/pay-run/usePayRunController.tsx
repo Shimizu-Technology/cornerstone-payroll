@@ -1046,13 +1046,35 @@ export function usePayRunController({
   };
 
   useEffect(() => {
-    if (loading || !payPeriod?.id || location.hash !== '#time-tracking-sync') return;
-    const target = document.getElementById('time-tracking-sync');
+    if (loading || !payPeriod?.id || !['#time-tracking-sync', '#expected-payroll-entries', '#payroll-ineligible-workers', '#payroll-blockers', '#payroll-loan-inputs', '#payroll-commit', '#payroll-feedback'].includes(location.hash)) return;
+    const target = document.getElementById(location.hash.slice(1));
+    for (let parent = target?.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
     target?.scrollIntoView?.({ block: 'start' });
     target?.focus({ preventScroll: true });
-  }, [loading, payPeriod?.id, location.hash]);
+  }, [loading, payPeriod?.id, location.hash, location.pathname]);
 
   const correctionRouteGeneration = commitRouteGenerationRef.current;
+
+  const handleRestoreEmployee = async (employeeId: number) => {
+    if (!payPeriod || payPeriod.id !== payRunId || processing || savedImportReloadRequiredRef.current || refreshInFlightRouteRef.current !== null) return;
+    const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
+    const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
+      scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
+    refreshInFlightRouteRef.current = scope.generation;
+    setProcessing(true);
+    try {
+      await payPeriodsApi.restoreEmployee(payRunId, employeeId);
+      if (!isCurrentRoute()) return;
+      const result = await loadPayPeriod(payRunId, true, true);
+      if (!isCurrentRoute() || result === 'superseded') return;
+      if (result === 'failed') throw new Error('Employee added back, but the run could not reload. Try Add back again to refresh it.');
+    } finally {
+      if (isCurrentRoute()) {
+        refreshInFlightRouteRef.current = null;
+        setProcessing(false);
+      }
+    }
+  };
 
   if (loading) {
     return { status: 'loading' as const, fallback: <WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" /> };
@@ -1540,7 +1562,7 @@ export function usePayRunController({
     refreshDialog: { error, handleRefreshSetup, processing, refreshBaseSalary, refreshRecurring, refreshSetupOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, sourceCoverageOpen },
     loans: { additionalEmployeeIds, canEditPayPeriod, employees, isCalculated, isDraft, namedLoanDrafts, namedLoanOptions, payPeriod, payrollItems, setNamedLoanDrafts, standaloneLoanConflicts },
     comparison: { comparison, comparisonError, comparisonFlagTone, comparisonHiddenRows, comparisonHighlights, comparisonLoading, comparisonRows, comparisonTotalRows, isApproved, isCalculated, isCommitted, loadComparison, payPeriod, payrollItems },
-    roster: { onCalculateExpectedEntry: (field: ExpectedEntries['fields'][number], value: number) => handleRunPayroll(undefined, { field, value }), loadPayPeriod, hasStagedWorksheetChanges, canEditPayPeriod, additionalEmployeeIds, employees, financialActionsHeld, handleRunPayroll, isCalculated, isDraft, payPeriod, payrollItems, processing, setAdditionalEmployeeIds, setBonusEdits, setBonusMap, setHoursMap, setLoansMap, setNamedLoanDrafts, setPayrollFieldDrafts, setSalaryOverrideMap, setTipsMap, setTipsPaidOutMap },
+    roster: { handleRestoreEmployee, onCalculateExpectedEntry: (field: ExpectedEntries['fields'][number], value: number) => handleRunPayroll(undefined, { field, value }), loadPayPeriod, hasStagedWorksheetChanges, canEditPayPeriod, additionalEmployeeIds, employees, financialActionsHeld, handleRunPayroll, isCalculated, isDraft, payPeriod, payrollItems, processing, setAdditionalEmployeeIds, setBonusEdits, setBonusMap, setHoursMap, setLoansMap, setNamedLoanDrafts, setPayrollFieldDrafts, setSalaryOverrideMap, setTipsMap, setTipsPaidOutMap },
     hours: { hasStagedWorksheetChanges, additionalEmployeeIds, bonusEdits, bonusMap, companyId, currentPath, departmentFilter, departmentOptions, displayEmployeesForHours, employeeTypeFilter, employees, employmentGroupKey, employmentGroupLabel, employmentGroupTone, estimateWorksheetGross, hoursMap, hoursSortBy, hoursSortDirection, hoursTableOpen, isCalculated, isDraft, loansMap, namedLoanDrafts, namedLoanOptions, payPeriod, payrollFieldAssignmentLookup, payrollFieldDrafts, payrollItemByEmployeeId, payrollItems, resetPayrollFieldDraft, retainedRetirementEntries, salaryOverrideMap, searchTerm, setBonusEdits, setBonusMap, setDepartmentFilter, setEmployeeTypeFilter, setHoursSortBy, setHoursSortDirection, setHoursTableOpen, setNamedLoanDrafts, setSearchTerm, setShowPayrollFields, setShowTipsLoans, showPayrollFields, showTipsLoans, tipsLoansVisibilityModeRef, tipsMap, tipsPaidOutMap, updateHours, updateLoan, updatePayrollFieldDraft, updateSalaryOverride, updateTip, updateTipsPaidOut, updateWageRateHours, worksheetPayrollFields },
     results: { companyId, currentPath, departmentFilter, departmentOptions, employeeLookup, employeeTypeFilter, employmentGroupKey, employmentGroupLabel, employmentGroupTone, isCalculated, isCommitted, isDraft, payPeriod, payrollItemDisplayedHours, payrollItemNameParts, payrollItems, registerPayrollFieldTotals, registerTotals, resultsSortBy, resultsSortDirection, searchTerm, setCorrectingItem, setDepartmentFilter, setEditingItem, setEmployeeTypeFilter, setReplacingItem, setResultsSortBy, setResultsSortDirection, setReviewingItem, setSearchTerm, sortPayrollItems, visiblePayrollFields },
     employerTaxes: { fitDivergence, isDraft, payrollItems, totalDRTDeposit, totalEmployerMedicare, totalEmployerSS, totalMedicare, totalSS, totalWithholding },

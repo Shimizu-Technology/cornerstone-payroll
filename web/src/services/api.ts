@@ -1555,6 +1555,8 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/adopt_confirmed_workweek`),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
+  restoreEmployee: (id: number, employeeId: number) =>
+    api.delete(`/admin/pay_periods/${id}/excluded_employees/${employeeId}`),
   unapprove: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
   commit: (id: number, acknowledgeOutstandingFileRequests?: boolean) =>

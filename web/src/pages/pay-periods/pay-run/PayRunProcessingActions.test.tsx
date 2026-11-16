@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
-import { PayRunStepAction } from './PayRunProcessingActions';
+import { PayRunProcessingActions, PayRunStepAction } from './PayRunProcessingActions';
 
 afterEach(cleanup);
 it.each([
@@ -47,4 +47,20 @@ it.each([true, false])('blocks Commit over client changes with setting %s', requ
   expect(screen.getByRole('button', { name: 'Commit' })).toHaveProperty('disabled', true);
   expect(screen.getByText('MoSa Approver requested changes: Add two hours. Unapprove to make changes.')).toBeTruthy();
   expect(commit).not.toHaveBeenCalled();
+});
+
+it('tells staff to unapprove an approved regular run with removed employees', () => {
+  const props = { companyId: 1, payRunId: 2, payPeriod: { id: 2, status: 'approved', run_purpose: 'regular', excluded_employee_ids: [7] }, isApproved: true,
+    calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [], handleUnapprove: vi.fn() } as unknown as ComponentProps<typeof PayRunProcessingActions>;
+  render(<MemoryRouter><PayRunProcessingActions {...props} /></MemoryRouter>);
+  expect(screen.getByText('1 removed from this run. Unapprove to add someone back.')).toBeTruthy();
+});
+
+it.each(['approved', 'calculated'] as const)('shows the %s header blocker with a direct link to expected entries', status => {
+  const props = { companyId: 1, payRunId: 2, payPeriod: { id: 2, status, run_purpose: 'regular', expected_entries: { outstanding: ['Regular Worker'] } }, isApproved: status === 'approved', isCalculated: status === 'calculated',
+    calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [] } as unknown as ComponentProps<typeof PayRunProcessingActions>;
+  render(<MemoryRouter><PayRunProcessingActions {...props} /></MemoryRouter>);
+  expect(screen.getByText('Resolve expected entries: Regular Worker', { exact: false })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Resolve expected entries' }).getAttribute('href')).toContain('#expected-payroll-entries');
+  expect(screen.getByRole('button', { name: status === 'approved' ? 'Commit' : 'Approve' })).toHaveProperty('disabled', true);
 });
