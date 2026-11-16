@@ -32,6 +32,37 @@ export function carryRowOutcomes(previous: MosaSourceRow[], next: MosaSourceRow[
   });
 }
 
+// Whether two reviews were matched from the same retained files, compared by
+// each file's SHA-256 per role. A rematch of unchanged files can get a new
+// package, so IDs alone can't tell. False when any file has no fingerprint.
+export function sameSourceFiles(a?: ImportSourceDocument[], b?: ImportSourceDocument[]): boolean {
+  const fingerprint = (documents?: ImportSourceDocument[]) => {
+    if (!documents?.length || documents.some((document) => !document.sha256)) return null;
+    return documents.map((document) => `${document.source_role}:${document.sha256}`).sort().join('|');
+  };
+  const left = fingerprint(a);
+  return left !== null && left === fingerprint(b);
+}
+
+const WARNING_TITLES: Record<string, string> = {
+  workbook_period_end_differs: 'The workbook’s period end differs from Revel',
+  pay_period_workweek_offset: 'This pay period and the overtime workweek start on different days',
+  legacy_mosa_workbook: 'Older MoSa workbook format',
+  zero_workbook_tips: 'The workbook’s tips total $0',
+  client_no_tips_or_loans: 'The client chose no tips or loans this period',
+  missing_workbook: 'The tips & loans workbook isn’t included',
+  duplicate_source: 'These files were already previewed for this payroll',
+  no_rows_detected: 'No payroll rows were found',
+  unverified_source_not_kept: 'A file saved before verification was not kept',
+};
+
+// One line for a notice; the full message stays available underneath.
+export function noticeTitle(code: string | undefined, message: string): string {
+  if (code && WARNING_TITLES[code]) return WARNING_TITLES[code];
+  const firstSentence = message.match(/^.*?[.!?](?=\s|$)/)?.[0] || message;
+  return firstSentence.length > 110 ? `${firstSentence.slice(0, 107).trimEnd()}…` : firstSentence;
+}
+
 // SHA-256 of a chosen file, to tell whether it is the same file an import
 // already holds. Null when the browser cannot hash it.
 export async function fileSha256(file: File): Promise<string | null> {
