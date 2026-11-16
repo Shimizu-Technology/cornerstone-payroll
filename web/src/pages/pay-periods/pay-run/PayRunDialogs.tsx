@@ -177,7 +177,7 @@ export function PayRunDialogs({
               excluded_employee_ids: Array.from(new Set([...(prev.excluded_employee_ids || []), removedItem.employee_id])),
               excluded_employees: [
                 ...(prev.excluded_employees || []).filter(employee => employee.employee_id !== removedItem.employee_id),
-                { employee_id: removedItem.employee_id, name: removedItem.employee_name || employeeLookup.get(removedItem.employee_id)?.full_name || 'Employee', reason: 'Removed from pay period' },
+                { employee_id: removedItem.employee_id, name: removedItem.employee_name || (() => { const employee = employeeLookup.get(removedItem.employee_id); return employee ? [employee.first_name, employee.middle_name, employee.last_name].filter(Boolean).join(' ') : 'Employee'; })(), reason: 'Removed from pay period' },
               ],
             } : prev);
             const employeeKey = String(removedItem.employee_id);
