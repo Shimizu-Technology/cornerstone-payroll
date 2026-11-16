@@ -5,12 +5,31 @@ class EmployeeStatusTransitionService
 
   REACTIVATABLE_STATUSES = %w[inactive terminated].freeze
 
+  def self.open_runs(employee, effective_date: nil)
+    runs = PayPeriod.where(company_id: employee.company_id, status: %w[draft calculated approved], run_purpose: "regular")
+      .where(id: PayrollItem.where(employee_id: employee.id).select(:pay_period_id))
+      .order(:id)
+    effective_date ? runs.where("end_date >= ?", effective_date) : runs
+  end
+
+  def self.open_run_groups(employee, effective_date:)
+    runs = open_runs(employee, effective_date: effective_date)
+    {
+      remove: runs.where("start_date >= ?", effective_date),
+      check: runs.where("start_date < ?", effective_date)
+    }
+  end
+
   def self.terminate!(employee:, actor:, attributes:)
     new(employee:, actor:).terminate!(attributes)
   end
 
   def self.reactivate!(employee:, actor:, attributes:)
     new(employee:, actor:).reactivate!(attributes)
+  end
+
+  def self.deactivate!(employee:, actor:, attributes:)
+    new(employee:, actor:).deactivate!(attributes)
   end
 
   def initialize(employee:, actor:)
@@ -31,6 +50,7 @@ class EmployeeStatusTransitionService
       raise Error, "Termination cannot be before the hire date" if @employee.hire_date && effective_date < @employee.hire_date
       raise Error, "Termination cannot be before the worker's latest status change" if before_latest_status_event?(effective_date)
 
+      block_approved_runs!(effective_date)
       previous_status = @employee.status
       @employee.update!(status: "terminated", termination_date: effective_date)
       @employee.employee_status_events.create!(
@@ -39,6 +59,37 @@ class EmployeeStatusTransitionService
         event_type: "terminated",
         previous_status: previous_status,
         resulting_status: "terminated",
+        effective_date: effective_date,
+        last_worked_on: last_worked_on,
+        reason_category: data[:reason_category].presence,
+        internal_notes: data[:internal_notes].presence,
+        source: data[:source].presence || "operator"
+      )
+    end
+  end
+
+  def deactivate!(attributes)
+    data = attributes.to_h.symbolize_keys
+    effective_date = parse_date!(data[:effective_date], "inactive date")
+    raise Error, "Inactive date cannot be in the future" if effective_date > Date.current
+    last_worked_on = parse_optional_date!(data[:last_worked_on], "last worked date")
+
+    ApplicationRecord.transaction do
+      @employee.lock!
+      raise Error, "Client configuration access required" unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
+      raise Error, "Only active workers can be marked inactive" unless @employee.status == "active"
+      raise Error, "Inactive date cannot be before the hire date" if @employee.hire_date && effective_date < @employee.hire_date
+      raise Error, "Inactive date cannot be before the worker's latest status change" if before_latest_status_event?(effective_date)
+
+      block_approved_runs!(effective_date)
+      previous_status = @employee.status
+      @employee.update!(status: "inactive")
+      @employee.employee_status_events.create!(
+        company: @employee.company,
+        actor: @actor,
+        event_type: "deactivated",
+        previous_status: previous_status,
+        resulting_status: "inactive",
         effective_date: effective_date,
         last_worked_on: last_worked_on,
         reason_category: data[:reason_category].presence,
@@ -62,7 +113,7 @@ class EmployeeStatusTransitionService
       if @employee.termination_date && effective_date <= @employee.termination_date
         raise Error, "Reactivation must be after the termination date"
       end
-      raise Error, "Reactivation cannot be before the worker's latest status change" if before_latest_status_event?(effective_date)
+      raise Error, "Reactivation must be after the worker's latest status change" if @employee.employee_status_events.where("effective_date >= ?", effective_date).exists?
 
       previous_status = @employee.status
       @employee.update!(status: "active", termination_date: nil)
@@ -80,6 +131,12 @@ class EmployeeStatusTransitionService
   end
 
   private
+
+  def block_approved_runs!(effective_date)
+    runs = self.class.open_run_groups(@employee, effective_date: effective_date).fetch(:remove).lock.to_a
+    approved = runs.find(&:approved?)
+    raise Error, "Unapprove pay run ##{approved.id} first" if approved
+  end
 
   # Status events form one timeline; a backdated change would rewrite which
   # status applied on earlier payroll dates.
