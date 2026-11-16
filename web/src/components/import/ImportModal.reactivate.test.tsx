@@ -41,9 +41,13 @@ function preview(rows: MosaSourceRow[], matched: ImportPreviewRow[], revision = 
   };
 }
 
-function open(initial: ImportPreviewResponse, canReactivateWorkers: boolean) {
-  render(<MemoryRouter><ImportModal open payPeriodId={9} companyId={7} initialPreview={initial} canReactivateWorkers={canReactivateWorkers} onOpenChange={vi.fn()} onImportComplete={vi.fn()} /></MemoryRouter>);
+function open(initial: ImportPreviewResponse, canReactivateWorkers: boolean, canRehireWorkers = false) {
+  render(<MemoryRouter><ImportModal open payPeriodId={9} companyId={7} initialPreview={initial} canReactivateWorkers={canReactivateWorkers} canRehireWorkers={canRehireWorkers} onOpenChange={vi.fn()} onImportComplete={vi.fn()} /></MemoryRouter>);
 }
+const terminatedBlake: MosaSourceRow = {
+  ...inactiveBlake,
+  errors: [{ ...inactiveBlake.errors[0], employee_status: 'terminated', message: 'Blake Returning is terminated in Cornerstone.' }],
+};
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -282,4 +286,18 @@ it('clears the client revision selection when matching again offers a different 
   await screen.findByText('Blake Returning is active again and is now matched in this import.');
 
   expect((screen.getByLabelText('Use this import for the client’s revision 2') as HTMLInputElement).checked).toBe(false);
+});
+
+it('leaves rehiring a terminated match to managers and admins', () => {
+  open(preview([averyRow(1), terminatedBlake], [avery]), true, false);
+
+  expect(screen.queryByRole('button', { name: /Reactivate/ })).toBeNull();
+  expect(screen.getByText('Blake Returning was terminated. A manager or admin can rehire them.')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Open profile for Returning, Blake (opens in a new tab)' })).toBeTruthy();
+});
+
+it('offers a terminated match to someone who can rehire', () => {
+  open(preview([averyRow(1), terminatedBlake], [avery]), true, true);
+
+  expect(screen.getByRole('button', { name: 'Reactivate Blake Returning' })).toBeTruthy();
 });

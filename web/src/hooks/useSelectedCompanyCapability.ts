@@ -1,5 +1,6 @@
 import { useAuth, useOptionalAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 
 export type ClientCapability =
   | 'manage_client_configuration'
@@ -28,4 +29,15 @@ export function useSelectedCompanyCapability(capability: ClientCapability, compa
 // such as the import review opened from a pay run. No provider, no capability.
 export function useOptionalSelectedCompanyCapability(capability: ClientCapability, companyId?: number | null): boolean {
   return hasCapability(useOptionalAuth(), useCompany(), capability, companyId);
+}
+
+// Payroll staff can reactivate an inactive worker. Bringing back a terminated
+// worker is a rehire, which also needs client configuration. Both respect the
+// selected workspace's write permission.
+export function useOptionalWorkerStatusAccess(companyId?: number | null): { canReactivate: boolean; canRehire: boolean } {
+  const { activeCompany } = useCompany();
+  const hasStatus = useOptionalSelectedCompanyCapability('manage_employee_status', companyId);
+  const hasConfiguration = useOptionalSelectedCompanyCapability('manage_client_configuration', companyId);
+  const canReactivate = hasStatus && canWriteCompany(activeCompany, 'manage_employee_status');
+  return { canReactivate, canRehire: canReactivate && hasConfiguration && canWriteCompany(activeCompany, 'manage_client_configuration') };
 }
