@@ -2134,3 +2134,27 @@ it('clears staff email attestation when the reviewed revision changes', async ()
   await screen.findByText('unconfirmed:');
   expect(apiMocks.recordClientApproval).not.toHaveBeenCalled();
 });
+
+
+it('honors a fresh dialog confirmation when the page still has an older client-review blocker', async () => {
+  vi.clearAllMocks();
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  const committed = { ...initialPayPeriod, status: 'committed' } as PayPeriod;
+  apiMocks.commit.mockResolvedValue({ pay_period: committed });
+  apiMocks.get.mockResolvedValue({ pay_period: committed });
+  let controller!: Extract<ReturnType<typeof usePayRunController>, { status: 'ready' }>['sections'];
+  function FreshCommitHarness() {
+    const result = usePayRunController({ initialPayPeriod: { ...initialPayPeriod, status: 'approved',
+      client_payroll_approval_required: true, payroll_review: { status: 'changes_requested', change_request_note: 'Old client decision' } } as PayPeriod });
+    if (result.status !== 'ready') return null;
+    controller = result.sections;
+    return <output>Ready to confirm</output>;
+  }
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<FreshCommitHarness />} /></Routes></MemoryRouter>);
+  await screen.findByText('Ready to confirm');
+  act(() => controller.dialogs.setCommitPeriodId(12));
+  await act(async () => controller.dialogs.handleCommit(12, { acknowledged_outstanding_file_request_ids: [] }));
+  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12, { acknowledged_outstanding_file_request_ids: [] });
+});

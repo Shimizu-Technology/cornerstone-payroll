@@ -1,0 +1,646 @@
+[
+  {
+    "id": 1,
+    "viewport": "desktop",
+    "entry": "run",
+    "scenario": "happy",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7000
+    },
+    "saved": {
+      "calls": [
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              1
+            ],
+            "expected_next_check_number": 7000
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7000"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 2,
+    "viewport": "desktop",
+    "entry": "run",
+    "scenario": "requests",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7001
+    },
+    "recovery": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              2
+            ],
+            "expected_next_check_number": 7001
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "focus": true,
+      "message": "A file request was added or resolved. Review the list and tick the box again.",
+      "overflow": false,
+      "section": "Outstanding client file requests",
+      "visible": true,
+      "warning": true,
+      "screenshot": "desktop-run-requests.png"
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              2
+            ],
+            "expected_next_check_number": 7001
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              2,
+              13
+            ],
+            "expected_next_check_number": 7001
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7001"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 3,
+    "viewport": "desktop",
+    "entry": "run",
+    "scenario": "counter",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7002
+    },
+    "recovery": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              3
+            ],
+            "expected_next_check_number": 7002
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "focus": true,
+      "message": "The next check number changed to 7102 (it was 7002). Check your stock, then confirm again.",
+      "overflow": false,
+      "section": "Check numbering",
+      "visible": true,
+      "warning": true,
+      "screenshot": "desktop-run-counter.png"
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              3
+            ],
+            "expected_next_check_number": 7002
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              3
+            ],
+            "expected_next_check_number": 7102
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7102"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 4,
+    "viewport": "desktop",
+    "entry": "list",
+    "scenario": "happy",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7103
+    },
+    "saved": {
+      "calls": [
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              4
+            ],
+            "expected_next_check_number": 7103
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7103"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 5,
+    "viewport": "desktop",
+    "entry": "list",
+    "scenario": "requests",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7104
+    },
+    "recovery": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              5
+            ],
+            "expected_next_check_number": 7104
+          },
+          "status": 409
+        }
+      ],
+      "disabled": false,
+      "focus": true,
+      "message": "A file request was added or resolved. No requests remain outstanding. Review the updated details, then confirm again.\n\nResolved: desktop list requests timesheet",
+      "overflow": false,
+      "section": "Outstanding client file requests",
+      "visible": true,
+      "warning": true,
+      "screenshot": "desktop-list-requests.png"
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              5
+            ],
+            "expected_next_check_number": 7104
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [],
+            "expected_next_check_number": 7104
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7104"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 6,
+    "viewport": "desktop",
+    "entry": "list",
+    "scenario": "counter",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7105
+    },
+    "recovery": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              6
+            ],
+            "expected_next_check_number": 7105
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "focus": true,
+      "message": "The next check number changed to 7205 (it was 7105). Check your stock, then confirm again.",
+      "overflow": false,
+      "section": "Check numbering",
+      "visible": true,
+      "warning": true,
+      "screenshot": "desktop-list-counter.png"
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              6
+            ],
+            "expected_next_check_number": 7105
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              6
+            ],
+            "expected_next_check_number": 7205
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7205"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 7,
+    "viewport": "mobile",
+    "entry": "run",
+    "scenario": "happy",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7206
+    },
+    "saved": {
+      "calls": [
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              7
+            ],
+            "expected_next_check_number": 7206
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7206"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 8,
+    "viewport": "mobile",
+    "entry": "run",
+    "scenario": "requests",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7207
+    },
+    "recovery": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              8
+            ],
+            "expected_next_check_number": 7207
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "focus": true,
+      "message": "A file request was added or resolved. Review the list and tick the box again.",
+      "overflow": false,
+      "section": "Outstanding client file requests",
+      "visible": true,
+      "warning": true,
+      "screenshot": "mobile-run-requests.png"
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              8
+            ],
+            "expected_next_check_number": 7207
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              8,
+              14
+            ],
+            "expected_next_check_number": 7207
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7207"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 9,
+    "viewport": "mobile",
+    "entry": "run",
+    "scenario": "counter",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7208
+    },
+    "recovery": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              9
+            ],
+            "expected_next_check_number": 7208
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "focus": true,
+      "message": "The next check number changed to 7308 (it was 7208). Check your stock, then confirm again.",
+      "overflow": false,
+      "section": "Check numbering",
+      "visible": true,
+      "warning": true,
+      "screenshot": "mobile-run-counter.png"
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              9
+            ],
+            "expected_next_check_number": 7208
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              9
+            ],
+            "expected_next_check_number": 7308
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7308"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 10,
+    "viewport": "mobile",
+    "entry": "list",
+    "scenario": "happy",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7309
+    },
+    "saved": {
+      "calls": [
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              10
+            ],
+            "expected_next_check_number": 7309
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7309"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 11,
+    "viewport": "mobile",
+    "entry": "list",
+    "scenario": "requests",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7310
+    },
+    "recovery": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              11
+            ],
+            "expected_next_check_number": 7310
+          },
+          "status": 409
+        }
+      ],
+      "disabled": false,
+      "focus": true,
+      "message": "A file request was added or resolved. No requests remain outstanding. Review the updated details, then confirm again.\n\nResolved: mobile list requests timesheet",
+      "overflow": false,
+      "section": "Outstanding client file requests",
+      "visible": true,
+      "warning": true,
+      "screenshot": "mobile-list-requests.png"
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              11
+            ],
+            "expected_next_check_number": 7310
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [],
+            "expected_next_check_number": 7310
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7310"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 12,
+    "viewport": "mobile",
+    "entry": "list",
+    "scenario": "counter",
+    "loading": {
+      "details": false,
+      "requests": false,
+      "text": "Commit and finalize payroll?\n\nThis locks the calculated payroll and updates year-to-date totals. Checks and bank payments require separate issuance or settlement confirmation.\n\nLoading current requests and check numbering…\n\nKeep reviewing\nConfirm commit"
+    },
+    "before": {
+      "disabled": true,
+      "number": 7311
+    },
+    "recovery": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              12
+            ],
+            "expected_next_check_number": 7311
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "focus": true,
+      "message": "The next check number changed to 7411 (it was 7311). Check your stock, then confirm again.",
+      "overflow": false,
+      "section": "Check numbering",
+      "visible": true,
+      "warning": true,
+      "screenshot": "mobile-list-counter.png"
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              12
+            ],
+            "expected_next_check_number": 7311
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              12
+            ],
+            "expected_next_check_number": 7411
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7411"
+      ],
+      "status": "committed"
+    }
+  }
+]

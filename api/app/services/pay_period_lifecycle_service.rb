@@ -105,6 +105,7 @@ class PayPeriodLifecycleService
       requests = pay_period.outstanding_client_file_requests.lock.to_a
       validate_file_request_snapshot!(requests, acknowledged_outstanding_file_request_ids)
       validate_check_number_snapshot!(expected_next_check_number)
+      PayrollSubmissions::LinkPayPeriod.for_commit!(pay_period)
       @acknowledged_outstanding_file_requests = requests.map { |request| { id: request.id, title: request.title, status: request.status } }
       validate_payment_delivery!
       validate_source_earnings!

@@ -1221,8 +1221,6 @@ export function PayPeriods() {
       {/* Create Pay Period Modal */}
       {commitReview && <PayrollCommitDialog open payPeriod={commitReview}
         companyName={activeCompany?.name ?? `Company #${commitReview.company_id ?? ''}`}
-        itemCount={(commitReview.payroll_items ?? []).filter((item) => item.payroll_included !== false).length}
-        totalNet={(commitReview.payroll_items ?? []).filter((item) => item.payroll_included !== false).reduce((sum, item) => sum + Number(item.net_pay || 0), 0)}
         processing={actionInFlight === `commit-${commitReview.id}`}
         onCancel={() => setCommitReview(null)} onConfirm={confirmCommit} />}
       <Dialog open={deletingPeriod !== null} onOpenChange={(open) => {
