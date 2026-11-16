@@ -10,8 +10,10 @@
 #
 #   PAY_PERIOD_ID=132 COMPANY_ID=6 ACTOR_USER_ID=1 bin/rails runner script/ops/preview_checks_and_stubs.rb
 #
-# Output: OUT_DIR (default /tmp/payroll_preview) holds <prefix>_PREVIEW_paper_checks_<pay date>.pdf
-# and <prefix>_PREVIEW_pay_stubs_<pay date>.pdf. Delete the directory after downloading.
+# Output: a fresh run_<id>_<timestamp> directory under OUT_DIR (default
+# /tmp/payroll_preview) holds <prefix>_PREVIEW_paper_checks_<pay date>.pdf and
+# <prefix>_PREVIEW_pay_stubs_<pay date>.pdf, so an earlier preview's files are
+# never mistaken for this one. Delete OUT_DIR after downloading.
 require "combine_pdf"
 
 PAY_PERIOD_ID = Integer(ENV.fetch("PAY_PERIOD_ID"))
@@ -20,24 +22,24 @@ ACTOR_USER_ID = Integer(ENV.fetch("ACTOR_USER_ID"))
 OUT_DIR = ENV.fetch("OUT_DIR", "/tmp/payroll_preview")
 PREVIEWABLE_STATUSES = %w[calculated approved].freeze
 
-# Check stubs read saved YTD totals, which commit writes. Like the pay stub
-# (PayStubGenerator#ytd_source_items), add this uncommitted check once so the
-# preview shows the YTD the committed check will show. In-memory for this
-# process only.
+# Check stubs read YTD from reportable periods, which for a live client are
+# committed ones. Like the pay stub (PayStubGenerator#ytd_source_items), add
+# this check once when its period is outside that scope, so the preview shows
+# the YTD the committed check will show. In-memory for this process only.
 CheckGenerator.prepend(Module.new do
   def ytd
     return @preview_ytd if @preview_ytd
 
-    base = super.dup
-    unless pay_period.committed?
+    base = super.transform_values(&:to_d)
+    unless PayPeriod.reportable_for_company(pay_period.company).exists?(pay_period.id)
       item = payroll_item
-      base[:gross] += item.gross_pay.to_f
-      base[:fit] += item.withholding_tax.to_f
-      base[:ss] += item.social_security_tax.to_f
-      base[:med] += item.medicare_tax.to_f
-      base[:addl_wh] += item.additional_withholding.to_f
+      base[:gross] += item.gross_pay.to_d
+      base[:fit] += item.withholding_tax.to_d
+      base[:ss] += item.social_security_tax.to_d
+      base[:med] += item.medicare_tax.to_d
+      base[:addl_wh] += item.additional_withholding.to_d
       base[:taxes] = base[:fit] + base[:ss] + base[:med] + base[:addl_wh]
-      base[:net] += item.net_pay.to_f
+      base[:net] += item.net_pay.to_d
     end
     @preview_ytd = base
   end
@@ -123,9 +125,10 @@ ApplicationRecord.transaction do
   raise ActiveRecord::Rollback
 end
 
-FileUtils.mkdir_p(OUT_DIR)
+run_dir = File.join(OUT_DIR, "run_#{PAY_PERIOD_ID}_#{Time.current.utc.strftime('%Y%m%d%H%M%S')}")
+FileUtils.mkdir_p(run_dir)
 results.each do |name, data|
-  File.binwrite(File.join(OUT_DIR, name), data)
-  puts "#{File.join(OUT_DIR, name)} #{data.bytesize} bytes"
+  File.binwrite(File.join(run_dir, name), data)
+  puts "#{File.join(run_dir, name)} #{data.bytesize} bytes"
 end
 puts "Run #{PAY_PERIOD_ID} status after: #{PayPeriod.find(PAY_PERIOD_ID).status}"
