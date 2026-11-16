@@ -247,3 +247,9 @@ export function useAuth() {
   }
   return context;
 }
+
+// For components that can also render outside the provider (embedded dialogs,
+// isolated tests). Undefined there; callers must treat that as signed out.
+export function useOptionalAuth() {
+  return useContext(AuthContext);
+}

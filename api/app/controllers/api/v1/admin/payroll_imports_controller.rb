@@ -5,7 +5,7 @@ module Api
     module Admin
       class PayrollImportsController < BaseController
         before_action :set_pay_period
-        around_action :with_import_lock, only: %i[preview remove_source tip_treatment apply resolve_portal_source]
+        around_action :with_import_lock, only: %i[preview rematch remove_source tip_treatment apply resolve_portal_source]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/supplemental_template
         def supplemental_template
@@ -89,6 +89,36 @@ module Api
           rescue StandardError => e
             render json: { error: "Failed to parse files: #{e.message}" }, status: :unprocessable_entity
           end
+        end
+
+        # POST /api/v1/admin/pay_periods/:pay_period_id/rematch_import
+        # Matches the current review's retained files again, for example after
+        # a worker it names was reactivated. No upload or reason is needed; an
+        # unchanged roster returns the same review.
+        def rematch
+          unless @pay_period.can_edit?
+            return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
+          end
+
+          current = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          current_record = PayrollImport::CurrentReview.import_record_for(@pay_period, current)
+          unless current&.applyable? && current_record
+            return render json: { error: "Only an import still in review can be matched again. Upload corrected files instead." }, status: :unprocessable_entity
+          end
+          if current_record.submission_imports.exists?
+            return render json: { error: "Open the client revision again to match its files with the current employee list." }, status: :unprocessable_entity
+          end
+
+          package_result = PayrollIntake::PreviewService.new(
+            pay_period: @pay_period, source_type: "mosa_revel", files: [], actor: current_user, carry_forward: true
+          ).call
+          # A tip choice follows the workbook it was made for (see tip_confirmation_for).
+          import_record = persist_preview(package_result, nil, nil, tips_paid_out_from_tips: false)
+          render json: preview_response(import_record, package_result)
+        rescue PayrollIntake::PreviewService::ReplacementRequiredError, ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue StandardError => e
+          render json: { error: "Could not match the files again: #{e.message}" }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/remove_import_source
@@ -398,15 +428,16 @@ module Api
           skip_default_audit_log!
           PayrollSubmissions::ImportBridge.new(pay_period: @pay_period, actor: current_user, submission_id: params[:submission_id],
             superseded_reason: params[:superseded_reason], supersedes_package_id: params[:supersedes_package_id],
-            supersession_reason: params[:supersession_reason], staff_workbook: params[:staff_workbook]).call do |result, submission, current, reason, files|
+            supersession_reason: params[:supersession_reason], staff_workbook: params[:staff_workbook]).call do |result, submission, current, reason, files, carried_staff|
             record = persist_preview(result, files.first, files.second)
             selection = record.submission_imports.find_or_create_by!(payroll_submission: submission, current_submission: current) do |link|
               link.selected_by = current_user
               link.superseded_reason = reason
-              if params[:staff_workbook].present?
+              if params[:staff_workbook].present? || carried_staff
+                # A carried workbook keeps who attached it and when.
                 link.staff_workbook_document = record.payroll_intake_session.documents.find_by!(source_role: "supplemental_workbook")
-                link.staff_workbook_attached_by = current_user
-                link.staff_workbook_attached_at = Time.current
+                link.staff_workbook_attached_by = carried_staff&.staff_workbook_attached_by || current_user
+                link.staff_workbook_attached_at = carried_staff&.staff_workbook_attached_at || Time.current
               end
             end
             PayrollSubmissions::Audit.record!(actor: current_user, period: submission.period, action: "payroll_submissions#open_import",
@@ -475,6 +506,7 @@ module Api
           preview[:source_warnings] += workbook_warnings(source_package, source)
           {
             import_id: import_record.id, preview: preview, source_package: source_package_json(source_package),
+            pay_period: { start_date: @pay_period.start_date, end_date: @pay_period.end_date },
             duplicate: package_result[:duplicate], portal_source: portal_source_json(selection),
             pending_portal_source: pending_portal_source_json,
             client_change_prefill: (selection ? change_prefill(selection.payroll_submission, preview[:matched]) : nil),
@@ -601,7 +633,7 @@ module Api
             documents: source_package.documents.reject { |document| document.verification_status == "legacy_unverified" }
               .sort_by(&:position).map do |document|
                 { id: document.id, source_role: document.source_role, filename: document.filename,
-                  content_type: document.content_type, byte_size: document.byte_size }
+                  content_type: document.content_type, byte_size: document.byte_size, sha256: document.sha256 }
               end,
             disposition_targets: disposition_targets_json,
             sources: completeness.sources,
@@ -620,7 +652,14 @@ module Api
           completeness = PayrollIntake::SourceCompleteness.new(session: source_package, company: @pay_period.company)
           waivable = completeness.waivable_missing_roles
           staff_waived = ActiveModel::Type::Boolean.new.cast(params[:no_tips_or_loans])
-          client_waived = selection&.payroll_submission&.workbook_choice == "none"
+          client_choice = selection&.payroll_submission&.workbook_choice
+          # The client sent a workbook or a link to one; staff cannot record "none" over that.
+          if staff_waived && client_choice.in?(%w[link attach]) && waivable.any?
+            raise ArgumentError, client_choice == "link" ?
+              "The client sent a link to the tips & loans workbook. Attach the workbook from the link before applying." :
+              "The client attached a tips & loans workbook. Reopen the client revision so the workbook is included."
+          end
+          client_waived = client_choice == "none"
           waived = staff_waived || client_waived ? waivable : []
           missing = completeness.missing_required_roles(waived_roles: waived)
           if missing.any?

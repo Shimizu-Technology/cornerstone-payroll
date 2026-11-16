@@ -1605,6 +1605,9 @@ export const payPeriodsApi = {
   },
   resolvePortalSource: (id: number, submissionId: number, reason: string): Promise<{ resolved_submission_id: number }> =>
     api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
+  // Match the current review's files again, e.g. after reactivating a worker.
+  rematchImport: (id: number): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/rematch_import`),
   currentImport: (id: number): Promise<ImportPreviewResponse> =>
     api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
   // Takes one file out of an import still in review; the reason is recorded on the new version.
@@ -1878,6 +1881,9 @@ export const timecardsApi = {
 
 export interface PayrollIntakeWarning {
   employee_id?: number;
+  // Set when a source row names an inactive or terminated worker.
+  employee_name?: string;
+  employee_status?: string;
   code: string;
   message: string;
   severity: 'info' | 'warning' | 'error' | string;
@@ -2177,6 +2183,7 @@ export interface ImportSourceDocument {
   filename: string;
   content_type: string;
   byte_size: number;
+  sha256?: string | null;
 }
 
 export interface ImportPreviewResponse {
@@ -2192,6 +2199,7 @@ export interface ImportPreviewResponse {
   } | null;
   import_id: number;
   duplicate?: boolean;
+  pay_period?: { start_date: string; end_date: string };
   source_package: {
     id: number;
     package_id: string;

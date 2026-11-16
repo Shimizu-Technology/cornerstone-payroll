@@ -483,6 +483,7 @@ Rails.application.routes.draw do
             get :current_import, to: "payroll_imports#current"
             post :resolve_portal_source, to: "payroll_imports#resolve_portal_source"
             post :preview_import, to: "payroll_imports#preview"
+            post :rematch_import, to: "payroll_imports#rematch"
             post :remove_import_source, to: "payroll_imports#remove_source"
             post :import_tip_treatment, to: "payroll_imports#tip_treatment"
             post :apply_import, to: "payroll_imports#apply"
