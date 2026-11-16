@@ -23,6 +23,9 @@ module Api
             )
           end,
           can_manage_clients: current_user.organization_admin?,
+          # Matches Admin::CompaniesController#staff_client_access? so assigned
+          # managers and accountants can find the client edit page.
+          can_view_client_management: current_user.organization_admin? || current_user.manager? || current_user.accountant?,
           can_switch_company: current_user.accessible_company_ids.size > 1,
           current_company_id: company_ids.include?(current_company_id) ? current_company_id : company_ids.first
         }

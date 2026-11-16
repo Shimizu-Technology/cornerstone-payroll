@@ -56,11 +56,11 @@ The text above the footer says why Apply is off, for example **Apply is off: …
 
 ### Reactivating an inactive worker from the import
 
-If an unmatched row is someone who is inactive or terminated in Cornerstone, the row says *"Name is inactive in Cornerstone."*
+If an unmatched row is someone who is inactive or terminated in Cornerstone, the row says *"Name is inactive in Cornerstone."* or *"Name is terminated in Cornerstone."*
 
-- **Managers, admins, and accountants with client-management delegation** see **Reactivate Name**. It opens the reactivation window with the pay period start as the default **Reactivation effective date**. Use the first day they're working again.
+- **Any payroll staff member** (accountant, manager or admin) sees **Reactivate Name** for an inactive worker. A terminated worker is a rehire: only managers, admins and accountants with client-management delegation see the button. Everyone else sees *"Name was terminated. A manager or admin can rehire them."* It opens the reactivation window with the pay period start as the default **Reactivation effective date**. Use the first day they're working again.
 - **After reactivation**, the import matches the same files again by itself. There's no re-upload and no reason to type. The row becomes ready, other outcomes stay, and a status line says **Matched again after Name was reactivated**.
-- **Everyone else** sees *"A manager or admin can reactivate Name."* (the message names managers and admins, but a delegated accountant can also do it) and **Open profile**, which opens the worker's profile in a new tab.
+- **Open profile** opens the worker's profile in a new tab. If your access doesn't allow reactivation (for example, a read-only test workspace), the row says *"You don't have access to reactivate Name."* instead of showing the button.
 
 For a review that came from a client portal revision, reactivating reopens that client revision instead.
 
@@ -135,7 +135,7 @@ If MoSa asks for changes: **More payroll actions** → **Roll Back Approval**, f
 
 ## 6. Client approval in the portal (only when turned on)
 
-This step applies only when the client's **Require client approval before payroll commit** setting is on. The setting is on the client's edit page and needs client-administration access to change. When it's off, staff approve and commit, and the client isn't notified. MoSa had it off as of November 17, 2026. Check the setting before each cycle.
+This step applies only when the client's **Require client approval before payroll commit** setting is on. The setting is on the client's edit page (**Client Management** → **Edit**). Managers, admins and accountants with client-management delegation can change it. When it's off, staff approve and commit, and the client isn't notified. MoSa had it off as of November 17, 2026. Check the setting before each cycle.
 
 When it's on:
 
@@ -179,7 +179,7 @@ Direct-deposit stubs are separate from paper checks. Printing a stub doesn't sta
 
 Use **Mark inactive** on an employee's profile when the person still works for MoSa but won't be paid for a while: leave of absence, seasonal, or no hours scheduled. Inactive workers aren't paid until they're reactivated. Use **Terminate Employee** when employment has ended.
 
-- **Who:** managers, admins, and accountants with client-management delegation.
+- **Who:** any payroll staff member: accountants, managers and admins. Terminating, and reactivating a terminated worker, stay with managers, admins and accountants with client-management delegation.
 - **How:**
   1. Open the employee, choose **Mark inactive**, and set the **Inactive effective date**. It can't be in the future.
   2. Pick a reason and add notes if useful, then confirm with **Mark inactive**.
@@ -193,7 +193,7 @@ Every change is recorded in the employee's status history and the audit log.
 | Message | What it means | How to clear it |
 | --- | --- | --- |
 | **Add the Tips & loans workbook, or confirm there are no tips or loans this period.** | The import is missing a required file. | Add the workbook, or tick **No tips or loans this period**. |
-| **Name is inactive in Cornerstone.** (unmatched row) | The row belongs to an inactive or terminated worker. | A manager or admin chooses **Reactivate Name**. The import matches again by itself. |
+| **Name is inactive in Cornerstone.** or **Name is terminated in Cornerstone.** (unmatched row) | The row belongs to an inactive or terminated worker. | Choose **Reactivate Name**. The import matches again by itself. For a terminated worker, a manager or admin does this. |
 | **Revel hours would replace hours entered by hand for …** | Hours saved by hand differ from the new Revel hours. | Tick **Replace the hand-entered hours with the Revel hours above.**, or fix the source. |
 | **Set up the named installment loan for Name in Employee Loans before importing this amount.** | The workbook has an installment payment with no matching loan. | Set up the loan in **Employee Loans**, then preview the import again. |
 | **Unapprove this pay run before applying an import** | You're importing into an approved run. | **Roll Back Approval**, then apply. |

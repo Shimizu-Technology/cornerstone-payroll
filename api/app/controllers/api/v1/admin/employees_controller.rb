@@ -14,7 +14,7 @@ module Api
         before_action :validate_department_scope!, only: [ :create, :update ]
         before_action :validate_employee_company_context!, only: [ :create, :update ]
         before_action :require_super_admin!, only: :transition_tax_classification
-        before_action :require_manager_or_admin!, only: [ :terminate, :reactivate, :deactivate ]
+        before_action :require_manager_or_admin!, only: :terminate
         around_action :with_recurring_pay_item_setup_invalidation, only: :update
 
         # GET /api/v1/admin/employees
@@ -151,36 +151,22 @@ module Api
 
         # POST /api/v1/admin/employees/:id/terminate
         def terminate
-          EmployeeStatusTransitionService.terminate!(
-            employee: @employee,
-            actor: current_user,
-            attributes: termination_params
-          )
-          render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
-        rescue EmployeeStatusTransitionService::Error => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          transition_status { EmployeeStatusTransitionService.terminate!(employee: @employee, actor: current_user, attributes: termination_params) }
         end
 
+        # POST /api/v1/admin/employees/:id/deactivate
         def deactivate
-          EmployeeStatusTransitionService.deactivate!(
-            employee: @employee, actor: current_user,
-            attributes: params.require(:deactivation).permit(:effective_date, :reason_category, :internal_notes)
-          )
-          render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
-        rescue EmployeeStatusTransitionService::Error => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          transition_status do
+            EmployeeStatusTransitionService.deactivate!(
+              employee: @employee, actor: current_user,
+              attributes: params.require(:deactivation).permit(:effective_date, :reason_category, :internal_notes)
+            )
+          end
         end
 
         # POST /api/v1/admin/employees/:id/reactivate
         def reactivate
-          EmployeeStatusTransitionService.reactivate!(
-            employee: @employee,
-            actor: current_user,
-            attributes: reactivation_params
-          )
-          render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
-        rescue EmployeeStatusTransitionService::Error => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          transition_status { EmployeeStatusTransitionService.reactivate!(employee: @employee, actor: current_user, attributes: reactivation_params) }
         end
 
         # POST /api/v1/admin/employees/:id/transition_tax_classification
@@ -262,6 +248,28 @@ module Api
             changed_fields: (snapshot_changes[:changed_fields] | redacted_fields).sort,
             redacted_fields: redacted_fields
           )
+        end
+
+        # Status changes recheck the operator's client access under the company
+        # lock, as profile edits do, because accountants can now reach them.
+        def transition_status
+          Employee.transaction do
+            @employee.company.lock!
+            revalidate_current_company_write_access!(company: @employee.company)
+            # Rehiring a terminated worker is client configuration, including
+            # in test workspaces where operators may otherwise change status.
+            if action_name == "reactivate" && @employee.reload.status == "terminated" &&
+                !TestWorkspaceAccessPolicy.allowed?(user: current_user, company: @employee.company,
+                  request_method: request.request_method, capability: :manage_client_configuration)
+              raise EmployeeStatusTransitionService::Forbidden, "A manager or admin can rehire a terminated worker"
+            end
+            yield
+          end
+          render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
+        rescue EmployeeStatusTransitionService::Forbidden => e
+          render json: { error: e.message }, status: :forbidden
+        rescue EmployeeStatusTransitionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def set_employee

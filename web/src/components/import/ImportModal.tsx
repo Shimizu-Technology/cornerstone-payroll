@@ -42,8 +42,10 @@ interface ImportModalProps {
   companyId: number;
   onSourcePreviewed?: () => void;
   onImportComplete: (payPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => void;
-  // Managers and admins can reactivate a matched inactive worker from the review.
+  // Payroll staff can reactivate a matched inactive worker from the review.
   canReactivateWorkers?: boolean;
+  // A terminated match is a rehire, which also needs client configuration.
+  canRehireWorkers?: boolean;
 }
 
 type Step = 'upload' | 'preview' | 'applying' | 'done';
@@ -55,7 +57,7 @@ const SOURCE_PICKERS = [
   { role: 'supplemental_workbook', label: 'Tips & loans workbook', hint: 'The Cornerstone change workbook with tips, loans, owner pay and one-time items.' },
 ] as const;
 
-export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, onSourcePreviewed, onImportComplete, canReactivateWorkers = false }: ImportModalProps) {
+export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, onSourcePreviewed, onImportComplete, canReactivateWorkers = false, canRehireWorkers = false }: ImportModalProps) {
   const [step, setStep] = useState<Step>(initialPreview ? 'preview' : 'upload');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [excelFile, setExcelFile] = useState<File | null>(null);
@@ -1218,11 +1220,13 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                       {row.errors.map((entry) => <div key={entry.code} className="mt-2 text-sm">
                         <p className="text-danger-700">{entry.message}</p>
                         {entry.employee_id && <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
-                          {entry.employee_status && (canReactivateWorkers
+                          {entry.employee_status && ((entry.employee_status === 'terminated' ? canRehireWorkers : canReactivateWorkers)
                             ? <Button type="button" onClick={() => void startReactivation(entry.employee_id!)} disabled={loading || openingWorker !== null}>
                                 {openingWorker === entry.employee_id ? 'Opening…' : `Reactivate ${entry.employee_name}`}
                               </Button>
-                            : <p className="text-neutral-700">A manager or admin can reactivate {entry.employee_name}.</p>)}
+                            : <p className="text-neutral-700">{entry.employee_status === 'terminated'
+                                ? `${entry.employee_name} was terminated. A manager or admin can rehire them.`
+                                : `You don't have access to reactivate ${entry.employee_name}.`}</p>)}
                           <Link
                             to={`/companies/${companyId}/employees/${entry.employee_id}/edit`}
                             target="_blank"
