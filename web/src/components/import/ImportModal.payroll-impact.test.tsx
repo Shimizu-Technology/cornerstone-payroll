@@ -60,3 +60,23 @@ it('keeps a changed rate selection through an apply error and retry', async () =
   await screen.findByText('Preview again if rates changed.');
   expect((screen.getAllByRole('combobox', { name: 'Job and rate for Alex Example' })[0] as HTMLSelectElement).value).toBe('21');
 });
+
+it.each(['unmatched_revel', 'unmatched_workbook'])('links an unmatched non-active %s worker to their profile without including pay', rowKind => {
+  const data = preview();
+  data.preview.matched = [];
+  data.preview.source_rows = [{ id: 11, position: 0, row_kind: rowKind, employee_id: null, source_employee_name: 'Example, Avery', disposition: 'pending', warnings: [], errors: [{ code: 'unmatched_employee', severity: 'error', employee_id: 139, message: 'Avery Example is inactive in Cornerstone.' }] }];
+  data.preview.can_apply = false;
+  mount(data);
+  const link = screen.getByRole('link', { name: /Open profile for Example, Avery/ });
+  expect(link.getAttribute('href')).toBe('/companies/7/employees/139/edit');
+  expect(link.getAttribute('target')).toBe('_blank');
+  expect((screen.getByRole('button', { name: /Apply Import/ }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('option', { name: 'Include in this payroll' })).toBeNull();
+});
+it('does not show a profile link for a source row with no identified worker', () => {
+  const data = preview();
+  data.preview.matched = [];
+  data.preview.source_rows = [{ id: 11, position: 0, row_kind: 'unmatched_revel', employee_id: null, source_employee_name: 'Unknown', disposition: 'pending', warnings: [], errors: [{ code: 'unmatched_employee', severity: 'error', message: 'Match this Revel hours row to a Cornerstone employee.' }] }];
+  mount(data);
+  expect(screen.queryByRole('link', { name: /Open profile/ })).toBeNull();
+});

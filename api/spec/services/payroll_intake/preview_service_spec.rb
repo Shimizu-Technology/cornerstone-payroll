@@ -52,7 +52,8 @@ RSpec.describe PayrollIntake::PreviewService do
     second = result.fetch(:session)
     expect(result[:duplicate]).to be(false)
     expect(second).to have_attributes(supersedes_id: first.id, supersession_reason: "client revision 2: changes only")
-    expect(second.evidence_snapshot).to include("source_import_hash" => first.import_hash, "payroll_submission_id" => corrected.id)
+    expect(second.evidence_snapshot).to include("source_import_hash" => first.evidence_snapshot.fetch("source_import_hash"),
+      "payroll_submission_id" => corrected.id)
     expect(second.documents.pluck(:sha256)).to eq(first.documents.pluck(:sha256))
     expect(first.reload).not_to be_applyable
     expect(second).to be_applyable
@@ -60,6 +61,54 @@ RSpec.describe PayrollIntake::PreviewService do
     expect(preview).to include(duplicate: true, session: first)
     expect { preview(original) }.to raise_error(ArgumentError, /revision was already applied/)
     expect(PayrollIntakeSession.count).to eq(2)
+  end
+
+  it "keeps a changes-only correction after a status change alters the active roster" do
+    original = submission(1)
+    first = applied(original)
+    other = create(:employee, company: company, first_name: "Blake", last_name: "Other", status: "inactive")
+    EmployeeStatusTransitionService.reactivate!(employee: other, actor: actor, attributes: { effective_date: run.start_date.iso8601 })
+    corrected = submission(2, "200")
+    second = preview(corrected).fetch(:session)
+
+    expect(second).to have_attributes(supersedes_id: first.id, supersession_reason: "client revision 2: changes only")
+    expect(second.evidence_snapshot).to include("source_import_hash" => first.evidence_snapshot.fetch("source_import_hash"),
+      "payroll_submission_id" => corrected.id)
+    expect(preview(corrected)).to include(duplicate: true, session: second)
+  end
+
+  it "recognizes the same files in a package stored before the roster joined the import key" do
+    original = submission(1)
+    first = applied(original)
+    file_only_hash = first.evidence_snapshot.fetch("source_import_hash")
+    first.update_columns(import_hash: file_only_hash, evidence_snapshot: first.evidence_snapshot.except("source_import_hash"))
+    second = preview(submission(2, "200")).fetch(:session)
+
+    expect(second).to have_attributes(supersedes_id: first.id, supersession_reason: "client revision 2: changes only")
+    expect(second.evidence_snapshot).to include("source_import_hash" => file_only_hash)
+  end
+
+  it "deduplicates a plain retry against a package stored before the roster joined the import key" do
+    first = preview.fetch(:session)
+    first.update_columns(import_hash: first.evidence_snapshot.fetch("source_import_hash"),
+      evidence_snapshot: first.evidence_snapshot.except("source_import_hash"))
+
+    expect(preview).to include(duplicate: true, session: first)
+
+    other = create(:employee, company: company, first_name: "Blake", last_name: "Other", status: "inactive")
+    EmployeeStatusTransitionService.reactivate!(employee: other, actor: actor, attributes: { effective_date: run.start_date.iso8601 })
+    expect { preview }.to raise_error(described_class::ReplacementRequiredError)
+    expect(PayrollIntakeSession.count).to eq(1)
+  end
+
+  it "requires a replacement for a pre-deploy package once a new active worker is added" do
+    first = preview.fetch(:session)
+    first.update_columns(import_hash: first.evidence_snapshot.fetch("source_import_hash"),
+      evidence_snapshot: first.evidence_snapshot.except("source_import_hash"), created_at: 1.minute.ago)
+    create(:employee, company: company, first_name: "Blake", last_name: "Other")
+
+    expect { preview }.to raise_error(described_class::ReplacementRequiredError)
+    expect(PayrollIntakeSession.count).to eq(1)
   end
 
   it "refuses an identical re-send and preserves the applied current package" do
