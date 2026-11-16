@@ -106,7 +106,7 @@ module PayrollSubmissions
             new_documents << document
           end
         end
-        period.pay_period ||= run
+        period.pay_period = run if run
         period.transition!("submit", actor: @actor, submission: submission)
         new_documents.each do |document|
           PortalActivity.record!(user: @actor, record: document, action: "client_documents#create",

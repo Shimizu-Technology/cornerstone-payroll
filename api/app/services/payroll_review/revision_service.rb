@@ -76,9 +76,18 @@ module PayrollReview
       unless package.published_at
         package.update!(published_at: Time.current, sent_for_client_approval_at: package.sent_for_client_approval_at || Time.current)
         audit!(package, "published")
-        notify!(package, "payroll_review_published")
       end
+      # record! deduplicates by package ID. Retry even after publication so a
+      # previous notification failure never makes the missing event permanent.
+      notify!(package, "payroll_review_published")
       package
+    end
+
+    def retry_publication_notification!
+      return unless pay_period.approved? && Company.find(pay_period.company_id).client_payroll_approval_required?
+
+      package = pay_period.payroll_review_packages.current.first
+      notify!(package, "payroll_review_published") if package&.published_at
     end
 
     def withdraw!

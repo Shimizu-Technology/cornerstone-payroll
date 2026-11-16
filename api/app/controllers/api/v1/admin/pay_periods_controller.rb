@@ -51,6 +51,7 @@ module Api
 
         # GET /api/v1/admin/pay_periods/:id
         def show
+          PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).retry_publication_notification!
           render json: {
             pay_period: pay_period_json(@pay_period, include_items: true)
           }

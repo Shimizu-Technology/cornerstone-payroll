@@ -22,6 +22,27 @@ RSpec.describe PayrollReview::RevisionService do
 
   subject(:service) { described_class.new(pay_period: pay_period, actor: staff) }
 
+  it "recovers a failed publication notification on republish without duplicating events" do
+    allow(PortalNotifications).to receive(:record!).and_wrap_original do |original, **args|
+      original.call(**args)
+      raise ActiveRecord::StatementInvalid, "notification failure"
+    end
+
+    PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff).approve!
+    package = pay_period.payroll_review_packages.current.first!
+    expect(pay_period.reload).to be_approved
+    expect(package.published_at).to be_present
+    events = PortalNotificationEvent.where(dedupe_key: "payroll_review_published:#{package.id}")
+    expect(events).to be_empty
+
+    allow(PortalNotifications).to receive(:record!).and_call_original
+    expect(service.publish!).to eq(package)
+    expect(service.publish!).to eq(package)
+    expect(events.count).to eq(1)
+    expect(events.first.event_type).to eq("payroll_review_published")
+    expect(AuditLog.where(action: "payroll_review#published", record_id: package.id).count).to eq(1)
+  end
+
   it "issues an immutable checksum revision and reuses it while payroll is unchanged" do
     first = service.issue!
     second = service.issue!
