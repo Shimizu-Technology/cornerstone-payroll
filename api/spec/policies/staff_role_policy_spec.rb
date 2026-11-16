@@ -18,7 +18,8 @@ RSpec.describe StaffRolePolicy do
       view_record_activity: %w[super_admin org_admin admin manager accountant],
       manage_filing_review: %w[super_admin org_admin admin manager accountant],
       manage_client_configuration: %w[super_admin org_admin admin manager],
-      manage_client_administration: %w[super_admin org_admin admin],
+      manage_client_administration: %w[super_admin org_admin admin manager],
+      manage_employee_status: %w[super_admin org_admin admin manager accountant],
       manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
       manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
       manage_organization: %w[super_admin org_admin admin],
@@ -103,6 +104,15 @@ RSpec.describe StaffRolePolicy do
       described_class::ACTION_CAPABILITIES.each_value do |capability|
         expect(described_class::CAPABILITY_ROLES).to have_key(capability)
       end
+    end
+
+    it "lets payroll staff change worker status but keeps termination on client configuration" do
+      %w[deactivate reactivate].each do |action_name|
+        expect(described_class.capability_for(controller_path: "api/v1/admin/employees", action_name: action_name))
+          .to eq(:manage_employee_status)
+      end
+      expect(described_class.capability_for(controller_path: "api/v1/admin/employees", action_name: "terminate"))
+        .to eq(:manage_client_configuration)
     end
 
     it "keeps the explicitly reviewed endpoint classifications stable" do

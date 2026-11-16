@@ -207,6 +207,8 @@ export function EmployeeForm() {
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
   const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration', loadedEmployee?.company_id ?? activeCompanyId) && canWriteCompany(activeCompany, 'manage_client_configuration');
+  // Mark inactive and reactivate are open to all payroll staff; terminate is not.
+  const canChangeEmployeeStatus = useSelectedCompanyCapability('manage_employee_status', loadedEmployee?.company_id ?? activeCompanyId) && canWriteCompany(activeCompany, 'manage_employee_status');
   const [initialSsn, setInitialSsn] = useState('');
   const [storedSsnLastFour, setStoredSsnLastFour] = useState<string | null>(null);
   const [storedEinLastFour, setStoredEinLastFour] = useState<string | null>(null);
@@ -1102,12 +1104,12 @@ export function EmployeeForm() {
                   Inactive workers aren't paid. Reactivate to include them in payroll again.
                 </p>
               )}
-              {!canManageClientConfiguration && (
-                <p className="text-red-600 text-sm">A manager or admin can reactivate this worker.</p>
+              {!canChangeEmployeeStatus && (
+                <p className="text-red-600 text-sm">You don't have access to reactivate this worker.</p>
               )}
             </div>
           </div>
-          {canManageClientConfiguration && <Button
+          {canChangeEmployeeStatus && <Button
             type="button"
             variant="outline"
             onClick={() => setStatusTransitionMode('reactivate')}
@@ -2199,20 +2201,24 @@ export function EmployeeForm() {
           </CardContent>
         </Card>
 
-        {isEditing && employeeStatus !== 'terminated' && !isClient && canManageClientConfiguration && (
+        {isEditing && employeeStatus !== 'terminated' && !isClient && (canChangeEmployeeStatus || canManageClientConfiguration) && (
           <div className="flex flex-wrap items-center gap-3">
-            {employeeStatus === 'active' && <>
+            {employeeStatus === 'active' && canChangeEmployeeStatus && <>
               <Button type="button" variant="outline" onClick={() => setStatusTransitionMode('deactivate')}>Mark inactive</Button>
             </>}
-            <Button
+            {canManageClientConfiguration && <Button
               type="button"
               variant="danger"
               onClick={() => setStatusTransitionMode('terminate')}
             >
               <Trash2 className="mr-2 h-4 w-4" />
               {`Terminate ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
-            </Button>
-            <p className="w-full text-sm text-neutral-600">Inactive: not paid until reactivated. Use Terminate when employment has ended.</p>
+            </Button>}
+            <p className="w-full text-sm text-neutral-600">
+              {canManageClientConfiguration
+                ? 'Inactive: not paid until reactivated. Use Terminate when employment has ended.'
+                : 'Inactive: not paid until reactivated. A manager or admin can terminate a worker whose employment has ended.'}
+            </p>
           </div>
         )}
       </form>

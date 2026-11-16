@@ -41,7 +41,7 @@ interface ImportModalProps {
   companyId: number;
   onSourcePreviewed?: () => void;
   onImportComplete: (payPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => void;
-  // Managers and admins can reactivate a matched inactive worker from the review.
+  // Payroll staff can reactivate a matched inactive worker from the review.
   canReactivateWorkers?: boolean;
 }
 
@@ -1140,7 +1140,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                             ? <Button type="button" onClick={() => void startReactivation(entry.employee_id!)} disabled={loading || openingWorker !== null}>
                                 {openingWorker === entry.employee_id ? 'Opening…' : `Reactivate ${entry.employee_name}`}
                               </Button>
-                            : <p className="text-neutral-700">A manager or admin can reactivate {entry.employee_name}.</p>)}
+                            : <p className="text-neutral-700">You don't have access to reactivate {entry.employee_name}.</p>)}
                           <Link
                             to={`/companies/${companyId}/employees/${entry.employee_id}/edit`}
                             target="_blank"

@@ -77,7 +77,7 @@ it('tells staff without reactivation access who can do it', () => {
   open(preview([averyRow(1), inactiveBlake], [avery]), false);
 
   expect(screen.queryByRole('button', { name: /Reactivate/ })).toBeNull();
-  expect(screen.getByText('A manager or admin can reactivate Blake Returning.')).toBeTruthy();
+  expect(screen.getByText("You don't have access to reactivate Blake Returning.")).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Open profile for Returning, Blake (opens in a new tab)' })).toBeTruthy();
 });
 

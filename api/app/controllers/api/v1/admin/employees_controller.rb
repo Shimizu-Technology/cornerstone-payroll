@@ -14,7 +14,7 @@ module Api
         before_action :validate_department_scope!, only: [ :create, :update ]
         before_action :validate_employee_company_context!, only: [ :create, :update ]
         before_action :require_super_admin!, only: :transition_tax_classification
-        before_action :require_manager_or_admin!, only: [ :terminate, :reactivate, :deactivate ]
+        before_action :require_manager_or_admin!, only: :terminate
         around_action :with_recurring_pay_item_setup_invalidation, only: :update
 
         # GET /api/v1/admin/employees

@@ -54,9 +54,16 @@ RSpec.describe "Delegated administration of an existing client", type: :request 
     expect(AuditLog.where(action: "employee_intake_settings#update")).to be_empty
   end
 
-  it "does not promote managers into the new administration capability" do
+  it "lets managers administer the client without a Client management grant" do
     manager = create(:user, company: company, role: "manager")
     allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(manager)
+    update_intake
+    expect(response).to have_http_status(:ok), response.body
+    expect(company.reload.employee_intake_enabled_by_id).to eq(manager.id)
+  end
+
+  it "still denies accountants without a Client management grant" do
+    assignment.update!(client_management: false)
     update_intake
     expect(response).to have_http_status(:forbidden)
     expect(company.reload.employee_intake_expires_at).to be_nil

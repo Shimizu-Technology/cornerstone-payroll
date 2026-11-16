@@ -355,5 +355,69 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       expect(response).to have_http_status(:forbidden)
       expect(client_company.reload.address_line1).not_to eq("Should Not Save")
     end
+
+    it "does not let an accountant without Client management require client approval" do
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: { client_payroll_approval_required: true, phone: "671-555-0101" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(client_company.reload.client_payroll_approval_required).to be(false)
+    end
+
+    it "does not let a client user require client approval" do
+      client_user = User.create!(
+        company: client_company, email: "approval-client@example.com", name: "Approval Client", role: "client", active: true
+      )
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user).and_return(client_user)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user_id).and_return(client_user.id)
+
+      patch "/api/v1/admin/companies/#{client_company.id}", params: { company: { client_payroll_approval_required: true } }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(client_company.reload.client_payroll_approval_required).to be(false)
+    end
+  end
+
+  describe "assigned manager access" do
+    let!(:manager_user) do
+      User.create!(
+        company: staff_company, organization: organization, email: "assigned-manager@example.com",
+        name: "Assigned Manager", role: "manager", active: true
+      )
+    end
+
+    before do
+      CompanyAssignment.create!(user: manager_user, company: client_company)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user).and_return(manager_user)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user_id).and_return(manager_user.id)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_company_id).and_return(client_company.id)
+    end
+
+    it "offers managers the full client edit, including client approval" do
+      get "/api/v1/admin/companies/#{client_company.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("company", "editable_fields"))
+        .to match_array(Api::V1::Admin::CompaniesController::ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s))
+      expect(response.parsed_body.dig("company", "client_capabilities")).to include("manage_client_administration")
+    end
+
+    it "lets managers require client approval before commit and audits the change" do
+      patch "/api/v1/admin/companies/#{client_company.id}", params: { company: { client_payroll_approval_required: true } }
+
+      expect(response).to have_http_status(:ok)
+      expect(client_company.reload.client_payroll_approval_required).to be(true)
+      audit = AuditLog.where(action: "companies#update", record_id: client_company.id).last
+      expect(audit.user_id).to eq(manager_user.id)
+      expect(audit.metadata).to include("changed_fields" => [ "client_payroll_approval_required" ])
+    end
+
+    it "still keeps managers out of unassigned clients" do
+      patch "/api/v1/admin/companies/#{inactive_client_company.id}", params: { company: { client_payroll_approval_required: true } }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(inactive_client_company.reload.client_payroll_approval_required).to be(false)
+    end
   end
 end

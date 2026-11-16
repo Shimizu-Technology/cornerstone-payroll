@@ -6,7 +6,7 @@ import { payPeriodsApi, type ImportPreviewResponse } from '@/services/api';
 import type { PeriodDetail } from '@/services/payrollSubmissions';
 
 export function PortalImportAction({ period, companyId, onApplied }: { period: PeriodDetail; companyId: number; onApplied: () => void }) {
-  const canReactivateWorkers = useOptionalSelectedCompanyCapability('manage_client_configuration', companyId);
+  const canReactivateWorkers = useOptionalSelectedCompanyCapability('manage_employee_status', companyId);
   const [selectedId, setSelectedId] = useState(period.submissions.find(row => row.current)?.id);
   const [supersededReason, setSupersededReason] = useState('');
   const [dispositionReason, setDispositionReason] = useState('');
