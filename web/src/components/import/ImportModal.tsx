@@ -475,7 +475,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         acknowledge_low_confidence_matches: reviewedSuggestedMatches,
         force_overwrite: reviewedOverwrite,
         confirm_hours_overwrite: confirmHoursOverwrite,
-        no_tips_or_loans: noTipsOrLoans,
+        no_tips_or_loans: staffWaived,
         wage_rate_choices: rateChoices,
         ...(clientChanges.length ? { confirm_client_changes: reviewedClientChanges,
           reviewed_changes: clientChanges.map(row => ({ change_index: row.change_index,
@@ -546,9 +546,15 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const nonMatchedSourceRows = sourceRows.filter((row) => row.row_kind !== 'matched');
   const handEditedRows = included.filter((row) => row.hand_edited_hours);
   const packageSources = previewData?.source_package.sources || [];
-  const clientWaivedSources = (previewData?.portal_source || (usePendingRevision ? previewData?.pending_portal_source : null))?.workbook_choice === 'none';
+  const clientWorkbookChoice = (previewData?.portal_source || (usePendingRevision ? previewData?.pending_portal_source : null))?.workbook_choice;
+  const clientWaivedSources = clientWorkbookChoice === 'none';
+  // The client sent the workbook or a link to it, so "No tips or loans" is not staff's to choose.
+  const waiverBlockedReason = clientWorkbookChoice === 'link'
+    ? 'The client sent a link to the workbook. Attach the workbook from the link above.'
+    : clientWorkbookChoice === 'attach' ? 'The client attached a workbook. Open the client revision again so it is included.' : null;
+  const staffWaived = noTipsOrLoans && !waiverBlockedReason;
   const missingSources = packageSources.filter((source) => source.required && !source.present
-    && !(source.waiver_label && (noTipsOrLoans || clientWaivedSources)));
+    && !(source.waiver_label && (staffWaived || clientWaivedSources)));
   // An older MoSa workbook has no per-person tip treatment, so staff choose it here,
   // including when the workbook was added after the first upload.
   const legacyWorkbook = Boolean(previewData?.preview.source_warnings?.some((warning) => warning.code === 'legacy_mosa_workbook'));
@@ -615,7 +621,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const attention: { key: string; label: string; reason: string; jump: () => void }[] = [];
   if (missingSources.length > 0) {
     const labels = missingSources.map((source) => source.label).join(' and ');
-    const waivable = missingSources.every((source) => source.waiver_label);
+    const waivable = !waiverBlockedReason && missingSources.every((source) => source.waiver_label);
     attention.push({ key: 'sources', label: waivable ? `Add the ${labels}, or confirm there are none` : `Add the ${labels}`, reason: `the ${labels} ${missingSources.length === 1 ? 'is' : 'are'} missing`, jump: () => jumpToSection('sources') });
   }
   if (tipChoiceMissing) {
@@ -929,9 +935,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 onAdd={previewData.portal_source ? undefined : (role, file) => void addSourceFile(role, file)}
                 onRemove={canRemoveSources ? removeSourceFile : undefined}
                 busy={addingSource}
-                waived={noTipsOrLoans}
+                waived={staffWaived}
                 onWaivedChange={setNoTipsOrLoans}
                 clientWaived={clientWaivedSources}
+                waiverBlockedReason={waiverBlockedReason}
               />
             ) : (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">

@@ -118,3 +118,20 @@ it('shows a serious notice on its own without counting it as something that keep
   expect(screen.getByRole('alert').textContent).toContain('retained as superseded revision 1');
   expect(screen.queryByRole('region', { name: 'Needs your action' })).toBeNull();
 });
+
+it('does not offer "No tips or loans" when the client sent a workbook link', () => {
+  const data = preview([averyRow(1)], [avery]);
+  data.source_package.sources = [
+    { role: 'revel_hours', label: 'Revel hours PDF', required: true, present: true, filename: 'revel.pdf' },
+    { role: 'supplemental_workbook', label: 'Tips & loans workbook', required: true, present: false, waiver_label: 'No tips or loans this period' },
+  ];
+  data.portal_source = { selection_id: 1, submission_id: 2, revision: 1, period_id: 3, current: true, changes: [], no_changes: false,
+    workbook_choice: 'link', changes_link_url: 'https://example.test/workbook' } as unknown as ImportPreviewResponse['portal_source'];
+  open(data, true);
+
+  const checklist = screen.getByRole('region', { name: 'Files for this import' });
+  expect(within(checklist).queryByLabelText('No tips or loans this period')).toBeNull();
+  expect(within(checklist).getByText('The client sent a link to the workbook. Attach the workbook from the link above.')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Add the Tips & loans workbook' })).toBeTruthy();
+  expect((screen.getByRole('button', { name: /Apply Import/ }) as HTMLButtonElement).disabled).toBe(true);
+});

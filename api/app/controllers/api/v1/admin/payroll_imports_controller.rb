@@ -422,15 +422,16 @@ module Api
           skip_default_audit_log!
           PayrollSubmissions::ImportBridge.new(pay_period: @pay_period, actor: current_user, submission_id: params[:submission_id],
             superseded_reason: params[:superseded_reason], supersedes_package_id: params[:supersedes_package_id],
-            supersession_reason: params[:supersession_reason], staff_workbook: params[:staff_workbook]).call do |result, submission, current, reason, files|
+            supersession_reason: params[:supersession_reason], staff_workbook: params[:staff_workbook]).call do |result, submission, current, reason, files, carried_staff|
             record = persist_preview(result, files.first, files.second)
             selection = record.submission_imports.find_or_create_by!(payroll_submission: submission, current_submission: current) do |link|
               link.selected_by = current_user
               link.superseded_reason = reason
-              if params[:staff_workbook].present?
+              if params[:staff_workbook].present? || carried_staff
+                # A carried workbook keeps who attached it and when.
                 link.staff_workbook_document = record.payroll_intake_session.documents.find_by!(source_role: "supplemental_workbook")
-                link.staff_workbook_attached_by = current_user
-                link.staff_workbook_attached_at = Time.current
+                link.staff_workbook_attached_by = carried_staff&.staff_workbook_attached_by || current_user
+                link.staff_workbook_attached_at = carried_staff&.staff_workbook_attached_at || Time.current
               end
             end
             PayrollSubmissions::Audit.record!(actor: current_user, period: submission.period, action: "payroll_submissions#open_import",
@@ -645,7 +646,14 @@ module Api
           completeness = PayrollIntake::SourceCompleteness.new(session: source_package, company: @pay_period.company)
           waivable = completeness.waivable_missing_roles
           staff_waived = ActiveModel::Type::Boolean.new.cast(params[:no_tips_or_loans])
-          client_waived = selection&.payroll_submission&.workbook_choice == "none"
+          client_choice = selection&.payroll_submission&.workbook_choice
+          # The client sent a workbook or a link to one; staff cannot record "none" over that.
+          if staff_waived && client_choice.in?(%w[link attach]) && waivable.any?
+            raise ArgumentError, client_choice == "link" ?
+              "The client sent a link to the tips & loans workbook. Attach the workbook from the link before applying." :
+              "The client attached a tips & loans workbook. Reopen the client revision so the workbook is included."
+          end
+          client_waived = client_choice == "none"
           waived = staff_waived || client_waived ? waivable : []
           missing = completeness.missing_required_roles(waived_roles: waived)
           if missing.any?
