@@ -77,3 +77,24 @@ it('deactivates an existing default and removes its rendered row', async () => {
   await screen.findByText('No every-period changes configured.');
   expect(screen.queryByRole('button', { name: 'Remove default for Morgan Owner' })).toBeNull();
 });
+
+it('saves field labels, help, requirement and none permissions, and suggests hours for an hourly employee', async () => {
+  render(<StandingChangesSettings />);
+  await screen.findByLabelText('Employee');
+  fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '2' } });
+  expect((screen.getByLabelText('Change') as HTMLSelectElement).value).toBe('extra_hours');
+  fireEvent.change(screen.getByLabelText('Saved job and rate'), { target: { value: '7' } });
+  fireEvent.change(screen.getByLabelText('Entry label'), { target: { value: 'Manual work' } });
+  fireEvent.change(screen.getByLabelText('Help text'), { target: { value: 'Hours for maintenance' } });
+  fireEvent.click(screen.getByLabelText('Allow None this period'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save default' }));
+  await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/admin/payroll_standing_changes', { standing_change: expect.objectContaining({ label: 'Manual work', help_text: 'Hours for maintenance', allow_none: false, kind: 'extra_hours' }) }));
+});
+it('saves the client missing-regular threshold separately from entry configuration', async () => {
+  mocks.patch.mockResolvedValue(fixture);
+  render(<StandingChangesSettings />);
+  await screen.findByLabelText('Paid in at least');
+  fireEvent.change(screen.getByLabelText('Paid in at least'), { target: { value: '2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save missing-regular rule' }));
+  await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/admin/payroll_standing_changes/rule', { regular_pay_lookback: 4, regular_pay_threshold: 2 }));
+});
