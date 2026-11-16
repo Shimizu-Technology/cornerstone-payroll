@@ -155,7 +155,7 @@ RSpec.describe 'Configured entry import provenance' do
 
   [ :deactivated, :none_disabled, :employee_inactive, :job_inactive ].each do |state|
     it "records and skips stale none when #{state}" do
-      row = { 'skipped' => true }
+      row = { 'skipped' => true, 'label' => "Addison's hours" }
       if state == :job_inactive
         worker = create(:employee, company: company)
         rate = create(:employee_wage_rate, employee: worker)
@@ -170,6 +170,7 @@ RSpec.describe 'Configured entry import provenance' do
       when :job_inactive then field.employee_wage_rate.update!(active: false)
       end
       service = PayrollSubmissions::ImportChanges.new(submission: answer, pay_period: period)
+      expect(service.manual_review_warnings.join).to include("Addison's hours", 'Enter the value or ask the client')
       service.apply_to([], reviewed: [], confirmed: true)
       expect { service.apply_period_decisions!(actor: nil) }.not_to change(PayrollEntryResolution, :count)
       expect(service.review_decisions).to include(include(decision: 'stale_none', standing_change_id: field.id, revision: 1, reason: /not applied/))

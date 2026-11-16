@@ -172,7 +172,7 @@ module PayrollSubmissions
         row["kind"] == "owner_pay" ?
           "Legacy owner pay uses a total/each amount. Enter each owner's own period pay manually; no split is inferred." :
           "Legacy extra hours have no saved job. Enter and check these hours on the worksheet; no job or rate is inferred."
-      end.uniq
+      end.concat(stale_none_rows.map { |row| stale_none_warning(row) }).uniq
     end
 
     private
@@ -189,9 +189,9 @@ module PayrollSubmissions
       @submission.change_rows.each do |row|
         next unless row["standing_change_id"] && row["skipped"]
 
-        field = PayrollStandingChange.find_by(id: row["standing_change_id"], company_id: @period.company_id)
-        unless field && field.active? && field.allow_none? && field.employee_id == row["employee_id"] && field.kind == row["kind"] && field.employee_wage_rate_id == row["employee_wage_rate_id"] && field.availability_error.nil?
-          @review_decisions << row.symbolize_keys.merge(decision: "stale_none", reason: "Configured entry changed or is unavailable; None this period was not applied.", revision: @submission.revision)
+        field = current_none_field(row)
+        unless field
+          @review_decisions << row.symbolize_keys.merge(decision: "stale_none", reason: stale_none_warning(row), revision: @submission.revision)
           next
         end
 
@@ -201,6 +201,20 @@ module PayrollSubmissions
         resolution.update!(employee_id: field.employee_id, note: row["note"],
           source_evidence: { submission_id: @submission.id, revision: @submission.revision })
       end
+    end
+
+    def current_none_field(row)
+      field = PayrollStandingChange.find_by(id: row["standing_change_id"], company_id: @period.company_id)
+      field if field && field.active? && field.allow_none? && field.employee_id == row["employee_id"] && field.kind == row["kind"] && field.employee_wage_rate_id == row["employee_wage_rate_id"] && field.availability_error.nil?
+    end
+
+    def stale_none_rows
+      @submission.change_rows.select { |row| row["standing_change_id"] && row["skipped"] && !current_none_field(row) }
+    end
+
+    def stale_none_warning(row)
+      label = row["label"].presence || "Configured entry ##{row['standing_change_id']}"
+      "The client answered None for '#{label}', but None is no longer allowed or the entry is unavailable. None was not applied. Enter the value or ask the client."
     end
 
     def missing_owner_pay(submitted, source_rows)

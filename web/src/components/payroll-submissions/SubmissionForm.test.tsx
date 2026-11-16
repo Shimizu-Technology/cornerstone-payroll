@@ -185,22 +185,18 @@ it('hides unavailable fields from the client', () => {
 });
 
 
-it('renders a deactivated default from an older revision as an ordinary removable row', () => {
-  const current = { changes: [{ kind: 'owner_pay', employee_id: 122, standing_change_id: 9, employee_name: 'Monique Owner', amount: '5000' }], documents: [] } as unknown as SubmissionRevision;
-  render(<SubmissionForm period={{ ...period, standing_changes: [] }} current={current} onSent={vi.fn()} />);
-  expect(screen.queryByText(/Every period/)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: /Remove change 1/ }));
+it('drops an answered configured field omitted from the client list and sends the update', async () => {
+  const onSent = vi.fn();
+  const current = { ...keptRevision, changes: [
+    { kind: 'owner_pay', employee_id: 122, standing_change_id: 9, label: 'Hidden owner pay', amount: '5000' },
+    { kind: 'owner_pay', employee_id: 135, standing_change_id: 8, skipped: true },
+  ] } as SubmissionRevision;
+  render(<SubmissionForm period={{ ...period, standing_changes: [] }} current={current} onSent={onSent} />);
+  expect(screen.queryByText('Hidden owner pay')).toBeNull();
   expect(screen.queryByLabelText('Amount ($)')).toBeNull();
-});
-
-it('drops a skipped default that was later deactivated instead of reopening it as a blank change', () => {
-  const current = { changes: [
-    { kind: 'owner_pay', employee_id: 135, standing_change_id: 8, employee_name: 'Sara Owner', skipped: true },
-    { kind: 'owner_pay', employee_id: 122, standing_change_id: 9, employee_name: 'Monique Owner', amount: '5000' },
-  ], documents: [] } as unknown as SubmissionRevision;
-  render(<SubmissionForm period={{ ...period, standing_changes: [] }} current={current} onSent={vi.fn()} />);
-  expect(screen.getAllByLabelText('Amount ($)')).toHaveLength(1);
-  expect((screen.getByLabelText('Amount ($)') as HTMLInputElement).value).toBe('5000');
+  fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
+  await waitFor(() => expect(onSent).toHaveBeenCalledOnce());
+  expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([]);
 });
 
 it('shows configured help without employee pickers and respects allow_none', async () => {
