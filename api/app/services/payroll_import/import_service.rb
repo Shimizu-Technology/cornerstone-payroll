@@ -379,6 +379,7 @@ module PayrollImport
         installment_new_amount: existing[:installment_new_amount].to_f + incoming[:installment_new_amount].to_f,
         installment_payment: existing[:installment_payment].to_f + incoming[:installment_payment].to_f,
         installment_estimated_ending_balance: [ existing[:installment_estimated_ending_balance].to_f, incoming[:installment_estimated_ending_balance].to_f ].max,
+        installment_row_count: existing[:installment_row_count].to_i + incoming[:installment_row_count].to_i,
         tips_already_paid: merge_optional_boolean(existing[:tips_already_paid], incoming[:tips_already_paid]),
         tip_pool: merge_tip_pool(existing[:tip_pool], incoming[:tip_pool]),
         period_pay: merge_period_pay(existing[:period_pay], incoming[:period_pay]),
@@ -478,6 +479,7 @@ module PayrollImport
         loan_reconciliation_matches: loan_reconciliation.fetch(:matches),
         loan_reconciliation_errors: loan_reconciliation.fetch(:errors),
         loan_reconciliation_warnings: loan_reconciliation.fetch(:warnings),
+        installment_loan_setup: loan_reconciliation[:installment_setup],
         payroll_components: Array(excel_data&.dig(:payroll_components))
       }
 
@@ -504,7 +506,8 @@ module PayrollImport
         } ]
         item.custom_columns_data = item.custom_columns_data.to_h.merge(
           "mosa_wage_rate_choice" => { "employee_wage_rate_id" => rate.id,
-            "default_source" => row[:wage_rate_default_source], "default_pay_period_id" => row[:wage_rate_default_pay_period_id] }
+            "default_source" => row[:wage_rate_default_source], "default_pay_period_id" => row[:wage_rate_default_pay_period_id],
+            "primary_job_fallback" => row[:wage_rate_needs_review] == true }
         )
       else
         # Single-rate calculations keep using the profile rate. Stale saved
