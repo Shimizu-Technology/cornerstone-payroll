@@ -249,6 +249,13 @@ class PayrollItem < ApplicationRecord
   before_create :prevent_retired_history_mutation
   before_update :guard_pending_payment_resolution
 
+  def status_removal_resolution
+    return unless time_tracking_entry_allocations.any? || time_tracking_manual_allocations.any? ||
+      aire_payroll_entry_acknowledgements.any? || fica_basis_proof.present?
+
+    "This paycheck has AIRE time allocated or tax evidence. Reactivate #{employee.full_name} or correct the source time first."
+  end
+
   def pending_payment_resolution_cannot_change
     return unless changes_to_save.keys.any? { |key| key != "updated_at" }
     message = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self)
