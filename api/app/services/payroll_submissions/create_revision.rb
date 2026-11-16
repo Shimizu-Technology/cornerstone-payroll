@@ -142,7 +142,7 @@ module PayrollSubmissions
     def normalized_answers
       no_changes = ActiveModel::Type::Boolean.new.cast(@params[:no_changes]) || false
       rows = ChangeRows.normalize!(@params[:changes], company_id: @company.id)
-      raise FileSet::Invalid, { "changes" => [ "Choose either \"No changes this period\" or list the changes, not both" ] } if no_changes && rows.any? { |row| !row["skipped"] }
+      raise FileSet::Invalid, { "changes" => [ "Choose either \"No changes this period\" or list the changes, not both" ] } if no_changes && rows.any? { |row| !row["skipped"] && !row["standing_change_id"] }
 
       raise FileSet::Invalid, { "changes" => [ 'List the changes this period or choose "No changes this period"' ] } unless no_changes || rows.any? { |row| !row["skipped"] }
 

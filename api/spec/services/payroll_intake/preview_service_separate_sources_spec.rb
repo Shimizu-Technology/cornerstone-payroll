@@ -136,6 +136,11 @@ RSpec.describe PayrollIntake::PreviewService, "separate MoSa source files" do
     expect(third.evidence_snapshot.fetch("source_changes")).to include("removed" => [ "supplemental_workbook" ])
     expect(second.reload).to be_superseded
 
+    # Retrying with the same files reuses version 3 instead of creating more versions.
+    expect(preview).to include(duplicate: true, session: third)
+    expect(preview(pdf)).to include(duplicate: true, session: third)
+    expect(PayrollIntakeSession.where(pay_period: run).count).to eq(3)
+
     fourth = preview(workbook).fetch(:session)
     expect(fourth).to have_attributes(supersedes_id: third.id, package_revision: 4, supersession_reason: "Added: Tips & loans workbook")
     expect(roles(fourth)).to eq(%w[revel_hours supplemental_workbook])
