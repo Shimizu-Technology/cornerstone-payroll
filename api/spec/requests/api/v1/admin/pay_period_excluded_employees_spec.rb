@@ -137,6 +137,15 @@ RSpec.describe "Restore removed pay-run employees", type: :request do
     end
   end
 
+  it "still requires intake payroll confirmation on an explicit adjustment run" do
+    period.update!(status: "draft")
+    period.update!(run_purpose: "adjustment")
+    employee.update_columns(intake_exception: { "reason" => "Missing I-9" }, intake_payroll_confirmed_at: nil)
+    delete url, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(period.pay_period_excluded_employees).to exist(employee_id: employee.id)
+  end
+
   it "allows historically deactivated workers on an explicit adjustment run" do
     period.update!(status: "draft")
     period.update!(run_purpose: "adjustment")

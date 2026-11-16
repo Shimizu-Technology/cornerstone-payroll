@@ -197,6 +197,7 @@ class Employee < ApplicationRecord
   scope :eligible_for_payroll_run, ->(period, explicitly_selected: false) {
     if explicitly_selected && %w[final correction adjustment].include?(period.run_purpose)
       where("status IN (?) OR (status = ? AND EXISTS (SELECT 1 FROM employee_status_events WHERE employee_id = employees.id AND event_type = ?))", %w[active terminated], "inactive", "deactivated")
+        .where("intake_exception = '{}'::jsonb OR (intake_payroll_confirmed_at IS NOT NULL AND intake_payroll_eligible_from <= ?)", period.end_date)
     else
       eligible_for_period(period.start_date, period.end_date)
     end
