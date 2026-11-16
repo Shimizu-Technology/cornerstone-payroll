@@ -40,7 +40,7 @@ class EmployeeStatusTransitionService
   def terminate!(attributes)
     data = attributes.to_h.symbolize_keys
     effective_date = parse_date!(data[:effective_date], "termination date")
-    raise Error, "Termination date cannot be in the future" if effective_date > Date.current
+    raise Error, "Termination date cannot be in the future" if effective_date > PayrollBusinessClock.today
     last_worked_on = parse_optional_date!(data[:last_worked_on], "last worked date")
 
     ApplicationRecord.transaction do
@@ -71,7 +71,7 @@ class EmployeeStatusTransitionService
   def deactivate!(attributes)
     data = attributes.to_h.symbolize_keys
     effective_date = parse_date!(data[:effective_date], "inactive date")
-    raise Error, "Inactive date cannot be in the future" if effective_date > Date.current
+    raise Error, "Inactive date cannot be in the future" if effective_date > PayrollBusinessClock.today
     last_worked_on = parse_optional_date!(data[:last_worked_on], "last worked date")
 
     ApplicationRecord.transaction do
@@ -102,7 +102,7 @@ class EmployeeStatusTransitionService
   def reactivate!(attributes)
     data = attributes.to_h.symbolize_keys
     effective_date = parse_date!(data[:effective_date], "reactivation date")
-    raise Error, "Reactivation date cannot be in the future" if effective_date > Date.current
+    raise Error, "Reactivation date cannot be in the future" if effective_date > PayrollBusinessClock.today
 
     ApplicationRecord.transaction do
       @employee.lock!
