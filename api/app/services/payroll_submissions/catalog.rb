@@ -115,7 +115,7 @@ module PayrollSubmissions
       linked = entry.record&.pay_period
       return unless linked&.correction_status == "voided"
 
-      "The linked pay run ##{linked.id} was voided. Select a replacement run for these files, or contact an admin."
+      "The linked pay run ##{linked.id} was voided. Import these files into the replacement pay run, or contact an admin."
     end
 
     def ambiguous_pay_period_ids(entry)

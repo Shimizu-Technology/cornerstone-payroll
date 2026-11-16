@@ -91,6 +91,9 @@ export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyNam
               const updated = pay_period.outstanding_file_requests ?? [];
               setConflict({ kind: 'requests', added: updated.filter(request => !requests.some(old => old.id === request.id)).map(request => request.id),
                 resolved: requests.filter(old => !updated.some(request => request.id === old.id)).map(request => request.title) });
+            } else {
+              // Nothing to show beside the numbering (no paper checks or no summary): say why Confirm stopped.
+              setError(err instanceof Error ? err.message : 'This payroll changed. Review it and confirm again.');
             }
           }
         } catch {
