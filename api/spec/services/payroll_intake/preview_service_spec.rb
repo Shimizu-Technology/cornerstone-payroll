@@ -101,6 +101,16 @@ RSpec.describe PayrollIntake::PreviewService do
     expect(PayrollIntakeSession.count).to eq(1)
   end
 
+  it "requires a replacement for a pre-deploy package once a new active worker is added" do
+    first = preview.fetch(:session)
+    first.update_columns(import_hash: first.evidence_snapshot.fetch("source_import_hash"),
+      evidence_snapshot: first.evidence_snapshot.except("source_import_hash"), created_at: 1.minute.ago)
+    create(:employee, company: company, first_name: "Blake", last_name: "Other")
+
+    expect { preview }.to raise_error(described_class::ReplacementRequiredError)
+    expect(PayrollIntakeSession.count).to eq(1)
+  end
+
   it "refuses an identical re-send and preserves the applied current package" do
     original = submission(1)
     first = applied(original)
