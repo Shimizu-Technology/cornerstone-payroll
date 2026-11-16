@@ -88,6 +88,19 @@ RSpec.describe PayrollIntake::PreviewService do
     expect(second.evidence_snapshot).to include("source_import_hash" => file_only_hash)
   end
 
+  it "deduplicates a plain retry against a package stored before the roster joined the import key" do
+    first = preview.fetch(:session)
+    first.update_columns(import_hash: first.evidence_snapshot.fetch("source_import_hash"),
+      evidence_snapshot: first.evidence_snapshot.except("source_import_hash"))
+
+    expect(preview).to include(duplicate: true, session: first)
+
+    other = create(:employee, company: company, first_name: "Blake", last_name: "Other", status: "inactive")
+    EmployeeStatusTransitionService.reactivate!(employee: other, actor: actor, attributes: { effective_date: run.start_date.iso8601 })
+    expect { preview }.to raise_error(described_class::ReplacementRequiredError)
+    expect(PayrollIntakeSession.count).to eq(1)
+  end
+
   it "refuses an identical re-send and preserves the applied current package" do
     original = submission(1)
     first = applied(original)

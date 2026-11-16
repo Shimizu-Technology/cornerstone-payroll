@@ -240,7 +240,20 @@ module PayrollIntake
     end
 
     def existing_duplicate_session
-      PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: import_hash)
+      PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: import_hash) ||
+        legacy_duplicate_session
+    end
+
+    # MoSa packages stored before the roster joined the key carry the file-only
+    # hash. A plain retry still reuses one until a worker's status changes.
+    def legacy_duplicate_session
+      return if import_hash == source_files_hash || @revision_evidence
+
+      session = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: source_files_hash)
+      return unless session
+      return if EmployeeStatusEvent.where(company_id: company.id).where("created_at > ?", session.created_at).exists?
+
+      session
     end
 
     def duplicate_session_result(session)
