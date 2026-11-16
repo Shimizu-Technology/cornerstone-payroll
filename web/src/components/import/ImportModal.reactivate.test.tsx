@@ -185,6 +185,26 @@ it('locks outcomes while matching runs again, so a change made meanwhile is not 
   expect((screen.getAllByLabelText('Outcome for Server, Avery')[0] as HTMLSelectElement).disabled).toBe(false);
 });
 
+it('locks the client no-pay decision while matching runs again', async () => {
+  mocks.getEmployee.mockResolvedValue({ data: blake });
+  mocks.reactivate.mockResolvedValue({ data: { ...blake, status: 'active' } });
+  let finish: (value: ImportPreviewResponse) => void = () => undefined;
+  mocks.rematchImport.mockReturnValue(new Promise<ImportPreviewResponse>((resolve) => { finish = resolve; }));
+  const prefill: ImportPreviewResponse['client_change_prefill'] = { submission_id: 20, revision: 2, rows: [
+    { change_index: -2, kind: 'owner_pay', employee_id: 1, employee_name: 'Avery Server', requires_pay_decision: true },
+  ] };
+  open({ ...preview([averyRow(1), inactiveBlake], [avery]), client_change_prefill: prefill }, true);
+
+  fireEvent.click(screen.getByLabelText('No pay this period for Avery Server'));
+  await reactivateBlake();
+
+  expect((screen.getByLabelText('No pay this period for Avery Server') as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByLabelText('Reason for no pay for Avery Server') as HTMLInputElement).disabled).toBe(true);
+  finish({ ...preview([averyRow(11), blakeMatchedRow(12)], [{ ...avery, source_row_id: 11 }, blakeMatched], 2), client_change_prefill: prefill });
+  await screen.findByText('Blake Returning is active again and is now matched in this import.');
+  expect((screen.getByLabelText('No pay this period for Avery Server') as HTMLInputElement).disabled).toBe(false);
+});
+
 it('ignores a worker that finishes loading after staff went Back', async () => {
   let finish: (value: { data: typeof blake }) => void = () => undefined;
   mocks.getEmployee.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
