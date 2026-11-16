@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "caxlsx"
 
 RSpec.describe PayrollIntake::PreviewService do
   let!(:company) { create(:company, payroll_intake_source_types: [ "mosa_revel" ]) }
@@ -32,7 +33,26 @@ RSpec.describe PayrollIntake::PreviewService do
 
   def preview(source = nil, **options)
     described_class.new(pay_period: run, source_type: "mosa_revel", actor: actor, storage: storage,
-      portal_submission: source, files: [ portal_upload("revel.pdf", bytes, "application/pdf") ], **options).call
+      portal_submission: source, files: source_files, **options).call
+  end
+
+  def source_files
+    files = [ portal_upload("revel.pdf", bytes, "application/pdf") ]
+    files << portal_upload("tips-loans.xlsx", @workbook, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") if @workbook
+    files
+  end
+
+  # MoSa's own workbook with Avery's $300 installment loan, $25 a payroll.
+  def use_installment_workbook!
+    package = Axlsx::Package.new
+    package.workbook.add_worksheet(name: PayrollImport::LoanTipExcelParser::INSTALLMENT_SHEET) do |sheet|
+      sheet.add_row([ "INSTALLMENT LOANS" ])
+      sheet.add_row([ "PAY PERIOD ENDING", nil, run.end_date ])
+      sheet.add_row([ "PAY DAY", nil, run.pay_date ])
+      sheet.add_row([ nil, "Nickname", "Last Name", "First Name", "Dept", "Beginning Balance", "New Loan", "Payment", "Estimated Ending" ])
+      sheet.add_row([ 1, nil, "Example", "Avery", "Joint", 0, 300, 25, 275 ])
+    end
+    @workbook = package.to_stream.read
   end
 
   def applied(source)
@@ -99,6 +119,67 @@ RSpec.describe PayrollIntake::PreviewService do
     EmployeeStatusTransitionService.reactivate!(employee: other, actor: actor, attributes: { effective_date: run.start_date.iso8601 })
     expect { preview }.to raise_error(described_class::ReplacementRequiredError)
     expect(PayrollIntakeSession.count).to eq(1)
+  end
+
+  def installment_loan!
+    EmployeeLoan.create!(company: company, employee: employee, name: "Advance", original_amount: 300, opening_balance: 300,
+      current_balance: 300, balance_as_of: run.pay_date, balance_source: "new_loan", payment_amount: 25, first_deduction_date: run.pay_date)
+  end
+
+  def roster_only_hash(source = nil)
+    service = described_class.new(pay_period: run, source_type: "mosa_revel", actor: actor, storage: storage,
+      portal_submission: source, files: source_files)
+    service.send(:snapshot_files!)
+    service.send(:roster_import_hash)
+  end
+
+  it "makes the same files a new review after a loan is set up, because the review reconciles each worker's loans" do
+    use_installment_workbook!
+    first = preview.fetch(:session)
+    expect(preview).to include(duplicate: true, session: first)
+
+    installment_loan!
+    second = preview(carry_forward: true)
+    expect(second[:duplicate]).to be(false)
+    expect(second[:session]).to have_attributes(supersedes_id: first.id)
+    expect(preview(carry_forward: true)).to include(duplicate: true, session: second[:session])
+  end
+
+  it "deduplicates a plain retry against a package keyed before loans joined the import key, until a loan changes" do
+    use_installment_workbook!
+    first = preview.fetch(:session)
+    first.update_columns(import_hash: roster_only_hash, created_at: 1.minute.ago)
+
+    expect(preview).to include(duplicate: true, session: first)
+    installment_loan!
+    expect { preview }.to raise_error(described_class::ReplacementRequiredError)
+    expect(PayrollIntakeSession.count).to eq(1)
+  end
+
+  it "does not reopen a superseded package keyed before loans joined the import key" do
+    first = preview.fetch(:session)
+    first.update_columns(import_hash: roster_only_hash, created_at: 1.minute.ago, superseded_at: Time.current)
+
+    expect(preview).not_to include(session: first)
+  end
+
+  it "ignores loan activity of a worker the files don't name" do
+    use_installment_workbook!
+    other = create(:employee, company: company, first_name: "Blake", last_name: "Other")
+    first = preview.fetch(:session)
+    EmployeeLoan.create!(company: company, employee: other, name: "Advance", original_amount: 300, opening_balance: 300,
+      current_balance: 300, balance_as_of: run.pay_date, balance_source: "new_loan", payment_amount: 25, first_deduction_date: run.pay_date)
+
+    expect(preview).to include(duplicate: true, session: first)
+  end
+
+  it "finds a changes-only client revision keyed before loans joined the import key" do
+    applied(submission(1))
+    corrected = submission(2, "200")
+    second = preview(corrected).fetch(:session)
+    second.update_columns(import_hash: Digest::SHA256.hexdigest("#{roster_only_hash(corrected)}\nclient-revision:#{corrected.id}"), created_at: 1.minute.ago)
+
+    expect(preview(corrected)).to include(duplicate: true, session: second)
   end
 
   it "requires a replacement for a pre-deploy package once a new active worker is added" do

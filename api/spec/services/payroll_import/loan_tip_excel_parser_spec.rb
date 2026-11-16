@@ -130,6 +130,7 @@ RSpec.describe PayrollImport::LoanTipExcelParser do
     expect(recurring).to include(
       recurring_loan_deduction: 50.0,
       installment_payment: 0.0,
+      installment_row_count: 0,
       loan_deduction: 50.0
     )
     expect(installment).to include(
@@ -138,6 +139,7 @@ RSpec.describe PayrollImport::LoanTipExcelParser do
       installment_new_amount: 75.0,
       installment_payment: 50.0,
       installment_estimated_ending_balance: 325.0,
+      installment_row_count: 1,
       loan_deduction: 50.0
     )
     expect(mixed).to include(
@@ -146,6 +148,7 @@ RSpec.describe PayrollImport::LoanTipExcelParser do
       installment_new_amount: 10.0,
       installment_payment: 40.0,
       installment_estimated_ending_balance: 95.0,
+      installment_row_count: 2,
       loan_deduction: 60.0
     )
   ensure

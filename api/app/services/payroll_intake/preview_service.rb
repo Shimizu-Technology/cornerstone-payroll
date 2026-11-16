@@ -183,17 +183,64 @@ module PayrollIntake
       end
     end
 
-    # MoSa matches only active workers. The same files need a new reviewed
-    # package after a worker returns, rather than the old unmatched preview.
-    # The latest status event keeps a roster that returns to an earlier state
-    # from reusing a superseded review.
+    # MoSa matches only active workers and reconciles each worker's Employee
+    # Loans. The same files need a new reviewed package after a worker returns
+    # or a loan is set up, resumed or paid, rather than the old preview.
     def import_hash
       @import_hash ||= if source_type == "mosa_revel"
+        Digest::SHA256.hexdigest("#{roster_import_hash}\n--employee-loans--\n#{loan_setup_signature}")
+      else
+        source_files_hash
+      end
+    end
+
+    # The latest status event keeps a roster that returns to an earlier state
+    # from reusing a superseded review. Packages stored before loans joined the
+    # key carry this hash.
+    def roster_import_hash
+      @roster_import_hash ||= begin
         roster = JSON.generate(company.employees.active.order(:id).pluck(:id))
         latest_status_event_id = EmployeeStatusEvent.where(company_id: company.id).maximum(:id)
         Digest::SHA256.hexdigest("#{source_files_hash}\n--active-roster--\n#{roster}\n#{latest_status_event_id}")
-      else
-        source_files_hash
+      end
+    end
+
+    def loan_setup_signature
+      rows = relevant_loans.order(:id)
+        .pluck(:id, :employee_id, :status, :current_balance, :payment_amount, :first_deduction_date, :balance_as_of, :paid_off_date)
+      JSON.generate(rows.map { |row| row.map { |value| value.is_a?(BigDecimal) ? value.to_s("F") : value.to_s } })
+    end
+
+    def loans_changed_since?(session)
+      relevant_loans.where("updated_at > ?", session.created_at).exists?
+    end
+
+    # Loans reach a review only through workbook rows and owners' setup rows,
+    # so another worker's loan activity does not make the same files a new review.
+    def relevant_loans
+      ids = loan_employee_ids
+      ids ? EmployeeLoan.where(company_id: company.id, employee_id: ids) : EmployeeLoan.where(company_id: company.id)
+    end
+
+    # Active owners plus the workers the workbook names; nil (every loan) when
+    # the workbook can't be read here, which the extraction then reports.
+    def loan_employee_ids
+      return @loan_employee_ids if defined?(@loan_employee_ids)
+
+      @loan_employee_ids = begin
+        employees = company.employees.active.to_a
+        ids = employees.select(&:variable_salary?).map(&:id)
+        workbook = file_snapshots.find { |snapshot| snapshot_role(snapshot) == "supplemental_workbook" }
+        if workbook
+          matcher = PayrollImport::NameMatcher.new(employees)
+          PayrollImport::LoanTipExcelParser.parse_file(workbook[:file]).each do |row|
+            id = row[:employee_id].presence&.to_i || matcher.match_excel_name(row[:last_name], row[:first_name])&.dig(:employee_id)
+            ids << id if id
+          end
+        end
+        ids.uniq.sort
+      rescue StandardError
+        nil
       end
     end
 
@@ -220,6 +267,13 @@ module PayrollIntake
       revision_hash = Digest::SHA256.hexdigest("#{import_hash}\nclient-revision:#{submission.id}")
       if PayrollIntakeSession.exists?(pay_period: pay_period, source_type: source_type, import_hash: revision_hash)
         @import_hash = revision_hash
+        return
+      end
+      # A revision package keyed before loans joined the key, while loans are unchanged.
+      legacy_hash = Digest::SHA256.hexdigest("#{roster_import_hash}\nclient-revision:#{submission.id}")
+      legacy = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: legacy_hash)
+      if legacy && !legacy.superseded? && !loans_changed_since?(legacy)
+        @import_hash = legacy_hash
         return
       end
       current = PayrollIntakeSession.current.find_by(pay_period: pay_period, source_type: source_type)
@@ -261,10 +315,16 @@ module PayrollIntake
     def legacy_duplicate_session
       return if import_hash == source_files_hash || @revision_evidence || @follows_current
 
+      # Keyed with the roster before loans joined the key.
+      # A superseded one can't be reopened; the same files become a new version.
+      session = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: roster_import_hash)
+      return session if session && !session.superseded? && !loans_changed_since?(session)
+
       session = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: source_files_hash)
       return unless session
       return if EmployeeStatusEvent.where(company_id: company.id).where("created_at > ?", session.created_at).exists?
       return if company.employees.active.where("created_at > ?", session.created_at).exists?
+      return if loans_changed_since?(session)
 
       session
     end

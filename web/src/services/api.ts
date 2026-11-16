@@ -1607,9 +1607,12 @@ export const payPeriodsApi = {
   },
   resolvePortalSource: (id: number, submissionId: number, reason: string): Promise<{ resolved_submission_id: number }> =>
     api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
-  // Match the current review's files again, e.g. after reactivating a worker.
-  rematchImport: (id: number): Promise<ImportPreviewResponse> =>
-    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/rematch_import`),
+  // Match the current review's files again, e.g. after reactivating a worker or setting up a loan.
+  rematchImport: (id: number, reason?: string): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/rematch_import`, reason ? { reason } : undefined),
+  // Sets up (or resumes) the Employee Loan for an installment the review found in the workbook.
+  setUpImportInstallmentLoan: (id: number, data: { import_id: number; employee_id: number; name?: string; starting_balance?: string; payment_amount?: string; first_deduction_date?: string }): Promise<{ loan_id: number; already_set_up: boolean }> =>
+    api.post<{ loan_id: number; already_set_up: boolean }>(`/admin/pay_periods/${id}/import_installment_loan`, data),
   currentImport: (id: number): Promise<ImportPreviewResponse> =>
     api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
   // Takes one file out of an import still in review; the reason is recorded on the new version.
@@ -2111,6 +2114,9 @@ export interface ImportPreviewRow {
   selected_wage_rate_id?: number | null;
   wage_rate_default_source?: string;
   wage_rate_default_pay_period_id?: number | null;
+  // Equal-rate jobs with no single job in history: hours default to the primary job.
+  wage_rate_needs_review?: boolean;
+  installment_loan_setup?: InstallmentLoanSetupOffer | null;
   source_row_id: number;
   period_pay_required?: boolean;
   current_period_pay?: string | null;
@@ -2167,6 +2173,12 @@ export interface ImportPreviewRow {
   }>;
 }
 
+// What import review offers when the workbook has an installment that Employee Loans doesn't.
+export type InstallmentLoanSetupOffer =
+  | { action: 'create'; name: string; starting_balance: string; payment_amount: string; first_deduction_date: string;
+      beginning_balance: string; new_amount: string; estimated_ending_balance: string; message: string }
+  | { action: 'resume'; employee_loan_id: number; name: string; current_balance: string; payment_amount: string | null; message: string };
+
 export interface MosaSourceRow {
   id: number;
   position: number;
@@ -2193,6 +2205,8 @@ export interface ImportSourceDocument {
 }
 
 export interface ImportPreviewResponse {
+  // Who may set up a loan from the review follows the Employee Loans screen.
+  loan_setup?: { allowed: boolean; reason: string | null };
   client_change_prefill?: ClientChangePrefill | null;
   pending_change_prefill?: ClientChangePrefill | null;
   pending_portal_source?: { submission_id: number; revision: number; period_id: number; workbook_choice?: 'attach' | 'link' | 'none' | null; changes_link_url?: string | null; notes?: string | null; no_changes: boolean; changes: import('./payrollSubmissions').ChangeRow[] } | null;

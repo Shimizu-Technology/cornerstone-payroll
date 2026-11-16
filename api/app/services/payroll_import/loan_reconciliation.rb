@@ -11,6 +11,7 @@ module PayrollImport
       @errors = []
       @warnings = []
       @matches = []
+      @installment_setup = nil
     end
 
     def call
@@ -42,7 +43,10 @@ module PayrollImport
         direct_loan_deduction: errors.empty? ? direct_amount : source_total,
         errors: errors,
         warnings: warnings,
-        matches: matches
+        matches: matches,
+        # What import review offers when the workbook has an installment the
+        # Employee Loans ledger doesn't: set it up, or resume a paused one.
+        installment_setup: @installment_setup
       }
     end
 
@@ -70,6 +74,10 @@ module PayrollImport
     end
 
     def reconcile_installment!
+      if active_loans("balance_tracked").empty?
+        offer_installment_setup!
+        return
+      end
       loan = unique_active_loan("balance_tracked", "installment loan")
       return unless loan
 
@@ -77,7 +85,8 @@ module PayrollImport
       addition = money(source_row[:installment_new_amount])
       source_payment = money(source_row[:installment_payment])
       expected_current = beginning + addition
-      if beginning <= 0
+      # A new loan can arrive as a new amount on a zero beginning balance.
+      if expected_current <= 0
         errors << "#{loan.name} needs a beginning balance in the workbook."
         return
       end
@@ -107,6 +116,63 @@ module PayrollImport
       end
 
       matches << match_payload(loan, expected_payment)
+    end
+
+    # No active installment loan is scheduled for this payday. Offer the setup
+    # only when the workbook row is unambiguous; never guess between loans.
+    def offer_installment_setup!
+      name = employee.full_name
+      open_loans = employee.employee_loans.where(tracking_mode: "balance_tracked", status: %w[active suspended]).order(:id).to_a
+      scheduled_elsewhere = open_loans.select(&:active?)
+      paused = open_loans.reject(&:active?)
+      if scheduled_elsewhere.any?
+        errors << "#{scheduled_elsewhere.map(&:name).to_sentence} for #{name} isn't scheduled for this payday in Employee Loans. Check its first deduction date and schedule, or correct the workbook."
+        return
+      end
+      if paused.many?
+        errors << "#{name} has #{paused.length} paused installment loans in Employee Loans. Resume the right one there, then match the files again."
+        return
+      end
+      if paused.one?
+        loan = paused.first
+        message = "#{loan.name} for #{name} is paused in Employee Loans. Resume it so this payroll deducts the installment."
+        @installment_setup = { action: "resume", employee_loan_id: loan.id, name: loan.name,
+          current_balance: loan.current_balance.to_d.round(2).to_s("F"), payment_amount: loan.payment_amount&.to_d&.round(2)&.to_s("F"), message: message }
+        errors << message
+        return
+      end
+
+      # A balance continuing on the workbook after Cornerstone closed the loan
+      # (for example a capped final payment) is not a new debt.
+      beginning = money(source_row[:installment_beginning_balance])
+      paid_off = beginning.positive? && employee.employee_loans.where(tracking_mode: "balance_tracked", status: "paid_off").order(:paid_off_date, :id).last
+      if paid_off
+        paid_on = paid_off.paid_off_date ? " on #{paid_off.paid_off_date.strftime('%-m/%-d/%Y')}" : ""
+        errors << "#{name}'s installment loan #{paid_off.name} was paid off#{paid_on} in Employee Loans, but the workbook still shows #{currency(beginning)}. Check the workbook with the client."
+        return
+      end
+
+      row_count = source_row[:installment_row_count].to_i
+      if row_count > 1
+        errors << "The workbook has #{row_count} installment loan rows for #{name}. Ask the client to combine them into one row, or set up the loans in Employee Loans."
+        return
+      end
+      addition = money(source_row[:installment_new_amount])
+      payment = money(source_row[:installment_payment])
+      starting = beginning + addition
+      unless starting.positive? && payment.positive? && payment <= starting
+        errors << "Set up the named installment loan for #{name} in Employee Loans before importing this amount."
+        return
+      end
+
+      message = "The workbook has an installment loan for #{name} (#{currency(starting)} balance, #{currency(payment)} this payroll), but Employee Loans has none. Set it up so this payroll and later ones deduct it."
+      @installment_setup = {
+        action: "create", name: "Installment loan",
+        starting_balance: starting.to_s("F"), payment_amount: payment.to_s("F"), first_deduction_date: pay_date.iso8601,
+        beginning_balance: beginning.to_s("F"), new_amount: addition.to_s("F"),
+        estimated_ending_balance: money(source_row[:installment_estimated_ending_balance]).to_s("F"), message: message
+      }
+      errors << message
     end
 
     def active_loans(mode)
