@@ -38,7 +38,7 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
   const committedSummary = state.committed ? `Committed${committedAt ? ` ${formatGuamDateTime(committedAt)}` : ''}${sections.metadata.processedBy ? ` by ${sections.metadata.processedBy}` : ''}` : state.commitReason || 'Ready to commit the approved payroll';
   return <div className="space-y-3" aria-label="Payroll steps">
     <ExpectedEntriesPanel payPeriod={payPeriod} disabled={sections.roster.processing || sections.roster.financialActionsHeld || !sections.roster.canEditPayPeriod || sections.roster.hasStagedWorksheetChanges}
-      onSaved={() => sections.roster.loadPayPeriod(payPeriod.id, true)} onEnterPay={id => {
+      onCalculate={sections.roster.onCalculateExpectedEntry} onSaved={() => sections.roster.loadPayPeriod(payPeriod.id, true)} onEnterPay={id => {
         sections.roster.setAdditionalEmployeeIds(prev => new Set([...prev, id]));
         sections.roster.setHoursMap(prev => ({ ...prev, [id]: prev[id] || { regular: 0, overtime: 0 } }));
         const step = document.getElementById('payroll-hours') as HTMLDetailsElement | null;
