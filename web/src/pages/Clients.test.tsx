@@ -535,6 +535,18 @@ describe('Clients name-only rename', () => {
     await screen.findAllByText(rehearsal.name);
     expect(screen.queryByRole('button', { name: `Rename ${rehearsal.name}` })).toBeNull();
   });
+
+  it('offers rename to a manager on a live client they administer, but not on a test workspace', async () => {
+    apiMocks.auth = { isAdmin: false, isAccountant: false, isManager: true, hasCapability: (capability: string) => capability === 'staff_workspace' };
+    apiMocks.list.mockResolvedValue({ companies: [
+      { ...target, client_capabilities: ['manage_client_administration'] },
+      { ...rehearsal, client_capabilities: ['manage_client_administration'] },
+    ] });
+    renderClients();
+    await screen.findAllByText(target.name);
+    expect(screen.getAllByRole('button', { name: `Rename ${target.name}` }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: `Rename ${rehearsal.name}` })).toBeNull();
+  });
 });
 
 
@@ -624,6 +636,32 @@ describe('Client create/edit field labels', () => {
       name: 'Delegated client name', ein: '', phone: '',
     }));
     expect(screen.queryByRole('button', { name: 'Create test workspace' })).toBeNull();
+  });
+  it('lets a manager require client approval and asks for a client name before saving', async () => {
+    // The server sends managers the full client edit (ADMIN_EDITABLE_COMPANY_FIELDS).
+    const managerFields = ['name', 'ein', 'pay_frequency', 'active', 'address_line1', 'address_line2', 'city', 'state', 'zip', 'phone', 'email',
+      'bank_name', 'bank_address', 'check_stock_type', 'next_check_number', 'simple_payroll_register_enabled', 'historical_payroll_enabled',
+      'client_payroll_approval_required'];
+    const user = userEvent.setup();
+    apiMocks.auth = { isAdmin: false, isAccountant: false, isManager: true, hasCapability: (capability: string) => capability === 'staff_workspace' };
+    apiMocks.get.mockResolvedValue({ company: { ...target, editable_fields: managerFields } });
+    apiMocks.update.mockResolvedValue({ company: target });
+    render(<Clients />);
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    const approval = await screen.findByRole('switch', { name: 'Require client approval before payroll commit' });
+    expect(approval.hasAttribute('disabled')).toBe(false);
+    await user.click(approval);
+    const name = screen.getByRole('textbox', { name: /Client Name/ });
+    const savedName = (name as HTMLInputElement).value;
+    await user.clear(name);
+    await user.click(screen.getByRole('button', { name: 'Update Client' }));
+    expect(await screen.findByText('Client name is required')).toBeTruthy();
+    expect(apiMocks.update).not.toHaveBeenCalled();
+    await user.type(name, savedName);
+    await user.click(screen.getByRole('button', { name: 'Update Client' }));
+    await waitFor(() => expect(apiMocks.update).toHaveBeenCalledWith(target.id, expect.objectContaining({
+      name: savedName, client_payroll_approval_required: true,
+    })));
   });
 
 });

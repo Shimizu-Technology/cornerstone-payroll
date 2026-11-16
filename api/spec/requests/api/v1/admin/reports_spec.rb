@@ -1528,7 +1528,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(W2FilingReadiness.find_by!(company: company, year: 2025).marked_ready_at).to be_nil
     end
 
-    it "returns 403 for manager users (admin-only approval action)" do
+    it "lets managers mark this client ready with attributed evidence" do
       manager_user = User.create!(
         company: company,
         email: "manager-reports-#{company.id}@example.com",
@@ -1539,8 +1539,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(manager_user)
 
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:ok), response.body
+      expect(W2FilingReadiness.find_by!(company: company, year: 2025)).to have_attributes(
+        status: "filing_ready", marked_ready_by_id: manager_user.id)
+    end
+
+    it "returns 403 for accountants without Client management" do
+      accountant = create(:user, company: company, role: "accountant")
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(accountant)
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body["error"]).to match(/Admin access required/i)
+      expect(response.parsed_body["error"]).to match(/Manager or admin access required/i)
+      expect(W2FilingReadiness.find_by!(company: company, year: 2025).marked_ready_at).to be_nil
     end
 
     it "returns 422 when preflight has not been run" do
