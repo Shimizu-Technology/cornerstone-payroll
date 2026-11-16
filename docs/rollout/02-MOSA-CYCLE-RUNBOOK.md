@@ -1,5 +1,7 @@
 # MoSa payroll cycle runbook
 
+> For the step-by-step staff guide to the current app (two-file import, expected entries, **Download preview**, client review and commit), use [MoSa biweekly payroll cycle](../runbooks/MOSA_PAYROLL_CYCLE.md). This page keeps the rollout controls: parallel cycles, cutover evidence and hard stops.
+
 This is Cornerstone's current operator procedure for one MoSa payroll cycle. It uses the Cornerstone Payroll interface. Legacy Gmail-download, employee-backfill, and database-apply scripts are not part of the live workflow.
 
 During the required parallel cycles, QuickBooks remains the payout and filing source. Cornerstone records a comparison run only. Do not distribute a payment from Cornerstone until the cutover record is signed.
