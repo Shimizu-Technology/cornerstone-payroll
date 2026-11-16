@@ -94,7 +94,7 @@ class PayrollSubmissionPeriod < ApplicationRecord
 
   def can?(event, audience)
     rule = EVENTS[event.to_s]
-    rule.present? && rule[:audience] == audience && rule[:from].include?(status)
+    rule.present? && rule[:audience] == audience && event_status_allowed?(event, rule)
   end
 
   # Call inside the caller's transaction with the period row locked.
@@ -103,7 +103,7 @@ class PayrollSubmissionPeriod < ApplicationRecord
     rule = EVENTS[event.to_s]
     raise TransitionError, "That action is not available" unless rule && audience
     raise TransitionError, "Only #{rule[:audience] == 'staff' ? 'Cornerstone staff' : 'the client'} can do that" unless rule[:audience] == audience
-    unless rule[:from].include?(status)
+    unless event_status_allowed?(event, rule)
       raise TransitionError, "This period is #{status_label.downcase}, so that action is not available"
     end
 
@@ -146,6 +146,15 @@ class PayrollSubmissionPeriod < ApplicationRecord
   end
 
   private
+
+  def event_status_allowed?(event, rule)
+    return true if rule[:from].include?(status)
+
+    # A manual paid marker predates the financial run. It must not prevent
+    # corrected source files while that linked live run is still open.
+    event.to_s == "submit" && status == "paid" && pay_period &&
+      pay_period.correction_status != "voided" && !pay_period.client_finished?
+  end
 
   def end_after_start
     return if start_date.blank? || end_date.blank? || end_date >= start_date

@@ -313,6 +313,7 @@ RSpec.describe "Payroll setup refresh API", type: :request do
   end
 
   it "supersedes an already approved client review even if the monetary calculation remains the same" do
+    company.update!(client_payroll_approval_required: true)
     period.update!(status: "calculated")
     package = PayrollReview::RevisionService.new(pay_period: period, actor: actor).issue!
     client = create(:user, company: company, role: "client")

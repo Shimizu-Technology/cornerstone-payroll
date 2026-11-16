@@ -508,7 +508,7 @@ RSpec.describe "Pay-period submissions", type: :request do
       as_client
       get "#{client_base}/#{period.id}"
       expect(data["allowed_actions"]).to include("submit")
-      send_package(notes: "Corrected hours", idempotency_key: "legacy-correction")
+      send_package(notes: "Corrected hours", based_on_revision: period.current_submission.revision, idempotency_key: "legacy-correction")
       expect(response).to have_http_status(:created), response.body
       expect(period.reload.status).to eq("submitted")
     end
