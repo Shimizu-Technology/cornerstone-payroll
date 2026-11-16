@@ -78,6 +78,27 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     response.parsed_body
   end
 
+  it "shows stale None before apply and retains the warning in the response and import note" do
+    field = PayrollStandingChange.create!(company: company, employee: employee, kind: "extra_hours",
+      employee_wage_rate: create(:employee_wage_rate, employee: employee), label: "Addison's hours", required: false)
+    source = revision(workbook: true)
+    source.update_columns(change_rows: [ { "kind" => "extra_hours", "employee_id" => employee.id,
+      "employee_wage_rate_id" => field.employee_wage_rate_id, "standing_change_id" => field.id,
+      "label" => field.label, "skipped" => true } ])
+    field.update!(allow_none: false)
+    data = preview(source)
+    expect(response).to have_http_status(:ok), response.body
+    warning = data.dig("client_change_prefill", "manual_review_warnings").sole
+    expect(warning).to include("Addison's hours", "Enter the value or ask the client")
+    apply(data)
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body["manual_review_warnings"]).to include(warning)
+    expect(response.parsed_body["client_change_decisions"]).to include(include("decision" => "stale_none", "reason" => warning))
+    expect(period.status_events.last.note).to include(warning)
+    expect(PayrollImportRecord.find(data["import_id"]).raw_data["client_change_decisions"]).to include(include("decision" => "stale_none", "reason" => warning))
+    expect(PayrollEntryResolution.where(pay_period: run)).to be_empty
+  end
+
   it "retains and verifies a staff workbook against a link revision without changing the client evidence" do
     source = revision
     source.update_columns(workbook_choice: "link", changes_link_url: "https://example.test/workbook")
@@ -886,7 +907,9 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(data.dig("pending_change_prefill", "submission_id")).to eq(source.id)
       params = reviewed_standing_params(data).merge(use_submission_id: source.id)
       params[:reviewed_changes][0][:amount] = "8421.12"
+      params[:reviewed_changes][0][:reason] = "Client confirmed corrected pay"
       params[:reviewed_changes][1][:hours] = "67.5"
+      params[:reviewed_changes][1][:reason] = "Client confirmed corrected hours"
       post "#{url}/apply_import", params: params, as: :json
       expect(response).to have_http_status(:ok), response.body
       expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.12"))
@@ -931,6 +954,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(response).to have_http_status(:ok), response.body
       input = reviewed_standing_params(replacement).merge(portal_source_id: replacement.dig("portal_source", "selection_id"))
       input[:reviewed_changes][1][:hours] = "67"
+      input[:reviewed_changes][1][:reason] = "Client confirmed corrected hours"
       post "#{url}/apply_import", params: input, as: :json
       expect(response).to have_http_status(:ok), response.body
       expect(item.reload.hours_worked).to eq(67)

@@ -2137,7 +2137,7 @@ export interface MosaSourceRow {
   warnings: PayrollIntakeWarning[];
 }
 
-export type ClientChangePrefill = { submission_id: number; revision: number; manual_review_warnings?: string[]; removals?: string[]; rows: { change_index: number; kind: 'owner_pay' | 'extra_hours'; requires_pay_decision?: boolean; employee_id?: number; employee_name?: string; amount?: string; hours?: string; employee_wage_rate_id?: number; wage_rate_label?: string; wage_rate?: string; error?: string; overwrite_required?: boolean; saved_regular_hours?: string; saved_overtime_hours?: string; saved_period_pay?: string; workbook_period_pay?: string; pay_conflict?: boolean }[] };
+export type ClientChangePrefill = { submission_id: number; revision: number; manual_review_warnings?: string[]; removals?: string[]; rows: { change_index: number; previous_value?: string; kind: 'owner_pay' | 'extra_hours'; requires_pay_decision?: boolean; employee_id?: number; employee_name?: string; amount?: string; hours?: string; employee_wage_rate_id?: number; wage_rate_label?: string; wage_rate?: string; error?: string; overwrite_required?: boolean; saved_regular_hours?: string; saved_overtime_hours?: string; saved_period_pay?: string; workbook_period_pay?: string; pay_conflict?: boolean }[] };
 
 export interface ImportSourceDocument {
   id: number;

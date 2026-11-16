@@ -651,7 +651,7 @@ RSpec.describe "Pay-period submissions", type: :request do
   end
   describe "every-period defaults" do
     let!(:owner) { create(:employee, :salary, company: company, salary_type: "variable", pay_rate: 0) }
-    let!(:default) { PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay") }
+    let!(:default) { PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay", required: true) }
 
     it "offers blank per-person defaults, refuses omission, and records a filled default as a change" do
       get "#{client_base}/#{ref}"
@@ -666,11 +666,24 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(PayrollItem.count).to eq(0)
     end
 
-    it "records explicit skips alongside No changes and rejects using both No changes and an amount" do
+    it "hides unavailable mappings from clients while flagging them to staff" do
+      send_package(changes: [ { kind: "owner_pay", standing_change_id: default.id, employee_id: owner.id, amount: "10" } ].to_json)
+      expect(response).to have_http_status(:created)
+      owner.update!(status: "inactive")
+      get "#{client_base}/#{ref}"
+      expect(data.fetch("standing_changes")).to be_empty
+      expect(data.fetch("submissions").first.fetch("changes").sole).not_to have_key("availability_error")
+      as_staff
+      get "#{staff_base}/#{ref}"
+      expect(data.fetch("standing_changes").sole.fetch("availability_error")).to include("inactive")
+      expect(data.fetch("submissions").first.fetch("changes").sole.fetch("availability_error")).to include("inactive")
+    end
+
+    it "records configured values independently of No changes and preserves explicit none" do
       row = { kind: "owner_pay", standing_change_id: default.id, employee_id: owner.id }
       send_package(no_changes: true, changes: [ row.merge(amount: "1") ].to_json)
-      expect(response).to have_http_status(:unprocessable_entity)
-      send_package(no_changes: true, changes: [ row.merge(skipped: true) ].to_json)
+      expect(response).to have_http_status(:created), response.body
+      send_package(no_changes: true, based_on_revision: 1, changes: [ row.merge(skipped: true) ].to_json)
       expect(response).to have_http_status(:created), response.body
       expect(data.fetch("submissions").first).to include("no_changes" => true, "changes" => [ include("skipped" => true) ])
       expect(default.reload).to be_active
