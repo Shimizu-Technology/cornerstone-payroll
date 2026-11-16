@@ -48,4 +48,25 @@ RSpec.describe "Payroll commit snapshots", type: :model do
     end
     expect { service.commit!(expected_next_check_number: "5.5") }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError)
   end
+  it "links an ambiguous period without outstanding requests to the run staff commits" do
+    create(:pay_period, company: company, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    expect(period.pay_period_id).to be_nil
+    service.commit!(acknowledged_outstanding_file_request_ids: [], expected_next_check_number: 5000)
+    expect(period.reload.pay_period_id).to eq(run.id)
+    expect(run.reload).to be_committed
+  end
+
+  it "does not apply other regular runs' ambiguous requests to a bonus or supplemental run" do
+    request
+    duplicate = create(:pay_period, company: company, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    period.reload.update!(pay_period: nil)
+    bonus = create(:pay_period, company: company, run_purpose: "bonus", start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    supplemental = create(:pay_period, company: company, cycle: "supplemental", corrects_pay_period: run, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    expect(run.client_file_link_error).to include("withdraw requests")
+    expect(duplicate.client_file_link_error).to be_present
+    [ bonus, supplemental ].each do |other|
+      expect(other.client_file_link_error).to be_nil
+      expect(other.outstanding_client_file_requests).to be_empty
+    end
+  end
 end

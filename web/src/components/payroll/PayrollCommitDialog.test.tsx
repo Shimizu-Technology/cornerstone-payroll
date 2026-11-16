@@ -77,7 +77,14 @@ describe('Payroll commit confirmation', () => {
     render(<PayrollCommitDialog {...state} />); await loaded();
     fireEvent.click(screen.getByRole('checkbox')); fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
     await screen.findByText(/Signed W-4/); await loaded();
-    expect(screen.getByRole('alert').textContent).toContain('Review the updated details');
+    const alert = screen.getByRole('alert');
+    expect(alert.className).toContain('bg-warning-50');
+    expect(document.activeElement).toBe(alert);
+    expect(alert.textContent).toBe(code === 'check_number_changed'
+      ? 'The next check number changed to 1300 (it was 1200). Check your stock, then confirm again.'
+      : 'A file request was added or resolved. Review the list and tick the box again.');
+    expect(alert.closest('section')?.getAttribute('aria-label')).toBe(code === 'check_number_changed' ? 'Check numbering' : 'Outstanding client file requests');
+    expect(screen.queryByText(/Reload the record/)).toBeNull();
     expect(screen.getByText(/numbered from 1300/)).toBeTruthy();
     expect(screen.getByRole('checkbox')).toHaveProperty('checked', false);
     expect(screen.getByRole('button', { name: 'Confirm commit' })).toHaveProperty('disabled', true);
@@ -106,4 +113,44 @@ describe('Payroll commit confirmation', () => {
     expect(screen.queryByText(/Paper checks will/)).toBeNull(); fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
     expect(state.onConfirm).toHaveBeenCalledExactlyOnceWith(12, { acknowledged_outstanding_file_request_ids: [] });
   });
+  it('hides stale totals and requests on the initial load and while reloading after a conflict', async () => {
+    let finish!: (data: { pay_period: PayPeriod }) => void;
+    api.get.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const stale = { ...period, outstanding_file_requests: [request], payroll_items: [] };
+    const state = props(stale);
+    const view = render(<PayrollCommitDialog {...state} />);
+    expect(screen.getByRole('status')).toBeTruthy();
+    expect(screen.queryByText(/Riley's timesheet/)).toBeNull();
+    expect(screen.queryByText('Total net pay')).toBeNull();
+    expect(screen.queryByText('$0.00')).toBeNull();
+    await act(async () => finish({ pay_period: { ...period, outstanding_file_requests: [request] } })); await loaded();
+    expect(screen.getByText('$1,234.56')).toBeTruthy();
+    api.get.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    state.onConfirm.mockRejectedValueOnce(new ApiError('Changed. Reload the record.', 409, undefined, { code: 'check_number_changed' }));
+    fireEvent.click(screen.getByRole('checkbox')); fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
+    await screen.findByRole('status');
+    expect(screen.queryByText(/Riley's timesheet/)).toBeNull();
+    expect(screen.queryByText('$1,234.56')).toBeNull();
+    expect(screen.queryByText(/numbered from 1200/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Committing…' })).toHaveProperty('disabled', true);
+    await act(async () => finish({ pay_period: { ...period, check_number_summary: { ...period.check_number_summary!, next_check_number: 1300 } } }));
+    await loaded();
+    expect(screen.getByRole('alert').textContent).toContain('changed to 1300 (it was 1200)');
+    view.unmount();
+  });
+
+  it('explains a resolved last request and still requires an explicit second confirmation', async () => {
+    api.get.mockResolvedValueOnce({ pay_period: { ...period, outstanding_file_requests: [request] } }).mockResolvedValue({ pay_period: period });
+    const state = props(); state.onConfirm.mockRejectedValueOnce(new ApiError('Changed. Reload the record.', 409, undefined, { code: 'outstanding_file_requests_changed' }));
+    render(<PayrollCommitDialog {...state} />); await loaded();
+    fireEvent.click(screen.getByRole('checkbox')); fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
+    await screen.findByText('None outstanding.');
+    expect(screen.getByRole('alert').textContent).toContain('No requests remain outstanding.');
+    expect(screen.getByRole('alert').textContent).toContain("Resolved: Riley's timesheet");
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(state.onConfirm).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
+    expect(state.onConfirm).toHaveBeenLastCalledWith(12, { acknowledged_outstanding_file_request_ids: [], expected_next_check_number: 1200 });
+  });
+
 });

@@ -82,7 +82,6 @@ module PayrollSubmissions
 
       PayrollSubmissionPeriod.create_or_find_by!(company_id: @company.id, start_date: entry.start_date, end_date: entry.end_date) do |record|
         record.pay_date = entry.pay_date
-        record.pay_period = entry.pay_period
         record.company_pay_schedule = entry.schedule
         record.source = entry.source
       end.tap { |record| entry.record = record }
@@ -100,7 +99,7 @@ module PayrollSubmissions
     end
 
     def preload_live_pay_periods(entries)
-      @candidates_by_dates = offerable_pay_periods.where(start_date: entries.map(&:start_date), end_date: entries.map(&:end_date))
+      @candidates_by_dates = unclaimed_pay_periods.where(start_date: entries.map(&:start_date), end_date: entries.map(&:end_date))
         .order(:id).to_a.group_by { |period| [ period.start_date, period.end_date ] }
     end
 
@@ -110,6 +109,13 @@ module PayrollSubmissions
       return linked.correction_status == "voided" ? nil : linked if linked
 
       matching_pay_period(entry.start_date, entry.end_date)
+    end
+
+    def retired_link_warning(entry)
+      linked = entry.record&.pay_period
+      return unless linked&.correction_status == "voided"
+
+      "The linked pay run ##{linked.id} was voided. Select a replacement run for these files, or contact an admin."
     end
 
     def ambiguous_pay_period_ids(entry)
@@ -198,7 +204,7 @@ module PayrollSubmissions
     def created_entries
       @created_entries ||= begin
         created = created_pay_periods.to_a
-        candidates = offerable_pay_periods.where(start_date: created.map(&:start_date), end_date: created.map(&:end_date))
+        candidates = unclaimed_pay_periods.where(start_date: created.map(&:start_date), end_date: created.map(&:end_date))
           .order(:id).to_a.group_by { |run| [ run.start_date, run.end_date ] }
         @matching_candidates ||= {}
         created.group_by { |run| [ run.start_date, run.end_date ] }.map do |key, runs|
@@ -219,12 +225,16 @@ module PayrollSubmissions
       return @candidates_by_dates[key] if @candidates_by_dates&.key?(key)
 
       @matching_candidates ||= {}
-      @matching_candidates[key] ||= offerable_pay_periods.where(start_date: start_date, end_date: end_date).order(:id).to_a
+      @matching_candidates[key] ||= unclaimed_pay_periods.where(start_date: start_date, end_date: end_date).order(:id).to_a
     end
 
     def matching_pay_period(start_date, end_date)
       candidates = matching_candidates(start_date, end_date)
       candidates.first if candidates.one?
+    end
+
+    def unclaimed_pay_periods
+      offerable_pay_periods.where.not(id: PayrollSubmissionPeriod.where.not(pay_period_id: nil).select(:pay_period_id))
     end
 
     def offerable_pay_periods

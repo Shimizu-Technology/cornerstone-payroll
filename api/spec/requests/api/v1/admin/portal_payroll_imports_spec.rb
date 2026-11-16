@@ -609,8 +609,22 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(run.pending_portal_submission?).to be(true)
   end
 
-  it "keeps a linked pending revision gated after the run dates change" do
-    revision
+  it "releases an automatic unselected link when the run dates change" do
+    source = revision
+    old_start, old_end = run.start_date, run.end_date
+    run.update!(start_date: old_start + 1, end_date: old_end + 1)
+    expect(period.reload.pay_period_id).to be_nil
+    expect(run.reload.pending_portal_submission?).to be(false)
+    expect(source.reload.payroll_submission_period_id).to eq(period.id)
+    replacement = create(:pay_period, company: company, start_date: old_start, end_date: old_end, pay_date: run.pay_date)
+    expect(period.reload.pay_period_id).to eq(replacement.id)
+    expect(replacement.pending_portal_submission?).to be(true)
+  end
+
+  it "keeps a selected pending revision gated after the run dates change" do
+    source = revision
+    preview(source)
+    expect(response).to have_http_status(:ok), response.body
     run.update!(start_date: run.start_date + 1, end_date: run.end_date + 1)
     expect(run.reload.pending_portal_submission?).to be(true)
     stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
