@@ -362,6 +362,13 @@ module PayrollIntake
       earlier = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: import_hash)
       return unless earlier&.superseded?
 
+      # The current version may already be these same files following its
+      # predecessor. Reuse it, so a retry doesn't create version after version.
+      if current.supersedes && current.import_hash == Digest::SHA256.hexdigest("#{import_hash}\nafter-package:#{current.supersedes.package_id}")
+        @import_hash = current.import_hash
+        return
+      end
+
       @follows_current = true
       @import_hash = Digest::SHA256.hexdigest("#{import_hash}\nafter-package:#{current.package_id}")
     end
