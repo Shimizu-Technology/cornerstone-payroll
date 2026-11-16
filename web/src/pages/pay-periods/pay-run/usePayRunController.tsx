@@ -885,7 +885,10 @@ export function usePayRunController({
 
   const handleUnapprove = async () => {
     if (!payPeriod) return;
-    if (!confirm('Roll back approval? This will return the pay period to "Calculated" status.')) return;
+    const clientReviewWarning = payPeriod.client_payroll_approval_required && payPeriod.payroll_review?.published_at
+      ? " This withdraws the client's review and any approval."
+      : '';
+    if (!confirm('Roll back approval? This will return the pay period to "Calculated" status.' + clientReviewWarning)) return;
     try {
       setProcessing(true);
       setError(null);
@@ -1046,9 +1049,9 @@ export function usePayRunController({
   };
 
   useEffect(() => {
-    if (loading || !payPeriod?.id || !['#time-tracking-sync', '#expected-payroll-entries', '#payroll-ineligible-workers', '#payroll-blockers', '#payroll-loan-inputs', '#payroll-commit', '#payroll-feedback'].includes(location.hash)) return;
+    if (loading || !payPeriod?.id || !['#time-tracking-sync', '#expected-payroll-entries', '#payroll-ineligible-workers', '#payroll-blockers', '#payroll-loan-inputs', '#payroll-commit', '#payroll-feedback', '#payroll-results'].includes(location.hash)) return;
     const target = document.getElementById(location.hash.slice(1));
-    for (let parent = target?.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
+    for (let parent = target; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
     target?.scrollIntoView?.({ block: 'start' });
     target?.focus({ preventScroll: true });
   }, [loading, payPeriod?.id, location.hash, location.pathname]);

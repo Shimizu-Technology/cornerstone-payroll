@@ -21,6 +21,7 @@ it('shows removed names and reasons, then offers Enter pay in the unpaid roster'
   expect(screen.queryByRole('button', { name: 'Enter pay' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Add back Manual Worker' }));
   await waitFor(() => expect(data.handleRestoreEmployee).toHaveBeenCalledWith(7));
+  expect(await screen.findByText("Imported hours aren't brought back. Enter hours or import again.")).toBeTruthy();
   view.rerender(<PayRunRoster {...data} payPeriod={{ ...data.payPeriod, excluded_employee_ids: [], excluded_employees: [] }} />);
   expect(screen.getByRole('button', { name: 'Enter pay' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: 'Removed from this run' })).toBeNull();
@@ -38,9 +39,9 @@ it.each(['processing', 'financialActionsHeld', 'hasStagedWorksheetChanges'] as c
   render(<PayRunRoster {...props()} {...{ [key]: true }} />);
   expect(screen.getByRole('button', { name: 'Add back Manual Worker' })).toHaveProperty('disabled', true);
 });
-it('shows removed employees on draft special runs and hides them on approved runs', () => {
+it.each(['regular', 'bonus'] as const)('shows removed employees on draft %s runs and hides them on approved runs', purpose => {
   const data = props();
-  const view = render(<PayRunRoster {...data} isCalculated={false} isDraft payPeriod={{ ...data.payPeriod, status: 'draft', run_purpose: 'bonus' }} />);
+  const view = render(<PayRunRoster {...data} isCalculated={false} isDraft payPeriod={{ ...data.payPeriod, status: 'draft', run_purpose: purpose }} />);
   expect(within(screen.getByRole('region', { name: 'Removed from this run' })).getByRole('button')).toBeTruthy();
   view.rerender(<PayRunRoster {...data} isCalculated={false} payPeriod={{ ...data.payPeriod, status: 'approved' }} />);
   expect(screen.queryByRole('region', { name: 'Removed from this run' })).toBeNull();

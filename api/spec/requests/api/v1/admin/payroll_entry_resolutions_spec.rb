@@ -113,6 +113,8 @@ RSpec.describe "Approved-run payroll entry resolutions", type: :request do
       expect(item.reload.attributes).to eq(amounts)
       expect(service.verify_current_checksum!(package)).to be(true)
       expect(AuditLog.where(action: "payroll_entry_resolutions#save").last.user_id).to eq(staff.id)
+      expect(AuditLog.where(action: "payroll_entry_resolutions#save").last.metadata).to include(
+        "pay_period_status" => "approved", "client_review_revision" => package.revision)
       delete url, params: params, as: :json
       expect(response).to have_http_status(:ok), response.body
       expect(period.reload).to be_approved
@@ -120,6 +122,8 @@ RSpec.describe "Approved-run payroll entry resolutions", type: :request do
       expect(item.reload.attributes).to eq(amounts)
       expect(service.verify_current_checksum!(package)).to be(true)
       expect(AuditLog.where(action: "payroll_entry_resolutions#destroy").last.user_id).to eq(staff.id)
+      expect(AuditLog.where(action: "payroll_entry_resolutions#destroy").last.metadata).to include(
+        "pay_period_status" => "approved", "client_review_revision" => package.revision)
     end
     expect(PayrollExpectedEntries.new(period).payload[:fields].sole[:status]).to eq("missing")
   end

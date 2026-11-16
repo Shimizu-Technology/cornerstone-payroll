@@ -370,11 +370,7 @@ module Api
           results = { success: [], skipped: [], errors: [] }
 
           eligible_scope = Employee.where(id: employee_ids, company_id: current_company_id)
-          eligible_scope = if params[:employee_ids].present? && %w[final correction adjustment].include?(@pay_period.run_purpose)
-            eligible_scope.where("status IN (?) OR (status = ? AND EXISTS (SELECT 1 FROM employee_status_events WHERE employee_id = employees.id AND event_type = ?))", %w[active terminated], "inactive", "deactivated")
-          else
-            eligible_scope.eligible_for_period(@pay_period.start_date, @pay_period.end_date)
-          end
+            .eligible_for_payroll_run(@pay_period, explicitly_selected: params[:employee_ids].present?)
           employees_by_id = eligible_scope
                                      .includes(:company, :employee_deductions, :deduction_types, :employee_loans, :employee_w4_elections, :employee_wage_rates, :employee_ytd_totals, employee_payroll_fields: :payroll_field_definition)
                                      .index_by(&:id)
@@ -1471,10 +1467,11 @@ module Api
           end
 
           unless list
-            exclusions = pay_period.pay_period_excluded_employees.includes(:employee).to_a
-            json[:excluded_employee_ids] = exclusions.map(&:employee_id)
-            json[:excluded_employees] = exclusions.map do |exclusion|
-              { employee_id: exclusion.employee_id, name: exclusion.employee.full_name, reason: exclusion.reason }
+            exclusions = pay_period.pay_period_excluded_employees.joins(:employee)
+              .pluck(:employee_id, :reason, "employees.first_name", "employees.middle_name", "employees.last_name")
+            json[:excluded_employee_ids] = exclusions.map(&:first)
+            json[:excluded_employees] = exclusions.map do |employee_id, reason, first_name, middle_name, last_name|
+              { employee_id: employee_id, name: [ first_name, middle_name, last_name ].compact_blank.join(" "), reason: reason }
             end
           end
 
@@ -1490,7 +1487,7 @@ module Api
             json[:payroll_items] = items.map do |item|
               payroll_item_json(item, print_activity: print_activity, payment_lookup: payment_lookup)
             end
-            json[:default_employee_ids] = PayPeriodDefaultRoster.new(pay_period).employee_ids
+            json[:default_employee_ids] = PayPeriodDefaultRoster.new(pay_period).employee_ids(excluded_employee_ids: json[:excluded_employee_ids])
           end
 
           json

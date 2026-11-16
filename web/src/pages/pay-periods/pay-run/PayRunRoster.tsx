@@ -31,15 +31,17 @@ export function PayRunRoster({
 }: PayRunSectionProps<'roster'>) {
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState('');
+  const [restored, setRestored] = useState(false);
   const restore = async (employeeId: number) => {
     setRestoring(true);
     setRestoreError('');
-    try { await handleRestoreEmployee(employeeId); }
+    try { await handleRestoreEmployee(employeeId); setRestored(true); }
     catch (error) { setRestoreError(error instanceof Error ? error.message : 'Could not add employee back'); }
     finally { setRestoring(false); }
   };
   return (<>
-{(isCalculated || (isDraft && payPeriod.run_purpose !== 'regular')) && !!payPeriod.excluded_employees?.length && (
+{restored && (isCalculated || isDraft) && <p role="status" className="text-sm text-neutral-600">Imported hours aren't brought back. Enter hours or import again.</p>}
+{(isCalculated || isDraft) && !!payPeriod.excluded_employees?.length && (
   <section aria-label="Removed from this run" className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
     <h3 className="font-medium text-neutral-800">Removed from this run ({payPeriod.excluded_employees.length})</h3>
     {restoreError && <p role="alert" className="mt-2 text-sm text-danger-700">{restoreError}</p>}

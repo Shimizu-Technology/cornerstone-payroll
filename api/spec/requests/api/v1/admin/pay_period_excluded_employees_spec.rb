@@ -125,4 +125,31 @@ RSpec.describe "Restore removed pay-run employees", type: :request do
     expect(response.parsed_body.dig("pay_period", "excluded_employee_ids")).to eq([ employee.id ])
     expect(response.parsed_body.dig("pay_period", "excluded_employees").sole).to include("reason" => "No hours received")
   end
+  %w[final correction adjustment].each do |purpose|
+    it "uses explicit calculation eligibility to restore a previously terminated worker on a #{purpose} run" do
+      period.update!(status: "draft")
+      period.update!(run_purpose: purpose)
+      employee.update!(status: "terminated", termination_date: period.start_date - 1.day)
+      expect(Employee.eligible_for_period(period.start_date, period.end_date)).not_to exist(id: employee.id)
+      delete url, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(period.pay_period_excluded_employees).to be_empty
+    end
+  end
+
+  it "allows historically deactivated workers on an explicit adjustment run" do
+    period.update!(status: "draft")
+    period.update!(run_purpose: "adjustment")
+    employee.update!(hire_date: period.start_date - 1.year)
+    EmployeeStatusTransitionService.deactivate!(employee: employee, actor: create(:user, company: company, role: "admin"), attributes: { effective_date: period.start_date - 1.day })
+    delete url, as: :json
+    expect(response).to have_http_status(:ok), response.body
+  end
+
+  it "formats removed employee names the same way as the employee profile" do
+    employee.update!(middle_name: "Leigh")
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    get "/api/v1/admin/pay_periods/#{period.id}", as: :json
+    expect(response.parsed_body.dig("pay_period", "excluded_employees").sole["name"]).to eq(employee.full_name)
+  end
 end
