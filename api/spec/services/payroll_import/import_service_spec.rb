@@ -78,6 +78,48 @@ RSpec.describe PayrollImport::ImportService do
     end
   end
 
+  describe "recording the hours an import wrote" do
+    let!(:worker) { create(:employee, company: company, pay_rate: 20) }
+
+    before { allow_any_instance_of(PayrollItem).to receive(:calculate!) { |paycheck| paycheck.save! } }
+
+    it "does not record hand-entered hours on a workbook-only row as imported, so a later Revel PDF asks first" do
+      item = create(:payroll_item, company: company, employee: worker, pay_period: pay_period, pay_rate: 20, hours_worked: 8, import_source: "mosa_revel")
+
+      expect(service.apply!(matched: [ { employee_id: worker.id, workbook_only: true, total_tips: 0 } ])[:errors]).to be_empty
+
+      expect(item.reload.hours_worked).to eq(8)
+      expect(item.custom_columns_data["mosa_imported_hours"]).to eq("regular_hours" => "0.0", "overtime_hours" => "0.0")
+      edited = PayrollImport::LivePreviewRowState.hand_edited_hours({ "employee_id" => worker.id, "employee_name" => "Worker", "regular_hours" => 10 }, item)
+      expect(edited).to include("saved_regular_hours" => "8.0", "source_regular_hours" => "10.0")
+    end
+
+    it "keeps the hours an earlier Revel import recorded when a later import is workbook-only" do
+      expect(service.apply!(matched: [ { employee_id: worker.id, regular_hours: 40, overtime_hours: 1, total_tips: 0 } ])[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: worker)
+      item.update!(hours_worked: 38)
+
+      expect(service.apply!(matched: [ { employee_id: worker.id, workbook_only: true, total_tips: 0 } ])[:errors]).to be_empty
+
+      expect(item.reload.custom_columns_data["mosa_imported_hours"]).to eq("regular_hours" => "40.0", "overtime_hours" => "1.0")
+      edited = PayrollImport::LivePreviewRowState.hand_edited_hours({ "employee_id" => worker.id, "regular_hours" => 42, "overtime_hours" => 1 }, item)
+      expect(edited).to include("saved_regular_hours" => "38.0", "source_regular_hours" => "42.0")
+    end
+
+    it "falls back to the last applied import's Revel hours for rows imported before hours were recorded" do
+      item = create(:payroll_item, company: company, employee: worker, pay_period: pay_period, pay_rate: 20, hours_worked: 36, import_source: "mosa_revel")
+      PayrollImportRecord.create!(pay_period: pay_period, status: "applied",
+        matched_data: [ { employee_id: worker.id, regular_hours: 40.0, overtime_hours: 0.0 } ])
+      applied = PayrollImport::LivePreviewRowState.applied_hours_by_employee(pay_period)
+      row = { "employee_id" => worker.id, "regular_hours" => 41, "overtime_hours" => 0 }
+
+      expect(PayrollImport::LivePreviewRowState.hand_edited_hours(row, item, applied_hours: applied))
+        .to include("saved_regular_hours" => "36.0", "source_regular_hours" => "41.0")
+      item.update!(hours_worked: 40)
+      expect(PayrollImport::LivePreviewRowState.hand_edited_hours(row, item, applied_hours: applied)).to be_nil
+    end
+  end
+
   describe "restoring a worksheet split from before the client's hours" do
     let!(:worker) { create(:employee, company: company, pay_rate: 35) }
     let!(:maintenance) { create(:employee_wage_rate, employee: worker, rate: 35, label: "Maintenance", is_primary: true) }
