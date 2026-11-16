@@ -1,6 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { Link } from 'react-router';
-import { useEffect, useState, useRef, type ReactElement } from 'react';
+import { Fragment, useEffect, useState, useRef, type ReactElement } from 'react';
 import { CheckCircle2, ChevronDown, CircleDashed, Download, Info, RefreshCw } from 'lucide-react';
 import {
   Dialog,
@@ -29,6 +29,7 @@ import { carryRowOutcomes, defaultDisposition, fileSha256, importSourceFiles, MO
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { ImportSourcePanel } from './ImportSourcePanel';
 import { ImportSourceChecklist } from './ImportSourceChecklist';
+import { InstallmentLoanSetup, type InstallmentLoanSubmission } from './InstallmentLoanSetup';
 import { ApiError, employeesApi, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
@@ -369,37 +370,86 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     }
   };
 
-  // After a worker returns, match the same retained files again so their row
-  // can be paid. Outcomes already chosen for other rows are kept.
+  // Match the same retained files again after the employee list or loans
+  // changed. Outcomes already chosen for other rows are kept. The reason is
+  // recorded on the new import version.
+  const matchAgain = async (current: ImportPreviewResponse, reason: string, employeeId: number, readyStatus: string, attentionStatus: string, recordReason = true) => {
+    const previousRows = sourceRows;
+    const previousChoices = rateChoices;
+    const previousDrafts = { clientChangeDrafts, clientDeclines, clientAdjustmentReasons, clientDeclineReasons, clientPayChoices };
+    const previousPrefill = current.client_change_prefill || current.pending_change_prefill;
+    const previousDocuments = current.source_package.documents;
+    const pendingSubmissionId = usePendingRevision ? current.pending_portal_source?.submission_id : undefined;
+    const portal = current.portal_source;
+    const data = portal
+      ? await payPeriodsApi.previewPortalSubmission(payPeriodId, portal.submission_id, {
+          superseded_reason: portal.superseded_reason, supersedes_package_id: current.source_package.package_id,
+          supersession_reason: reason, tips_paid_out_from_tips: current.preview.tips_paid_out_from_tips,
+        })
+      : recordReason ? await payPeriodsApi.rematchImport(payPeriodId, reason) : await payPeriodsApi.rematchImport(payPeriodId);
+    // Another window may have replaced the review with different files; outcomes
+    // chosen here apply only to a review of the same files.
+    const sameFiles = sameSourceFiles(previousDocuments, data.source_package.documents);
+    openPreview(data, sameFiles ? previousRows : undefined, pendingSubmissionId);
+    if (sameFiles) {
+      // Keep job picks whose job is still offered, and the client-change drafts
+      // when they are for the same client revision. Confirmations are asked again.
+      setRateChoices(Object.fromEntries(Object.entries(previousChoices).filter(([employee, rateId]) => data.preview.matched
+        .some((row) => String(row.employee_id) === employee && row.wage_rate_options?.some((option) => option.id === rateId)))));
+      const prefill = data.client_change_prefill || data.pending_change_prefill;
+      if (prefill && previousPrefill && prefill.submission_id === previousPrefill.submission_id && prefill.revision === previousPrefill.revision) {
+        setClientChangeDrafts(previousDrafts.clientChangeDrafts);
+        setClientDeclines(previousDrafts.clientDeclines);
+        setClientAdjustmentReasons(previousDrafts.clientAdjustmentReasons);
+        setClientDeclineReasons(previousDrafts.clientDeclineReasons);
+        setClientPayChoices(previousDrafts.clientPayChoices);
+      }
+    }
+    const ready = data.preview.source_rows.some((row) => row.employee_id === employeeId && row.row_kind === 'matched' && row.errors.length === 0);
+    const status = ready ? readyStatus : attentionStatus;
+    setNotice(sameFiles ? status : `${status} The import’s files changed since this review opened, so choose each row’s outcome again.`);
+    onSourcePreviewed?.();
+    void refreshCurrentPackage();
+  };
+
+  // After a worker returns, match the same retained files again so their row can be paid.
   const handleReactivated = async (employee: Employee) => {
     setReactivating(null);
     if (!previewData) return;
     const name = `${employee.first_name} ${employee.last_name}`.trim();
-    const previousRows = sourceRows;
-    const previousDocuments = previewData.source_package.documents;
-    const pendingSubmissionId = usePendingRevision ? previewData.pending_portal_source?.submission_id : undefined;
     try {
       setLoading(true);
       setError(null);
       setNotice(null);
-      const portal = previewData.portal_source;
-      const data = portal
-        ? await payPeriodsApi.previewPortalSubmission(payPeriodId, portal.submission_id, {
-            superseded_reason: portal.superseded_reason, supersedes_package_id: previewData.source_package.package_id,
-            supersession_reason: `Matched again after ${name} was reactivated`, tips_paid_out_from_tips: previewData.preview.tips_paid_out_from_tips,
-          })
-        : await payPeriodsApi.rematchImport(payPeriodId);
-      // Another window may have replaced the review with different files; outcomes
-      // chosen here apply only to a review of the same files.
-      const sameFiles = sameSourceFiles(previousDocuments, data.source_package.documents);
-      openPreview(data, sameFiles ? previousRows : undefined, pendingSubmissionId);
-      const ready = data.preview.source_rows.some((row) => row.employee_id === employee.id && row.row_kind === 'matched' && row.errors.length === 0);
-      const status = ready ? `${name} is active again and is now matched in this import.` : `${name} is active again. Their row still needs attention below.`;
-      setNotice(sameFiles ? status : `${status} The import’s files changed since this review opened, so choose each row’s outcome again.`);
-      onSourcePreviewed?.();
-      void refreshCurrentPackage();
+      // The server records why for a plain rematch; the portal path needs it said.
+      await matchAgain(previewData, `Matched again after ${name} was reactivated`, employee.id,
+        `${name} is active again and is now matched in this import.`, `${name} is active again. Their row still needs attention below.`, false);
     } catch (err) {
       setError(`${name} is active again, but the files could not be matched again. ${err instanceof Error ? err.message : ''} Upload the files again to match them.`.trim());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Set up (or resume) the Employee Loan the workbook's installment needs, then
+  // match the files again so the review reconciles it. Errors reach the form.
+  const handleInstallmentLoan = async (row: ImportPreviewRow, fields?: InstallmentLoanSubmission) => {
+    if (!previewData) return;
+    const current = previewData;
+    const resume = row.installment_loan_setup?.action === 'resume';
+    const what = resume ? `${row.installment_loan_setup?.name} for ${row.employee_name}` : `${row.employee_name}’s installment loan`;
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await payPeriodsApi.setUpImportInstallmentLoan(payPeriodId, { import_id: current.import_id, employee_id: row.employee_id, ...fields });
+      const done = resume ? `${what} is resumed` : result.already_set_up ? `${what} was already set up` : `${what} is set up`;
+      try {
+        await matchAgain(current, resume ? `Matched again after ${what} was resumed` : `Matched again after ${what} was set up`, row.employee_id,
+          `${done} and matches this import.`, `${done}. Their row still needs attention below.`);
+      } catch (err) {
+        setError(`${done}, but the files could not be matched again. ${err instanceof Error ? err.message : ''} Try again; no second loan is created.`.trim());
+      }
     } finally {
       setLoading(false);
     }
@@ -548,6 +598,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const reviewedEmployeeCount = included.length + clientOnlyEmployees.size;
   const missingPeriodPay = included.filter((row) => row.period_pay_missing);
   const missingRateChoices = included.filter((row) => row.wage_rate_options?.length && !(rateChoices[row.employee_id] ?? row.selected_wage_rate_id));
+  // Equal-rate jobs with no single job in history default to the primary job. Pay is
+  // the same, so this never blocks; staff can move the hours to a department job.
+  const primaryJobDefaults = included.filter((row) => row.wage_rate_needs_review && rateChoices[row.employee_id] == null);
   const overwriteRows = [...included.filter((row) => row.overwrite_required),
     ...clientChanges.filter(change => change.overwrite_required && !clientDeclines[change.change_index] && !isNoPay(change) && !matched.some(row => row.employee_id === change.employee_id))];
   const incompleteSourceRows = sourceRows.filter((row) => (
@@ -677,6 +730,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const seriousNotices = sourceNotices.filter((warning) => warning.severity === 'error' && !actionNotices.includes(warning));
   const infoNotices = [
     ...sourceNotices.filter((warning) => warning.severity !== 'error' && !actionNotices.includes(warning)).map((warning) => ({ key: `source-${warning.code}`, title: noticeTitle(warning.code, warning.message), message: warning.message })),
+    ...(primaryJobDefaults.length > 0 ? [{
+      key: 'primary-job-defaults',
+      title: `Hours on the primary job for ${primaryJobDefaults.length} worker${primaryJobDefaults.length === 1 ? '' : 's'}`,
+      message: `The last committed payroll doesn’t show one job for ${primaryJobDefaults.map((row) => row.employee_name).join(', ')}, so their hours go on the primary job. Every job pays the same rate, so pay doesn’t change. If the hours belong to a department job, change Job and rate below; reports show hours by job.`,
+    }] : []),
     ...(activeChangePrefill?.manual_review_warnings || []).map((message) => ({ key: `review-${message}`, title: noticeTitle(undefined, message), message })),
     ...(activeChangePrefill?.removals || []).map((message) => ({ key: `removal-${message}`, title: noticeTitle(undefined, message), message })),
   ];
@@ -699,10 +757,34 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       <p className="text-xs font-semibold text-neutral-800">
         {row.wage_rate_options.filter((option) => option.id === (rateChoices[row.employee_id] ?? row.selected_wage_rate_id)).map((option) => `${option.label} · ${formatCurrency(option.rate)}/hr`).join('')}
       </p>
-      <p className="text-xs text-neutral-600">{row.wage_rate_default_source}</p>
+      <p className={cn('text-xs', row.wage_rate_needs_review && rateChoices[row.employee_id] == null ? 'font-medium text-amber-800' : 'text-neutral-600')}>{row.wage_rate_default_source}</p>
       {rateChoices[row.employee_id] != null && rateChoices[row.employee_id] !== row.selected_wage_rate_id && <p className="text-xs text-neutral-600">Your selection will be used for all imported hours.</p>}
     </div>
   ) : null;
+
+  // A matched row's own problems, such as a loan that doesn't reconcile, with
+  // the inline loan setup when the workbook's installment can be set up here.
+  const rowIssues = (row: ImportPreviewRow, sourceRow: EditableSourceRow): ReactElement | null => {
+    const offer = row.installment_loan_setup;
+    const errors = sourceRow.errors.filter((entry) => entry.message !== offer?.message);
+    if (!offer && errors.length === 0) return null;
+    return (
+      <div className="mt-2 min-w-0 max-w-md space-y-2 whitespace-normal">
+        {errors.map((entry, index) => <p key={`${entry.code}-${index}`} className="text-sm text-danger-700">{entry.message}</p>)}
+        {offer && previewData && (
+          <InstallmentLoanSetup
+            key={`${previewData.import_id}-${row.employee_id}`}
+            employeeName={row.employee_name}
+            offer={offer}
+            access={previewData.loan_setup}
+            disabled={loading}
+            onCreate={(fields) => handleInstallmentLoan(row, fields)}
+            onResume={() => handleInstallmentLoan(row)}
+          />
+        )}
+      </div>
+    );
+  };
 
   const missingHoursNotice = (row: ImportPreviewRow): ReactElement | null => row.missing_revel_hours_with_deductions ? (
     <p className="mt-2 max-w-xs whitespace-normal text-xs font-medium text-amber-800">No Revel hours — enter hours from MoSa's email before calculating. Any hours already entered will be kept.</p>
@@ -1197,6 +1279,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                     </div>
                     <div>{dispositionControls(sourceRow)}</div>
                     {missingHoursNotice(row)}
+                    {rowIssues(row, sourceRow)}
                     {rateChoiceControl(row)}
                     <dl className="grid grid-cols-2 gap-3 text-sm">
                       <div><dt className="text-xs text-neutral-600">Hours</dt><dd className="font-medium">{row.regular_hours}{row.overtime_hours > 0 ? ` + ${row.overtime_hours} OT` : ''}</dd></div>
@@ -1232,8 +1315,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                     const excluded = sourceRow.disposition !== 'included';
                     const classifiedLoanAmount = (row.one_payroll_deduction || 0) + (row.recurring_loan_deduction || 0) + (row.installment_payment || 0);
                     const sourceLoanAmount = Math.max(row.loan_deduction || 0, classifiedLoanAmount);
+                    const issues = rowIssues(row, sourceRow);
                     return (
-                      <TableRow key={row.source_row_id} className={excluded ? 'bg-neutral-50/70' : ''}>
+                      <Fragment key={row.source_row_id}>
+                      <TableRow className={cn(excluded ? 'bg-neutral-50/70' : '', issues && 'border-b-0')}>
                         <TableCell>
                           {dispositionControls(sourceRow)}
                         </TableCell>
@@ -1329,6 +1414,15 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                           </Badge>
                         </TableCell>
                       </TableRow>
+                      {issues && (
+                        // Full width under the worker, kept in view while the wide table scrolls.
+                        <TableRow className={excluded ? 'bg-neutral-50/70' : ''}>
+                          <TableCell colSpan={8} className="pt-0">
+                            <div className="sticky left-0 max-w-2xl">{issues}</div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </TableBody>
