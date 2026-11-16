@@ -16,7 +16,7 @@ Each download records the staff member, time, pay run, part and review revision 
 
 ## After the client replies
 
-- **Changes needed:** roll back approval if necessary, fix the entries, calculate again, review and approve, then download a fresh preview. If the review revision changed, the card identifies the last downloaded revision and asks for a new one.
+- **Changes needed:** roll back approval if necessary, fix the entries, calculate again, review and approve, then download a fresh preview. If the review revision changed, the card identifies the last downloaded revision and asks for a new one. Also download a new preview after changing an employee's name or address, or the check settings: those change the PDF without creating a new review revision.
 - **Client agrees:** follow the normal approval and **Commit** workflow, set check numbers for the physical stock, then prepare the final print package. Preview downloads do not count as client approval or printing.
 
 Draft, committed and voided runs cannot use this preview action. Calculate a draft first. Use the final print workflow for committed payroll.
