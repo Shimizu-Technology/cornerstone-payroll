@@ -20,6 +20,7 @@ class PayrollExpectedEntries
         wage_rate: field.employee_wage_rate&.rate, wage_rate_label: field.employee_wage_rate&.label, label: field.display_label, help_text: field.help_text, kind: field.kind, required: field.required?,
         saved_wage_rate_hours: items.select { |item| item.employee_id == field.employee_id }.flat_map(&:wage_rate_hours),
         allow_none: field.allow_none?, availability_error: field.availability_error, status: status, value: value,
+        source_revision: client_revision(field, status, resolution),
         note: exclusion&.reason || resolution&.note, inline_save_error: inline_save_error(field) }
     end
     # A field that can't be filled (deactivated job, changed pay setup) no
@@ -31,6 +32,18 @@ class PayrollExpectedEntries
   end
 
   private
+
+  def client_revision(field, status, resolution)
+    return resolution.source_evidence["revision"] if status == "none"
+    return unless status == "filled"
+
+    item = items.find { |item| item.employee_id == field.employee_id }
+    evidence = item&.custom_columns_data.to_h.fetch("client_change_evidence", {}).to_h
+    return unless evidence["standing_change_id"] == field.id
+    return if field.kind == "owner_pay" && item.custom_columns_data.to_h.dig("period_pay_evidence", "source_type") != "client_submission"
+
+    evidence["revision"]
+  end
 
   def items
     @items ||= @period.payroll_items.financially_reportable.to_a

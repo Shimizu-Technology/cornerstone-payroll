@@ -34,6 +34,7 @@ export function ExpectedEntriesPanel({ payPeriod, disabled, onSaved, onEnterPay,
     {error && <p role="alert" className="text-danger-700">{error}</p>}
     {data.fields.map(field => <div key={field.id} className="space-y-2 border-t border-neutral-200 pt-3">
       <p className="font-medium">{field.label} · {field.status === 'filled' ? 'Filled: ' + (field.kind === 'owner_pay' ? formatCurrency(Number(field.value)) : field.value + ' h') : field.status === 'excluded' ? 'Excluded this period' : field.status === 'none' ? 'None this period' : 'Missing'}{!field.required && ' (optional)'}</p>
+      {field.source_revision && <p className="text-sm text-neutral-600">From client: revision {field.source_revision}</p>}
       {field.help_text && <p className="text-sm">{field.help_text}</p>}
       {field.availability_error && <p role="alert" className="text-sm text-danger-700">Needs attention in Settings: {field.availability_error}</p>}
       {field.note && <p className="text-sm">{field.note}</p>}
