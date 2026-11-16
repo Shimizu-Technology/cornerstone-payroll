@@ -131,6 +131,25 @@ RSpec.describe PayrollImport::LoanReconciliation do
     expect(result[:installment_setup]).to include(action: "resume", employee_loan_id: loan.id, name: "Installment employee loan", current_balance: "200.0")
   end
 
+  it "never offers a second loan when Cornerstone already paid off the installment the workbook still shows" do
+    loan = installment_loan(balance: 20, payment: 50)
+    loan.record_payment!(amount: 20, date: pay_date - 14)
+    expect(loan.reload).to be_paid_off
+
+    result = described_class.new(employee: employee, pay_date: pay_date,
+      source_row: { loan_deduction: 20, installment_beginning_balance: 20, installment_payment: 20, installment_row_count: 1 }).call
+
+    expect(result[:installment_setup]).to be_nil
+    expect(result[:errors]).to contain_exactly(
+      "#{employee.full_name}'s installment loan Installment employee loan was paid off on #{loan.paid_off_date.strftime('%-m/%-d/%Y')} in Employee Loans, but the workbook still shows $20.00. Check the workbook with the client."
+    )
+
+    # A brand-new advance after the payoff is a new loan.
+    fresh = described_class.new(employee: employee, pay_date: pay_date,
+      source_row: { loan_deduction: 25, installment_new_amount: 300, installment_payment: 25, installment_row_count: 1 }).call
+    expect(fresh[:installment_setup]).to include(action: "create", starting_balance: "300.0")
+  end
+
   it "does not offer a setup when the workbook has several installment rows for one person" do
     result = described_class.new(employee: employee, pay_date: pay_date,
       source_row: { loan_deduction: 80, installment_beginning_balance: 200, installment_payment: 80, installment_row_count: 2 }).call

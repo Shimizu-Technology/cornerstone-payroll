@@ -373,6 +373,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   // recorded on the new import version.
   const matchAgain = async (current: ImportPreviewResponse, reason: string, employeeId: number, readyStatus: string, attentionStatus: string, recordReason = true) => {
     const previousRows = sourceRows;
+    const previousChoices = rateChoices;
+    const previousDrafts = { clientChangeDrafts, clientDeclines, clientAdjustmentReasons, clientDeclineReasons };
+    const previousPrefill = current.client_change_prefill || current.pending_change_prefill;
     const previousDocuments = current.source_package.documents;
     const pendingSubmissionId = usePendingRevision ? current.pending_portal_source?.submission_id : undefined;
     const portal = current.portal_source;
@@ -386,6 +389,19 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     // chosen here apply only to a review of the same files.
     const sameFiles = sameSourceFiles(previousDocuments, data.source_package.documents);
     openPreview(data, sameFiles ? previousRows : undefined, pendingSubmissionId);
+    if (sameFiles) {
+      // Keep job picks whose job is still offered, and the client-change drafts
+      // when they are for the same client revision. Confirmations are asked again.
+      setRateChoices(Object.fromEntries(Object.entries(previousChoices).filter(([employee, rateId]) => data.preview.matched
+        .some((row) => String(row.employee_id) === employee && row.wage_rate_options?.some((option) => option.id === rateId)))));
+      const prefill = data.client_change_prefill || data.pending_change_prefill;
+      if (prefill && previousPrefill && prefill.submission_id === previousPrefill.submission_id && prefill.revision === previousPrefill.revision) {
+        setClientChangeDrafts(previousDrafts.clientChangeDrafts);
+        setClientDeclines(previousDrafts.clientDeclines);
+        setClientAdjustmentReasons(previousDrafts.clientAdjustmentReasons);
+        setClientDeclineReasons(previousDrafts.clientDeclineReasons);
+      }
+    }
     const ready = data.preview.source_rows.some((row) => row.employee_id === employeeId && row.row_kind === 'matched' && row.errors.length === 0);
     const status = ready ? readyStatus : attentionStatus;
     setNotice(sameFiles ? status : `${status} The import’s files changed since this review opened, so choose each row’s outcome again.`);

@@ -206,13 +206,42 @@ module PayrollIntake
     end
 
     def loan_setup_signature
-      rows = EmployeeLoan.where(company_id: company.id).order(:id)
-        .pluck(:id, :status, :current_balance, :payment_amount, :first_deduction_date, :balance_as_of)
+      rows = relevant_loans.order(:id)
+        .pluck(:id, :employee_id, :status, :current_balance, :payment_amount, :first_deduction_date, :balance_as_of, :paid_off_date)
       JSON.generate(rows.map { |row| row.map { |value| value.is_a?(BigDecimal) ? value.to_s("F") : value.to_s } })
     end
 
     def loans_changed_since?(session)
-      EmployeeLoan.where(company_id: company.id).where("updated_at > ?", session.created_at).exists?
+      relevant_loans.where("updated_at > ?", session.created_at).exists?
+    end
+
+    # Loans reach a review only through workbook rows and owners' setup rows,
+    # so another worker's loan activity does not make the same files a new review.
+    def relevant_loans
+      ids = loan_employee_ids
+      ids ? EmployeeLoan.where(company_id: company.id, employee_id: ids) : EmployeeLoan.where(company_id: company.id)
+    end
+
+    # Active owners plus the workers the workbook names; nil (every loan) when
+    # the workbook can't be read here, which the extraction then reports.
+    def loan_employee_ids
+      return @loan_employee_ids if defined?(@loan_employee_ids)
+
+      @loan_employee_ids = begin
+        employees = company.employees.active.to_a
+        ids = employees.select(&:variable_salary?).map(&:id)
+        workbook = file_snapshots.find { |snapshot| snapshot_role(snapshot) == "supplemental_workbook" }
+        if workbook
+          matcher = PayrollImport::NameMatcher.new(employees)
+          PayrollImport::LoanTipExcelParser.parse_file(workbook[:file]).each do |row|
+            id = row[:employee_id].presence&.to_i || matcher.match_excel_name(row[:last_name], row[:first_name])&.dig(:employee_id)
+            ids << id if id
+          end
+        end
+        ids.uniq.sort
+      rescue StandardError
+        nil
+      end
     end
 
     # File identity remains the default idempotency key. Only a selected newer
@@ -243,7 +272,7 @@ module PayrollIntake
       # A revision package keyed before loans joined the key, while loans are unchanged.
       legacy_hash = Digest::SHA256.hexdigest("#{roster_import_hash}\nclient-revision:#{submission.id}")
       legacy = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: legacy_hash)
-      if legacy && !loans_changed_since?(legacy)
+      if legacy && !legacy.superseded? && !loans_changed_since?(legacy)
         @import_hash = legacy_hash
         return
       end
@@ -287,8 +316,9 @@ module PayrollIntake
       return if import_hash == source_files_hash || @revision_evidence || @follows_current
 
       # Keyed with the roster before loans joined the key.
+      # A superseded one can't be reopened; the same files become a new version.
       session = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: roster_import_hash)
-      return session if session && !loans_changed_since?(session)
+      return session if session && !session.superseded? && !loans_changed_since?(session)
 
       session = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: source_files_hash)
       return unless session

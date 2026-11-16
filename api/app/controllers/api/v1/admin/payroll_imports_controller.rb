@@ -245,14 +245,26 @@ module Api
             if open_loans.any?
               raise ArgumentError, "#{employee.full_name} already has #{open_loans.map(&:name).to_sentence} in Employee Loans. Review it there instead of adding another loan."
             end
+            if offer["beginning_balance"].to_d.positive? && employee.employee_loans.exists?(tracking_mode: "balance_tracked", status: "paid_off")
+              raise ArgumentError, "#{employee.full_name}'s installment loan was paid off in Employee Loans. Check the workbook with the client instead of adding another loan."
+            end
 
+            attributes, advance = installment_loan_attributes(offer)
             loan = EmployeeLoanSetupService.new(company: @pay_period.company, actor: current_user).create!(
-              employee: employee, attributes: installment_loan_attributes(offer), schedule_kind: "new",
-              setup_mode: offer["beginning_balance"].to_d.positive? ? "existing_balance" : "new_loan"
+              employee: employee, attributes: attributes, schedule_kind: "new",
+              setup_mode: attributes.key?(:opening_balance) ? "existing_balance" : "new_loan"
             )
-            record_loan_audit!("employee_loans#create", loan, offer)
+            # The workbook's new advance is its own ledger entry, as Record
+            # addition on the Employee Loans screen makes it.
+            if advance
+              loan.record_addition!(amount: advance, date: loan.balance_as_of, recorded_by: current_user,
+                notes: "New advance from the tips & loans workbook (pay date #{@pay_period.pay_date.iso8601}).")
+            end
+            record_loan_audit!("employee_loans#create", loan.reload, offer)
             render json: { loan_id: loan.id, already_set_up: false }, status: :created
           end
+        rescue ActiveRecord::RecordNotUnique
+          render json: { error: "This loan schedule was linked by another update. Reload the review and try again." }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
         rescue ArgumentError => e
@@ -596,6 +608,8 @@ module Api
         end
 
         # Staff confirm or edit the workbook's figures before the loan is created.
+        # Returns the loan attributes and the workbook's new advance, when it is
+        # recorded as its own addition on an existing balance.
         def installment_loan_attributes(offer)
           input = params.permit(:name, :starting_balance, :payment_amount, :first_deduction_date)
           name = input[:name].to_s.strip.presence || offer["name"]
@@ -603,24 +617,29 @@ module Api
 
           starting = BigDecimal(input.fetch(:starting_balance, offer["starting_balance"]).to_s, exception: false)
           payment = BigDecimal(input.fetch(:payment_amount, offer["payment_amount"]).to_s, exception: false)
-          first_date = Date.iso8601(input.fetch(:first_deduction_date, offer["first_deduction_date"]).to_s)
           raise ArgumentError, "Starting balance must be greater than zero" unless starting&.positive?
           raise ArgumentError, "Payment per payroll must be greater than zero" unless payment&.positive?
           raise ArgumentError, "Payment per payroll can't be more than the starting balance" if payment > starting
+          # The first deduction is this payroll: an earlier date would deduct on
+          # other runs, a later one would leave this review unreconciled.
+          if input.key?(:first_deduction_date) && input[:first_deduction_date].to_s != @pay_period.pay_date.iso8601
+            raise ArgumentError, "The first deduction is this payroll's pay date, #{@pay_period.pay_date.strftime('%-m/%-d/%Y')}."
+          end
 
-          note = "Set up from the tips & loans workbook in payroll import review (pay date #{@pay_period.pay_date.iso8601})."
+          first_date = @pay_period.pay_date
+          starting = starting.round(2)
+          beginning = offer["beginning_balance"].to_d.round(2)
+          advance = offer["new_amount"].to_d.round(2)
+          note = "Set up from the tips & loans workbook in payroll import review (pay date #{first_date.iso8601})."
+          base = { employee_id: offer_employee_id, name: name, tracking_mode: "balance_tracked", payment_amount: payment.round(2),
+            first_deduction_date: first_date, notes: note }
           # The loan's balance stands as of its first deduction, so earlier
           # paydays never deduct it and this payroll reconciles to it.
-          if offer["beginning_balance"].to_d.positive?
-            { employee_id: offer_employee_id, name: name, tracking_mode: "balance_tracked", payment_amount: payment.round(2),
-              first_deduction_date: first_date, opening_balance: starting.round(2), balance_as_of: first_date,
-              balance_source: "other_verified", principal_amount_known: false, notes: note }
-          else
-            { employee_id: offer_employee_id, name: name, tracking_mode: "balance_tracked", payment_amount: payment.round(2),
-              first_deduction_date: first_date, original_amount: starting.round(2), start_date: first_date, notes: note }
-          end
-        rescue Date::Error
-          raise ArgumentError, "Enter the first deduction pay date"
+          return [ base.merge(original_amount: starting, start_date: first_date), nil ] unless beginning.positive?
+
+          split = advance.positive? && beginning + advance == starting
+          [ base.merge(opening_balance: split ? beginning : starting, balance_as_of: first_date,
+            balance_source: "other_verified", principal_amount_known: false), split ? advance : nil ]
         end
 
         def offer_employee_id
