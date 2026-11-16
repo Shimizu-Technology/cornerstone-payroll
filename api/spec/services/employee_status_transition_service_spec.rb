@@ -6,6 +6,23 @@ RSpec.describe EmployeeStatusTransitionService do
   let(:employee) { create(:employee, hire_date: Date.new(2024, 1, 1)) }
   let(:actor) { create(:user, company: employee.company, organization: employee.company.organization, role: :manager) }
 
+  %w[deactivate terminate].each do |action|
+    it "blocks #{action} while a covering run is approved" do
+      run = create(:pay_period, :approved, company: employee.company, start_date: Date.new(2024, 3, 1), end_date: Date.new(2024, 3, 15), pay_date: Date.new(2024, 3, 20))
+      create(:payroll_item, employee: employee, company: employee.company, pay_period: run)
+      expect { described_class.public_send("#{action}!", employee: employee, actor: actor, attributes: { effective_date: "2024-03-15" }) }
+        .to raise_error(described_class::Error, "Unapprove pay run ##{run.id} first")
+      expect(employee.reload.status).to eq("active")
+      expect(employee.employee_status_events).to be_empty
+    end
+  end
+
+  it "accepts a dedicated inactive reason and refuses same-day reactivation" do
+    described_class.deactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-03-15", reason_category: "seasonal" })
+    expect { described_class.reactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-03-15" }) }
+      .to raise_error(described_class::Error, /after the worker's latest status change/)
+  end
+
   it "records the effective termination separately from the time it was entered" do
     event = described_class.terminate!(
       employee: employee,

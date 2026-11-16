@@ -1,6 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, RotateCcw, ShieldAlert, UserMinus } from 'lucide-react';
+import { CalendarClock, UserRoundX, RotateCcw, ShieldAlert, UserMinus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -49,13 +49,19 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
     setError(null);
   }, [open, mode, setError]);
 
+  const latestEventDate = employee.status_history?.map(event => event.effective_date).sort().at(-1);
+  const latestDate = [latestEventDate, employee.termination_date].filter((value): value is string => !!value).sort().at(-1);
+  const reactivateMin = latestDate ? new Date(new Date(`${latestDate}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10) : employee.hire_date;
+  const affectedRuns = (employee.open_pay_runs ?? []).filter(run => run.start_date <= effectiveDate && run.end_date >= effectiveDate);
+  const approvedRun = affectedRuns.find(run => run.status === 'approved');
   const workerLabel = employee.employment_type === 'contractor' ? 'contractor' : 'employee';
   const canSubmit = useMemo(() => {
-    if (!effectiveDate || saving) return false;
+    if (!effectiveDate || saving || (mode !== 'reactivate' && approvedRun)) return false;
+    if (mode === 'reactivate' && reactivateMin && effectiveDate < reactivateMin) return false;
     if (mode === 'terminate' && lastWorkedOn && lastWorkedOn > effectiveDate) return false;
     if (mode === 'reactivate' && employee.termination_date && effectiveDate <= employee.termination_date) return false;
     return true;
-  }, [effectiveDate, employee.termination_date, lastWorkedOn, mode, saving]);
+  }, [effectiveDate, employee.termination_date, lastWorkedOn, mode, saving, approvedRun, reactivateMin]);
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -92,7 +98,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
         <div className={`border-b px-6 py-5 text-white sm:rounded-t-3xl ${isTermination ? 'border-rose-800 bg-rose-950' : 'border-primary-800 bg-primary-950'}`}>
           <DialogHeader>
             <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/15">
-              {isTermination ? <UserMinus className="h-5 w-5" /> : <RotateCcw className="h-5 w-5" />}
+              {mode === 'deactivate' ? <UserRoundX className="h-5 w-5" /> : isTermination ? <UserMinus className="h-5 w-5" /> : <RotateCcw className="h-5 w-5" />}
             </div>
             <DialogTitle className="text-xl text-white">
               {mode === 'deactivate' ? `Mark ${employee.first_name} inactive` : isTermination ? `Terminate ${employee.first_name}` : `Reactivate ${employee.first_name}`}
@@ -119,6 +125,11 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
             </p>
           </div>
 
+          {mode !== 'reactivate' && affectedRuns.length > 0 && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm">
+            <p className="font-semibold">Open pay runs including this worker</p>
+            <ul>{affectedRuns.map(run => <li key={run.id}>Pay run #{run.id}: {run.start_date} – {run.end_date} ({run.status})</li>)}</ul>
+            {approvedRun ? <p role="alert">Unapprove pay run #{approvedRun.id} first</p> : <p>Recalculate these runs to remove payroll that is no longer eligible.</p>}
+          </div>}
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
           <div className={`grid gap-4 ${isTermination ? 'sm:grid-cols-2' : ''}`}>
@@ -130,7 +141,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
                 id="employee-status-effective-date"
                 type="date"
                 required
-                min={(mode === 'reactivate' && employee.termination_date ? employee.termination_date : employee.hire_date) || undefined}
+                min={(mode === 'reactivate' ? reactivateMin : employee.hire_date) || undefined}
                 max={todayIsoDate()}
                 value={effectiveDate}
                 onChange={(event) => setEffectiveDate(event.target.value)}
@@ -156,12 +167,18 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
               <label className="mb-1 block text-sm font-medium text-neutral-800">Reason category <span className="text-xs font-normal text-neutral-500">(optional)</span></label>
               <Select value={reasonCategory || ''} onChange={(event) => setReasonCategory((event.target.value || undefined) as EmployeeTerminationInput['reason_category'])}>
                 <option value="">Not recorded</option>
+                {mode === 'deactivate' ? <>
+                  <option value="leave_of_absence">Leave of absence</option>
+                  <option value="seasonal">Seasonal</option>
+                  <option value="no_hours_scheduled">No hours scheduled</option>
+                </> : <>
                 <option value="voluntary">Voluntary resignation</option>
                 <option value="involuntary">Involuntary termination</option>
                 <option value="layoff">Layoff</option>
                 <option value="reduction_in_force">Reduction in force</option>
                 <option value="end_of_contract">End of contract</option>
                 <option value="retirement">Retirement</option>
+                </>}
                 <option value="other">Other</option>
               </Select>
             </div>
