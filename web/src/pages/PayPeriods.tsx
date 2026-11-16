@@ -1,5 +1,6 @@
 import { PriorProviderHistoryNotice, PriorProviderHistoryRecordedNotice } from '@/components/payroll/PriorProviderHistoryNotice';
 import { TaxYearWarning } from '@/components/settings/TaxYearWarning';
+import { PayrollCommitDialog } from '@/components/payroll/PayrollCommitDialog';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useFeedback, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
@@ -34,6 +35,7 @@ import { HelpTip } from '@/components/ui/help-tip';
 import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteCompany } from '@/lib/company-write-access';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
@@ -143,12 +145,14 @@ function PayPeriodMobileCard({
 }
 
 export function PayPeriods() {
+  const canManageCheckSettings = useSelectedCompanyCapability('manage_client_check_settings');
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { activeCompanyId, activeCompany } = useCompany();
   const trainingReplayWorkspace = activeCompany?.test_workspace_purpose === 'training_replay';
   const readOnlyWorkspace = !canWriteCompany(activeCompany);
+  const canChangeCheckNumber = canManageCheckSettings && !readOnlyWorkspace;
   const returnTo = currentAppPath(location.pathname, location.search);
   const payRunDestination = (payRunId: number, tab: PayRunWorkspaceTab): string => (
     activeCompanyId
@@ -161,6 +165,7 @@ export function PayPeriods() {
   const { dismiss: dismissFeedback } = useFeedback();
   const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
   const [deletingPeriod, setDeletingPeriod] = useState<PayPeriod | null>(null);
+  const [commitReview, setCommitReview] = useState<PayPeriod | null>(null);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [calculationResult, setCalculationResult] = useState<{ id: number; summary: string; failed: boolean; failures: PayrollCalculationFailure[]; year: number; names: Map<number, string> } | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
@@ -532,26 +537,38 @@ export function PayPeriods() {
     }
   };
 
+  // Load the run fresh so the commit review shows current check numbering
+  // and warnings, the same dialog the pay run itself uses.
   const handleCommit = async (id: number) => {
-    if (readOnlyWorkspace) return;
-    const period = payPeriodCompanyId === activeCompanyId
-      ? payPeriods.find((candidate) => candidate.record_type === 'native' && candidate.id === id)
-      : undefined;
-    const warningText = period?.compliance_warnings?.length
-      ? `\n\nAttention:\n${period.compliance_warnings.map((warning) => `• ${warning}`).join('\n')}`
-      : '';
-    if (!confirm(`Are you sure you want to commit this pay period? This action cannot be undone.${warningText}`)) {
-      return;
+    if (readOnlyWorkspace || actionInFlight !== null) return;
+    const isCurrentMutation = currentMutationGuard();
+    try {
+      setActionInFlight(`commit-details-${id}`);
+      setError(null);
+      const { pay_period } = await payPeriodsApi.get(id, activeCompanyId ?? undefined);
+      if (!isCurrentMutation()) return;
+      setCommitReview(pay_period);
+    } catch (err) {
+      if (!isCurrentMutation()) return;
+      setError(err instanceof Error ? err.message : 'Failed to load the pay period for commit');
+    } finally {
+      if (isCurrentMutation()) setActionInFlight(null);
     }
+  };
+
+  const confirmCommit = async (id: number) => {
+    if (readOnlyWorkspace) return;
     const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`commit-${id}`);
       setError(null);
       await payPeriodsApi.commit(id);
       if (!isCurrentMutation()) return;
+      setCommitReview(null);
       void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
+      setCommitReview(null);
       setError(err instanceof Error ? err.message : 'Failed to commit pay period');
     } finally {
       if (isCurrentMutation()) setActionInFlight(null);
@@ -1202,6 +1219,12 @@ export function PayPeriods() {
       </div>
 
       {/* Create Pay Period Modal */}
+      {commitReview && <PayrollCommitDialog open payPeriod={commitReview}
+        companyName={activeCompany?.name ?? `Company #${commitReview.company_id ?? ''}`}
+        itemCount={(commitReview.payroll_items ?? []).filter((item) => item.payroll_included !== false).length}
+        totalNet={(commitReview.payroll_items ?? []).filter((item) => item.payroll_included !== false).reduce((sum, item) => sum + Number(item.net_pay || 0), 0)}
+        processing={actionInFlight === `commit-${commitReview.id}`}
+        onCancel={() => setCommitReview(null)} onConfirm={(id) => void confirmCommit(id)} />}
       <Dialog open={deletingPeriod !== null} onOpenChange={(open) => {
         if (!open && actionInFlight === null) {
           setDeletingPeriod(null);
@@ -1346,13 +1369,14 @@ export function PayPeriods() {
                 <Label htmlFor="starting_check_number">Starting Check Number (optional)</Label>
                 <Input
                   id="starting_check_number"
+                  disabled={!canChangeCheckNumber}
                   inputMode="numeric"
                   value={formData.starting_check_number}
                   onChange={(e) => setFormData({ ...formData, starting_check_number: e.target.value })}
                   placeholder="Use current check settings"
                 />
                 <p className="text-xs text-neutral-600">
-                  {loadingCheckSettings
+                  {!canChangeCheckNumber ? 'A manager or admin can change the starting check number in check settings.' : loadingCheckSettings
                     ? 'Checking current company check settings...'
                     : checkSettingsError
                       ? 'Could not load the current next check number. You can still enter an unused check number; the server will reject duplicates.'
