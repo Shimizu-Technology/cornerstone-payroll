@@ -214,3 +214,31 @@ it('shows configured help without employee pickers and respects allow_none', asy
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
   expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([expect.objectContaining({standing_change_id: 1, employee_id: 122, amount: '1400'})]);
 });
+
+it('reopens a carried none when the field now requires a value', async () => {
+  const field = { kind: 'owner_pay' as const, employee_id: 122, standing_change_id: 1, label: 'Mo pay', required: true, allow_none: false };
+  render(<SubmissionForm period={{ ...period, standing_changes: [field] }} current={{ ...keptRevision, changes: [{ ...field, skipped: true }] }} onSent={vi.fn()} />);
+  const input = screen.getByLabelText('Amount ($): Mo pay');
+  expect(input).toHaveProperty('disabled', false);
+  expect(input.getAttribute('aria-required')).toBe('true');
+  expect(screen.queryByLabelText(/None this period/)).toBeNull();
+  fireEvent.change(input, { target: { value: '1200' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send update' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)[0]).not.toHaveProperty('skipped');
+});
+
+it('shows indexed server change errors only in the summary after rows are filtered', async () => {
+  mocks.submit.mockRejectedValueOnce({ message: 'Check changes', data: { details: { 'changes.1': ['Server first row error'] } } });
+  const fields: PeriodDetail = { ...period, standing_changes: [{ kind: 'owner_pay', standing_change_id: 1, employee_id: 122, label: 'Mo pay', required: true }] };
+  render(<SubmissionForm period={fields} onSent={vi.fn()} />);
+  uploadPdf();
+  fireEvent.click(screen.getByLabelText('No tips or loans this period'));
+  fireEvent.change(screen.getByLabelText('Amount ($): Mo pay'), { target: { value: '100' } });
+  fireEvent.change(screen.getByLabelText('Add a change'), { target: { value: 'wage_change' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
+  send();
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(screen.getAllByText('Server first row error')).toHaveLength(1);
+  expect(screen.getByText('Server first row error').closest('li')).toBeNull();
+});

@@ -104,11 +104,11 @@ module PayrollSubmissions
           return result
         end
         result.merge!("standing_change_id" => item.id, "employee_id" => item.employee_id, "label" => item.display_label)
+        @errors[key] << item.availability_error if item.availability_error
         if ActiveModel::Type::Boolean.new.cast(row["skipped"])
           @errors[key] << "#{item.display_label}: enter a value; None this period is not allowed." unless item.allow_none?
           return result.merge("skipped" => true, "employee_wage_rate_id" => item.employee_wage_rate_id).compact
         end
-        @errors[key] << item.availability_error if item.availability_error
       elsif ActiveModel::Type::Boolean.new.cast(row["skipped"])
         @errors[key] << "Only an every-period default can be marked Not this period."
       end

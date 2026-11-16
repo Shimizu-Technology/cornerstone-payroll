@@ -34,12 +34,12 @@ RSpec.describe PayrollSubmissions::StandingChanges do
     expect { PayrollSubmissions::ChangeRows.normalize!([ { kind: "owner_pay", amount: "100", basis: "each" } ], company_id: company.id) }.to raise_error(PayrollSubmissions::ChangeRows::Invalid)
   end
 
-  it "explains inactive defaults and allows explicit skips without changing the defaults" do
+  it "rejects inactive defaults including explicit skips" do
     owner.update!(status: "inactive")
     row = { kind: "owner_pay", standing_change_id: default.id, employee_id: owner.id, amount: "1" }
     expect(described_class.new(company: company, before_pay_date: Date.current).rows.sole[:availability_error]).to include("inactive")
     expect { PayrollSubmissions::ChangeRows.normalize!([ row ], company_id: company.id) }.to raise_error(PayrollSubmissions::ChangeRows::Invalid)
-    expect(PayrollSubmissions::ChangeRows.normalize!([ row.merge(skipped: true) ], company_id: company.id).sole["skipped"]).to be(true)
+    expect { PayrollSubmissions::ChangeRows.normalize!([ row.merge(skipped: true) ], company_id: company.id) }.to raise_error(PayrollSubmissions::ChangeRows::Invalid, /inactive/)
     expect(default.reload).to be_active
   end
 end

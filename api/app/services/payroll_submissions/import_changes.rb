@@ -190,7 +190,10 @@ module PayrollSubmissions
         next unless row["standing_change_id"] && row["skipped"]
 
         field = PayrollStandingChange.find_by(id: row["standing_change_id"], company_id: @period.company_id)
-        raise ArgumentError, "Configured entry changed. Review this revision before applying." unless field && field.active? && field.allow_none? && field.employee_id == row["employee_id"] && field.kind == row["kind"] && field.employee_wage_rate_id == row["employee_wage_rate_id"] && field.availability_error.nil?
+        unless field && field.active? && field.allow_none? && field.employee_id == row["employee_id"] && field.kind == row["kind"] && field.employee_wage_rate_id == row["employee_wage_rate_id"] && field.availability_error.nil?
+          @review_decisions << row.symbolize_keys.merge(decision: "stale_none", reason: "Configured entry changed or is unavailable; None this period was not applied.", revision: @submission.revision)
+          next
+        end
 
         resolution = PayrollEntryResolution.find_or_initialize_by(pay_period: @period, payroll_standing_change: field)
         next if resolution.persisted? # Preserve an explicit staff answer.
@@ -259,6 +262,10 @@ module PayrollSubmissions
       if conflict || choice
         unless %w[client saved workbook].include?(choice) && pay.all? { |key, amount| amount.to_d == input[key].to_d }
           raise ArgumentError, "Choose which pay to use for #{change[:employee_name]}; saved or workbook pay differs. Review the current amounts again."
+        end
+        if choice != "client"
+          reason = input[:reason].to_s.strip
+          raise ArgumentError, "Enter a reason (up to 1000 characters) for changing #{change[:employee_name]}'s client entry." unless reason.present? && reason.length <= 1000
         end
         if choice == "saved"
           item = @period.payroll_items.find_by!(employee_id: change[:employee_id])
