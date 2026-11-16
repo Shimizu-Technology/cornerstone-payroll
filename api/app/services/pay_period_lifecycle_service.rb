@@ -24,6 +24,7 @@ class PayPeriodLifecycleService
       end
 
       validate_go_live_gate!
+      validate_expected_entries!
       validate_payroll_participation!
       validate_variable_period_pay!
       validate_employee_document_readiness!
@@ -71,6 +72,7 @@ class PayPeriodLifecycleService
       if pay_period.parallel_run? || pay_period.payroll_parallel_run_review.present?
         raise InvalidTransitionError, "Parallel comparison payroll cannot be committed. Create a new live payroll after go-live approval."
       end
+      validate_expected_entries!
       unless pay_period.payroll_items.exists?
         raise EmptyPayPeriodError, "Cannot commit pay period with no payroll items"
       end
@@ -122,6 +124,13 @@ class PayPeriodLifecycleService
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def validate_expected_entries!
+    outstanding = PayrollExpectedEntries.new(pay_period).payload[:outstanding]
+    return if outstanding.empty?
+
+    raise InvalidTransitionError, "Resolve expected entries before approval or commit: #{outstanding.join('; ')}."
+  end
 
   def validate_employer_contribution_tracking!
     pay_period.payroll_items.financially_reportable.each do |item|
