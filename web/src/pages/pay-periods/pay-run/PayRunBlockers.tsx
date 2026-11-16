@@ -56,7 +56,7 @@ export function PayRunBlockers({
             </p>
           </Alert>
         )}
-{part !== 'hours' && payPeriod.client_payroll_approval_required && payPeriod.payroll_review && (
+{part !== 'hours' && payPeriod.payroll_review && (payPeriod.client_payroll_approval_required || payPeriod.payroll_review.published_at) && (
           <Alert tone={payPeriod.payroll_review.status === 'approved' ? 'success' : 'warning'} className={payPeriod.payroll_review.status === 'approved' ? 'border-success-200 bg-success-50/70' : 'border-warning-200 bg-warning-50/70'}>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-start gap-3">
@@ -65,21 +65,27 @@ export function PayRunBlockers({
                 </div>
                 <div>
                   <p className="font-semibold text-neutral-950">
-                    Client review revision {payPeriod.payroll_review.revision} · {payPeriod.payroll_review.status === 'approved' ? 'Approved' : 'Awaiting approval'}
+                    Client review revision {payPeriod.payroll_review.revision} · {payPeriod.payroll_review.status === 'approved' ? 'Approved' : payPeriod.payroll_review.status === 'changes_requested' ? 'Changes requested' : payPeriod.status === 'committed' ? 'Payroll finalized' : payPeriod.status === 'approved' ? (payPeriod.client_payroll_approval_required === false ? 'Client review disabled' : 'Awaiting client review') : 'Approve payroll to publish preview'}
                   </p>
                   <p className="mt-1 text-sm leading-6 text-neutral-700">
                     Review ID <span className="font-mono font-semibold">{payPeriod.payroll_review.checksum_short}</span>. This ID changes whenever payroll inputs, source evidence, or calculation results change.
                   </p>
+                  {payPeriod.payroll_review.change_request_note && <div role="status" className="mt-3 space-y-1 text-warning-950">
+                    <p className="font-semibold">{payPeriod.payroll_review.changes_requested_by_name} requested changes</p>
+                    <p className="whitespace-pre-wrap break-words">{payPeriod.payroll_review.change_request_note}</p>
+                    <p>{payPeriod.payroll_review.changes_requested_at && formatGuam(payPeriod.payroll_review.changes_requested_at)}</p>
+                    <p className="font-semibold">Unapprove to make changes, recalculate, then approve to publish a new revision.</p>
+                  </div>}
                   {payPeriod.payroll_review.status === 'approved' ? (
                     <p className="mt-1 text-sm text-success-800">
                       Approved by {payPeriod.payroll_review.approved_by_name} via {payPeriod.payroll_review.approval_method === 'client_portal' ? 'client portal' : 'email attestation'}.
                     </p>
                   ) : (
-                    <p className="mt-1 text-sm text-warning-900">The client may approve in their portal, or payroll staff may retain and record an explicit approval email. A receipt-only reply does not approve payroll.</p>
+                    <p className="mt-1 text-sm text-warning-900">{payPeriod.status === 'committed' ? 'Payroll is finalized. This review is retained as history.' : payPeriod.payroll_review.status === 'changes_requested' ? "Resolve the client's change request before committing (unapprove to make changes)." : payPeriod.client_payroll_approval_required === false ? 'Client review is disabled. This preview is retained as history; staff can commit without a client decision.' : payPeriod.status === 'approved' ? 'The preview is available in the client portal. Client approval is required before commit when enabled for this client.' : 'Staff approval publishes the preview for the client to review.'}</p>
                   )}
                 </div>
               </div>
-              {payPeriod.payroll_review.status === 'pending' && (
+              {payPeriod.client_payroll_approval_required !== false && payPeriod.status === 'approved' && payPeriod.payroll_review.status === 'pending' && (
                 <Button type="button" variant="outline" onClick={() => void openClientApproval()} disabled={clientApprovalLoading} className="shrink-0 bg-white">
                   {clientApprovalLoading ? 'Loading…' : 'Record Email Approval'}
                 </Button>
@@ -87,6 +93,14 @@ export function PayRunBlockers({
             </div>
           </Alert>
         )}
+{part !== 'hours' && payPeriod.payroll_review_history?.some(entry => entry.superseded_at && entry.change_request_note) && <details className="rounded-lg border border-neutral-200 bg-white p-4 text-sm">
+  <summary className="min-h-11 cursor-pointer font-semibold">Earlier client change requests</summary>
+  {payPeriod.payroll_review_history.filter(entry => entry.superseded_at && entry.change_request_note).map(entry => <div key={entry.id} className="mt-3 space-y-1 border-t pt-3">
+    <p className="font-semibold">Revision {entry.revision} · {entry.changes_requested_by_name}</p>
+    <p className="whitespace-pre-wrap break-words">{entry.change_request_note}</p>
+    {entry.changes_requested_at && <p>{formatGuam(entry.changes_requested_at)}</p>}
+  </div>)}
+</details>}
 {part !== 'approval' && payPeriod.intake_stale_at && (
           <Alert tone="error">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

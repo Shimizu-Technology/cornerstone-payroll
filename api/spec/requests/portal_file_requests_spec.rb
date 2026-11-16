@@ -131,14 +131,21 @@ RSpec.describe "Portal file requests", type: :request do
 
     post "/api/v1/admin/payroll_submission_periods/#{period.id}/mark_paid"
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to eq("A requested file is still outstanding. Accept or withdraw it first.")
+    expect(response.parsed_body.fetch("error")).to include("Payroll files finish when the pay run is committed.")
     expect(period.reload.status).to eq("draft_ready")
+
+    # A committed financial run does not hide an outstanding file request.
+    pay_period.update_columns(status: "committed", committed_at: Time.current)
+    get "/api/v1/admin/payroll_submission_periods/#{period.id}"
+    expect(data).to include("status" => "in_review", "status_label" => "Requested files outstanding")
 
     # A response is not acceptance, so the period still cannot be completed.
     as_client
     get "/api/v1/client/payroll_submission_periods/#{period.id}"
     expect(data.fetch("file_requests").first).to include("title" => "Riley's timesheet", "status" => "requested")
     respond_with(request_id, [ client_file ])
+    get "/api/v1/client/payroll_submission_periods/#{period.id}"
+    expect(data).to include("status" => "in_review", "status_label" => "Requested files outstanding")
     as_staff
     post "/api/v1/admin/payroll_submission_periods/#{period.id}/mark_paid"
     expect(response).to have_http_status(:unprocessable_entity)
@@ -146,8 +153,10 @@ RSpec.describe "Portal file requests", type: :request do
     post "/api/v1/admin/portal_file_requests/#{request_id}/withdraw", params: { body: "Found it in the Revel export." }
     expect(response).to have_http_status(:created)
     post "/api/v1/admin/payroll_submission_periods/#{period.id}/mark_paid"
-    expect(response).to have_http_status(:ok)
-    expect(period.reload.status).to eq("paid")
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(period.reload.status).to eq("draft_ready")
+    get "/api/v1/admin/payroll_submission_periods/#{period.id}"
+    expect(data).to include("status" => "paid", "review_pay_period_id" => pay_period.id)
   end
 
   it "refuses a new request on a paid pay period" do
@@ -293,5 +302,36 @@ RSpec.describe "Portal file requests", type: :request do
     post "/api/v1/admin/portal_file_requests/#{request.id}/accept", params: { response_message_id: request.reload.last_response_message_id }
     get "/api/v1/admin/client_inbox", params: { status: "waiting" }
     expect(response.parsed_body.fetch("data")).to be_empty
+  end
+  it "requires explicit acknowledgement to commit with requested or unaccepted client files and audits the decision" do
+    ensure_verified_test_tax_years(2026)
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    pay_period.update!(status: "calculated", calculated_at: Time.current)
+    create(:payroll_item, company: company, employee: employee, pay_period: pay_period,
+      hours_worked: 80, gross_pay: 1_200, net_pay: 1_100)
+    request_file(idempotency_key: "commit-warning")
+    request_id = data.fetch("id")
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+    expect(response).to have_http_status(:ok), response.body
+    get "/api/v1/admin/pay_periods/#{pay_period.id}"
+    expect(response.parsed_body.dig("pay_period", "outstanding_file_requests")).to include(
+      include("id" => request_id, "title" => "Riley's timesheet", "status" => "requested"))
+    [ nil, false, "false" ].each do |acknowledgement|
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: { acknowledge_outstanding_file_requests: acknowledgement }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Acknowledge the outstanding client file requests")
+      expect(pay_period.reload).to be_approved
+    end
+    # Sent files still need staff acceptance, so this requires the same acknowledgement.
+    PortalFileRequest.find(request_id).update!(status: "responded")
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+    expect(response).to have_http_status(:unprocessable_entity)
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: { acknowledge_outstanding_file_requests: true }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(pay_period.reload).to be_committed
+    log = AuditLog.where(action: "pay_periods#commit", record_id: pay_period.id).last!
+    expect(log.metadata).to include("acknowledge_outstanding_file_requests" => true,
+      "outstanding_file_requests" => [ { "id" => request_id, "title" => "Riley's timesheet", "status" => "responded" } ])
+    expect(PortalFileRequest.find(request_id).status).to eq("responded")
   end
 end

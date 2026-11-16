@@ -556,13 +556,13 @@ export function PayPeriods() {
     }
   };
 
-  const confirmCommit = async (id: number) => {
+  const confirmCommit = async (id: number, acknowledgeOutstandingFileRequests?: boolean) => {
     if (readOnlyWorkspace) return;
     const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`commit-${id}`);
       setError(null);
-      await payPeriodsApi.commit(id);
+      await (acknowledgeOutstandingFileRequests ? payPeriodsApi.commit(id, true) : payPeriodsApi.commit(id));
       if (!isCurrentMutation()) return;
       setCommitReview(null);
       void loadPayPeriodsRef.current(true);
@@ -1224,7 +1224,7 @@ export function PayPeriods() {
         itemCount={(commitReview.payroll_items ?? []).filter((item) => item.payroll_included !== false).length}
         totalNet={(commitReview.payroll_items ?? []).filter((item) => item.payroll_included !== false).reduce((sum, item) => sum + Number(item.net_pay || 0), 0)}
         processing={actionInFlight === `commit-${commitReview.id}`}
-        onCancel={() => setCommitReview(null)} onConfirm={(id) => void confirmCommit(id)} />}
+        onCancel={() => setCommitReview(null)} onConfirm={(id, acknowledged) => void confirmCommit(id, acknowledged)} />}
       <Dialog open={deletingPeriod !== null} onOpenChange={(open) => {
         if (!open && actionInFlight === null) {
           setDeletingPeriod(null);

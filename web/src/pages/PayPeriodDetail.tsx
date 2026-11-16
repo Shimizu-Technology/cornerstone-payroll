@@ -100,7 +100,7 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
     ...(payPeriod.correction_status === 'voided' ? [{ text: 'Review voided payroll and correction history', href: route('activity', '#payroll-corrections') }] : []),
     ...(sections.processing.hasPendingCalculationChanges ? [{ text: 'Recalculate to include your changes', href: route('work', '#payroll-blockers') }] : []),
     ...(sections.feedback.calculationFailures.length ? [{ text: `${sections.feedback.calculationFailures.length} calculation error${sections.feedback.calculationFailures.length === 1 ? '' : 's'}`, href: route('work', '#payroll-calculation-issues') }] : []),
-    ...(payPeriod.client_payroll_approval_required && payPeriod.payroll_review?.status !== 'approved' ? [{ text: 'Client approval pending', href: route('work', '#payroll-commit') }] : []),
+    ...(payPeriod.status === 'approved' && payPeriod.client_payroll_approval_required && payPeriod.payroll_review?.status !== 'approved' ? [{ text: payPeriod.payroll_review?.status === 'changes_requested' ? 'Client requested changes' : 'Client approval pending', href: route('work', '#payroll-commit') }] : []),
     ...(held ? [{ text: `${held} held entr${held === 1 ? 'y' : 'ies'} outside this payroll`, href: route('work', '#time-tracking-sync') }] : []),
     ...(payPeriod.status === 'committed' && payPeriod.correction_status !== 'voided' ? [{ text: preparedChecks ? `${preparedChecks} check${preparedChecks === 1 ? '' : 's'} prepared, not issued` : 'Review check preparation and payment delivery', href: route('checks') }] : []),
     ...(payPeriod.parallel_run ? [{ text: 'Parallel comparison · cannot commit', href: route('activity') }] : []),

@@ -86,14 +86,22 @@ Never edit a previously retained source package or keep an old calculation appro
 
 If any value exceeds the template tolerance, stop. Keep QuickBooks authoritative, record the discrepancy, and follow [the issue-remediation procedure](05-ISSUE-REMEDIATION-LOG.md).
 
-## 6. Record exact client approval
+## 6. Publish the preview and obtain exact client approval
 
-1. Send or present the reports for the calculation revision shown in Cornerstone.
-2. Require an unambiguous approval of that payroll. “Received” or “thank you” is not approval.
-3. Use the client portal approval, or choose **Record Email Approval** and retain the exact approval evidence.
-4. Confirm the displayed review ID is still the same after approval.
+1. After calculation and staff review, choose **Approve**. When **Require client approval before payroll commit** is on, this publishes the current revision's PREVIEW checks and pay stubs to the client portal and records an update notification. With the setting off, staff approve and commit without publishing a client review or notifying the client. Staff approval does not require a client decision first.
+2. The assigned client opens the pay run and uses **Review preview → View preview** or **Download preview**. These watermarked documents are for review before commitment.
+3. The client either acknowledges and chooses **Approve this revision** (optional note), or chooses **Request changes** with a required note. Both decisions record the user, time and revision and notify the client's configured staff recipients.
+4. For an emailed approval, staff choose **Record Email Approval** on the approved run, select the assigned client user and retain the explicit approval evidence reference. “Received” or “thank you” is not approval.
+5. For a change request, choose **Unapprove to make changes**, correct the inputs, recalculate and approve again. Unapprove withdraws the revision and its client approval while retaining the original evidence. Even unchanged amounts require a new decision after unapprove. The new publication notifies the client again.
+6. Confirm the current revision has client approval before **Commit** when **Require client approval before payroll commit** is enabled for that company. A pending change request on the current revision blocks commit even if the setting is later turned off. Unapprove to make the requested changes. Financial/source/setup gates still apply.
 
-Any source, setup, or calculation change invalidates the old approval and requires recalculation and a new approval.
+The portal retains revision and change-request history. Client preview access is company-scoped, revision-bound and audited. Preview downloads never assign check numbers or mark checks printed. A changed calculation cannot use an older revision's decision.
+
+**Payroll files:** use this area for source files, messages and earlier uploaded-draft history. New manual draft-PDF uploads, posting, draft decisions and manual mark-paid are retired. Use **Open payroll preview review** for the single approval flow. For live runs, paid status follows the actual pay run commit; outstanding client file requests keep the files period in review until accepted or withdrawn. Earlier periods without a live run retain their original status.
+
+**Runs already approved at deployment:** existing current shared revisions on approved runs are recognized as published; an exact existing client approval remains usable if its checksum still matches. No historical notification is sent automatically. If an approved run has no shared review package, unapprove and re-approve it to publish a preview. A client approval recorded while the run was only calculated is retained as history and replaced at staff approval, requiring the client to review the published revision. Committed payroll and earlier Payroll files history remain readable. This rollout does not mass-approve or commit anything.
+
+Email delivery uses the existing portal configuration and recipient preferences. Publication and decision events are retained even when delivery is disabled or no recipient is configured; verify recipient setup before the live cycle.
 
 ## 7. Parallel-cycle disposition
 
@@ -128,7 +136,7 @@ Do not approve, commit, or cut over when any of these is true:
 - an unresolved employee setup or document-readiness blocker;
 - owner pay is combined or ambiguous;
 - a loan balance, repayment rule, or 401(k) election is not supported by reviewed setup evidence;
-- the client has not explicitly approved the current review ID;
+- at commit only: required client approval of the current published review ID is missing, or the client requested changes (even if the setting is now off);
 - a tax, gross, net, check, or employee-count difference exceeds tolerance;
 - a P1 or blocking correction remains open; or
 - the recovery and cutover gates have not been signed.

@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { payrollClientCommitReason } from '@/lib/payrollClientCommitReason';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatCurrency, formatDateRange, formatDate } from '@/lib/utils';
@@ -5,17 +7,23 @@ import type { PayPeriod } from '@/types';
 
 type Props = {
   open: boolean;
-  payPeriod: Pick<PayPeriod, 'id' | 'status' | 'start_date' | 'end_date' | 'pay_date' | 'compliance_warnings' | 'correction_status' | 'check_number_summary' | 'payroll_items'>;
+  payPeriod: Pick<PayPeriod, 'id' | 'status' | 'start_date' | 'end_date' | 'pay_date' | 'compliance_warnings' | 'correction_status' | 'payroll_review' | 'client_payroll_approval_required' | 'check_number_summary' | 'payroll_items' | 'outstanding_file_requests'>;
   companyName: string;
   itemCount: number;
   totalNet: number;
   processing: boolean;
   onCancel: () => void;
-  onConfirm: (payPeriodId: number) => void;
+  onConfirm: (payPeriodId: number, acknowledgeOutstandingFileRequests?: boolean) => void;
 };
 
 export function PayrollCommitDialog({ open, payPeriod, companyName, itemCount, totalNet, processing, onCancel, onConfirm }: Props) {
-  const canConfirm = !processing && payPeriod.status === 'approved' && payPeriod.correction_status !== 'voided';
+  const requests = payPeriod.outstanding_file_requests ?? [];
+  const requestKey = `${payPeriod.id}:${open}:${requests.map(request => `${request.id}:${request.status}`).join(',')}`;
+  const [acknowledgedKey, setAcknowledgedKey] = useState<string | null>(null);
+  useEffect(() => { setAcknowledgedKey(null); }, [open, payPeriod.id]);
+  const acknowledged = acknowledgedKey === requestKey;
+  const clientCommitReason = payrollClientCommitReason(payPeriod);
+  const canConfirm = (!requests.length || acknowledged) && !clientCommitReason && !processing && payPeriod.status === 'approved' && payPeriod.correction_status !== 'voided';
   const hasPaperChecks = payPeriod.payroll_items?.some(item => (item.effective_payment_delivery_method ?? item.payment_delivery_method ?? 'paper_check') === 'paper_check');
   const numbering = payPeriod.check_number_summary;
   return <Dialog open={open} onOpenChange={value => { if (!value && !processing) onCancel(); }} dismissOnEscape={!processing}>
@@ -41,10 +49,20 @@ export function PayrollCommitDialog({ open, payPeriod, companyName, itemCount, t
         <p className="font-semibold">Review these warnings before committing</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">{payPeriod.compliance_warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
       </div>}
+      {!!requests.length && <div className="space-y-3 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-950">
+        <p className="font-semibold">Outstanding client file requests</p>
+        <ul className="list-disc space-y-2 pl-5">{requests.map(request => <li key={request.id} className="break-words">{request.title} — {request.status_label}</li>)}</ul>
+        <label className="flex min-h-11 cursor-pointer items-start gap-3 leading-6">
+          <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={acknowledged} disabled={processing}
+            onChange={event => setAcknowledgedKey(event.target.checked ? requestKey : null)} />
+          <span>I reviewed these outstanding requests and will finalize payroll without the requested files being accepted.</span>
+        </label>
+      </div>}
+      {clientCommitReason && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-warning-950">{clientCommitReason}</p>}
       <p className="text-sm leading-6 text-neutral-600">Review this run before confirming. Later payroll changes must use the corrections workflow.</p>
       <DialogFooter className="gap-2 sm:gap-0">
         <Button className="max-sm:min-h-[44px]" type="button" variant="outline" disabled={processing} onClick={onCancel}>Keep reviewing</Button>
-        <Button className="max-sm:min-h-[44px]" type="button" disabled={!canConfirm} onClick={() => { if (canConfirm) onConfirm(payPeriod.id); }}>{processing ? 'Committing…' : 'Confirm commit'}</Button>
+        <Button className="max-sm:min-h-[44px]" type="button" disabled={!canConfirm} onClick={() => { if (canConfirm) { if (requests.length) onConfirm(payPeriod.id, true); else onConfirm(payPeriod.id); } }}>{processing ? 'Committing…' : 'Confirm commit'}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>;

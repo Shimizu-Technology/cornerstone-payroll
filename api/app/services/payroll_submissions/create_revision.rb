@@ -67,7 +67,7 @@ module PayrollSubmissions
           outcome = :replayed
           raise ActiveRecord::Rollback
         end
-        raise PayrollSubmissionPeriod::TransitionError, "This period is paid. Send any correction as a message." if period.status == "paid"
+        raise PayrollSubmissionPeriod::TransitionError, "This period is paid. Send any correction as a message." if run ? run.client_finished? : period.status == "paid"
 
         latest = period.submissions.reload.first
         if latest && latest.content_fingerprint == content
@@ -106,6 +106,7 @@ module PayrollSubmissions
             new_documents << document
           end
         end
+        period.pay_period = run if run
         period.transition!("submit", actor: @actor, submission: submission)
         new_documents.each do |document|
           PortalActivity.record!(user: @actor, record: document, action: "client_documents#create",

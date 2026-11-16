@@ -1,3 +1,4 @@
+import { payrollClientCommitReason } from '@/lib/payrollClientCommitReason';
 import { estimateDraftGross } from '@/lib/draft-gross';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { useFeedbackState } from '@/components/ui/action-feedback';
@@ -88,6 +89,10 @@ export function usePayRunController({
   const [clientApprovalEvidence, setClientApprovalEvidence] = useState('');
   const [clientApprovalNotes, setClientApprovalNotes] = useState('');
   const [clientApprovalConfirmed, setClientApprovalConfirmed] = useState(false);
+  useEffect(() => {
+    setClientApprovalConfirmed(false);
+    setClientApprovalEvidence('');
+  }, [payPeriod?.payroll_review?.id]);
   const [adoptingConfirmedWorkweek, setAdoptingConfirmedWorkweek] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -864,6 +869,7 @@ export function usePayRunController({
     try {
       const response = await payPeriodsApi.recordClientApproval(payPeriod.id, {
         client_approver_id: Number(clientApproverId),
+        revision_id: payPeriod.payroll_review.id,
         acknowledgement: clientApprovalConfirmed ? payPeriod.payroll_review.acknowledgement : '',
         evidence_reference: clientApprovalEvidence.trim(),
         notes: clientApprovalNotes.trim() || undefined,
@@ -901,9 +907,9 @@ export function usePayRunController({
     if (payPeriod?.status !== 'approved' || payPeriod.correction_status === 'voided') setCommitPeriodId(null);
   }, [payPeriod?.id, payPeriod?.status, payPeriod?.correction_status]);
 
-  const handleCommit = async (confirmedPeriodId: number) => {
+  const handleCommit = async (confirmedPeriodId: number, acknowledgeOutstandingFileRequests?: boolean) => {
     if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
-        payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || processing || commitInFlightRef.current) return;
+        payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || payrollClientCommitReason(payPeriod) || processing || commitInFlightRef.current) return;
     commitInFlightRef.current = true;
     const currentRouteGeneration = commitRouteGenerationRef.current;
     const isCurrentRoute = () => currentRouteGeneration === commitRouteGenerationRef.current;
@@ -911,7 +917,7 @@ export function usePayRunController({
     setProcessing(true);
     setError(null);
     try {
-      const response = await payPeriodsApi.commit(confirmedPeriodId);
+      const response = await (acknowledgeOutstandingFileRequests ? payPeriodsApi.commit(confirmedPeriodId, true) : payPeriodsApi.commit(confirmedPeriodId));
       if (!isCurrentRoute()) return;
       setPayPeriod(response.pay_period);
       await loadPayPeriod(confirmedPeriodId, true);

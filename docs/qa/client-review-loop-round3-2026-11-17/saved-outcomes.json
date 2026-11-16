@@ -1,0 +1,117 @@
+{
+  "company_id": 415,
+  "approval_required": false,
+  "rows": [
+    {
+      "case": "published",
+      "id": 275,
+      "status": "approved",
+      "gross": "1200.0",
+      "net": "1100.0",
+      "review_published_at": "2026-11-16 17:38:15 UTC",
+      "requests": [],
+      "commit_audit": null
+    },
+    {
+      "case": "detail_desktop",
+      "id": 276,
+      "status": "committed",
+      "gross": "1200.0",
+      "net": "1100.0",
+      "review_published_at": "2026-11-16 17:38:15 UTC",
+      "requests": [
+        {
+          "id": 23,
+          "title": "Riley Detail Desktop timesheet",
+          "status": "requested"
+        }
+      ],
+      "commit_audit": {
+        "acknowledge_outstanding_file_requests": true,
+        "outstanding_file_requests": [
+          {
+            "id": 23,
+            "title": "Riley Detail Desktop timesheet",
+            "status": "requested"
+          }
+        ]
+      }
+    },
+    {
+      "case": "detail_phone",
+      "id": 277,
+      "status": "committed",
+      "gross": "1200.0",
+      "net": "1100.0",
+      "review_published_at": "2026-11-16 17:38:16 UTC",
+      "requests": [
+        {
+          "id": 24,
+          "title": "Riley Detail Phone timesheet",
+          "status": "requested"
+        }
+      ],
+      "commit_audit": {
+        "acknowledge_outstanding_file_requests": true,
+        "outstanding_file_requests": [
+          {
+            "id": 24,
+            "title": "Riley Detail Phone timesheet",
+            "status": "requested"
+          }
+        ]
+      }
+    },
+    {
+      "case": "list_desktop",
+      "id": 278,
+      "status": "committed",
+      "gross": "1200.0",
+      "net": "1100.0",
+      "review_published_at": "2026-11-16 17:38:16 UTC",
+      "requests": [
+        {
+          "id": 25,
+          "title": "Riley List Desktop timesheet",
+          "status": "requested"
+        }
+      ],
+      "commit_audit": {
+        "acknowledge_outstanding_file_requests": true,
+        "outstanding_file_requests": [
+          {
+            "id": 25,
+            "title": "Riley List Desktop timesheet",
+            "status": "requested"
+          }
+        ]
+      }
+    },
+    {
+      "case": "list_phone",
+      "id": 279,
+      "status": "committed",
+      "gross": "1200.0",
+      "net": "1100.0",
+      "review_published_at": "2026-11-16 17:38:16 UTC",
+      "requests": [
+        {
+          "id": 26,
+          "title": "Riley List Phone timesheet",
+          "status": "requested"
+        }
+      ],
+      "commit_audit": {
+        "acknowledge_outstanding_file_requests": true,
+        "outstanding_file_requests": [
+          {
+            "id": 26,
+            "title": "Riley List Phone timesheet",
+            "status": "requested"
+          }
+        ]
+      }
+    }
+  ],
+  "decision_notifications": 0
+}

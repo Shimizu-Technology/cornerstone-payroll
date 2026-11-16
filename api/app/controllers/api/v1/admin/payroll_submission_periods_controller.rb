@@ -29,7 +29,7 @@ module Api
           render_period
         end
 
-        # Draft paycheck and direct-deposit PDFs; post: false keeps them staff-only.
+        # Retired manual draft route; the service returns the pay-run review recovery path.
         def drafts
           skip_default_audit_log!
           payroll_actions.create_draft!(@entry, params: params.permit(:paycheck_pdf, :direct_deposit_pdf, :note, :post, :idempotency_key))

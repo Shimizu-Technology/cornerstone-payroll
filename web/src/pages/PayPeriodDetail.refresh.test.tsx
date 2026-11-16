@@ -7,6 +7,7 @@ import { Link, createMemoryRouter, RouterProvider, MemoryRouter, Route, Routes, 
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
 import { PayPeriodDetail as PayPeriodDetailPage } from './PayPeriodDetail';
+import { usePayRunController } from './pay-periods/pay-run/usePayRunController';
 import { payrollFinalRecordFixture, voidedFinalRecordFixture } from '@/components/payroll/PayrollFinalRecordPanel.fixtures';
 
 // Exercise moved controls through the same tab seam used by the workspace.
@@ -33,6 +34,8 @@ async function findPayRunButton(name: string): Promise<HTMLElement> {
 
 const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
+  clientReview: vi.fn(),
+  recordClientApproval: vi.fn(),
   liabilities: vi.fn(),
   payrollFieldInputs: vi.fn(),
   employeesList: vi.fn(),
@@ -56,6 +59,8 @@ vi.mock('@/services/api', () => ({
   ApiError: class ApiError extends Error {},
   payPeriodsApi: {
     get: apiMocks.get,
+    clientReview: apiMocks.clientReview,
+    recordClientApproval: apiMocks.recordClientApproval,
     liabilities: apiMocks.liabilities,
     payrollFieldInputs: apiMocks.payrollFieldInputs,
     runPayroll: apiMocks.runPayroll,
@@ -2092,4 +2097,26 @@ it('submits the saved legacy job bucket when configured jobs have different labe
   await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledOnce());
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['24'].wage_rates).toContainEqual(legacy);
+});
+
+it('clears staff email attestation when the reviewed revision changes', async () => {
+  vi.clearAllMocks();
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  let controller: Extract<ReturnType<typeof usePayRunController>, { status: 'ready' }>['sections'];
+  function AttestationHarness() {
+    const result = usePayRunController({ initialPayPeriod: { ...initialPayPeriod, status: 'approved',
+      payroll_review: { id: 91, revision: 1, status: 'pending', published_at: '2026-11-17', acknowledgement: 'Exact revision' } } as PayPeriod });
+    if (result.status !== 'ready') return null;
+    controller = result.sections;
+    return <output>{controller.dialogs.clientApprovalConfirmed ? 'confirmed' : 'unconfirmed'}:{controller.dialogs.clientApprovalEvidence}</output>;
+  }
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<AttestationHarness />} /></Routes></MemoryRouter>);
+  await screen.findByText('unconfirmed:');
+  act(() => { controller.dialogs.setClientApprovalOpen(true); controller.dialogs.setClientApprovalConfirmed(true); controller.dialogs.setClientApprovalEvidence('Email for revision 1'); });
+  expect(screen.getByText('confirmed:Email for revision 1')).toBeTruthy();
+  act(() => { controller.dialogs.setPayPeriod(current => current && { ...current, payroll_review: { ...current.payroll_review!, id: 92, revision: 2 } }); });
+  await screen.findByText('unconfirmed:');
+  expect(apiMocks.recordClientApproval).not.toHaveBeenCalled();
 });

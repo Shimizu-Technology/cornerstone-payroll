@@ -1527,7 +1527,7 @@ export const payPeriodsApi = {
       client_approval_required: boolean;
       authorized_client_approvers: Array<{ id: number; name: string; email: string }>;
     }>(`/admin/pay_periods/${id}/client_review`),
-  recordClientApproval: (id: number, data: { client_approver_id: number; acknowledgement: string; evidence_reference: string; notes?: string }) =>
+  recordClientApproval: (id: number, data: { revision_id: number; client_approver_id: number; acknowledgement: string; evidence_reference: string; notes?: string }) =>
     api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/admin/pay_periods/${id}/record_client_approval`, data),
   liabilities: (id: number) =>
     api.get<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
@@ -1557,8 +1557,8 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
   unapprove: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
-  commit: (id: number) =>
-    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
+  commit: (id: number, acknowledgeOutstandingFileRequests?: boolean) =>
+    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`, acknowledgeOutstandingFileRequests ? { acknowledge_outstanding_file_requests: true } : undefined),
   promotedPaymentPreview: (id: number) =>
     api.get<{ promoted_payment: PromotedPaymentPreview }>(`/admin/pay_periods/${id}/promoted_payment_preview`),
   preparePromotedPayment: (id: number, data: { acknowledgement: string; starting_check_number: string; check_date: string }) =>
@@ -1722,8 +1722,12 @@ export const clientPayPeriodsApi = {
     api.get<ClientPayrollHistoryResponse>('/client/pay_periods', params, { companyId }),
   get: (id: number, companyId?: number): Promise<PayPeriodResponse> =>
     api.get<PayPeriodResponse>(`/client/pay_periods/${id}`, undefined, { companyId }),
-  approveReview: (id: number, companyId: number, data: { acknowledgement: string; notes?: string }) =>
+  approveReview: (id: number, companyId: number, data: { revision_id: number; acknowledgement: string; notes?: string }) =>
     api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/client/pay_periods/${id}/approve_review`, data, { companyId }),
+  requestChanges: (id: number, companyId: number, data: { revision_id: number; note: string }) =>
+    api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/client/pay_periods/${id}/request_changes`, data, { companyId }),
+  previewPdf: (id: number, companyId: number, revisionId: number) =>
+    api.getBlobWithParams(`/client/pay_periods/${id}/preview_pdf`, { revision_id: revisionId }, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },

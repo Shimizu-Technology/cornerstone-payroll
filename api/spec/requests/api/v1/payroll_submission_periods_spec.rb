@@ -313,25 +313,14 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(PayrollSubmission.count).to eq(0)
     end
 
-    it "lets a non-MoSa client message and approve a posted draft without a submission" do
+    it "retires manual draft posting for non-intake clients too" do
       company.update!(payroll_intake_source_types: [])
       as_staff
-      post "#{staff_base}/#{ref}/drafts", params: { paycheck_pdf: synthetic_pdf("fixed-pay-draft.pdf"), post: true }
-      expect(response).to have_http_status(:created), response.body
-      period_id = data["id"]
-      draft_id = data["drafts"].first["id"]
-      as_client
-      get "#{client_base}/#{period_id}"
-      expect(response).to have_http_status(:ok)
-      expect(data["submissions"]).to be_empty
-      expect(data["drafts"].first["id"]).to eq(draft_id)
-      expect(data["allowed_actions"]).to contain_exactly("approve", "request_changes", "message")
-      post "#{client_base}/#{period_id}/messages", params: { body: "Checking this draft", idempotency_key: "fixed-message" }
-      expect(response).to have_http_status(:created), response.body
-      expect(PayrollSubmissionPeriod.find(period_id).client_portal_thread.messages.last.body).to eq("Checking this draft")
-      post "#{client_base}/#{period_id}/decision", params: { decision: "approve", draft_id: draft_id }
-      expect(response).to have_http_status(:ok), response.body
-      expect(data["status"]).to eq("approved")
+      expect do
+        post "#{staff_base}/#{ref}/drafts", params: { paycheck_pdf: synthetic_pdf("fixed-pay-draft.pdf"), post: true }
+      end.not_to change(PayrollSubmissionDraft, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("preview on the pay run")
     end
 
     it "still serializes legacy revisions without inventing a no-tips declaration" do
@@ -443,163 +432,111 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(response).to have_http_status(:not_found)
     end
 
-    it "replays a draft retry and refuses a reused key with a different draft" do
-      post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
-      bytes = "%PDF-1.4\n% draft bytes\n%%EOF\n"
-      draft_pdf = -> { portal_upload("paychecks.pdf", bytes, "application/pdf") }
-      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: draft_pdf.call, note: "first", idempotency_key: "d1" }
-      expect(response).to have_http_status(:created)
+    it "retires manual draft uploads, posting, decisions and mark-paid without writing evidence" do
+      as_staff
       expect do
-        post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: draft_pdf.call, note: "first", idempotency_key: "d1" }
-      end.not_to change(ClientDocument, :count)
-      expect(period.drafts.count).to eq(1)
-      expect do
-        post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: draft_pdf.call, note: "corrected note", idempotency_key: "d1" }
-      end.not_to change(ClientDocument, :count)
-      expect(response).to have_http_status(:conflict)
-      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: draft_pdf.call, note: "first", post: false, idempotency_key: "d1" }
-      expect(response).to have_http_status(:conflict)
-      expect(period.drafts.count).to eq(1)
+        post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf }
+        expect(response).to have_http_status(:unprocessable_entity)
+        post "#{staff_base}/#{period.id}/drafts/123/post"
+        expect(response).to have_http_status(:unprocessable_entity)
+        post "#{staff_base}/#{period.id}/mark_paid"
+        expect(response).to have_http_status(:unprocessable_entity)
+        as_client
+        post "#{client_base}/#{period.id}/decision", params: { decision: "approve", draft_id: 123 }
+        expect(response).to have_http_status(:unprocessable_entity)
+      end.not_to change { [ ClientDocument.count, PayrollSubmissionDraft.count, period.status_events.count ] }
     end
 
-    it "removes both stored draft files when the second upload fails" do
-      post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
-      calls = 0
-      written = []
-      allow_any_instance_of(R2StorageService).to receive(:upload).and_wrap_original do |original, key, *args, **opts|
-        calls += 1
-        original.call(key, *args, **opts)
-        written << key
-        raise Timeout::Error, "read timeout after the object was stored" if calls == 2
-      end
-      expect do
-        post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf("p.pdf"), direct_deposit_pdf: synthetic_pdf("d.pdf") }
-      rescue Timeout::Error
-        nil
-      end.not_to change { [ ClientDocument.count, PayrollSubmissionDraft.count ] }
-      expect(written.size).to eq(2)
-      expect(written.map { |key| R2StorageService.new.download(key) }).to all(be_nil)
-    end
-
-    it "keeps a posted draft's files available to the client instead of archiving them" do
-      post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
-      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf("posted.pdf") }
-      posted = period.drafts.first.paycheck_document
-      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf("hidden.pdf"), post: false }
-      hidden = period.drafts.first.paycheck_document
-      allow_any_instance_of(Api::V1::Admin::ClientDocumentsController).to receive(:current_user) { User.find(staff.id) }
-      allow_any_instance_of(Api::V1::Admin::ClientDocumentsController).to receive(:current_company_id).and_return(company.id)
-
-      delete "/api/v1/admin/client_documents/#{posted.id}"
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to include("shared with the client for review")
-      expect(posted.reload).not_to be_archived
-
-      as_client
-      allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_user) { User.find(client.id) }
-      allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_company_id).and_return(company.id)
-      get "/api/v1/client/documents/#{posted.id}/download"
-      expect(response).to have_http_status(:ok)
-
-      delete "/api/v1/admin/client_documents/#{hidden.id}"
-      expect(response).to have_http_status(:ok)
-      expect(hidden.reload).to be_archived
-    end
-
-    it "keeps an unposted draft staff-only, then posts it for the client" do
-      post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
-      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf("MHI paychecks.pdf"), post: false, note: "Internal check" }
-      expect(response).to have_http_status(:created)
-      draft = period.drafts.first
-      expect(draft).not_to be_posted
-      expect(draft.paycheck_document.visible_to_client).to be(false)
-      expect(data["status"]).to eq("received")
-
+    it "keeps earlier posted drafts readable and staff-only drafts hidden" do
+      posted = create(:client_document, company: company, uploaded_by: staff, visible_to_client: true)
+      hidden = create(:client_document, company: company, uploaded_by: staff, visible_to_client: false)
+      period.drafts.create!(company: company, revision: 1, request_fingerprint: "a" * 64, created_by: staff, posted_by: staff,
+        posted_at: Time.current, paycheck_document: posted, note: "Earlier shared draft")
+      period.drafts.create!(company: company, revision: 2, request_fingerprint: "b" * 64, created_by: staff, paycheck_document: hidden, note: "Internal check")
       as_client
       get "#{client_base}/#{period.id}"
-      expect(data["drafts"]).to eq([])
+      expect(response).to have_http_status(:ok)
+      expect(data["drafts"].map { |draft| draft["revision"] }).to eq([ 1 ])
+      expect(data["allowed_actions"]).not_to include("approve", "request_changes")
       expect(response.body).not_to include("Internal check")
-      expect(response.body).not_to include("MHI paychecks")
-      get "#{client_base}/#{period.id}/activity"
-      expect(response.parsed_body["data"].map { |e| e["action"] }).not_to include("payroll_submission_drafts#create")
-      allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_user) { User.find(client.id) }
-      allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_company_id).and_return(company.id)
-      get "/api/v1/client/documents/#{draft.paycheck_document_id}/download"
-      expect(response).to have_http_status(:not_found)
-
       as_staff
-      post "#{staff_base}/#{period.id}/drafts/#{draft.id}/post"
-      expect(response).to have_http_status(:ok)
-      expect(data["status"]).to eq("draft_ready")
-      expect(draft.reload.paycheck_document.visible_to_client).to be(true)
-      expect(PortalNotificationEvent.where(event_type: "payroll_draft_posted").count).to eq(1)
+      get "#{staff_base}/#{period.id}"
+      expect(data["drafts"].size).to eq(2)
+      expect(data["allowed_actions"]).not_to include("post_draft", "save_draft", "mark_paid")
+    end
 
+    it "shows the pay-run preview decision instead of the earlier manual draft approval" do
+      company.update!(client_payroll_approval_required: true)
+      ensure_verified_test_tax_years(2026)
+      period.update!(status: "approved", pay_period: pay_period)
+      period.with_lock { period.transition!("resolve_source", actor: staff, submission: period.current_submission, note: "Synthetic source reviewed") }
+      pay_period.update!(status: "calculated")
+      create(:payroll_item, company: company, pay_period: pay_period, employee: employee, gross_pay: 100, net_pay: 90)
+      pay_period.update!(status: "approved")
+      review = PayrollReview::RevisionService.new(pay_period: pay_period, actor: staff).publish!
       as_client
       get "#{client_base}/#{period.id}"
-      expect(data["drafts"].first).to include("id" => draft.id, "current" => true)
-      expect(data["drafts"].first).not_to have_key("created_by_name")
-      expect(data["allowed_actions"]).to include("approve", "request_changes")
-    end
-
-    it "lets the client approve or request a change on the current draft only" do
-      post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
-      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf, direct_deposit_pdf: synthetic_pdf("dd.pdf") }
-      first_draft = period.drafts.first
-
-      as_client
-      post "#{client_base}/#{period.id}/decision", params: { decision: "request_changes", draft_id: first_draft.id }
-      expect(response).to have_http_status(:unprocessable_entity)
-      post "#{client_base}/#{period.id}/decision", params: { decision: "request_changes", draft_id: first_draft.id, note: "Add 2 hours for Sam" }
-      expect(response).to have_http_status(:ok)
+      expect(data["status"]).to eq("draft_ready")
+      expect(data["status_label"]).to eq("Payroll preview ready for review")
+      PayrollReview::RevisionService.new(pay_period: pay_period, actor: client).request_changes!(revision_id: review.id, note: "Correct the hours")
+      get "#{client_base}/#{period.id}"
       expect(data["status"]).to eq("changes_requested")
-      thread = period.reload.client_portal_thread
-      expect(thread.messages.last).to have_attributes(body: "Add 2 hours for Sam", author_id: client.id)
-      expect(PortalNotificationEvent.where(event_type: "payroll_draft_decided").count).to eq(1)
-
-      as_staff
-      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf }
-      second_draft = period.drafts.first
-
-      as_client
-      post "#{client_base}/#{period.id}/decision", params: { decision: "approve", draft_id: first_draft.id }
-      expect(response).to have_http_status(:not_found)
-      post "#{client_base}/#{period.id}/decision", params: { decision: "approve", draft_id: second_draft.id }
-      expect(response).to have_http_status(:ok)
-      expect(data["status"]).to eq("approved")
-      expect(data["drafts"].map { |d| [ d["revision"], d["current"], d["superseded"] ] }).to eq([ [ 2, true, false ], [ 1, false, true ] ])
-      post "#{client_base}/#{period.id}/decision", params: { decision: "approve", draft_id: second_draft.id }
-      expect(response).to have_http_status(:ok)
-      expect(period.status_events.where(event: "approve").count).to eq(1)
-
-      as_staff
-      post "#{staff_base}/#{period.id}/mark_paid"
-      expect(data["status"]).to eq("paid")
-      as_client
-      send_package(no_changes: true, notes: "late")
-      expect(response).to have_http_status(:unprocessable_entity)
     end
 
-    it "enforces per-role transitions" do
-      post "#{staff_base}/#{period.id}/mark_paid"
-      expect(response).to have_http_status(:unprocessable_entity)
-      post "#{staff_base}/#{period.id}/drafts", params: { paycheck_pdf: synthetic_pdf }
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to include("Confirm receipt")
+    %w[draft_ready approved changes_requested paid].each do |original_status|
+      it "preserves #{original_status} for an old period with no run" do
+        period.update!(status: original_status, pay_period: nil, start_date: "2026-09-01", end_date: "2026-09-15")
+        as_client
+        get "#{client_base}/#{period.id}"
+        expect(data["status"]).to eq(original_status)
+        expect(data["status_label"]).to eq(PayrollSubmissionPeriod::STATUS_LABELS.fetch(original_status))
+        expect(data["review_pay_period_id"]).to be_nil
+      end
+    end
 
+    it "preserves paid for a committed then voided linked run" do
+      period.update!(status: "paid", pay_period: pay_period)
+      pay_period.update_columns(status: "committed", committed_at: Time.current, correction_status: "voided")
       as_client
-      post "#{client_base}/#{period.id}/decision", params: { decision: "approve", draft_id: 0 }
-      expect(response).to have_http_status(:not_found)
-      as_staff(client)
-      post "#{staff_base}/#{period.id}/acknowledge", params: { submission_id: period.submissions.first.id }
-      expect(response).to have_http_status(:forbidden)
+      get "#{client_base}/#{period.id}"
+      expect(data["status"]).to eq("paid")
+      expect(data["review_pay_period_id"]).to be_nil
+    end
 
-      catalog = PayrollSubmissions::Catalog.new(company: company)
-      actions = PayrollSubmissions::Actions.new(company: company, actor: client, catalog: catalog)
-      expect { actions.mark_paid!(period) }.to raise_error(PayrollSubmissionPeriod::TransitionError, /Only Cornerstone staff/)
-      staff_actions = PayrollSubmissions::Actions.new(company: company, actor: staff, catalog: catalog)
-      expect { period.with_lock { period.transition!("approve", actor: staff) } }.to raise_error(PayrollSubmissionPeriod::TransitionError, /Only the client/)
-      expect { staff_actions.start_review!(period) }.to raise_error(PayrollSubmissionPeriod::TransitionError)
+    it "allows corrected source files for a legacy-paid period with an uncommitted live run" do
+      period.update!(status: "paid", pay_period: pay_period)
+      as_client
+      get "#{client_base}/#{period.id}"
+      expect(data["allowed_actions"]).to include("submit")
+      send_package(notes: "Corrected hours", based_on_revision: period.current_submission.revision, idempotency_key: "legacy-correction")
+      expect(response).to have_http_status(:created), response.body
       expect(period.reload.status).to eq("submitted")
+    end
+
+    it "derives paid status only from the actual pay run commit" do
+      period.update!(status: "paid", pay_period: pay_period)
+      as_client
+      get "#{client_base}/#{period.id}"
+      expect(data["status"]).to eq("in_review")
+      # Client approval is off for this company, so no preview will be published.
+      expect(data["status_label"]).to eq("Payroll in progress")
+      pay_period.update_columns(status: "committed", committed_at: Time.current)
+      get "#{client_base}/#{period.id}"
+      expect(data["status"]).to eq("paid")
+      expect(data["review_pay_period_id"]).to eq(pay_period.id)
+      expect(data["allowed_actions"]).to eq([ "message" ])
+    end
+
+    it "rejects corrected source files once the linked run is committed" do
+      period.update!(status: "paid", pay_period: pay_period)
+      pay_period.update_columns(status: "committed", committed_at: Time.current)
+      as_client
+      expect {
+        send_package(notes: "Too late", based_on_revision: period.current_submission.revision, idempotency_key: "post-commit-correction")
+      }.not_to change { period.reload.submissions.count }
+      expect(response).not_to have_http_status(:created)
+      expect(response.status).to be_between(400, 499)
+      expect(period.reload.status).to eq("paid")
     end
 
     it "rolls back an acknowledgement when its audit write fails" do

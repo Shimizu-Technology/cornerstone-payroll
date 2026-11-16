@@ -360,6 +360,12 @@ class PayPeriod < ApplicationRecord
     status == "approved"
   end
 
+  def outstanding_client_file_requests
+    periods = PayrollSubmissionPeriod.where(company_id: company_id)
+    periods = periods.where(pay_period_id: id).or(periods.where(pay_period_id: nil, start_date: start_date, end_date: end_date))
+    PortalFileRequest.where(company_id: company_id, payroll_submission_period_id: periods.select(:id)).outstanding.order(:id)
+  end
+
   def committed?
     status == "committed"
   end

@@ -68,6 +68,7 @@ module PortalNotifications
     def self.destination_group(event)
       # Keyed on the event, not its shared category: a file request is
       # answered or reviewed where the request card is.
+      return :pay_runs if event.event_type.start_with?("payroll_review_")
       return :file_requests if FILE_REQUEST_EVENTS.include?(event.event_type)
 
       case event.category
@@ -87,6 +88,7 @@ module PortalNotifications
       groups = events.map { |event| self.class.destination_group(event) }.uniq
       group = groups.one? ? groups.first : :general
       case [ audience == "staff", group ]
+      when [ true, :pay_runs ], [ false, :pay_runs ] then "/pay-periods"
       when [ true, :payroll ], [ true, :file_requests ] then "/app/client-inbox"
       when [ false, :file_requests ] then "/messages"
       when [ false, :payroll ] then "/payroll-files"

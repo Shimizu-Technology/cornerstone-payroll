@@ -1334,8 +1334,8 @@ export function Clients() {
                   <SettingToggle
                     disabled={!canEditField('client_payroll_approval_required')}
                     checked={form.client_payroll_approval_required === true}
-                    label="Require client approval before payroll approval"
-                    description="Shares each calculated revision in the client portal. Cornerstone cannot approve or commit the run until an assigned client user approves that exact revision, either in the portal or through a retained email attestation."
+                    label="Require client approval before payroll commit"
+                    description="After staff approve payroll, the client is notified to review the preview. Commit requires an assigned client user to approve that exact revision in the portal or through a retained email attestation. When off, staff can approve and commit without client review or notification."
                     onToggle={() => updateField('client_payroll_approval_required', form.client_payroll_approval_required !== true)}
                   />
 

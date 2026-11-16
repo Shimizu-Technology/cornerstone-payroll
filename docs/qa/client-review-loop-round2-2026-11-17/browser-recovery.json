@@ -1,0 +1,27 @@
+{
+  "desktop_commit_block": {
+    "body": {
+      "error": "Round 2 Client requested changes: Add two hours. Unapprove to make changes."
+    },
+    "status": 422
+  },
+  "phone_commit_block": {
+    "body": {
+      "error": "Round 2 Client requested changes: Add two hours. Unapprove to make changes."
+    },
+    "status": 422
+  },
+  "stale_recovery": {
+    "confirmed": false,
+    "note": "Retain this note while loading the latest preview",
+    "overflow": false,
+    "revision2": true,
+    "text": "Client\nRound 2 synthetic client\nPay Period: May 1 - 15, 2026\n\nPay Date: May 20, 2026\n\nBack to List\n\nEmployees\n\n1\n\nGross Pay\n\n$1,200.00\n\nNet Pay\n\n$1,040.56\n\nStatus\n\nReady for your review\n\nEmployee Payroll\n\nHours, earnings, taxes, deductions, and net pay for this exact payroll revision.\n\nAll Types\nSalary\nHourly\nContractor\n\nRiley Synthetic\n\nHOURLY\n\nNET PAY\n\n$1,040.56\n\nHours\n\n80\n\nRate\n\n$15.00/hr\n\nGross\n\n$1,200.00\n\nTaxes\n\n$0.00\n\nRetirement\n\n$0.00\n\nLoans\n\n$0.00\n\nInsurance\n\n$0.00\n\nTotal deductions\n\n$0.00\nReview preview\n\nRevision 2 · Review ID b8a27460f695. Your approval is needed before payroll is finalized. Review the preview checks and pay stubs, then approve or request changes.\n\nGross pay $1,200.00 · Net pay $1,040.56\n\nView preview\nDownload preview\nNote for Cornerstone (required to request changes)\nI reviewed the preview. I approve this exact payroll review revision for processing.\nApprove this revision\nRequest changes\nRevision and request history\nSwitching to Round 2 synthetic client"
+  },
+  "stale_message": {
+    "alerts": [
+      "Action needs attention\n\nThis payroll was updated. Review the latest preview."
+    ],
+    "recoveryMessage": true
+  }
+}
