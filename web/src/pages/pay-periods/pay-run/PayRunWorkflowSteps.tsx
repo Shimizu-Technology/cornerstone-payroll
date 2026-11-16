@@ -8,6 +8,7 @@ import { PayRunSourceCheckpoint } from './PayRunSourceCheckpoint';
 import { FicaHistoryReviewNotice, PayRunBlockers, PayRunClientFiles } from './PayRunBlockers';
 import { PayRunFeedback } from './PayRunFeedback';
 import { PayRunLoanInputs } from './PayRunLoanInputs';
+import { ExpectedEntriesPanel } from './ExpectedEntriesPanel';
 import { PayRunRoster } from './PayRunRoster';
 import { PayRunHoursWorksheet } from './PayRunHoursWorksheet';
 import { PayRunSavedRecords } from './PayRunSavedRecords';
@@ -36,6 +37,14 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
   const hasFeedback = Boolean(sections.feedback.error || sections.feedback.calculationNotice || sections.feedback.calendarRefreshError || sections.feedback.worksheetRefreshWarning || sections.feedback.savedImportReloadRequired || sections.feedback.calculationFailures.length);
   const committedSummary = state.committed ? `Committed${committedAt ? ` ${formatGuamDateTime(committedAt)}` : ''}${sections.metadata.processedBy ? ` by ${sections.metadata.processedBy}` : ''}` : state.commitReason || 'Ready to commit the approved payroll';
   return <div className="space-y-3" aria-label="Payroll steps">
+    <ExpectedEntriesPanel payPeriod={payPeriod} disabled={sections.roster.processing || sections.roster.financialActionsHeld || !sections.roster.canEditPayPeriod || sections.roster.hasStagedWorksheetChanges}
+      onSaved={() => sections.roster.loadPayPeriod(payPeriod.id, true)} onEnterPay={id => {
+        sections.roster.setAdditionalEmployeeIds(prev => new Set([...prev, id]));
+        sections.roster.setHoursMap(prev => ({ ...prev, [id]: prev[id] || { regular: 0, overtime: 0 } }));
+        const step = document.getElementById('payroll-hours') as HTMLDetailsElement | null;
+        if (step) step.open = true;
+        document.getElementById('payroll-loan-inputs')?.scrollIntoView({ block: 'start' });
+      }} />
     <PayRunClientFiles payPeriod={payPeriod} />
     <FicaHistoryReviewNotice note={payPeriod.annual_fica_review_note} />
 
