@@ -512,9 +512,18 @@ class PayPeriod < ApplicationRecord
   end
 
   def annual_fica_review_note
-    if payroll_items.financially_reportable.any? { |item| item.tax_rule_snapshot.to_h.dig("annual_fica_context", "history_review_open") == true }
-      BelowThresholdFicaContext::NOTE
+    items = payroll_items.financially_reportable.select do |item|
+      context = item.tax_rule_snapshot.to_h["annual_fica_context"]
+      context.is_a?(Hash) && context["history_review_open"] == true
     end
+    ActiveRecord::Associations::Preloader.new(records: items, associations: :employee).call
+    notes = items.map do |item|
+      context = item.tax_rule_snapshot.fetch("annual_fica_context")
+      # Keep older committed snapshots readable without reinterpreting history.
+      note = context["note"].presence || BelowThresholdFicaContext::NOTE
+      "#{item.employee.full_name}: #{note}"
+    end
+    notes.uniq.sort.join("\n").presence
   end
 
   def compliance_warnings
