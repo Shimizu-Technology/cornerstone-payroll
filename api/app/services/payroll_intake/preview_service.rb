@@ -158,9 +158,13 @@ module PayrollIntake
         digest << JSON.generate(workweek_evidence)
         # MoSa matches only active workers. The same files need a new reviewed
         # package after a worker returns, rather than the old unmatched preview.
+        # The latest status event keeps a roster that returns to an earlier
+        # state from reusing a superseded review.
         if source_type == "mosa_revel"
           digest << "\n--active-roster--\n"
           digest << JSON.generate(company.employees.active.order(:id).pluck(:id))
+          digest << "\n"
+          digest << EmployeeStatusEvent.where(company_id: company.id).maximum(:id).to_s
         end
         digest << "\n"
         digest << pasted_text.strip

@@ -66,7 +66,21 @@ RSpec.describe EmployeeStatusTransitionService do
 
       expect(employee.eligible_on?(Date.new(2024, 3, 14))).to be(false)
       expect(Employee.eligible_for_period(Date.new(2024, 3, 1), Date.new(2024, 3, 14))).not_to include(employee)
+      # The termination falls inside March, but no active period starts until April.
+      expect((Date.new(2024, 3, 1)..Date.new(2024, 3, 31)).none? { |date| employee.eligible_on?(date) }).to be(true)
+      expect(Employee.eligible_for_period(Date.new(2024, 3, 1), Date.new(2024, 3, 31))).not_to include(employee)
       expect(Employee.eligible_for_period(Date.new(2024, 4, 1), Date.new(2024, 4, 14))).to include(employee)
+    end
+
+    it "rejects a status change dated before the worker's latest status event" do
+      employee.update!(status: "inactive")
+      described_class.reactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-04-01" })
+
+      expect {
+        described_class.terminate!(employee: employee, actor: actor, attributes: { effective_date: "2024-03-15" })
+      }.to raise_error(described_class::Error, /before the worker's latest status change/)
+      expect(employee.reload.status).to eq("active")
+      expect(employee.employee_status_events.count).to eq(1)
     end
 
     it "still reactivates terminated workers and preserves their termination history" do

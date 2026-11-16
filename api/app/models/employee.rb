@@ -221,13 +221,19 @@ class Employee < ApplicationRecord
             FROM employee_status_events initial_inactive_event
             WHERE initial_inactive_event.employee_id = employees.id
               AND initial_inactive_event.previous_status = 'inactive'
-              AND initial_inactive_event.effective_date > :period_end
               AND NOT EXISTS (
                 SELECT 1
                 FROM employee_status_events earlier_event
                 WHERE earlier_event.employee_id = employees.id
                   AND (earlier_event.effective_date < initial_inactive_event.effective_date
                     OR (earlier_event.effective_date = initial_inactive_event.effective_date AND earlier_event.id < initial_inactive_event.id))
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM employee_status_events active_event
+                WHERE active_event.employee_id = employees.id
+                  AND active_event.resulting_status = 'active'
+                  AND active_event.effective_date <= :period_end
               )
           )
         SQL

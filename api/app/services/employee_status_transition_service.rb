@@ -29,6 +29,7 @@ class EmployeeStatusTransitionService
       raise Error, "Client configuration access required" unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
       raise Error, "This worker is already terminated" if @employee.status == "terminated"
       raise Error, "Termination cannot be before the hire date" if @employee.hire_date && effective_date < @employee.hire_date
+      raise Error, "Termination cannot be before the worker's latest status change" if before_latest_status_event?(effective_date)
 
       previous_status = @employee.status
       @employee.update!(status: "terminated", termination_date: effective_date)
@@ -61,6 +62,7 @@ class EmployeeStatusTransitionService
       if @employee.termination_date && effective_date <= @employee.termination_date
         raise Error, "Reactivation must be after the termination date"
       end
+      raise Error, "Reactivation cannot be before the worker's latest status change" if before_latest_status_event?(effective_date)
 
       previous_status = @employee.status
       @employee.update!(status: "active", termination_date: nil)
@@ -78,6 +80,12 @@ class EmployeeStatusTransitionService
   end
 
   private
+
+  # Status events form one timeline; a backdated change would rewrite which
+  # status applied on earlier payroll dates.
+  def before_latest_status_event?(effective_date)
+    @employee.employee_status_events.where("effective_date > ?", effective_date).exists?
+  end
 
   def parse_date!(value, label)
     raise Date::Error if value.blank?
