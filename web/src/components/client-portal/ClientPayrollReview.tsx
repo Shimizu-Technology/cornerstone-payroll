@@ -63,7 +63,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
     } catch (cause) { await handleFailure(cause, 'Could not send your decision. Your note is still here.'); }
     finally { setBusy(false); }
   };
-  if (!review && !payPeriod.payroll_review_history?.length) return null;
+  if (!review?.published_at && !payPeriod.payroll_review_history?.length) return null;
   return <Card className="border-primary-200">
     <CardContent className="space-y-4 pt-6 [&_button]:min-h-11">
       <div>

@@ -125,7 +125,7 @@ module Api
 
           json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
           json[:payroll_review] = PayrollReview::PackagePresenter.call(
-            pay_period.payroll_review_packages.summary.current.includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
+            pay_period.payroll_review_packages.summary.current.where.not(published_at: nil).includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
           )
 
           if include_items
