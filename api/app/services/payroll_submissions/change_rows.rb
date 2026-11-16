@@ -56,7 +56,7 @@ module PayrollSubmissions
       @employees = Employee.where(company_id: @company_id, id: employee_ids).index_by(&:id)
       @defaults = PayrollStandingChange.where(company_id: @company_id).index_by(&:id)
       normalized = rows.each_with_index.map { |row, index| normalize_row(row, index) }
-      missing = @defaults.values.select(&:active?).reject { |item| normalized.any? { |row| row["standing_change_id"] == item.id } }
+      missing = @defaults.values.select { |item| item.active? && item.availability_error.nil? && item.required? }.reject { |item| normalized.any? { |row| row["standing_change_id"] == item.id } }
       @errors["changes"] << "Every period defaults changed. Reload and fill in or skip every default." if missing.any?
       duplicates = normalized.select { |row| %w[owner_pay extra_hours].include?(row["kind"]) && !row["skipped"] }
         .group_by { |row| [ row["kind"], row["employee_id"] ] }.values.any?(&:many?)
@@ -99,15 +99,16 @@ module PayrollSubmissions
       result = { "kind" => kind }
       if row["standing_change_id"].present?
         item = @defaults[integer(row["standing_change_id"])]
-        unless item && item.kind == kind && item.employee_id == integer(row["employee_id"]) && item.employee_wage_rate_id == integer(row["employee_wage_rate_id"])
+        unless item && item.active? && item.kind == kind && item.employee_id == integer(row["employee_id"]) && item.employee_wage_rate_id == integer(row["employee_wage_rate_id"])
           @errors[key] << "Every period default changed. Reload before sending."
           return result
         end
-        result.merge!("standing_change_id" => item.id, "employee_id" => item.employee_id)
+        result.merge!("standing_change_id" => item.id, "employee_id" => item.employee_id, "label" => item.display_label)
+        @errors[key] << item.availability_error if item.availability_error
         if ActiveModel::Type::Boolean.new.cast(row["skipped"])
+          @errors[key] << "#{item.display_label}: enter a value; None this period is not allowed." unless item.allow_none?
           return result.merge("skipped" => true, "employee_wage_rate_id" => item.employee_wage_rate_id).compact
         end
-        @errors[key] << item.availability_error if item.availability_error
       elsif ActiveModel::Type::Boolean.new.cast(row["skipped"])
         @errors[key] << "Only an every-period default can be marked Not this period."
       end
