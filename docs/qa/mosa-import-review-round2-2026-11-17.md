@@ -44,6 +44,11 @@ covered by request, service and component tests rather than the browser.
   `useAuth` outside the provider). ESLint `--max-warnings 0`, `tsc -b` and the production build passed.
 - Playwright gate0 release lane, full: 45 passed on #472 and on #473, including
   "accounts for every MoSa source row" (Back → Preview Import → apply, then the blocked import).
+- After merging `origin/main` at `0209afe9` (#468 and #470): #472 435 RSpec examples and #473 439,
+  0 failures; full Vitest 192 files / 1879 tests on #472 and 193 files / 1887 tests on #473; gate0
+  lane on the final #473 head 45 passed. One earlier run on that head failed the unrelated
+  "calculates, reviews, rolls back approval…" step (Approve not shown after Calculate); it did not
+  reproduce on the rerun and passes on main's CI.
 - RuboCop: no offenses. Brakeman: no warnings. Impeccable 4.6.0 on the changed UI files: `[]`.
 
 ## Resources
