@@ -75,7 +75,9 @@ module Api
               }, status: :unprocessable_entity
             end
 
-            import_record = persist_preview(package_result, pdf_file, excel_file)
+            # The upload step shows the tip fallback beside the workbook it uploads.
+            import_record = persist_preview(package_result, pdf_file, excel_file,
+              tip_choice_offered: excel_file.present? && params.key?(:tips_paid_out_from_tips))
             render json: preview_response(import_record, package_result)
           rescue PayrollIntake::PreviewService::ReplacementRequiredError => e
             render json: {
@@ -417,14 +419,14 @@ module Api
         end
 
         def persist_preview(package_result, pdf_file, excel_file,
-                            tips_paid_out_from_tips: ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips]))
+                            tips_paid_out_from_tips: ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips]),
+                            tip_choice_offered: false)
           source_package = package_result.fetch(:session)
           unless source_package.applyable?
             raise ArgumentError, "This source package was already applied or superseded. Review a corrected current source."
           end
           preview_data = preview_from_source_package(source_package)
-          tip_confirmation = tip_confirmation_for(source_package, tips_paid_out_from_tips,
-            offered: excel_file.present? && params.key?(:tips_paid_out_from_tips))
+          tip_confirmation = tip_confirmation_for(source_package, tips_paid_out_from_tips, offered: tip_choice_offered)
           tips_paid_out_from_tips = tip_confirmation.fetch("tips_paid_out_from_tips")
           preview_data[:tips_paid_out_from_tips] = tips_paid_out_from_tips
 
@@ -662,7 +664,7 @@ module Api
               "tip_treatment_confirmed" => kept["tip_treatment_confirmed"].merge("carried_from_import_id" => previous_record.id) }
           end
 
-          { "tips_paid_out_from_tips" => false, "tip_treatment_confirmed" => nil }
+          { "tips_paid_out_from_tips" => uploaded_flag, "tip_treatment_confirmed" => nil }
         end
 
         def included_hand_edited_hours(import_record, included_employee_ids)
