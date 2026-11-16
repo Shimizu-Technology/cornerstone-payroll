@@ -44,19 +44,24 @@ module PayrollSubmissions
         end
         documents = source_documents!(submission)
         files = documents.map { |link| upload_for!(link) }
+        link_only = submission.changes_link_url.present? && documents.none? { |link| link.role == "changes_workbook" }
+        carried_staff = nil
         if @options[:staff_workbook].present?
-          unless submission.changes_link_url.present? && documents.none? { |link| link.role == "changes_workbook" }
-            raise ArgumentError, "A staff workbook may only supplement a revision with a workbook link and no workbook file"
-          end
+          raise ArgumentError, "A staff workbook may only supplement a revision with a workbook link and no workbook file" unless link_only
+
           validated = FileSet.new(company_id: @run.company_id, files: [ [ "changes_workbook", @options[:staff_workbook] ] ]).prepare!
           files << validated.prepared.sole.file
+        elsif link_only && (carried_staff = staff_workbook_in_review(submission))
+          # Reopening the same revision, for example after a worker was
+          # reactivated, keeps the workbook staff already attached from the link.
+          files << carried_upload!(carried_staff.staff_workbook_document)
         end
         result = PayrollIntake::PreviewService.new(pay_period: @run, source_type: "mosa_revel", actor: @actor,
           files: files, portal_documents: documents, portal_submission: submission,
           **@options.slice(:supersedes_package_id, :supersession_reason)).call
         retained_keys = result[:session].documents.filter_map(&:storage_reference) unless result[:duplicate]
         begin
-          yield result, submission, current, @superseded_reason, files
+          yield result, submission, current, @superseded_reason, files, carried_staff
         rescue StandardError
           Array(retained_keys).each do |key|
             R2StorageService.new.delete(key)
@@ -81,6 +86,30 @@ module PayrollSubmissions
       end
       # Supporting attachments remain evidence, never importer inputs.
       links.reject { |link| link.role == "attachment" }.sort_by { |link| link.role == "revel_payroll" ? 0 : 1 }
+    end
+
+    # The selection of this revision in the open review that holds a staff-attached workbook.
+    def staff_workbook_in_review(submission)
+      package = PayrollImport::CurrentReview.source_package_for(@run)
+      return unless package&.applyable?
+
+      PayrollSubmissionImport.joins(:payroll_import)
+        .where(payroll_submission: submission, payroll_imports: { payroll_intake_session_id: package.id, status: "previewed" })
+        .where.not(staff_workbook_document_id: nil)
+        .order(id: :desc).first
+    end
+
+    # Re-verified against its retained fingerprint before it is used again.
+    def carried_upload!(document)
+      bytes = PayrollIntake::SourcePackageVerifier.new(session: document.payroll_intake_session).verified_bytes!(document)
+      raise ArgumentError, "The staff-attached workbook could not be verified. Attach it again." if bytes.blank?
+
+      tempfile = Tempfile.new([ "portal-import-", File.extname(document.filename.to_s).downcase ])
+      @tempfiles << tempfile
+      tempfile.binmode
+      tempfile.write(bytes)
+      tempfile.rewind
+      ActionDispatch::Http::UploadedFile.new(tempfile: tempfile, filename: document.filename, type: document.content_type)
     end
 
     def upload_for!(link)

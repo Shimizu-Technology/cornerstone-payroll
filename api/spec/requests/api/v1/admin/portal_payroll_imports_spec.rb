@@ -108,6 +108,51 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect(detail[:submissions].first[:imports].sole[:staff_workbook]).to include(filename: "downloaded.xlsx", sha256: evidence.sha256, attached_by_name: staff.name)
   end
 
+  it "keeps the staff-attached workbook when the same revision is opened again after a worker is reactivated" do
+    company.update!(payroll_intake_settings: {})
+    returning = create(:employee, company: company, first_name: "Blake", last_name: "Returning", pay_rate: 12, status: "inactive")
+    bytes = File.binread(build_revel_pdf([ { name: "Example, Avery", regular_hours: 40, regular_pay: 400 },
+      { name: "Returning, Blake", regular_hours: 12, regular_pay: 144 } ], period_start: run.start_date, period_end: run.end_date))
+    source = revision(bytes: bytes)
+    source.update_columns(workbook_choice: "link", changes_link_url: "https://example.test/workbook")
+    post "#{url}/preview_import", params: { submission_id: source.id, staff_workbook: workbook_upload }
+    expect(response).to have_http_status(:ok), response.body
+    first = response.parsed_body
+    attached = PayrollSubmissionImport.find(first.dig("portal_source", "selection_id"))
+
+    # Opening it again unchanged reopens the same review, workbook included.
+    expect(preview(source)["import_id"]).to eq(first["import_id"])
+
+    EmployeeStatusTransitionService.reactivate!(employee: returning, actor: staff, attributes: { effective_date: run.start_date.iso8601 })
+    second = preview(source, supersedes_package_id: first.dig("source_package", "package_id"),
+      supersession_reason: "Matched again after Blake Returning was reactivated")
+    expect(response).to have_http_status(:ok), second
+
+    expect(second.dig("source_package", "sources").find { |entry| entry["role"] == "supplemental_workbook" }).to include("present" => true, "filename" => "downloaded.xlsx")
+    selection = PayrollSubmissionImport.find(second.dig("portal_source", "selection_id"))
+    expect(selection.id).not_to eq(attached.id)
+    expect(selection.staff_workbook_document.sha256).to eq(attached.staff_workbook_document.sha256)
+    expect(selection.staff_workbook_document.payroll_intake_session_id).to eq(PayrollImportRecord.find(second["import_id"]).payroll_intake_session_id)
+    expect(selection).to have_attributes(staff_workbook_attached_by: staff, staff_workbook_attached_at: attached.staff_workbook_attached_at)
+    expect(second.dig("preview", "matched").map { |row| row["employee_id"] }).to include(returning.id)
+
+    apply(second)
+    expect(response).to have_http_status(:ok), response.body
+  end
+
+  it "refuses a staff no-tips-or-loans choice when the client sent a workbook link" do
+    company.update!(payroll_intake_settings: {})
+    source = revision
+    source.update_columns(workbook_choice: "link", changes_link_url: "https://example.test/workbook")
+    data = preview(source)
+    expect(data.dig("source_package", "sources").find { |entry| entry["role"] == "supplemental_workbook" }).to include("present" => false)
+
+    post "#{url}/apply_import", params: { import_id: data["import_id"], portal_source_id: data.dig("portal_source", "selection_id"), no_tips_or_loans: true }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to eq("The client sent a link to the tips & loans workbook. Attach the workbook from the link before applying.")
+    expect(run.payroll_items).to be_empty
+  end
+
   it "refuses staff workbooks for revisions without links or already containing workbooks" do
     source = revision(workbook: true)
     post "#{url}/preview_import", params: { submission_id: source.id, staff_workbook: workbook_upload }
