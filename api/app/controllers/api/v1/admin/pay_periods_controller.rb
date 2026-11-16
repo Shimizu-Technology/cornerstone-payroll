@@ -386,20 +386,6 @@ module Api
             company_id: current_company_id
           )
 
-          # Include saved rows even when the submitted selection omits an ineligible worker.
-          saved_ids = @pay_period.payroll_items.pluck(:employee_id)
-          ineligible = Employee.where(id: saved_ids, company_id: current_company_id)
-            .where.not(id: Employee.eligible_for_period(@pay_period.start_date, @pay_period.end_date).select(:id))
-          # Explicit selections on special runs intentionally permit inactive/final pay.
-          ineligible = ineligible.where.not(id: employees_by_id.keys)
-          ineligible.each do |worker|
-            @pay_period.payroll_items.where(employee_id: worker.id).each(&:destroy!)
-            event = worker.employee_status_events.where(event_type: %w[deactivated terminated])
-              .where("effective_date <= ?", @pay_period.start_date).order(effective_date: :desc, id: :desc).first
-            reason = "#{worker.full_name} is #{event&.resulting_status || worker.status} from #{event&.effective_date || worker.termination_date || 'their inactive period'}"
-            results[:skipped] << { employee_id: worker.id, name: worker.full_name, reason: reason }
-          end
-
           employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]
             next unless employee
@@ -1394,6 +1380,7 @@ module Api
             tax_sync_last_error: tax_sync_visible? ? pay_period.tax_sync_last_error : nil,
             tax_synced_at: tax_sync_visible? ? pay_period.tax_synced_at : nil,
             lifecycle: lifecycle,
+            ineligible_workers: list ? nil : PayrollRunEligibility.new(pay_period).payload,
             expected_entries: list ? nil : PayrollExpectedEntries.new(pay_period).payload,
             pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields

@@ -32,7 +32,7 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
     end
 
     %w[inactive terminated].each do |status|
-      it "removes and reports stale #{status} payroll items on recalculation" do
+      it "retains stale #{status} payroll items for explicit operator removal" do
         date = pay_period.start_date - 1.day
         employee.update!(status: status, termination_date: status == "terminated" ? date : nil)
         employee.employee_status_events.create!(company: company, event_type: status == "inactive" ? "deactivated" : "terminated",
@@ -40,8 +40,8 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
         create(:payroll_item, employee: employee, company: company, pay_period: pay_period)
         post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { employee_ids: [ employee.id ] }, headers: { "X-Company-Id" => company.id.to_s }
         expect(response).to have_http_status(:ok)
-        expect(pay_period.payroll_items.where(employee_id: employee.id)).not_to exist
-        expect(response.parsed_body.dig("results", "skipped").first.fetch("reason")).to eq("#{employee.full_name} is #{status} from #{date}")
+        expect(pay_period.payroll_items.where(employee_id: employee.id)).to exist
+        expect(response.parsed_body.dig("results", "success")).to be_empty
       end
     end
 
@@ -55,6 +55,33 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
         expect(response).to have_http_status(:ok)
         expect(pay_period.payroll_items.where(employee_id: employee.id)).to exist
       end
+    end
+
+    it "keeps a terminated worker's final-pay row when recalculated from the list without selections" do
+      employee.update!(status: "terminated", termination_date: pay_period.start_date - 1.day)
+      pay_period.update!(status: "draft")
+      pay_period.update!(run_purpose: "final")
+      pay_period.update!(status: "calculated")
+      item = create(:payroll_item, employee: employee, company: company, pay_period: pay_period, hours_worked: 8)
+      before = item.attributes
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", headers: { "X-Company-Id" => company.id.to_s }
+      expect(response).to have_http_status(:ok)
+      expect(item.reload.attributes).to eq(before)
+    end
+
+    it "never destroys an ineligible AIRE-allocated item during calculation" do
+      employee.update!(status: "inactive")
+      item = create(:payroll_item, employee: employee, company: company, pay_period: pay_period)
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      import = create(:time_tracking_import, pay_period: pay_period, time_tracking_source: source)
+      allocation = TimeTrackingEntryAllocation.create!(company: company, time_tracking_source: source,
+        time_tracking_import: import, pay_period: pay_period, payroll_item: item, employee: employee,
+        source_user_id: "91", source_time_entry_id: "41", line_key: "flight:41", source_kind: "current",
+        original_work_date: pay_period.start_date, total_hours: 6, regular_hours: 5, overtime_hours: 1)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", headers: { "X-Company-Id" => company.id.to_s }
+      expect(response).to have_http_status(:ok)
+      expect(item.reload).to be_persisted
+      expect(allocation.reload.payroll_item_id).to eq(item.id)
     end
 
     it "refreshes an existing single-rate payroll item from the employee pay rate" do

@@ -1,5 +1,7 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
+import { payRunPath } from '@/lib/routes';
 import { CalendarClock, UserRoundX, RotateCcw, ShieldAlert, UserMinus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -49,19 +51,33 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
     setError(null);
   }, [open, mode, setError]);
 
+  const [runCheck, setRunCheck] = useState<{ date: string; runs: NonNullable<Employee['open_pay_runs']> } | null>(null);
+  const [runCheckError, setRunCheckError] = useState(false);
+  useEffect(() => {
+    if (!open || mode === 'reactivate' || !effectiveDate) return;
+    let cancelled = false;
+    setRunCheck(null);
+    setRunCheckError(false);
+    employeesApi.get(employee.id, employee.company_id, effectiveDate).then(response => {
+      if (!cancelled) setRunCheck({ date: effectiveDate, runs: response.data.open_pay_runs ?? [] });
+    }).catch(() => { if (!cancelled) setRunCheckError(true); });
+    return () => { cancelled = true; };
+  }, [open, mode, effectiveDate, employee.id, employee.company_id]);
+
   const latestEventDate = employee.status_history?.map(event => event.effective_date).sort().at(-1);
   const latestDate = [latestEventDate, employee.termination_date].filter((value): value is string => !!value).sort().at(-1);
   const reactivateMin = latestDate ? new Date(new Date(`${latestDate}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10) : employee.hire_date;
-  const affectedRuns = (employee.open_pay_runs ?? []).filter(run => run.start_date <= effectiveDate && run.end_date >= effectiveDate);
+  const affectedRuns = runCheck?.date === effectiveDate ? runCheck.runs : [];
+  const checkingRuns = mode !== 'reactivate' && runCheck?.date !== effectiveDate;
   const approvedRun = affectedRuns.find(run => run.status === 'approved');
   const workerLabel = employee.employment_type === 'contractor' ? 'contractor' : 'employee';
   const canSubmit = useMemo(() => {
-    if (!effectiveDate || saving || (mode !== 'reactivate' && approvedRun)) return false;
+    if (!effectiveDate || saving || checkingRuns || (mode !== 'reactivate' && approvedRun)) return false;
     if (mode === 'reactivate' && reactivateMin && effectiveDate < reactivateMin) return false;
     if (mode === 'terminate' && lastWorkedOn && lastWorkedOn > effectiveDate) return false;
     if (mode === 'reactivate' && employee.termination_date && effectiveDate <= employee.termination_date) return false;
     return true;
-  }, [effectiveDate, employee.termination_date, lastWorkedOn, mode, saving, approvedRun, reactivateMin]);
+  }, [effectiveDate, employee.termination_date, lastWorkedOn, mode, saving, approvedRun, reactivateMin, checkingRuns]);
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -125,10 +141,11 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
             </p>
           </div>
 
+          {checkingRuns && <p role="status">{runCheckError ? 'Unable to check open pay runs. Close and reopen to retry.' : 'Checking open pay runs...'}</p>}
           {mode !== 'reactivate' && affectedRuns.length > 0 && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm">
             <p className="font-semibold">Open pay runs including this worker</p>
-            <ul>{affectedRuns.map(run => <li key={run.id}>Pay run #{run.id}: {run.start_date} – {run.end_date} ({run.status})</li>)}</ul>
-            {approvedRun ? <p role="alert">Unapprove pay run #{approvedRun.id} first</p> : <p>Recalculate these runs to remove payroll that is no longer eligible.</p>}
+            <ul>{affectedRuns.map(run => <li key={run.id}><Link className="underline" to={payRunPath(employee.company_id, run.id, 'work')}>Pay run #{run.id}: {run.start_date} – {run.end_date} ({run.status})</Link></li>)}</ul>
+            {approvedRun && <p role="alert">Unapprove pay run #{approvedRun.id} first</p>}<p>Remove {employee.first_name} from these runs before approving them. No paychecks are removed automatically.</p>
           </div>}
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 

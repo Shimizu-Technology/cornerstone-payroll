@@ -521,8 +521,8 @@ export const employeesApi = {
     group_by?: string;
   }, signal?: AbortSignal): Promise<{ data: Employee[]; meta: PaginationMeta }> =>
     api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params, { signal }),
-  get: (id: number, companyId?: number): Promise<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }> =>
-    api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, undefined, { companyId }),
+  get: (id: number, companyId?: number, statusEffectiveDate?: string): Promise<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }> =>
+    api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, { status_effective_date: statusEffectiveDate }, { companyId }),
   create: (data: EmployeeFormData & { company_id: number }) =>
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
   update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
