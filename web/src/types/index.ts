@@ -1283,7 +1283,14 @@ export interface AirePayrollCommandResponse {
   command_result?: Record<string, unknown>;
 }
 
+export interface ExpectedEntries {
+  fields: { id: number; employee_id: number; employee_wage_rate_id: number | null; wage_rate?: string; wage_rate_label?: string; saved_wage_rate_hours?: PayrollItemWageRateHours[]; label: string; help_text?: string; kind: 'owner_pay' | 'extra_hours'; required: boolean; allow_none: boolean; availability_error?: string; inline_save_error?: string; status: 'filled' | 'missing' | 'none' | 'excluded'; value: string; note?: string }[];
+  missing_regulars: { employee_id: number; label: string; resolved: boolean; excluded?: boolean; note?: string }[];
+  outstanding: string[];
+}
+
 export interface PayPeriod {
+  expected_entries?: ExpectedEntries;
   client_files?: { period_id: number; revision: number; submission_id: number; submitted_at: string; status: string; blocks_calculation: boolean } | null;
   prior_provider_history_available?: boolean;
   /** Initial roster defaults; explicit operator selections remain authoritative. */
@@ -1331,6 +1338,7 @@ export interface PayPeriod {
   intake_stale_session_id?: number | null;
   client_payroll_approval_required?: boolean;
   payroll_review?: PayrollReviewPackage | null;
+  last_preview_download?: { revision: number; downloaded_at: string } | null;
   time_tracking?: {
     connected_payroll?: { mode: 'enabled' | 'paused'; enabled: boolean; message: string | null };
     active_source_types: string[];

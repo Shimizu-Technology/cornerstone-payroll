@@ -4,6 +4,9 @@ require "rails_helper"
 require "pdf/reader"
 
 RSpec.describe "Client pay stubs", type: :request do
+  include ActiveSupport::Testing::TimeHelpers
+
+  around(:each, :freeze_time) { |example| freeze_time { example.run } }
   let(:company) { create(:company) }
   let(:user) { create(:user, role: "client", company: company) }
   let(:employee) { create(:employee, company: company) }
@@ -72,7 +75,7 @@ RSpec.describe "Client pay stubs", type: :request do
     expect(response).to have_http_status(:forbidden)
   end
 
-  it "matches the staff statement using stored YTD without changing any payroll data" do
+  it "matches the staff statement using stored YTD without changing any payroll data", :freeze_time do
     source = create(:company, organization: company.organization)
     source_period = create(:pay_period, :committed, company: source)
     company.update!(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox",
