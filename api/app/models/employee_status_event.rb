@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class EmployeeStatusEvent < ApplicationRecord
-  EVENT_TYPES = %w[terminated reactivated].freeze
+  EVENT_TYPES = %w[terminated reactivated deactivated].freeze
   STATUSES = %w[active inactive terminated].freeze
   SOURCES = %w[operator production_migration].freeze
   TERMINATION_REASONS = %w[voluntary involuntary layoff reduction_in_force end_of_contract retirement other].freeze
@@ -35,7 +35,7 @@ class EmployeeStatusEvent < ApplicationRecord
   end
 
   def valid_transition
-    expected = event_type == "terminated" ? "terminated" : "active"
+    expected = { "terminated" => "terminated", "deactivated" => "inactive", "reactivated" => "active" }[event_type]
     errors.add(:resulting_status, "does not match the event type") unless resulting_status == expected
   end
 

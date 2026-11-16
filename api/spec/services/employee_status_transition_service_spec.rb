@@ -41,6 +41,31 @@ RSpec.describe EmployeeStatusTransitionService do
     expect(event.update(internal_notes: "rewritten")).to be(false)
     expect(event.errors[:base]).to include("Employee status history is immutable")
   end
+  describe ".deactivate!" do
+    it "preserves eligibility before, during and after an inactive interval" do
+      event = described_class.deactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-03-15", reason_category: "other", internal_notes: "Seasonal pause" })
+      expect(event).to have_attributes(event_type: "deactivated", previous_status: "active", resulting_status: "inactive", actor: actor)
+      expect(employee.reload.status).to eq("inactive")
+      expect(employee.eligible_on?(Date.new(2024, 3, 14))).to be(true)
+      expect(employee.eligible_on?(Date.new(2024, 3, 15))).to be(false)
+      expect(Employee.eligible_for_period(Date.new(2024, 3, 1), Date.new(2024, 3, 14))).to include(employee)
+      expect(Employee.eligible_for_period(Date.new(2024, 3, 15), Date.new(2024, 3, 31))).not_to include(employee)
+      described_class.reactivate!(employee: employee, actor: actor, attributes: { effective_date: "2024-04-01" })
+      expect(employee.eligible_on?(Date.new(2024, 4, 1))).to be(true)
+      expect(Employee.eligible_for_period(Date.new(2024, 3, 15), Date.new(2024, 3, 31))).not_to include(employee)
+      expect(Employee.eligible_for_period(Date.new(2024, 4, 1), Date.new(2024, 4, 14))).to include(employee)
+      expect(event.update(internal_notes: "Changed")).to be(false)
+    end
+
+    it "rejects future and pre-hire dates without changing status" do
+      [ Date.current + 1, Date.new(2023, 12, 31) ].each do |date|
+        expect { described_class.deactivate!(employee: employee, actor: actor, attributes: { effective_date: date }) }.to raise_error(described_class::Error)
+      end
+      expect(employee.reload.status).to eq("active")
+      expect(employee.employee_status_events).to be_empty
+    end
+  end
+
   describe ".reactivate!" do
     it "reactivates an imported inactive worker without inventing a termination" do
       employee.update!(status: "inactive", termination_date: nil)

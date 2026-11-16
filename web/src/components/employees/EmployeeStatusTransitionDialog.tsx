@@ -18,7 +18,7 @@ import type { Employee, EmployeeTerminationInput } from '@/types';
 
 interface Props {
   employee: Employee;
-  mode: 'terminate' | 'reactivate';
+  mode: 'terminate' | 'reactivate' | 'deactivate';
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCompleted: (employee: Employee) => void;
@@ -62,7 +62,9 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
     setSaving(true);
     setError(null);
     try {
-      const response = mode === 'terminate'
+      const response = mode === 'deactivate'
+        ? await employeesApi.deactivate(employee.id, { effective_date: effectiveDate, reason_category: reasonCategory, internal_notes: internalNotes.trim() || undefined })
+        : mode === 'terminate'
         ? await employeesApi.terminate(employee.id, {
             effective_date: effectiveDate,
             last_worked_on: lastWorkedOn || undefined,
@@ -93,10 +95,10 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
               {isTermination ? <UserMinus className="h-5 w-5" /> : <RotateCcw className="h-5 w-5" />}
             </div>
             <DialogTitle className="text-xl text-white">
-              {isTermination ? `Terminate ${employee.first_name}` : `Reactivate ${employee.first_name}`}
+              {mode === 'deactivate' ? `Mark ${employee.first_name} inactive` : isTermination ? `Terminate ${employee.first_name}` : `Reactivate ${employee.first_name}`}
             </DialogTitle>
             <DialogDescription className="text-neutral-200">
-              {isTermination
+              {mode === 'deactivate' ? 'Inactive: not paid until reactivated. Use Terminate when employment has ended.' : isTermination
                 ? 'Record when the termination actually took effect. The worker and every prior paycheck remain available for reports and audit history.'
                 : employee.status === 'inactive'
                   ? 'Start a new active period for this worker. The inactive period stays in the immutable status timeline.'
@@ -109,7 +111,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
           <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
             {isTermination ? <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" /> : <CalendarClock className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />}
             <p>
-              {isTermination
+              {mode === 'deactivate' ? 'The worker is excluded from automatic payroll from this date until reactivated.' : isTermination
                 ? 'This date controls automatic payroll eligibility. A final, correction, or adjustment run can still include the worker explicitly when needed.'
                 : employee.termination_date
                   ? `The reactivation date must be after the recorded termination on ${employee.termination_date}. It does not alter prior payroll.`
@@ -122,7 +124,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
           <div className={`grid gap-4 ${isTermination ? 'sm:grid-cols-2' : ''}`}>
             <div>
               <label htmlFor="employee-status-effective-date" className="mb-1 block text-sm font-medium text-neutral-800">
-                {isTermination ? 'Termination effective date' : 'Reactivation effective date'} <span className="text-danger-600">*</span>
+                {mode === 'deactivate' ? 'Inactive effective date' : isTermination ? 'Termination effective date' : 'Reactivation effective date'} <span className="text-danger-600">*</span>
               </label>
               <Input
                 id="employee-status-effective-date"
@@ -149,7 +151,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
             )}
           </div>
 
-          {isTermination && (
+          {mode !== 'reactivate' && (
             <div>
               <label className="mb-1 block text-sm font-medium text-neutral-800">Reason category <span className="text-xs font-normal text-neutral-500">(optional)</span></label>
               <Select value={reasonCategory || ''} onChange={(event) => setReasonCategory((event.target.value || undefined) as EmployeeTerminationInput['reason_category'])}>
@@ -171,7 +173,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
               rows={3}
               value={internalNotes}
               onChange={(event) => setInternalNotes(event.target.value)}
-              placeholder={isTermination ? 'Add context staff may need later. Avoid unnecessary sensitive detail.' : 'Add any context for this reactivation.'}
+              placeholder={mode === 'deactivate' ? 'Add context for this inactive period.' : isTermination ? 'Add context staff may need later. Avoid unnecessary sensitive detail.' : 'Add any context for this reactivation.'}
             />
             <p className="mt-1 text-xs leading-5 text-neutral-500">Only managers and organization administrators can view these notes.</p>
           </div>
@@ -180,7 +182,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
         <DialogFooter className="sticky bottom-0 z-10 border-t border-neutral-200 bg-neutral-50/95 px-6 py-4 backdrop-blur-md sm:rounded-b-3xl">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
           <Button type="button" variant={isTermination ? 'danger' : 'default'} onClick={submit} disabled={!canSubmit}>
-            {saving ? 'Saving history...' : isTermination ? `Terminate ${workerLabel}` : `Reactivate ${workerLabel}`}
+            {saving ? 'Saving history...' : mode === 'deactivate' ? 'Mark inactive' : isTermination ? `Terminate ${workerLabel}` : `Reactivate ${workerLabel}`}
           </Button>
         </DialogFooter>
       </DialogContent>

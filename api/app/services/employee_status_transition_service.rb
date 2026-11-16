@@ -13,6 +13,10 @@ class EmployeeStatusTransitionService
     new(employee:, actor:).reactivate!(attributes)
   end
 
+  def self.deactivate!(employee:, actor:, attributes:)
+    new(employee:, actor:).deactivate!(attributes)
+  end
+
   def initialize(employee:, actor:)
     @employee = employee
     @actor = actor
@@ -39,6 +43,36 @@ class EmployeeStatusTransitionService
         event_type: "terminated",
         previous_status: previous_status,
         resulting_status: "terminated",
+        effective_date: effective_date,
+        last_worked_on: last_worked_on,
+        reason_category: data[:reason_category].presence,
+        internal_notes: data[:internal_notes].presence,
+        source: data[:source].presence || "operator"
+      )
+    end
+  end
+
+  def deactivate!(attributes)
+    data = attributes.to_h.symbolize_keys
+    effective_date = parse_date!(data[:effective_date], "inactive date")
+    raise Error, "Inactive date date cannot be in the future" if effective_date > Date.current
+    last_worked_on = parse_optional_date!(data[:last_worked_on], "last worked date")
+
+    ApplicationRecord.transaction do
+      @employee.lock!
+      raise Error, "Client configuration access required" unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
+      raise Error, "Only active workers can be marked inactive" unless @employee.status == "active"
+      raise Error, "Inactive date cannot be before the hire date" if @employee.hire_date && effective_date < @employee.hire_date
+      raise Error, "Inactive date cannot be before the worker's latest status change" if before_latest_status_event?(effective_date)
+
+      previous_status = @employee.status
+      @employee.update!(status: "inactive")
+      @employee.employee_status_events.create!(
+        company: @employee.company,
+        actor: @actor,
+        event_type: "deactivated",
+        previous_status: previous_status,
+        resulting_status: "inactive",
         effective_date: effective_date,
         last_worked_on: last_worked_on,
         reason_category: data[:reason_category].presence,

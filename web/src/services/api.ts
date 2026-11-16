@@ -527,6 +527,8 @@ export const employeesApi = {
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
   update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
     api.patch<{ data: Employee; payment_method_review?: { reapproval_pay_period_ids: number[] } }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
+  deactivate: (id: number, deactivation: import('@/types').EmployeeTerminationInput) =>
+    api.post<{ data: Employee }>(`/admin/employees/${id}/deactivate`, { deactivation }),
   terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/terminate`, { termination }),
   reactivate: (id: number, reactivation: import('@/types').EmployeeReactivationInput) =>

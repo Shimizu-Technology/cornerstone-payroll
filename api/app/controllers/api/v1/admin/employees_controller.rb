@@ -6,15 +6,15 @@ module Api
       class EmployeesController < BaseController
         include Auditable
         include RecurringPayItemSetupMutation
-        audit_actions :terminate, :reactivate
+        audit_actions :terminate, :reactivate, :deactivate
         before_action :set_employee, only: [
-          :show, :update, :destroy, :terminate, :reactivate, :transition_tax_classification,
+          :show, :update, :destroy, :terminate, :reactivate, :deactivate, :transition_tax_classification,
           :resolve_configuration_review_item, :review_intake_exception
         ]
         before_action :validate_department_scope!, only: [ :create, :update ]
         before_action :validate_employee_company_context!, only: [ :create, :update ]
         before_action :require_super_admin!, only: :transition_tax_classification
-        before_action :require_manager_or_admin!, only: [ :terminate, :reactivate ]
+        before_action :require_manager_or_admin!, only: [ :terminate, :reactivate, :deactivate ]
         around_action :with_recurring_pay_item_setup_invalidation, only: :update
 
         # GET /api/v1/admin/employees
@@ -155,6 +155,16 @@ module Api
             employee: @employee,
             actor: current_user,
             attributes: termination_params
+          )
+          render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
+        rescue EmployeeStatusTransitionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def deactivate
+          EmployeeStatusTransitionService.deactivate!(
+            employee: @employee, actor: current_user,
+            attributes: params.require(:deactivation).permit(:effective_date, :reason_category, :internal_notes)
           )
           render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
         rescue EmployeeStatusTransitionService::Error => e
