@@ -28,6 +28,7 @@ module PayrollImport
   # - installment_new_amount (decimal)
   # - installment_payment (decimal)
   # - installment_estimated_ending_balance (decimal)
+  # - installment_row_count (integer): installment rows merged into this person
   class LoanTipExcelParser
     TIPS_BOH_SHEET = "TIPS - BOH"
     TIPS_FOH_SHEET = "TIPS - FOH"
@@ -154,6 +155,7 @@ module PayrollImport
         installment_new_amount: 0.0,
         installment_payment: 0.0,
         installment_estimated_ending_balance: 0.0,
+        installment_row_count: 0,
         payroll_components: []
       }
     end
@@ -386,6 +388,7 @@ module PayrollImport
         employee[:installment_new_amount] += addition
         employee[:installment_payment] += payment
         employee[:installment_estimated_ending_balance] = [ employee[:installment_estimated_ending_balance], ending ].max
+        employee[:installment_row_count] += 1 if [ opening, addition, payment, ending ].any?(&:positive?)
         employee[:loan_deduction] += amount + payment
         employee[:loan_action] = action
         employee[:component_reference] = sheet.cell(row_num, 3).to_s.strip.presence
@@ -552,6 +555,7 @@ module PayrollImport
         emp[:installment_new_amount] += new_amount_value
         emp[:installment_payment] += payment_amount
         emp[:installment_estimated_ending_balance] = [ emp[:installment_estimated_ending_balance], estimated_ending_amount ].max
+        emp[:installment_row_count] += 1
         emp[:loan_deduction] += payment_amount
       end
     end

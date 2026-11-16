@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "pdf/reader"
 
 RSpec.describe PayrollImport::ImportService do
   let(:company) { create(:company) }
@@ -215,6 +216,74 @@ RSpec.describe PayrollImport::ImportService do
       expect(item.payroll_item_earnings.find_by!(category: "regular").amount).to eq(429)
       expect(item.hours_worked).to eq(26)
       expect(item.loan_deduction).to eq(89)
+    end
+  end
+
+  # MoSa: "Hourly rate" plus a department job, all at the same rate. Reports
+  # show earnings by job label, so the department job must carry the hours.
+  context "with equal-rate department jobs" do
+    let!(:primary) { create(:employee_wage_rate, employee: employee, label: "Hourly rate", rate: 15.50, is_primary: true) }
+    let!(:kitchen) { create(:employee_wage_rate, employee: employee, label: "Joint Kitchen", rate: 15.50) }
+    let!(:vacation) { create(:employee_wage_rate, employee: employee, label: "Vacation", rate: 15.50) }
+
+    def committed_allocation(entries)
+      previous = create(:pay_period, company: company, start_date: "2026-10-05", end_date: "2026-10-18", pay_date: "2026-10-22")
+      item = create(:payroll_item, pay_period: previous, employee: employee, pay_rate: employee.pay_rate, gross_pay: 500)
+      item.wage_rate_hours = entries
+      item.calculate!
+      previous.update_columns(status: "committed", committed_at: 1.day.ago)
+      previous
+    end
+
+    def bucket(rate, hours = 30)
+      { employee_wage_rate_id: rate.id, label: rate.label, rate: rate.rate, regular_hours: hours }
+    end
+
+    it "puts the hours on the department job from the last committed payroll, without changing pay" do
+      previous = committed_allocation([ bucket(kitchen) ])
+      row = preview
+      expect(row).to include(selected_wage_rate_id: kitchen.id, wage_rate_default_pay_period_id: previous.id, wage_rate_needs_review: false)
+      expect(row[:wage_rate_options].map { |option| option[:label] }).to eq([ "Hourly rate", "Joint Kitchen", "Vacation" ])
+
+      item = import(row)
+      expect(item.wage_rate_hours).to contain_exactly(include("employee_wage_rate_id" => kitchen.id, "label" => "Joint Kitchen", "regular_hours" => 40.0, "overtime_hours" => 2.0))
+      expect(item.payroll_item_earnings.map { |earning| [ earning.label, earning.amount ] }).to include([ "Joint Kitchen", 620 ], [ "Joint Kitchen OT", 46.50 ])
+      # The same 40 + 2 hours at the profile rate, as an import without jobs paid them.
+      expect(item.gross_pay).to eq(666.50)
+      expect(item.custom_columns_data.dig("mosa_wage_rate_choice", "primary_job_fallback")).to be(false)
+
+      summary = PDF::Reader.new(StringIO.new(PayrollSummaryByEmployeePdfGenerator.new(period).generate)).pages.map(&:text).join(" ")
+      expect(summary).to include("Joint Kitchen")
+    end
+
+    it "keeps the primary job when that is what the last committed payroll used" do
+      committed_allocation([ bucket(primary) ])
+      expect(preview).to include(selected_wage_rate_id: primary.id, wage_rate_needs_review: false)
+    end
+
+    it "falls back to the primary job with a notice when there is no history, and applies without a choice" do
+      row = preview
+      expect(row).to include(selected_wage_rate_id: primary.id, wage_rate_needs_review: true, wage_rate_default_pay_period_id: nil)
+      expect(row[:wage_rate_default_source]).to start_with("Primary job (Hourly rate). The last committed payroll doesn't show one job.")
+      item = import(row)
+      expect(item.wage_rate_hours.sole).to include("label" => "Hourly rate", "regular_hours" => 40.0)
+      expect(item.gross_pay).to eq(666.50)
+      expect(item.custom_columns_data.dig("mosa_wage_rate_choice", "primary_job_fallback")).to be(true)
+    end
+
+    it "never infers a split: a split last payroll falls back to the primary job with a notice" do
+      committed_allocation([ bucket(primary, 10), bucket(kitchen, 20) ])
+      row = preview
+      expect(row).to include(selected_wage_rate_id: primary.id, wage_rate_needs_review: true)
+      expect(row[:wage_rate_default_source]).to include("split hours across jobs")
+      expect(import(row.merge(selected_wage_rate_id: kitchen.id)).wage_rate_hours.sole).to include("label" => "Joint Kitchen", "regular_hours" => 40.0)
+    end
+
+    it "keeps the profile-rate path when the profile rate differs from the jobs, so pay cannot change" do
+      employee.update_columns(pay_rate: 16.00)
+      row = preview
+      expect(row).not_to have_key(:wage_rate_options)
+      expect(import(row).wage_rate_hours).to be_empty
     end
   end
 
