@@ -85,7 +85,9 @@ module PayrollIntake
             package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION,
             supersedes: predecessor,
             supersession_reason: supersession_reason,
-            evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence).merge(@revision_evidence || {}),
+            evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence)
+              .merge(import_hash == source_files_hash ? {} : { "source_import_hash" => source_files_hash })
+              .merge(@revision_evidence || {}),
             status: "draft",
             created_by: actor
           )
@@ -148,8 +150,10 @@ module PayrollIntake
       end
     end
 
-    def import_hash
-      @import_hash ||= begin
+    # Identifies the source files alone. Client revisions compare against it,
+    # so it keeps the formula that earlier packages were stored with.
+    def source_files_hash
+      @source_files_hash ||= begin
         digest = Digest::SHA256.new
         digest << source_type
         digest << "\n"
@@ -165,6 +169,20 @@ module PayrollIntake
           digest << snapshot[:sha256]
         end
         digest.hexdigest
+      end
+    end
+
+    # MoSa matches only active workers. The same files need a new reviewed
+    # package after a worker returns, rather than the old unmatched preview.
+    # The latest status event keeps a roster that returns to an earlier state
+    # from reusing a superseded review.
+    def import_hash
+      @import_hash ||= if source_type == "mosa_revel"
+        roster = JSON.generate(company.employees.active.order(:id).pluck(:id))
+        latest_status_event_id = EmployeeStatusEvent.where(company_id: company.id).maximum(:id)
+        Digest::SHA256.hexdigest("#{source_files_hash}\n--active-roster--\n#{roster}\n#{latest_status_event_id}")
+      else
+        source_files_hash
       end
     end
 
@@ -187,8 +205,8 @@ module PayrollIntake
         raise ArgumentError, "This client revision was already applied. Send a newer revision to correct its changes."
       end
 
-      source_hash = import_hash
-      revision_hash = Digest::SHA256.hexdigest("#{source_hash}\nclient-revision:#{submission.id}")
+      source_hash = source_files_hash
+      revision_hash = Digest::SHA256.hexdigest("#{import_hash}\nclient-revision:#{submission.id}")
       if PayrollIntakeSession.exists?(pay_period: pay_period, source_type: source_type, import_hash: revision_hash)
         @import_hash = revision_hash
         return
@@ -222,7 +240,22 @@ module PayrollIntake
     end
 
     def existing_duplicate_session
-      PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: import_hash)
+      PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: import_hash) ||
+        legacy_duplicate_session
+    end
+
+    # MoSa packages stored before the roster joined the key carry the file-only
+    # hash. A plain retry still reuses one until a worker's status changes or
+    # a new active worker is added.
+    def legacy_duplicate_session
+      return if import_hash == source_files_hash || @revision_evidence
+
+      session = PayrollIntakeSession.find_by(pay_period: pay_period, source_type: source_type, import_hash: source_files_hash)
+      return unless session
+      return if EmployeeStatusEvent.where(company_id: company.id).where("created_at > ?", session.created_at).exists?
+      return if company.employees.active.where("created_at > ?", session.created_at).exists?
+
+      session
     end
 
     def duplicate_session_result(session)

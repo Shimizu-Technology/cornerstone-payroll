@@ -1013,6 +1013,59 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/employees/:id/reactivate" do
+    let!(:employee) { create(:employee, company: company, status: "inactive", termination_date: nil) }
+    let(:payload) { { reactivation: { effective_date: "2024-04-01", internal_notes: "Returned to work" } } }
+
+    it "returns the active profile and history and audits the inactive-to-active change" do
+      post "/api/v1/admin/employees/#{employee.id}/reactivate", params: payload, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("data")).to include("status" => "active", "termination_date" => nil)
+      expect(response.parsed_body.dig("data", "status_history", 0)).to include(
+        "event_type" => "reactivated", "previous_status" => "inactive", "resulting_status" => "active",
+        "effective_date" => "2024-04-01", "internal_notes" => "Returned to work"
+      )
+      audit = AuditLog.find_by!(action: "employees#reactivate", record_id: employee.id)
+      expect(audit.metadata).to include(
+        "changed_fields" => include("status"),
+        "before_values" => include("status" => "inactive"),
+        "after_values" => include("status" => "active")
+      )
+      get "/api/v1/admin/employees", params: { eligible_pay_period_id: create(:pay_period, company: company, start_date: "2024-04-01", end_date: "2024-04-14", pay_date: "2024-04-19").id }
+      expect(response.parsed_body.fetch("data").pluck("id")).to include(employee.id)
+    end
+
+    it "still accepts a terminated worker after their termination date" do
+      employee.update!(status: "terminated", termination_date: "2024-03-15")
+      post "/api/v1/admin/employees/#{employee.id}/reactivate", params: payload, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload).to have_attributes(status: "active", termination_date: nil)
+    end
+
+    it "refuses an active worker without adding history" do
+      employee.update!(status: "active")
+      post "/api/v1/admin/employees/#{employee.id}/reactivate", params: payload, as: :json
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(employee.employee_status_events).to be_empty
+    end
+
+    it "refuses accountants without adding history or a successful audit" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+      post "/api/v1/admin/employees/#{employee.id}/reactivate", params: payload, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(employee.reload.status).to eq("inactive")
+      expect(employee.employee_status_events).to be_empty
+      expect(AuditLog.where(action: "employees#reactivate", record_id: employee.id)).to be_empty
+    end
+
+    it "does not expose a client portal reactivation endpoint" do
+      post "/api/v1/client/employees/#{employee.id}/reactivate", params: payload, as: :json
+      expect(response).to have_http_status(:not_found)
+      expect(employee.reload.status).to eq("inactive")
+    end
+  end
+
   describe "PATCH /api/v1/admin/employees/:id legacy recurring components" do
     let!(:employee) do
       create(

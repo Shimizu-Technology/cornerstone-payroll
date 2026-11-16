@@ -802,7 +802,16 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                     <div>
                       <p className="font-medium text-neutral-950">{row.source_employee_name}</p>
                       <p className="mt-1 text-xs text-neutral-600">{row.row_kind === 'unmatched_revel' ? 'Revel hours' : 'Change workbook'}</p>
-                      {row.errors.map((entry) => <p key={entry.code} className="mt-2 text-sm text-danger-700">{entry.message}</p>)}
+                      {row.errors.map((entry) => <div key={entry.code} className="mt-2 text-sm">
+                        <p className="text-danger-700">{entry.message}</p>
+                        {entry.employee_id && <Link
+                          to={`/companies/${companyId}/employees/${entry.employee_id}/edit`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-11 items-center font-medium text-primary-700 underline"
+                          aria-label={`Open profile for ${row.source_employee_name} (opens in a new tab)`}
+                        >Open profile</Link>}
+                      </div>)}
                     </div>
                     {dispositionControls(row)}
                   </div>

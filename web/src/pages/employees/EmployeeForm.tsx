@@ -1084,18 +1084,26 @@ export function EmployeeForm() {
         </div>
       </nav>
 
-      {isEditing && employeeStatus === 'terminated' && !isClient && (
+      {isEditing && (employeeStatus === 'terminated' || employeeStatus === 'inactive') && !isClient && (
         <div className="mx-4 mt-6 flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-4 sm:mx-6 sm:flex-row sm:items-center sm:justify-between lg:mx-8">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
             <div>
               <p className="text-red-800 font-medium">
-                This {form.employment_type === 'contractor' ? 'contractor' : 'employee'} is terminated
+                This {form.employment_type === 'contractor' ? 'contractor' : 'employee'} is {employeeStatus === 'inactive' ? 'inactive' : 'terminated'}
               </p>
-              {terminationDate && (
+              {employeeStatus === 'terminated' && terminationDate && (
                 <p className="text-red-600 text-sm">
                   Terminated on {new Date(terminationDate + 'T00:00:00').toLocaleDateString()}
                 </p>
+              )}
+              {employeeStatus === 'inactive' && (
+                <p className="text-red-600 text-sm">
+                  Inactive workers aren't paid. Reactivate to include them in payroll again.
+                </p>
+              )}
+              {!canManageClientConfiguration && (
+                <p className="text-red-600 text-sm">A manager or admin can reactivate this worker.</p>
               )}
             </div>
           </div>
