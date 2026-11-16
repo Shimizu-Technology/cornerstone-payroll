@@ -90,7 +90,8 @@ class FirstHawaiianFourUpCheckGenerator
     @rehearsal_preview = rehearsal_preview
     @entries = payroll_items.map { |item| entry_from_payroll_item(item) } +
       non_employee_checks.map { |check| entry_from_non_employee_check(check) }
-    @entries.sort_by! { |entry| check_number_sort_key(entry.check_number) }
+    # Preview checks have no numbers yet; keep the caller's order on ties.
+    @entries = @entries.each_with_index.sort_by { |entry, index| [ check_number_sort_key(entry.check_number), index ] }.map(&:first)
     @starting_slot = normalize_starting_slot(starting_slot)
   end
 

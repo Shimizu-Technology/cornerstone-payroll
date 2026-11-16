@@ -52,6 +52,17 @@ RSpec.describe PayrollPreviewPdf do
     end
   end
 
+  it "keeps the caller's order for unnumbered First Hawaiian preview checks" do
+    company.update!(check_stock_type: "first_hawaiian_4up")
+    names = %w[Adams Baker Chen Diaz Evans Fujita Garcia]
+    items = names.map do |last|
+      create(:payroll_item, company: company, pay_period: period, gross_pay: 100, net_pay: 90,
+        employee: create(:employee, company: company, first_name: "Pat", last_name: last))
+    end
+    generator = FirstHawaiianFourUpCheckGenerator.new(company: company, payroll_items: items, preview: true)
+    expect(generator.send(:entries).map(&:payee)).to eq(names.map { |last| "Pat #{last}" })
+  end
+
   it "suppresses any legacy assigned check reference in a preview" do
     item.update_columns(check_number: "987654321")
     company.update!(check_memo_template: "Payroll {check_number}")

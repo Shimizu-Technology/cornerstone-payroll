@@ -139,6 +139,19 @@ RSpec.describe "Payroll preview downloads", type: :request do
     expect(AuditLog.where(action: "checks#preview_pdf")).to be_empty
   end
 
+  it "refuses to record a download when the run changed while the PDF was being prepared" do
+    allow(PayrollPreviewPdf).to receive(:generate).and_wrap_original do |original, **args|
+      original.call(**args).tap do
+        review.update!(status: "superseded", superseded_at: Time.current, supersession_reason: "Recalculated")
+        period.payroll_review_packages.create!(company: company, revision: 4, schema_version: "1", calculation_checksum: "c" * 64, generated_at: Time.current)
+      end
+    end
+    download
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body["error"]).to include("changed while the preview was being prepared")
+    expect(AuditLog.where(action: "checks#preview_pdf")).to be_empty
+  end
+
   it "exposes the latest preview revision on the run after recalculation" do
     download
     review.update!(status: "superseded", superseded_at: Time.current, supersession_reason: "Recalculated")
