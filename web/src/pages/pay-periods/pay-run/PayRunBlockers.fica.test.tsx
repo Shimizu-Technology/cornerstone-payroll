@@ -37,6 +37,7 @@ describe('FICA history disclosure', () => {
       results: { payrollItems: [], payrollItemDisplayedHours: () => 0 },
       feedback: { calculationFailures: [] },
       metadata: {},
+      roster: { processing: false, financialActionsHeld: false, canEditPayPeriod: true, hasStagedWorksheetChanges: false, loadPayPeriod: () => undefined },
     } as unknown as ComponentProps<typeof PayRunSteps>['sections'];
     render(<MemoryRouter><PayRunSteps sections={sections} /></MemoryRouter>);
     expect(screen.getByText('Prior-period payroll review remains open')).toBeTruthy();
