@@ -30,6 +30,18 @@ RSpec.describe TestWorkspaceAccessPolicy do
     expect(described_class.allowed?(user: reviewer, company: workspace, request_method: "PATCH")).to be(false)
   end
 
+  it "lets operators mark workers inactive and reactivate them, but not configure the client" do
+    operator = create(:user, company: source, organization: organization, role: "accountant")
+    CompanyAssignment.create!(user: operator, company: workspace, workspace_access_level: "operator")
+
+    expect(described_class::PROTECTED_CAPABILITIES).not_to include(:manage_employee_status)
+    expect(described_class.allowed?(user: operator, company: workspace, request_method: "POST", capability: :manage_employee_status)).to be(true)
+    expect(described_class.allowed?(user: operator, company: workspace, request_method: "POST", capability: :manage_client_configuration)).to be(false)
+
+    operator.company_assignments.find_by!(company: workspace).update!(workspace_access_level: "reviewer")
+    expect(described_class.allowed?(user: operator, company: workspace, request_method: "POST", capability: :manage_employee_status)).to be(false)
+  end
+
   it "recognizes only the two server-identified plain-paper statement POST reads" do
     reviewer = create(:user, company: source, organization: organization, role: "accountant")
     CompanyAssignment.create!(user: reviewer, company: workspace, workspace_access_level: "reviewer")
