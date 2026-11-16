@@ -176,6 +176,10 @@ export function Clients() {
     setRenameError(null);
   }, [renameScope, setRenameError]);
   const canEditAssignedClients = canManageClients || isAccountant || isManager;
+  // Mirrors the server's full client edit: organization admins anywhere, and
+  // client administrators (managers, delegated accountants) on live clients.
+  const canRenameClient = (client: CompanyListItem) => !isReadOnlyWorkspace(client)
+    && (canManageClients || (!isTestWorkspace(client) && client.client_capabilities?.includes('manage_client_administration') === true));
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -596,7 +600,7 @@ export function Clients() {
   };
 
   const handleOpenRename = (client: CompanyListItem) => {
-    if (!canManageClients || isReadOnlyWorkspace(client) || client.migration_rehearsal_status === 'pending' || renameBusyRef.current) return;
+    if (!canRenameClient(client) || client.migration_rehearsal_status === 'pending' || renameBusyRef.current) return;
     setRenameClient(client);
     setRenameName(client.name);
     setRenameError(null);
@@ -610,7 +614,7 @@ export function Clients() {
   };
 
   const handleRename = async () => {
-    if (!canManageClients || !renameClient || renameBusyRef.current) return;
+    if (!renameClient || !canRenameClient(renameClient) || renameBusyRef.current) return;
     const name = renameName.trim();
     if (!name) {
       setRenameError('Enter a client name. This name appears on reports and earnings statements.');
@@ -666,7 +670,7 @@ export function Clients() {
   };
 
   const handleSave = async () => {
-    if (canManageClients && !form.name.trim()) {
+    if (canEditField('name') && !form.name.trim()) {
       setFormError('Client name is required');
       return;
     }
@@ -710,7 +714,7 @@ export function Clients() {
     <>
       <Header
         title={canManageClients ? 'Client Management' : 'Client Info'}
-        subtitle={canManageClients ? 'Manage payroll clients' : 'View and update assigned client contact details'}
+        subtitle={canManageClients ? 'Manage payroll clients' : 'View and update your assigned clients'}
       />
 
       <div className="space-y-6 p-4 sm:p-6">
@@ -1483,7 +1487,7 @@ export function Clients() {
                               {loadingEditId === c.id ? 'Loading...' : 'Edit'}
                             </Button>
                           )}
-                          {canManageClients && !isReadOnlyWorkspace(c) && (
+                          {canRenameClient(c) && (
                             <Button size="sm" variant="outline" className="text-xs" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
                               Rename
                             </Button>
@@ -1634,7 +1638,7 @@ export function Clients() {
                                 )}
                               </Button>
                             )}
-                            {canManageClients && !isReadOnlyWorkspace(c) && (
+                            {canRenameClient(c) && (
                               <Button size="sm" variant="outline" className="text-xs" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
                                 Rename
                               </Button>
