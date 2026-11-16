@@ -70,7 +70,7 @@ class EmployeeClassificationTransitionService
     if employee.tax_classification == target_tax_classification
       raise Error, "The new record must cross the W-2/1099 classification boundary"
     end
-    raise Error, "Effective date cannot be in the future" if effective_date > Date.current
+    raise Error, "Effective date cannot be in the future" if effective_date > PayrollBusinessClock.today
     if employee.hire_date.present? && effective_date <= employee.hire_date
       raise Error, "Effective date must be after the current record's start date"
     end
