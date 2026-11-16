@@ -1,6 +1,6 @@
 # Historical MoSa import and Form 941 notes
 
-> **Historical record — do not use the MoSa commands below for a current payroll.** The script-based mailbox download, skeleton-employee backfill, and direct database apply tools were retired because they bypass the retained source-package, readiness, approval, and correction controls now built into Cornerstone. Use the current [MoSa payroll cycle runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md). Never delete payroll rows as a rollback.
+> **Historical record — do not use the MoSa commands below for a current payroll.** The script-based mailbox download, skeleton-employee backfill, and direct database apply tools were retired because they bypass the retained source-package, readiness, approval, and correction controls now built into Cornerstone. For a current MoSa payroll, follow the [MoSa biweekly payroll cycle](runbooks/MOSA_PAYROLL_CYCLE.md) step-by-step staff guide. Parallel-run and cutover evidence rules are in the [MoSa rollout cycle runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md). Never delete payroll rows as a rollback.
 
 ## Overview
 
