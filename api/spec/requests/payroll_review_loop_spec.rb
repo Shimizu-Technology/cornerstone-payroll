@@ -164,6 +164,32 @@ RSpec.describe "Published payroll review loop", type: :request do
     expect(PortalNotificationEvent.where(event_type: "payroll_review_decided")).to be_empty
   end
 
+  it "recovers a missing publication event when staff open the approved run" do
+    allow(PortalNotifications).to receive(:record!).and_raise(ActiveRecord::StatementInvalid, "notification failure")
+    staff_approve
+    package = review
+    events = PortalNotificationEvent.where(dedupe_key: "payroll_review_published:#{package.id}")
+    expect(events).to be_empty
+    get admin
+    expect(response).to have_http_status(:ok), response.body
+    expect(events).to be_empty
+
+    allow(PortalNotifications).to receive(:record!).and_call_original
+    company.update!(client_payroll_approval_required: false)
+    get admin
+    expect(response).to have_http_status(:ok), response.body
+    expect(events).to be_empty
+    company.update!(client_payroll_approval_required: true)
+    2.times do
+      get admin
+      expect(response).to have_http_status(:ok), response.body
+    end
+    expect(events.count).to eq(1)
+    expect(events.first.deliveries.pluck(:user_id)).to include(client.id)
+    expect(period.reload).to be_approved
+    expect(package.reload.published_at).to be_present
+  end
+
   it "renders outside the period lock and rejects a changed checksum without auditing or serving the PDF" do
     staff_approve
     @actor = client
@@ -178,6 +204,27 @@ RSpec.describe "Published payroll review loop", type: :request do
       .not_to change { AuditLog.where(action: "client_payroll_review#preview_pdf").count }
     expect(response).to have_http_status(:conflict)
     expect(response.media_type).to eq("application/json")
+  end
+
+  it "returns the stale revision response when staff unapprove during preview generation" do
+    staff_approve
+    package = review
+    @actor = client
+    allow(PayrollPreviewPdf).to receive(:generate).and_wrap_original do |original, **args|
+      pdf = original.call(**args)
+      PayPeriodLifecycleService.new(pay_period: period.reload, actor: staff).unapprove!
+      pdf
+    end
+
+    expect { get "#{base}/preview_pdf", params: { revision_id: package.id } }
+      .not_to change { AuditLog.where(action: "client_payroll_review#preview_pdf").count }
+
+    expect(response).to have_http_status(:conflict)
+    expect(response.media_type).to eq("application/json")
+    expect(response.parsed_body["code"]).to eq("stale_payroll_review_revision")
+    expect(response.headers["Content-Disposition"]).to be_nil
+    expect(period.reload).to be_calculated
+    expect(package.reload).to be_superseded
   end
 
   it "rejects a different company's run and stale calculations without exposing PDFs or decisions" do

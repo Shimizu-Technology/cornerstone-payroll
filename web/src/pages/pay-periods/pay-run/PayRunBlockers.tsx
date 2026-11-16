@@ -81,7 +81,7 @@ export function PayRunBlockers({
                       Approved by {payPeriod.payroll_review.approved_by_name} via {payPeriod.payroll_review.approval_method === 'client_portal' ? 'client portal' : 'email attestation'}.
                     </p>
                   ) : (
-                    <p className="mt-1 text-sm text-warning-900">{payPeriod.status === 'committed' ? 'Payroll is finalized. This review is retained as history.' : payPeriod.client_payroll_approval_required === false ? 'Client review is disabled. This preview is retained as history; staff can commit without a client decision.' : payPeriod.status === 'approved' ? 'The preview is available in the client portal. Client approval is required before commit when enabled for this client.' : 'Staff approval publishes the preview for the client to review.'}</p>
+                    <p className="mt-1 text-sm text-warning-900">{payPeriod.status === 'committed' ? 'Payroll is finalized. This review is retained as history.' : payPeriod.payroll_review.status === 'changes_requested' ? "Resolve the client's change request before committing (unapprove to make changes)." : payPeriod.client_payroll_approval_required === false ? 'Client review is disabled. This preview is retained as history; staff can commit without a client decision.' : payPeriod.status === 'approved' ? 'The preview is available in the client portal. Client approval is required before commit when enabled for this client.' : 'Staff approval publishes the preview for the client to review.'}</p>
                   )}
                 </div>
               </div>

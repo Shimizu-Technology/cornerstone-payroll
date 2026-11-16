@@ -67,7 +67,7 @@ module Api
               raise PayrollReview::RevisionService::StaleRevisionError, "Revision changed" unless current.id == package.id
 
               PayrollReview::RevisionService.new(pay_period: @pay_period).verify_current_checksum!(current)
-            rescue PayrollReview::RevisionService::StaleRevisionError
+            rescue PayrollReview::RevisionService::Error
               return render json: { error: "This payroll changed while the preview was being prepared. Review the latest preview.", code: "stale_payroll_review_revision" }, status: :conflict
             end
             AuditLog.record!(user: current_user, company_id: @pay_period.company_id,
