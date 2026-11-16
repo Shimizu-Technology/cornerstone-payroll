@@ -22,6 +22,8 @@ const apiMocks = vi.hoisted(() => ({
   commit: vi.fn(),
 }));
 
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => true }) }));
+
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({
     activeCompanyId: 11,

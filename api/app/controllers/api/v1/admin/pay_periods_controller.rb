@@ -1301,6 +1301,9 @@ module Api
         end
 
         def apply_starting_check_number!(value, company:)
+          unless StaffRolePolicy.allowed?(current_user, :manage_client_check_settings, company: company)
+            raise ArgumentError, "Manager, admin, or Client management access required to change the starting check number"
+          end
           new_number = value.to_s.strip
           raise ArgumentError, "Starting check number must be numeric" unless new_number.match?(/\A\d+\z/)
 
@@ -1326,12 +1329,25 @@ module Api
             blocks_calculation: pay_period.pending_portal_submission? }
         end
 
+        def check_number_summary(company)
+          maxima = [ PayrollItem, NonEmployeeCheck ].map do |model|
+            model.where(company_id: company.id).where("check_number ~ ?", "^[0-9]+$")
+              .maximum(Arel.sql("CAST(check_number AS numeric)"))
+          end
+          {
+            next_check_number: company.next_check_number,
+            last_used_check_number: maxima.compact.max&.to_i,
+            can_change: StaffRolePolicy.allowed?(current_user, :manage_client_check_settings, company: company)
+          }
+        end
+
         def pay_period_json(pay_period, include_items: false, list: false)
           agg = pay_period_aggregates(pay_period)
           lifecycle = pay_period_lifecycle_summary(pay_period)
 
           json = {
             id: pay_period.id,
+            check_number_summary: list ? nil : check_number_summary(pay_period.company),
             client_files: list ? nil : client_files_summary(pay_period),
             source_correction_required: include_items && pay_period.committed? && !pay_period.voided? && TimeTracking::FinancialCorrectionService.required_for?(pay_period),
             company_id: pay_period.company_id,

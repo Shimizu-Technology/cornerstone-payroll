@@ -861,6 +861,8 @@ module Api
 
         # GET /api/v1/admin/reports/installment_loans_pdf
         def installment_loans_pdf
+          return if params[:pay_period_id].present? && !find_pay_period_for_report
+
           company = Company.find(current_company_id)
           as_of = parse_optional_iso_date(params[:as_of_date], param_name: "as_of_date")
           return if performed?
@@ -873,6 +875,8 @@ module Api
         end
 
         def installment_loans_xlsx
+          return if params[:pay_period_id].present? && !find_pay_period_for_report
+
           company = Company.find(current_company_id)
           as_of = parse_optional_iso_date(params[:as_of_date], param_name: "as_of_date")
           return if performed?
@@ -1394,6 +1398,7 @@ module Api
             return nil
           end
 
+          @download_pay_period = pp
           pp
         end
 
@@ -1438,6 +1443,7 @@ module Api
             return [ nil, render(json: { error: "The previous provider already paid this payroll; use its recorded history instead of a live payroll register" }, status: :unprocessable_entity) ]
           end
 
+          @download_pay_period = pay_period
           @audit_report_record = pay_period
           @audit_report_target_key = "native:#{pay_period.id}"
           @audit_report_period_subject = AuditRecordSnapshot.subject_name(pay_period)
@@ -2907,7 +2913,22 @@ module Api
           true
         end
 
+        def preview_download?
+          @download_pay_period && %w[calculated approved].include?(@download_pay_period.status)
+        end
+
+        def send_data(data, options = {})
+          if preview_download?
+            data = PayrollReportPreview.pdf(data) if options[:type] == "application/pdf"
+            data = PayrollReportPreview.csv(data) if options[:type].to_s.start_with?("text/csv")
+          end
+          super(data, options)
+        end
+
         def send_spreadsheet!(filename:, sheets:)
+          if preview_download?
+            sheets = [ { name: "Preview notice", rows: [ [ PayrollReportPreview::LABEL ] ] }, *sheets ]
+          end
           exporter = SpreadsheetReportExporter.new(filename: filename, sheets: sheets)
           send_data exporter.generate,
             filename: exporter.filename,
