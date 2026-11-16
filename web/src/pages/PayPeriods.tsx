@@ -33,8 +33,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { HelpTip } from '@/components/ui/help-tip';
 import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteCompany } from '@/lib/company-write-access';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
@@ -144,14 +144,14 @@ function PayPeriodMobileCard({
 }
 
 export function PayPeriods() {
-  const { hasCapability } = useAuth();
-  const canChangeCheckNumber = hasCapability('manage_client_check_settings');
+  const canManageCheckSettings = useSelectedCompanyCapability('manage_client_check_settings');
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { activeCompanyId, activeCompany } = useCompany();
   const trainingReplayWorkspace = activeCompany?.test_workspace_purpose === 'training_replay';
   const readOnlyWorkspace = !canWriteCompany(activeCompany);
+  const canChangeCheckNumber = canManageCheckSettings && !readOnlyWorkspace;
   const returnTo = currentAppPath(location.pathname, location.search);
   const payRunDestination = (payRunId: number, tab: PayRunWorkspaceTab): string => (
     activeCompanyId

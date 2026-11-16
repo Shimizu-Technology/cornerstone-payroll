@@ -1334,6 +1334,8 @@ module Api
             model.where(company_id: company.id).where("check_number ~ ?", "^[0-9]+$")
               .maximum(Arel.sql("CAST(check_number AS numeric)"))
           end
+          maxima << PayrollItem.where(company_id: company.id).where("replaced_check_number ~ ?", "^[0-9]+$")
+            .maximum(Arel.sql("CAST(replaced_check_number AS numeric)"))
           {
             next_check_number: company.next_check_number,
             last_used_check_number: maxima.compact.max&.to_i,
@@ -1347,7 +1349,7 @@ module Api
 
           json = {
             id: pay_period.id,
-            check_number_summary: list ? nil : check_number_summary(pay_period.company),
+            check_number_summary: !list && pay_period.approved? ? check_number_summary(pay_period.company) : nil,
             client_files: list ? nil : client_files_summary(pay_period),
             source_correction_required: include_items && pay_period.committed? && !pay_period.voided? && TimeTracking::FinancialCorrectionService.required_for?(pay_period),
             company_id: pay_period.company_id,

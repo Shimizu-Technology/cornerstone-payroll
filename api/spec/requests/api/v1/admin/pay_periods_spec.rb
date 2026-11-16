@@ -65,11 +65,12 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
 
     it "reports the company counter and highest numeric check across both sources" do
-      create(:payroll_item, employee: employee, pay_period: pay_period, check_number: "1234")
+      pay_period.update!(status: "approved")
+      create(:payroll_item, employee: employee, pay_period: pay_period, check_number: "1234", replaced_check_number: "1800")
       create(:non_employee_check, company: company, check_number: "1500")
       get "/api/v1/admin/pay_periods/#{pay_period.id}"
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("pay_period", "check_number_summary")).to include("next_check_number" => company.next_check_number, "last_used_check_number" => 1500, "can_change" => true)
+      expect(response.parsed_body.dig("pay_period", "check_number_summary")).to include("next_check_number" => company.next_check_number, "last_used_check_number" => 1800, "can_change" => true)
       admin_user.update!(role: "accountant")
       get "/api/v1/admin/pay_periods/#{pay_period.id}"
       expect(response.parsed_body.dig("pay_period", "check_number_summary", "can_change")).to be(false)
