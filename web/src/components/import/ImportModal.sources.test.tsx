@@ -6,11 +6,12 @@ import { ImportModal } from './ImportModal';
 import { payrollIntakeImportsApi } from '@/services/api';
 import type { ImportPackageSource, ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
 
-const mocks = vi.hoisted(() => ({ previewImport: vi.fn(), applyImport: vi.fn(), currentImport: vi.fn() }));
+const mocks = vi.hoisted(() => ({ previewImport: vi.fn(), applyImport: vi.fn(), currentImport: vi.fn(), removeImportSource: vi.fn(), saveImportTipTreatment: vi.fn() }));
 vi.mock('@/services/api', async original => ({
   ...await original<typeof import('@/services/api')>(),
   payrollIntakeImportsApi: { list: vi.fn().mockResolvedValue({ imports: [] }) },
-  payPeriodsApi: { previewImport: mocks.previewImport, applyImport: mocks.applyImport, currentImport: mocks.currentImport },
+  payPeriodsApi: { previewImport: mocks.previewImport, applyImport: mocks.applyImport, currentImport: mocks.currentImport,
+    removeImportSource: mocks.removeImportSource, saveImportTipTreatment: mocks.saveImportTipTreatment },
 }));
 
 const pdfSource: ImportPackageSource = { role: 'revel_hours', label: 'Revel hours PDF', required: true, present: true, filename: 'revel.pdf' };
@@ -131,7 +132,7 @@ it('adds the workbook from the review and keeps the outcomes already chosen', as
 
   const file = workbook();
   fireEvent.change(screen.getByLabelText('Add Tips & loans workbook'), { target: { files: [file] } });
-  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, undefined, file, false));
+  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, undefined, file, undefined));
   await waitFor(() => expect(screen.getByText(/Import version 2/)).toBeTruthy());
 
   expect((screen.getAllByLabelText('Outcome for Cook, Blake')[0] as HTMLSelectElement).value).toBe('excluded');
@@ -157,4 +158,95 @@ it('lists hand-entered hours that Revel would replace and asks first', async () 
   expect(applyButton().disabled).toBe(false);
   fireEvent.click(applyButton());
   await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ confirm_hours_overwrite: true })));
+});
+
+const sha256 = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))), (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+it('reopens the open review when Back leaves the same files chosen, instead of offering to add them', async () => {
+  const first = preview([pdfSource, workbookPresent]);
+  mocks.previewImport.mockResolvedValue(first);
+  mocks.currentImport.mockResolvedValue(first);
+  openUpload();
+  const pdfFile = pdf();
+  const workbookFile = workbook();
+  fireEvent.change(screen.getByLabelText('Revel hours PDF'), { target: { files: [pdfFile] } });
+  fireEvent.change(screen.getByLabelText('Tips & loans workbook'), { target: { files: [workbookFile] } });
+  const held = currentPackage('previewed', ['revel_hours', 'supplemental_workbook']);
+  held.documents[0].sha256 = await sha256('pdf');
+  held.documents[1].sha256 = await sha256('xlsx');
+  vi.mocked(payrollIntakeImportsApi.list).mockResolvedValue({ imports: [held], disposition_targets: [] });
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Import' }));
+  await screen.findByRole('region', { name: 'Files for this import' });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  expect(await screen.findByText('Selected: revel.pdf · already in import version 1')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Add to import version/ })).toBeNull();
+  expect(screen.queryByLabelText('What changed?')).toBeNull();
+  const again = screen.getByRole('button', { name: 'Preview Import' }) as HTMLButtonElement;
+  expect(again.disabled).toBe(false);
+  fireEvent.click(again);
+
+  await screen.findByRole('region', { name: 'Files for this import' });
+  expect(mocks.currentImport).toHaveBeenCalledWith(9);
+  expect(mocks.previewImport).toHaveBeenCalledTimes(1);
+});
+
+it('sends only the new file when one chosen file is already in the open import', async () => {
+  const held = currentPackage('previewed', ['revel_hours']);
+  held.documents[0].sha256 = await sha256('pdf');
+  vi.mocked(payrollIntakeImportsApi.list).mockResolvedValue({ imports: [held], disposition_targets: [] });
+  mocks.previewImport.mockResolvedValue(preview([pdfSource, workbookPresent], { revision: 2 }));
+  openUpload();
+  await screen.findByText('In import version 1: revel.pdf');
+  const workbookFile = workbook();
+  fireEvent.change(screen.getByLabelText('Revel hours PDF'), { target: { files: [pdf()] } });
+  fireEvent.change(screen.getByLabelText('Tips & loans workbook'), { target: { files: [workbookFile] } });
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Add to import version 1' }));
+  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, undefined, workbookFile, false, undefined, undefined));
+});
+
+it('requires a saved tip choice when the review holds an older MoSa workbook', async () => {
+  const legacy = preview([pdfSource, workbookPresent]);
+  legacy.preview.source_warnings = [{ code: 'legacy_mosa_workbook', message: 'This is the legacy MoSa workbook.', severity: 'warning' }];
+  const chosen = { ...legacy, preview: { ...legacy.preview, tips_paid_out_from_tips: true, tip_treatment_confirmed: true } };
+  mocks.saveImportTipTreatment.mockResolvedValue(chosen);
+  openReview(legacy);
+
+  expect(applyButton().disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Choose how the workbook’s tips were paid' })).toBeTruthy();
+  expect(screen.getByText(/Tip treatment reviewed with these files/).parentElement?.textContent).toContain('Not chosen yet.');
+
+  fireEvent.click(screen.getByLabelText(/Yes, already paid daily/));
+  await waitFor(() => expect(mocks.saveImportTipTreatment).toHaveBeenCalledWith(9, legacy.import_id, true));
+  await waitFor(() => expect(applyButton().disabled).toBe(false));
+  expect(screen.getByText(/Tips were already paid daily and will offset employee checks/)).toBeTruthy();
+  expect((screen.getByLabelText(/Yes, already paid daily/) as HTMLInputElement).checked).toBe(true);
+});
+
+it('removes a file added by mistake with a reason and keeps the outcomes already chosen', async () => {
+  mocks.removeImportSource.mockResolvedValue(preview([pdfSource, workbookMissing], { revision: 2, firstRowId: 11 }));
+  openReview(preview([pdfSource, workbookPresent]));
+  const [outcome] = screen.getAllByLabelText('Outcome for Cook, Blake');
+  fireEvent.change(outcome, { target: { value: 'excluded' } });
+  fireEvent.change(screen.getAllByLabelText('Reason for Cook, Blake')[0], { target: { value: 'Left before this period' } });
+
+  const checklist = screen.getByRole('region', { name: 'Files for this import' });
+  fireEvent.click(within(checklist).getByRole('button', { name: 'Remove Tips & loans workbook' }));
+  const confirm = within(checklist).getByRole('button', { name: 'Remove Tips & loans workbook' }) as HTMLButtonElement;
+  expect(confirm.disabled).toBe(true);
+  fireEvent.change(within(checklist).getByLabelText('Why remove it?'), { target: { value: 'Last period’s workbook' } });
+  fireEvent.click(confirm);
+
+  await waitFor(() => expect(mocks.removeImportSource).toHaveBeenCalledWith(9, 'supplemental_workbook', 'Last period’s workbook'));
+  await waitFor(() => expect(screen.getByText(/Import version 2/)).toBeTruthy());
+  expect((screen.getAllByLabelText('Outcome for Cook, Blake')[0] as HTMLSelectElement).value).toBe('excluded');
+  expect(within(screen.getByRole('region', { name: 'Files for this import' })).queryByRole('button', { name: /^Remove/ })).toBeNull();
+});
+
+it('offers no Remove for a client portal revision', () => {
+  const portal = preview([pdfSource, workbookPresent]);
+  portal.portal_source = { selection_id: 1, submission_id: 2, revision: 1, period_id: 3, current: true, changes: [], workbook_choice: 'attach' } as unknown as ImportPreviewResponse['portal_source'];
+  openReview(portal);
+  expect(screen.queryByRole('button', { name: /^Remove/ })).toBeNull();
 });
