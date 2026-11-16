@@ -5,6 +5,8 @@ import { Input } from '@/components/ui/input';
 import { formatCurrency } from '@/lib/utils';
 import type { InstallmentLoanSetupOffer } from '@/services/api';
 
+export type InstallmentLoanSubmission = Omit<InstallmentLoanFields, 'first_deduction_date'>;
+
 export interface InstallmentLoanFields {
   name: string;
   starting_balance: string;
@@ -17,7 +19,7 @@ interface InstallmentLoanSetupProps {
   offer: InstallmentLoanSetupOffer;
   access?: { allowed: boolean; reason: string | null };
   disabled?: boolean;
-  onCreate: (fields: InstallmentLoanFields) => Promise<void>;
+  onCreate: (fields: InstallmentLoanSubmission) => Promise<void>;
   onResume: () => Promise<void>;
 }
 
@@ -94,7 +96,8 @@ export function InstallmentLoanSetup({ employeeName, offer, access, disabled = f
           onSubmit={(event) => {
             event.preventDefault();
             if (fieldError) { setError(fieldError); return; }
-            void run(() => onCreate({ ...fields, name: fields.name.trim(), starting_balance: fields.starting_balance.trim(), payment_amount: fields.payment_amount.trim() }));
+            // The server always uses this payroll's pay date; don't echo a possibly stale one.
+            void run(() => onCreate({ name: fields.name.trim(), starting_balance: fields.starting_balance.trim(), payment_amount: fields.payment_amount.trim() }));
           }}
         >
           <div className="grid gap-3 sm:grid-cols-2">

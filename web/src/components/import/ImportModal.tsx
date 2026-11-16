@@ -29,7 +29,7 @@ import { carryRowOutcomes, defaultDisposition, fileSha256, importSourceFiles, MO
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { ImportSourcePanel } from './ImportSourcePanel';
 import { ImportSourceChecklist } from './ImportSourceChecklist';
-import { InstallmentLoanSetup, type InstallmentLoanFields } from './InstallmentLoanSetup';
+import { InstallmentLoanSetup, type InstallmentLoanSubmission } from './InstallmentLoanSetup';
 import { ApiError, employeesApi, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
@@ -374,7 +374,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const matchAgain = async (current: ImportPreviewResponse, reason: string, employeeId: number, readyStatus: string, attentionStatus: string, recordReason = true) => {
     const previousRows = sourceRows;
     const previousChoices = rateChoices;
-    const previousDrafts = { clientChangeDrafts, clientDeclines, clientAdjustmentReasons, clientDeclineReasons };
+    const previousDrafts = { clientChangeDrafts, clientDeclines, clientAdjustmentReasons, clientDeclineReasons, clientPayChoices };
     const previousPrefill = current.client_change_prefill || current.pending_change_prefill;
     const previousDocuments = current.source_package.documents;
     const pendingSubmissionId = usePendingRevision ? current.pending_portal_source?.submission_id : undefined;
@@ -400,6 +400,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         setClientDeclines(previousDrafts.clientDeclines);
         setClientAdjustmentReasons(previousDrafts.clientAdjustmentReasons);
         setClientDeclineReasons(previousDrafts.clientDeclineReasons);
+        setClientPayChoices(previousDrafts.clientPayChoices);
       }
     }
     const ready = data.preview.source_rows.some((row) => row.employee_id === employeeId && row.row_kind === 'matched' && row.errors.length === 0);
@@ -430,7 +431,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   // Set up (or resume) the Employee Loan the workbook's installment needs, then
   // match the files again so the review reconciles it. Errors reach the form.
-  const handleInstallmentLoan = async (row: ImportPreviewRow, fields?: InstallmentLoanFields) => {
+  const handleInstallmentLoan = async (row: ImportPreviewRow, fields?: InstallmentLoanSubmission) => {
     if (!previewData) return;
     const current = previewData;
     const resume = row.installment_loan_setup?.action === 'resume';
