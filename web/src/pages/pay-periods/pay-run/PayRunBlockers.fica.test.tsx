@@ -19,7 +19,7 @@ vi.mock('./PayRunEmployerTaxes', () => ({ PayRunEmployerTaxes: () => null }));
 vi.mock('./PayRunEmptyState', () => ({ PayRunEmptyState: () => null }));
 vi.mock('./PayRunTimecardOcr', () => ({ PayRunTimecardOcr: () => null }));
 
-const note = "Prior-period void history needs accountant review; this paycheck's Social Security/Medicare is unaffected. Historical tax and filing review remains open.";
+const note = "Maya Cruz: Prior-period payroll history needs accountant review: voided pay period #75. This paycheck's Social Security/Medicare is unaffected. Historical tax and filing review remains open. Noah Reyes: Prior-period payroll history needs accountant review: reversed paycheck #412. Historical tax and filing review remains open.";
 const props = {
   payPeriod: {
     annual_fica_review_note: note,
@@ -45,6 +45,21 @@ describe('FICA history disclosure', () => {
     expect(screen.getByText(note).closest('details')).toBeNull();
     expect(document.querySelector('#payroll-commit')?.hasAttribute('open')).toBe(true);
     expect(screen.queryByText('Review settings')).toBeNull();
+  });
+
+  it('renders the affected workers and their actual reasons', () => {
+    render(<FicaHistoryReviewNotice note={note} />);
+    const notice = screen.getByText('Prior-period payroll review remains open').parentElement;
+    expect(notice?.textContent).toContain('Maya Cruz:');
+    expect(notice?.textContent).toContain('voided pay period #75');
+    expect(notice?.textContent).toContain('Noah Reyes:');
+    expect(notice?.textContent).toContain('reversed paycheck #412');
+  });
+
+  it('still renders the plain note from older committed snapshots', () => {
+    const legacyNote = "Prior-period void history or imported paycheck history needs accountant review.";
+    render(<FicaHistoryReviewNotice note={legacyNote} />);
+    expect(screen.getByText(legacyNote)).toBeTruthy();
   });
 
   it('does not duplicate the note or attach unrelated settings actions', () => {
