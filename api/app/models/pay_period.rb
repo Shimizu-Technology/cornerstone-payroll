@@ -222,6 +222,9 @@ class PayPeriod < ApplicationRecord
                (will_save_change_to_status? && status != "draft")
            }
 
+  before_create :lock_company_for_linking
+  after_create :link_payroll_submission_period
+
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
   before_validation :force_test_workspace_to_parallel
   before_update :prevent_retired_history_mutation
@@ -360,10 +363,24 @@ class PayPeriod < ApplicationRecord
     status == "approved"
   end
 
+  def client_file_link_error
+    unlinked = PayrollSubmissionPeriod.where(company_id: company_id, pay_period_id: nil, start_date: start_date, end_date: end_date)
+    return unless unlinked.exists?
+
+    ids = self.class.portal_submission_runs.where(company_id: company_id, start_date: start_date, end_date: end_date).order(:id).pluck(:id)
+    return unless ids.many? && PortalFileRequest.where(payroll_submission_period_id: unlinked.select(:id)).outstanding.exists?
+
+    "Payroll files match multiple pay runs (#{ids.join(', ')}). Open the correct run and import the files to link this period before committing."
+  end
+
   def outstanding_client_file_requests
     periods = PayrollSubmissionPeriod.where(company_id: company_id)
-    periods = periods.where(pay_period_id: id).or(periods.where(pay_period_id: nil, start_date: start_date, end_date: end_date))
-    PortalFileRequest.where(company_id: company_id, payroll_submission_period_id: periods.select(:id)).outstanding.order(:id)
+    unlinked = periods.where(pay_period_id: nil, start_date: start_date, end_date: end_date)
+    linked = periods.where(pay_period_id: id)
+    if unlinked.exists? && self.class.portal_submission_runs.where(company_id: company_id, start_date: start_date, end_date: end_date).pluck(:id) == [ id ]
+      linked = linked.or(unlinked)
+    end
+    PortalFileRequest.where(company_id: company_id, payroll_submission_period_id: linked.select(:id)).outstanding.order(:id)
   end
 
   def committed?
@@ -663,6 +680,14 @@ class PayPeriod < ApplicationRecord
   end
 
   private
+
+  def lock_company_for_linking
+    Company.lock.find(company_id)
+  end
+
+  def link_payroll_submission_period
+    PayrollSubmissions::LinkPayPeriod.for_run(self)
+  end
 
   # A duplicate regular run cannot escape another run's pending same-date
   # source. Linked evidence remains authoritative even after run date edits.

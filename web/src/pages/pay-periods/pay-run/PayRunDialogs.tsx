@@ -248,7 +248,7 @@ export function PayRunDialogs({
 <PayrollCommitDialog open={commitPeriodId === payRunId && payPeriod.id === payRunId && isApproved && !isVoided}
         payPeriod={payPeriod} companyName={activeCompany && activeCompany.id === payPeriod.company_id ? activeCompany.name : `Company #${payPeriod.company_id || companyId}`}
         itemCount={reportablePayrollItems.length} totalNet={totalNet} processing={processing}
-        onCancel={() => setCommitPeriodId(null)} onConfirm={(confirmedPeriodId, acknowledged) => void handleCommit(confirmedPeriodId, acknowledged)} />
+        onCancel={() => setCommitPeriodId(null)} onConfirm={handleCommit} />
 <Dialog
         open={payDateCorrectionOpen}
         onOpenChange={(open) => {
