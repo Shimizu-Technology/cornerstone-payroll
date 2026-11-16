@@ -50,7 +50,7 @@ type EditableSourceRow = MosaSourceRow;
 
 // The two MoSa files. Either can be sent first; the package keeps the other.
 const SOURCE_PICKERS = [
-  { role: 'revel_hours', label: 'Revel hours PDF', hint: 'The original Revel report. Only its regular and overtime hours are imported, and its dates must match this payroll.' },
+  { role: 'revel_hours', label: 'Revel hours PDF', hint: 'The original Revel report. Its regular and overtime hours are imported; Revel pay rates and pay amounts are ignored. Its dates must match this payroll.' },
   { role: 'supplemental_workbook', label: 'Tips & loans workbook', hint: 'The Cornerstone change workbook with tips, loans, owner pay and one-time items.' },
 ] as const;
 
