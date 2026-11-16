@@ -1575,16 +1575,17 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/retry_tax_sync`),
   generateFitCheck: (id: number) =>
     api.post<{ message: string; check_id: number }>(`/admin/pay_periods/${id}/generate_fit_check`),
+  // Either file can be sent alone; the current package keeps the other one.
   previewImport: async (
     id: number,
-    pdfFile: File,
+    pdfFile?: File,
     excelFile?: File,
     tipsPaidOutFromTips = false,
     replacement?: { supersedesPackageId: string; reason: string },
     submissionId?: number,
   ): Promise<ImportPreviewResponse> => {
     const formData = new FormData();
-    formData.append('pdf_file', pdfFile);
+    if (pdfFile) formData.append('pdf_file', pdfFile);
     if (submissionId) formData.append('use_submission_id', String(submissionId));
     if (excelFile) formData.append('excel_file', excelFile);
     formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
@@ -1617,6 +1618,8 @@ export const payPeriodsApi = {
       portal_source_id?: number;
       use_submission_id?: number;
       force_overwrite?: boolean;
+      confirm_hours_overwrite?: boolean;
+      no_tips_or_loans?: boolean;
       wage_rate_choices?: Record<string, number>;
       confirm_client_changes?: boolean;
       reviewed_changes?: { change_index: number; amount?: string; hours?: string; decision?: string; reason?: string; pay_choice?: string; saved_period_pay?: string; workbook_period_pay?: string }[];
@@ -2058,8 +2061,29 @@ export interface DeleteDraftCorrectionRunResponse {
 }
 
 // Import types
+export interface ImportPackageSource {
+  role: 'revel_hours' | 'supplemental_workbook' | string;
+  label: string;
+  required: boolean;
+  present: boolean;
+  filename?: string | null;
+  // Set when staff can record that this file is not needed this period.
+  waiver_label?: string | null;
+}
+
+export interface HandEditedHours {
+  employee_id: number;
+  employee_name: string;
+  saved_regular_hours: string;
+  saved_overtime_hours: string;
+  source_regular_hours: string;
+  source_overtime_hours: string;
+}
+
 export interface ImportPreviewRow {
   workbook_only?: boolean;
+  // Saved hours changed by hand after the last import that these Revel hours would replace.
+  hand_edited_hours?: HandEditedHours | null;
   missing_revel_hours_with_deductions?: boolean;
   wage_rate_options?: Array<{ id: number; label: string; rate: number }>;
   selected_wage_rate_id?: number | null;
@@ -2175,6 +2199,9 @@ export interface ImportPreviewResponse {
     // Retained files shown beside import review (Revel PDF, change workbook).
     documents?: ImportSourceDocument[];
     disposition_targets: PayrollIntakeDispositionTarget[];
+    // Which files this client needs before the package can be applied.
+    sources?: ImportPackageSource[];
+    complete?: boolean;
   };
   preview: {
     matched: ImportPreviewRow[];

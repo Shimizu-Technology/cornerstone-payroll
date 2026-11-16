@@ -132,6 +132,7 @@ class Company < ApplicationRecord
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validate :check_layout_config_must_be_hash
   validate :payroll_intake_source_types_are_supported
+  validate :payroll_intake_settings_are_supported
 
   scope :active, -> { where(active: true) }
   scope :live_payroll, -> { where(payroll_environment: "live") }
@@ -289,6 +290,16 @@ class Company < ApplicationRecord
     payroll_intake_source_types.include?(source_type.to_s)
   end
 
+  # Source files that make a complete intake package for this client. A
+  # client-specific list replaces the source's default; an empty list means
+  # any single file can be applied.
+  def payroll_intake_required_sources(source_type)
+    configured = payroll_intake_settings.to_h.dig(source_type.to_s, "required_sources")
+    return PayrollIntake::SourceCompleteness.default_required_roles(source_type) if configured.nil?
+
+    Array(configured).map(&:to_s)
+  end
+
   private
 
   def normalize_blanks
@@ -311,6 +322,27 @@ class Company < ApplicationRecord
     return if unsupported.empty?
 
     errors.add(:payroll_intake_source_types, "contains unsupported source type(s): #{unsupported.join(', ')}")
+  end
+
+  def payroll_intake_settings_are_supported
+    unless payroll_intake_settings.is_a?(Hash)
+      errors.add(:payroll_intake_settings, "must be a JSON object")
+      return
+    end
+
+    payroll_intake_settings.each do |source_type, settings|
+      unless PAYROLL_INTAKE_SOURCE_TYPES.include?(source_type.to_s) && settings.is_a?(Hash)
+        errors.add(:payroll_intake_settings, "contains an unsupported source type: #{source_type}")
+        next
+      end
+      next unless settings.key?("required_sources")
+
+      required = settings["required_sources"]
+      unknown = Array(required).map(&:to_s) - PayrollIntake::SourceCompleteness.roles_for(source_type).keys
+      next if required.is_a?(Array) && unknown.empty?
+
+      errors.add(:payroll_intake_settings, "lists unknown #{source_type} source files: #{Array(required).join(', ')}")
+    end
   end
 
   def test_workspace_source_is_valid

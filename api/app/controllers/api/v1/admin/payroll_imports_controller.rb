@@ -33,7 +33,8 @@ module Api
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/preview_import
-        # Upload PDF + optional Excel, get matched preview
+        # Upload the Revel PDF, the change workbook, or both. Files already in
+        # the current package are kept, so the other file can be added later.
         def preview
           unless @pay_period.can_edit?
             return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
@@ -44,8 +45,8 @@ module Api
           pdf_file = params[:pdf_file]
           excel_file = params[:excel_file]
 
-          unless pdf_file
-            return render json: { error: "PDF file is required" }, status: :unprocessable_entity
+          unless pdf_file || excel_file
+            return render json: { error: "Choose the Revel hours PDF, the tips & loans workbook, or both." }, status: :unprocessable_entity
           end
 
           begin
@@ -57,7 +58,8 @@ module Api
               actor: current_user,
               portal_submission: selected_source,
               supersedes_package_id: params[:supersedes_package_id],
-              supersession_reason: params[:supersession_reason]
+              supersession_reason: params[:supersession_reason],
+              carry_forward: true
             ).call
             source_package = package_result.fetch(:session)
             if package_result[:duplicate] && !source_package.applyable?
@@ -138,6 +140,7 @@ module Api
               raise ArgumentError, "Select the client revision used to create this replacement review."
             end
             PayrollIntake::SourcePackageVerifier.new(session: source_package).verify!
+            source_waivers = source_waivers_for!(source_package, selection)
 
             disposition_plan = PayrollIntake::DispositionPlan.new(
               session: source_package,
@@ -154,6 +157,14 @@ module Api
             low_confidence_matches = low_confidence_matches.select do |match|
               included_employee_ids.include?((match["employee_id"] || match[:employee_id]).to_i)
             end
+            hand_edited = included_hand_edited_hours(import_record, included_employee_ids)
+            if hand_edited.any? && !ActiveModel::Type::Boolean.new.cast(params[:confirm_hours_overwrite])
+              return render json: {
+                error: "Revel hours would replace hours entered by hand for #{hand_edited.map { |row| row['employee_name'] }.to_sentence}. Review and confirm before applying.",
+                details: { hand_edited_hours: hand_edited }
+              }, status: :unprocessable_entity
+            end
+
             acknowledged_low_confidence = ActiveModel::Type::Boolean.new.cast(params[:acknowledge_low_confidence_matches])
             if low_confidence_matches.any? && !acknowledged_low_confidence
               return render json: {
@@ -214,7 +225,8 @@ module Api
               raise ActiveRecord::Rollback if results[:errors].any?
 
               import_record.update!(status: "applied", validation_errors: [],
-                raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || []))
+                raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || [],
+                  "source_waivers" => source_waivers, "replaced_hand_edited_hours" => hand_edited))
               disposition_plan.decisions.each do |decision|
                 if decision.included? && unpaid_owners.key?(decision.row.employee_id)
                   decision.disposition = "excluded"
@@ -348,8 +360,8 @@ module Api
           import_record.assign_attributes(
             pay_period: @pay_period,
             status: "previewed",
-            pdf_filename: pdf_file.original_filename,
-            excel_filename: excel_file&.original_filename,
+            pdf_filename: retained_filename(source_package, "revel_hours") || pdf_file&.original_filename,
+            excel_filename: retained_filename(source_package, "supplemental_workbook") || excel_file&.original_filename,
             raw_data: {
               pdf_count: preview_data[:pdf_count],
               excel_count: preview_data[:excel_count],
@@ -486,6 +498,7 @@ module Api
         end
 
         def source_package_json(source_package)
+          completeness = PayrollIntake::SourceCompleteness.new(session: source_package, company: @pay_period.company)
           {
             id: source_package.id,
             package_id: source_package.package_id,
@@ -506,8 +519,42 @@ module Api
                 { id: document.id, source_role: document.source_role, filename: document.filename,
                   content_type: document.content_type, byte_size: document.byte_size }
               end,
-            disposition_targets: disposition_targets_json
+            disposition_targets: disposition_targets_json,
+            sources: completeness.sources,
+            complete: completeness.complete?
           }
+        end
+
+        def retained_filename(source_package, role)
+          source_package.documents.find { |document| document.source_role == role }&.filename
+        end
+
+        # Required files that are missing need an explicit, recorded choice. The
+        # client's own "No tips or loans this period" counts for the revision
+        # selected for this import.
+        def source_waivers_for!(source_package, selection)
+          completeness = PayrollIntake::SourceCompleteness.new(session: source_package, company: @pay_period.company)
+          waivable = completeness.waivable_missing_roles
+          staff_waived = ActiveModel::Type::Boolean.new.cast(params[:no_tips_or_loans])
+          client_waived = selection&.payroll_submission&.workbook_choice == "none"
+          waived = staff_waived || client_waived ? waivable : []
+          missing = completeness.missing_required_roles(waived_roles: waived)
+          if missing.any?
+            labels = completeness.labels_for(missing).to_sentence
+            message = (missing - waivable).empty? ? "Add the #{labels}, or confirm there are no tips or loans this period." : "Add the #{labels} before applying."
+            raise ArgumentError, message
+          end
+
+          waived.map do |role|
+            { "role" => role, "choice" => completeness.sources.find { |source| source[:role] == role }&.dig(:waiver_label),
+              "confirmed_by" => client_waived && !staff_waived ? "client" : "staff", "user_id" => current_user&.id, "at" => Time.current.iso8601 }
+          end
+        end
+
+        def included_hand_edited_hours(import_record, included_employee_ids)
+          rows = import_record.matched_data.select { |row| included_employee_ids.include?(row["employee_id"].to_i) }
+          items = @pay_period.payroll_items.where(employee_id: rows.map { |row| row["employee_id"] }).index_by(&:employee_id)
+          rows.filter_map { |row| PayrollImport::LivePreviewRowState.hand_edited_hours(row, items[row["employee_id"].to_i]) }
         end
 
         def source_row_json(row)
