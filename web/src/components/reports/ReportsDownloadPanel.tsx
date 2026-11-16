@@ -1021,7 +1021,7 @@ async function fetchReport(
     case 'transmittalLog':
       return reportsApi.transmittalLogPdf(payPeriodId, transmittalOptions);
     case 'installmentLoans':
-      return reportsApi.installmentLoansPdf(payPeriodPayDate);
+      return reportsApi.installmentLoansPdf(payPeriodPayDate, payPeriodId);
     case 'fullPrintPackage':
       return reportsApi.fullPrintPackagePdf(payPeriodId, transmittalOptions);
   }
@@ -1040,7 +1040,7 @@ async function fetchSpreadsheet(reportKey: ReportKey, payPeriodId: number, payPe
     case 'retirementPlans':
       return reportsApi.retirementPlansXlsx(payPeriodId);
     case 'installmentLoans':
-      return reportsApi.installmentLoansXlsx(payPeriodPayDate);
+      return reportsApi.installmentLoansXlsx(payPeriodPayDate, payPeriodId);
     default:
       return null;
   }

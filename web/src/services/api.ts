@@ -3441,10 +3441,10 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   retirementPlansXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/retirement_plans_xlsx', { pay_period_id: payPeriodId }),
-  installmentLoansPdf: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  installmentLoansXlsx: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate }),
+  installmentLoansPdf: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
+  installmentLoansXlsx: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
   transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,
@@ -4564,10 +4564,10 @@ export const payrollReportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   retirementPlansXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/retirement_plans_xlsx', { pay_period_id: payPeriodId }),
-  installmentLoansPdf: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  installmentLoansXlsx: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate }),
+  installmentLoansPdf: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
+  installmentLoansXlsx: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
   transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,
