@@ -94,6 +94,9 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
       item = calculate
       expect(item).to have_attributes(social_security_tax: 31.to_d, medicare_tax: "7.25".to_d)
       expect(item.tax_rule_snapshot["annual_fica_context"]).to include("mode" => "calculable_below_thresholds", "history_review_open" => true, "filing_review_open" => true)
+      expect(item.tax_rule_snapshot.dig("annual_fica_context", "note")).to include("imported paycheck history")
+      expect(item.tax_rule_snapshot.dig("annual_fica_context", "note")).not_to include("voided pay period", "reversed paycheck")
+      expect(item.pay_period.annual_fica_review_note).to include(employee.full_name, "imported paycheck history")
       lifecycle = PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor)
       lifecycle.approve!
       lifecycle.commit!

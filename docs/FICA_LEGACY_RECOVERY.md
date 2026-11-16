@@ -49,7 +49,9 @@ Keep the proof table and review artifacts during a rollback or incident. No prod
 
 A disputed financial void can leave the old employee-year bases unresolved even when it cannot affect an ordinary current check. `calculable_below_thresholds` distinguishes this capacity from historical recovery. It does **not** reconcile a void, certify stored old taxes, approve W-2GU/941 filings, or create/apply `PayrollItemFicaBasisProof` records. Both `history_review_open` and `filing_review_open` remain true after commit. The existing pay-run warnings and commit dialog show the retained review note.
 
-The new path only relaxes an existing annual-context hold. Already verified annual calculations, reviewed proofs, signed corrections and cap allocations retain their existing behavior. When the independent bound is also provable for an already calculable ordinary check, the same review snapshot can be retained. Failure to establish that optional bound does not invalidate an already verified annual calculation.
+The new path only relaxes an existing annual-context hold. Already verified annual calculations, reviewed proofs, signed corrections and cap allocations retain their existing behavior. For an already calculable ordinary check, a review snapshot is retained only when genuinely disputed history exists and the independent bound proves exactly the same current-check amounts. A `verified_empty_legacy_item` disposition alone is not disputed history: it records a row proven to have no payroll activity, already excluded from the ordinary ledger. Failure to establish an optional bound does not invalidate an already verified annual calculation.
+
+New review snapshots name the actual reason: reversed paycheck IDs, voided pay-period IDs, or imported paycheck history. The pay-run warning prefixes each stored note with the affected worker's name. Existing committed snapshots retain their stored wording; snapshots missing a note use the legacy wording with the worker's name. No committed history is rewritten. Roll back approval and recalculate unfinished runs to replace a false legacy note, then review and approve again.
 
 ### Source completeness is required
 

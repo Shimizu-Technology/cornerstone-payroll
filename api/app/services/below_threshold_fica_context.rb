@@ -24,7 +24,7 @@ class BelowThresholdFicaContext
 
     PayrollItem.where(company: company, employee_id: candidate_employee_ids, pay_period_id: periods.select(:id))
       .where.not(employment_type: "contractor").left_joins(:legacy_disposition, :pay_period)
-      .where("payroll_items.payroll_reversed_at IS NOT NULL OR pay_periods.correction_status = 'voided' OR payroll_item_legacy_dispositions.id IS NOT NULL").exists?
+      .where("payroll_items.payroll_reversed_at IS NOT NULL OR pay_periods.correction_status = 'voided' OR (payroll_item_legacy_dispositions.id IS NOT NULL AND payroll_item_legacy_dispositions.reason != ?)", PayrollItemLegacyDisposition::REASON).exists?
   end
 
   def snapshot(current_item:, rules:, lock_rules: false, reviewing_imports: false)
@@ -93,7 +93,7 @@ class BelowThresholdFicaContext
       review.attributes, candidate_employees.map { |person| person.attributes.slice("id", "company_id", "previous_employee_id", "employment_type") }
     ])
     { "version" => VERSION, "mode" => MODE, "year" => year, "employee_id" => employee.id,
-      "history_review_open" => true, "filing_review_open" => true, "note" => NOTE,
+      "history_review_open" => true, "filing_review_open" => true, "note" => review_note,
       "source_digest" => source_digest, "rule_digest" => FicaBasisEvidence.digest(verified),
       "bounds" => FicaBasisEvidence.normalize(bounds.stringify_keys),
       "current_wages" => FicaBasisEvidence.normalize({ "medicare" => gross, "ss_wages" => gross - tips, "ss_tips" => tips }) }
@@ -149,7 +149,25 @@ class BelowThresholdFicaContext
   end
 
   def disputed_history?
-    candidates.any? { |item| !item.payroll_included? || item.legacy_disposition.present? }
+    candidates.any? { |item| !item.payroll_included? || unresolved_disposition?(item) }
+  end
+
+  def unresolved_disposition?(item)
+    item.legacy_disposition.present? && item.legacy_disposition.reason != PayrollItemLegacyDisposition::REASON
+  end
+
+  def review_note
+    reasons = candidates.flat_map do |item|
+      result = []
+      result << "reversed paycheck ##{item.id}" if item.payroll_reversed_at.present?
+      result << "voided pay period ##{item.pay_period_id}" if item.pay_period.voided?
+      result << "unresolved legacy disposition for paycheck ##{item.id}" if unresolved_disposition?(item)
+      result
+    end
+    reasons << "imported paycheck history" if imported_paychecks.any?
+    "Prior-period payroll history needs accountant review: #{reasons.uniq.join('; ')}. " \
+      "This paycheck's Social Security/Medicare is unaffected because the conservative annual wage bounds are within the limits. " \
+      "Historical tax and filing review remains open."
   end
 
   def validate_candidate!(item, rules)
