@@ -488,6 +488,7 @@ Rails.application.routes.draw do
             post :rematch_import, to: "payroll_imports#rematch"
             post :remove_import_source, to: "payroll_imports#remove_source"
             post :import_tip_treatment, to: "payroll_imports#tip_treatment"
+            post :import_installment_loan, to: "payroll_imports#installment_loan"
             post :apply_import, to: "payroll_imports#apply"
             # Timecard OCR CSV import
             post :preview_timecard_import, to: "timecard_imports#preview"
