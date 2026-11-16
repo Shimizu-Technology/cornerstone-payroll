@@ -55,3 +55,9 @@ it.each(['approve', 'changes', 'preview'])('reloads stale %s and asks for a fres
   expect(screen.getByRole('checkbox')).toHaveProperty('checked', false);
   expect(screen.getByLabelText('Note for Cornerstone (required to request changes)')).toHaveProperty('value', 'Add two hours');
 });
+
+it('shows no review card for an unpublished internal revision after setting-off payroll commits', () => {
+  const { container } = render(<ClientPayrollReview payPeriod={{ ...period, status: 'committed', client_payroll_approval_required: false,
+    payroll_review: { ...period.payroll_review!, published_at: null }, payroll_review_history: [] }} companyId={3} onDone={onDone} />);
+  expect(container.textContent).toBe('');
+});

@@ -129,6 +129,11 @@ RSpec.describe "Published payroll review loop", type: :request do
     @actor = staff
     post "#{admin}/commit"
     expect(response).to have_http_status(:ok), response.body
+    @actor = client
+    get base
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("pay_period", "payroll_review")).to be_nil
+    expect(response.parsed_body.dig("pay_period", "payroll_review_history")).to eq([])
   end
 
   it "blocks commit over a current change request even when the setting is disabled" do
