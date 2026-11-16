@@ -22,12 +22,13 @@ const apiMocks = vi.hoisted(() => ({
   commit: vi.fn(),
 }));
 
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => true }) }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => true, user: { company_capabilities: {} }, isLoading: false }) }));
 
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({
     activeCompanyId: 11,
     activeCompany: apiMocks.activeCompany,
+    loading: false,
   }),
 }));
 
@@ -377,5 +378,54 @@ describe('PayPeriods delete confirmation', () => {
     expect(await screen.findByText('Could not load the run')).toBeTruthy();
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(apiMocks.payPeriodDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('PayPeriods check numbering', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    apiMocks.payScheduleGet.mockResolvedValue({ pay_schedule: null });
+    apiMocks.companyGet.mockResolvedValue({ company: { id: 11, next_check_number: 22026 } });
+  });
+
+  const openNewPayPeriod = async () => {
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'New Pay Period' }));
+    return (await screen.findByLabelText(/Starting Check Number/)) as HTMLInputElement;
+  };
+
+  it('lets a user with the client check-settings grant set the starting check number', async () => {
+    apiMocks.activeCompany = { id: 11, client_capabilities: ['manage_client_check_settings'] };
+    expect((await openNewPayPeriod()).disabled).toBe(false);
+  });
+
+  it('disables the starting check number without the client grant', async () => {
+    apiMocks.activeCompany = { id: 11, client_capabilities: [] };
+    const input = await openNewPayPeriod();
+    expect(input.disabled).toBe(true);
+    expect(screen.getByText(/A manager or admin can change the starting check number/)).toBeTruthy();
+  });
+
+  it('reviews check numbering before committing from the list', async () => {
+    apiMocks.activeCompany = { id: 11, client_capabilities: [] };
+    const approved = { ...editablePeriod, status: 'approved' as const, parallel_run: false, test_workspace_role: null };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([approved]));
+    apiMocks.payPeriodGet.mockResolvedValue({ pay_period: {
+      id: 12, company_id: 11, status: 'approved', start_date: '2026-08-24', end_date: '2026-09-06', pay_date: '2026-09-10',
+      correction_status: null, compliance_warnings: [],
+      check_number_summary: { next_check_number: 1001, last_used_check_number: 5000, can_change: false },
+      payroll_items: [{ id: 1, net_pay: '90.00', payment_delivery_method: 'paper_check', payroll_included: true }],
+    } });
+    apiMocks.commit.mockResolvedValue({});
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Commit' }))[0]);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Paper checks will be numbered from 1001/)).toBeTruthy();
+    expect(within(dialog).getByRole('alert').textContent).toMatch(/at or below the last one used \(5000\)/);
+    expect(apiMocks.commit).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm commit' }));
+    await waitFor(() => expect(apiMocks.commit).toHaveBeenCalledWith(12));
   });
 });
