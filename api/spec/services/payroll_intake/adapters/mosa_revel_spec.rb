@@ -259,6 +259,17 @@ RSpec.describe PayrollIntake::Adapters::MosaRevel do
       expect(original.reload).to be_superseded
       expect(original.rows.sole.employee_id).to be_nil
       expect(preview.call).to include(duplicate: true, session: current)
+
+      # The active roster returns to its original state; the superseded first
+      # review must not come back for the same files.
+      EmployeeStatusTransitionService.terminate!(employee: employee, actor: admin,
+        attributes: { effective_date: pay_period.start_date.iso8601 })
+      expect { preview.call }.to raise_error(PayrollIntake::PreviewService::ReplacementRequiredError)
+      third = preview.call(supersedes_package_id: current.package_id, supersession_reason: "Worker left again").fetch(:session)
+      expect(third).to have_attributes(supersedes_id: current.id, package_revision: 3)
+      expect(third.id).not_to eq(original.id)
+      expect(third.rows.sole.employee_id).to be_nil
+      expect(preview.call).to include(duplicate: true, session: third)
     end
 
     it "keeps unknown and other-company workers generic" do
