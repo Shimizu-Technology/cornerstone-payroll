@@ -660,11 +660,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 <div className="flex items-start gap-3">
                   <RefreshCw className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold">Import version {currentPackage.package_revision} is the set of files currently in review</p>
+                    <p className="font-semibold">{currentOpen ? `Import version ${currentPackage.package_revision} is the set of files currently in review` : `Import version ${currentPackage.package_revision} was already applied`}</p>
                     <p className="mt-1 text-sm text-amber-800">
                       {currentOpen
                         ? 'Continue the saved review, or add the file that is still missing below. Replacing a file already received needs a reason.'
-                        : 'This source was already applied. Upload again only when MoSa sent a correction.'}
+                        : 'Upload again only when MoSa sends a correction.'}
                     </p>
                     {currentOpen && (
                       <Button type="button" variant="outline" size="sm" className="mt-3 border-amber-300 bg-white" onClick={() => void handleResumeCurrent()} disabled={loading}>
