@@ -18,16 +18,19 @@ class BelowThresholdFicaContext
   end
 
   def applicable?
-    periods = PayPeriod.where(company: company, status: "committed", pay_date: year_range)
-    periods = periods.where.not(id: excluding_pay_period_id) if excluding_pay_period_id
-    return true if imported_paychecks.any?
-
-    PayrollItem.where(company: company, employee_id: candidate_employee_ids, pay_period_id: periods.select(:id))
-      .where.not(employment_type: "contractor").left_joins(:legacy_disposition, :pay_period)
-      .where("payroll_items.payroll_reversed_at IS NOT NULL OR pay_periods.correction_status = 'voided' OR payroll_item_legacy_dispositions.id IS NOT NULL").exists?
+    imported_paychecks.any? || unresolved_history?
   end
 
-  def snapshot(current_item:, rules:, lock_rules: false, reviewing_imports: false)
+  # Imported checks alone are not unresolved history on a verified annual path.
+  def unresolved_history?
+    periods = PayPeriod.where(company: company, status: "committed", pay_date: year_range)
+    periods = periods.where.not(id: excluding_pay_period_id) if excluding_pay_period_id
+    PayrollItem.where(company: company, employee_id: candidate_employee_ids, pay_period_id: periods.select(:id))
+      .where.not(employment_type: "contractor").left_joins(:legacy_disposition, :pay_period)
+      .where("payroll_items.payroll_reversed_at IS NOT NULL OR pay_periods.correction_status = 'voided' OR (payroll_item_legacy_dispositions.id IS NOT NULL AND payroll_item_legacy_dispositions.reason != ?)", PayrollItemLegacyDisposition::REASON).exists?
+  end
+
+  def snapshot(current_item:, rules:, lock_rules: false, reviewing_imports: false, include_imported_history: true)
     if lock_rules
       AnnualTaxConfig.where(tax_year: year).order(:id).lock("FOR SHARE").load
       TaxTable.for_year(year).order(:id).lock("FOR SHARE").load
@@ -57,7 +60,7 @@ class BelowThresholdFicaContext
     if PayrollGoLiveReview.where(company: company).exists?
       hold!("Successor/predecessor import mapping requires separately reviewed reconciliation")
     end
-    hold!("No disputed financial history for the below-threshold path") unless disputed_history? || imported_paychecks.any?
+    hold!("No disputed financial history for the below-threshold path") unless unresolved_history? || imported_paychecks.any?
     bounds = { ss: 0.to_d, medicare: 0.to_d }
     candidates.each do |item|
       validate_candidate!(item, verified)
@@ -93,7 +96,7 @@ class BelowThresholdFicaContext
       review.attributes, candidate_employees.map { |person| person.attributes.slice("id", "company_id", "previous_employee_id", "employment_type") }
     ])
     { "version" => VERSION, "mode" => MODE, "year" => year, "employee_id" => employee.id,
-      "history_review_open" => true, "filing_review_open" => true, "note" => NOTE,
+      "history_review_open" => true, "filing_review_open" => true, "note" => review_note(include_imported_history: include_imported_history),
       "source_digest" => source_digest, "rule_digest" => FicaBasisEvidence.digest(verified),
       "bounds" => FicaBasisEvidence.normalize(bounds.stringify_keys),
       "current_wages" => FicaBasisEvidence.normalize({ "medicare" => gross, "ss_wages" => gross - tips, "ss_tips" => tips }) }
@@ -148,8 +151,22 @@ class BelowThresholdFicaContext
       .includes(:historical_ytd_bridge).order(:id).to_a
   end
 
-  def disputed_history?
-    candidates.any? { |item| !item.payroll_included? || item.legacy_disposition.present? }
+  def unresolved_disposition?(item)
+    item.legacy_disposition.present? && item.legacy_disposition.reason != PayrollItemLegacyDisposition::REASON
+  end
+
+  def review_note(include_imported_history:)
+    reasons = candidates.flat_map do |item|
+      result = []
+      result << "reversed paycheck ##{item.id}" if item.payroll_reversed_at.present?
+      result << "voided pay period ##{item.pay_period_id}" if item.pay_period.voided?
+      result << "unresolved legacy disposition for paycheck ##{item.id}" if unresolved_disposition?(item)
+      result
+    end
+    reasons << "imported paycheck history" if include_imported_history && imported_paychecks.any?
+    "Prior-period payroll history needs accountant review: #{reasons.uniq.join('; ')}. " \
+      "This paycheck's Social Security/Medicare is unaffected because the conservative annual wage bounds are within the limits. " \
+      "Historical tax and filing review remains open."
   end
 
   def validate_candidate!(item, rules)
