@@ -666,7 +666,7 @@ export function Clients() {
   };
 
   const handleSave = async () => {
-    if (canManageClients && !form.name.trim()) {
+    if (canEditField('name') && !form.name.trim()) {
       setFormError('Client name is required');
       return;
     }
@@ -710,7 +710,7 @@ export function Clients() {
     <>
       <Header
         title={canManageClients ? 'Client Management' : 'Client Info'}
-        subtitle={canManageClients ? 'Manage payroll clients' : 'View and update assigned client contact details'}
+        subtitle={canManageClients ? 'Manage payroll clients' : 'View and update your assigned clients'}
       />
 
       <div className="space-y-6 p-4 sm:p-6">

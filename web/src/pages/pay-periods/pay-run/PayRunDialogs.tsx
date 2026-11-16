@@ -90,7 +90,7 @@ export function PayRunDialogs({
   timeTrackingImportOpen,
   totalNet
 }: PayRunSectionProps<'dialogs'>) {
-  const canReactivateWorkers = useOptionalSelectedCompanyCapability('manage_client_configuration', Number(companyId));
+  const canReactivateWorkers = useOptionalSelectedCompanyCapability('manage_employee_status', Number(companyId));
   return (<>
 <ImportModal
         open={importModalOpen}

@@ -1,6 +1,6 @@
 # Staff role and permission matrix
 
-**Reviewed:** August 23, 2026
+**Reviewed:** August 23, 2026. **Updated:** November 17, 2026 (managers hold client administration; all payroll staff can mark workers inactive and reactivate them).
 
 This is the approved staff authorization contract for Cornerstone Payroll. The backend policy registry in `api/app/policies/staff_role_policy.rb` is the executable source for high-impact actions. Frontend route and navigation guards mirror it for usability, but the backend remains authoritative.
 
@@ -11,7 +11,7 @@ This is the approved staff authorization contract for Cornerstone Payroll. The b
 | `super_admin` | Every organization | Platform recovery, tenant provisioning, and the rare worker tax-classification record transition. Not a routine payroll identity. |
 | `org_admin` | One organization | Firm owner/admin. Manages the firm's users, clients, tax rules, integrations, audit history, and organization-wide tools. |
 | `admin` | One organization | Legacy alias for `org_admin` until existing Cornerstone accounts are migrated. |
-| `manager` | Assigned companies | Payroll manager. Performs payroll work and manages client-specific configuration and sensitive workforce approvals. |
+| `manager` | Assigned companies | Payroll manager. Performs payroll work and manages client-specific configuration, client administration and sensitive workforce approvals. |
 | `accountant` | Assigned companies | Payroll operator. Maintains employees, imports time and payroll evidence, calculates/processes payroll, checks, corrections, reports, transmittals, and other assigned-client operations. |
 | `client` | Assigned companies | Portal-safe employee requests, documents, completed pay periods, and approved reports only. |
 | `employee` | Home company | Reserved for future employee self-service; it has no staff-console access. |
@@ -22,14 +22,22 @@ This is the approved staff authorization contract for Cornerstone Payroll. The b
 | --- | --- | --- | --- | --- | --- | --- |
 | Staff workspace and assigned-client read access | Yes | Yes | Yes | Yes | No | No |
 | Assigned-client payroll operations | Yes | Yes | Yes | Yes | No | No |
-| Client configuration and sensitive workforce approval | Yes | Yes | Yes | No | No | No |
+| Mark a worker inactive or reactivate them (`manage_employee_status`) | Yes | Yes | Yes | Yes | No | No |
+| Client configuration and sensitive workforce approval (`manage_client_configuration`) | Yes | Yes | Yes | Yes\* | No | No |
+| Client administration (`manage_client_administration`) | Yes | Yes | Yes | Yes\* | No | No |
 | Organization administration | Yes | Yes | No | No | No | No |
 | Platform administration | Yes | No | No | No | No | No |
 | Client portal | No | No | No | No | Yes | No |
 
+\* Only for a client whose company assignment has **Client management** delegation. Delegation is rechecked on every request.
+
 “Payroll operations” includes employee maintenance, departments, pay periods and items, imports, calculate/approve/unapprove/commit, checks and corrections, reports and filing preparation, loans, transmittals, portal documents, and assigned-client contact details. This is intentionally available to accountants because it is their core job.
 
-“Client configuration” includes pay schedule/legal workweek confirmation, check stock/layout/sequence, reusable payroll-field definitions, reminder configuration, printer-profile creation/editing/deletion/application, employee termination/reactivation and work-profile changes, and approval or rejection of client payroll-sensitive employee changes.
+“Client configuration” includes pay schedule/legal workweek confirmation, check stock/layout/sequence, reusable payroll-field definitions, reminder configuration, printer-profile creation/editing/deletion/application, employee termination and work-profile changes, and approval or rejection of client payroll-sensitive employee changes.
+
+“Worker status” (`manage_employee_status`) covers **Mark inactive** and **Reactivate**, from the employee profile or from an import review's **Reactivate Name** action. Reactivation applies to inactive and terminated workers. Terminating a worker stays under client configuration. Each change keeps its actor, effective date and reason in the worker's status history and is audited as `employees#deactivate` or `employees#reactivate`.
+
+“Client administration” (`manage_client_administration`) covers the full client edit (name, EIN, pay frequency, active status, bank, check stock and next check number, simple payroll register, historical payroll workspace and **Require client approval before payroll commit**), the employee intake window, staff portal notification recipients, and marking W-2GU filing ready. Managers hold it for their assigned clients since November 17, 2026.
 
 “Organization administration” includes users and invitations, client assignments and creation, audit history, tax configuration and effective-dated pay-component tax rules, external time-source secrets, and the organization-wide invoice center.
 
@@ -47,13 +55,15 @@ Every endpoint below is registered in `StaffRolePolicy` and is enforced by `Admi
 | --- | --- |
 | Platform administration | all organization endpoints; employee tax-classification record transition |
 | Organization administration | all user, invitation, company-assignment, audit-log, tax-config, and invoice controllers; client creation; time-source create/update/delete/test; pay-component tax-rule create/update |
-| Client configuration | pay-schedule update; payroll-field definition create/update/archive; reminder update/test; check settings and next-number update; printer-profile create/update/delete/apply/clear/apply-to-all; employee-change review/approve/reject; terminate/reactivate; work-profile create |
+| Client configuration | pay-schedule update; payroll-field definition create/update/archive; reminder update/test; check settings and next-number update; printer-profile create/update/delete/apply/clear/apply-to-all; employee-change review/approve/reject; terminate; work-profile create |
+| Client administration | employee intake settings update; portal notification recipients; W-2GU mark ready. Full company update fields are gated inside `companies#update`. |
+| Worker status | employee mark inactive (`employees#deactivate`) and reactivate (`employees#reactivate`); rechecked inside `EmployeeStatusTransitionService` |
 
 Read access remains narrower than a mutation response suggests:
 
 - Managers, accountants, and clients only receive companies assigned within their own organization.
 - An `X-Company-Id` outside that set is rejected; it cannot grant access.
-- Non-admin staff may update only a client's address, city/state/ZIP, phone, and email. They cannot change EIN, company identity/status, pay frequency, bank/check configuration, or the next check number through the company endpoint.
+- Accountants without Client management may update only a client's address, city/state/ZIP, phone, and email. They cannot change EIN, company identity/status, pay frequency, bank/check configuration, the next check number or client approval through the company endpoint. Managers, admins and delegated accountants get the full client edit.
 - Accountants may read client configuration needed to process payroll, but configuration mutations are rejected.
 - Managers may inspect non-secret time-source metadata for imports, but only organization admins may create, test, rotate, or deactivate the secret-bearing integration.
 - Client users never enter the staff namespace, and staff users do not enter the client namespace. Every `/api/v1/client/*` endpoint returns 403 for a staff role (`ClientPortalAccess`), so staff edits are always validated and audited as staff actions.

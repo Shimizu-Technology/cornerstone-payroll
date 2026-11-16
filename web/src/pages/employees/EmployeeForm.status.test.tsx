@@ -5,10 +5,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Employee } from '@/types';
 import { EmployeeForm } from './EmployeeForm';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), manage: true, client: false }));
+const allStaffCapabilities = ['manage_client_configuration', 'manage_employee_status'];
+const mocks = vi.hoisted(() => ({ get: vi.fn(), capabilities: [] as string[], client: false }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1 }, isClient: mocks.client, isSuperAdmin: false }) }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: vi.fn(), activeCompanyId: 1, activeCompany: { id: 1, pay_frequency: 'biweekly', client_capabilities: ['manage_client_configuration'] } }) }));
-vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: () => mocks.manage }));
+vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: (capability: string) => mocks.capabilities.includes(capability) }));
 vi.mock('@/hooks/useEmployeeIntakeSettings', () => ({ useEmployeeIntakeSettings: () => ({ settings: { enabled: false }, loading: false }) }));
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/employees/EmployeePayItemsPanel', () => ({ EmployeePayItemsPanel: () => null }));
@@ -22,7 +23,7 @@ vi.mock('@/services/api', async original => ({
   clientDepartmentsApi: { list: vi.fn().mockResolvedValue({ data: [] }) },
   employeeWageRatesApi: { list: vi.fn().mockResolvedValue({ wage_rates: [] }) },
 }));
-beforeEach(() => { vi.clearAllMocks(); mocks.manage = true; mocks.client = false; HTMLElement.prototype.scrollIntoView = vi.fn(); });
+beforeEach(() => { vi.clearAllMocks(); mocks.capabilities = [...allStaffCapabilities]; mocks.client = false; HTMLElement.prototype.scrollIntoView = vi.fn(); });
 afterEach(cleanup);
 async function view(status: Employee['status']) {
   mocks.get.mockResolvedValue({ data: {
@@ -47,14 +48,32 @@ it('does not offer reactivation for an active worker', async () => {
   expect(screen.queryByRole('button', { name: 'Reactivate' })).toBeNull();
   expect(screen.queryByText(/This employee is/)).toBeNull();
 });
-it('shows the accountant hint instead of a reactivation action', async () => {
-  mocks.manage = false;
+it('lets an accountant reactivate an inactive worker', async () => {
+  mocks.capabilities = ['manage_employee_status'];
   await view('inactive');
-  expect(screen.getByText('A manager or admin can reactivate this worker.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+  expect(await screen.findByRole('dialog', { name: 'Reactivate Avery' })).toBeTruthy();
+});
+it('lets an accountant mark a worker inactive but not terminate them', async () => {
+  mocks.capabilities = ['manage_employee_status'];
+  await view('active');
+  expect(screen.getByRole('button', { name: 'Mark inactive' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Terminate/ })).toBeNull();
+  expect(screen.getByText(/A manager or admin can terminate a worker whose employment has ended/)).toBeTruthy();
+});
+it('offers managers both Mark inactive and Terminate', async () => {
+  await view('active');
+  expect(screen.getByRole('button', { name: 'Mark inactive' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Terminate Employee' })).toBeTruthy();
+});
+it('explains when the operator has no access to change status', async () => {
+  mocks.capabilities = [];
+  await view('inactive');
+  expect(screen.getByText("You don't have access to reactivate this worker.")).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Reactivate' })).toBeNull();
 });
 it('does not expose the staff reactivation banner to clients', async () => {
-  mocks.client = true; mocks.manage = false;
+  mocks.client = true; mocks.capabilities = [];
   await view('inactive');
   expect(screen.queryByRole('button', { name: 'Reactivate' })).toBeNull();
   expect(screen.queryByText('This employee is inactive')).toBeNull();

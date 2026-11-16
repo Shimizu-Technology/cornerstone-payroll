@@ -5,6 +5,7 @@ export type ClientCapability =
   | 'manage_client_configuration'
   | 'manage_client_check_settings'
   | 'manage_client_administration'
+  | 'manage_employee_status'
   | 'manage_time_tracking_lock';
 
 type AuthSnapshot = Pick<ReturnType<typeof useAuth>, 'user' | 'isLoading'>;
