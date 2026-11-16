@@ -23,7 +23,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import type { ExpectedEntries, PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
-import { type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, unavailableSavedWageRateLabels, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, taxSyncStatusConfig, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
+import { preservesWorksheetJobHours, type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, unavailableSavedWageRateLabels, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, taxSyncStatusConfig, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
 
 export function usePayRunController({
   active = true,
@@ -623,7 +623,7 @@ export function usePayRunController({
         const preservesSourceRates = payrollItems.some(item => item.employee_id === Number(empId)
           && (item.timekeeping_source === 'correction_reference' || item.import_source?.startsWith('time_tracking:')));
         hours[empId] = entry.wage_rates && entry.wage_rates.length > 0
-          && (entry.wage_rates.length > 1 || preservesSourceRates || Number(empId) === entryFieldEmployeeId)
+          && (preservesWorksheetJobHours(employees.find(employee => employee.id === Number(empId)), entry.wage_rates) || preservesSourceRates || Number(empId) === entryFieldEmployeeId)
           ? {
               regular: entry.regular,
               overtime: entry.overtime,
