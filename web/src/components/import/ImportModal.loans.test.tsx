@@ -70,7 +70,9 @@ it('sets up the workbook’s new installment loan from the review, then matches 
 
   await waitFor(() => expect(mocks.setUpLoan).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(mocks.setUpLoan).toHaveBeenCalledWith(9, { import_id: 41, employee_id: 5, name: 'Emma advance',
-    starting_balance: '600.0', payment_amount: '50.0', first_deduction_date: '2026-11-19' }));
+    starting_balance: '600.0', payment_amount: '50.0' }));
+  // The server always uses this payroll's pay date, so the form never sends one.
+  expect(mocks.setUpLoan.mock.calls[0][1]).not.toHaveProperty('first_deduction_date');
   await waitFor(() => expect(mocks.rematchImport).toHaveBeenCalledWith(9, 'Matched again after Elena Mercer’s installment loan was set up'));
   expect(await screen.findByText('Elena Mercer’s installment loan is set up and matches this import.')).toBeTruthy();
   expect(screen.queryAllByRole('region', { name: 'Installment loan for Elena Mercer' })).toHaveLength(0);
