@@ -248,6 +248,7 @@ export interface Employee {
   termination_date?: string;
   current_work_profile?: EmployeeWorkProfile | null;
   status_history?: EmployeeStatusEvent[];
+  open_pay_runs?: { action: 'remove' | 'check'; id: number; status: string; start_date: string; end_date: string }[];
   employment_type: EmploymentType;
   tax_classification?: 'w2' | '1099';
   previous_employee_id?: number | null;
@@ -487,7 +488,7 @@ export interface EmployeeWorkProfileInput {
 
 export interface EmployeeStatusEvent {
   id: number;
-  event_type: 'terminated' | 'reactivated';
+  event_type: 'terminated' | 'reactivated' | 'deactivated';
   previous_status: EmployeeStatus;
   resulting_status: EmployeeStatus;
   effective_date: string;
@@ -529,7 +530,7 @@ export interface DailyTimeRecordInput {
 export interface EmployeeTerminationInput {
   effective_date: string;
   last_worked_on?: string;
-  reason_category?: 'voluntary' | 'involuntary' | 'layoff' | 'reduction_in_force' | 'end_of_contract' | 'retirement' | 'other';
+  reason_category?: 'voluntary' | 'involuntary' | 'layoff' | 'reduction_in_force' | 'end_of_contract' | 'retirement' | 'leave_of_absence' | 'seasonal' | 'no_hours_scheduled' | 'other';
   internal_notes?: string;
 }
 
@@ -1290,6 +1291,8 @@ export interface ExpectedEntries {
 }
 
 export interface PayPeriod {
+  check_number_summary?: { next_check_number: number; last_used_check_number: number | null; can_change: boolean } | null;
+  ineligible_workers?: { resolution?: string; employee_id: number; reason: string; status: string; effective_date: string | null }[];
   expected_entries?: ExpectedEntries;
   client_files?: { period_id: number; revision: number; submission_id: number; submitted_at: string; status: string; blocks_calculation: boolean } | null;
   prior_provider_history_available?: boolean;

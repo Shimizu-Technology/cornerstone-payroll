@@ -521,12 +521,14 @@ export const employeesApi = {
     group_by?: string;
   }, signal?: AbortSignal): Promise<{ data: Employee[]; meta: PaginationMeta }> =>
     api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params, { signal }),
-  get: (id: number, companyId?: number): Promise<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }> =>
-    api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, undefined, { companyId }),
+  get: (id: number, companyId?: number, statusEffectiveDate?: string): Promise<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }> =>
+    api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, { status_effective_date: statusEffectiveDate }, { companyId }),
   create: (data: EmployeeFormData & { company_id: number }) =>
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
   update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
     api.patch<{ data: Employee; payment_method_review?: { reapproval_pay_period_ids: number[] } }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
+  deactivate: (id: number, deactivation: import('@/types').EmployeeTerminationInput) =>
+    api.post<{ data: Employee }>(`/admin/employees/${id}/deactivate`, { deactivation }),
   terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/terminate`, { termination }),
   reactivate: (id: number, reactivation: import('@/types').EmployeeReactivationInput) =>
@@ -3483,10 +3485,10 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   retirementPlansXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/retirement_plans_xlsx', { pay_period_id: payPeriodId }),
-  installmentLoansPdf: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  installmentLoansXlsx: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate }),
+  installmentLoansPdf: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
+  installmentLoansXlsx: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
   transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,
@@ -4606,10 +4608,10 @@ export const payrollReportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   retirementPlansXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/retirement_plans_xlsx', { pay_period_id: payPeriodId }),
-  installmentLoansPdf: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  installmentLoansXlsx: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate }),
+  installmentLoansPdf: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
+  installmentLoansXlsx: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
   transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,

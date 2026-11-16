@@ -370,7 +370,7 @@ module Api
 
           eligible_scope = Employee.where(id: employee_ids, company_id: current_company_id)
           eligible_scope = if params[:employee_ids].present? && %w[final correction adjustment].include?(@pay_period.run_purpose)
-            eligible_scope.where(status: %w[active terminated])
+            eligible_scope.where("status IN (?) OR (status = ? AND EXISTS (SELECT 1 FROM employee_status_events WHERE employee_id = employees.id AND event_type = ?))", %w[active terminated], "inactive", "deactivated")
           else
             eligible_scope.eligible_for_period(@pay_period.start_date, @pay_period.end_date)
           end
@@ -1301,6 +1301,9 @@ module Api
         end
 
         def apply_starting_check_number!(value, company:)
+          unless StaffRolePolicy.allowed?(current_user, :manage_client_check_settings, company: company)
+            raise ArgumentError, "Manager, admin, or Client management access required to change the starting check number"
+          end
           new_number = value.to_s.strip
           raise ArgumentError, "Starting check number must be numeric" unless new_number.match?(/\A\d+\z/)
 
@@ -1326,12 +1329,27 @@ module Api
             blocks_calculation: pay_period.pending_portal_submission? }
         end
 
+        def check_number_summary(company)
+          maxima = [ PayrollItem, NonEmployeeCheck ].map do |model|
+            model.where(company_id: company.id).where("check_number ~ ?", "^[0-9]+$")
+              .maximum(Arel.sql("CAST(check_number AS numeric)"))
+          end
+          maxima << PayrollItem.where(company_id: company.id).where("replaced_check_number ~ ?", "^[0-9]+$")
+            .maximum(Arel.sql("CAST(replaced_check_number AS numeric)"))
+          {
+            next_check_number: company.next_check_number,
+            last_used_check_number: maxima.compact.max&.to_i,
+            can_change: StaffRolePolicy.allowed?(current_user, :manage_client_check_settings, company: company)
+          }
+        end
+
         def pay_period_json(pay_period, include_items: false, list: false)
           agg = pay_period_aggregates(pay_period)
           lifecycle = pay_period_lifecycle_summary(pay_period)
 
           json = {
             id: pay_period.id,
+            check_number_summary: !list && pay_period.approved? ? check_number_summary(pay_period.company) : nil,
             client_files: list ? nil : client_files_summary(pay_period),
             source_correction_required: include_items && pay_period.committed? && !pay_period.voided? && TimeTracking::FinancialCorrectionService.required_for?(pay_period),
             company_id: pay_period.company_id,
@@ -1380,6 +1398,7 @@ module Api
             tax_sync_last_error: tax_sync_visible? ? pay_period.tax_sync_last_error : nil,
             tax_synced_at: tax_sync_visible? ? pay_period.tax_synced_at : nil,
             lifecycle: lifecycle,
+            ineligible_workers: list ? nil : PayrollRunEligibility.new(pay_period).payload,
             expected_entries: list ? nil : PayrollExpectedEntries.new(pay_period).payload,
             pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields

@@ -157,6 +157,10 @@ module Api
           end
           @payroll_item.reload
 
+          if (resolution = @payroll_item.status_removal_resolution)
+            return render json: { errors: [ resolution ] }, status: :unprocessable_entity
+          end
+
           ActiveRecord::Base.transaction(requires_new: true) do
             PayPeriodExcludedEmployee.create_or_find_by!(
               pay_period: @pay_period,
@@ -170,8 +174,8 @@ module Api
           end
 
           head :no_content
-        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed => e
-          render json: { errors: [ e.message ] }, status: :unprocessable_entity
+        rescue ActiveRecord::DeleteRestrictionError, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed => e
+          render json: { errors: [ @payroll_item.status_removal_resolution || e.message ] }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate
