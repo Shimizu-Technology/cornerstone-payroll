@@ -18,11 +18,13 @@ interface Props {
   onWaivedChange: (waived: boolean) => void;
   // The client already said there is nothing to send for these files.
   clientWaived?: boolean;
+  // Set when the client sent the file or a link to it, so staff cannot record "none".
+  waiverBlockedReason?: string | null;
 }
 
 // Which files this import has, which are still needed, and a way to add the
 // missing one or take out one added by mistake without starting over.
-export function ImportSourceChecklist({ sources, summary, onAdd, onRemove, busy, waived, onWaivedChange, clientWaived }: Props) {
+export function ImportSourceChecklist({ sources, summary, onAdd, onRemove, busy, waived, onWaivedChange, clientWaived, waiverBlockedReason }: Props) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [removeBusy, setRemoveBusy] = useState(false);
@@ -111,7 +113,7 @@ export function ImportSourceChecklist({ sources, summary, onAdd, onRemove, busy,
       )}
       {waivable.length > 0 && (clientWaived
         ? <p className="mt-2 text-sm text-neutral-700">The client chose: {waivable.map((source) => source.waiver_label).join(' · ')}.</p>
-        : (
+        : waiverBlockedReason ? <p className="mt-2 text-sm font-medium text-amber-900">{waiverBlockedReason}</p> : (
           <label className="mt-2 flex min-h-11 items-center gap-2 font-medium text-neutral-900">
             <input type="checkbox" className="h-4 w-4 shrink-0" checked={waived} onChange={(event) => onWaivedChange(event.target.checked)} />
             {waivable.map((source) => source.waiver_label).join(' · ')}
