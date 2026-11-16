@@ -78,3 +78,17 @@ it('does not expose the staff reactivation banner to clients', async () => {
   expect(screen.queryByRole('button', { name: 'Reactivate' })).toBeNull();
   expect(screen.queryByText('This employee is inactive')).toBeNull();
 });
+it('leaves rehiring a terminated worker to managers and admins', async () => {
+  mocks.capabilities = ['manage_employee_status'];
+  await view('terminated');
+  expect(screen.getByText('A manager or admin can rehire this worker.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Reactivate' })).toBeNull();
+});
+it('tells an accountant marking a worker inactive who can terminate', async () => {
+  mocks.capabilities = ['manage_employee_status'];
+  await view('active');
+  fireEvent.click(screen.getByRole('button', { name: 'Mark inactive' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Mark Avery inactive' });
+  expect(dialog.textContent).toContain('A manager or admin can terminate a worker whose employment has ended.');
+  expect(dialog.textContent).not.toContain('Use Terminate');
+});

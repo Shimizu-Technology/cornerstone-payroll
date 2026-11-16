@@ -22,7 +22,8 @@ This is the approved staff authorization contract for Cornerstone Payroll. The b
 | --- | --- | --- | --- | --- | --- | --- |
 | Staff workspace and assigned-client read access | Yes | Yes | Yes | Yes | No | No |
 | Assigned-client payroll operations | Yes | Yes | Yes | Yes | No | No |
-| Mark a worker inactive or reactivate them (`manage_employee_status`) | Yes | Yes | Yes | Yes | No | No |
+| Mark a worker inactive or reactivate an inactive worker (`manage_employee_status`) | Yes | Yes | Yes | Yes | No | No |
+| Reactivate (rehire) a terminated worker (`manage_employee_status` and `manage_client_configuration`) | Yes | Yes | Yes | Yes\* | No | No |
 | Client configuration and sensitive workforce approval (`manage_client_configuration`) | Yes | Yes | Yes | Yes\* | No | No |
 | Client administration (`manage_client_administration`) | Yes | Yes | Yes | Yes\* | No | No |
 | Organization administration | Yes | Yes | No | No | No | No |
@@ -35,9 +36,9 @@ This is the approved staff authorization contract for Cornerstone Payroll. The b
 
 “Client configuration” includes pay schedule/legal workweek confirmation, check stock/layout/sequence, reusable payroll-field definitions, reminder configuration, printer-profile creation/editing/deletion/application, employee termination and work-profile changes, and approval or rejection of client payroll-sensitive employee changes.
 
-“Worker status” (`manage_employee_status`) covers **Mark inactive** and **Reactivate**, from the employee profile or from an import review's **Reactivate Name** action. Reactivation applies to inactive and terminated workers. Terminating a worker stays under client configuration. Each change keeps its actor, effective date and reason in the worker's status history and is audited as `employees#deactivate` or `employees#reactivate`.
+“Worker status” (`manage_employee_status`) covers **Mark inactive** and **Reactivate** for inactive workers, from the employee profile or from an import review's **Reactivate Name** action. Reactivating a terminated worker is a rehire and also needs client configuration, like terminating. Without it, the profile says "A manager or admin can rehire this worker." and the import review says "Name was terminated. A manager or admin can rehire them." Each status change rechecks the operator's client access under the company lock. Each change keeps its actor, effective date and reason in the worker's status history and is audited as `employees#deactivate` or `employees#reactivate`.
 
-“Client administration” (`manage_client_administration`) covers the full client edit (name, EIN, pay frequency, active status, bank, check stock and next check number, simple payroll register, historical payroll workspace and **Require client approval before payroll commit**), the employee intake window, staff portal notification recipients, and marking W-2GU filing ready. Managers hold it for their assigned clients since November 17, 2026.
+“Client administration” (`manage_client_administration`) covers the full client edit (name, EIN, pay frequency, active status, bank, check stock and next check number, simple payroll register, historical payroll workspace and **Require client approval before payroll commit**), the employee intake window, staff portal notification recipients, and marking W-2GU filing ready. Managers hold it for their assigned clients since November 17, 2026. On a test workspace the full client edit stays with organization admins, whatever the workspace access level. Archive and restore remain the way to change a workspace's status.
 
 “Organization administration” includes users and invitations, client assignments and creation, audit history, tax configuration and effective-dated pay-component tax rules, external time-source secrets, and the organization-wide invoice center.
 
@@ -57,7 +58,7 @@ Every endpoint below is registered in `StaffRolePolicy` and is enforced by `Admi
 | Organization administration | all user, invitation, company-assignment, audit-log, tax-config, and invoice controllers; client creation; time-source create/update/delete/test; pay-component tax-rule create/update |
 | Client configuration | pay-schedule update; payroll-field definition create/update/archive; reminder update/test; check settings and next-number update; printer-profile create/update/delete/apply/clear/apply-to-all; employee-change review/approve/reject; terminate; work-profile create |
 | Client administration | employee intake settings update; portal notification recipients; W-2GU mark ready. Full company update fields are gated inside `companies#update`. |
-| Worker status | employee mark inactive (`employees#deactivate`) and reactivate (`employees#reactivate`); rechecked inside `EmployeeStatusTransitionService` |
+| Worker status | employee mark inactive (`employees#deactivate`) and reactivate (`employees#reactivate`); rechecked inside `EmployeeStatusTransitionService`, which also requires client configuration to reactivate a terminated worker |
 
 Read access remains narrower than a mutation response suggests:
 

@@ -413,6 +413,28 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       expect(audit.metadata).to include("changed_fields" => [ "client_payroll_approval_required" ])
     end
 
+    it "keeps a test workspace's identity and status with organization admins, even for a workspace admin manager" do
+      workspace = create(
+        :company, organization: organization, payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "sandbox", migration_source_company: client_company,
+        migration_rehearsal_status: "ready", test_workspace_expires_at: 10.days.from_now, name: "Client A — Practice"
+      )
+      CompanyAssignment.create!(user: manager_user, company: workspace, workspace_access_level: "workspace_admin")
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_company_id).and_return(workspace.id)
+
+      get "/api/v1/admin/companies/#{workspace.id}"
+      expect(response.parsed_body.dig("company", "editable_fields"))
+        .to match_array(Api::V1::Admin::CompaniesController::STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s))
+
+      patch "/api/v1/admin/companies/#{workspace.id}", params: {
+        company: { active: false, name: "Renamed practice", client_payroll_approval_required: true, phone: "671-555-0199" }
+      }
+
+      expect(response).to have_http_status(:ok), response.body
+      workspace.reload
+      expect(workspace).to have_attributes(active: true, name: "Client A — Practice", client_payroll_approval_required: false, phone: "671-555-0199")
+    end
+
     it "still keeps managers out of unassigned clients" do
       patch "/api/v1/admin/companies/#{inactive_client_company.id}", params: { company: { client_payroll_approval_required: true } }
 

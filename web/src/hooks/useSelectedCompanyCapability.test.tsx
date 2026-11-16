@@ -2,7 +2,7 @@
 import { cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CompanyListItem } from '@/services/api';
-import { useOptionalSelectedCompanyCapability, useSelectedCompanyCapability } from './useSelectedCompanyCapability';
+import { useOptionalSelectedCompanyCapability, useOptionalWorkerStatusAccess, useSelectedCompanyCapability } from './useSelectedCompanyCapability';
 
 const state = vi.hoisted(() => ({
   company: null as CompanyListItem | null, id: 1 as number | null, loading: false, authLoading: false,
@@ -79,5 +79,21 @@ describe('optional selected client capability', () => {
   it('fails closed outside the auth provider, even when company data grants it', () => {
     state.noProvider = true;
     expect(renderHook(() => useOptionalSelectedCompanyCapability(capability, 1)).result.current).toBe(false);
+  });
+});
+
+describe('worker status access', () => {
+  it('lets payroll staff reactivate but keeps rehiring with client configuration and writable workspaces', () => {
+    state.company = company(1, ['manage_employee_status']);
+    const view = renderHook(() => useOptionalWorkerStatusAccess(1));
+    expect(view.result.current).toEqual({ canReactivate: true, canRehire: false });
+
+    state.company = company(1, ['manage_employee_status', 'manage_client_configuration']);
+    view.rerender();
+    expect(view.result.current).toEqual({ canReactivate: true, canRehire: true });
+
+    state.company = { ...company(1, ['manage_employee_status', 'manage_client_configuration']), workspace_can_write: false } as CompanyListItem;
+    view.rerender();
+    expect(view.result.current).toEqual({ canReactivate: false, canRehire: false });
   });
 });

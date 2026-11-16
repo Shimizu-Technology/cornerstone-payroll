@@ -233,6 +233,8 @@ export function EmployeeForm() {
   const [w4ChangeReason, setW4ChangeReason] = useState('');
   const [w4ElectionReceived, setW4ElectionReceived] = useState(false);
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
+  // Bringing back a terminated worker is a rehire, which stays with client configuration.
+  const canReactivateLoadedWorker = canChangeEmployeeStatus && (employeeStatus !== 'terminated' || canManageClientConfiguration);
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const [generalError, setGeneralError, generalErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -1104,12 +1106,14 @@ export function EmployeeForm() {
                   Inactive workers aren't paid. Reactivate to include them in payroll again.
                 </p>
               )}
-              {!canChangeEmployeeStatus && (
-                <p className="text-red-600 text-sm">You don't have access to reactivate this worker.</p>
+              {!canReactivateLoadedWorker && (
+                <p className="text-red-600 text-sm">
+                  {employeeStatus === 'terminated' ? 'A manager or admin can rehire this worker.' : "You don't have access to reactivate this worker."}
+                </p>
               )}
             </div>
           </div>
-          {canChangeEmployeeStatus && <Button
+          {canReactivateLoadedWorker && <Button
             type="button"
             variant="outline"
             onClick={() => setStatusTransitionMode('reactivate')}
@@ -2300,6 +2304,7 @@ export function EmployeeForm() {
         <EmployeeStatusTransitionDialog
           employee={loadedEmployee}
           mode={statusTransitionMode}
+          canTerminate={canManageClientConfiguration}
           open
           onOpenChange={(open): void => {
             if (companyIdRef.current === companyId && !open) setStatusTransitionMode(null);

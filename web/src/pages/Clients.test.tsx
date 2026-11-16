@@ -535,6 +535,18 @@ describe('Clients name-only rename', () => {
     await screen.findAllByText(rehearsal.name);
     expect(screen.queryByRole('button', { name: `Rename ${rehearsal.name}` })).toBeNull();
   });
+
+  it('offers rename to a manager on a live client they administer, but not on a test workspace', async () => {
+    apiMocks.auth = { isAdmin: false, isAccountant: false, isManager: true, hasCapability: (capability: string) => capability === 'staff_workspace' };
+    apiMocks.list.mockResolvedValue({ companies: [
+      { ...target, client_capabilities: ['manage_client_administration'] },
+      { ...rehearsal, client_capabilities: ['manage_client_administration'] },
+    ] });
+    renderClients();
+    await screen.findAllByText(target.name);
+    expect(screen.getAllByRole('button', { name: `Rename ${target.name}` }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: `Rename ${rehearsal.name}` })).toBeNull();
+  });
 });
 
 

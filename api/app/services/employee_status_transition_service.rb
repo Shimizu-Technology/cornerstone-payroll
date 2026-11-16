@@ -2,6 +2,7 @@
 
 class EmployeeStatusTransitionService
   class Error < StandardError; end
+  class Forbidden < Error; end
 
   REACTIVATABLE_STATUSES = %w[inactive terminated].freeze
 
@@ -45,7 +46,7 @@ class EmployeeStatusTransitionService
 
     ApplicationRecord.transaction do
       @employee.lock!
-      raise Error, "Client configuration access required" unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
+      raise Forbidden, "Client configuration access required" unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
       raise Error, "This worker is already terminated" if @employee.status == "terminated"
       raise Error, "Termination cannot be before the hire date" if @employee.hire_date && effective_date < @employee.hire_date
       raise Error, "Termination cannot be before the worker's latest status change" if before_latest_status_event?(effective_date)
@@ -76,7 +77,7 @@ class EmployeeStatusTransitionService
 
     ApplicationRecord.transaction do
       @employee.lock!
-      raise Error, "Payroll staff access required to change a worker's status" unless StaffRolePolicy.allowed?(@actor, :manage_employee_status, company: @employee.company)
+      raise Forbidden, "Payroll staff access required to change a worker's status" unless StaffRolePolicy.allowed?(@actor, :manage_employee_status, company: @employee.company)
       raise Error, "Only active workers can be marked inactive" unless @employee.status == "active"
       raise Error, "Inactive date cannot be before the hire date" if @employee.hire_date && effective_date < @employee.hire_date
       raise Error, "Inactive date cannot be before the worker's latest status change" if before_latest_status_event?(effective_date)
@@ -106,7 +107,12 @@ class EmployeeStatusTransitionService
 
     ApplicationRecord.transaction do
       @employee.lock!
-      raise Error, "Payroll staff access required to change a worker's status" unless StaffRolePolicy.allowed?(@actor, :manage_employee_status, company: @employee.company)
+      raise Forbidden, "Payroll staff access required to change a worker's status" unless StaffRolePolicy.allowed?(@actor, :manage_employee_status, company: @employee.company)
+      # Bringing back a terminated worker is a rehire, which stays with
+      # client configuration like termination itself.
+      if @employee.status == "terminated" && !StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
+        raise Forbidden, "A manager or admin can rehire a terminated worker"
+      end
       # Inactive workers (for example, brought over as inactive in a client
       # migration) come back the same way as terminated ones.
       raise Error, "Only inactive or terminated workers can be reactivated" unless REACTIVATABLE_STATUSES.include?(@employee.status)
