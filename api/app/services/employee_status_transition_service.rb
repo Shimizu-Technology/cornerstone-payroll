@@ -40,7 +40,7 @@ class EmployeeStatusTransitionService
   def terminate!(attributes)
     data = attributes.to_h.symbolize_keys
     effective_date = parse_date!(data[:effective_date], "termination date")
-    raise Error, "Termination date cannot be in the future" if effective_date > business_today
+    raise Error, "Termination date cannot be in the future" if effective_date > PayrollBusinessClock.today
     last_worked_on = parse_optional_date!(data[:last_worked_on], "last worked date")
 
     ApplicationRecord.transaction do
@@ -71,7 +71,7 @@ class EmployeeStatusTransitionService
   def deactivate!(attributes)
     data = attributes.to_h.symbolize_keys
     effective_date = parse_date!(data[:effective_date], "inactive date")
-    raise Error, "Inactive date cannot be in the future" if effective_date > business_today
+    raise Error, "Inactive date cannot be in the future" if effective_date > PayrollBusinessClock.today
     last_worked_on = parse_optional_date!(data[:last_worked_on], "last worked date")
 
     ApplicationRecord.transaction do
@@ -102,7 +102,7 @@ class EmployeeStatusTransitionService
   def reactivate!(attributes)
     data = attributes.to_h.symbolize_keys
     effective_date = parse_date!(data[:effective_date], "reactivation date")
-    raise Error, "Reactivation date cannot be in the future" if effective_date > business_today
+    raise Error, "Reactivation date cannot be in the future" if effective_date > PayrollBusinessClock.today
 
     ApplicationRecord.transaction do
       @employee.lock!
@@ -156,10 +156,5 @@ class EmployeeStatusTransitionService
     return nil if value.blank?
 
     parse_date!(value, label)
-  end
-
-  # Staff work in Guam; UTC's date runs a day behind until 10 a.m. there.
-  def business_today
-    Time.find_zone!("Pacific/Guam").today
   end
 end

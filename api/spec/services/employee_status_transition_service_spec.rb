@@ -122,7 +122,7 @@ RSpec.describe EmployeeStatusTransitionService do
     end
 
     it "rejects future and pre-hire dates without changing status" do
-      [ Time.find_zone!("Pacific/Guam").today + 1, Date.new(2023, 12, 31) ].each do |date|
+      [ PayrollBusinessClock.today + 1, Date.new(2023, 12, 31) ].each do |date|
         expect { described_class.deactivate!(employee: employee, actor: actor, attributes: { effective_date: date }) }.to raise_error(described_class::Error)
       end
       expect(employee.reload.status).to eq("active")
