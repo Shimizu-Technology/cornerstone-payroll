@@ -1415,7 +1415,7 @@ export interface PayrollReviewPackage {
   changes_requested_at?: string | null;
   changes_requested_by_name?: string | null;
   change_request_note?: string | null;
-  source_manifest: Record<string, unknown>;
+  source_manifest?: Record<string, unknown>;
   generated_at: string;
   generated_by_name?: string | null;
   approved_at?: string | null;

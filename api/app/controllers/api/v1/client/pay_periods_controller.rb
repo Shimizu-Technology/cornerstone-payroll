@@ -54,17 +54,18 @@ module Api
         end
 
         def preview_pdf
-          pdf = nil
-          package = nil
+          package = current_preview_package!
+          PayrollReview::RevisionService.new(pay_period: @pay_period).verify_current_checksum!(package)
+          pdf = PayrollPreviewPdf.generate(pay_period: @pay_period, company: @pay_period.company, part: params[:part].presence)
           @pay_period.with_lock do
-            raise PayrollReview::RevisionService::Error, "Preview is available only while payroll is approved." unless @pay_period.approved?
+            begin
+              current = current_preview_package!
+              raise PayrollReview::RevisionService::Error, "Revision changed" unless current.id == package.id
 
-            package = @pay_period.payroll_review_packages.current.first
-            unless package && package.published_at && package.id.to_s == params[:revision_id].to_s
-              raise PayrollReview::RevisionService::Error, "This preview revision changed. Reload the pay run."
+              PayrollReview::RevisionService.new(pay_period: @pay_period).verify_current_checksum!(current)
+            rescue PayrollReview::RevisionService::Error
+              return render json: { error: "This payroll changed while the preview was being prepared. Review the latest preview." }, status: :conflict
             end
-            PayrollReview::RevisionService.new(pay_period: @pay_period).verify_current_checksum!(package)
-            pdf = PayrollPreviewPdf.generate(pay_period: @pay_period, company: @pay_period.company, part: params[:part].presence)
             AuditLog.record!(user: current_user, company_id: @pay_period.company_id,
               action: "client_payroll_review#preview_pdf", record_type: "PayrollReviewPackage", record_id: package.id,
               event_category: "document_access", ip_address: request.remote_ip, user_agent: request.user_agent,
@@ -80,6 +81,16 @@ module Api
         end
 
         private
+
+        def current_preview_package!
+          raise PayrollReview::RevisionService::Error, "Preview is available only while payroll is approved." unless @pay_period.approved? && @pay_period.correction_status != "voided"
+
+          package = @pay_period.payroll_review_packages.current.first
+          unless package && package.published_at && package.id.to_s == params[:revision_id].to_s
+            raise PayrollReview::RevisionService::Error, "This preview revision changed. Reload the pay run."
+          end
+          package
+        end
 
         def set_pay_period
           scope = PayPeriod.reportable_periods.where(company_id: current_company_id)
@@ -114,13 +125,14 @@ module Api
 
           json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
           json[:payroll_review] = PayrollReview::PackagePresenter.call(
-            pay_period.payroll_review_packages.current.includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
+            pay_period.payroll_review_packages.summary.current.includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
           )
 
           if include_items
-            json[:payroll_review_history] = pay_period.payroll_review_packages.where.not(sent_for_client_approval_at: nil)
+            json[:payroll_review_history] = pay_period.payroll_review_packages.shared_history
+              .select(PayrollReviewPackage.column_names - %w[calculation_snapshot source_manifest])
               .includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
-              .map { |package| PayrollReview::PackagePresenter.call(package) }
+              .map { |package| PayrollReview::PackagePresenter.call(package, include_source_manifest: false) }
             json[:payroll_items] = items.map do |item|
               {
                 id: item.id,

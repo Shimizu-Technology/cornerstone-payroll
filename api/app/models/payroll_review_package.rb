@@ -38,6 +38,8 @@ class PayrollReviewPackage < ApplicationRecord
   validate :shared_review_history_immutable, on: :update
 
   scope :current, -> { where(superseded_at: nil) }
+  scope :summary, -> { select(column_names - [ "calculation_snapshot" ]) }
+  scope :shared_history, -> { where.not(sent_for_client_approval_at: nil).or(where.not(changes_requested_at: nil)) }
 
   def approved?
     status == "approved"

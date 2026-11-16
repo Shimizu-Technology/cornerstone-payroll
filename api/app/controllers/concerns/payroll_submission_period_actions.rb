@@ -29,7 +29,7 @@ module PayrollSubmissionPeriodActions
   end
 
   def index
-    render json: { data: payroll_catalog.entries.map { |entry| payroll_serializer.summary(entry) },
+    render json: { data: payroll_serializer.summaries(payroll_catalog.entries),
       meta: { derives_from_schedule: payroll_catalog.derives_from_schedule? } }
   end
 

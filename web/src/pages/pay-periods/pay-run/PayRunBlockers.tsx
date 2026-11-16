@@ -56,7 +56,7 @@ export function PayRunBlockers({
             </p>
           </Alert>
         )}
-{part !== 'hours' && payPeriod.payroll_review && (
+{part !== 'hours' && payPeriod.payroll_review && (payPeriod.client_payroll_approval_required || payPeriod.payroll_review.published_at) && (
           <Alert tone={payPeriod.payroll_review.status === 'approved' ? 'success' : 'warning'} className={payPeriod.payroll_review.status === 'approved' ? 'border-success-200 bg-success-50/70' : 'border-warning-200 bg-warning-50/70'}>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-start gap-3">
@@ -65,7 +65,7 @@ export function PayRunBlockers({
                 </div>
                 <div>
                   <p className="font-semibold text-neutral-950">
-                    Client review revision {payPeriod.payroll_review.revision} · {payPeriod.payroll_review.status === 'approved' ? 'Approved' : payPeriod.payroll_review.status === 'changes_requested' ? 'Changes requested' : payPeriod.status === 'approved' ? 'Awaiting client review' : 'Approve payroll to publish preview'}
+                    Client review revision {payPeriod.payroll_review.revision} · {payPeriod.payroll_review.status === 'approved' ? 'Approved' : payPeriod.payroll_review.status === 'changes_requested' ? 'Changes requested' : payPeriod.status === 'committed' ? 'Payroll finalized' : payPeriod.status === 'approved' ? 'Awaiting client review' : 'Approve payroll to publish preview'}
                   </p>
                   <p className="mt-1 text-sm leading-6 text-neutral-700">
                     Review ID <span className="font-mono font-semibold">{payPeriod.payroll_review.checksum_short}</span>. This ID changes whenever payroll inputs, source evidence, or calculation results change.
@@ -81,7 +81,7 @@ export function PayRunBlockers({
                       Approved by {payPeriod.payroll_review.approved_by_name} via {payPeriod.payroll_review.approval_method === 'client_portal' ? 'client portal' : 'email attestation'}.
                     </p>
                   ) : (
-                    <p className="mt-1 text-sm text-warning-900">{payPeriod.status === 'approved' ? 'The preview is available in the client portal. Client approval is required before commit when enabled for this client.' : 'Staff approval publishes the preview for the client to review.'}</p>
+                    <p className="mt-1 text-sm text-warning-900">{payPeriod.status === 'committed' ? 'Payroll is finalized. This review is retained as history.' : payPeriod.status === 'approved' ? 'The preview is available in the client portal. Client approval is required before commit when enabled for this client.' : 'Staff approval publishes the preview for the client to review.'}</p>
                   )}
                 </div>
               </div>

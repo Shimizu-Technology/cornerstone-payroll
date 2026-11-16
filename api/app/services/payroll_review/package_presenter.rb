@@ -2,7 +2,7 @@
 
 module PayrollReview
   class PackagePresenter
-    def self.call(review_package)
+    def self.call(review_package, include_source_manifest: true)
       return nil unless review_package
 
       {
@@ -18,7 +18,6 @@ module PayrollReview
         changes_requested_at: review_package.changes_requested_at,
         changes_requested_by_name: review_package.changes_requested_by&.name,
         change_request_note: review_package.change_request_note,
-        source_manifest: review_package.source_manifest,
         generated_at: review_package.generated_at,
         generated_by_name: review_package.generated_by&.name,
         approved_at: review_package.approved_at,
@@ -29,7 +28,9 @@ module PayrollReview
         approval_notes: review_package.approval_notes,
         approval_evidence_reference: review_package.approval_evidence_reference,
         acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
-      }
+      }.tap do |payload|
+        payload[:source_manifest] = review_package.source_manifest if include_source_manifest
+      end
     end
   end
 end

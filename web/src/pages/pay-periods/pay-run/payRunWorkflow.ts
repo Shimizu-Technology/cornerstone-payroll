@@ -1,3 +1,4 @@
+import { payrollClientCommitReason } from '@/lib/payrollClientCommitReason';
 import type { PayPeriod } from '@/types';
 
 // Disclosure state is deliberately separate from progress. Only saved payroll
@@ -12,6 +13,6 @@ export function payRunSteps(period: PayPeriod) {
       : period.run_purpose !== 'regular'
         ? 'Hours and pay for selected employees only; regular-period hours are not added automatically.'
         : period.time_tracking?.aire_calendar?.enabled ? 'Review source hours and any held entries before calculating.' : 'Enter hours and pay, then calculate payroll.',
-    commitReason: period.status === 'approved' && period.payroll_review?.status === 'changes_requested' ? 'Unapprove to make the changes requested by the client.' : period.status === 'approved' && period.client_payroll_approval_required && period.payroll_review?.status !== 'approved' ? 'Awaiting client approval of this preview revision.' : period.parallel_run ? 'Parallel comparison · cannot commit.' : period.status === 'draft' ? 'Calculate payroll and review the results first.' : period.status === 'calculated' ? 'Approve the reviewed results before commitment.' : '',
+    commitReason: period.status === 'approved' && payrollClientCommitReason(period) ? payrollClientCommitReason(period) : period.parallel_run ? 'Parallel comparison · cannot commit.' : period.status === 'draft' ? 'Calculate payroll and review the results first.' : period.status === 'calculated' ? 'Approve the reviewed results before commitment.' : '',
   };
 }

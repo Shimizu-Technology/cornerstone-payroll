@@ -14,6 +14,7 @@ function payrollReview(status: 'pending' | 'approved'): Record<string, unknown> 
     calculation_checksum: 'a'.repeat(64),
     checksum_short: 'aaaaaaaaaaaa',
     status,
+    published_at: '2026-09-13T01:30:00Z',
     source_manifest: {},
     generated_at: '2026-09-13T01:00:00Z',
     generated_by_name: 'Cornerstone Payroll',
@@ -35,7 +36,7 @@ function payPeriod(status: 'pending' | 'approved'): Record<string, unknown> {
     start_date: '2026-08-16',
     end_date: '2026-08-31',
     pay_date: '2026-09-05',
-    status: 'calculated',
+    status: 'approved',
     run_purpose: 'regular',
     includes_base_salary: true,
     includes_recurring_items: true,
@@ -102,37 +103,39 @@ async function mockClientShell(page: Page): Promise<void> {
 test('client reviews complex payroll and explicitly approves the exact calculation revision', async ({ page }): Promise<void> => {
   await mockClientShell(page);
   let approvalPayload: Record<string, unknown> | null = null;
+  let approved = false;
 
   await page.route('**/api/v1/client/pay_periods/702**', async (route): Promise<void> => {
     if (route.request().method() === 'POST') {
       approvalPayload = route.request().postDataJSON() as Record<string, unknown>;
+      approved = true;
       await fulfillJson(route, { payroll_review: payrollReview('approved') });
       return;
     }
-    await fulfillJson(route, { pay_period: payPeriod('pending') });
+    await fulfillJson(route, { pay_period: payPeriod(approved ? 'approved' : 'pending') });
   });
 
   await page.goto('/companies/1/pay-runs/702/overview');
 
-  await expect(page.getByRole('heading', { name: 'Payroll review revision 3' })).toBeVisible();
-  await expect(page.getByText('Review ID aaaaaaaaaaaa')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Review preview' })).toBeVisible();
+  await expect(page.getByText(/Revision 3 · Review ID aaaaaaaaaaaa/)).toBeVisible();
   const payrollTable = page.getByRole('table');
   await expect(payrollTable.getByText('Mo Example')).toBeVisible();
   await expect(payrollTable.getByText('Sara Example')).toBeVisible();
   await expect(payrollTable.getByRole('columnheader', { name: 'Retirement' })).toBeVisible();
   await expect(payrollTable.getByRole('columnheader', { name: 'Loans' })).toBeVisible();
 
-  const approveButton = page.getByRole('button', { name: 'Approve This Exact Revision' });
+  const approveButton = page.getByRole('button', { name: 'Approve this revision' });
   await expect(approveButton).toBeDisabled();
-  await page.getByPlaceholder('Optional: add a note for Cornerstone about this payroll.').fill('Looks correct.');
+  await page.getByLabel('Note for Cornerstone (required to request changes)').fill('Looks correct.');
   await page.getByRole('checkbox').check();
   const approvalResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes('/api/v1/client/pay_periods/702/approve_review'));
   await approveButton.click();
   await approvalResponse;
 
-  expect(approvalPayload).toEqual({ acknowledgement, notes: 'Looks correct.' });
-  await expect(page.getByText('Approved by MoSa Approver. Cornerstone may now complete its payroll review.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Approve This Exact Revision' })).toHaveCount(0);
+  expect(approvalPayload).toEqual({ revision_id: 91, acknowledgement, notes: 'Looks correct.' });
+  await expect(page.getByText('Revision 3 approved by MoSa Approver. Cornerstone has been notified.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve this revision' })).toHaveCount(0);
 });
 
 test('client can find and review every payroll amount on a narrow phone before approval', async ({ page }, testInfo): Promise<void> => {
@@ -142,22 +145,33 @@ test('client can find and review every payroll amount on a narrow phone before a
     pay_periods: [{
       key: 'native-702', id: 702, record_type: 'native', start_date: '2026-08-16', end_date: '2026-08-31',
       pay_date: '2026-09-05', employee_count: 2, total_gross: '6500.00', total_net: '4890.00',
-      status: 'calculated', source: { label: 'Cornerstone', detail: 'Cornerstone payroll' },
+      status: 'approved', source: { label: 'Cornerstone', detail: 'Cornerstone payroll' },
     }],
   }));
-  await page.route('**/api/v1/client/pay_periods/702**', (route) => fulfillJson(route, { pay_period: payPeriod('pending') }));
+  let approved = false;
+  let approvalPayload: Record<string, unknown> | null = null;
+  await page.route('**/api/v1/client/pay_periods/702**', async route => {
+    if (route.request().method() === 'POST') {
+      approvalPayload = route.request().postDataJSON() as Record<string, unknown>;
+      approved = true;
+      await fulfillJson(route, { payroll_review: payrollReview('approved') });
+    } else await fulfillJson(route, { pay_period: payPeriod(approved ? 'approved' : 'pending') });
+  });
 
   await page.goto('/companies/1/pay-runs');
-  await page.getByRole('button', { name: 'Review & Approve' }).click();
+  await page.getByRole('button', { name: 'View Payroll' }).click();
 
   const mobileDetails = page.locator('[aria-label="Employee payroll details"]');
   await expect(mobileDetails.getByText('Mo Example')).toBeVisible();
   await expect(mobileDetails.getByText('$2,649.00')).toBeVisible();
   await expect(mobileDetails.getByText('Loans').first()).toBeVisible();
   await expect(mobileDetails.getByText('Insurance').first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Approve This Exact Revision' })).toBeDisabled();
+  for (const amount of ['$4,000.00', '$926.00', '$200.00', '$150.00', '$75.00', '$1,351.00', '$2,649.00', '$2,500.00', '$541.25', '$125.00', '$666.25', '$1,833.75']) {
+    await expect(mobileDetails.getByText(amount, { exact: true }).first()).toBeVisible();
+  }
+  await expect(page.getByRole('button', { name: 'Approve this revision' })).toBeDisabled();
   const detailsBottom = await mobileDetails.evaluate((node) => node.getBoundingClientRect().bottom + window.scrollY);
-  const approvalTop = await page.getByRole('heading', { name: 'Payroll review revision 3' }).evaluate((node) => node.getBoundingClientRect().top + window.scrollY);
+  const approvalTop = await page.getByRole('heading', { name: 'Review preview' }).evaluate((node) => node.getBoundingClientRect().top + window.scrollY);
   expect(approvalTop).toBeGreaterThan(detailsBottom);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await mobileDetails.getByText('Mo Example').scrollIntoViewIfNeeded();
@@ -167,4 +181,9 @@ test('client can find and review every payroll amount on a narrow phone before a
     await expect(mobileDetails.getByText('Mo Example')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
+  await page.getByLabel('Note for Cornerstone (required to request changes)').fill('Reviewed every amount.');
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Approve this revision' }).click();
+  await expect(page.getByText('Revision 3 approved by MoSa Approver. Cornerstone has been notified.')).toBeVisible();
+  expect(approvalPayload).toEqual({ revision_id: 91, acknowledgement, notes: 'Reviewed every amount.' });
 });

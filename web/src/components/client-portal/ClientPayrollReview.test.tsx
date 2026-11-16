@@ -10,7 +10,7 @@ const period = { id: 5, status: 'approved', total_gross: 1200, total_net: 1100,
   payroll_review: { id: 11, revision: 2, status: 'pending', published_at: '2026-11-17T00:00:00Z', checksum_short: 'abc123', acknowledgement: 'I approve this exact payroll review revision for processing.' },
 } as PayPeriod;
 const onDone = vi.fn();
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => { vi.resetAllMocks(); });
 afterEach(cleanup);
 it('requires acknowledgement for approval and binds it to the displayed revision', async () => {
   render(<ClientPayrollReview payPeriod={period} companyId={3} onDone={onDone} />);
@@ -39,4 +39,19 @@ it('offers the audited current preview and keeps a prior request visible in hist
   fireEvent.click(screen.getByRole('button', { name: 'View preview' }));
   await waitFor(() => expect(clientPayPeriodsApi.previewPdf).toHaveBeenCalledWith(5, 3, 11));
   expect(screen.getByText('Earlier request')).toBeTruthy();
+});
+
+it.each(['approve', 'changes', 'preview'])('reloads stale %s and asks for a fresh review while retaining the note', async action => {
+  const stale = Object.assign(new Error('Revision changed'), { status: 422 });
+  vi.mocked(clientPayPeriodsApi.approveReview).mockRejectedValueOnce(stale);
+  vi.mocked(clientPayPeriodsApi.requestChanges).mockRejectedValueOnce(stale);
+  vi.mocked(clientPayPeriodsApi.previewPdf).mockRejectedValueOnce(stale);
+  render(<ClientPayrollReview payPeriod={period} companyId={3} onDone={onDone} />);
+  fireEvent.change(screen.getByLabelText('Note for Cornerstone (required to request changes)'), { target: { value: 'Add two hours' } });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: action === 'approve' ? 'Approve this revision' : action === 'changes' ? 'Request changes' : 'View preview' }));
+  expect(await screen.findByText('This payroll was updated. Review the latest preview.')).toBeTruthy();
+  await waitFor(() => expect(onDone).toHaveBeenCalledOnce());
+  expect(screen.getByRole('checkbox')).toHaveProperty('checked', false);
+  expect(screen.getByLabelText('Note for Cornerstone (required to request changes)')).toHaveProperty('value', 'Add two hours');
 });

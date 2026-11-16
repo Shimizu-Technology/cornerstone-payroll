@@ -59,6 +59,8 @@ module PayrollReview
     # Called inside the lifecycle transaction, after staff approval. Legacy
     # approved runs can be explicitly republished without changing their pay.
     def publish!
+      return unless Company.find(pay_period.company_id).client_payroll_approval_required?
+
       raise Error, "Only approved payroll can be published." unless pay_period.approved?
       package = pay_period.payroll_review_packages.current.first
       if package&.approved? && !package.published_at
@@ -132,9 +134,12 @@ module PayrollReview
     end
 
     def verify_required_approval!
+      review_package = pay_period.payroll_review_packages.current.includes(:changes_requested_by).order(revision: :desc).first
+      if review_package&.changes_requested_at
+        raise Error, "#{review_package.changes_requested_by&.name || 'Client'} requested changes: #{review_package.change_request_note}. Unapprove to make changes."
+      end
       return true unless Company.find(pay_period.company_id).client_payroll_approval_required?
 
-      review_package = pay_period.payroll_review_packages.current.order(revision: :desc).first
       raise Error, "Generate the current client payroll review revision before commit." unless review_package
       raise Error, "Client approval is still required for payroll review revision #{review_package.revision}." unless review_package.approved? && review_package.published_at
 
@@ -185,8 +190,14 @@ module PayrollReview
     end
 
     def notify!(package, event, decision: nil)
-      PortalNotifications.record!(event_type: event, company: pay_period.company, actor: actor, subject: pay_period,
-        dedupe_key: "#{event}:#{package.id}", metadata: { pay_period_id: pay_period.id, revision: package.revision, decision: decision }.compact)
+      # A savepoint prevents notification failures (including SQL errors) from
+      # aborting the financial transaction or leaving a partial delivery ledger.
+      ApplicationRecord.transaction(requires_new: true) do
+        PortalNotifications.record!(event_type: event, company: pay_period.company, actor: actor, subject: pay_period,
+          dedupe_key: "#{event}:#{package.id}", metadata: { pay_period_id: pay_period.id, revision: package.revision, decision: decision }.compact)
+      end
+    rescue StandardError => e
+      Rails.logger.error("Payroll review notification failed: package=#{package.id} event=#{event} error=#{e.class}")
     end
 
     def validate_approver!(approver)

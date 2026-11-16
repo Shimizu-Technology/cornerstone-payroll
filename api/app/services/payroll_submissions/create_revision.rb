@@ -67,7 +67,7 @@ module PayrollSubmissions
           outcome = :replayed
           raise ActiveRecord::Rollback
         end
-        raise PayrollSubmissionPeriod::TransitionError, "This period is paid. Send any correction as a message." if period.status == "paid" || run&.client_finished?
+        raise PayrollSubmissionPeriod::TransitionError, "This period is paid. Send any correction as a message." if run ? run.client_finished? : period.status == "paid"
 
         latest = period.submissions.reload.first
         if latest && latest.content_fingerprint == content
