@@ -109,13 +109,21 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
       expect(response).to have_http_status(:forbidden)
     end
 
-    it "denies managers, accountants without Client management and client users" do
-      manager = create(:user, company: company, role: "manager")
+    it "allows managers" do
+      act_as(create(:user, company: company, role: "manager"))
+
+      get path, headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      save(emails: [ "manager@example.test" ])
+      expect(response).to have_http_status(:ok), response.body
+    end
+
+    it "denies accountants without Client management and client users" do
       accountant = create(:user, company: company, role: "accountant")
       create(:company_assignment, user: accountant, company: company)
       client = create(:user, company: company, role: "client")
 
-      [ manager, accountant, client ].each do |user|
+      [ accountant, client ].each do |user|
         act_as(user)
         get path, headers: headers
         expect(response).to have_http_status(:forbidden)

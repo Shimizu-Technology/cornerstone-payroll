@@ -407,7 +407,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
 
         {canViewClientManagement && (
           <>
-            <SectionDivider icon={<Shield className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Administration" collapsed={collapsed} />
+            <SectionDivider icon={<Shield className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label={isAdmin ? 'Administration' : 'Clients'} collapsed={collapsed} />
             <div className="space-y-1.5">
               {isSuperAdmin && (
                 <NavSection items={platformNavigation} collapsed={collapsed} onNavigate={onNavigate} />
