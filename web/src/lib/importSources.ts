@@ -31,3 +31,14 @@ export function carryRowOutcomes(previous: MosaSourceRow[], next: MosaSourceRow[
     return { ...row, disposition: kept.disposition, disposition_reason: kept.disposition_reason, target_pay_period_id: kept.target_pay_period_id };
   });
 }
+
+// SHA-256 of a chosen file, to tell whether it is the same file an import
+// already holds. Null when the browser cannot hash it.
+export async function fileSha256(file: File): Promise<string | null> {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+}

@@ -1580,7 +1580,8 @@ export const payPeriodsApi = {
     id: number,
     pdfFile?: File,
     excelFile?: File,
-    tipsPaidOutFromTips = false,
+    // Omit when the upload step's tip fallback was not offered (adding a file from the review).
+    tipsPaidOutFromTips: boolean | undefined = false,
     replacement?: { supersedesPackageId: string; reason: string },
     submissionId?: number,
   ): Promise<ImportPreviewResponse> => {
@@ -1588,7 +1589,7 @@ export const payPeriodsApi = {
     if (pdfFile) formData.append('pdf_file', pdfFile);
     if (submissionId) formData.append('use_submission_id', String(submissionId));
     if (excelFile) formData.append('excel_file', excelFile);
-    formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
+    if (tipsPaidOutFromTips !== undefined) formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
     if (replacement?.supersedesPackageId) formData.append('supersedes_package_id', replacement.supersedesPackageId);
     if (replacement?.reason) formData.append('supersession_reason', replacement.reason);
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
@@ -1603,6 +1604,12 @@ export const payPeriodsApi = {
     api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
   currentImport: (id: number): Promise<ImportPreviewResponse> =>
     api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
+  // Takes one file out of an import still in review; the reason is recorded on the new version.
+  removeImportSource: (id: number, sourceRole: string, reason: string): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/remove_import_source`, { source_role: sourceRole, reason }),
+  // Saves how the tips in an older MoSa workbook were paid; apply uses only the saved choice.
+  saveImportTipTreatment: (id: number, importId: number, tipsPaidOutFromTips: boolean): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/import_tip_treatment`, { import_id: importId, tips_paid_out_from_tips: tipsPaidOutFromTips }),
   applyImport: (
     id: number,
     data: {
@@ -2224,6 +2231,8 @@ export interface ImportPreviewResponse {
     matched_count: number;
     can_apply: boolean;
     tips_paid_out_from_tips: boolean;
+    // True once a tip choice is saved for an older MoSa workbook (at upload or in the review).
+    tip_treatment_confirmed?: boolean;
     source_warnings?: { code: string; message: string; severity: string }[];
     source_rows: MosaSourceRow[];
   };

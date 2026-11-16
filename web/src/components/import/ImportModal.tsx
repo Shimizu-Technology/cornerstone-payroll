@@ -25,7 +25,7 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
 import { cn, formatCurrency } from '@/lib/utils';
-import { carryRowOutcomes, defaultDisposition, importSourceFiles, MOSA_SOURCE_ACCEPT } from '@/lib/importSources';
+import { carryRowOutcomes, defaultDisposition, fileSha256, importSourceFiles, MOSA_SOURCE_ACCEPT } from '@/lib/importSources';
 import { ImportSourcePanel } from './ImportSourcePanel';
 import { ImportSourceChecklist } from './ImportSourceChecklist';
 import { ApiError, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
@@ -74,6 +74,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [confirmHoursOverwrite, setConfirmHoursOverwrite] = useState(false);
   const [noTipsOrLoans, setNoTipsOrLoans] = useState(false);
   const [addingSource, setAddingSource] = useState(false);
+  const [savingTips, setSavingTips] = useState(false);
+  // Fingerprints of the chosen files, to spot files the open import already holds.
+  const [chosenDigests, setChosenDigests] = useState<Record<string, { file: File; sha256: string | null }>>({});
   const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
   const [templateDownloading, setTemplateDownloading] = useState(false);
   const [currentPackage, setCurrentPackage] = useState<PayrollIntakeImportData | null>(null);
@@ -109,6 +112,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setConfirmHoursOverwrite(false);
     setNoTipsOrLoans(false);
     setAddingSource(false);
+    setSavingTips(false);
+    setChosenDigests({});
     setResults(null);
     setTemplateDownloading(false);
     setCurrentPackage(null);
@@ -135,6 +140,18 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     });
     return () => { active = false; };
   }, [open, payPeriodId, setError]);
+
+  useEffect(() => {
+    let active = true;
+    const chosen = [['revel_hours', pdfFile], ['supplemental_workbook', excelFile]] as const;
+    chosen.forEach(([role, file]) => {
+      if (!file) return;
+      void fileSha256(file).then((sha256) => {
+        if (active) setChosenDigests((current) => ({ ...current, [role]: { file, sha256 } }));
+      });
+    });
+    return () => { active = false; };
+  }, [pdfFile, excelFile]);
 
   const handleDownloadTemplate = async () => {
     try {
@@ -282,15 +299,22 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   const handlePreview = async (submissionId?: number) => {
     if (!pdfFile && !excelFile) return;
+    // The open import already holds exactly these files: reopen its review.
+    if (!submissionId && reopensCurrent) {
+      await handleResumeCurrent();
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
       setReviewedSuggestedMatches(false);
       setReviewedOverwrite(false);
+      // Files the open import already holds are kept by the server; send only the new ones.
+      const send = (role: string, file: File | null) => (file && !(currentOpen && sameRoles.includes(role)) ? file : undefined);
       const data = await payPeriodsApi.previewImport(
         payPeriodId,
-        pdfFile || undefined,
-        excelFile || undefined,
+        send('revel_hours', pdfFile),
+        send('supplemental_workbook', excelFile),
         tipsPaidOutFromTips,
         currentPackage && replacing
           ? { supersedesPackageId: currentPackage.package_id, reason: replacementReason.trim() }
@@ -328,7 +352,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         payPeriodId,
         role === 'revel_hours' ? file : undefined,
         role === 'supplemental_workbook' ? file : undefined,
-        previewData.preview.tips_paid_out_from_tips,
+        // No tip fallback is offered here: a workbook added from the review gets
+        // its own choice, and one already saved for the same workbook is kept.
+        undefined,
       );
       openPreview(data, previousRows);
       onSourcePreviewed?.();
@@ -338,6 +364,44 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     } finally {
       setLoading(false);
       setAddingSource(false);
+    }
+  };
+
+  // Take a file out of the open import, for example a workbook added by
+  // mistake. The other files are kept and outcomes chosen so far are kept.
+  const removeSourceFile = async (role: string, reason: string) => {
+    if (!previewData || loading) return false;
+    const previousRows = sourceRows;
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await payPeriodsApi.removeImportSource(payPeriodId, role, reason);
+      openPreview(data, previousRows);
+      if (role === 'supplemental_workbook') setNoTipsOrLoans(false);
+      onSourcePreviewed?.();
+      void refreshCurrentPackage();
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove the file');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // The choice is saved on the review so apply uses exactly what was shown.
+  const saveTipTreatment = async (paid: boolean) => {
+    if (!previewData || savingTips) return;
+    try {
+      setSavingTips(true);
+      setError(null);
+      const data = await payPeriodsApi.saveImportTipTreatment(payPeriodId, previewData.import_id, paid);
+      setPreviewData(data);
+      setTipsPaidOutFromTips(data.preview.tips_paid_out_from_tips);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the tip choice');
+    } finally {
+      setSavingTips(false);
     }
   };
 
@@ -433,6 +497,13 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const clientWaivedSources = (previewData?.portal_source || (usePendingRevision ? previewData?.pending_portal_source : null))?.workbook_choice === 'none';
   const missingSources = packageSources.filter((source) => source.required && !source.present
     && !(source.waiver_label && (noTipsOrLoans || clientWaivedSources)));
+  // An older MoSa workbook has no per-person tip treatment, so staff choose it here,
+  // including when the workbook was added after the first upload.
+  const legacyWorkbook = Boolean(previewData?.preview.source_warnings?.some((warning) => warning.code === 'legacy_mosa_workbook'));
+  const reviewTipsPaid = legacyWorkbook && !previewData?.preview.tip_treatment_confirmed ? null : Boolean(previewData?.preview.tips_paid_out_from_tips);
+  const tipChoiceMissing = legacyWorkbook && reviewTipsPaid === null;
+  const canRemoveSources = Boolean(previewData && !previewData.portal_source && previewData.source_package.current !== false
+    && packageSources.filter((source) => source.present).length > 1);
   const canApply = Boolean(
     previewData
       && !loading
@@ -446,14 +517,29 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       && (overwriteRows.length === 0 || reviewedOverwrite)
       && (handEditedRows.length === 0 || confirmHoursOverwrite)
       && missingSources.length === 0
+      && !tipChoiceMissing
+      && !savingTips
       && (suggestedMatchCount === 0 || reviewedSuggestedMatches),
   );
   // Upload step: which files the current package already has, and whether the
   // chosen files only add what is missing or replace something received.
   const currentRoles = new Set<string>((currentPackage?.documents || []).filter((document) => document.verification_status !== 'legacy_unverified').map((document) => document.source_role));
   const currentOpen = Boolean(currentPackage && ['previewed', 'reviewed'].includes(currentPackage.status));
-  const chosenRoles = [pdfFile ? 'revel_hours' : null, excelFile ? 'supplemental_workbook' : null].filter((role): role is string => role !== null);
-  const replacing = Boolean(currentPackage) && chosenRoles.length > 0 && (!currentOpen || chosenRoles.some((role) => currentRoles.has(role)));
+  const chosenFiles = ([['revel_hours', pdfFile], ['supplemental_workbook', excelFile]] as const)
+    .flatMap(([role, file]) => (file ? [{ role: role as string, file }] : []));
+  const chosenRoles = chosenFiles.map((chosen) => chosen.role);
+  const retainedDocument = (role: string) => (currentPackage?.documents || []).find((document) => document.source_role === role && document.verification_status !== 'legacy_unverified');
+  const chosenDigest = (role: string, file: File) => (chosenDigests[role]?.file === file ? chosenDigests[role].sha256 : undefined);
+  // Wait for the fingerprint only when the open import has a file in that slot to compare with.
+  const checkingFiles = currentOpen && chosenFiles.some(({ role, file }) => retainedDocument(role)?.sha256 && chosenDigest(role, file) === undefined);
+  // Chosen files the open import already holds byte for byte, such as after Back.
+  const sameRoles = currentOpen ? chosenFiles.filter(({ role, file }) => {
+    const sha256 = retainedDocument(role)?.sha256;
+    return Boolean(sha256) && chosenDigest(role, file) === sha256;
+  }).map(({ role }) => role) : [];
+  const newRoles = chosenRoles.filter((role) => !sameRoles.includes(role));
+  const reopensCurrent = currentOpen && chosenRoles.length > 0 && newRoles.length === 0;
+  const replacing = Boolean(currentPackage) && newRoles.length > 0 && (!currentOpen || newRoles.some((role) => currentRoles.has(role)));
   const replacementReady = !replacing || replacementReason.trim().length > 0;
 
   // What still blocks Apply, in plain words, with a way to jump to each item. The long
@@ -479,6 +565,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     const labels = missingSources.map((source) => source.label).join(' and ');
     const waivable = missingSources.every((source) => source.waiver_label);
     attention.push({ key: 'sources', label: waivable ? `Add the ${labels}, or confirm there are none` : `Add the ${labels}`, reason: `the ${labels} ${missingSources.length === 1 ? 'is' : 'are'} missing`, jump: () => jumpToSection('sources') });
+  }
+  if (tipChoiceMissing) {
+    attention.push({ key: 'tips', label: 'Choose how the workbook’s tips were paid', reason: 'how the older workbook’s tips were paid is not chosen', jump: () => jumpToSection('tip-treatment') });
   }
   if (clientChanges.length && (!reviewedClientChanges || clientChangesInvalid)) {
     attention.push({ key: 'client-changes', label: 'Review the client’s amounts and hours', reason: 'client changes need confirmation', jump: () => jumpToSection('client-changes') });
@@ -703,7 +792,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                         <div className="min-w-0 flex-1">
                           <label htmlFor={`import-source-${picker.role}`} className="block font-medium text-neutral-950">{picker.label}</label>
                           <p className="mt-0.5 break-all text-xs text-neutral-700">
-                            {chosen ? `Selected: ${chosen.name}` : kept ? `In import version ${currentPackage?.package_revision}: ${kept.filename}` : 'Not added yet'}
+                            {chosen
+                              ? `Selected: ${chosen.name}${sameRoles.includes(picker.role) ? ` · already in import version ${currentPackage?.package_revision}` : ''}`
+                              : kept ? `In import version ${currentPackage?.package_revision}: ${kept.filename}` : 'Not added yet'}
                           </p>
                           <input
                             id={`import-source-${picker.role}`}
@@ -730,7 +821,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950">
                 <p className="text-sm font-semibold">
                   {currentOpen
-                    ? `This replaces the ${SOURCE_PICKERS.filter((picker) => chosenRoles.includes(picker.role) && currentRoles.has(picker.role)).map((picker) => picker.label).join(' and ')} in import version ${currentPackage.package_revision}.`
+                    ? `This replaces the ${SOURCE_PICKERS.filter((picker) => newRoles.includes(picker.role) && currentRoles.has(picker.role)).map((picker) => picker.label).join(' and ')} in import version ${currentPackage.package_revision}.`
                     : `Import version ${currentPackage.package_revision} was already applied. These files make a corrected version.`}
                 </p>
                 <Input
@@ -772,6 +863,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 sources={packageSources}
                 summary={`Import version ${previewData.source_package.package_revision} · reference ${previewData.source_package.package_id.slice(0, 8)} · ${previewData.source_package.verified_source_count} of ${previewData.source_package.source_count} file${previewData.source_package.source_count === 1 ? '' : 's'} retained and verified`}
                 onAdd={previewData.portal_source ? undefined : (role, file) => void addSourceFile(role, file)}
+                onRemove={canRemoveSources ? removeSourceFile : undefined}
                 busy={addingSource}
                 waived={noTipsOrLoans}
                 onWaivedChange={setNoTipsOrLoans}
@@ -799,6 +891,24 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 {warning.message}
               </div>
             ))}
+            {legacyWorkbook && (
+              <fieldset data-attention="tip-treatment" tabIndex={-1} className={cn('rounded-lg border p-3 text-sm', tipChoiceMissing ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-neutral-200 bg-white text-neutral-900')}>
+                <legend className="sr-only">Tips in this older MoSa workbook</legend>
+                <p className="font-semibold">Were the tips in this older MoSa workbook already paid out daily?</p>
+                <p className="mt-0.5 text-neutral-700">This workbook doesn’t say per person, so one choice covers everyone in it. Choose before applying.</p>
+                <div className="mt-2 flex flex-col gap-1 sm:flex-row sm:gap-6">
+                  <label className="flex min-h-11 items-center gap-2">
+                    <input type="radio" name="review-tips-paid" className="h-4 w-4 shrink-0" checked={reviewTipsPaid === true} disabled={savingTips || loading} onChange={() => void saveTipTreatment(true)} />
+                    Yes, already paid daily — offset them from the checks
+                  </label>
+                  <label className="flex min-h-11 items-center gap-2">
+                    <input type="radio" name="review-tips-paid" className="h-4 w-4 shrink-0" checked={reviewTipsPaid === false} disabled={savingTips || loading} onChange={() => void saveTipTreatment(false)} />
+                    No, not paid yet — pay them in the checks
+                  </label>
+                </div>
+                {savingTips && <p role="status" className="mt-1 text-neutral-700">Saving…</p>}
+              </fieldset>
+            )}
             {ownerPayError && missingPeriodPay.length === 0 && (
               <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 pb-4 pt-1 text-sm">{ownerPayFeedback}</div>
             )}
@@ -1102,9 +1212,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             <div className="space-y-3 text-sm text-neutral-500">
               <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-neutral-700">
                 <span className="font-medium">Tip treatment reviewed with these files:</span>{' '}
-                {previewData.preview.tips_paid_out_from_tips
-                  ? 'Tips were already paid daily and will offset employee checks.'
-                  : 'Tips were not already paid daily and will remain in employee checks.'}
+                {reviewTipsPaid === null
+                  ? 'Not chosen yet.'
+                  : reviewTipsPaid
+                    ? 'Tips were already paid daily and will offset employee checks.'
+                    : 'Tips were not already paid daily and will remain in employee checks.'}
               </div>
               <p>
                 {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {reviewedEmployeeCount} to import
@@ -1156,8 +1268,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             {step === 'upload' && (
               <>
                 <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
-                <Button onClick={() => void handlePreview()} disabled={(!pdfFile && !excelFile) || loading || !replacementReady}>
-                  {loading ? 'Parsing...' : currentOpen && chosenRoles.length > 0 && !replacing ? `Add to import version ${currentPackage?.package_revision}` : 'Preview Import'}
+                <Button onClick={() => void handlePreview()} disabled={(!pdfFile && !excelFile) || loading || checkingFiles || !replacementReady}>
+                  {loading ? 'Parsing...' : checkingFiles ? 'Checking files…' : currentOpen && newRoles.length > 0 && !replacing ? `Add to import version ${currentPackage?.package_revision}` : 'Preview Import'}
                 </Button>
               </>
             )}
