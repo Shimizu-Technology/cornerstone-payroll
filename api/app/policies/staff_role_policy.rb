@@ -21,7 +21,10 @@ class StaffRolePolicy
     # Lock now or move an AIRE pay period's lock time. Deliberately narrower
     # than client configuration: platform and organization admins only.
     manage_time_tracking_lock: %w[super_admin org_admin],
-    manage_client_administration: %w[super_admin org_admin admin],
+    manage_client_administration: %w[super_admin org_admin admin manager],
+    # Mark a worker inactive or bring an inactive or terminated worker back.
+    # Termination stays on client configuration.
+    manage_employee_status: %w[super_admin org_admin admin manager accountant],
     manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
     manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
     manage_organization: %w[super_admin org_admin admin],
@@ -43,7 +46,8 @@ class StaffRolePolicy
     view_audit_history: "Admin or accountant access required",
     manage_client_configuration: "Manager, admin, or Client management access required",
     manage_time_tracking_lock: "Only organization admins can change the time tracking lock time",
-    manage_client_administration: "Admin access required or Client management for this client",
+    manage_client_administration: "Manager or admin access required, or Client management for this client",
+    manage_employee_status: "Payroll staff access required to change a worker's status",
     manage_own_aire_account_link: "Payroll staff access required to connect your own AIRE account",
     manage_historical_time_reconciliation: "Historical time reconciliation access required",
     manage_organization: "Admin access required",
@@ -178,7 +182,8 @@ class StaffRolePolicy
     "api/v1/admin/reports#w2_gu_mark_ready" => :manage_client_administration,
     "api/v1/admin/employees#review_intake_exception" => :manage_client_configuration,
     "api/v1/admin/employees#terminate" => :manage_client_configuration,
-    "api/v1/admin/employees#reactivate" => :manage_client_configuration,
+    "api/v1/admin/employees#deactivate" => :manage_employee_status,
+    "api/v1/admin/employees#reactivate" => :manage_employee_status,
     "api/v1/admin/employees#transition_tax_classification" => :manage_platform,
     "api/v1/admin/employee_work_profiles#create" => :manage_client_configuration,
     "api/v1/admin/historical_imports#preview" => :manage_client_configuration,
