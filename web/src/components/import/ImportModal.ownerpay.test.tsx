@@ -241,10 +241,11 @@ it('fills per-owner boxes from client changes, permits edits and requires explic
   expect((screen.getByLabelText('Extra hours for Avery Server') as HTMLInputElement).value).toBe('68');
   expect(applyButton().disabled).toBe(true);
   fireEvent.change(ownerInput(), { target: { value: '8421.12' } });
+  fireEvent.change(screen.getByLabelText("Reason for changing Monique Owner's entry"), { target: { value: 'Client confirmed correction' } });
   fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
   expect(applyButton().disabled).toBe(false);
   fireEvent.click(applyButton());
-  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ confirm_client_changes: true, reviewed_changes: [{ change_index: 0, amount: '8421.12' }, { change_index: 1, hours: '68' }] })));
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ confirm_client_changes: true, reviewed_changes: [{ change_index: 0, amount: '8421.12', reason: 'Client confirmed correction' }, { change_index: 1, hours: '68' }] })));
   expect(mocks.createItem).not.toHaveBeenCalled(); expect(mocks.updateItem).not.toHaveBeenCalled();
 });
 
@@ -260,6 +261,7 @@ it('offers prefill only after selecting the pending revision on the pay-run rout
   fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
   expect(applyButton().disabled).toBe(false);
   fireEvent.change(ownerInput(), { target: { value: '8421.12' } });
+  fireEvent.change(screen.getByLabelText("Reason for changing Monique Owner's entry"), { target: { value: 'Client confirmed correction' } });
   expect(applyButton().disabled).toBe(true);
 });
 

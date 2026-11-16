@@ -886,7 +886,9 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(data.dig("pending_change_prefill", "submission_id")).to eq(source.id)
       params = reviewed_standing_params(data).merge(use_submission_id: source.id)
       params[:reviewed_changes][0][:amount] = "8421.12"
+      params[:reviewed_changes][0][:reason] = "Client confirmed corrected pay"
       params[:reviewed_changes][1][:hours] = "67.5"
+      params[:reviewed_changes][1][:reason] = "Client confirmed corrected hours"
       post "#{url}/apply_import", params: params, as: :json
       expect(response).to have_http_status(:ok), response.body
       expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.12"))
@@ -931,6 +933,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(response).to have_http_status(:ok), response.body
       input = reviewed_standing_params(replacement).merge(portal_source_id: replacement.dig("portal_source", "selection_id"))
       input[:reviewed_changes][1][:hours] = "67"
+      input[:reviewed_changes][1][:reason] = "Client confirmed corrected hours"
       post "#{url}/apply_import", params: input, as: :json
       expect(response).to have_http_status(:ok), response.body
       expect(item.reload.hours_worked).to eq(67)

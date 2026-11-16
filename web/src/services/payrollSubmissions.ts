@@ -7,6 +7,9 @@ export type ChangeKind = 'extra_hours' | 'owner_pay' | 'paid_leave' | 'new_hire'
 export type ChangeRow = {
   kind: ChangeKind;
   label?: string;
+  help_text?: string;
+  required?: boolean;
+  allow_none?: boolean;
   standing_change_id?: number;
   skipped?: boolean;
   employee_wage_rate_id?: number;

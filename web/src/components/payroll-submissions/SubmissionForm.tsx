@@ -46,11 +46,11 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const [keep, setKeep] = useState<number[]>(carryable.map(d => d.document!.id));
   const [noChanges, setNoChanges] = useState(current?.no_changes ?? false);
   const [rows, setRows] = useState<DraftRow[]>(() => {
-    const defaults = period.standing_changes || [];
-    const previous = current?.changes || [];
-    return [...defaults.map(row => ({ ...row, ...previous.find(item => item.standing_change_id === row.standing_change_id && item.kind === row.kind && item.employee_id === row.employee_id && item.employee_wage_rate_id === row.employee_wage_rate_id) })),
+    const defaults = (period.standing_changes || []).filter(row => !row.availability_error);
+    const previous = (current?.changes || []).filter(row => !row.availability_error);
+    return [...defaults.map(row => ({ ...previous.find(item => item.standing_change_id === row.standing_change_id && item.kind === row.kind && item.employee_id === row.employee_id && item.employee_wage_rate_id === row.employee_wage_rate_id), ...row })),
       // A skipped default that was later deactivated has nothing to carry forward.
-      ...previous.filter(row => !defaults.some(item => item.standing_change_id === row.standing_change_id) && !(row.standing_change_id && row.skipped))
+      ...previous.filter(row => !(row.standing_change_id && period.standing_changes?.some(item => item.standing_change_id === row.standing_change_id && item.availability_error)) && !defaults.some(item => item.standing_change_id === row.standing_change_id) && !(row.standing_change_id && row.skipped))
         .map(row => ({ ...row, standing_change_id: undefined, skipped: undefined }))]
       .map(row => ({ ...row, key: crypto.randomUUID() }));
   });
@@ -107,7 +107,8 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       if (doc.role === 'changes_workbook' && (workbook || workbookChoice !== 'attach')) return false;
       return true;
     });
-    const changes = rows.filter(row => !noChanges || row.standing_change_id).map(row => rowFields(noChanges ? { ...row, skipped: true } : row));
+    const changes = rows.filter(row => (!noChanges || row.standing_change_id) && (!row.standing_change_id || row.required || row.skipped || row.amount || row.hours)).map(rowFields);
+    if (rows.some(row => row.standing_change_id && ((row.skipped && row.allow_none === false) || (row.required && !row.skipped && !row.amount && !row.hours)))) { setDetails({ changes: ['Complete each required payroll entry or choose None this period where allowed.'] }); return; }
     const invalid = changes.find(row => !row.skipped && ((row.kind === 'owner_pay' && (!row.employee_id || !/^\d+(\.\d{1,2})?$/.test(row.amount || '') || Number(row.amount) <= 0 || Number(row.amount) > 10_000_000)) || (row.kind === 'extra_hours' && (!row.employee_id || !row.employee_wage_rate_id || !/^\d+(\.\d{1,2})?$/.test(row.hours || '') || Number(row.hours) <= 0 || Number(row.hours) > 1000))));
     if (invalid) { setDetails({ changes: ['Choose an employee and enter a positive amount or hours, with a saved job for extra hours. Skip any every-period row you do not need.'] }); return; }
     setBusy(true);
@@ -171,13 +172,23 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
         </div>}
       </fieldset>
 
+      {rows.some(row => row.standing_change_id) && <fieldset className="min-w-0 space-y-3">
+        <legend className="text-sm font-semibold text-neutral-900">Payroll entries this period</legend>
+        <p className="text-sm text-neutral-600">Enter this period’s pay and hours. Cornerstone reviews these before payroll.</p>
+        {rows.filter(row => row.standing_change_id).map(row => <div key={row.key} className="min-w-0 space-y-2 rounded-lg border border-neutral-200 p-3">
+          <p className="break-words font-semibold">{row.label || row.employee_name}{row.required ? ' (required)' : ' (optional)'}</p>
+          {row.help_text && <p className="break-words text-sm text-neutral-600">{row.help_text}</p>}
+          <Input label={(row.kind === 'owner_pay' ? 'Amount ($): ' : 'Hours: ') + (row.label || row.employee_name)} inputMode="decimal" disabled={row.skipped} value={(row.kind === 'owner_pay' ? row.amount : row.hours) || ''} onChange={e => update(row.key, row.kind === 'owner_pay' ? { amount: e.target.value } : { hours: e.target.value })} />
+          {row.allow_none !== false && <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={!!row.skipped} onChange={e => update(row.key, { skipped: e.target.checked })} />None this period: {row.label || row.employee_name}</label>}
+        </div>)}
+      </fieldset>}
       <fieldset className="min-w-0 space-y-3">
-        <legend className="text-sm font-semibold text-neutral-900">Changes this period</legend>
+        <legend className="text-sm font-semibold text-neutral-900">Other changes this period</legend>
         <label className="flex min-h-11 items-center gap-2 text-sm font-medium">
           <input type="checkbox" className="h-5 w-5" checked={noChanges} onChange={e => setNoChanges(e.target.checked)} />
           No changes this period
         </label>
-        {noChanges && rows.some(row => row.standing_change_id) && <p className="text-sm text-neutral-600">Every-period rows will be recorded as Not this period.</p>}
+        <p className="text-sm text-neutral-600">This choice does not change your payroll entries above.</p>
         {!noChanges && <>
           <p className="text-sm text-neutral-600">Only list what is different from the Revel report. Cornerstone reviews every change before it reaches payroll.</p>
           {employeeState === 'loading' && <p role="status" className="text-sm text-neutral-600">Loading employees…</p>}
@@ -186,7 +197,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
             <Button type="button" size="sm" variant="outline" onClick={() => void loadEmployees()}>Try again</Button>
           </div>}
           <ul className="space-y-3">
-            {rows.map((row, index) => {
+            {rows.filter(row => !row.standing_change_id).map((row, index) => {
               const meta = CHANGE_KINDS.find(k => k.kind === row.kind)!;
               return <li key={row.key} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                 <div className="mb-2 flex items-start justify-between gap-2"><p className="font-semibold text-neutral-900">{index + 1}. {meta.label}</p>
@@ -232,11 +243,12 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
             <div className="sm:w-72"><Select label="Add a change" value={addKind} onChange={e => setAddKind(e.target.value as ChangeKind)}>{CHANGE_KINDS.map(k => <option key={k.kind} value={k.kind}>{k.label}</option>)}</Select></div>
             <Button type="button" variant="outline" onClick={() => setRows(list => [...list, blankRow(addKind)])}><Plus className="mr-1 h-4 w-4" aria-hidden />Add change</Button>
           </div>
-          {changeErrors.length > 0 && !Object.keys(details).some(key => key.startsWith('changes.')) && <FieldError messages={changeErrors} />}
+
 
         </>}
       </fieldset>
 
+      <FieldError messages={changeErrors} />
       <LabeledTextarea label="Notes for Cornerstone (optional)" value={notes} onChange={e => setNotes(e.target.value)} rows={3} />
       <FieldError messages={details.notes} />
 

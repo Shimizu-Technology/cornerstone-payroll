@@ -38,7 +38,7 @@ module PayrollSubmissions
       record = entry.record
       payload = summary(entry).merge(
         schedule_note: schedule_note,
-        standing_changes: StandingChanges.new(company: @catalog.company, before_pay_date: @catalog.pay_date_for(entry)).rows,
+        standing_changes: StandingChanges.new(company: @catalog.company, before_pay_date: @catalog.pay_date_for(entry)).rows.reject { |row| !@staff && row[:availability_error].present? },
         thread_id: record&.client_portal_thread_id,
         file_requests: record ? file_requests(record) : [],
         submissions: [], drafts: [], history: [],
@@ -97,7 +97,8 @@ module PayrollSubmissions
         workbook_choice: submission.workbook_choice, no_changes: submission.no_changes, notes: submission.notes, changes_link_url: submission.changes_link_url,
         changes: submission.change_rows.map do |row|
           row.merge(
-            "label" => ChangeRows::LABELS[row["kind"]],
+            "availability_error" => (PayrollStandingChange.find_by(id: row["standing_change_id"], company_id: submission.company_id)&.availability_error if row["standing_change_id"]),
+            "label" => row["label"].presence || ChangeRows::LABELS[row["kind"]],
             "employee_name" => row["employee_id"] && employee_names[row["employee_id"]],
             "employee_names" => row["employee_ids"] && row["employee_ids"].map { |id| employee_names[id] }
           ).compact

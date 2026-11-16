@@ -5,7 +5,7 @@ require "rails_helper"
 RSpec.describe PayrollSubmissions::StandingChanges do
   let(:company) { create(:company) }
   let(:owner) { create(:employee, :salary, company: company, salary_type: "variable", pay_rate: 0) }
-  let!(:default) { PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay") }
+  let!(:default) { PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay", required: true) }
 
   it "shows only previous locked payroll as a hint and never an amount field" do
     previous = create(:pay_period, :committed, company: company, pay_date: "2026-10-22")
@@ -41,5 +41,23 @@ RSpec.describe PayrollSubmissions::StandingChanges do
     expect { PayrollSubmissions::ChangeRows.normalize!([ row ], company_id: company.id) }.to raise_error(PayrollSubmissions::ChangeRows::Invalid)
     expect(PayrollSubmissions::ChangeRows.normalize!([ row.merge(skipped: true) ], company_id: company.id).sole["skipped"]).to be(true)
     expect(default.reload).to be_active
+  end
+end
+
+RSpec.describe 'Configured portal entry answers' do
+  let(:company) { create(:company) }
+  let(:owner) { create(:employee, :salary, company: company, salary_type: 'variable', pay_rate: 0) }
+  let!(:field) { PayrollStandingChange.create!(company: company, employee: owner, kind: 'owner_pay', label: 'Period pay', required: true, allow_none: false) }
+  let(:row) { { kind: 'owner_pay', employee_id: owner.id, standing_change_id: field.id } }
+
+  it 'requires values, rejects prohibited none, and snapshots the configured label' do
+    expect { PayrollSubmissions::ChangeRows.normalize!([], company_id: company.id) }.to raise_error(PayrollSubmissions::ChangeRows::Invalid)
+    expect { PayrollSubmissions::ChangeRows.normalize!([ row.merge(skipped: true) ], company_id: company.id) }.to raise_error(PayrollSubmissions::ChangeRows::Invalid, /not allowed/)
+    expect(PayrollSubmissions::ChangeRows.normalize!([ row.merge(amount: '1200') ], company_id: company.id).sole).to include('label' => 'Period pay', 'amount' => '1200.00')
+  end
+
+  it 'does not block sending when a required mapped employee is unavailable' do
+    owner.update!(status: 'inactive')
+    expect(PayrollSubmissions::ChangeRows.normalize!([], company_id: company.id)).to eq([])
   end
 end

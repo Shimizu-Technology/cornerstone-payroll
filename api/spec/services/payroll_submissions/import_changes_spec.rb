@@ -41,7 +41,7 @@ RSpec.describe PayrollSubmissions::ImportChanges do
 
   it "lets staff edit values and adds extra hours to Revel instead of the worksheet" do
     rows.last.merge!(workbook_only: false, regular_hours: 5, overtime_hours: 2)
-    result = service.apply_to(rows, reviewed: [ { change_index: 0, amount: "8421.12" }, { change_index: 1, hours: "3.5" } ], confirmed: true)
+    result = service.apply_to(rows, reviewed: [ { change_index: 0, amount: "8421.12", reason: "Confirmed correction" }, { change_index: 1, hours: "3.5", reason: "Confirmed hours" } ], confirmed: true)
     expect(result.first[:period_pay]).to eq("8421.12")
     expect(result.last).to include(regular_hours: 5, overtime_hours: 2, client_extra_hours: { hours: "3.5", employee_wage_rate_id: rate.id, rate: "35.0" })
   end
@@ -134,5 +134,67 @@ RSpec.describe PayrollSubmissions::ImportChanges do
       expect(service.apply_to(rows, reviewed: [], confirmed: false)).to eq(rows)
       expect(period.payroll_items.count).to eq(0)
     end
+  end
+end
+
+RSpec.describe 'Configured entry import provenance' do
+  let(:company) { create(:company) }
+  let(:owner) { create(:employee, :salary, company: company, salary_type: 'variable', pay_rate: 0) }
+  let!(:field) { PayrollStandingChange.create!(company: company, employee: owner, kind: 'owner_pay', required: true) }
+  let(:period) { create(:pay_period, company: company) }
+  let(:source) { PayrollSubmissionPeriod.create!(company: company, pay_period: period, source: 'pay_period', start_date: period.start_date, end_date: period.end_date) }
+  def revision(number, row)
+    source.submissions.create!(company: company, revision: number, submitted_at: Time.current,
+      content_fingerprint: SecureRandom.hex(32), request_fingerprint: SecureRandom.hex(32),
+      change_rows: [ { 'kind' => 'owner_pay', 'employee_id' => owner.id, 'standing_change_id' => field.id }.merge(row) ])
+  end
+
+  it 'stores audited none provenance and replaces only client resolutions on a new revision' do
+    first = revision(1, 'skipped' => true)
+    service = PayrollSubmissions::ImportChanges.new(submission: first, pay_period: period)
+    service.apply_to([], reviewed: [], confirmed: true)
+    expect { service.apply_period_decisions!(actor: nil) }.to change(PayrollEntryResolution, :count).by(1)
+    resolution = PayrollEntryResolution.last
+    expect(resolution.source_evidence).to eq('submission_id' => first.id, 'revision' => 1)
+    expect(AuditLog.where(action: 'payroll_entry_resolutions#save', record_id: period.id).last.metadata.dig('resolution', 'source_evidence')).to eq(resolution.source_evidence)
+    expect(PayrollExpectedEntries.new(period).payload[:fields].sole).to include(status: 'none', source_revision: 1)
+    second = revision(2, 'amount' => '1200')
+    next_service = PayrollSubmissions::ImportChanges.new(submission: second, pay_period: period)
+    rows = next_service.apply_to([ { employee_id: owner.id } ], reviewed: [ { change_index: 0, amount: '1200' } ], confirmed: true)
+    expect(rows.sole[:client_change_evidence]).to include(standing_change_id: field.id, revision: 2, submission_id: second.id)
+    next_service.apply_period_decisions!(actor: nil)
+    expect(PayrollEntryResolution.exists?(resolution.id)).to be(false)
+    create(:payroll_item, company: company, pay_period: period, employee: owner, salary_override: 1200,
+      custom_columns_data: { client_change_evidence: rows.sole[:client_change_evidence], period_pay_evidence: rows.sole[:period_pay_evidence] })
+    expect(PayrollExpectedEntries.new(period).payload[:fields].sole).to include(status: 'filled', source_revision: 2)
+    third = revision(3, 'amount' => '1400')
+    proposal = PayrollSubmissions::ImportChanges.new(submission: third, pay_period: period).proposals.sole
+    expect(proposal).to include(previous_value: '1200', amount: '1400')
+    expect { second.update!(change_rows: []) }.to raise_error(ActiveRecord::RecordInvalid, /cannot be edited/)
+  end
+
+  it 'maps configured extra hours to the saved employee and job with revision evidence' do
+    worker = create(:employee, company: company)
+    rate = create(:employee_wage_rate, employee: worker, rate: 20)
+    hours_field = PayrollStandingChange.create!(company: company, employee: worker, employee_wage_rate: rate, kind: 'extra_hours')
+    rows = PayrollSubmissions::ChangeRows.normalize!([
+      { kind: 'owner_pay', employee_id: owner.id, standing_change_id: field.id, skipped: true },
+      { kind: 'extra_hours', employee_id: worker.id, standing_change_id: hours_field.id, employee_wage_rate_id: rate.id, hours: '6.5' }
+    ], company_id: company.id)
+    submission = source.submissions.create!(company: company, revision: 1, submitted_at: Time.current,
+      content_fingerprint: SecureRandom.hex(32), request_fingerprint: SecureRandom.hex(32), change_rows: rows)
+    service = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: period)
+    result = service.apply_to([], reviewed: [ { change_index: 1, hours: '6.5' } ], confirmed: true).sole
+    expect(result).to include(employee_id: worker.id, client_extra_hours: { hours: '6.5', employee_wage_rate_id: rate.id, rate: '20.0' })
+    expect(result[:client_change_evidence]).to include(standing_change_id: hours_field.id, revision: 1)
+  end
+
+  it 'requires a reason for a reviewed adjustment and records it' do
+    service = PayrollSubmissions::ImportChanges.new(submission: revision(1, 'amount' => '1200'), pay_period: period)
+    input = [ { change_index: 0, amount: '1300' } ]
+    expect { service.apply_to([ { employee_id: owner.id } ], reviewed: input, confirmed: true) }.to raise_error(ArgumentError, /reason/)
+    input.first[:reason] = 'Client confirmed correction'
+    service.apply_to([ { employee_id: owner.id } ], reviewed: input, confirmed: true)
+    expect(service.review_decisions.sole).to include(reason: 'Client confirmed correction', reviewed_value: '1300')
   end
 end
