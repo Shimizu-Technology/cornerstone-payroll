@@ -530,6 +530,9 @@ module Api
           end
 
           if include_lifecycle
+            data["open_pay_runs"] = EmployeeStatusTransitionService.open_runs(employee).map do |run|
+              { id: run.id, status: run.status, start_date: run.start_date, end_date: run.end_date }
+            end
             data["status_history"] = employee.employee_status_events.order(effective_date: :desc, id: :desc).map do |event|
               serialize_status_event(event)
             end

@@ -43,3 +43,11 @@ it('marks an active worker inactive with an effective date', async () => {
   await waitFor(() => expect(completed).toHaveBeenCalledWith(inactive));
   expect(deactivate).toHaveBeenCalledWith(7, { effective_date: '2024-03-15', reason_category: undefined, internal_notes: undefined });
 });
+
+it('lists covering approved runs and blocks deactivation with dedicated reasons', () => {
+  render(<EmployeeStatusTransitionDialog employee={{ id: 7, first_name: 'Avery', employment_type: 'hourly', status: 'active', open_pay_runs: [{ id: 42, status: 'approved', start_date: '2000-01-01', end_date: '2099-12-31' }] } as Employee} mode="deactivate" open onOpenChange={vi.fn()} onCompleted={vi.fn()} />);
+  expect(screen.getByText('Unapprove pay run #42 first')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Mark inactive' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole('option', { name: 'Leave of absence' })).toBeTruthy();
+  expect(screen.queryByRole('option', { name: 'Voluntary resignation' })).toBeNull();
+});

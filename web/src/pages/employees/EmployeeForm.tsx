@@ -2203,7 +2203,6 @@ export function EmployeeForm() {
           <div className="flex flex-wrap items-center gap-3">
             {employeeStatus === 'active' && <>
               <Button type="button" variant="outline" onClick={() => setStatusTransitionMode('deactivate')}>Mark inactive</Button>
-              <p className="w-full text-sm text-neutral-600">Inactive: not paid until reactivated. Use Terminate when employment has ended.</p>
             </>}
             <Button
               type="button"
@@ -2213,6 +2212,7 @@ export function EmployeeForm() {
               <Trash2 className="mr-2 h-4 w-4" />
               {`Terminate ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
             </Button>
+            <p className="w-full text-sm text-neutral-600">Inactive: not paid until reactivated. Use Terminate when employment has ended.</p>
           </div>
         )}
       </form>

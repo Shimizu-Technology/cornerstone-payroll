@@ -31,6 +31,32 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
       end
     end
 
+    %w[inactive terminated].each do |status|
+      it "removes and reports stale #{status} payroll items on recalculation" do
+        date = pay_period.start_date - 1.day
+        employee.update!(status: status, termination_date: status == "terminated" ? date : nil)
+        employee.employee_status_events.create!(company: company, event_type: status == "inactive" ? "deactivated" : "terminated",
+          previous_status: "active", resulting_status: status, effective_date: date, source: "operator")
+        create(:payroll_item, employee: employee, company: company, pay_period: pay_period)
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { employee_ids: [ employee.id ] }, headers: { "X-Company-Id" => company.id.to_s }
+        expect(response).to have_http_status(:ok)
+        expect(pay_period.payroll_items.where(employee_id: employee.id)).not_to exist
+        expect(response.parsed_body.dig("results", "skipped").first.fetch("reason")).to eq("#{employee.full_name} is #{status} from #{date}")
+      end
+    end
+
+    %w[final correction adjustment].each do |purpose|
+      it "allows an explicitly selected deactivated worker on a #{purpose} run" do
+        employee.update!(status: "inactive")
+        employee.employee_status_events.create!(company: company, event_type: "deactivated", previous_status: "active", resulting_status: "inactive", effective_date: pay_period.start_date - 1.day, source: "operator")
+        pay_period.update!(status: "draft")
+        pay_period.update!(run_purpose: purpose)
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { employee_ids: [ employee.id ], hours: { employee.id.to_s => { regular: 10 } } }, headers: { "X-Company-Id" => company.id.to_s }
+        expect(response).to have_http_status(:ok)
+        expect(pay_period.payroll_items.where(employee_id: employee.id)).to exist
+      end
+    end
+
     it "refreshes an existing single-rate payroll item from the employee pay rate" do
       payroll_item = create(
         :payroll_item,

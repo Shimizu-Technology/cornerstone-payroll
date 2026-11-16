@@ -370,7 +370,7 @@ module Api
 
           eligible_scope = Employee.where(id: employee_ids, company_id: current_company_id)
           eligible_scope = if params[:employee_ids].present? && %w[final correction adjustment].include?(@pay_period.run_purpose)
-            eligible_scope.where(status: %w[active terminated])
+            eligible_scope.where("status IN (?) OR (status = ? AND EXISTS (SELECT 1 FROM employee_status_events WHERE employee_id = employees.id AND event_type = ?))", %w[active terminated], "inactive", "deactivated")
           else
             eligible_scope.eligible_for_period(@pay_period.start_date, @pay_period.end_date)
           end
@@ -385,6 +385,20 @@ module Api
             pay_period: @pay_period,
             company_id: current_company_id
           )
+
+          # Include saved rows even when the submitted selection omits an ineligible worker.
+          saved_ids = @pay_period.payroll_items.pluck(:employee_id)
+          ineligible = Employee.where(id: saved_ids, company_id: current_company_id)
+            .where.not(id: Employee.eligible_for_period(@pay_period.start_date, @pay_period.end_date).select(:id))
+          # Explicit selections on special runs intentionally permit inactive/final pay.
+          ineligible = ineligible.where.not(id: employees_by_id.keys)
+          ineligible.each do |worker|
+            @pay_period.payroll_items.where(employee_id: worker.id).each(&:destroy!)
+            event = worker.employee_status_events.where(event_type: %w[deactivated terminated])
+              .where("effective_date <= ?", @pay_period.start_date).order(effective_date: :desc, id: :desc).first
+            reason = "#{worker.full_name} is #{event&.resulting_status || worker.status} from #{event&.effective_date || worker.termination_date || 'their inactive period'}"
+            results[:skipped] << { employee_id: worker.id, name: worker.full_name, reason: reason }
+          end
 
           employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]

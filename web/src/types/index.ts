@@ -248,6 +248,7 @@ export interface Employee {
   termination_date?: string;
   current_work_profile?: EmployeeWorkProfile | null;
   status_history?: EmployeeStatusEvent[];
+  open_pay_runs?: { id: number; status: string; start_date: string; end_date: string }[];
   employment_type: EmploymentType;
   tax_classification?: 'w2' | '1099';
   previous_employee_id?: number | null;
@@ -529,7 +530,7 @@ export interface DailyTimeRecordInput {
 export interface EmployeeTerminationInput {
   effective_date: string;
   last_worked_on?: string;
-  reason_category?: 'voluntary' | 'involuntary' | 'layoff' | 'reduction_in_force' | 'end_of_contract' | 'retirement' | 'other';
+  reason_category?: 'voluntary' | 'involuntary' | 'layoff' | 'reduction_in_force' | 'end_of_contract' | 'retirement' | 'leave_of_absence' | 'seasonal' | 'no_hours_scheduled' | 'other';
   internal_notes?: string;
 }
 
