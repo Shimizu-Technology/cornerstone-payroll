@@ -26,7 +26,7 @@ export function PayRunChecks({
   setCheckPrintOpen
 }: PayRunSectionProps<'checks'>) {
   return (<>
-<PayrollPreviewCard payPeriod={payPeriod} onDownloaded={loadPayPeriod} />
+<PayrollPreviewCard payPeriod={payPeriod} onDownloaded={async () => { await loadPayPeriod(payPeriod.id, true); }} />
 {isCommitted && (
           <Card>
             <div className="p-4 border-b flex items-center justify-between gap-3">
