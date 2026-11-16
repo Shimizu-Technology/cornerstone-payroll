@@ -198,21 +198,22 @@ class Employee < ApplicationRecord
     where("intake_exception = '{}'::jsonb OR (intake_payroll_confirmed_at IS NOT NULL AND intake_payroll_eligible_from <= ?)", period_end)
       .where("hire_date IS NULL OR hire_date <= ?", period_end)
       .where("termination_date IS NULL OR termination_date >= ?", period_start)
-      .where(status: %w[active terminated])
+      .where("status IN ('active', 'terminated') OR EXISTS (SELECT 1 FROM employee_status_events WHERE employee_id = employees.id AND event_type = 'deactivated')")
       .where(
         <<~SQL.squish,
           NOT EXISTS (
             SELECT 1
             FROM employee_status_events termination_events
             WHERE termination_events.employee_id = employees.id
-              AND termination_events.event_type = 'terminated'
-              AND termination_events.effective_date < :period_start
+              AND ((termination_events.event_type = 'terminated' AND termination_events.effective_date < :period_start)
+                OR (termination_events.event_type = 'deactivated' AND termination_events.effective_date <= :period_start))
               AND NOT EXISTS (
                 SELECT 1
                 FROM employee_status_events reactivation_events
                 WHERE reactivation_events.employee_id = employees.id
                   AND reactivation_events.event_type = 'reactivated'
-                  AND reactivation_events.effective_date > termination_events.effective_date
+                  AND (reactivation_events.effective_date > termination_events.effective_date
+                    OR (reactivation_events.effective_date = termination_events.effective_date AND reactivation_events.id > termination_events.id))
                   AND reactivation_events.effective_date <= :period_end
               )
           )
@@ -326,7 +327,7 @@ class Employee < ApplicationRecord
     first_event = employee_status_events.order(:effective_date, :id).first
     return false if first_event&.previous_status == "inactive"
 
-    status != "inactive" && (termination_date.blank? || date <= termination_date)
+    (first_event&.previous_status == "active" || status != "inactive") && (termination_date.blank? || date <= termination_date)
   end
 
   def work_profile_on(date)
