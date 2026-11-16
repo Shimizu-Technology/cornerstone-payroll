@@ -518,7 +518,8 @@ RSpec.describe "Pay-period submissions", type: :request do
       as_client
       get "#{client_base}/#{period.id}"
       expect(data["status"]).to eq("in_review")
-      expect(data["status_label"]).to eq("Awaiting payroll preview")
+      # Client approval is off for this company, so no preview will be published.
+      expect(data["status_label"]).to eq("Payroll in progress")
       pay_period.update_columns(status: "committed", committed_at: Time.current)
       get "#{client_base}/#{period.id}"
       expect(data["status"]).to eq("paid")
