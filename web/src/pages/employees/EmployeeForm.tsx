@@ -236,7 +236,7 @@ export function EmployeeForm() {
   const [generalError, setGeneralError, generalErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [statusTransitionMode, setStatusTransitionMode] = useState<'terminate' | 'reactivate' | null>(null);
+  const [statusTransitionMode, setStatusTransitionMode] = useState<'terminate' | 'reactivate' | 'deactivate' | null>(null);
   const [employeeDocumentsOpen, setEmployeeDocumentsOpen] = useState(false);
   const [classificationTransitionOpen, setClassificationTransitionOpen] = useState(false);
   const employeeRequestIdRef = useRef(0);
@@ -2200,7 +2200,10 @@ export function EmployeeForm() {
         </Card>
 
         {isEditing && employeeStatus !== 'terminated' && !isClient && canManageClientConfiguration && (
-          <div className="flex justify-start">
+          <div className="flex flex-wrap items-center gap-3">
+            {employeeStatus === 'active' && <>
+              <Button type="button" variant="outline" onClick={() => setStatusTransitionMode('deactivate')}>Mark inactive</Button>
+            </>}
             <Button
               type="button"
               variant="danger"
@@ -2209,6 +2212,7 @@ export function EmployeeForm() {
               <Trash2 className="mr-2 h-4 w-4" />
               {`Terminate ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
             </Button>
+            <p className="w-full text-sm text-neutral-600">Inactive: not paid until reactivated. Use Terminate when employment has ended.</p>
           </div>
         )}
       </form>

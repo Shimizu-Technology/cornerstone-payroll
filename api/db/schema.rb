@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_17_000200) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_17_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1087,7 +1087,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_000200) do
     t.index [ "company_id" ], name: "index_employee_status_events_on_company_id"
     t.index [ "employee_id", "effective_date", "id" ], name: "idx_employee_status_events_timeline"
     t.index [ "employee_id" ], name: "index_employee_status_events_on_employee_id"
-    t.check_constraint "event_type::text = ANY (ARRAY['terminated'::character varying::text, 'reactivated'::character varying::text])", name: "employee_status_events_type_check"
+    t.check_constraint "event_type::text = ANY (ARRAY['terminated'::character varying::text, 'reactivated'::character varying::text, 'deactivated'::character varying::text])", name: "employee_status_events_type_check"
     t.check_constraint "last_worked_on IS NULL OR last_worked_on <= effective_date", name: "employee_status_events_last_worked_check"
     t.check_constraint "previous_status::text = ANY (ARRAY['active'::character varying::text, 'inactive'::character varying::text, 'terminated'::character varying::text])", name: "employee_status_events_previous_status_check"
     t.check_constraint "resulting_status::text = ANY (ARRAY['active'::character varying::text, 'inactive'::character varying::text, 'terminated'::character varying::text])", name: "employee_status_events_resulting_status_check"
