@@ -499,3 +499,17 @@ describe('explicit client management transport', () => {
     expect(JSON.parse(String(options?.body))).toEqual({ company_assignment: { client_management: enabled } });
   });
 });
+
+describe('MoSa import upload', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const sentFields = async (tips: boolean | undefined) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await payPeriodsApi.previewImport(9, undefined, new File(['xlsx'], 'changes.xlsx'), tips);
+    return [...(fetchMock.mock.lastCall?.[1]?.body as FormData).keys()];
+  };
+
+  it('sends the tip fallback only when the upload step offered it', async () => {
+    expect(await sentFields(false)).toContain('tips_paid_out_from_tips');
+    expect(await sentFields(undefined)).not.toContain('tips_paid_out_from_tips');
+  });
+});

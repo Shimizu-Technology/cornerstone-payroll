@@ -18,6 +18,7 @@ class CheckSignoffSheetGenerator
     workbook.add_worksheet(name: "Check Sign-Off") do |sheet|
       sheet.page_setup.set(orientation: :landscape, paper_size: 1)
       add_styles(workbook)
+      sheet.add_row [ PayrollReportPreview::LABEL ] if options[:preview]
       build_header(sheet)
       build_table(sheet)
       build_notes(sheet)

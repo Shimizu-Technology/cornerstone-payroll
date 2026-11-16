@@ -8,7 +8,8 @@ class SpreadsheetReportExporter
 
   attr_reader :filename
 
-  def initialize(filename:, sheets:)
+  def initialize(filename:, sheets:, preview: false)
+    @preview = preview
     @filename = filename
     @sheets = sheets
   end
@@ -19,6 +20,7 @@ class SpreadsheetReportExporter
 
     @sheets.each do |sheet|
       workbook.add_worksheet(name: safe_sheet_name(sheet.fetch(:name))) do |worksheet|
+        worksheet.add_row [ PayrollReportPreview::LABEL ] if @preview
         style_ids = build_style_ids(workbook, sheet)
         row_heights = sheet.fetch(:row_heights, {})
 
@@ -31,7 +33,7 @@ class SpreadsheetReportExporter
           worksheet.add_row(Array(row).map { |value| cell_value(value) }, **options)
         end
         worksheet.column_widths(*Array(sheet[:column_widths])) if sheet[:column_widths].present?
-        Array(sheet[:merged_cells]).each { |range| worksheet.merge_cells(range) }
+        Array(sheet[:merged_cells]).each { |range| worksheet.merge_cells(@preview ? range.gsub(/([A-Z]+)(\d+)/) { "#{$1}#{$2.to_i + 1}" } : range) }
         configure_sheet_view(worksheet, sheet)
       end
     end

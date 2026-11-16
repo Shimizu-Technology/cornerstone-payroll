@@ -5,7 +5,7 @@ module Api
     module Admin
       class PayrollImportsController < BaseController
         before_action :set_pay_period
-        around_action :with_import_lock, only: %i[preview apply resolve_portal_source]
+        around_action :with_import_lock, only: %i[preview remove_source tip_treatment apply resolve_portal_source]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/supplemental_template
         def supplemental_template
@@ -33,7 +33,8 @@ module Api
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/preview_import
-        # Upload PDF + optional Excel, get matched preview
+        # Upload the Revel PDF, the change workbook, or both. Files already in
+        # the current package are kept, so the other file can be added later.
         def preview
           unless @pay_period.can_edit?
             return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
@@ -44,8 +45,8 @@ module Api
           pdf_file = params[:pdf_file]
           excel_file = params[:excel_file]
 
-          unless pdf_file
-            return render json: { error: "PDF file is required" }, status: :unprocessable_entity
+          unless pdf_file || excel_file
+            return render json: { error: "Choose the Revel hours PDF, the tips & loans workbook, or both." }, status: :unprocessable_entity
           end
 
           begin
@@ -57,7 +58,8 @@ module Api
               actor: current_user,
               portal_submission: selected_source,
               supersedes_package_id: params[:supersedes_package_id],
-              supersession_reason: params[:supersession_reason]
+              supersession_reason: params[:supersession_reason],
+              carry_forward: true
             ).call
             source_package = package_result.fetch(:session)
             if package_result[:duplicate] && !source_package.applyable?
@@ -73,7 +75,9 @@ module Api
               }, status: :unprocessable_entity
             end
 
-            import_record = persist_preview(package_result, pdf_file, excel_file)
+            # The upload step shows the tip fallback beside the workbook it uploads.
+            import_record = persist_preview(package_result, pdf_file, excel_file,
+              tip_choice_offered: excel_file.present? && params.key?(:tips_paid_out_from_tips))
             render json: preview_response(import_record, package_result)
           rescue PayrollIntake::PreviewService::ReplacementRequiredError => e
             render json: {
@@ -85,6 +89,79 @@ module Api
           rescue StandardError => e
             render json: { error: "Failed to parse files: #{e.message}" }, status: :unprocessable_entity
           end
+        end
+
+        # POST /api/v1/admin/pay_periods/:pay_period_id/remove_import_source
+        # Takes one file out of an import still in review, for example a
+        # workbook added by mistake. The other files are kept and matched
+        # again, and the reason is recorded on the new import version.
+        def remove_source
+          unless @pay_period.can_edit?
+            return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
+          end
+
+          current = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          current_record = PayrollImport::CurrentReview.import_record_for(@pay_period, current)
+          unless current&.applyable? && current_record
+            return render json: { error: "Only an import still in review can have a file removed." }, status: :unprocessable_entity
+          end
+          if current_record.submission_imports.exists?
+            return render json: { error: "Files from a client revision can't be removed here. Open the client revision again instead." }, status: :unprocessable_entity
+          end
+
+          role = params[:source_role].to_s
+          label = PayrollIntake::SourceCompleteness.new(session: current, company: @pay_period.company).labels_for([ role ]).first
+          verified = current.documents.select { |document| document.verification_status == "verified" }
+          unless role.in?(PayrollIntake::SourceCompleteness.roles_for("mosa_revel").keys) && verified.any? { |document| document.source_role == role }
+            return render json: { error: "Import version #{current.package_revision} has no #{label} to remove." }, status: :unprocessable_entity
+          end
+          if verified.all? { |document| document.source_role == role }
+            return render json: { error: "The #{label} is the only file in this import. Upload the corrected file instead." }, status: :unprocessable_entity
+          end
+          reason = params[:reason].to_s.strip
+          if reason.blank? || reason.length > 500
+            return render json: { error: "Say why the #{label} is being removed (up to 500 characters)." }, status: :unprocessable_entity
+          end
+
+          package_result = PayrollIntake::PreviewService.new(
+            pay_period: @pay_period, source_type: "mosa_revel", files: [], actor: current_user, carry_forward: true,
+            remove_roles: [ role ], supersedes_package_id: current.package_id, supersession_reason: "Removed: #{label}. #{reason}"
+          ).call
+          # A tip choice follows the workbook it was made for (see tip_confirmation_for).
+          import_record = persist_preview(package_result, nil, nil, tips_paid_out_from_tips: false)
+          render json: preview_response(import_record, package_result)
+        rescue PayrollIntake::PreviewService::ReplacementRequiredError, ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue StandardError => e
+          render json: { error: "Could not remove the file: #{e.message}" }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/pay_periods/:pay_period_id/import_tip_treatment
+        # Records how the tips in an older MoSa workbook were paid, on the
+        # review itself. Apply uses only this saved choice, never one sent with apply.
+        def tip_treatment
+          unless @pay_period.can_edit?
+            return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
+          end
+
+          current = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          import_record = PayrollImport::CurrentReview.import_record_for(@pay_period, current)
+          unless current&.applyable? && import_record && import_record.id.to_s == params[:import_id].to_s
+            return render json: { error: "This review is no longer current. Reopen the current import." }, status: :unprocessable_entity
+          end
+          unless legacy_workbook?(current)
+            return render json: { error: "Only an older MoSa workbook needs this choice." }, status: :unprocessable_entity
+          end
+          unless params.key?(:tips_paid_out_from_tips)
+            return render json: { error: "Choose whether the tips were already paid out daily." }, status: :unprocessable_entity
+          end
+
+          paid = ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips])
+          import_record.update!(raw_data: import_record.raw_data.to_h.merge(
+            "tips_paid_out_from_tips" => paid,
+            "tip_treatment_confirmed" => { "source" => "review", "user_id" => current_user.id, "at" => Time.current.iso8601 }
+          ))
+          render json: preview_response(import_record, { session: current, duplicate: false })
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/apply_import
@@ -138,6 +215,7 @@ module Api
               raise ArgumentError, "Select the client revision used to create this replacement review."
             end
             PayrollIntake::SourcePackageVerifier.new(session: source_package).verify!
+            source_waivers = source_waivers_for!(source_package, selection)
 
             disposition_plan = PayrollIntake::DispositionPlan.new(
               session: source_package,
@@ -154,6 +232,14 @@ module Api
             low_confidence_matches = low_confidence_matches.select do |match|
               included_employee_ids.include?((match["employee_id"] || match[:employee_id]).to_i)
             end
+            hand_edited = included_hand_edited_hours(import_record, included_employee_ids)
+            if hand_edited.any? && !ActiveModel::Type::Boolean.new.cast(params[:confirm_hours_overwrite])
+              return render json: {
+                error: "Revel hours would replace hours entered by hand for #{hand_edited.map { |row| row['employee_name'] }.to_sentence}. Review and confirm before applying.",
+                details: { hand_edited_hours: hand_edited }
+              }, status: :unprocessable_entity
+            end
+
             acknowledged_low_confidence = ActiveModel::Type::Boolean.new.cast(params[:acknowledge_low_confidence_matches])
             if low_confidence_matches.any? && !acknowledged_low_confidence
               return render json: {
@@ -194,9 +280,7 @@ module Api
             end
 
             force_overwrite = params[:force_overwrite].to_s == "true"
-            tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(
-              import_record.raw_data.to_h.fetch("tips_paid_out_from_tips", false)
-            )
+            tips_paid_out_from_tips = tip_treatment_for!(source_package, import_record)
             results = { success: [], skipped: [], errors: [] }
             applied = false
             ActiveRecord::Base.transaction(requires_new: true) do
@@ -214,7 +298,8 @@ module Api
               raise ActiveRecord::Rollback if results[:errors].any?
 
               import_record.update!(status: "applied", validation_errors: [],
-                raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || []))
+                raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || [],
+                  "source_waivers" => source_waivers, "replaced_hand_edited_hours" => hand_edited))
               disposition_plan.decisions.each do |decision|
                 if decision.included? && unpaid_owners.key?(decision.row.employee_id)
                   decision.disposition = "excluded"
@@ -339,13 +424,16 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
-        def persist_preview(package_result, pdf_file, excel_file)
+        def persist_preview(package_result, pdf_file, excel_file,
+                            tips_paid_out_from_tips: ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips]),
+                            tip_choice_offered: false)
           source_package = package_result.fetch(:session)
           unless source_package.applyable?
             raise ArgumentError, "This source package was already applied or superseded. Review a corrected current source."
           end
           preview_data = preview_from_source_package(source_package)
-          tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips])
+          tip_confirmation = tip_confirmation_for(source_package, tips_paid_out_from_tips, offered: tip_choice_offered)
+          tips_paid_out_from_tips = tip_confirmation.fetch("tips_paid_out_from_tips")
           preview_data[:tips_paid_out_from_tips] = tips_paid_out_from_tips
 
           # Persist preview for later apply
@@ -354,12 +442,13 @@ module Api
           import_record.assign_attributes(
             pay_period: @pay_period,
             status: "previewed",
-            pdf_filename: pdf_file.original_filename,
-            excel_filename: excel_file&.original_filename,
+            pdf_filename: retained_filename(source_package, "revel_hours") || pdf_file&.original_filename,
+            excel_filename: retained_filename(source_package, "supplemental_workbook") || excel_file&.original_filename,
             raw_data: {
               pdf_count: preview_data[:pdf_count],
               excel_count: preview_data[:excel_count],
               tips_paid_out_from_tips: tips_paid_out_from_tips,
+              tip_treatment_confirmed: tip_confirmation["tip_treatment_confirmed"],
               unmatched_excel_names: preview_data[:unmatched_excel_names],
               duplicate_employee_matches: preview_data[:duplicate_employee_matches],
               low_confidence_matches: preview_data[:low_confidence_matches],
@@ -380,6 +469,7 @@ module Api
           source_package = package_result.fetch(:session)
           preview = preview_from_source_package(source_package)
           preview[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(import_record.raw_data.to_h["tips_paid_out_from_tips"])
+          preview[:tip_treatment_confirmed] = import_record.raw_data.to_h["tip_treatment_confirmed"].present?
           selection ||= import_record.submission_imports.order(id: :desc).first
           source = selection&.payroll_submission || pending_portal_period&.current_submission
           preview[:source_warnings] += workbook_warnings(source_package, source)
@@ -492,6 +582,7 @@ module Api
         end
 
         def source_package_json(source_package)
+          completeness = PayrollIntake::SourceCompleteness.new(session: source_package, company: @pay_period.company)
           {
             id: source_package.id,
             package_id: source_package.package_id,
@@ -512,8 +603,81 @@ module Api
                 { id: document.id, source_role: document.source_role, filename: document.filename,
                   content_type: document.content_type, byte_size: document.byte_size }
               end,
-            disposition_targets: disposition_targets_json
+            disposition_targets: disposition_targets_json,
+            sources: completeness.sources,
+            complete: completeness.complete?
           }
+        end
+
+        def retained_filename(source_package, role)
+          source_package.documents.find { |document| document.source_role == role }&.filename
+        end
+
+        # Required files that are missing need an explicit, recorded choice. The
+        # client's own "No tips or loans this period" counts for the revision
+        # selected for this import.
+        def source_waivers_for!(source_package, selection)
+          completeness = PayrollIntake::SourceCompleteness.new(session: source_package, company: @pay_period.company)
+          waivable = completeness.waivable_missing_roles
+          staff_waived = ActiveModel::Type::Boolean.new.cast(params[:no_tips_or_loans])
+          client_waived = selection&.payroll_submission&.workbook_choice == "none"
+          waived = staff_waived || client_waived ? waivable : []
+          missing = completeness.missing_required_roles(waived_roles: waived)
+          if missing.any?
+            labels = completeness.labels_for(missing).to_sentence
+            message = (missing - waivable).empty? ? "Add the #{labels}, or confirm there are no tips or loans this period." : "Add the #{labels} before applying."
+            raise ArgumentError, message
+          end
+
+          waived.map do |role|
+            { "role" => role, "choice" => completeness.sources.find { |source| source[:role] == role }&.dig(:waiver_label),
+              "confirmed_by" => client_waived && !staff_waived ? "client" : "staff", "user_id" => current_user&.id, "at" => Time.current.iso8601 }
+          end
+        end
+
+        # An older MoSa workbook does not say per person whether tips were
+        # already paid daily, so one saved choice covers it. A workbook added
+        # from the review, or carried without a choice, was never offered the
+        # upload fallback, so apply waits until the choice is recorded.
+        def tip_treatment_for!(source_package, import_record)
+          raw = import_record.raw_data.to_h
+          if legacy_workbook?(source_package) && raw["tip_treatment_confirmed"].blank?
+            raise ArgumentError, "Choose whether the tips in this older MoSa workbook were already paid out daily."
+          end
+
+          ActiveModel::Type::Boolean.new.cast(raw.fetch("tips_paid_out_from_tips", false))
+        end
+
+        def legacy_workbook?(source_package)
+          Array(source_package.warnings).any? { |warning| warning.to_h.stringify_keys["code"] == "legacy_mosa_workbook" }
+        end
+
+        # Uploading the workbook with the fallback offered beside it is an
+        # explicit choice, ticked or not. A new version that keeps the same
+        # workbook bytes keeps the choice made for it.
+        def tip_confirmation_for(source_package, uploaded_flag, offered:)
+          if offered
+            return { "tips_paid_out_from_tips" => uploaded_flag,
+              "tip_treatment_confirmed" => { "source" => "upload", "user_id" => current_user.id, "at" => Time.current.iso8601 } }
+          end
+
+          workbook_sha = ->(session) { session&.documents&.find { |document| document.source_role == "supplemental_workbook" }&.sha256 }
+          previous = source_package.supersedes
+          previous_record = previous && PayrollImportRecord.find_by(payroll_intake_session: previous)
+          kept = previous_record&.raw_data.to_h
+          if kept.to_h["tip_treatment_confirmed"].present? && workbook_sha.call(previous).present? && workbook_sha.call(previous) == workbook_sha.call(source_package)
+            return { "tips_paid_out_from_tips" => ActiveModel::Type::Boolean.new.cast(kept["tips_paid_out_from_tips"]),
+              "tip_treatment_confirmed" => kept["tip_treatment_confirmed"].merge("carried_from_import_id" => previous_record.id) }
+          end
+
+          { "tips_paid_out_from_tips" => uploaded_flag, "tip_treatment_confirmed" => nil }
+        end
+
+        def included_hand_edited_hours(import_record, included_employee_ids)
+          rows = import_record.matched_data.select { |row| included_employee_ids.include?(row["employee_id"].to_i) }
+          items = @pay_period.payroll_items.where(employee_id: rows.map { |row| row["employee_id"] }).index_by(&:employee_id)
+          applied_hours = PayrollImport::LivePreviewRowState.applied_hours_by_employee(@pay_period)
+          rows.filter_map { |row| PayrollImport::LivePreviewRowState.hand_edited_hours(row, items[row["employee_id"].to_i], applied_hours: applied_hours) }
         end
 
         def source_row_json(row)

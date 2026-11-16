@@ -1577,19 +1577,22 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/retry_tax_sync`),
   generateFitCheck: (id: number) =>
     api.post<{ message: string; check_id: number }>(`/admin/pay_periods/${id}/generate_fit_check`),
+  // Either file can be sent alone; the current package keeps the other one.
   previewImport: async (
     id: number,
-    pdfFile: File,
+    pdfFile?: File,
     excelFile?: File,
-    tipsPaidOutFromTips = false,
+    // Undefined when the upload step's tip fallback was not offered (adding a
+    // file from the review). No default: a default would turn undefined into false.
+    tipsPaidOutFromTips?: boolean,
     replacement?: { supersedesPackageId: string; reason: string },
     submissionId?: number,
   ): Promise<ImportPreviewResponse> => {
     const formData = new FormData();
-    formData.append('pdf_file', pdfFile);
+    if (pdfFile) formData.append('pdf_file', pdfFile);
     if (submissionId) formData.append('use_submission_id', String(submissionId));
     if (excelFile) formData.append('excel_file', excelFile);
-    formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
+    if (tipsPaidOutFromTips !== undefined) formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
     if (replacement?.supersedesPackageId) formData.append('supersedes_package_id', replacement.supersedesPackageId);
     if (replacement?.reason) formData.append('supersession_reason', replacement.reason);
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
@@ -1604,6 +1607,12 @@ export const payPeriodsApi = {
     api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
   currentImport: (id: number): Promise<ImportPreviewResponse> =>
     api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
+  // Takes one file out of an import still in review; the reason is recorded on the new version.
+  removeImportSource: (id: number, sourceRole: string, reason: string): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/remove_import_source`, { source_role: sourceRole, reason }),
+  // Saves how the tips in an older MoSa workbook were paid; apply uses only the saved choice.
+  saveImportTipTreatment: (id: number, importId: number, tipsPaidOutFromTips: boolean): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/import_tip_treatment`, { import_id: importId, tips_paid_out_from_tips: tipsPaidOutFromTips }),
   applyImport: (
     id: number,
     data: {
@@ -1619,6 +1628,8 @@ export const payPeriodsApi = {
       portal_source_id?: number;
       use_submission_id?: number;
       force_overwrite?: boolean;
+      confirm_hours_overwrite?: boolean;
+      no_tips_or_loans?: boolean;
       wage_rate_choices?: Record<string, number>;
       confirm_client_changes?: boolean;
       reviewed_changes?: { change_index: number; amount?: string; hours?: string; decision?: string; reason?: string; pay_choice?: string; saved_period_pay?: string; workbook_period_pay?: string }[];
@@ -2064,8 +2075,29 @@ export interface DeleteDraftCorrectionRunResponse {
 }
 
 // Import types
+export interface ImportPackageSource {
+  role: 'revel_hours' | 'supplemental_workbook' | string;
+  label: string;
+  required: boolean;
+  present: boolean;
+  filename?: string | null;
+  // Set when staff can record that this file is not needed this period.
+  waiver_label?: string | null;
+}
+
+export interface HandEditedHours {
+  employee_id: number;
+  employee_name: string;
+  saved_regular_hours: string;
+  saved_overtime_hours: string;
+  source_regular_hours: string;
+  source_overtime_hours: string;
+}
+
 export interface ImportPreviewRow {
   workbook_only?: boolean;
+  // Saved hours changed by hand after the last import that these Revel hours would replace.
+  hand_edited_hours?: HandEditedHours | null;
   missing_revel_hours_with_deductions?: boolean;
   wage_rate_options?: Array<{ id: number; label: string; rate: number }>;
   selected_wage_rate_id?: number | null;
@@ -2181,6 +2213,9 @@ export interface ImportPreviewResponse {
     // Retained files shown beside import review (Revel PDF, change workbook).
     documents?: ImportSourceDocument[];
     disposition_targets: PayrollIntakeDispositionTarget[];
+    // Which files this client needs before the package can be applied.
+    sources?: ImportPackageSource[];
+    complete?: boolean;
   };
   preview: {
     matched: ImportPreviewRow[];
@@ -2203,6 +2238,8 @@ export interface ImportPreviewResponse {
     matched_count: number;
     can_apply: boolean;
     tips_paid_out_from_tips: boolean;
+    // True once a tip choice is saved for an older MoSa workbook (at upload or in the review).
+    tip_treatment_confirmed?: boolean;
     source_warnings?: { code: string; message: string; severity: string }[];
     source_rows: MosaSourceRow[];
   };
@@ -3445,10 +3482,10 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   retirementPlansXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/retirement_plans_xlsx', { pay_period_id: payPeriodId }),
-  installmentLoansPdf: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  installmentLoansXlsx: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate }),
+  installmentLoansPdf: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
+  installmentLoansXlsx: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
   transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,
@@ -4568,10 +4605,10 @@ export const payrollReportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   retirementPlansXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/retirement_plans_xlsx', { pay_period_id: payPeriodId }),
-  installmentLoansPdf: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  installmentLoansXlsx: (asOfDate?: string) =>
-    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate }),
+  installmentLoansPdf: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
+  installmentLoansXlsx: (asOfDate?: string, payPeriodId?: number) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate, pay_period_id: payPeriodId }),
   transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,

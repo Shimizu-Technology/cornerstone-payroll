@@ -29,19 +29,33 @@ RSpec.describe "Variable salary source consistency" do
     expect(period.payroll_items.reload).to be_empty
   end
 
-  it "retains manually entered period pay, requires reviewed overwrite, and does not duplicate the recurring bonus" do
+  it "retains manually entered period pay without an overwrite prompt and does not duplicate the recurring bonus" do
     item = period.payroll_items.build(employee: employee, employment_type: "salary", pay_rate: employee.pay_rate, salary_override: 9000.00)
     item.sync_default_payroll_adjustments!(employee)
     item.calculate!
     expect(item.gross_pay).to eq(9900.00)
     preview = service.preview(pdf_records: [ { employee_name: "Salary, Variable", regular_hours: 0 } ], excel_records: [])
-    expect(preview[:matched].first).to include(period_pay_missing: false, current_period_pay: "9000.0", overwrite_required: true)
-    expect(service.apply!(matched: [ source_row ])[:errors].first[:error]).to include("force_overwrite")
-    expect(service.apply!(matched: [ source_row ], force_overwrite: true)[:errors]).to be_empty
+    # Saved period pay is kept by the import, so there is nothing to replace.
+    expect(preview[:matched].first).to include(period_pay_missing: false, current_period_pay: "9000.0", overwrite_required: false)
+    expect(service.apply!(matched: [ source_row ])[:errors]).to be_empty
     expect(item.reload.salary_override).to eq(9000.00)
     expect(item.gross_pay).to eq(9900.00)
     expect(service.apply!(matched: [ source_row ])[:errors]).to be_empty
     expect(item.reload.gross_pay).to eq(9900.00)
+  end
+
+  it "still asks before replacing saved hours, or saved period pay with a different workbook amount" do
+    item = period.payroll_items.build(employee: employee, employment_type: "salary", pay_rate: employee.pay_rate, salary_override: 9000.00)
+    item.sync_default_payroll_adjustments!(employee)
+    item.calculate!
+
+    expect(PayrollImport::ImportService.overwrite_required?(item)).to be(false)
+    expect(PayrollImport::ImportService.overwrite_required?(item, source_period_pay: "9000.00")).to be(false)
+    expect(PayrollImport::ImportService.overwrite_required?(item, source_period_pay: "8500.00")).to be(true)
+
+    item.update_columns(hours_worked: 4)
+    expect(PayrollImport::ImportService.overwrite_required?(item.reload)).to be(true)
+    expect(service.apply!(matched: [ source_row ])[:errors].first[:error]).to include("force_overwrite")
   end
 
   it "enforces period pay for direct calculation without treating a recurring bonus as base pay" do

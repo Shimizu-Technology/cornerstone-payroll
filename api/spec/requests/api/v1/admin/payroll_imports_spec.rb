@@ -191,6 +191,9 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/apply_import" do
+    # These packages are built from rows alone, without retained files.
+    before { company.update!(payroll_intake_settings: { "mosa_revel" => { "required_sources" => [] } }) }
+
     def create_preview!(raw_data: {}, unmatched_pdf_names: [])
       source_package = create(
         :payroll_intake_session,

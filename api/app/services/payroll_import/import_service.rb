@@ -10,6 +10,25 @@ module PayrollImport
   class ImportService
     attr_reader :pay_period, :company_id, :actor
 
+    # Inputs apply! replaces on a saved row. Manual bonuses, manual one-time
+    # items and saved period pay without a workbook amount are kept.
+    REPLACED_INPUTS = %i[hours_worked overtime_hours reported_tips tips tips_paid_out loan_deduction].freeze
+
+    # A saved row needs the replace confirmation only when this import would
+    # replace something staff entered by hand. A row that holds only an
+    # owner's period pay is kept as it is, unless the workbook sends a
+    # different amount for that owner.
+    def self.overwrite_required?(item, source_period_pay: nil)
+      return false if item.blank? || !item.persisted? || item.import_source == "mosa_revel"
+      return true if REPLACED_INPUTS.any? { |field| item.public_send(field).to_d.nonzero? }
+      job_hours = Array(item.wage_rate_hours).sum { |entry| entry.to_h.stringify_keys.values_at("regular_hours", "overtime_hours").sum(&:to_d) }
+      return true if job_hours.nonzero?
+
+      amount = BigDecimal(source_period_pay.to_s, exception: false)
+      manual = LivePreviewRowState.manual_period_pay(item)
+      amount.present? && amount.positive? && manual.present? && manual != amount
+    end
+
     def initialize(pay_period, actor: nil)
       @pay_period = pay_period
       @company_id = pay_period.company_id
@@ -142,6 +161,15 @@ module PayrollImport
 
     private
 
+    # What an earlier import wrote, or no hours at all when none did.
+    def hours_imported_before(payroll_item)
+      recorded = payroll_item.custom_columns_data.to_h["mosa_imported_hours"]
+      return recorded if recorded.is_a?(Hash)
+
+      @applied_hours ||= LivePreviewRowState.applied_hours_by_employee(pay_period)
+      @applied_hours[payroll_item.employee_id] || { "regular_hours" => "0.0", "overtime_hours" => "0.0" }
+    end
+
     def apply_locked!(matched:, force_overwrite:, tips_paid_out_from_tips:)
       raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
 
@@ -196,7 +224,7 @@ module PayrollImport
           payroll_item.company_id ||= pay_period.company_id
 
           # Prevent silent overwrite of manual/non-import entries unless explicitly forced.
-          if payroll_item.persisted? && payroll_item.import_source != "mosa_revel" && !force_overwrite
+          if self.class.overwrite_required?(payroll_item, source_period_pay: row[:period_pay]) && !force_overwrite
             results[:errors] << {
               employee_id: employee.id,
               name: employee.full_name,
@@ -229,7 +257,15 @@ module PayrollImport
               apply_client_hours!(payroll_item, employee, row) if row[:client_extra_hours]
               payroll_item.custom_columns_data = payroll_item.custom_columns_data.to_h.merge(
                 "mosa_missing_revel_hours" => row[:missing_revel_hours_with_deductions] == true,
-                "client_change_evidence" => row[:client_change_evidence]
+                "client_change_evidence" => row[:client_change_evidence],
+                # The hours this import left on the row. A later import compares
+                # them with the saved row to find hours staff changed by hand.
+                # A workbook-only row keeps the hours staff entered, so they are
+                # not recorded as imported and a later Revel PDF asks first.
+                "mosa_imported_hours" => row[:workbook_only] ? hours_imported_before(payroll_item) : {
+                  "regular_hours" => payroll_item.hours_worked.to_d.to_s("F"),
+                  "overtime_hours" => payroll_item.overtime_hours.to_d.to_s("F")
+                }
               )
 
               # Set tips from Excel — reported_tips is the taxable tip source of truth.
@@ -417,7 +453,7 @@ module PayrollImport
         current_period_pay: source_period_pay(excel_data) || existing_manual_period_pay(existing_item),
         period_pay_source: source_period_pay(excel_data) ? "change_workbook" : (existing_manual_period_pay(existing_item).present? ? "payroll_worksheet" : nil),
         period_pay_missing: period_pay_missing?(employee, existing_item, excel_data),
-        overwrite_required: existing_item.present? && existing_item.import_source != "mosa_revel",
+        overwrite_required: self.class.overwrite_required?(existing_item, source_period_pay: excel_data&.dig(:period_pay)),
         pay_rate: employee.pay_rate.to_f,
         confidence: match[:confidence],
         matched_name: match[:matched_name],
