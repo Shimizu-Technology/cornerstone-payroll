@@ -256,6 +256,13 @@ module Api
           Employee.transaction do
             @employee.company.lock!
             revalidate_current_company_write_access!(company: @employee.company)
+            # Rehiring a terminated worker is client configuration, including
+            # in test workspaces where operators may otherwise change status.
+            if action_name == "reactivate" && @employee.reload.status == "terminated" &&
+                !TestWorkspaceAccessPolicy.allowed?(user: current_user, company: @employee.company,
+                  request_method: request.request_method, capability: :manage_client_configuration)
+              raise EmployeeStatusTransitionService::Forbidden, "A manager or admin can rehire a terminated worker"
+            end
             yield
           end
           render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
