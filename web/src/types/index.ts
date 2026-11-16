@@ -1291,6 +1291,7 @@ export interface ExpectedEntries {
 }
 
 export interface PayPeriod {
+  check_number_summary?: { next_check_number: number; last_used_check_number: number | null; can_change: boolean } | null;
   ineligible_workers?: { resolution?: string; employee_id: number; reason: string; status: string; effective_date: string | null }[];
   expected_entries?: ExpectedEntries;
   client_files?: { period_id: number; revision: number; submission_id: number; submitted_at: string; status: string; blocks_calculation: boolean } | null;
