@@ -49,7 +49,7 @@ export function ClientPayPeriodDetail(): ReactElement {
   const resolvedPayPeriod = resolvedRouteKey === routeKey ? payPeriod : null;
   const resolvedError = resolvedRouteKey === routeKey ? error : null;
 
-  const load = useCallback(async (): Promise<void> => {
+  const load = useCallback(async (retainCurrent = false): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
@@ -63,10 +63,12 @@ export function ClientPayPeriodDetail(): ReactElement {
       return;
     }
 
-    setLoading(true);
-    setResolvedRouteKey(null);
+    if (!retainCurrent) {
+      setLoading(true);
+      setResolvedRouteKey(null);
+      setPayPeriod(null);
+    }
     setError(null);
-    setPayPeriod(null);
     try {
       const response = await clientPayPeriodsApi.get(payPeriodId, companyId);
       if (!isCurrentRequest()) return;
@@ -120,7 +122,6 @@ export function ClientPayPeriodDetail(): ReactElement {
           <div className="py-12 text-center text-sm text-gray-500">Loading pay period...</div>
         ) : resolvedPayPeriod ? (
           <>
-            <ClientPayrollReview key={routeKey} payPeriod={resolvedPayPeriod} companyId={companyId} onDone={load} />
             <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
               <SummaryCard label="Employees" value={String(resolvedPayPeriod.employee_count ?? resolvedPayPeriod.payroll_items?.length ?? 0)} />
               <SummaryCard label="Gross Pay" value={formatCurrency(resolvedPayPeriod.total_gross ?? 0)} />
@@ -180,7 +181,7 @@ export function ClientPayPeriodDetail(): ReactElement {
               </CardContent>
             </Card>
 
-
+            <ClientPayrollReview key={routeKey} payPeriod={resolvedPayPeriod} companyId={companyId} onDone={() => load(true)} />
           </>
         ) : null}
       </div>

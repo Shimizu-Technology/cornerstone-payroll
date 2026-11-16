@@ -1414,10 +1414,13 @@ module Api
               revision: last_preview.metadata["revision"], downloaded_at: last_preview.created_at.iso8601
             }
             json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
-            reviews = pay_period.payroll_review_packages.includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc).to_a
+            reviews = pay_period.payroll_review_packages.summary.includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
+            # Fetch only current/shared rows in one query, preserving the detail
+            # query budget even when there is no current review.
+            reviews = reviews.current.or(reviews.shared_history).to_a
             json[:payroll_review] = PayrollReview::PackagePresenter.call(reviews.find { |package| !package.superseded? })
             json[:payroll_review_history] = reviews.select { |package| package.sent_for_client_approval_at || package.changes_requested_at }
-              .map { |package| PayrollReview::PackagePresenter.call(package) }
+              .map { |package| PayrollReview::PackagePresenter.call(package, include_source_manifest: false) }
           end
 
           # Mutation responses replace the browser's current period too. Retain

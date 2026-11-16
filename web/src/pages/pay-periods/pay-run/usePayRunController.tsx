@@ -1,3 +1,4 @@
+import { payrollClientCommitReason } from '@/lib/payrollClientCommitReason';
 import { estimateDraftGross } from '@/lib/draft-gross';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { useFeedbackState } from '@/components/ui/action-feedback';
@@ -88,6 +89,10 @@ export function usePayRunController({
   const [clientApprovalEvidence, setClientApprovalEvidence] = useState('');
   const [clientApprovalNotes, setClientApprovalNotes] = useState('');
   const [clientApprovalConfirmed, setClientApprovalConfirmed] = useState(false);
+  useEffect(() => {
+    setClientApprovalConfirmed(false);
+    setClientApprovalEvidence('');
+  }, [payPeriod?.payroll_review?.id]);
   const [adoptingConfirmedWorkweek, setAdoptingConfirmedWorkweek] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -904,7 +909,7 @@ export function usePayRunController({
 
   const handleCommit = async (confirmedPeriodId: number) => {
     if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
-        payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || processing || commitInFlightRef.current) return;
+        payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || payrollClientCommitReason(payPeriod) || processing || commitInFlightRef.current) return;
     commitInFlightRef.current = true;
     const currentRouteGeneration = commitRouteGenerationRef.current;
     const isCurrentRoute = () => currentRouteGeneration === commitRouteGenerationRef.current;

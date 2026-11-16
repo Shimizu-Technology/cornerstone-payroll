@@ -11,6 +11,18 @@ module PayrollSubmissions
       @documents = ClientPortalThreadSerializer.new(current_user: current_user)
     end
 
+    def summaries(entries)
+      @catalog.preload_live_pay_periods(entries)
+      ids = entries.filter_map { |entry| @catalog.live_pay_period(entry)&.id }
+      @published_reviews = ids.index_with { nil }
+      PayrollReviewPackage.summary.current.where(pay_period_id: ids).where.not(published_at: nil).find_each do |package|
+        @published_reviews[package.pay_period_id] = package
+      end
+      ActiveRecord::Associations::Preloader.new(records: entries.filter_map(&:record),
+        associations: [ :submissions, :status_events, :read_receipts, :file_requests ]).call
+      entries.map { |entry| summary(entry) }
+    end
+
     def summary(entry)
       record = entry.record
       current = record&.current_submission
@@ -25,12 +37,17 @@ module PayrollSubmissions
         status_changed_at: record&.status_changed_at
       }
       pay_period = @catalog.live_pay_period(entry)
-      if record&.status.in?(%w[draft_ready approved changes_requested paid]) && !pay_period&.client_finished?
+      if pay_period && record&.status.in?(%w[draft_ready approved changes_requested paid]) && !pay_period.client_finished?
         payload[:status] = "in_review"
         payload[:status_label] = "Awaiting payroll preview"
       end
       if pay_period
-        published = pay_period.payroll_review_packages.current.where.not(published_at: nil).first
+        @published_reviews ||= {}
+        published = if @published_reviews.key?(pay_period.id)
+          @published_reviews[pay_period.id]
+        else
+          @published_reviews[pay_period.id] = pay_period.payroll_review_packages.summary.current.where.not(published_at: nil).first
+        end
         visible = @staff || pay_period.client_finished? || (pay_period.approved? && published)
         payload[:review_pay_period_id] = pay_period.id if visible
         if pay_period.client_finished?
@@ -45,6 +62,10 @@ module PayrollSubmissions
             [ "draft_ready", "Payroll preview ready for review" ]
           end
         end
+      end
+      if payload[:status] == "paid" && record && record.file_requests.any?(&:outstanding?)
+        payload[:status] = "in_review"
+        payload[:status_label] = "Requested files outstanding"
       end
       if @staff
         payload[:pay_period_id] = pay_period&.id
@@ -88,7 +109,8 @@ module PayrollSubmissions
     def allowed_actions(entry)
       record = entry.record
       status = record&.status || "waiting_for_files"
-      finished = @catalog.live_pay_period(entry)&.client_finished?
+      run = @catalog.live_pay_period(entry)
+      finished = run ? run.client_finished? : status == "paid"
       return [ "message" ] if finished
 
       if @staff
@@ -99,7 +121,7 @@ module PayrollSubmissions
         actions
       else
         actions = []
-        actions << "submit" if @catalog.company.payroll_intake_source_enabled?("mosa_revel") && status != "paid" && !finished && @catalog.open_for_files?(entry)
+        actions << "submit" if @catalog.company.payroll_intake_source_enabled?("mosa_revel") && !finished && @catalog.open_for_files?(entry)
         actions << "message"
         actions
       end

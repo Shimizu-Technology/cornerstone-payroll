@@ -1,3 +1,4 @@
+import { payrollClientCommitReason } from '@/lib/payrollClientCommitReason';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatCurrency, formatDateRange, formatDate } from '@/lib/utils';
@@ -5,7 +6,7 @@ import type { PayPeriod } from '@/types';
 
 type Props = {
   open: boolean;
-  payPeriod: Pick<PayPeriod, 'id' | 'status' | 'start_date' | 'end_date' | 'pay_date' | 'compliance_warnings' | 'correction_status'>;
+  payPeriod: Pick<PayPeriod, 'id' | 'status' | 'start_date' | 'end_date' | 'pay_date' | 'compliance_warnings' | 'correction_status' | 'payroll_review' | 'client_payroll_approval_required'>;
   companyName: string;
   itemCount: number;
   totalNet: number;
@@ -15,7 +16,8 @@ type Props = {
 };
 
 export function PayrollCommitDialog({ open, payPeriod, companyName, itemCount, totalNet, processing, onCancel, onConfirm }: Props) {
-  const canConfirm = !processing && payPeriod.status === 'approved' && payPeriod.correction_status !== 'voided';
+  const clientCommitReason = payrollClientCommitReason(payPeriod);
+  const canConfirm = !clientCommitReason && !processing && payPeriod.status === 'approved' && payPeriod.correction_status !== 'voided';
   return <Dialog open={open} onOpenChange={value => { if (!value && !processing) onCancel(); }} dismissOnEscape={!processing}>
     <DialogContent>
       <DialogHeader>
@@ -34,6 +36,7 @@ export function PayrollCommitDialog({ open, payPeriod, companyName, itemCount, t
         <p className="font-semibold">Review these warnings before committing</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">{payPeriod.compliance_warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
       </div>}
+      {clientCommitReason && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-warning-950">{clientCommitReason}</p>}
       <p className="text-sm leading-6 text-neutral-600">Review this run before confirming. Later payroll changes must use the corrections workflow.</p>
       <DialogFooter className="gap-2 sm:gap-0">
         <Button className="max-sm:min-h-[44px]" type="button" variant="outline" disabled={processing} onClick={onCancel}>Keep reviewing</Button>

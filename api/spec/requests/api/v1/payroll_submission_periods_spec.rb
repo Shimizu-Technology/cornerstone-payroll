@@ -466,6 +466,7 @@ RSpec.describe "Pay-period submissions", type: :request do
     end
 
     it "shows the pay-run preview decision instead of the earlier manual draft approval" do
+      company.update!(client_payroll_approval_required: true)
       ensure_verified_test_tax_years(2026)
       period.update!(status: "approved", pay_period: pay_period)
       period.with_lock { period.transition!("resolve_source", actor: staff, submission: period.current_submission, note: "Synthetic source reviewed") }
@@ -480,6 +481,36 @@ RSpec.describe "Pay-period submissions", type: :request do
       PayrollReview::RevisionService.new(pay_period: pay_period, actor: client).request_changes!(revision_id: review.id, note: "Correct the hours")
       get "#{client_base}/#{period.id}"
       expect(data["status"]).to eq("changes_requested")
+    end
+
+    %w[draft_ready approved changes_requested paid].each do |original_status|
+      it "preserves #{original_status} for an old period with no run" do
+        period.update!(status: original_status, pay_period: nil, start_date: "2026-09-01", end_date: "2026-09-15")
+        as_client
+        get "#{client_base}/#{period.id}"
+        expect(data["status"]).to eq(original_status)
+        expect(data["status_label"]).to eq(PayrollSubmissionPeriod::STATUS_LABELS.fetch(original_status))
+        expect(data["review_pay_period_id"]).to be_nil
+      end
+    end
+
+    it "preserves paid for a committed then voided linked run" do
+      period.update!(status: "paid", pay_period: pay_period)
+      pay_period.update_columns(status: "committed", committed_at: Time.current, correction_status: "voided")
+      as_client
+      get "#{client_base}/#{period.id}"
+      expect(data["status"]).to eq("paid")
+      expect(data["review_pay_period_id"]).to be_nil
+    end
+
+    it "allows corrected source files for a legacy-paid period with an uncommitted live run" do
+      period.update!(status: "paid", pay_period: pay_period)
+      as_client
+      get "#{client_base}/#{period.id}"
+      expect(data["allowed_actions"]).to include("submit")
+      send_package(notes: "Corrected hours", idempotency_key: "legacy-correction")
+      expect(response).to have_http_status(:created), response.body
+      expect(period.reload.status).to eq("submitted")
     end
 
     it "derives paid status only from the actual pay run commit" do

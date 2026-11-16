@@ -76,6 +76,28 @@ RSpec.describe "Pay period detail read", type: :request do
     end
   end
 
+  describe "review history" do
+    it "reads summaries without calculation snapshots and omits source manifests from shared history" do
+      period = build_detail_read_period(ordinary_rows: 1, status: :draft, branches: false)
+      common = { company_id: company.id, schema_version: "v1", calculation_checksum: "a" * 64,
+        calculation_snapshot: { "large" => "x" * 10_000 }, source_manifest: { "source" => "current only" }, generated_at: Time.current }
+      period.payroll_review_packages.create!(**common, revision: 1, status: "superseded", superseded_at: Time.current,
+        supersession_reason: "New revision", sent_for_client_approval_at: Time.current)
+      period.payroll_review_packages.create!(**common, revision: 2, status: "superseded", superseded_at: Time.current,
+        supersession_reason: "Unshared draft")
+      period.payroll_review_packages.create!(**common, revision: 3, status: "pending")
+      queries = []
+      callback = ->(_name, _start, _finish, _id, payload) { queries << payload[:sql] if payload[:sql].start_with?("SELECT") && payload[:sql].include?('"payroll_review_packages"') }
+      body = ActiveSupport::Notifications.subscribed(callback, "sql.active_record") { detail(period).fetch("pay_period") }
+      expect(body.dig("payroll_review", "source_manifest")).to eq("source" => "current only")
+      expect(body.fetch("payroll_review_history").pluck("revision")).to eq([ 1 ])
+      expect(body.fetch("payroll_review_history").first).not_to have_key("source_manifest")
+      expect(queries).not_to be_empty
+      queries.each { |sql| expect(sql).not_to include('"calculation_snapshot"') }
+      expect(queries.any? { |sql| sql.include?('"sent_for_client_approval_at" IS NOT NULL') }).to be(true)
+    end
+  end
+
   describe "response" do
     it "matches the unbatched read for every committed eligibility outcome" do
       period = build_detail_read_period(ordinary_rows: 4)

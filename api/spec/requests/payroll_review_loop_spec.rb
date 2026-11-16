@@ -121,9 +121,58 @@ RSpec.describe "Published payroll review loop", type: :request do
   it "requires no client gate with the setting off" do
     company.update!(client_payroll_approval_required: false)
     staff_approve
+    expect(review.published_at).to be_nil
+    expect(PortalNotificationEvent.where(event_type: "payroll_review_published")).to be_empty
+    @actor = client
+    get base
+    expect(response).to have_http_status(:not_found)
     @actor = staff
     post "#{admin}/commit"
     expect(response).to have_http_status(:ok), response.body
+  end
+
+  it "blocks commit over a current change request even when the setting is disabled" do
+    staff_approve
+    @actor = client
+    post "#{base}/request_changes", params: { revision_id: review.id, note: "Add two hours" }
+    expect(response).to have_http_status(:ok)
+    company.update!(client_payroll_approval_required: false)
+    @actor = staff
+    post "#{admin}/commit"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("#{client.name} requested changes: Add two hours. Unapprove to make changes.")
+    expect(period.reload).to be_approved
+  end
+
+  it "keeps staff approval and the client decision when notification recording fails" do
+    allow(PortalNotifications).to receive(:record!).and_wrap_original do |original, **args|
+      original.call(**args)
+      raise ActiveRecord::StatementInvalid, "notification failure"
+    end
+    staff_approve
+    expect(period.reload).to be_approved
+    expect(review.published_at).to be_present
+    expect(PortalNotificationEvent.where(event_type: "payroll_review_published")).to be_empty
+    client_approve
+    expect(response).to have_http_status(:ok), response.body
+    expect(review).to be_approved
+    expect(PortalNotificationEvent.where(event_type: "payroll_review_decided")).to be_empty
+  end
+
+  it "renders outside the period lock and rejects a changed checksum without auditing or serving the PDF" do
+    staff_approve
+    @actor = client
+    allow(PayrollPreviewPdf).to receive(:generate).and_wrap_original do |original, **args|
+      expect(PayPeriod.connection.transaction_open?).to be(true) # request spec fixture transaction only
+      expect(PayPeriod.connection.open_transactions).to eq(1)
+      pdf = original.call(**args)
+      item.update!(net_pay: 1_101)
+      pdf
+    end
+    expect { get "#{base}/preview_pdf", params: { revision_id: review.id } }
+      .not_to change { AuditLog.where(action: "client_payroll_review#preview_pdf").count }
+    expect(response).to have_http_status(:conflict)
+    expect(response.media_type).to eq("application/json")
   end
 
   it "rejects a different company's run and stale calculations without exposing PDFs or decisions" do

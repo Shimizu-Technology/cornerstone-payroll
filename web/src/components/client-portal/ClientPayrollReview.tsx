@@ -23,6 +23,17 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
   const canReview = payPeriod.status === 'approved' && !!review?.published_at;
   const canDecide = canReview && review?.status === 'pending';
 
+  const handleFailure = async (cause: unknown, fallback: string) => {
+    if (!active.current) return;
+    const stale = cause instanceof Error && 'status' in cause && (cause.status === 422 || cause.status === 409);
+    if (stale) {
+      setConfirmed(false); setArtifact(null);
+      setError('This payroll was updated. Review the latest preview.');
+      try { await onDone(); } catch { /* Keep the recovery message if reload fails. */ }
+    } else setError(cause instanceof Error ? cause.message : fallback);
+  };
+  useEffect(() => { setConfirmed(false); setArtifact(null); }, [review?.id]);
+
   const preview = async (view: boolean) => {
     if (!review) return;
     setBusy(true); setError(null);
@@ -36,7 +47,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
         document.body.appendChild(anchor); anchor.click(); anchor.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not open the preview. Try again.'); }
+    } catch (cause) { await handleFailure(cause, 'Could not open the preview. Try again.'); }
     finally { setBusy(false); }
   };
   const decide = async (approve: boolean) => {
@@ -49,7 +60,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
       else await clientPayPeriodsApi.requestChanges(payPeriod.id, companyId, { revision_id: review.id, note: note.trim() });
       if (!active.current) return;
       setConfirmed(false); setNote(''); await onDone();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not send your decision. Your note is still here.'); }
+    } catch (cause) { await handleFailure(cause, 'Could not send your decision. Your note is still here.'); }
     finally { setBusy(false); }
   };
   if (!review && !payPeriod.payroll_review_history?.length) return null;
@@ -57,7 +68,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
     <CardContent className="space-y-4 pt-6 [&_button]:min-h-11">
       <div>
         <h2 className="text-xl font-semibold text-neutral-950">Review preview</h2>
-        <p className="mt-1 text-sm text-neutral-700">{canReview ? `Revision ${review?.revision} · Review ID ${review?.checksum_short}. Preview checks and pay stubs before payroll is finalized.` : 'Payroll preview review is closed. See the revision history below.'}</p>
+        <p className="mt-1 text-sm text-neutral-700">{canReview ? `Revision ${review?.revision} · Review ID ${review?.checksum_short}. Your approval is needed before payroll is finalized. Review the preview checks and pay stubs, then approve or request changes.` : 'Payroll preview review is closed. See the revision history below.'}</p>
       </div>
       {canReview && <>
         <p className="text-sm font-medium">Gross pay {formatCurrency(payPeriod.total_gross ?? 0)} · Net pay {formatCurrency(payPeriod.total_net ?? 0)}</p>

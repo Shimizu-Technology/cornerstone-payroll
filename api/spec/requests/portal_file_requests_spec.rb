@@ -131,14 +131,21 @@ RSpec.describe "Portal file requests", type: :request do
 
     post "/api/v1/admin/payroll_submission_periods/#{period.id}/mark_paid"
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to eq("A requested file is still outstanding. Accept or withdraw it first.")
+    expect(response.parsed_body.fetch("error")).to include("Payroll files finish when the pay run is committed.")
     expect(period.reload.status).to eq("draft_ready")
+
+    # A committed financial run does not hide an outstanding file request.
+    pay_period.update_columns(status: "committed", committed_at: Time.current)
+    get "/api/v1/admin/payroll_submission_periods/#{period.id}"
+    expect(data).to include("status" => "in_review", "status_label" => "Requested files outstanding")
 
     # A response is not acceptance, so the period still cannot be completed.
     as_client
     get "/api/v1/client/payroll_submission_periods/#{period.id}"
     expect(data.fetch("file_requests").first).to include("title" => "Riley's timesheet", "status" => "requested")
     respond_with(request_id, [ client_file ])
+    get "/api/v1/client/payroll_submission_periods/#{period.id}"
+    expect(data).to include("status" => "in_review", "status_label" => "Requested files outstanding")
     as_staff
     post "/api/v1/admin/payroll_submission_periods/#{period.id}/mark_paid"
     expect(response).to have_http_status(:unprocessable_entity)
@@ -146,8 +153,10 @@ RSpec.describe "Portal file requests", type: :request do
     post "/api/v1/admin/portal_file_requests/#{request_id}/withdraw", params: { body: "Found it in the Revel export." }
     expect(response).to have_http_status(:created)
     post "/api/v1/admin/payroll_submission_periods/#{period.id}/mark_paid"
-    expect(response).to have_http_status(:ok)
-    expect(period.reload.status).to eq("paid")
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(period.reload.status).to eq("draft_ready")
+    get "/api/v1/admin/payroll_submission_periods/#{period.id}"
+    expect(data).to include("status" => "paid", "review_pay_period_id" => pay_period.id)
   end
 
   it "refuses a new request on a paid pay period" do
