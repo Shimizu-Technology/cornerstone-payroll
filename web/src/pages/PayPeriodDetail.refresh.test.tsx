@@ -42,6 +42,7 @@ const apiMocks = vi.hoisted(() => ({
   runPayroll: vi.fn(),
   commit: vi.fn(),
   unapprove: vi.fn(),
+  restoreEmployee: vi.fn(),
   refreshSetup: vi.fn(),
   comparison: vi.fn(),
   payrollFinalRecord: vi.fn(),
@@ -66,6 +67,7 @@ vi.mock('@/services/api', () => ({
     runPayroll: apiMocks.runPayroll,
     commit: apiMocks.commit,
     unapprove: apiMocks.unapprove,
+    restoreEmployee: apiMocks.restoreEmployee,
     refreshSetup: apiMocks.refreshSetup,
     comparison: apiMocks.comparison,
   },
@@ -2119,4 +2121,33 @@ it('clears staff email attestation when the reviewed revision changes', async ()
   act(() => { controller.dialogs.setPayPeriod(current => current && { ...current, payroll_review: { ...current.payroll_review!, id: 92, revision: 2 } }); });
   await screen.findByText('unconfirmed:');
   expect(apiMocks.recordClientApproval).not.toHaveBeenCalled();
+});
+
+it('restores a removed expected-hours employee and keeps inline hours entry enabled through calculation', async () => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Manual', last_name: 'Worker', employment_type: 'hourly', pay_rate: 15, status: 'active', pay_frequency: 'biweekly',
+    wage_rates: [{ id: 3, label: 'Regular', rate: 15, is_primary: true, active: true }] } as Employee;
+  const field = { id: 4, employee_id: 30, employee_wage_rate_id: 3, wage_rate: '15', label: 'Manual worker hours', kind: 'extra_hours', required: true, allow_none: true, status: 'excluded', value: '0' };
+  const period = { ...initialPayPeriod, status: 'calculated', run_purpose: 'regular', excluded_employee_ids: [30],
+    excluded_employees: [{ employee_id: 30, name: 'Manual Worker', reason: 'No hours received' }],
+    expected_entries: { fields: [field], missing_regulars: [], outstanding: [] } } as unknown as PayPeriod;
+  const restored = { ...period, excluded_employee_ids: [], excluded_employees: [], expected_entries: { fields: [{ ...field, status: 'missing' }], missing_regulars: [], outstanding: ['Manual worker hours'] } } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.restoreEmployee.mockResolvedValue({});
+  apiMocks.get.mockResolvedValue({ pay_period: restored });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...restored, expected_entries: { ...restored.expected_entries, fields: [{ ...field, status: 'filled', value: '16' }], outstanding: [] } }, results: { success: [], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add back to this run' }));
+  await waitFor(() => expect(apiMocks.restoreEmployee).toHaveBeenCalledWith(12, 30));
+  const hours = await screen.findByLabelText('Hours: Manual worker hours');
+  await waitFor(() => expect(hours).toHaveProperty('disabled', false));
+  fireEvent.change(hours, { target: { value: '16' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save and calculate' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledOnce());
+  const payload = apiMocks.runPayroll.mock.calls[0][1];
+  expect(payload.employee_ids).toContain(30);
+  expect(payload.hours['30'].wage_rates).toContainEqual(expect.objectContaining({ employee_wage_rate_id: 3, regular_hours: 16 }));
+  expect(await screen.findByText('Manual worker hours · Filled: 16 h')).toBeTruthy();
 });

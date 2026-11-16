@@ -37,13 +37,13 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
   const hasFeedback = Boolean(sections.feedback.error || sections.feedback.calculationNotice || sections.feedback.calendarRefreshError || sections.feedback.worksheetRefreshWarning || sections.feedback.savedImportReloadRequired || sections.feedback.calculationFailures.length);
   const committedSummary = state.committed ? `Committed${committedAt ? ` ${formatGuamDateTime(committedAt)}` : ''}${sections.metadata.processedBy ? ` by ${sections.metadata.processedBy}` : ''}` : state.commitReason || 'Ready to commit the approved payroll';
   return <div className="space-y-3" aria-label="Payroll steps">
-    {!!payPeriod.ineligible_workers?.length && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-900">
+    {!!payPeriod.ineligible_workers?.length && <div id="payroll-ineligible-workers" tabIndex={-1} role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-900">
       <h2 className="font-semibold">Ineligible on this run</h2>
       <ul>{payPeriod.ineligible_workers.map(worker => <li key={worker.employee_id}>{worker.reason}{worker.resolution && <p>{worker.resolution}</p>}</li>)}</ul>
       <p>For workers without AIRE time or tax evidence, use Edit payroll → Remove from Payroll, or reactivate them, before approving or committing. No paychecks are removed automatically.</p>
     </div>}
-    <ExpectedEntriesPanel payPeriod={payPeriod} disabled={sections.roster.processing || sections.roster.financialActionsHeld || !sections.roster.canEditPayPeriod || sections.roster.hasStagedWorksheetChanges}
-      onCalculate={sections.roster.onCalculateExpectedEntry} onSaved={() => sections.roster.loadPayPeriod(payPeriod.id, true)} onEnterPay={id => {
+    <ExpectedEntriesPanel key={payPeriod.id} onUnapprove={sections.processing.handleUnapprove} payPeriod={payPeriod} disabled={sections.roster.processing || sections.roster.financialActionsHeld || !sections.roster.canEditPayPeriod || (payPeriod.status !== 'approved' && sections.roster.hasStagedWorksheetChanges)}
+      onRestore={sections.roster.handleRestoreEmployee} onCalculate={sections.roster.onCalculateExpectedEntry} onSaved={() => sections.roster.loadPayPeriod(payPeriod.id, true)} onEnterPay={id => {
         sections.roster.setAdditionalEmployeeIds(prev => new Set([...prev, id]));
         sections.roster.setHoursMap(prev => ({ ...prev, [id]: prev[id] || { regular: 0, overtime: 0 } }));
         const step = document.getElementById('payroll-hours') as HTMLDetailsElement | null;

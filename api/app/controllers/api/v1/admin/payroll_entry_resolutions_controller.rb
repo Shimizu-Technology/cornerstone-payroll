@@ -30,8 +30,8 @@ module Api
           current_company.with_lock do
             revalidate_current_company_write_access!(capability: :payroll_operations)
             period = PayPeriod.where(company: current_company).lock.find(params[:pay_period_id])
-            unless period.draft? || period.calculated?
-              return render json: { error: "Only draft or calculated runs can change expected entries" }, status: :unprocessable_entity
+            unless period.can_edit? && (period.draft? || period.calculated? || period.approved?)
+              return render json: { error: "Only draft, calculated, or approved runs can change expected entries" }, status: :unprocessable_entity
             end
             yield period
             render json: { expected_entries: PayrollExpectedEntries.new(period).payload }

@@ -1,5 +1,6 @@
 
 
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 import type { PayRunSectionProps } from './usePayRunController';
@@ -9,6 +10,9 @@ export function PayRunRoster({
   employees,
   financialActionsHeld,
   handleRunPayroll,
+  handleRestoreEmployee,
+  canEditPayPeriod,
+  hasStagedWorksheetChanges,
   isCalculated,
   isDraft,
   payPeriod,
@@ -25,7 +29,29 @@ export function PayRunRoster({
   setTipsMap,
   setTipsPaidOutMap
 }: PayRunSectionProps<'roster'>) {
+  const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState('');
+  const restore = async (employeeId: number) => {
+    setRestoring(true);
+    setRestoreError('');
+    try { await handleRestoreEmployee(employeeId); }
+    catch (error) { setRestoreError(error instanceof Error ? error.message : 'Could not add employee back'); }
+    finally { setRestoring(false); }
+  };
   return (<>
+{(isCalculated || (isDraft && payPeriod.run_purpose !== 'regular')) && !!payPeriod.excluded_employees?.length && (
+  <section aria-label="Removed from this run" className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+    <h3 className="font-medium text-neutral-800">Removed from this run ({payPeriod.excluded_employees.length})</h3>
+    {restoreError && <p role="alert" className="mt-2 text-sm text-danger-700">{restoreError}</p>}
+    <ul className="mt-3 space-y-3">
+      {payPeriod.excluded_employees.map(employee => <li key={employee.employee_id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 break-words"><p className="text-sm font-medium">{employee.name}</p><p className="text-sm text-neutral-600">{employee.reason || 'Removed from pay period'}</p></div>
+        <Button className="min-h-11 shrink-0" size="sm" variant="outline" disabled={restoring || processing || financialActionsHeld || !canEditPayPeriod || hasStagedWorksheetChanges} onClick={() => void restore(employee.employee_id)} aria-label={`Add back ${employee.name}`}>Add back</Button>
+      </li>)}
+    </ul>
+    {hasStagedWorksheetChanges && <p className="mt-2 text-sm text-neutral-600">Calculate your worksheet edits first, then add someone back.</p>}
+  </section>
+)}
 {(isCalculated || (isDraft && payPeriod.run_purpose !== 'regular')) && (() => {
           const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
           const excludedEmployeeIds = new Set(payPeriod.excluded_employee_ids || []);

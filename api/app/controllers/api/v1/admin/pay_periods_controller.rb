@@ -1470,6 +1470,14 @@ module Api
             }
           end
 
+          unless list
+            exclusions = pay_period.pay_period_excluded_employees.includes(:employee).to_a
+            json[:excluded_employee_ids] = exclusions.map(&:employee_id)
+            json[:excluded_employees] = exclusions.map do |exclusion|
+              { employee_id: exclusion.employee_id, name: exclusion.employee.full_name, reason: exclusion.reason }
+            end
+          end
+
           if include_items
             print_activity = PayrollPaymentMethodEligibility.print_activity_for_period(pay_period)
             items = pay_period.payroll_items.reportable.includes(
@@ -1482,7 +1490,6 @@ module Api
             json[:payroll_items] = items.map do |item|
               payroll_item_json(item, print_activity: print_activity, payment_lookup: payment_lookup)
             end
-            json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)
             json[:default_employee_ids] = PayPeriodDefaultRoster.new(pay_period).employee_ids
           end
 

@@ -70,6 +70,7 @@ class StaffRolePolicy
     "api/v1/admin/historical_reports" => :payroll_operations,
     "api/v1/admin/payroll_history" => :payroll_operations,
     "api/v1/admin/imported_pay_periods" => :payroll_operations,
+    "api/v1/admin/pay_period_excluded_employees" => :payroll_operations,
     "api/v1/admin/payroll_go_live" => :payroll_operations,
     "api/v1/admin/payroll_filing_responsibilities" => :payroll_operations,
     "api/v1/admin/payroll_filing_records" => :payroll_operations,
