@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_17_000100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -620,6 +620,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
     t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
     t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['sandbox'::character varying::text, 'migration_rehearsal'::character varying::text, 'training_replay'::character varying::text, 'backup_snapshot'::character varying::text]))", name: "companies_test_workspace_purpose_check"
     t.index [ "created_by_id" ], name: "index_companies_on_created_by_id"
+    t.integer "regular_pay_lookback", default: 4, null: false
+    t.integer "regular_pay_threshold", default: 3, null: false
+    t.check_constraint "regular_pay_threshold > 0 AND regular_pay_threshold <= regular_pay_lookback AND regular_pay_lookback <= 24", name: "regular_pay_rule"
   end
 
   create_table "company_assignments", force: :cascade do |t|
@@ -2618,6 +2621,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
     t.index [ "created_by_id" ], name: "index_pay_periods_on_created_by_id"
   end
 
+  create_table "payroll_entry_resolutions", force: :cascade do |t|
+    t.bigint "pay_period_id", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "payroll_standing_change_id"
+    t.string "note", limit: 500
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "employee_id" ], name: "index_payroll_entry_resolutions_on_employee_id"
+    t.index [ "pay_period_id", "employee_id" ], name: "idx_entry_resolution_regular", unique: true, where: "(payroll_standing_change_id IS NULL)"
+    t.index [ "pay_period_id", "payroll_standing_change_id" ], name: "idx_entry_resolution_field", unique: true, where: "(payroll_standing_change_id IS NOT NULL)"
+    t.index [ "pay_period_id" ], name: "index_payroll_entry_resolutions_on_pay_period_id"
+    t.index [ "payroll_standing_change_id" ], name: "index_payroll_entry_resolutions_on_payroll_standing_change_id"
+  end
+
   create_table "payroll_field_definitions", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.string "amount_type", default: "fixed", null: false
@@ -3288,6 +3305,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
     t.check_constraint "\"position\" >= 0", name: "standing_change_position"
     t.check_constraint "kind::text = ANY (ARRAY['owner_pay'::character varying, 'extra_hours'::character varying]::text[])", name: "standing_change_kind"
     t.index [ "company_id", "kind", "employee_id" ], name: "idx_standing_changes_active_employee_kind", unique: true, where: "active"
+    t.string "label"
+    t.text "help_text"
+    t.boolean "required", default: false, null: false
+    t.boolean "allow_none", default: true, null: false
   end
 
   create_table "payroll_submission_documents", force: :cascade do |t|
@@ -4830,6 +4851,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   add_foreign_key "pay_periods", "payroll_intake_sessions", column: "intake_stale_session_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "promoted_payment_prepared_by_id"
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
+  add_foreign_key "payroll_entry_resolutions", "employees"
+  add_foreign_key "payroll_entry_resolutions", "pay_periods"
+  add_foreign_key "payroll_entry_resolutions", "payroll_standing_changes"
   add_foreign_key "payroll_field_definitions", "companies"
   add_foreign_key "payroll_field_definitions", "employees", column: "owner_employee_id"
   add_foreign_key "payroll_filing_events", "client_documents", column: "evidence_document_id", on_delete: :restrict

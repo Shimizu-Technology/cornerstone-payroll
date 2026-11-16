@@ -1380,6 +1380,7 @@ module Api
             tax_sync_last_error: tax_sync_visible? ? pay_period.tax_sync_last_error : nil,
             tax_synced_at: tax_sync_visible? ? pay_period.tax_synced_at : nil,
             lifecycle: lifecycle,
+            expected_entries: list ? nil : PayrollExpectedEntries.new(pay_period).payload,
             pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields
             correction_status:        pay_period.correction_status,
@@ -1402,6 +1403,14 @@ module Api
           }
 
           unless action_name == "index"
+            # Previews exist only for calculated or approved runs.
+            last_preview = if pay_period.status.in?(%w[calculated approved])
+              AuditLog.where(company_id: pay_period.company_id, action: "checks#preview_pdf",
+                record_type: "PayPeriod", record_id: pay_period.id).newest_first.first
+            end
+            json[:last_preview_download] = last_preview && {
+              revision: last_preview.metadata["revision"], downloaded_at: last_preview.created_at.iso8601
+            }
             json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
             json[:payroll_review] = PayrollReview::PackagePresenter.call(
               pay_period.payroll_review_packages.current.includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first

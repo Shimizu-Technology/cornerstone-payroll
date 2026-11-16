@@ -149,6 +149,9 @@ Rails.application.routes.draw do
         get "client_inbox/counts", to: "client_inbox#counts"
         patch "employees/:id/intake_exception", to: "employees#review_intake_exception"
         resource :employee_intake_settings, only: [ :show, :update ]
+        patch "payroll_standing_changes/rule", to: "payroll_standing_changes#rule"
+        post "pay_periods/:pay_period_id/entry_resolutions", to: "payroll_entry_resolutions#create"
+        delete "pay_periods/:pay_period_id/entry_resolutions", to: "payroll_entry_resolutions#destroy"
         resources :payroll_standing_changes, only: [ :index, :create, :update ]
         resource :pay_schedule_settings, only: [ :show, :update ]
         resource :payroll_go_live, only: [ :show ], controller: :payroll_go_live do
@@ -515,6 +518,7 @@ Rails.application.routes.draw do
 
           # CPR-66: Check printing (pay-period scoped)
           get  "checks",                    to: "checks#index"
+          get  "checks/preview_pdf", to: "checks#preview_pdf"
           get  "checks/rehearsal_preview_pdf", to: "checks#rehearsal_preview_pdf"
           post "checks/batch_pdf",          to: "checks#batch_pdf"
           post "checks/mark_all_printed",   to: "checks#mark_all_printed"
