@@ -4,6 +4,18 @@ module Api
   module V1
     module Admin
       class PayrollStandingChangesController < BaseController
+        def rule
+          current_company.with_lock do
+            revalidate_current_company_write_access!(capability: :manage_client_configuration)
+            current_company.update!(params.permit(:regular_pay_lookback, :regular_pay_threshold).to_h)
+            AuditLog.record!(company_id: current_company.id, action: "payroll_standing_changes#rule",
+              record_type: "Company", record_id: current_company.id, metadata: { changes: current_company.saved_changes })
+          end
+          render json: payload
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::StatementInvalid
+          render json: { error: "Choose a threshold from 1 to the lookback, and a lookback up to 24 runs" }, status: :unprocessable_entity
+        end
+
         def index
           render json: payload
         end
@@ -34,11 +46,11 @@ module Api
         private
 
         def change_params
-          params.require(:standing_change).permit(:kind, :employee_id, :employee_wage_rate_id, :position, :active)
+          params.require(:standing_change).permit(:kind, :employee_id, :employee_wage_rate_id, :position, :active, :label, :help_text, :required, :allow_none)
         end
 
         def payload
-          { defaults: PayrollStandingChange.where(company: current_company).ordered.map { |item| item.as_json(only: %i[id kind employee_id employee_wage_rate_id position active]).merge(availability_error: item.availability_error) },
+          { regular_pay_rule: { lookback: current_company.regular_pay_lookback, threshold: current_company.regular_pay_threshold }, defaults: PayrollStandingChange.where(company: current_company).ordered.map { |item| item.as_json(only: %i[id kind employee_id employee_wage_rate_id position active label help_text required allow_none]).merge(availability_error: item.availability_error) },
             employees: Employee.where(company: current_company).order(:last_name, :first_name).includes(:employee_wage_rates).map do |employee|
               { id: employee.id, name: employee.full_name, status: employee.status, variable_salary: employee.variable_salary?,
                 hourly: employee.hourly_pay_basis?, wage_rates: employee.active_wage_rates.map { |rate| { id: rate.id, label: rate.label, rate: rate.rate } } }

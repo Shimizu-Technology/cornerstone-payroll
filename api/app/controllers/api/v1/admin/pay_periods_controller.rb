@@ -1394,6 +1394,7 @@ module Api
             tax_sync_last_error: tax_sync_visible? ? pay_period.tax_sync_last_error : nil,
             tax_synced_at: tax_sync_visible? ? pay_period.tax_synced_at : nil,
             lifecycle: lifecycle,
+            expected_entries: list ? nil : PayrollExpectedEntries.new(pay_period).payload,
             pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields
             correction_status:        pay_period.correction_status,
