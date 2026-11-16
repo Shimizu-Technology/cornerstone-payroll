@@ -5,6 +5,9 @@ module PayrollImport
   # pay and existing paycheck rows can change afterwards (staff enter a person's
   # pay while reviewing), and apply! reads the live values. This refreshes only
   # those fields so a reopened review matches what apply! will check.
+  #
+  # It also flags Revel hours that would replace hours staff changed by hand
+  # after an earlier import, so the review can show old -> new and ask first.
   class LivePreviewRowState
     def initialize(pay_period)
       @pay_period = pay_period
@@ -22,7 +25,10 @@ module PayrollImport
     private
 
     def refresh_row(row, item)
-      row = row.merge("overwrite_required" => item.present? && item.import_source != "mosa_revel")
+      row = row.merge(
+        "overwrite_required" => ImportService.overwrite_required?(item, source_period_pay: row["period_pay"]),
+        "hand_edited_hours" => self.class.hand_edited_hours(row, item)
+      )
       return row unless row["period_pay_required"]
 
       source = positive_amount(row["period_pay"])
@@ -41,6 +47,30 @@ module PayrollImport
 
     def manual_period_pay(item)
       self.class.manual_period_pay(item)
+    end
+
+    # Saved hours that differ from what the last import left on the row, when
+    # this import would replace them with different Revel hours.
+    def self.hand_edited_hours(row, item)
+      row = row.to_h.stringify_keys
+      return if item.blank? || item.import_source != "mosa_revel" || row["workbook_only"]
+
+      imported = item.custom_columns_data.to_h["mosa_imported_hours"]
+      return unless imported.is_a?(Hash)
+
+      saved = { "regular_hours" => item.hours_worked.to_d, "overtime_hours" => item.overtime_hours.to_d }
+      edited = saved.any? { |key, value| value != imported[key].to_d }
+      incoming = { "regular_hours" => row["regular_hours"].to_d, "overtime_hours" => row["overtime_hours"].to_d }
+      return unless edited && incoming != saved
+
+      {
+        "employee_id" => item.employee_id,
+        "employee_name" => row["employee_name"],
+        "saved_regular_hours" => saved["regular_hours"].to_s("F"),
+        "saved_overtime_hours" => saved["overtime_hours"].to_s("F"),
+        "source_regular_hours" => incoming["regular_hours"].to_s("F"),
+        "source_overtime_hours" => incoming["overtime_hours"].to_s("F")
+      }
     end
 
     # Pay entered by hand. Pay that an earlier workbook import wrote does not count.

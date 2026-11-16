@@ -1,7 +1,7 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { Link } from 'react-router';
 import { useEffect, useState, useRef, type ReactElement } from 'react';
-import { CheckCircle2, Download, RefreshCw } from 'lucide-react';
+import { CheckCircle2, CircleDashed, Download, RefreshCw } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -25,8 +25,9 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
 import { cn, formatCurrency } from '@/lib/utils';
-import { importSourceFiles } from '@/lib/importSources';
+import { carryRowOutcomes, defaultDisposition, importSourceFiles, MOSA_SOURCE_ACCEPT } from '@/lib/importSources';
 import { ImportSourcePanel } from './ImportSourcePanel';
+import { ImportSourceChecklist } from './ImportSourceChecklist';
 import { ApiError, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
@@ -43,6 +44,12 @@ interface ImportModalProps {
 
 type Step = 'upload' | 'preview' | 'applying' | 'done';
 type EditableSourceRow = MosaSourceRow;
+
+// The two MoSa files. Either can be sent first; the package keeps the other.
+const SOURCE_PICKERS = [
+  { role: 'revel_hours', label: 'Revel hours PDF', hint: 'The original Revel report. Only its regular and overtime hours are imported, and its dates must match this payroll.' },
+  { role: 'supplemental_workbook', label: 'Tips & loans workbook', hint: 'The Cornerstone change workbook with tips, loans, owner pay and one-time items.' },
+] as const;
 
 export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, onSourcePreviewed, onImportComplete }: ImportModalProps) {
   const [step, setStep] = useState<Step>(initialPreview ? 'preview' : 'upload');
@@ -64,10 +71,12 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [staffWorkbook, setStaffWorkbook] = useState<File | null>(null);
   const [reviewedSuggestedMatches, setReviewedSuggestedMatches] = useState(false);
   const [reviewedOverwrite, setReviewedOverwrite] = useState(false);
+  const [confirmHoursOverwrite, setConfirmHoursOverwrite] = useState(false);
+  const [noTipsOrLoans, setNoTipsOrLoans] = useState(false);
+  const [addingSource, setAddingSource] = useState(false);
   const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
   const [templateDownloading, setTemplateDownloading] = useState(false);
   const [currentPackage, setCurrentPackage] = useState<PayrollIntakeImportData | null>(null);
-  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const [replacementReason, setReplacementReason] = useState('');
   const [ownerPayDrafts, setOwnerPayDrafts] = useState<Record<number, number | null>>({});
   const [ownerPayBusy, setOwnerPayBusy] = useState<number | null>(null);
@@ -97,16 +106,22 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setTipsPaidOutFromTips(false);
     setReviewedSuggestedMatches(false);
     setReviewedOverwrite(false);
+    setConfirmHoursOverwrite(false);
+    setNoTipsOrLoans(false);
+    setAddingSource(false);
     setResults(null);
     setTemplateDownloading(false);
     setCurrentPackage(null);
-    setReplacementConfirmed(false);
     setReplacementReason('');
     setOwnerPayDrafts({});
     setOwnerPayBusy(null);
     setOwnerPayError(null);
     setReviewReloadNeeded(false);
   };
+
+  const refreshCurrentPackage = () => payrollIntakeImportsApi.list(payPeriodId).then((history) => {
+    setCurrentPackage(history.imports.find((entry) => entry.source_type === 'mosa_revel' && entry.current) || null);
+  }).catch(() => undefined);
 
   useEffect(() => {
     if (!open) return;
@@ -141,18 +156,18 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     }
   };
 
-  const openPreview = (data: ImportPreviewResponse) => {
+  const openPreview = (data: ImportPreviewResponse, keepOutcomesFrom?: MosaSourceRow[]) => {
     setPreviewData(data);
     setReviewedClientChanges(false); setClientChangeDrafts({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
     setUsePendingRevision(false);
     setRateChoices({});
-    setSourceRows(data.preview.source_rows.map((row) => ({
-      ...row,
-      disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending',
-    })));
+    setSourceRows(keepOutcomesFrom
+      ? carryRowOutcomes(keepOutcomesFrom, data.preview.source_rows)
+      : data.preview.source_rows.map((row) => ({ ...row, disposition: defaultDisposition(row) })));
     setTipsPaidOutFromTips(data.preview.tips_paid_out_from_tips);
     setReviewedSuggestedMatches(false);
     setReviewedOverwrite(false);
+    setConfirmHoursOverwrite(false);
     setStep('preview');
   };
 
@@ -194,6 +209,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     });
     // The rows that need the replace-existing confirmation may have changed.
     setReviewedOverwrite(false);
+    setConfirmHoursOverwrite(false);
   };
 
   // Each person's pay is saved on their own paycheck row, apart from calculation.
@@ -265,7 +281,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   };
 
   const handlePreview = async (submissionId?: number) => {
-    if (!pdfFile) return;
+    if (!pdfFile && !excelFile) return;
     try {
       setLoading(true);
       setError(null);
@@ -273,10 +289,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       setReviewedOverwrite(false);
       const data = await payPeriodsApi.previewImport(
         payPeriodId,
-        pdfFile,
+        pdfFile || undefined,
         excelFile || undefined,
         tipsPaidOutFromTips,
-        currentPackage && replacementConfirmed
+        currentPackage && replacing
           ? { supersedesPackageId: currentPackage.package_id, reason: replacementReason.trim() }
           : undefined,
         submissionId,
@@ -285,17 +301,43 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       setUsePendingRevision(!!submissionId);
       setDuplicateRevision(null);
       onSourcePreviewed?.();
-      void payrollIntakeImportsApi.list(payPeriodId).then((history) => {
-        setCurrentPackage(history.imports.find((entry) => entry.source_type === 'mosa_revel' && entry.current) || null);
-      }).catch(() => undefined);
+      void refreshCurrentPackage();
     } catch (err) {
       const id = err instanceof ApiError ? err.details?.pending_submission_id : undefined;
       const revision = err instanceof ApiError ? err.details?.pending_revision : undefined;
       const duplicate = typeof id === 'number' && typeof revision === 'number' ? { id, revision } : null;
       setDuplicateRevision(duplicate);
       setError(duplicate ? null : err instanceof Error ? err.message : 'Failed to parse files');
+      // Another upload may have changed the current package; show what it holds now.
+      if (err instanceof ApiError && err.details?.replacement_required) void refreshCurrentPackage();
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Add the missing file from the review. The package keeps the file already
+  // received, matching runs again, and outcomes chosen so far are kept.
+  const addSourceFile = async (role: string, file: File) => {
+    if (!previewData || loading) return;
+    const previousRows = sourceRows;
+    try {
+      setLoading(true);
+      setAddingSource(true);
+      setError(null);
+      const data = await payPeriodsApi.previewImport(
+        payPeriodId,
+        role === 'revel_hours' ? file : undefined,
+        role === 'supplemental_workbook' ? file : undefined,
+        previewData.preview.tips_paid_out_from_tips,
+      );
+      openPreview(data, previousRows);
+      onSourcePreviewed?.();
+      void refreshCurrentPackage();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add the file');
+    } finally {
+      setLoading(false);
+      setAddingSource(false);
     }
   };
 
@@ -316,6 +358,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         })),
         acknowledge_low_confidence_matches: reviewedSuggestedMatches,
         force_overwrite: reviewedOverwrite,
+        confirm_hours_overwrite: confirmHoursOverwrite,
+        no_tips_or_loans: noTipsOrLoans,
         wage_rate_choices: rateChoices,
         ...(clientChanges.length ? { confirm_client_changes: reviewedClientChanges,
           reviewed_changes: clientChanges.map(row => ({ change_index: row.change_index,
@@ -384,6 +428,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const suggestedMatchCount = previewData?.preview.low_confidence_matches.filter((match) => includedSourceRows.some((row) => row.employee_id === match.employee_id)).length || 0;
   const suggestedMatches = previewData?.preview.low_confidence_matches.filter((match) => includedSourceRows.some((row) => row.employee_id === match.employee_id)) || [];
   const nonMatchedSourceRows = sourceRows.filter((row) => row.row_kind !== 'matched');
+  const handEditedRows = included.filter((row) => row.hand_edited_hours);
+  const packageSources = previewData?.source_package.sources || [];
+  const clientWaivedSources = (previewData?.portal_source || (usePendingRevision ? previewData?.pending_portal_source : null))?.workbook_choice === 'none';
+  const missingSources = packageSources.filter((source) => source.required && !source.present
+    && !(source.waiver_label && (noTipsOrLoans || clientWaivedSources)));
   const canApply = Boolean(
     previewData
       && !loading
@@ -395,9 +444,17 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       && missingPeriodPay.length === 0
       && missingRateChoices.length === 0
       && (overwriteRows.length === 0 || reviewedOverwrite)
+      && (handEditedRows.length === 0 || confirmHoursOverwrite)
+      && missingSources.length === 0
       && (suggestedMatchCount === 0 || reviewedSuggestedMatches),
   );
-  const replacementReady = !replacementConfirmed || replacementReason.trim().length > 0;
+  // Upload step: which files the current package already has, and whether the
+  // chosen files only add what is missing or replace something received.
+  const currentRoles = new Set((currentPackage?.documents || []).filter((document) => document.verification_status !== 'legacy_unverified').map((document) => document.source_role));
+  const currentOpen = Boolean(currentPackage && ['previewed', 'reviewed'].includes(currentPackage.status));
+  const chosenRoles = [pdfFile ? 'revel_hours' : null, excelFile ? 'supplemental_workbook' : null].filter((role): role is string => role !== null);
+  const replacing = Boolean(currentPackage) && chosenRoles.length > 0 && (!currentOpen || chosenRoles.some((role) => currentRoles.has(role)));
+  const replacementReady = !replacing || replacementReason.trim().length > 0;
 
   // What still blocks Apply, in plain words, with a way to jump to each item. The long
   // review list can put the cause far from the Apply button on a phone.
@@ -418,6 +475,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     target?.focus();
   };
   const attention: { key: string; label: string; reason: string; jump: () => void }[] = [];
+  if (missingSources.length > 0) {
+    const labels = missingSources.map((source) => source.label).join(' and ');
+    const waivable = missingSources.every((source) => source.waiver_label);
+    attention.push({ key: 'sources', label: waivable ? `Add the ${labels}, or confirm there are none` : `Add the ${labels}`, reason: `the ${labels} ${missingSources.length === 1 ? 'is' : 'are'} missing`, jump: () => jumpToSection('sources') });
+  }
   if (clientChanges.length && (!reviewedClientChanges || clientChangesInvalid)) {
     attention.push({ key: 'client-changes', label: 'Review the client’s amounts and hours', reason: 'client changes need confirmation', jump: () => jumpToSection('client-changes') });
   }
@@ -438,6 +500,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   }
   if (overwriteRows.length > 0 && !reviewedOverwrite) {
     attention.push({ key: 'overwrite', label: 'Confirm replacing saved entries', reason: 'replacing saved entries is not confirmed', jump: () => jumpToSection('overwrite') });
+  }
+  if (handEditedRows.length > 0 && !confirmHoursOverwrite) {
+    attention.push({ key: 'hand-edited', label: 'Confirm replacing hand-entered hours', reason: 'replacing hand-entered hours is not confirmed', jump: () => jumpToSection('hand-edited') });
   }
   const applyBlockedReason = canApply ? null : attention.length > 0 ? `Apply is off: ${attention.map((item) => item.reason).join('; ')}.` : 'Apply is off until the items marked in this review are finished.';
 
@@ -520,7 +585,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         <DialogHeader>
           <DialogTitle>Import Payroll Data</DialogTitle>
           <DialogDescription>
-            {step === 'upload' && 'Upload the Revel hours PDF and, when needed, one payroll change workbook.'}
+            {step === 'upload' && 'Upload the Revel hours PDF and the tips & loans workbook, together or one at a time.'}
             {step === 'preview' && (unresolvedCount > 0
               ? `${unresolvedCount} source row${unresolvedCount === 1 ? ' needs' : 's need'} attention before this import can be applied.`
               : missingPeriodPay.length > 0
@@ -594,30 +659,17 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
                 <div className="flex items-start gap-3">
                   <RefreshCw className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-                  <div className="flex-1">
+                  <div className="min-w-0 flex-1">
                     <p className="font-semibold">Import version {currentPackage.package_revision} is the set of files currently in review</p>
                     <p className="mt-1 text-sm text-amber-800">
-                      {['previewed', 'reviewed'].includes(currentPackage.status)
-                        ? 'Continue the saved review, or upload corrected files and document what changed.'
+                      {currentOpen
+                        ? 'Continue the saved review, or add the file that is still missing below. Replacing a file already received needs a reason.'
                         : 'This source was already applied. Upload again only when MoSa sent a correction.'}
                     </p>
-                    {['previewed', 'reviewed'].includes(currentPackage.status) && (
+                    {currentOpen && (
                       <Button type="button" variant="outline" size="sm" className="mt-3 border-amber-300 bg-white" onClick={() => void handleResumeCurrent()} disabled={loading}>
                         Continue import version {currentPackage.package_revision}
                       </Button>
-                    )}
-                    <label className="mt-3 flex items-start gap-2 text-xs font-medium">
-                      <input type="checkbox" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} className="mt-0.5 rounded border-amber-300" />
-                      <span>These corrected files replace import version {currentPackage.package_revision}.</span>
-                    </label>
-                    {replacementConfirmed && (
-                      <Input
-                        label="What changed?"
-                        value={replacementReason}
-                        onChange={(event) => setReplacementReason(event.target.value)}
-                        placeholder="Example: MoSa corrected Mo’s regular hours."
-                        className="mt-3 bg-white"
-                      />
                     )}
                   </div>
                 </div>
@@ -635,41 +687,61 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 </Button>
               </div>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-neutral-600 mb-1">
-                Revel POS Payroll PDF <span className="text-red-500">*</span>
-              </label>
-              <input
-                ref={pdfInputRef}
-                aria-label="Revel POS Payroll PDF"
-                type="file"
-                accept=".pdf"
-                onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
-                className="block w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-              />
-              {pdfFile && <p className="text-xs text-neutral-600 mt-1">{pdfFile.name}</p>}
-              <p className="mt-2 text-xs text-neutral-600">
-                Keep using the original Revel report. Its regular and overtime hours are imported; Revel pay rates and pay amounts are ignored. The dates in the report must match this payroll.
-              </p>
-            </div>
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-semibold text-neutral-950">Files for this payroll</legend>
+              <p className="text-sm text-neutral-600">Add either file now and the other one later. The import is applied once both are in, or once you confirm there are no tips or loans.</p>
+              <ul className="space-y-3">
+                {SOURCE_PICKERS.map((picker) => {
+                  const chosen = picker.role === 'revel_hours' ? pdfFile : excelFile;
+                  const kept = currentRoles.has(picker.role) ? currentPackage?.documents.find((document) => document.source_role === picker.role) : undefined;
+                  return (
+                    <li key={picker.role} className="rounded-xl border border-neutral-200 bg-white p-3">
+                      <div className="flex min-w-0 items-start gap-2">
+                        {chosen || kept
+                          ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-700" aria-hidden="true" />
+                          : <CircleDashed className="mt-0.5 h-5 w-5 shrink-0 text-neutral-400" aria-hidden="true" />}
+                        <div className="min-w-0 flex-1">
+                          <label htmlFor={`import-source-${picker.role}`} className="block font-medium text-neutral-950">{picker.label}</label>
+                          <p className="mt-0.5 break-all text-xs text-neutral-700">
+                            {chosen ? `Selected: ${chosen.name}` : kept ? `In import version ${currentPackage?.package_revision}: ${kept.filename}` : 'Not added yet'}
+                          </p>
+                          <input
+                            id={`import-source-${picker.role}`}
+                            ref={picker.role === 'revel_hours' ? pdfInputRef : excelInputRef}
+                            type="file"
+                            accept={MOSA_SOURCE_ACCEPT[picker.role]}
+                            onChange={(event) => {
+                              const file = event.target.files?.[0] || null;
+                              if (picker.role === 'revel_hours') setPdfFile(file);
+                              else { setExcelFile(file); setTipsPaidOutFromTips(false); }
+                            }}
+                            className="mt-2 block w-full text-sm text-neutral-600 file:mr-3 file:min-h-11 file:rounded-md file:border-0 file:bg-primary-50 file:px-4 file:text-sm file:font-medium file:text-primary-700 hover:file:bg-primary-100"
+                          />
+                          <p className="mt-1 text-xs text-neutral-600">{picker.hint}</p>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </fieldset>
 
-            <div>
-              <label className="block text-xs font-medium text-neutral-600 mb-1">
-                Cornerstone payroll changes workbook (optional)
-              </label>
-              <input
-                ref={excelInputRef}
-                aria-label="Cornerstone payroll changes workbook (optional)"
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={(e) => {
-                  setExcelFile(e.target.files?.[0] || null);
-                  setTipsPaidOutFromTips(false);
-                }}
-                className="block w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-              />
-              {excelFile && <p className="text-xs text-neutral-600 mt-1">{excelFile.name}</p>}
-            </div>
+            {replacing && currentPackage && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950">
+                <p className="text-sm font-semibold">
+                  {currentOpen
+                    ? `This replaces the ${SOURCE_PICKERS.filter((picker) => chosenRoles.includes(picker.role) && currentRoles.has(picker.role)).map((picker) => picker.label).join(' and ')} in import version ${currentPackage.package_revision}.`
+                    : `Import version ${currentPackage.package_revision} was already applied. These files make a corrected version.`}
+                </p>
+                <Input
+                  label="What changed?"
+                  value={replacementReason}
+                  onChange={(event) => setReplacementReason(event.target.value)}
+                  placeholder="Example: MoSa corrected Mo’s regular hours."
+                  className="mt-2 bg-white"
+                />
+              </div>
+            )}
 
             <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
               <input
@@ -695,13 +767,25 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         {step === 'preview' && previewData && (
           <div ref={reviewRef} className="space-y-3">
             {missingRateChoices.length > 0 && <p role="alert" data-attention="rate-choices" tabIndex={-1} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Choose a job and rate for {missingRateChoices.map((row) => row.employee_name).join(', ')} using the Job and rate selectors below before applying.</p>}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
-              <span className="inline-flex items-center gap-2 font-semibold">
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                {previewData.source_package.verified_source_count} source{previewData.source_package.source_count === 1 ? '' : 's'} retained and verified
-              </span>
-              <span>Import version {previewData.source_package.package_revision} <span className="text-green-800">· reference {previewData.source_package.package_id.slice(0, 8)}</span></span>
-            </div>
+            {packageSources.length > 0 ? (
+              <ImportSourceChecklist
+                sources={packageSources}
+                summary={`Import version ${previewData.source_package.package_revision} · reference ${previewData.source_package.package_id.slice(0, 8)} · ${previewData.source_package.verified_source_count} of ${previewData.source_package.source_count} file${previewData.source_package.source_count === 1 ? '' : 's'} retained and verified`}
+                onAdd={previewData.portal_source ? undefined : (role, file) => void addSourceFile(role, file)}
+                busy={addingSource}
+                waived={noTipsOrLoans}
+                onWaivedChange={setNoTipsOrLoans}
+                clientWaived={clientWaivedSources}
+              />
+            ) : (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+                <span className="inline-flex items-center gap-2 font-semibold">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  {previewData.source_package.verified_source_count} source{previewData.source_package.source_count === 1 ? '' : 's'} retained and verified
+                </span>
+                <span>Import version {previewData.source_package.package_revision} <span className="text-green-800">· reference {previewData.source_package.package_id.slice(0, 8)}</span></span>
+              </div>
+            )}
             {attention.length > 0 && (
               <section aria-label="Needs attention" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
                 <p className="font-semibold">{attention.length === 1 ? '1 thing' : `${attention.length} things`} to finish before you can apply</p>
@@ -710,7 +794,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 </ul>
               </section>
             )}
-            {(previewData.preview.source_warnings || []).map((warning) => (
+            {(previewData.preview.source_warnings || []).filter((warning) => !(warning.code === 'missing_workbook' && packageSources.length > 0)).map((warning) => (
               <div key={warning.code} role={warning.severity === 'warning' ? 'alert' : undefined} className={warning.severity === 'info' ? 'rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700' : 'rounded-lg border border-warning-300 bg-warning-50 px-4 py-3 text-sm font-semibold text-warning-950'}>
                 {warning.message}
               </div>
@@ -783,6 +867,28 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 <input type="checkbox" checked={reviewedOverwrite} onChange={(event) => setReviewedOverwrite(event.target.checked)} className="shrink-0 self-start" />
                 <span>Replace existing hours, tips and direct loan deductions with the reviewed source values for {overwriteRows.map((row) => row.employee_name).join(', ')}. {clientChanges.some(change => change.kind === 'owner_pay') ? 'Confirmed owner-pay changes replace the named owners’ period pay. Other saved period pay and manually entered bonuses are retained.' : 'Saved period pay and manually entered bonuses are retained.'}</span>
               </label>
+            )}
+            {handEditedRows.length > 0 && (
+              <section data-attention="hand-edited" tabIndex={-1} aria-label="Hours entered by hand" className="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-950">
+                <p className="font-semibold">Revel hours will replace hours entered by hand ({handEditedRows.length})</p>
+                <ul className="mt-2 space-y-1">
+                  {handEditedRows.map((row) => {
+                    const hours = row.hand_edited_hours!;
+                    const overtimeChanged = Number(hours.saved_overtime_hours) !== Number(hours.source_overtime_hours);
+                    return (
+                      <li key={row.source_row_id} className="break-words">
+                        <span className="font-medium">{row.employee_name}:</span>{' '}
+                        {Number(hours.saved_regular_hours)} → {Number(hours.source_regular_hours)} regular
+                        {overtimeChanged && <> · {Number(hours.saved_overtime_hours)} → {Number(hours.source_overtime_hours)} overtime</>}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <label className="mt-3 flex min-h-11 items-start gap-2 font-medium">
+                  <input type="checkbox" className="mt-1 shrink-0" checked={confirmHoursOverwrite} onChange={(event) => setConfirmHoursOverwrite(event.target.checked)} />
+                  <span>Replace the hand-entered hours with the Revel hours above.</span>
+                </label>
+              </section>
             )}
             {unresolvedCount > 0 && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
@@ -1050,8 +1156,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             {step === 'upload' && (
               <>
                 <Button variant="outline" onClick={handleClose} disabled={loading}>Cancel</Button>
-                <Button onClick={() => void handlePreview()} disabled={!pdfFile || loading || !replacementReady}>
-                  {loading ? 'Parsing...' : 'Preview Import'}
+                <Button onClick={() => void handlePreview()} disabled={(!pdfFile && !excelFile) || loading || !replacementReady}>
+                  {loading ? 'Parsing...' : currentOpen && chosenRoles.length > 0 && !replacing ? `Add to import version ${currentPackage?.package_revision}` : 'Preview Import'}
                 </Button>
               </>
             )}
