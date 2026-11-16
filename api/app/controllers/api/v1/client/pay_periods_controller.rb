@@ -129,7 +129,7 @@ module Api
           )
 
           if include_items
-            json[:payroll_review_history] = pay_period.payroll_review_packages.shared_history
+            json[:payroll_review_history] = pay_period.payroll_review_packages.where.not(published_at: nil)
               .select(PayrollReviewPackage.column_names - %w[calculation_snapshot source_manifest])
               .includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
               .map { |package| PayrollReview::PackagePresenter.call(package, include_source_manifest: false) }
