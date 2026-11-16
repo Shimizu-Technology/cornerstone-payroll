@@ -22,6 +22,8 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCompleted: (employee: Employee) => void;
+  // Starting date to suggest, such as the pay period start. Never later than today.
+  defaultEffectiveDate?: string;
 }
 
 function todayIsoDate(): string {
@@ -32,8 +34,9 @@ function todayIsoDate(): string {
   return `${year}-${month}-${day}`;
 }
 
-export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenChange, onCompleted }: Props) {
-  const [effectiveDate, setEffectiveDate] = useState(todayIsoDate());
+export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenChange, onCompleted, defaultEffectiveDate }: Props) {
+  const initialEffectiveDate = defaultEffectiveDate && defaultEffectiveDate < todayIsoDate() ? defaultEffectiveDate : todayIsoDate();
+  const [effectiveDate, setEffectiveDate] = useState(initialEffectiveDate);
   const [lastWorkedOn, setLastWorkedOn] = useState('');
   const [reasonCategory, setReasonCategory] = useState<EmployeeTerminationInput['reason_category']>();
   const [internalNotes, setInternalNotes] = useState('');
@@ -42,12 +45,12 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
 
   useEffect(() => {
     if (!open) return;
-    setEffectiveDate(todayIsoDate());
+    setEffectiveDate(initialEffectiveDate);
     setLastWorkedOn('');
     setReasonCategory(undefined);
     setInternalNotes('');
     setError(null);
-  }, [open, mode, setError]);
+  }, [open, mode, setError, initialEffectiveDate]);
 
   const workerLabel = employee.employment_type === 'contractor' ? 'contractor' : 'employee';
   const canSubmit = useMemo(() => {

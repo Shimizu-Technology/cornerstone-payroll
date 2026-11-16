@@ -1,7 +1,7 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { Link } from 'react-router';
 import { useEffect, useState, useRef, type ReactElement } from 'react';
-import { CheckCircle2, CircleDashed, Download, RefreshCw } from 'lucide-react';
+import { CheckCircle2, ChevronDown, CircleDashed, Download, Info, RefreshCw } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -25,12 +25,13 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
 import { cn, formatCurrency } from '@/lib/utils';
-import { carryRowOutcomes, defaultDisposition, importSourceFiles, MOSA_SOURCE_ACCEPT } from '@/lib/importSources';
+import { carryRowOutcomes, defaultDisposition, importSourceFiles, MOSA_SOURCE_ACCEPT, noticeTitle } from '@/lib/importSources';
+import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { ImportSourcePanel } from './ImportSourcePanel';
 import { ImportSourceChecklist } from './ImportSourceChecklist';
-import { ApiError, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
+import { ApiError, employeesApi, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
-import type { PayPeriod, PayrollItem } from '@/types';
+import type { Employee, PayPeriod, PayrollItem } from '@/types';
 
 interface ImportModalProps {
   initialPreview?: ImportPreviewResponse;
@@ -40,6 +41,8 @@ interface ImportModalProps {
   companyId: number;
   onSourcePreviewed?: () => void;
   onImportComplete: (payPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => void;
+  // Managers and admins can reactivate a matched inactive worker from the review.
+  canReactivateWorkers?: boolean;
 }
 
 type Step = 'upload' | 'preview' | 'applying' | 'done';
@@ -51,7 +54,7 @@ const SOURCE_PICKERS = [
   { role: 'supplemental_workbook', label: 'Tips & loans workbook', hint: 'The Cornerstone change workbook with tips, loans, owner pay and one-time items.' },
 ] as const;
 
-export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, onSourcePreviewed, onImportComplete }: ImportModalProps) {
+export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, onSourcePreviewed, onImportComplete, canReactivateWorkers = false }: ImportModalProps) {
   const [step, setStep] = useState<Step>(initialPreview ? 'preview' : 'upload');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [excelFile, setExcelFile] = useState<File | null>(null);
@@ -74,6 +77,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [confirmHoursOverwrite, setConfirmHoursOverwrite] = useState(false);
   const [noTipsOrLoans, setNoTipsOrLoans] = useState(false);
   const [addingSource, setAddingSource] = useState(false);
+  const [reactivating, setReactivating] = useState<Employee | null>(null);
+  const [openingWorker, setOpeningWorker] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
   const [templateDownloading, setTemplateDownloading] = useState(false);
   const [currentPackage, setCurrentPackage] = useState<PayrollIntakeImportData | null>(null);
@@ -109,6 +115,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setConfirmHoursOverwrite(false);
     setNoTipsOrLoans(false);
     setAddingSource(false);
+    setReactivating(null);
+    setOpeningWorker(null);
+    setNotice(null);
     setResults(null);
     setTemplateDownloading(false);
     setCurrentPackage(null);
@@ -315,6 +324,49 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     }
   };
 
+  const startReactivation = async (employeeId: number) => {
+    try {
+      setOpeningWorker(employeeId);
+      setError(null);
+      const { data } = await employeesApi.get(employeeId, companyId);
+      setReactivating(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open this worker');
+    } finally {
+      setOpeningWorker(null);
+    }
+  };
+
+  // After a worker returns, match the same retained files again so their row
+  // can be paid. Outcomes already chosen for other rows are kept.
+  const handleReactivated = async (employee: Employee) => {
+    setReactivating(null);
+    if (!previewData) return;
+    const name = `${employee.first_name} ${employee.last_name}`.trim();
+    const previousRows = sourceRows;
+    try {
+      setLoading(true);
+      setError(null);
+      setNotice(null);
+      const portal = previewData.portal_source;
+      const data = portal
+        ? await payPeriodsApi.previewPortalSubmission(payPeriodId, portal.submission_id, {
+            superseded_reason: portal.superseded_reason, supersedes_package_id: previewData.source_package.package_id,
+            supersession_reason: `Matched again after ${name} was reactivated`, tips_paid_out_from_tips: previewData.preview.tips_paid_out_from_tips,
+          })
+        : await payPeriodsApi.rematchImport(payPeriodId);
+      openPreview(data, previousRows);
+      const ready = data.preview.source_rows.some((row) => row.employee_id === employee.id && row.row_kind === 'matched' && row.errors.length === 0);
+      setNotice(ready ? `${name} is active again and is now matched in this import.` : `${name} is active again. Their row still needs attention below.`);
+      onSourcePreviewed?.();
+      void refreshCurrentPackage();
+    } catch (err) {
+      setError(`${name} is active again, but the files could not be matched again. ${err instanceof Error ? err.message : ''} Upload the files again to match them.`.trim());
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Add the missing file from the review. The package keeps the file already
   // received, matching runs again, and outcomes chosen so far are kept.
   const addSourceFile = async (role: string, file: File) => {
@@ -504,6 +556,14 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   if (handEditedRows.length > 0 && !confirmHoursOverwrite) {
     attention.push({ key: 'hand-edited', label: 'Confirm replacing hand-entered hours', reason: 'replacing hand-entered hours is not confirmed', jump: () => jumpToSection('hand-edited') });
   }
+  // Notices that do not block Apply are grouped and collapsed to one line each.
+  const sourceNotices = (previewData?.preview.source_warnings || []).filter((warning) => !(warning.code === 'missing_workbook' && packageSources.length > 0));
+  const blockingNotices = sourceNotices.filter((warning) => warning.severity === 'error');
+  const infoNotices = [
+    ...sourceNotices.filter((warning) => warning.severity !== 'error').map((warning) => ({ key: `source-${warning.code}`, title: noticeTitle(warning.code, warning.message), message: warning.message })),
+    ...(activeChangePrefill?.manual_review_warnings || []).map((message) => ({ key: `review-${message}`, title: noticeTitle(undefined, message), message })),
+    ...(activeChangePrefill?.removals || []).map((message) => ({ key: `removal-${message}`, title: noticeTitle(undefined, message), message })),
+  ];
   const applyBlockedReason = canApply ? null : attention.length > 0 ? `Apply is off: ${attention.map((item) => item.reason).join('; ')}.` : 'Apply is off until the items marked in this review are finished.';
 
   const rateChoiceControl = (row: ImportPreviewRow): ReactElement | null => row.wage_rate_options?.length ? (
@@ -786,24 +846,44 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 <span>Import version {previewData.source_package.package_revision} <span className="text-green-800">· reference {previewData.source_package.package_id.slice(0, 8)}</span></span>
               </div>
             )}
-            {attention.length > 0 && (
-              <section aria-label="Needs attention" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-                <p className="font-semibold">{attention.length === 1 ? '1 thing' : `${attention.length} things`} to finish before you can apply</p>
-                <ul className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  {attention.map((item) => <li key={item.key}><Button type="button" variant="outline" className="w-full sm:w-auto" onClick={item.jump}>{item.label}</Button></li>)}
+            {notice && <p role="status" className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-900">{notice}</p>}
+            {(attention.length > 0 || blockingNotices.length > 0) && (
+              <section aria-label="Needs your action" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                <h3 className="font-semibold">Needs your action ({attention.length + blockingNotices.length})</h3>
+                <p className="mt-0.5 text-amber-900">Apply stays off until these are done.</p>
+                {blockingNotices.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {blockingNotices.map((warning) => <li key={warning.code} className="font-medium">{warning.message}</li>)}
+                  </ul>
+                )}
+                {attention.length > 0 && (
+                  <ul className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    {attention.map((item) => <li key={item.key}><Button type="button" variant="outline" className="w-full sm:w-auto" onClick={item.jump}>{item.label}</Button></li>)}
+                  </ul>
+                )}
+              </section>
+            )}
+            {infoNotices.length > 0 && (
+              <section aria-label="For your information" className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-800">
+                <h3 className="flex items-center gap-2 font-semibold text-neutral-950"><Info className="h-4 w-4 shrink-0" aria-hidden="true" />For your information ({infoNotices.length})</h3>
+                <ul className="mt-1 divide-y divide-neutral-200">
+                  {infoNotices.map((item) => (
+                    <li key={item.key}>
+                      {item.title === item.message ? <p className="py-2.5">{item.message}</p> : <details className="group">
+                        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 py-2 [&::-webkit-details-marker]:hidden">
+                          <span className="min-w-0">{item.title}</span>
+                          <ChevronDown className="h-4 w-4 shrink-0 text-neutral-500 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
+                        </summary>
+                        <p className="pb-3 text-neutral-700">{item.message}</p>
+                      </details>}
+                    </li>
+                  ))}
                 </ul>
               </section>
             )}
-            {(previewData.preview.source_warnings || []).filter((warning) => !(warning.code === 'missing_workbook' && packageSources.length > 0)).map((warning) => (
-              <div key={warning.code} role={warning.severity === 'warning' ? 'alert' : undefined} className={warning.severity === 'info' ? 'rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700' : 'rounded-lg border border-warning-300 bg-warning-50 px-4 py-3 text-sm font-semibold text-warning-950'}>
-                {warning.message}
-              </div>
-            ))}
             {ownerPayError && missingPeriodPay.length === 0 && (
               <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 pb-4 pt-1 text-sm">{ownerPayFeedback}</div>
             )}
-            {activeChangePrefill?.manual_review_warnings?.map(message => <p key={message} className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">{message}</p>)}
-            {activeChangePrefill?.removals?.map(message => <p key={message} className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">{message}</p>)}
             {clientChanges.length > 0 && <section data-attention="client-changes" tabIndex={-1} aria-label="From the client's changes" className="space-y-3 rounded-lg border border-info-200 bg-info-50 p-4">
               <h3 className="font-semibold">From the client’s changes · revision {activeChangePrefill?.revision}</h3>
               <p className="text-sm">Review each person’s figures. You can edit them here before applying. Other submitted changes still need staff review.</p>
@@ -910,13 +990,20 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                       <p className="mt-1 text-xs text-neutral-600">{row.row_kind === 'unmatched_revel' ? 'Revel hours' : 'Change workbook'}</p>
                       {row.errors.map((entry) => <div key={entry.code} className="mt-2 text-sm">
                         <p className="text-danger-700">{entry.message}</p>
-                        {entry.employee_id && <Link
-                          to={`/companies/${companyId}/employees/${entry.employee_id}/edit`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-h-11 items-center font-medium text-primary-700 underline"
-                          aria-label={`Open profile for ${row.source_employee_name} (opens in a new tab)`}
-                        >Open profile</Link>}
+                        {entry.employee_id && <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+                          {entry.employee_status && (canReactivateWorkers
+                            ? <Button type="button" onClick={() => void startReactivation(entry.employee_id!)} disabled={loading || openingWorker !== null}>
+                                {openingWorker === entry.employee_id ? 'Opening…' : `Reactivate ${entry.employee_name}`}
+                              </Button>
+                            : <p className="text-neutral-700">A manager or admin can reactivate {entry.employee_name}.</p>)}
+                          <Link
+                            to={`/companies/${companyId}/employees/${entry.employee_id}/edit`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex min-h-11 items-center font-medium text-primary-700 underline"
+                            aria-label={`Open profile for ${row.source_employee_name} (opens in a new tab)`}
+                          >Open profile</Link>
+                        </div>}
                       </div>)}
                     </div>
                     {dispositionControls(row)}
@@ -1187,6 +1274,16 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           </DialogFooter>
         </div>
       </DialogContent>
+      {reactivating && (
+        <EmployeeStatusTransitionDialog
+          employee={reactivating}
+          mode="reactivate"
+          open
+          onOpenChange={(next) => { if (!next) setReactivating(null); }}
+          onCompleted={(employee) => void handleReactivated(employee)}
+          defaultEffectiveDate={previewData?.pay_period?.start_date}
+        />
+      )}
     </Dialog>
   );
 }

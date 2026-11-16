@@ -128,8 +128,8 @@ it('lists what blocks Apply, jumps to each item, and keeps outcomes already chos
   const scrolled = vi.fn();
   Element.prototype.scrollIntoView = scrolled;
   open(preview([ownerMissing], [unmatchedRow]));
-  const needs = screen.getByRole('region', { name: 'Needs attention' });
-  expect(within(needs).getByText('2 things to finish before you can apply')).toBeTruthy();
+  const needs = screen.getByRole('region', { name: 'Needs your action' });
+  expect(within(needs).getByRole('heading', { name: 'Needs your action (2)' })).toBeTruthy();
   expect(screen.getByText('Apply is off: pay is missing for Monique Owner; 1 source row needs an outcome.')).toBeTruthy();
   fireEvent.click(within(needs).getByRole('button', { name: 'Enter pay for Monique Owner' }));
   expect(scrolled).toHaveBeenCalled();
@@ -178,7 +178,7 @@ it('lists a missing job and rate choice among the things to finish', () => {
   const initial = preview([]);
   initial.preview.matched = [twoRates];
   open(initial);
-  const needs = screen.getByRole('region', { name: 'Needs attention' });
+  const needs = screen.getByRole('region', { name: 'Needs your action' });
   expect(within(needs).getByRole('button', { name: 'Choose job and rate for Avery Server' })).toBeTruthy();
   expect(screen.getByText(/Apply is off: no job and rate chosen for Avery Server/)).toBeTruthy();
 });

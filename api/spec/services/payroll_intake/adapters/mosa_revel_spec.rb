@@ -220,8 +220,8 @@ RSpec.describe PayrollIntake::Adapters::MosaRevel do
 
         expect(row).to include(employee_id: nil, status: "needs_review", match_method: nil)
         expect(row[:validation_errors].sole).to include(
-          code: "unmatched_revel_employee", employee_id: employee.id,
-          message: "Avery Example is #{status} in Cornerstone. A manager or admin can reactivate them from their profile, then upload the files again. Or choose an outcome below."
+          code: "unmatched_revel_employee", employee_id: employee.id, employee_name: "Avery Example", employee_status: status,
+          message: "Avery Example is #{status} in Cornerstone."
         )
       end
     end

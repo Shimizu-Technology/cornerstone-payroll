@@ -5,7 +5,7 @@ module Api
     module Admin
       class PayrollImportsController < BaseController
         before_action :set_pay_period
-        around_action :with_import_lock, only: %i[preview apply resolve_portal_source]
+        around_action :with_import_lock, only: %i[preview rematch apply resolve_portal_source]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/supplemental_template
         def supplemental_template
@@ -87,6 +87,36 @@ module Api
           rescue StandardError => e
             render json: { error: "Failed to parse files: #{e.message}" }, status: :unprocessable_entity
           end
+        end
+
+        # POST /api/v1/admin/pay_periods/:pay_period_id/rematch_import
+        # Matches the current review's retained files again, for example after
+        # a worker it names was reactivated. No upload or reason is needed; an
+        # unchanged roster returns the same review.
+        def rematch
+          unless @pay_period.can_edit?
+            return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
+          end
+
+          current = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          current_record = PayrollImport::CurrentReview.import_record_for(@pay_period, current)
+          unless current&.applyable? && current_record
+            return render json: { error: "Only an import still in review can be matched again. Upload corrected files instead." }, status: :unprocessable_entity
+          end
+          if current_record.submission_imports.exists?
+            return render json: { error: "Open the client revision again to match its files with the current employee list." }, status: :unprocessable_entity
+          end
+
+          package_result = PayrollIntake::PreviewService.new(
+            pay_period: @pay_period, source_type: "mosa_revel", files: [], actor: current_user, carry_forward: true
+          ).call
+          import_record = persist_preview(package_result, nil, nil,
+            tips_paid_out_from_tips: ActiveModel::Type::Boolean.new.cast(current_record.raw_data.to_h["tips_paid_out_from_tips"]))
+          render json: preview_response(import_record, package_result)
+        rescue PayrollIntake::PreviewService::ReplacementRequiredError, ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue StandardError => e
+          render json: { error: "Could not match the files again: #{e.message}" }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/apply_import
@@ -345,13 +375,13 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
-        def persist_preview(package_result, pdf_file, excel_file)
+        def persist_preview(package_result, pdf_file, excel_file,
+                            tips_paid_out_from_tips: ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips]))
           source_package = package_result.fetch(:session)
           unless source_package.applyable?
             raise ArgumentError, "This source package was already applied or superseded. Review a corrected current source."
           end
           preview_data = preview_from_source_package(source_package)
-          tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips])
           preview_data[:tips_paid_out_from_tips] = tips_paid_out_from_tips
 
           # Persist preview for later apply
@@ -391,6 +421,7 @@ module Api
           preview[:source_warnings] += workbook_warnings(source_package, source)
           {
             import_id: import_record.id, preview: preview, source_package: source_package_json(source_package),
+            pay_period: { start_date: @pay_period.start_date, end_date: @pay_period.end_date },
             duplicate: package_result[:duplicate], portal_source: portal_source_json(selection),
             pending_portal_source: pending_portal_source_json,
             client_change_prefill: (selection ? change_prefill(selection.payroll_submission, preview[:matched]) : nil),

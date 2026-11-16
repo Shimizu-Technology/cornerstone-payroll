@@ -31,3 +31,21 @@ export function carryRowOutcomes(previous: MosaSourceRow[], next: MosaSourceRow[
     return { ...row, disposition: kept.disposition, disposition_reason: kept.disposition_reason, target_pay_period_id: kept.target_pay_period_id };
   });
 }
+
+const WARNING_TITLES: Record<string, string> = {
+  workbook_period_end_differs: 'The workbook’s period end differs from Revel',
+  pay_period_workweek_offset: 'This pay period and the overtime workweek start on different days',
+  legacy_mosa_workbook: 'Older MoSa workbook format',
+  zero_workbook_tips: 'The workbook’s tips total $0',
+  client_no_tips_or_loans: 'The client chose no tips or loans this period',
+  missing_workbook: 'The tips & loans workbook isn’t included',
+  duplicate_source: 'These files were already previewed for this payroll',
+  no_rows_detected: 'No payroll rows were found',
+};
+
+// One line for a notice; the full message stays available underneath.
+export function noticeTitle(code: string | undefined, message: string): string {
+  if (code && WARNING_TITLES[code]) return WARNING_TITLES[code];
+  const firstSentence = message.match(/^.*?[.!?](?=\s|$)/)?.[0] || message;
+  return firstSentence.length > 110 ? `${firstSentence.slice(0, 107).trimEnd()}…` : firstSentence;
+}
