@@ -2,6 +2,12 @@
 
 module PayrollImport
   # Revel supplies hours but no usable job. Never infer a split across jobs.
+  #
+  # An hourly worker with several active jobs gets the job used on the last
+  # committed payroll, even when every job pays the same rate: reports show
+  # earnings by job label. When history names no single job, equal rates fall
+  # back to the primary job (pay is the same) with a notice; different rates
+  # need a reviewed choice.
   class WageRateChoice
     def initialize(employee:, pay_period:)
       @employee = employee
@@ -10,7 +16,12 @@ module PayrollImport
 
     def preview
       rates = @employee.active_wage_rates.to_a
-      return {} unless @employee.hourly_pay_basis? && rates.map(&:rate).uniq.many?
+      return {} unless @employee.hourly_pay_basis? && rates.many?
+
+      same_rate = rates.map(&:rate).uniq.one?
+      # Without allocations, calculation pays the profile rate. A job choice
+      # must not change pay, so a profile rate that differs keeps that path.
+      return {} if same_rate && rates.first.rate != @employee.pay_rate.to_d
 
       history = PayPeriod.committed
       if @pay_period.company.test_workspace?
@@ -47,12 +58,22 @@ module PayrollImport
         selected = matches.first if matches.one?
       end
       history_label = previous&.pay_period&.training_baseline? ? "Copied locked payroll" : "Last committed payroll"
+      fallback = same_rate && selected.nil? ? (rates.find(&:is_primary) || rates.min_by(&:id)) : nil
+      default_source = if selected
+        "#{history_label}, paid #{previous.pay_period.pay_date.iso8601}"
+      elsif fallback
+        reason = jobs.many? ? "split hours across jobs" : "doesn't show one job"
+        "Primary job (#{fallback.label}). The last committed payroll #{reason}. Every job pays the same rate; change the job if these hours belong to another."
+      else
+        "Choose a job and rate — the last committed payroll does not identify one active job."
+      end
       {
         wage_rate_options: rates.map { |rate| { id: rate.id, label: rate.label, rate: rate.rate.to_f } },
-        selected_wage_rate_id: selected&.id,
-        wage_rate_default_source: selected ? "#{history_label}, paid #{previous.pay_period.pay_date.iso8601}" :
-          "Choose a job and rate — the last committed payroll does not identify one active job.",
-        wage_rate_default_pay_period_id: selected ? previous.pay_period_id : nil
+        selected_wage_rate_id: (selected || fallback)&.id,
+        wage_rate_default_source: default_source,
+        wage_rate_default_pay_period_id: selected ? previous.pay_period_id : nil,
+        # Non-blocking: staff may want the department job instead.
+        wage_rate_needs_review: fallback.present?
       }
     end
   end

@@ -63,6 +63,17 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     result = service.apply_to(rows.first(1), reviewed: reviewed, confirmed: true, source_employee_ids: [ owner.id ])
     expect(result.last).to include(employee_id: worker.id, client_extra_hours: { hours: "68", employee_wage_rate_id: rate.id, rate: "35.0" })
   end
+
+  it "puts a setup-only worker's client hours on the client's job instead of the equal-rate primary fallback" do
+    primary = create(:employee_wage_rate, employee: worker, rate: 35, label: "Hourly rate", is_primary: true)
+    fallback = rows.first(1) + [ { employee_id: worker.id, workbook_only: true, payroll_setup_only: true, selected_wage_rate_id: primary.id, wage_rate_needs_review: true } ]
+    result = service.apply_to(fallback, reviewed: reviewed, confirmed: true)
+    expect(result.last).to include(selected_wage_rate_id: rate.id, wage_rate_needs_review: false)
+
+    staff_choice = rows.first(1) + [ { employee_id: worker.id, workbook_only: true, payroll_setup_only: true, selected_wage_rate_id: primary.id, wage_rate_needs_review: false } ]
+    expect(service.apply_to(staff_choice, reviewed: reviewed, confirmed: true).last).to include(selected_wage_rate_id: primary.id)
+  end
+
   it "shows baseline hours on reimport rather than the previously applied total" do
     create(:payroll_item, company: company, employee: worker, pay_period: period, hours_worked: 70,
       custom_columns_data: { client_change_evidence: { kind: "extra_hours", submission_id: submission.id,
