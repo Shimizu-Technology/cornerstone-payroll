@@ -130,6 +130,106 @@ RSpec.describe "MoSa import source files and re-import safeguards", type: :reque
     end
   end
 
+  describe "removing a file from an import in review" do
+    it "takes out a workbook added by mistake with a reason, so the PDF alone can apply with no tips or loans" do
+      preview!(pdf_file: pdf)
+      complete = preview!(excel_file: workbook)
+
+      post "#{url}/remove_import_source", params: { source_role: "supplemental_workbook", reason: " " }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Say why the Tips & loans workbook is being removed (up to 500 characters).")
+
+      post "#{url}/remove_import_source", params: { source_role: "supplemental_workbook", reason: "Last period's workbook" }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      removed = response.parsed_body
+      expect(sources(removed)).to eq("revel_hours" => true, "supplemental_workbook" => false)
+      expect(removed.dig("source_package", "supersession_reason")).to eq("Removed: Tips & loans workbook. Last period's workbook")
+      expect(removed.dig("source_package", "supersedes_package_id")).to eq(complete.dig("source_package", "package_id"))
+
+      apply(removed, no_tips_or_loans: true)
+      expect(response).to have_http_status(:ok), response.body
+    end
+
+    it "refuses to remove the only file, a file the import does not have, or a file from an applied import" do
+      data = preview!(pdf_file: pdf)
+      post "#{url}/remove_import_source", params: { source_role: "revel_hours", reason: "Wrong file" }, as: :json
+      expect(response.parsed_body["error"]).to eq("The Revel hours PDF is the only file in this import. Upload the corrected file instead.")
+      post "#{url}/remove_import_source", params: { source_role: "supplemental_workbook", reason: "Wrong file" }, as: :json
+      expect(response.parsed_body["error"]).to eq("Import version 1 has no Tips & loans workbook to remove.")
+
+      apply(data, no_tips_or_loans: true)
+      expect(response).to have_http_status(:ok), response.body
+      post "#{url}/remove_import_source", params: { source_role: "revel_hours", reason: "Wrong file" }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Only an import still in review can have a file removed.")
+    end
+  end
+
+  describe "tips in an older MoSa workbook added from the review" do
+    before do
+      allow(PayrollImport::LoanTipExcelParser).to receive(:parse_file_with_metadata).and_return(
+        metadata: { pay_date: run.pay_date, period_end: run.end_date },
+        rows: [ { first_name: "Avery", last_name: "Example", total_tips: 25 } ]
+      )
+    end
+
+    def choose_tips!(data, paid)
+      post "#{url}/import_tip_treatment", params: { import_id: data["import_id"], tips_paid_out_from_tips: paid }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      response.parsed_body
+    end
+
+    it "waits for a recorded choice when the workbook was added from the review, then pays out by it" do
+      preview!(pdf_file: pdf)
+      # Added from the review: the upload step's tip fallback was not offered.
+      added = preview!(excel_file: workbook)
+      expect(added.dig("preview", "source_warnings")).to include(include("code" => "legacy_mosa_workbook"))
+      expect(added.dig("preview", "tip_treatment_confirmed")).to be(false)
+
+      apply(added)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Choose whether the tips in this older MoSa workbook were already paid out daily.")
+      expect(run.payroll_items.count).to eq(0)
+
+      chosen = choose_tips!(added, true)
+      expect(chosen.dig("preview", "tips_paid_out_from_tips")).to be(true)
+      expect(chosen.dig("preview", "tip_treatment_confirmed")).to be(true)
+      # A value sent with apply never overrides the saved choice.
+      apply(added, tips_paid_out_from_tips: false)
+      expect(response).to have_http_status(:ok), response.body
+      expect(run.payroll_items.find_by!(employee: employee)).to have_attributes(reported_tips: 25, tips_paid_out: 25)
+      expect(PayrollImportRecord.find(added["import_id"]).raw_data["tip_treatment_confirmed"]).to include("source" => "review", "user_id" => staff.id)
+    end
+
+    it "treats uploading with the fallback offered as a choice" do
+      data = preview!(pdf_file: pdf, excel_file: workbook, tips_paid_out_from_tips: false)
+      expect(data.dig("preview", "tip_treatment_confirmed")).to be(true)
+      apply(data)
+      expect(response).to have_http_status(:ok), response.body
+      expect(run.payroll_items.find_by!(employee: employee)).to have_attributes(reported_tips: 25, tips_paid_out: 0)
+    end
+
+    it "keeps a choice when the same workbook is carried into a new version" do
+      first = preview!(excel_file: workbook)
+      choose_tips!(first, false)
+
+      completed = preview!(pdf_file: pdf)
+      expect(completed.dig("preview", "tip_treatment_confirmed")).to be(true)
+      expect(completed.dig("preview", "tips_paid_out_from_tips")).to be(false)
+      apply(completed)
+      expect(response).to have_http_status(:ok), response.body
+      expect(run.payroll_items.find_by!(employee: employee)).to have_attributes(reported_tips: 25, tips_paid_out: 0)
+    end
+
+    it "refuses the choice for a review without an older workbook" do
+      allow(PayrollImport::LoanTipExcelParser).to receive(:parse_file_with_metadata).and_call_original
+      data = preview!(pdf_file: pdf, excel_file: workbook)
+      post "#{url}/import_tip_treatment", params: { import_id: data["import_id"], tips_paid_out_from_tips: true }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Only an older MoSa workbook needs this choice.")
+    end
+  end
+
   describe "re-importing over hours changed by hand" do
     it "lists old and new hours and applies only after explicit confirmation" do
       first = preview!(pdf_file: pdf(40), excel_file: workbook)

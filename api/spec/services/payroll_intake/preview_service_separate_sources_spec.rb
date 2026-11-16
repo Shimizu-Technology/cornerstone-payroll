@@ -122,6 +122,37 @@ RSpec.describe PayrollIntake::PreviewService, "separate MoSa source files" do
     expect(second.rows.find_by!(employee: returning).regular_hours).to eq(12)
   end
 
+  it "removes a file with the given reason, and can add it back after returning to a superseded version's files" do
+    first = preview(pdf).fetch(:session)
+    second = preview(workbook).fetch(:session)
+
+    third = preview(remove_roles: [ "supplemental_workbook" ], supersedes_package_id: second.package_id,
+      supersession_reason: "Removed: Tips & loans workbook. Wrong period").fetch(:session)
+
+    # The same PDF alone was version 1, which is superseded; this is a new version, not a reopened one.
+    expect(third).to have_attributes(supersedes_id: second.id, package_revision: 3, supersession_reason: "Removed: Tips & loans workbook. Wrong period")
+    expect(third.id).not_to eq(first.id)
+    expect(roles(third)).to eq([ "revel_hours" ])
+    expect(third.evidence_snapshot.fetch("source_changes")).to include("removed" => [ "supplemental_workbook" ])
+    expect(second.reload).to be_superseded
+
+    fourth = preview(workbook).fetch(:session)
+    expect(fourth).to have_attributes(supersedes_id: third.id, package_revision: 4, supersession_reason: "Added: Tips & loans workbook")
+    expect(roles(fourth)).to eq(%w[revel_hours supplemental_workbook])
+  end
+
+  it "says when a file saved before verification is not kept, instead of dropping it quietly" do
+    first = preview(pdf).fetch(:session)
+    first.documents.sole.update_columns(verification_status: "legacy_unverified")
+
+    second = preview(workbook).fetch(:session)
+
+    expect(roles(second)).to eq([ "supplemental_workbook" ])
+    expect(second.supersession_reason).to eq("Added: Tips & loans workbook. Not kept (saved before files were verified): Revel hours PDF")
+    expect(second.warnings).to include(include("code" => "unverified_source_not_kept", "message" => include("Revel hours PDF in import version 1")))
+    expect(second.evidence_snapshot.dig("source_changes", "not_kept_unverified")).to eq([ { "role" => "revel_hours", "document_id" => first.documents.sole.id } ])
+  end
+
   it "refuses a carried file whose retained bytes no longer match their fingerprint" do
     first = preview(pdf).fetch(:session)
     objects[first.documents.first.storage_reference] = "tampered"

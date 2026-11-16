@@ -41,6 +41,7 @@ const WARNING_TITLES: Record<string, string> = {
   missing_workbook: 'The tips & loans workbook isn’t included',
   duplicate_source: 'These files were already previewed for this payroll',
   no_rows_detected: 'No payroll rows were found',
+  unverified_source_not_kept: 'A file saved before verification was not kept',
 };
 
 // One line for a notice; the full message stays available underneath.
@@ -48,4 +49,15 @@ export function noticeTitle(code: string | undefined, message: string): string {
   if (code && WARNING_TITLES[code]) return WARNING_TITLES[code];
   const firstSentence = message.match(/^.*?[.!?](?=\s|$)/)?.[0] || message;
   return firstSentence.length > 110 ? `${firstSentence.slice(0, 107).trimEnd()}…` : firstSentence;
+}
+
+// SHA-256 of a chosen file, to tell whether it is the same file an import
+// already holds. Null when the browser cannot hash it.
+export async function fileSha256(file: File): Promise<string | null> {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
 }
