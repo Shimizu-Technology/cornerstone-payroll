@@ -50,7 +50,7 @@ module PayrollIntake
         )
 
         {
-          rows: tagged_rows(preview),
+          rows: tagged_rows(preview, workbook_rows: workbook&.fetch(:rows, []) || []),
           detected_period: {
             revel: revel.dig(:metadata, :period),
             workbook: workbook&.fetch(:metadata, {}) || {},
@@ -185,10 +185,19 @@ module PayrollIntake
         ]
       end
 
-      def tagged_rows(preview)
+      def tagged_rows(preview, workbook_rows:)
         matched = preview.fetch(:matched).map { |row| row.merge(row_kind: "matched", preview_row: row) }
         unmatched_pdf = preview.fetch(:unmatched_pdf_names).map { |name| { row_kind: "unmatched_revel", source_employee_name: name } }
-        unmatched_workbook = preview.fetch(:unmatched_excel_names).map { |name| { row_kind: "unmatched_workbook", source_employee_name: name } }
+        unmatched_workbook = preview.fetch(:unmatched_excel_names).map do |name|
+          source = workbook_rows.find do |row|
+            (row[:employee_name].presence || [ row[:first_name], row[:last_name] ].compact.join(" ").strip) == name
+          end
+          {
+            row_kind: "unmatched_workbook", source_employee_name: name,
+            source_employee_id: source&.dig(:employee_id),
+            source_first_name: source&.dig(:first_name), source_last_name: source&.dig(:last_name)
+          }
+        end
         matched + unmatched_pdf + unmatched_workbook
       end
 
@@ -200,9 +209,9 @@ module PayrollIntake
 
         case kind
         when "unmatched_revel"
-          errors << error("unmatched_revel_employee", "Match this Revel hours row to a Cornerstone employee.")
+          errors << unmatched_employee_error(raw_row, name, "unmatched_revel_employee", "Match this Revel hours row to a Cornerstone employee.")
         when "unmatched_workbook"
-          errors << error("unmatched_workbook_employee", "Use the employee's Cornerstone ID in the change workbook.")
+          errors << unmatched_employee_error(raw_row, name, "unmatched_workbook_employee", "Use the employee's Cornerstone ID in the change workbook.")
         end
         if raw_row[:doubletime_hours].to_f.positive?
           errors << error("doubletime_not_supported", "This Revel row includes double-time hours. Enter a reviewed typed earning before applying.")
@@ -246,6 +255,29 @@ module PayrollIntake
           status: errors.any? || warnings.any? ? "needs_review" : "ready",
           source_payload: raw_row.to_h
         }
+      end
+
+      # This lookup only explains an unmatched row; it must never populate the
+      # payable employee_id. Only active workers participate in ImportService.
+      def unmatched_employee_error(raw_row, name, code, fallback)
+        @non_active_employees ||= company.employees.where(status: EmployeeStatusTransitionService::REACTIVATABLE_STATUSES).to_a
+        @non_active_matcher ||= PayrollImport::NameMatcher.new(@non_active_employees)
+        match = if raw_row[:source_employee_id].present?
+          employee = @non_active_employees.find { |candidate| candidate.id == raw_row[:source_employee_id].to_i }
+          employee && { employee_id: employee.id }
+        elsif raw_row[:row_kind] == "unmatched_revel"
+          @non_active_matcher.match_pdf_name(name)
+        else
+          @non_active_matcher.match_excel_name(raw_row[:source_last_name], raw_row[:source_first_name])
+        end
+        employee = @non_active_employees.find { |candidate| candidate.id == match&.dig(:employee_id) }
+        return error(code, fallback) unless employee
+
+        error(
+          code,
+          "#{employee.full_name} is #{employee.status} in Cornerstone. A manager or admin can reactivate them from their profile, " \
+          "then upload the files again. Or choose an outcome below."
+        ).merge(employee_id: employee.id)
       end
 
       def round(value)

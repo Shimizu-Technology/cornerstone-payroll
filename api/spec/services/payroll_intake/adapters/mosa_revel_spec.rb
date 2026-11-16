@@ -209,4 +209,91 @@ RSpec.describe PayrollIntake::Adapters::MosaRevel do
     expect(result[:session].documents).to all(have_attributes(verification_status: "verified", sha256: match(/\A[0-9a-f]{64}\z/)))
     expect(result[:session].rows.first.source_payload).not_to include("regular_pay", "overtime_pay", "total_pay")
   end
+  describe "unmatched non-active workers" do
+    %w[inactive terminated].each do |status|
+      it "explains how to reactivate a #{status} Revel worker without matching them for pay" do
+        employee.update!(status: status)
+        adapter = described_class.new(pay_period: pay_period, company: company)
+        extracted = adapter.extract(files: [ revel_upload ])
+        result = adapter.normalize(extracted_rows: extracted[:rows], detected_period: extracted[:detected_period])
+        row = result.fetch(:rows).sole
+
+        expect(row).to include(employee_id: nil, status: "needs_review", match_method: nil)
+        expect(row[:validation_errors].sole).to include(
+          code: "unmatched_revel_employee", employee_id: employee.id,
+          message: "Avery Example is #{status} in Cornerstone. A manager or admin can reactivate them from their profile, then upload the files again. Or choose an outcome below."
+        )
+      end
+    end
+
+    it "rematches identical files after reactivation while retaining the prior unmatched review" do
+      employee.update!(status: "inactive")
+      CompanyWorkweek.create!(company: company, starts_on_weekday: pay_period.start_date.wday, starts_at_minutes: 0,
+        timezone: "Pacific/Guam", effective_on: pay_period.start_date, source: "operator_confirmed",
+        confirmation_status: "confirmed", confirmed_by: admin, confirmed_at: Time.current, notes: "Synthetic reactivation workweek")
+      objects = {}
+      storage = Object.new.tap do |store|
+        store.define_singleton_method(:upload) { |key, data, **| objects[key] = data }
+        store.define_singleton_method(:download_with_limit) { |key, **| objects.fetch(key) }
+        store.define_singleton_method(:delete) { |key| objects.delete(key) }
+      end
+      upload = revel_upload
+      preview = ->(**options) do
+        PayrollIntake::PreviewService.new(pay_period: pay_period, source_type: "mosa_revel", files: [ upload ],
+          actor: admin, storage: storage, **options).call
+      end
+      original = preview.call.fetch(:session)
+      expect(original.rows.sole.employee_id).to be_nil
+      expect(original.rows.sole.validation_errors.sole).to include("employee_id" => employee.id)
+      expect(preview.call).to include(duplicate: true)
+
+      EmployeeStatusTransitionService.reactivate!(employee: employee, actor: admin,
+        attributes: { effective_date: pay_period.start_date.iso8601 })
+      expect { preview.call }.to raise_error(PayrollIntake::PreviewService::ReplacementRequiredError)
+      replacement = preview.call(supersedes_package_id: original.package_id, supersession_reason: "Worker returned to work")
+      current = replacement.fetch(:session)
+      expect(replacement[:duplicate]).to be(false)
+      expect(current).to have_attributes(supersedes_id: original.id, package_revision: 2)
+      expect(current.rows.sole).to have_attributes(employee_id: employee.id, status: "ready")
+      expect(current.rows.sole.validation_errors).to be_empty
+      expect(original.reload).to be_superseded
+      expect(original.rows.sole.employee_id).to be_nil
+      expect(preview.call).to include(duplicate: true, session: current)
+    end
+
+    it "keeps unknown and other-company workers generic" do
+      employee.update!(status: "inactive", company: create(:company))
+      adapter = described_class.new(pay_period: pay_period, company: company)
+      result = adapter.normalize(extracted_rows: [ { row_kind: "unmatched_revel", source_employee_name: "Example, Avery" } ])
+      expect(result[:rows].sole[:validation_errors].sole).to eq(
+        code: "unmatched_revel_employee", message: "Match this Revel hours row to a Cornerstone employee.", severity: "error"
+      )
+    end
+
+    it "explains an unmatched legacy workbook name using the existing name matcher" do
+      employee.update!(status: "inactive")
+      allow(PayrollImport::LoanTipExcelParser).to receive(:parse_file_with_metadata).and_return(
+        metadata: { pay_date: pay_period.pay_date, period_end: pay_period.end_date },
+        rows: [ { first_name: "Avery", last_name: "Example", total_tips: 20 } ]
+      )
+      adapter = described_class.new(pay_period: pay_period, company: company)
+      extracted = adapter.extract(files: [ revel_upload, workbook_upload ])
+      row = adapter.normalize(extracted_rows: extracted[:rows])[:rows].find { |item| item[:source_payload]["row_kind"] == "unmatched_workbook" }
+      expect(row[:employee_id]).to be_nil
+      expect(row[:validation_errors].sole).to include(code: "unmatched_workbook_employee", employee_id: employee.id, message: include("is inactive in Cornerstone"))
+    end
+
+    it "uses a generated workbook ID rather than a similar name" do
+      employee.update!(status: "inactive")
+      allow(PayrollImport::LoanTipExcelParser).to receive(:parse_file_with_metadata).and_return(
+        metadata: { pay_date: pay_period.pay_date, period_end: pay_period.end_date },
+        rows: [ { employee_id: employee.id, employee_name: "Old workbook name", total_tips: 20 } ]
+      )
+      adapter = described_class.new(pay_period: pay_period, company: company)
+      extracted = adapter.extract(files: [ revel_upload, workbook_upload ])
+      row = adapter.normalize(extracted_rows: extracted[:rows])[:rows].find { |item| item[:source_employee_name] == "Old workbook name" }
+      expect(row[:employee_id]).to be_nil
+      expect(row[:validation_errors].sole).to include(employee_id: employee.id, message: include("Avery Example is inactive"))
+    end
+  end
 end

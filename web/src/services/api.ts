@@ -1864,6 +1864,7 @@ export const timecardsApi = {
 };
 
 export interface PayrollIntakeWarning {
+  employee_id?: number;
   code: string;
   message: string;
   severity: 'info' | 'warning' | 'error' | string;

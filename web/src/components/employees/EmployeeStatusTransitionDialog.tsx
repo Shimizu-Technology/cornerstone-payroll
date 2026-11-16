@@ -98,7 +98,9 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
             <DialogDescription className="text-neutral-200">
               {isTermination
                 ? 'Record when the termination actually took effect. The worker and every prior paycheck remain available for reports and audit history.'
-                : 'Start a new active period for this worker. The prior termination stays in the immutable status timeline.'}
+                : employee.status === 'inactive'
+                  ? 'Start a new active period for this worker. The inactive period stays in the immutable status timeline.'
+                  : 'Start a new active period for this worker. The prior termination stays in the immutable status timeline.'}
             </DialogDescription>
           </DialogHeader>
         </div>
@@ -109,7 +111,9 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
             <p>
               {isTermination
                 ? 'This date controls automatic payroll eligibility. A final, correction, or adjustment run can still include the worker explicitly when needed.'
-                : `The reactivation date must be after the recorded termination${employee.termination_date ? ` on ${employee.termination_date}` : ''}. It does not alter prior payroll.`}
+                : employee.termination_date
+                  ? `The reactivation date must be after the recorded termination on ${employee.termination_date}. It does not alter prior payroll.`
+                  : 'Use the first day they are working again. It does not alter prior payroll.'}
             </p>
           </div>
 
@@ -117,10 +121,11 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
 
           <div className={`grid gap-4 ${isTermination ? 'sm:grid-cols-2' : ''}`}>
             <div>
-              <label className="mb-1 block text-sm font-medium text-neutral-800">
+              <label htmlFor="employee-status-effective-date" className="mb-1 block text-sm font-medium text-neutral-800">
                 {isTermination ? 'Termination effective date' : 'Reactivation effective date'} <span className="text-danger-600">*</span>
               </label>
               <Input
+                id="employee-status-effective-date"
                 type="date"
                 required
                 min={(mode === 'reactivate' && employee.termination_date ? employee.termination_date : employee.hire_date) || undefined}
