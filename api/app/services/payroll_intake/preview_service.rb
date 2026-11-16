@@ -156,6 +156,12 @@ module PayrollIntake
         digest << adapter_class::PARSER_VERSION
         digest << "\n"
         digest << JSON.generate(workweek_evidence)
+        # MoSa matches only active workers. The same files need a new reviewed
+        # package after a worker returns, rather than the old unmatched preview.
+        if source_type == "mosa_revel"
+          digest << "\n--active-roster--\n"
+          digest << JSON.generate(company.employees.active.order(:id).pluck(:id))
+        end
         digest << "\n"
         digest << pasted_text.strip
         file_snapshots.each do |snapshot|

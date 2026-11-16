@@ -3,6 +3,8 @@
 class EmployeeStatusTransitionService
   class Error < StandardError; end
 
+  REACTIVATABLE_STATUSES = %w[inactive terminated].freeze
+
   def self.terminate!(employee:, actor:, attributes:)
     new(employee:, actor:).terminate!(attributes)
   end
@@ -53,7 +55,9 @@ class EmployeeStatusTransitionService
     ApplicationRecord.transaction do
       @employee.lock!
       raise Error, "Client configuration access required" unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
-      raise Error, "Only terminated workers can be reactivated" unless @employee.status == "terminated"
+      # Inactive workers (for example, brought over as inactive in a client
+      # migration) come back the same way as terminated ones.
+      raise Error, "Only inactive or terminated workers can be reactivated" unless REACTIVATABLE_STATUSES.include?(@employee.status)
       if @employee.termination_date && effective_date <= @employee.termination_date
         raise Error, "Reactivation must be after the termination date"
       end

@@ -216,6 +216,20 @@ class Employee < ApplicationRecord
                   AND reactivation_events.effective_date <= :period_end
               )
           )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM employee_status_events initial_inactive_event
+            WHERE initial_inactive_event.employee_id = employees.id
+              AND initial_inactive_event.previous_status = 'inactive'
+              AND initial_inactive_event.effective_date > :period_end
+              AND NOT EXISTS (
+                SELECT 1
+                FROM employee_status_events earlier_event
+                WHERE earlier_event.employee_id = employees.id
+                  AND (earlier_event.effective_date < initial_inactive_event.effective_date
+                    OR (earlier_event.effective_date = initial_inactive_event.effective_date AND earlier_event.id < initial_inactive_event.id))
+              )
+          )
         SQL
         period_start: period_start,
         period_end: period_end
@@ -302,6 +316,9 @@ class Employee < ApplicationRecord
 
     event = employee_status_events.where("effective_date <= ?", date).order(effective_date: :desc, id: :desc).first
     return event.resulting_status == "active" if event
+
+    first_event = employee_status_events.order(:effective_date, :id).first
+    return false if first_event&.previous_status == "inactive"
 
     status != "inactive" && (termination_date.blank? || date <= termination_date)
   end
