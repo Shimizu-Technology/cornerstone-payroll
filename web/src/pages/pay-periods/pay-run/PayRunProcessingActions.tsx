@@ -1,4 +1,5 @@
 
+import { PayrollPreviewCard } from '@/components/payroll/PayrollPreviewCard';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 
 import { Link } from 'react-router';
@@ -53,8 +54,9 @@ export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>)
   const needsHours = isDraft && canImportTimeTracking && needsSourceCoverageAcknowledgement(payPeriod);
   const openHours = () => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); };
   const route = (tab: 'work' | 'checks' | 'activity', hash = '') => `${payRunPath(companyId, payRunId, tab, { returnTo })}${hash}`;
-  return <section title={connectedPaused ? 'Connected payroll is paused' : undefined} className="flex w-full items-start gap-2 sm:w-auto" aria-label="Payroll processing actions">
+  return <section title={connectedPaused ? 'Connected payroll is paused' : undefined} className="flex w-full flex-wrap items-start gap-2 sm:w-auto" aria-label="Payroll processing actions">
     <div className="min-w-0 flex-1 [&_button]:w-full [&>div]:w-full">{isVoided ? <Link className="inline-flex min-h-11 items-center justify-center rounded-full bg-primary-700 px-4 text-sm font-semibold text-white" to={route('activity', '#payroll-corrections')}>Review corrections</Link> : <PayRunStepAction {...props} step={isDraft ? 'hours' : isCalculated || isCommitted ? 'results' : 'commit'} header />}</div>
+    <PayrollPreviewCard key={payPeriod.id} payPeriod={payPeriod} compact onDownloaded={props.onPreviewDownloaded} />
     <details ref={menu} className="relative shrink-0" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); menu.current?.removeAttribute('open'); menu.current?.querySelector('summary')?.focus(); } }}>
       <summary aria-label="More payroll actions" className="flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center rounded-full border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-primary-700 [&::-webkit-details-marker]:hidden"><MoreHorizontal className="h-5 w-5" aria-hidden="true" /></summary>
       <div className="absolute right-0 top-full z-30 mt-2 flex max-h-[70vh] w-72 max-w-[calc(100vw-2rem)] flex-col items-stretch gap-2 overflow-y-auto rounded-xl border border-neutral-200 bg-white p-3 shadow-lg" onClick={event => { if ((event.target as HTMLElement).closest('button:not(:disabled), a')) { menu.current?.removeAttribute('open'); menu.current?.querySelector('summary')?.focus(); } }}>
