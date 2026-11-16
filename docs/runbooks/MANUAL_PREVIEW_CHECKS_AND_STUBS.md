@@ -23,7 +23,7 @@ First used on Nov 16, 2026 for MoSa's Hotbox Nov 2–15 run (#132, pay date Nov 
 - **Paper checks:** `CheckGenerator` (or the First Hawaiian 4-up generator) for every paper check with positive net pay. No VOID marks. No check numbers, because none are assigned before commit.
 - **Pay stubs:** `PayStubGenerator` for every employee with earnings-statement activity, direct deposit included.
 - **Watermark:** every page gets a faint diagonal "PREVIEW" and a small "PREVIEW" banner. On pay stubs, "PREVIEW" also covers the "This is your official earnings statement" footer.
-- **Check stub YTD:** check stubs normally show saved YTD, and commit writes that. The script adds the current uncommitted check once, as `PayStubGenerator` already does, so the check stub and the pay stub agree. Without it, the check stub's YTD totals leave out this paycheck while its earnings rows include it.
+- **Check stub YTD:** check stubs read YTD from reportable periods, which for a live client means committed ones. When the run is outside that scope, the script adds the current check once, as `PayStubGenerator` already does, so the check stub and the pay stub agree. Without it, the check stub's YTD totals leave out this paycheck while its earnings rows include it.
 
 **It changes nothing.** The script runs inside a `SET TRANSACTION READ ONLY` transaction that is rolled back. Any write would fail. The run's status is printed before and after.
 
@@ -39,15 +39,20 @@ You need production access with the Render CLI (`render ssh`) and a staff user i
    render ssh srv-d74hd8v5r7bs73ctg8a0 --output text -- -T 'cat > /tmp/preview_checks_and_stubs.rb' < api/script/ops/preview_checks_and_stubs.rb
    ```
    Once this file is deployed, it's already on the server at `script/ops/preview_checks_and_stubs.rb`, and you can skip the upload.
-3. **Run it:**
+3. **Run it.** If you uploaded it in step 2:
    ```sh
    render ssh srv-d74hd8v5r7bs73ctg8a0 --output text -- -T \
      'cd /opt/render/project/src/api && PAY_PERIOD_ID=132 COMPANY_ID=6 ACTOR_USER_ID=1 bin/rails runner /tmp/preview_checks_and_stubs.rb'
    ```
-   Check the printed counts and net totals against the pay run header (net pay and number of employees), and confirm the status is unchanged.
+   If it's deployed and you skipped the upload:
+   ```sh
+   render ssh srv-d74hd8v5r7bs73ctg8a0 --output text -- -T \
+     'cd /opt/render/project/src/api && PAY_PERIOD_ID=132 COMPANY_ID=6 ACTOR_USER_ID=1 bin/rails runner script/ops/preview_checks_and_stubs.rb'
+   ```
+   Check the printed counts and net totals against the pay run header (net pay and number of employees), and confirm the status is unchanged. Each run writes to a new `run_<id>_<timestamp>` folder; the script prints the full file paths.
 4. **Download the PDFs.** Use base64 so the binary survives the SSH session:
    ```sh
-   render ssh srv-d74hd8v5r7bs73ctg8a0 --output text -- -T 'base64 -w0 /tmp/payroll_preview/<file>.pdf' 2>/dev/null \
+   render ssh srv-d74hd8v5r7bs73ctg8a0 --output text -- -T 'base64 -w0 /tmp/payroll_preview/<run folder>/<file>.pdf' 2>/dev/null \
      | grep -v 'WARNING\|vulnerable\|pq.html\|hostkeys' | base64 -d > ~/Downloads/<file>.pdf
    ```
 5. **Remove the server copies.** The PDFs contain payroll data:
