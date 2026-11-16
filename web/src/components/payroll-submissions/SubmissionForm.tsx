@@ -52,7 +52,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       // A skipped default that was later deactivated has nothing to carry forward.
       ...previous.filter(row => !(row.standing_change_id && period.standing_changes?.some(item => item.standing_change_id === row.standing_change_id && item.availability_error)) && !defaults.some(item => item.standing_change_id === row.standing_change_id) && !(row.standing_change_id && row.skipped))
         .map(row => ({ ...row, standing_change_id: undefined, skipped: undefined }))]
-      .map(row => ({ ...row, key: crypto.randomUUID() }));
+      .map(row => ({ ...row, skipped: row.allow_none === false ? undefined : row.skipped, key: crypto.randomUUID() }));
   });
   const [workbookChoice, setWorkbookChoice] = useState<'attach' | 'link' | 'none' | ''>(current?.workbook_choice || (current?.documents.some(d => d.role === 'changes_workbook') ? 'attach' : current?.changes_link_url ? 'link' : ''));
   const [link, setLink] = useState(current?.changes_link_url || '');
@@ -178,7 +178,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
         {rows.filter(row => row.standing_change_id).map(row => <div key={row.key} className="min-w-0 space-y-2 rounded-lg border border-neutral-200 p-3">
           <p className="break-words font-semibold">{row.label || row.employee_name}{row.required ? ' (required)' : ' (optional)'}</p>
           {row.help_text && <p className="break-words text-sm text-neutral-600">{row.help_text}</p>}
-          <Input label={(row.kind === 'owner_pay' ? 'Amount ($): ' : 'Hours: ') + (row.label || row.employee_name)} inputMode="decimal" disabled={row.skipped} value={(row.kind === 'owner_pay' ? row.amount : row.hours) || ''} onChange={e => update(row.key, row.kind === 'owner_pay' ? { amount: e.target.value } : { hours: e.target.value })} />
+          <Input label={(row.kind === 'owner_pay' ? 'Amount ($): ' : 'Hours: ') + (row.label || row.employee_name)} inputMode="decimal" aria-required={row.required} disabled={row.skipped} value={(row.kind === 'owner_pay' ? row.amount : row.hours) || ''} onChange={e => update(row.key, row.kind === 'owner_pay' ? { amount: e.target.value } : { hours: e.target.value })} />
           {row.allow_none !== false && <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={!!row.skipped} onChange={e => update(row.key, { skipped: e.target.checked })} />None this period: {row.label || row.employee_name}</label>}
         </div>)}
       </fieldset>}
@@ -235,7 +235,6 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
                   </>}
                   <div className="sm:col-span-2"><Input label="Note (optional)" value={row.note || ''} onChange={e => update(row.key, { note: e.target.value })} /></div>
                 </fieldset>
-                <FieldError messages={details[`changes.${index + 1}`]} />
               </li>;
             })}
           </ul>

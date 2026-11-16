@@ -89,6 +89,8 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     expect { service.apply_to(rows, reviewed: reviewed, confirmed: true) }.to raise_error(ArgumentError, /Choose.*pay/)
     input = reviewed.deep_dup
     input.first.merge!(pay_choice: "saved", saved_period_pay: "5000.0")
+    expect { service.apply_to(rows, reviewed: input, confirmed: true) }.to raise_error(ArgumentError, /reason/)
+    input.first[:reason] = "Verified alternative pay"
     expect(service.apply_to(rows, reviewed: input, confirmed: true).first[:period_pay]).to be_nil
   end
 
@@ -97,6 +99,8 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     expect { service.apply_to(rows, reviewed: reviewed, confirmed: true) }.to raise_error(ArgumentError, /Choose.*pay/)
     input = reviewed.deep_dup
     input.first.merge!(pay_choice: "workbook", workbook_period_pay: "4000")
+    expect { service.apply_to(rows, reviewed: input, confirmed: true) }.to raise_error(ArgumentError, /reason/)
+    input.first[:reason] = "Verified alternative pay"
     expect(service.apply_to(rows, reviewed: input, confirmed: true).first).to include(period_pay: "4000", period_pay_evidence: { source: "Workbook" })
     expect(service.review_decisions.first).to include(pay_choice: "workbook", applied_value: "4000", reviewed_value: "8421.13")
   end
@@ -147,6 +151,29 @@ RSpec.describe 'Configured entry import provenance' do
     source.submissions.create!(company: company, revision: number, submitted_at: Time.current,
       content_fingerprint: SecureRandom.hex(32), request_fingerprint: SecureRandom.hex(32),
       change_rows: [ { 'kind' => 'owner_pay', 'employee_id' => owner.id, 'standing_change_id' => field.id }.merge(row) ])
+  end
+
+  [ :deactivated, :none_disabled, :employee_inactive, :job_inactive ].each do |state|
+    it "records and skips stale none when #{state}" do
+      row = { 'skipped' => true }
+      if state == :job_inactive
+        worker = create(:employee, company: company)
+        rate = create(:employee_wage_rate, employee: worker)
+        field.update!(employee: worker, kind: 'extra_hours', employee_wage_rate: rate)
+        row.merge!('kind' => 'extra_hours', 'employee_id' => worker.id, 'employee_wage_rate_id' => rate.id)
+      end
+      answer = revision(1, row)
+      case state
+      when :deactivated then field.update!(active: false)
+      when :none_disabled then field.update!(allow_none: false)
+      when :employee_inactive then owner.update!(status: 'inactive')
+      when :job_inactive then field.employee_wage_rate.update!(active: false)
+      end
+      service = PayrollSubmissions::ImportChanges.new(submission: answer, pay_period: period)
+      service.apply_to([], reviewed: [], confirmed: true)
+      expect { service.apply_period_decisions!(actor: nil) }.not_to change(PayrollEntryResolution, :count)
+      expect(service.review_decisions).to include(include(decision: 'stale_none', standing_change_id: field.id, revision: 1, reason: /not applied/))
+    end
   end
 
   it 'stores audited none provenance and replaces only client resolutions on a new revision' do

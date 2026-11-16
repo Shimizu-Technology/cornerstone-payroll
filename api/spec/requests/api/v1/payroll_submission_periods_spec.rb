@@ -667,12 +667,16 @@ RSpec.describe "Pay-period submissions", type: :request do
     end
 
     it "hides unavailable mappings from clients while flagging them to staff" do
+      send_package(changes: [ { kind: "owner_pay", standing_change_id: default.id, employee_id: owner.id, amount: "10" } ].to_json)
+      expect(response).to have_http_status(:created)
       owner.update!(status: "inactive")
       get "#{client_base}/#{ref}"
       expect(data.fetch("standing_changes")).to be_empty
+      expect(data.fetch("submissions").first.fetch("changes").sole).not_to have_key("availability_error")
       as_staff
       get "#{staff_base}/#{ref}"
       expect(data.fetch("standing_changes").sole.fetch("availability_error")).to include("inactive")
+      expect(data.fetch("submissions").first.fetch("changes").sole.fetch("availability_error")).to include("inactive")
     end
 
     it "records configured values independently of No changes and preserves explicit none" do
