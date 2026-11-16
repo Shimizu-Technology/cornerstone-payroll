@@ -512,6 +512,7 @@ Rails.application.routes.draw do
 
           # CPR-66: Check printing (pay-period scoped)
           get  "checks",                    to: "checks#index"
+          get  "checks/preview_pdf", to: "checks#preview_pdf"
           get  "checks/rehearsal_preview_pdf", to: "checks#rehearsal_preview_pdf"
           post "checks/batch_pdf",          to: "checks#batch_pdf"
           post "checks/mark_all_printed",   to: "checks#mark_all_printed"

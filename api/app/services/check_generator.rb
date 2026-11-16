@@ -88,7 +88,8 @@ class CheckGenerator
     }
   end
 
-  def initialize(payroll_item, company: nil)
+  def initialize(payroll_item, company: nil, preview: false)
+    @preview = preview
     @payroll_item = payroll_item
     @employee     = payroll_item.employee
     @pay_period   = payroll_item.pay_period
@@ -115,6 +116,16 @@ class CheckGenerator
         pdf.start_new_page unless index.zero?
         new(item, company: company).send(:draw_document, pdf, rehearsal_preview: true)
       end
+    end.render
+  end
+
+  def self.generate_preview_batch(items, company:)
+    PdfUnicodeFont.document(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
+      items.each_with_index do |item, index|
+        pdf.start_new_page unless index.zero?
+        new(item, company: company, preview: true).send(:draw_document, pdf)
+      end
+      PdfPreviewWatermark.apply(pdf)
     end.render
   end
 
@@ -191,16 +202,28 @@ class CheckGenerator
         pay_period_id: pay_period.id
       )
 
-      gross   = totals[:gross_pay].to_f
-      fit     = totals[:withholding_tax].to_f
-      ss      = totals[:social_security_tax].to_f
-      med     = totals[:medicare_tax].to_f
-      addl_wh = totals[:additional_withholding].to_f
+      gross   = totals[:gross_pay].to_d
+      fit     = totals[:withholding_tax].to_d
+      ss      = totals[:social_security_tax].to_d
+      med     = totals[:medicare_tax].to_d
+      addl_wh = totals[:additional_withholding].to_d
 
+      net = totals[:net_pay].to_d
+      # Live clients report only committed runs; test workspaces already include
+      # calculated/approved runs. Add this check only when absent from that scope.
+      if payroll_item.payroll_included? && pay_period.correction_status.in?([ nil, "correction" ]) &&
+          !PayPeriod.reportable_for_company(pay_period.company).exists?(pay_period.id)
+        gross += payroll_item.gross_pay.to_d
+        fit += payroll_item.withholding_tax.to_d
+        ss += payroll_item.social_security_tax.to_d
+        med += payroll_item.medicare_tax.to_d
+        addl_wh += payroll_item.additional_withholding.to_d
+        net += payroll_item.net_pay.to_d
+      end
       taxes = fit + ss + med + addl_wh
 
       { gross: gross, fit: fit, ss: ss, med: med, addl_wh: addl_wh,
-        taxes: taxes, net: totals[:net_pay].to_f }
+        taxes: taxes, net: net }
     end
   end
 
@@ -221,6 +244,7 @@ class CheckGenerator
       page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
       draw_document(pdf, voided: voided, rehearsal_preview: rehearsal_preview)
+      PdfPreviewWatermark.apply(pdf) if @preview
     end.render
   end
 
@@ -795,7 +819,7 @@ class CheckGenerator
       .gsub("{period_start}", format_date(pay_period.start_date))
       .gsub("{period_end}", format_date(pay_period.end_date))
       .gsub("{pay_date}", format_date(pay_period.pay_date))
-      .gsub("{check_number}", payroll_item.check_number.to_s)
+      .gsub("{check_number}", @preview ? "" : payroll_item.check_number.to_s)
       .gsub("{company_name}", company&.name.to_s)
   end
 

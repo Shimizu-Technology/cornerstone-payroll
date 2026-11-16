@@ -34,7 +34,10 @@ module Api
         ].freeze
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
 
-        before_action :set_pay_period,    only: [ :index, :rehearsal_preview_pdf, :batch_pdf, :mark_all_printed ]
+        # The document-access audit is the sole write, including on a first read.
+        skip_before_action :track_authenticated_user_activity, only: :preview_pdf
+
+        before_action :set_pay_period,    only: [ :index, :preview_pdf, :rehearsal_preview_pdf, :batch_pdf, :mark_all_printed ]
         before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :confirm_direct_deposit_payment, :void, :reverse_paycheck, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
 
@@ -96,6 +99,36 @@ module Api
               check_stock_type: @pay_period.company.check_stock_type
             }
           }
+        end
+
+        # GET /pay_periods/:pay_period_id/checks/preview_pdf?part=checks|stubs
+        def preview_pdf
+          @pay_period.with_lock do
+            if @pay_period.correction_status == "voided"
+              return render json: { error: "Voided pay runs cannot be previewed" }, status: :unprocessable_entity
+            end
+            unless @pay_period.status.in?(%w[calculated approved])
+              return render json: { error: "Preview is only available for calculated or approved pay runs (this run is #{@pay_period.status})" }, status: :unprocessable_entity
+            end
+
+            revision = @pay_period.payroll_review_packages.current.order(revision: :desc).first
+            pdf = PayrollPreviewPdf.generate(pay_period: @pay_period,
+              company: render_company_for(@pay_period.company), part: params[:part].presence)
+            AuditLog.record!(user: current_user, company_id: @pay_period.company_id,
+              action: "checks#preview_pdf", record_type: "PayPeriod", record_id: @pay_period.id,
+              event_category: "document_access", ip_address: request.remote_ip, user_agent: request.user_agent,
+              metadata: { pay_period_id: @pay_period.id, payroll_review_package_id: revision&.id,
+                revision: revision&.revision || 0, part: params[:part].presence || "combined" })
+            prefix = @pay_period.company.name.to_s.gsub(/[^A-Za-z0-9]+/, "_").gsub(/\A_+|_+\z/, "").first(40).presence || "Payroll"
+            part_token = params[:part].present? ? "_#{params[:part]}" : ""
+            response.headers["Cache-Control"] = "private, no-store"
+            send_data pdf, type: "application/pdf", disposition: "attachment",
+              filename: "#{prefix}_PREVIEW_#{@pay_period.pay_date.iso8601}_rev#{revision&.revision || 0}#{part_token}.pdf"
+          end
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::ActiveRecordError
+          render json: { error: "Could not record the preview download. Try again." }, status: :service_unavailable
         end
 
         # Read-only, VOID-marked proof for calculated or approved migration

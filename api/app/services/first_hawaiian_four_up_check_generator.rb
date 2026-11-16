@@ -84,7 +84,8 @@ class FirstHawaiianFourUpCheckGenerator
     numeric_value.clamp(MIN_SLOT_PITCH_ADJUSTMENT, MAX_SLOT_PITCH_ADJUSTMENT)
   end
 
-  def initialize(company:, payroll_items: [], non_employee_checks: [], starting_slot: 1, rehearsal_preview: false)
+  def initialize(company:, payroll_items: [], non_employee_checks: [], starting_slot: 1, rehearsal_preview: false, preview: false)
+    @preview = preview
     @company = company
     @rehearsal_preview = rehearsal_preview
     @entries = payroll_items.map { |item| entry_from_payroll_item(item) } +
@@ -99,6 +100,7 @@ class FirstHawaiianFourUpCheckGenerator
 
     PdfUnicodeFont.document(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
       draw_entries(pdf)
+      PdfPreviewWatermark.apply(pdf) if @preview
     end.render
   end
 
@@ -273,7 +275,7 @@ class FirstHawaiianFourUpCheckGenerator
       .gsub("{period_start}", format_date(period.start_date))
       .gsub("{period_end}", format_date(period.end_date))
       .gsub("{pay_date}", format_date(period.pay_date))
-      .gsub("{check_number}", item.check_number.to_s)
+      .gsub("{check_number}", @preview ? "" : item.check_number.to_s)
       .gsub("{company_name}", company&.name.to_s)
   end
 
