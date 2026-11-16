@@ -329,10 +329,14 @@ module Api
                 period = selection.period
                 # Keep Imported tied to the actual selected revision; choosing
                 # an old source does not label the newer files as imported.
-                decline_notes = client_changes.review_decisions.select { |row| %w[decline no_pay].include?(row[:decision]) }
-                  .map { |row| "#{row[:employee_name] || 'Missing employee'}: #{row[:decision] == 'no_pay' ? 'No pay this period' : "Don't apply"} — #{row[:reason]}" }
+                review_notes = client_changes.review_decisions.select { |row| %w[decline no_pay stale_none].include?(row[:decision]) }
+                  .map do |row|
+                    next row[:reason] if row[:decision] == "stale_none"
+
+                    "#{row[:employee_name] || 'Missing employee'}: #{row[:decision] == 'no_pay' ? 'No pay this period' : "Don't apply"} — #{row[:reason]}"
+                  end
                 period.transition!("import", actor: current_user,
-                  submission: selection.payroll_submission, note: ([ "Imported revision #{selection.payroll_submission.revision} into payroll review." ] + decline_notes).join(" "))
+                  submission: selection.payroll_submission, note: ([ "Imported revision #{selection.payroll_submission.revision} into payroll review." ] + review_notes).join(" "))
                 PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#import",
                   metadata: { submission_id: selection.payroll_submission_id, current_submission_id: selection.current_submission_id,
                     superseded_reason: selection.superseded_reason, source_route: selection.source_route,
@@ -355,6 +359,8 @@ module Api
 
             render json: {
               results: results,
+              client_change_decisions: client_changes&.review_decisions || [],
+              manual_review_warnings: client_changes&.manual_review_warnings || [],
               pay_period: pay_period_json(@pay_period.reload)
             }
           rescue ArgumentError => e
