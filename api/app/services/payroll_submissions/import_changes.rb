@@ -112,6 +112,7 @@ module PayrollSubmissions
           # client's job also replaces the primary-job fallback for equal rates.
           if row[:payroll_setup_only] && own_hours(change[:employee_id]).zero? && (row[:selected_wage_rate_id].blank? || row[:wage_rate_needs_review])
             row[:selected_wage_rate_id] = change[:employee_wage_rate_id]
+            row[:wage_rate_needs_review] = false
           end
         end
         row[:client_change_evidence] = change.merge(submission_id: @submission.id, reviewed_value: value) if field == :hours || row.dig(:period_pay_evidence, :source_type) == "client_submission"

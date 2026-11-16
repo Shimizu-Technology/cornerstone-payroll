@@ -99,7 +99,7 @@ export function InstallmentLoanSetup({ employeeName, offer, access, disabled = f
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <Input label="Loan name" value={fields.name} maxLength={100} onChange={update('name')} disabled={busy} />
-            <Input label="First deduction pay date" type="date" value={fields.first_deduction_date} onChange={update('first_deduction_date')} disabled={busy} />
+            <Input label="First deduction pay date" type="date" value={fields.first_deduction_date} readOnly aria-readonly="true" helperText="This payroll" />
             <Input label="Starting balance" inputMode="decimal" value={fields.starting_balance} onChange={update('starting_balance')} disabled={busy} />
             <Input label="Payment per payroll" inputMode="decimal" value={fields.payment_amount} onChange={update('payment_amount')} disabled={busy} />
           </div>
@@ -107,6 +107,7 @@ export function InstallmentLoanSetup({ employeeName, offer, access, disabled = f
             From the workbook: {amount(offer.beginning_balance)} beginning balance + {amount(offer.new_amount)} new loan.
             {Number(offer.estimated_ending_balance) > 0 && ` Estimated ending balance ${amount(offer.estimated_ending_balance)}.`}
           </p>
+          <p className="text-xs font-medium text-amber-900">Changing these amounts from the workbook will show a balance mismatch on the next review.</p>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button type="submit" disabled={disabled || busy}>{busy ? 'Creating loan…' : 'Create loan'}</Button>
             <Button type="button" variant="outline" disabled={busy} onClick={() => { setEditing(false); setError(null); }}>Cancel</Button>

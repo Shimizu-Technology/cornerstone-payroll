@@ -29,8 +29,9 @@ RSpec.describe "Setting up an installment loan from MoSa import review", type: :
       confirmed_by: staff, confirmed_at: Time.current, notes: "Synthetic confirmed workweek")
   end
 
-  # MoSa's own workbook: a new $600 installment loan, $50 a payroll. Built
-  # once so a second upload is byte-for-byte the same file.
+  # MoSa's own workbook: by default a new $600 installment loan, $50 a
+  # payroll. Built once so a second upload is byte-for-byte the same file.
+  let(:installment_row) { [ 0, 600, 50, 550 ] }
   let(:workbook_bytes) do
     package = Axlsx::Package.new
     package.workbook.add_worksheet(name: PayrollImport::LoanTipExcelParser::INSTALLMENT_SHEET) do |sheet|
@@ -38,7 +39,7 @@ RSpec.describe "Setting up an installment loan from MoSa import review", type: :
       sheet.add_row([ "PAY PERIOD ENDING", nil, run.end_date ])
       sheet.add_row([ "PAY DAY", nil, run.pay_date ])
       sheet.add_row([ nil, "Nickname", "Last Name", "First Name", "Dept", "Beginning Balance", "New Loan", "Payment", "Estimated Ending" ])
-      sheet.add_row([ 1, nil, "Mercer", "Emma", "Joint", 0, 600, 50, 550 ])
+      sheet.add_row([ 1, nil, "Mercer", "Emma", "Joint", *installment_row ])
     end
     package.to_stream.read
   end
@@ -154,6 +155,48 @@ RSpec.describe "Setting up an installment loan from MoSa import review", type: :
     post "#{url}/import_installment_loan", params: { import_id: data["import_id"] + 1, employee_id: emma.id }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
     expect(emma.employee_loans).to be_empty
+  end
+
+  it "only deducts first on this payroll's pay date" do
+    data = preview!
+    set_up!(data, starting_balance: "600", payment_amount: "50", first_deduction_date: (run.pay_date - 14).iso8601)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to eq("The first deduction is this payroll's pay date, #{run.pay_date.strftime('%-m/%-d/%Y')}.")
+    expect(EmployeeLoan.count).to eq(0)
+  end
+
+  context "with an existing balance and a new advance in the workbook" do
+    let(:installment_row) { [ 200, 100, 50, 250 ] }
+
+    it "records the beginning balance and the advance as separate ledger entries, and the review reconciles" do
+      data = preview!
+      expect(emma_row(data)["installment_loan_setup"]).to include("starting_balance" => "300.0", "beginning_balance" => "200.0", "new_amount" => "100.0")
+      set_up!(data)
+      expect(response).to have_http_status(:created), response.body
+      loan = EmployeeLoan.find(response.parsed_body["loan_id"])
+      expect(loan).to have_attributes(opening_balance: 200, current_balance: 300, balance_source: "other_verified", balance_as_of: run.pay_date)
+      expect(loan.loan_transactions.order(:id).map { |entry| [ entry.transaction_type, entry.amount.to_d ] }).to eq([ [ "addition", 200 ], [ "addition", 100 ] ])
+      expect(AuditLog.find_by!(action: "employee_loans#create", record_id: loan.id).metadata).to include("current_balance" => "300.0")
+
+      post "#{url}/rematch_import"
+      expect(emma_source(response.parsed_body)["errors"]).to eq([])
+    end
+
+    it "refuses a stale offer once the installment was paid off, instead of adding a second debt" do
+      data = preview!
+      type = DeductionType.create!(company: company, name: "Old loan", category: "post_tax", sub_category: "loan", active: true)
+      EmployeeLoan.create!(company: company, employee: emma, deduction_type: type, name: "Old loan", original_amount: 50, opening_balance: 50,
+        current_balance: 0, balance_as_of: run.start_date - 30, balance_source: "new_loan", payment_amount: 50, status: "paid_off", paid_off_date: run.start_date - 10)
+      set_up!(data)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("was paid off in Employee Loans")
+      expect(emma.employee_loans.count).to eq(1)
+
+      post "#{url}/rematch_import"
+      second = response.parsed_body
+      expect(emma_row(second)["installment_loan_setup"]).to be_nil
+      expect(emma_source(second)["errors"].sole["message"]).to include("Old loan was paid off on")
+    end
   end
 
   it "rejects a payment larger than the starting balance and leaves no partial loan" do

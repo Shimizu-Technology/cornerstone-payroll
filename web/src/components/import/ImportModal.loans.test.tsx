@@ -78,6 +78,26 @@ it('sets up the workbook’s new installment loan from the review, then matches 
   expect((screen.getAllByLabelText('Outcome for Mercer, Elena')[0] as HTMLSelectElement).value).toBe('included');
 });
 
+it('keeps staff’s job picks when a loan setup matches the files again', async () => {
+  const options = [{ id: 1, label: 'Hourly rate', rate: 12 }, { id: 2, label: 'Joint', rate: 12 }];
+  const kai = (sourceRowId: number): ImportPreviewRow => emma({ source_row_id: sourceRowId, employee_id: 6, employee_name: 'Kai Frontline', pdf_employee_name: 'Frontline, Kai',
+    installment_payment: 0, wage_rate_options: options, selected_wage_rate_id: 1, wage_rate_needs_review: true, wage_rate_default_source: 'Primary job (Hourly rate).' });
+  const kaiSource = (id: number): MosaSourceRow => ({ ...emmaSource(id), source_employee_name: 'Frontline, Kai', employee_id: 6 });
+  mocks.setUpLoan.mockResolvedValue({ loan_id: 77, already_set_up: false });
+  mocks.rematchImport.mockResolvedValue(preview([emmaSource(11), kaiSource(12)], [emma({ source_row_id: 11 }), kai(12)], 2));
+  open(preview([emmaSource(1, createOffer.message), kaiSource(2)], [emma({ installment_loan_setup: createOffer }), kai(2)]));
+
+  fireEvent.change(screen.getAllByLabelText('Job and rate for Kai Frontline')[0], { target: { value: '2' } });
+  const setup = screen.getAllByRole('region', { name: 'Installment loan for Elena Mercer' })[0];
+  fireEvent.click(within(setup).getByRole('button', { name: 'Set up installment loan' }));
+  expect((within(setup).getByLabelText('First deduction pay date') as HTMLInputElement).readOnly).toBe(true);
+  fireEvent.click(within(setup).getByRole('button', { name: 'Create loan' }));
+
+  expect(await screen.findByText('Elena Mercer’s installment loan is set up and matches this import.')).toBeTruthy();
+  expect((screen.getAllByLabelText('Job and rate for Kai Frontline')[0] as HTMLSelectElement).value).toBe('2');
+  expect(screen.queryByText('Hours on the primary job for 1 worker')).toBeNull();
+});
+
 it('checks the figures before sending and shows a refused setup in the form without matching again', async () => {
   mocks.setUpLoan.mockRejectedValue(new ApiError('Elena Mercer isn’t active. Reactivate them before setting up the loan.', 422));
   open(preview([emmaSource(1, createOffer.message)], [emma({ installment_loan_setup: createOffer })]));

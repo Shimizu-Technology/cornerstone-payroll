@@ -142,12 +142,21 @@ module PayrollImport
         return
       end
 
+      # A balance continuing on the workbook after Cornerstone closed the loan
+      # (for example a capped final payment) is not a new debt.
+      beginning = money(source_row[:installment_beginning_balance])
+      paid_off = beginning.positive? && employee.employee_loans.where(tracking_mode: "balance_tracked", status: "paid_off").order(:paid_off_date, :id).last
+      if paid_off
+        paid_on = paid_off.paid_off_date ? " on #{paid_off.paid_off_date.strftime('%-m/%-d/%Y')}" : ""
+        errors << "#{name}'s installment loan #{paid_off.name} was paid off#{paid_on} in Employee Loans, but the workbook still shows #{currency(beginning)}. Check the workbook with the client."
+        return
+      end
+
       row_count = source_row[:installment_row_count].to_i
       if row_count > 1
         errors << "The workbook has #{row_count} installment loan rows for #{name}. Ask the client to combine them into one row, or set up the loans in Employee Loans."
         return
       end
-      beginning = money(source_row[:installment_beginning_balance])
       addition = money(source_row[:installment_new_amount])
       payment = money(source_row[:installment_payment])
       starting = beginning + addition
