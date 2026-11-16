@@ -432,7 +432,12 @@ module Api
           payload
         end
 
+        # A test workspace's identity, status and bank/check setup stay with
+        # organization admins (archive and restore are the status path), as a
+        # Client management grant never applies to a test workspace either.
         def full_company_management?(company)
+          return false if company.test_workspace? && !current_user&.organization_admin?
+
           StaffRolePolicy.allowed?(current_user, :manage_client_administration, company: company)
         end
 

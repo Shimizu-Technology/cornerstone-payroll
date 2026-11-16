@@ -24,6 +24,9 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       active: true
     )
   end
+  let(:client_user) do
+    User.create!(company: company, email: "client-#{company.id}@example.com", name: "Client User", role: "client", active: true)
+  end
 
   before do
     allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_company_id).and_return(company.id)
@@ -1023,13 +1026,14 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       )
     end
 
-    it "does not let an accountant perform a status transition" do
+    it "does not let an accountant terminate a worker" do
       allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
 
       post "/api/v1/admin/employees/#{employee.id}/terminate", params: payload, as: :json
 
       expect(response).to have_http_status(:forbidden)
       expect(employee.reload).to be_active
+      expect(employee.employee_status_events).to be_empty
     end
   end
 
@@ -1045,8 +1049,30 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       expect(AuditLog.find_by!(action: "employees#deactivate", record_id: employee.id).metadata).to include("after_values" => include("status" => "inactive"))
     end
 
-    it "refuses staff without configuration permission" do
+    it "lets an accountant mark a worker inactive and audits who did it" do
       allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+      post "/api/v1/admin/employees/#{employee.id}/deactivate", params: payload, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload.status).to eq("inactive")
+      expect(employee.employee_status_events.sole).to have_attributes(event_type: "deactivated", actor_id: accountant_user.id)
+      expect(AuditLog.find_by!(action: "employees#deactivate", record_id: employee.id).user_id).to eq(accountant_user.id)
+    end
+
+    it "rechecks the operator's access under the company lock" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+      allow_any_instance_of(Company).to receive(:lock!).and_wrap_original do |original, *args|
+        accountant_user.update_columns(active: false) if original.receiver.id == company.id
+        original.call(*args)
+      end
+      post "/api/v1/admin/employees/#{employee.id}/deactivate", params: payload, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("company_context_unavailable")
+      expect(employee.reload.status).to eq("active")
+      expect(employee.employee_status_events).to be_empty
+    end
+
+    it "refuses client users" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(client_user)
       post "/api/v1/admin/employees/#{employee.id}/deactivate", params: payload, as: :json
       expect(response).to have_http_status(:forbidden)
       expect(employee.reload.status).to eq("active")
@@ -1091,8 +1117,27 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       expect(employee.employee_status_events).to be_empty
     end
 
-    it "refuses accountants without adding history or a successful audit" do
+    it "lets an accountant reactivate an inactive worker and audits who did it" do
       allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+      post "/api/v1/admin/employees/#{employee.id}/reactivate", params: payload, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload.status).to eq("active")
+      expect(employee.employee_status_events.sole).to have_attributes(event_type: "reactivated", actor_id: accountant_user.id)
+      expect(AuditLog.find_by!(action: "employees#reactivate", record_id: employee.id).user_id).to eq(accountant_user.id)
+    end
+
+    it "keeps rehiring a terminated worker with managers and admins" do
+      employee.update!(status: "terminated", termination_date: "2024-03-15")
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+      post "/api/v1/admin/employees/#{employee.id}/reactivate", params: payload, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to eq("A manager or admin can rehire a terminated worker")
+      expect(employee.reload).to have_attributes(status: "terminated", termination_date: Date.new(2024, 3, 15))
+      expect(employee.employee_status_events).to be_empty
+    end
+
+    it "refuses client users without adding history or a successful audit" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(client_user)
       post "/api/v1/admin/employees/#{employee.id}/reactivate", params: payload, as: :json
       expect(response).to have_http_status(:forbidden)
       expect(employee.reload.status).to eq("inactive")

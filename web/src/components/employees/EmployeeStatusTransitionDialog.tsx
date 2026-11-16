@@ -26,6 +26,8 @@ interface Props {
   onCompleted: (employee: Employee) => void;
   // Starting date to suggest, such as the pay period start. Never later than today.
   defaultEffectiveDate?: string;
+  // Whether this operator can also terminate. Accountants can mark inactive but not terminate.
+  canTerminate?: boolean;
 }
 
 function todayIsoDate(): string {
@@ -36,7 +38,7 @@ function todayIsoDate(): string {
   return `${year}-${month}-${day}`;
 }
 
-export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenChange, onCompleted, defaultEffectiveDate }: Props) {
+export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenChange, onCompleted, defaultEffectiveDate, canTerminate = true }: Props) {
   const initialEffectiveDate = defaultEffectiveDate && defaultEffectiveDate < todayIsoDate() ? defaultEffectiveDate : todayIsoDate();
   const [effectiveDate, setEffectiveDate] = useState(initialEffectiveDate);
   const [lastWorkedOn, setLastWorkedOn] = useState('');
@@ -125,7 +127,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
               {mode === 'deactivate' ? `Mark ${employee.first_name} inactive` : isTermination ? `Terminate ${employee.first_name}` : `Reactivate ${employee.first_name}`}
             </DialogTitle>
             <DialogDescription className="text-neutral-200">
-              {mode === 'deactivate' ? 'Inactive: not paid until reactivated. Use Terminate when employment has ended.' : isTermination
+              {mode === 'deactivate' ? `Inactive: not paid until reactivated. ${canTerminate ? 'Use Terminate when employment has ended.' : 'A manager or admin can terminate a worker whose employment has ended.'}` : isTermination
                 ? 'Record when the termination actually took effect. The worker and every prior paycheck remain available for reports and audit history.'
                 : employee.status === 'inactive'
                   ? 'Start a new active period for this worker. The inactive period stays in the immutable status timeline.'
