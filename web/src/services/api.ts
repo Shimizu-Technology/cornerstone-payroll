@@ -1580,8 +1580,9 @@ export const payPeriodsApi = {
     id: number,
     pdfFile?: File,
     excelFile?: File,
-    // Omit when the upload step's tip fallback was not offered (adding a file from the review).
-    tipsPaidOutFromTips: boolean | undefined = false,
+    // Undefined when the upload step's tip fallback was not offered (adding a
+    // file from the review). No default: a default would turn undefined into false.
+    tipsPaidOutFromTips?: boolean,
     replacement?: { supersedesPackageId: string; reason: string },
     submissionId?: number,
   ): Promise<ImportPreviewResponse> => {
