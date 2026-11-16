@@ -78,3 +78,19 @@ it('warns about reused stock and hides numbering for bank-only runs', () => {
   expect(screen.queryByText(/Paper checks will/)).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();
 });
+
+it('requires acknowledgement of every outstanding request and resets it for changed requests', () => {
+  const request = { id: 1, title: "Riley's timesheet", status: 'requested', status_label: 'Waiting for the file' };
+  const state = { ...props(), payPeriod: { ...period, outstanding_file_requests: [request] } };
+  const { rerender } = render(<PayrollCommitDialog {...state} />);
+  const confirm = screen.getByRole('button', { name: 'Confirm commit' });
+  expect(screen.getByText(/Riley's timesheet/)).toBeTruthy();
+  expect(confirm).toHaveProperty('disabled', true);
+  fireEvent.click(confirm);
+  expect(state.onConfirm).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(confirm);
+  expect(state.onConfirm).toHaveBeenCalledExactlyOnceWith(12, true);
+  rerender(<PayrollCommitDialog {...state} payPeriod={{ ...state.payPeriod, outstanding_file_requests: [request, { ...request, id: 2, title: 'Signed W-4' }] }} />);
+  expect(confirm).toHaveProperty('disabled', true);
+});

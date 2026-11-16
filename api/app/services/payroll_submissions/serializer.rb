@@ -39,7 +39,7 @@ module PayrollSubmissions
       pay_period = @catalog.live_pay_period(entry)
       if pay_period && record&.status.in?(%w[draft_ready approved changes_requested paid]) && !pay_period.client_finished?
         payload[:status] = "in_review"
-        payload[:status_label] = "Awaiting payroll preview"
+        payload[:status_label] = @catalog.company.client_payroll_approval_required? ? "Awaiting payroll preview" : "Payroll in progress"
       end
       if pay_period
         @published_reviews ||= {}
@@ -48,6 +48,7 @@ module PayrollSubmissions
         else
           @published_reviews[pay_period.id] = pay_period.payroll_review_packages.summary.current.where.not(published_at: nil).first
         end
+        published = nil unless @catalog.company.client_payroll_approval_required?
         visible = @staff || pay_period.client_finished? || (pay_period.approved? && published)
         payload[:review_pay_period_id] = pay_period.id if visible
         if pay_period.client_finished?

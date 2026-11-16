@@ -3,6 +3,7 @@
 module PayrollReview
   class RevisionService
     class Error < StandardError; end
+    class StaleRevisionError < Error; end
 
     def initialize(pay_period:, actor: nil)
       @pay_period = pay_period
@@ -91,7 +92,7 @@ module PayrollReview
 
     def request_changes!(revision_id:, note:)
       package = nil
-      pay_period.with_lock do
+      with_decision_lock do
         package = decision_package!(revision_id)
         validate_approver!(actor)
         note = note.to_s.strip
@@ -109,7 +110,7 @@ module PayrollReview
       approval_method = method.to_s
       review_package = nil
 
-      pay_period.with_lock do
+      with_decision_lock do
         review_package = decision_package!(revision_id)
         validate_approver!(approver)
         validate_recording_method!(approval_method, approver, recorded_by, evidence_reference)
@@ -151,7 +152,7 @@ module PayrollReview
       current_checksum = CalculationSnapshot.new(pay_period: pay_period).call.fetch(:checksum)
       return true if ActiveSupport::SecurityUtils.secure_compare(review_package.calculation_checksum, current_checksum)
 
-      raise Error, "Payroll changed after client review revision #{review_package.revision}. Recalculate and request approval for the new revision."
+      raise StaleRevisionError, "Payroll changed after client review revision #{review_package.revision}. Recalculate and request approval for the new revision."
     rescue EmployeeYearFicaContext::UnreconciledLedgerError
       raise Error, EmployeeYearFicaContext::STALE_MESSAGE
     end
@@ -160,7 +161,16 @@ module PayrollReview
 
     attr_reader :pay_period, :actor
 
+    def with_decision_lock
+      Company.find(pay_period.company_id).with_lock do
+        pay_period.with_lock { yield }
+      end
+    end
+
     def decision_package!(revision_id)
+      unless Company.find(pay_period.company_id).client_payroll_approval_required?
+        raise Error, "Client payroll review is disabled for this company."
+      end
       pay_period.reload
       raise Error, "Cornerstone must approve payroll before client review." unless pay_period.approved?
 
@@ -169,7 +179,7 @@ module PayrollReview
         raise Error, "Publish the current payroll preview before client review."
       end
       if revision_id.to_s != package.id.to_s
-        raise Error, "This review revision changed. Reload the preview before deciding."
+        raise StaleRevisionError, "This review revision changed. Reload the preview before deciding."
       end
       if package.approved? || package.changes_requested_at
         raise Error, "This revision already has a client decision. Cornerstone must unapprove and publish a new revision."
