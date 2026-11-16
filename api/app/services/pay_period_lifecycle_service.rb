@@ -30,7 +30,6 @@ class PayPeriodLifecycleService
       validate_employee_document_readiness!
       validate_annual_fica_context!
       validate_employer_contribution_tracking!
-      validate_client_approval!
       validate_payment_delivery!
       validate_source_earnings!
       pay_period.update!(
@@ -38,9 +37,12 @@ class PayPeriodLifecycleService
         approved_by_id: actor&.id,
         approved_at: Time.current
       )
+      PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).publish!
     end
 
     pay_period
+  rescue PayrollReview::RevisionService::Error => e
+    raise InvalidTransitionError, e.message
   end
 
   def unapprove!
@@ -49,6 +51,7 @@ class PayPeriodLifecycleService
         raise InvalidTransitionError, "Can only unapprove an approved pay period"
       end
 
+      PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).withdraw!
       pay_period.update!(
         status: "calculated",
         approved_by_id: nil,

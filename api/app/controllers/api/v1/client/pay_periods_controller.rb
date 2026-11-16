@@ -5,7 +5,7 @@ module Api
     module Client
       class PayPeriodsController < BaseController
         audit_actions :approve_review
-        before_action :set_pay_period, only: %i[show approve_review]
+        before_action :set_pay_period, only: %i[show approve_review request_changes preview_pdf]
 
         def index
           result = PayrollHistoryQuery.new(
@@ -35,11 +35,48 @@ module Api
             recorded_by: current_user,
             method: "client_portal",
             acknowledgement: params[:acknowledgement],
-            notes: params[:notes]
+            notes: params[:notes],
+            revision_id: params[:revision_id]
           )
           render json: { payroll_review: PayrollReview::PackagePresenter.call(review_package) }
         rescue PayrollReview::RevisionService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def request_changes
+          return render json: { error: "A client portal user must request changes." }, status: :forbidden unless current_user&.client?
+
+          package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user)
+            .request_changes!(revision_id: params[:revision_id], note: params[:note])
+          render json: { payroll_review: PayrollReview::PackagePresenter.call(package) }
+        rescue PayrollReview::RevisionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def preview_pdf
+          pdf = nil
+          package = nil
+          @pay_period.with_lock do
+            raise PayrollReview::RevisionService::Error, "Preview is available only while payroll is approved." unless @pay_period.approved?
+
+            package = @pay_period.payroll_review_packages.current.first
+            unless package && package.published_at && package.id.to_s == params[:revision_id].to_s
+              raise PayrollReview::RevisionService::Error, "This preview revision changed. Reload the pay run."
+            end
+            PayrollReview::RevisionService.new(pay_period: @pay_period).verify_current_checksum!(package)
+            pdf = PayrollPreviewPdf.generate(pay_period: @pay_period, company: @pay_period.company, part: params[:part].presence)
+            AuditLog.record!(user: current_user, company_id: @pay_period.company_id,
+              action: "client_payroll_review#preview_pdf", record_type: "PayrollReviewPackage", record_id: package.id,
+              event_category: "document_access", ip_address: request.remote_ip, user_agent: request.user_agent,
+              metadata: { pay_period_id: @pay_period.id, revision: package.revision, part: params[:part].presence || "combined" })
+          end
+          response.headers["Cache-Control"] = "private, no-store"
+          send_data pdf, type: "application/pdf", disposition: "attachment",
+            filename: "Payroll_PREVIEW_#{@pay_period.pay_date.iso8601}_rev#{package.revision}.pdf"
+        rescue PayrollReview::RevisionService::Error, ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::ActiveRecordError
+          render json: { error: "Could not record the preview download. Try again." }, status: :service_unavailable
         end
 
         private
@@ -81,6 +118,9 @@ module Api
           )
 
           if include_items
+            json[:payroll_review_history] = pay_period.payroll_review_packages.where.not(sent_for_client_approval_at: nil)
+              .includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
+              .map { |package| PayrollReview::PackagePresenter.call(package) }
             json[:payroll_items] = items.map do |item|
               {
                 id: item.id,
@@ -118,9 +158,8 @@ module Api
           return false unless pay_period
           return true if pay_period.client_finished?
 
-          pay_period.company.client_payroll_approval_required? &&
-            pay_period.status.in?(%w[calculated approved]) &&
-            pay_period.payroll_review_packages.current.exists?
+          pay_period.approved? &&
+            pay_period.payroll_review_packages.current.where.not(published_at: nil).exists?
         end
       end
     end

@@ -16,6 +16,7 @@ RSpec.describe PayrollReview::RevisionService do
   end
 
   before do
+    ensure_verified_test_tax_years(2024, 2026)
     CompanyAssignment.create!(user: client, company: company)
   end
 
@@ -37,14 +38,14 @@ RSpec.describe PayrollReview::RevisionService do
     )
   end
 
-  it "locks company before period and reads the fresh approval setting" do
+  it "locks company before period and keeps calculation separate from publication" do
     company.update!(client_payroll_approval_required: false)
     pay_period.company # cache the disabled setting on this instance
     Company.find(company.id).update!(client_payroll_approval_required: true)
     locks = []
     subscriber = ->(_name, _start, _finish, _id, payload) { locks << payload[:sql] if payload[:sql].include?("FOR UPDATE") }
     package = ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") { service.issue! }
-    expect(package.sent_for_client_approval_at).to be_present
+    expect(package.sent_for_client_approval_at).to be_nil
     company_lock = locks.index { |sql| sql.include?('"companies"') }
     period_lock = locks.index { |sql| sql.include?('"pay_periods"') }
     expect(company_lock).to be < period_lock
@@ -84,14 +85,17 @@ RSpec.describe PayrollReview::RevisionService do
 
   it "supersedes an approved revision and creates a new pending revision when payroll changes" do
     first = service.issue!
+    pay_period.update!(status: "approved")
+    service.publish!
     service.approve!(
       approver: client,
       recorded_by: client,
-      method: "client_portal",
+      method: "client_portal", revision_id: pay_period.payroll_review_packages.current.first.id,
       acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
     )
     payroll_item.update!(hours_worked: 81, gross_pay: 1_620, net_pay: 1_370)
 
+    pay_period.update!(status: "calculated")
     second = service.issue!
 
     expect(first.reload).to have_attributes(status: "superseded", superseded_at: be_present)
@@ -104,11 +108,15 @@ RSpec.describe PayrollReview::RevisionService do
     service.issue!
 
     expect do
-      service.approve!(approver: client, recorded_by: client, method: "client_portal", acknowledgement: "Received, thank you!")
+      pay_period.update!(status: "approved")
+    service.publish!
+    service.approve!(approver: client, recorded_by: client, method: "client_portal", revision_id: pay_period.payroll_review_packages.current.first.id, acknowledgement: "Received, thank you!")
     end.to raise_error(described_class::Error, /exact payroll revision/)
 
     expect do
-      service.approve!(approver: other_client, recorded_by: other_client, method: "client_portal",
+      pay_period.update!(status: "approved")
+    service.publish!
+    service.approve!(approver: other_client, recorded_by: other_client, method: "client_portal", revision_id: pay_period.payroll_review_packages.current.first.id,
                        acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT)
     end.to raise_error(described_class::Error, /assigned to this client/)
   end
@@ -117,10 +125,12 @@ RSpec.describe PayrollReview::RevisionService do
     service.issue!
 
     expect do
-      service.approve!(
+      pay_period.update!(status: "approved")
+    service.publish!
+    service.approve!(
         approver: client,
         recorded_by: staff,
-        method: "email_attestation",
+        method: "email_attestation", revision_id: pay_period.payroll_review_packages.current.first.id,
         acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
       )
     end.to raise_error(described_class::Error, /message reference/)
@@ -128,7 +138,7 @@ RSpec.describe PayrollReview::RevisionService do
     approved = service.approve!(
       approver: client,
       recorded_by: staff,
-      method: "email_attestation",
+      method: "email_attestation", revision_id: pay_period.payroll_review_packages.current.first.id,
       acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT,
       evidence_reference: "gmail-message-123"
     )
@@ -142,10 +152,12 @@ RSpec.describe PayrollReview::RevisionService do
 
   it "keeps saved revision identity and approval evidence immutable" do
     review_package = service.issue!
+    pay_period.update!(status: "approved")
+    service.publish!
     service.approve!(
       approver: client,
       recorded_by: client,
-      method: "client_portal",
+      method: "client_portal", revision_id: pay_period.payroll_review_packages.current.first.id,
       acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT,
       notes: "Approved as shown"
     )
@@ -161,14 +173,16 @@ RSpec.describe PayrollReview::RevisionService do
       .to raise_error(ActiveRecord::RecordInvalid, /cannot transition from approved/)
   end
 
-  it "blocks payroll approval when approval is missing or the calculation changed" do
+  it "blocks commit when client approval is missing or the calculation changed" do
     review_package = service.issue!
     expect { service.verify_required_approval! }.to raise_error(described_class::Error, /still required/)
 
+    pay_period.update!(status: "approved")
+    service.publish!
     service.approve!(
       approver: client,
       recorded_by: client,
-      method: "client_portal",
+      method: "client_portal", revision_id: pay_period.payroll_review_packages.current.first.id,
       acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
     )
     expect(service.verify_required_approval!).to be(true)
@@ -176,5 +190,65 @@ RSpec.describe PayrollReview::RevisionService do
     payroll_item.update!(net_pay: payroll_item.net_pay + 1)
     expect { service.verify_required_approval! }.to raise_error(described_class::Error, /changed after client review revision/)
     expect(review_package.reload).to be_approved
+  end
+  def client_decision(package)
+    service.approve!(approver: client, recorded_by: client, method: "client_portal", revision_id: package.id,
+      acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT)
+  end
+
+  it "publishes at staff approval and accepts the current client decision before commit" do
+    package = service.issue!
+    lifecycle = PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff)
+    lifecycle.approve!
+    expect(package.reload.published_at).to be_present
+    expect { lifecycle.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Client approval is still required/)
+    client_decision(package)
+    lifecycle.commit!
+    expect(pay_period.reload).to be_committed
+  end
+
+  it "retains a requested change and requires a newly published revision after unapprove and recalculate" do
+    lifecycle = PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff)
+    lifecycle.approve!
+    package = pay_period.payroll_review_packages.current.first!
+    client_service = described_class.new(pay_period: pay_period, actor: client)
+    expect { client_service.request_changes!(revision_id: package.id, note: " ") }.to raise_error(described_class::Error, /Describe/)
+    client_service.request_changes!(revision_id: package.id, note: "Correct hours")
+    lifecycle.unapprove!
+    expect(package.reload).to have_attributes(status: "superseded", changes_requested_by: client, change_request_note: "Correct hours")
+    payroll_item.update!(hours_worked: 82)
+    next_package = service.issue!
+    lifecycle.approve!
+    expect { client_decision(package) }.to raise_error(described_class::Error, /revision changed/)
+    client_decision(next_package)
+    lifecycle.commit!
+    expect(pay_period.reload).to be_committed
+  end
+
+  it "withdraws approved evidence on unapprove and allows commit without a client gate when disabled" do
+    lifecycle = PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff)
+    lifecycle.approve!
+    package = pay_period.payroll_review_packages.current.first!
+    client_decision(package)
+    lifecycle.unapprove!
+    expect(package.reload).to have_attributes(status: "superseded", approved_by: client)
+    expect { service.verify_required_approval! }.to raise_error(described_class::Error, /before commit/)
+    lifecycle.approve!
+    expect(pay_period.payroll_review_packages.current.first.revision).to eq(2)
+    company.update!(client_payroll_approval_required: false)
+    lifecycle.commit!
+    expect(pay_period.reload).to be_committed
+  end
+
+  it "retains a pre-rollout calculated-run approval as history and requires a published decision" do
+    pay_period.update!(status: "approved")
+    package = service.publish!
+    client_decision(package)
+    package.update_columns(published_at: nil)
+    pay_period.update!(status: "calculated")
+    PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff).approve!
+    current = pay_period.payroll_review_packages.current.first!
+    expect(package.reload).to have_attributes(status: "superseded", approved_by: client)
+    expect(current).to have_attributes(revision: 2, status: "pending", published_at: be_present)
   end
 end

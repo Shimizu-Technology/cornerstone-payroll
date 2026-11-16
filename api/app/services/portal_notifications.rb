@@ -54,6 +54,8 @@ module PortalNotifications
     "payroll_draft_decided" => { category: "payroll_submissions" },
     "payroll_submission_imported" => { category: "payroll_updates" },
     "payroll_submission_acknowledged" => { category: "payroll_updates" },
+    "payroll_review_published" => { category: "payroll_updates" },
+    "payroll_review_decided" => { category: "payroll_submissions" },
     "payroll_draft_posted" => { category: "payroll_updates" },
     # File requests ride the conversation alerts, one alert per unread burst.
     "file_requested" => { category: "portal_replies", message: true },

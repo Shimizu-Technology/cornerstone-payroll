@@ -1,18 +1,17 @@
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { CheckCircle2, ShieldCheck } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { clientPayrollSubmissionsApi } from '@/services/payrollSubmissions';
 import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
+import { ClientPayrollReview } from '@/components/client-portal/ClientPayrollReview';
 import { ClientPayStubButton } from '@/components/client-portal/ClientPayStubButton';
 import type { PayrollItem } from '@/types';
 import { payRunsPath, safeInternalReturnPath } from '@/lib/routes';
@@ -45,9 +44,6 @@ export function ClientPayPeriodDetail(): ReactElement {
   const [payPeriod, setPayPeriod] = useState<Awaited<ReturnType<typeof clientPayPeriodsApi.get>>['pay_period'] | null>(null);
   const [search, setSearch] = useState('');
   const [employmentType, setEmploymentType] = useState('');
-  const [approvalConfirmed, setApprovalConfirmed] = useState(false);
-  const [approvalNotes, setApprovalNotes] = useState('');
-  const [approving, setApproving] = useState(false);
   const [resolvedRouteKey, setResolvedRouteKey] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
   const resolvedPayPeriod = resolvedRouteKey === routeKey ? payPeriod : null;
@@ -109,24 +105,6 @@ export function ClientPayPeriodDetail(): ReactElement {
     });
   }, [employmentType, resolvedPayPeriod?.payroll_items, search]);
 
-  const approveReview = async (): Promise<void> => {
-    if (!resolvedPayPeriod?.payroll_review || !approvalConfirmed) return;
-    setApproving(true);
-    setError(null);
-    try {
-      const response = await clientPayPeriodsApi.approveReview(payPeriodId, companyId, {
-        acknowledgement: resolvedPayPeriod.payroll_review.acknowledgement,
-        notes: approvalNotes.trim() || undefined,
-      });
-      setPayPeriod({ ...resolvedPayPeriod, payroll_review: response.payroll_review });
-      setApprovalConfirmed(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve this payroll review');
-    } finally {
-      setApproving(false);
-    }
-  };
-
   return (
     <div>
       <Header
@@ -142,11 +120,12 @@ export function ClientPayPeriodDetail(): ReactElement {
           <div className="py-12 text-center text-sm text-gray-500">Loading pay period...</div>
         ) : resolvedPayPeriod ? (
           <>
+            <ClientPayrollReview key={routeKey} payPeriod={resolvedPayPeriod} companyId={companyId} onDone={load} />
             <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
               <SummaryCard label="Employees" value={String(resolvedPayPeriod.employee_count ?? resolvedPayPeriod.payroll_items?.length ?? 0)} />
               <SummaryCard label="Gross Pay" value={formatCurrency(resolvedPayPeriod.total_gross ?? 0)} />
               <SummaryCard label="Net Pay" value={formatCurrency(resolvedPayPeriod.total_net ?? 0)} />
-              <SummaryCard label="Status" value={resolvedPayPeriod.test_workspace_role === 'baseline' ? 'Paid (copied history)' : resolvedPayPeriod.status.charAt(0).toUpperCase() + resolvedPayPeriod.status.slice(1)} />
+              <SummaryCard label="Status" value={resolvedPayPeriod.test_workspace_role === 'baseline' ? 'Paid (copied history)' : resolvedPayPeriod.status === 'approved' ? (resolvedPayPeriod.payroll_review?.status === 'approved' ? 'Client approved' : resolvedPayPeriod.payroll_review?.status === 'changes_requested' ? 'Changes requested' : 'Ready for your review') : resolvedPayPeriod.status.charAt(0).toUpperCase() + resolvedPayPeriod.status.slice(1)} />
             </div>
 
 
@@ -201,41 +180,7 @@ export function ClientPayPeriodDetail(): ReactElement {
               </CardContent>
             </Card>
 
-            {resolvedPayPeriod.client_payroll_approval_required && resolvedPayPeriod.payroll_review && (
-              <Card className={resolvedPayPeriod.payroll_review.status === 'approved' ? 'border-emerald-200 bg-emerald-50/70' : 'border-primary-200 bg-primary-50/70'}>
-                <CardContent className="py-6">
-                  <div className="flex items-start gap-3">
-                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${resolvedPayPeriod.payroll_review.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-primary-100 text-primary-700'}`}>
-                      {resolvedPayPeriod.payroll_review.status === 'approved' ? <CheckCircle2 className="h-5 w-5" /> : <ShieldCheck className="h-5 w-5" />}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h2 className="font-display text-lg font-bold text-neutral-950">
-                        Payroll review revision {resolvedPayPeriod.payroll_review.revision}
-                      </h2>
-                      <p className="mt-1 text-sm leading-6 text-neutral-700">
-                        Review ID <span className="font-mono font-semibold">{resolvedPayPeriod.payroll_review.checksum_short}</span>. Your approval applies only to the hours and dollar amounts shown on this page. Any later change creates a new review ID and requires a new approval.
-                      </p>
-                      {resolvedPayPeriod.payroll_review.status === 'approved' ? (
-                        <p className="mt-3 text-sm font-semibold text-emerald-800">Approved by {resolvedPayPeriod.payroll_review.approved_by_name}. Cornerstone may now complete its payroll review.</p>
-                      ) : (
-                        <div className="mt-5 grid max-w-3xl gap-4">
-                          <Textarea value={approvalNotes} onChange={(event) => setApprovalNotes(event.target.value)} placeholder="Optional: add a note for Cornerstone about this payroll." maxLength={2000} />
-                          <label className="flex items-start gap-3 rounded-xl border border-primary-200 bg-white p-4 text-sm leading-6 text-neutral-800">
-                            <input type="checkbox" className="mt-1 h-4 w-4 rounded border-neutral-300" checked={approvalConfirmed} onChange={(event) => setApprovalConfirmed(event.target.checked)} />
-                            <span>I reviewed the employee payroll details above and confirm: “{resolvedPayPeriod.payroll_review.acknowledgement}”</span>
-                          </label>
-                          <div>
-                            <Button onClick={() => void approveReview()} disabled={!approvalConfirmed || approving}>
-                              {approving ? 'Approving…' : 'Approve This Exact Revision'}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+
           </>
         ) : null}
       </div>

@@ -82,19 +82,13 @@ it('sends an update as a new revision carrying the Revel PDF forward with a stab
   expect(second.get('revel_payroll')).toBeNull();
 });
 
-it('lets the client approve the posted draft or request a change with a note', async () => {
-  const draft = { id: 4, revision: 1, current: true, superseded: false, posted: true, posted_at: '2026-11-18T00:00:00Z', posted_by_name: 'Dafne Staff', paycheck_document: doc(201, 'MHI paychecks.pdf'), direct_deposit_document: null };
-  mocks.get.mockResolvedValue({ data: period({ status: 'draft_ready', status_label: 'Draft ready', drafts: [draft], allowed_actions: ['submit', 'approve', 'request_changes', 'message'] }) });
-  mocks.decide.mockResolvedValue({ data: period({ status: 'changes_requested', status_label: 'Changes requested', drafts: [draft] }) });
+it('keeps earlier drafts readable and directs decisions to the pay run preview', async () => {
+  const draft = { id: 4, revision: 1, current: true, superseded: false, posted: true, paycheck_document: doc(201, 'MHI paychecks.pdf') };
+  mocks.get.mockResolvedValue({ data: period({ review_pay_period_id: 12, drafts: [draft] }) });
   renderAt('client');
-  fireEvent.click(await screen.findByRole('button', { name: 'Request a change' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Send change request' }));
-  expect(await screen.findByText('Describe the change you need.')).toBeTruthy();
-  expect(mocks.decide).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('What should change?'), { target: { value: 'Add 2 hours for Sam' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Send change request' }));
-  await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith('9', { decision: 'request_changes', draft_id: 4, note: 'Add 2 hours for Sam' }));
-  expect(await screen.findByText('Change request sent to Cornerstone.')).toBeTruthy();
+  expect(await screen.findByRole('link', { name: 'Open payroll preview review' })).toHaveProperty('href', 'http://localhost:3000/companies/2/pay-runs/12');
+  expect(screen.getByText('MHI paychecks.pdf')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Approve draft/ })).toBeNull();
 });
 
 it('lets staff confirm the exact current revision and records the page as seen', async () => {
@@ -105,7 +99,8 @@ it('lets staff confirm the exact current revision and records the page as seen',
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm receipt of revision 2' }));
   await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith('9', 2));
   expect(mocks.seen).toHaveBeenCalledWith('9', 41);
-  expect(await screen.findByRole('button', { name: 'Post draft for review' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: 'Start review' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Post draft for review' })).toBeNull();
 });
 
 it('holds the draft actions while a receipt confirmation is still saving', async () => {
@@ -114,9 +109,10 @@ it('holds the draft actions while a receipt confirmation is still saving', async
   mocks.acknowledge.mockReturnValue(new Promise(resolve => { finish = resolve; }));
   renderAt('staff');
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm receipt of revision 2' }));
-  expect((screen.getByRole('button', { name: 'Save staff-only' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Confirm receipt of revision 2' }) as HTMLButtonElement).disabled).toBe(true);
   finish({ data: period({ status: 'received', status_label: 'Received', allowed_actions: ['save_draft', 'message'] }) });
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Save staff-only' }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirm receipt of revision 2' })).toBeNull());
+  expect(screen.queryByRole('button', { name: 'Save staff-only' })).toBeNull();
 });
 
 it('marks a period seen only once it is shown in the foreground, through the displayed update', async () => {
@@ -167,13 +163,12 @@ it('keeps a posted draft and approval available without a Send form for clients 
   mocks.get.mockResolvedValue({ data: period({ status: 'draft_ready', status_label: 'Draft ready', submissions: [], current_revision: null, drafts: [draft], allowed_actions: ['approve', 'request_changes', 'message'] }) });
   mocks.decide.mockResolvedValue({ data: period({ status: 'approved', status_label: 'Approved', submissions: [], drafts: [draft], allowed_actions: ['message'] }) });
   renderAt('client');
-  expect(await screen.findByRole('button', { name: 'Approve draft 1' })).toBeTruthy();
+  expect(await screen.findByText('Fixed pay draft.pdf')).toBeTruthy();
   expect(screen.getByText('Fixed pay draft.pdf')).toBeTruthy();
   expect(screen.queryByRole('form', { name: /Send/ })).toBeNull();
   expect(screen.queryByText(/This period opens for files/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Send an update or replace a file' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Approve draft 1' }));
-  await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith('9', expect.objectContaining({ decision: 'approve', draft_id: 4 })));
+  expect(screen.queryByRole('button', { name: 'Approve draft 1' })).toBeNull();
 });
 it('counts explicit skips separately from changes in the sent receipt', async () => {
   const standing = { kind: 'owner_pay' as const, standing_change_id: 1, employee_id: 5, employee_name: 'Sam Worker' };
@@ -192,7 +187,7 @@ it('orders the six staff sections and hides the single-revision picker', async (
   renderAt('staff');
   await screen.findByRole('heading', { name: 'Status' });
   expect(screen.getAllByRole('heading', { level: 2 }).map(node => node.textContent)).toEqual([
-    'Status', 'What the client sent', 'Next step', 'Draft for client review', 'Messages', 'History',
+    'Status', 'What the client sent', 'Next step', 'Payroll preview review', 'Messages', 'History',
   ]);
   expect(screen.queryByLabelText('Client’s revision')).toBeNull();
 });

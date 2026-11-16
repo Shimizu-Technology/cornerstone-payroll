@@ -316,7 +316,11 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     period.update!(status: "calculated")
     package = PayrollReview::RevisionService.new(pay_period: period, actor: actor).issue!
     client = create(:user, company: company, role: "client")
-    PayrollReview::RevisionService.new(pay_period: period, actor: actor).approve!(
+    period.update!(status: "approved")
+    review_service = PayrollReview::RevisionService.new(pay_period: period, actor: actor)
+    package = review_service.publish!
+    review_service.approve!(
+      revision_id: package.id,
       approver: client, recorded_by: actor, method: "email_attestation",
       acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT, evidence_reference: "Retained approval email"
     )

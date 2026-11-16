@@ -602,7 +602,7 @@ module Api
 
         def client_review
           review_package = @pay_period.payroll_review_packages.current
-                                      .includes(:generated_by, :approved_by, :approval_recorded_by)
+                                      .includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by)
                                       .order(revision: :desc).first
           render json: {
             payroll_review: PayrollReview::PackagePresenter.call(review_package),
@@ -619,7 +619,8 @@ module Api
             method: "email_attestation",
             acknowledgement: params[:acknowledgement],
             notes: params[:notes],
-            evidence_reference: params[:evidence_reference]
+            evidence_reference: params[:evidence_reference],
+            revision_id: params[:revision_id]
           )
           render json: { payroll_review: PayrollReview::PackagePresenter.call(review_package) }
         rescue PayrollReview::RevisionService::Error, ActiveRecord::RecordNotFound => e
@@ -1412,9 +1413,10 @@ module Api
               revision: last_preview.metadata["revision"], downloaded_at: last_preview.created_at.iso8601
             }
             json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
-            json[:payroll_review] = PayrollReview::PackagePresenter.call(
-              pay_period.payroll_review_packages.current.includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
-            )
+            reviews = pay_period.payroll_review_packages.includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc).to_a
+            json[:payroll_review] = PayrollReview::PackagePresenter.call(reviews.find { |package| !package.superseded? })
+            json[:payroll_review_history] = reviews.select { |package| package.sent_for_client_approval_at || package.changes_requested_at }
+              .map { |package| PayrollReview::PackagePresenter.call(package) }
           end
 
           # Mutation responses replace the browser's current period too. Retain

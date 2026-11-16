@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { LabeledTextarea } from '@/components/payroll-submissions/LabeledTextarea';
 import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
 import { useCompany } from '@/contexts/CompanyContext';
 import { FileRow, RevisionCard } from '@/components/payroll-submissions/PeriodParts';
@@ -32,67 +31,14 @@ function DraftFiles({ draft, api, audience }: { draft: SubmissionDraft; api: typ
   </ul>;
 }
 
-function ClientDecision({ period, draft, onDone }: { period: PeriodDetail; draft: SubmissionDraft; onDone: (detail: PeriodDetail) => void }) {
-  const [mode, setMode] = useState<'idle' | 'change'>('idle');
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const decide = async (decision: 'approve' | 'request_changes') => {
-    if (decision === 'request_changes' && !note.trim()) { setError('Describe the change you need.'); return; }
-    setBusy(true); setError(null);
-    try { onDone((await clientPayrollSubmissionsApi.decide(period.ref, { decision, draft_id: draft.id, note: note.trim() || undefined })).data); }
-    catch (err) { setError(err instanceof Error ? err.message : 'That did not save. Try again.'); }
-    finally { setBusy(false); }
-  };
-  return <div className="space-y-3">
-    <p className="text-sm text-neutral-700">Check the draft paychecks and direct deposits, then approve them or tell Cornerstone what to change.</p>
-    {mode === 'idle' ? <div className="flex flex-col gap-2 sm:flex-row">
-      <Button type="button" disabled={busy} onClick={() => void decide('approve')}>Approve draft {draft.revision}</Button>
-      <Button type="button" variant="outline" disabled={busy} onClick={() => setMode('change')}>Request a change</Button>
-    </div> : <form className="space-y-2" onSubmit={(e: FormEvent) => { e.preventDefault(); void decide('request_changes'); }}>
-      <LabeledTextarea label="What should change?" value={note} onChange={e => setNote(e.target.value)} rows={3} />
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Button type="submit" disabled={busy}>Send change request</Button>
-        <Button type="button" variant="outline" disabled={busy} onClick={() => { setMode('idle'); setError(null); }}>Cancel</Button>
-      </div>
-    </form>}
-    {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
-  </div>;
-}
-
-// The status and draft sections render separate StaffActions; they share one
-// busy flag so an older response can't overwrite a newer period state.
 function StaffActions({ period, onDone, mode = 'draft', busy, setBusy }: { mode?: 'status' | 'draft'; period: PeriodDetail; onDone: (detail: PeriodDetail) => void; busy: boolean; setBusy: (busy: boolean) => void }) {
   const api = adminPayrollSubmissionsApi;
   const [error, setError] = useState<string | null>(null);
-  const [paycheck, setPaycheck] = useState<File | null>(null);
-  const [deposits, setDeposits] = useState<File | null>(null);
-  const [note, setNote] = useState('');
-  const [confirmPaid, setConfirmPaid] = useState(false);
-  const retry = useRef<{ identity: string; key: string } | null>(null);
-  const formRef = useRef<HTMLFormElement>(null);
   const current = period.submissions.find(s => s.current);
-  const unposted = period.drafts.find(d => !d.posted && d.revision === Math.max(...period.drafts.map(x => x.revision)));
   const can = (action: string) => period.allowed_actions.includes(action as never);
   const run = async (work: () => Promise<{ data: PeriodDetail }>) => {
     setBusy(true); setError(null);
     try { onDone((await work()).data); } catch (err) { setError(err instanceof Error ? err.message : 'That did not save. Try again.'); } finally { setBusy(false); }
-  };
-  const draft = (post: boolean) => {
-    if (!paycheck && !deposits) { setError('Attach the draft paychecks, the direct deposits, or both.'); return; }
-    const identity = JSON.stringify([paycheck?.name, paycheck?.size, deposits?.name, deposits?.size, note, post]);
-    if (retry.current?.identity !== identity) retry.current = { identity, key: crypto.randomUUID() };
-    const form = new FormData();
-    if (paycheck) form.append('paycheck_pdf', paycheck);
-    if (deposits) form.append('direct_deposit_pdf', deposits);
-    if (note.trim()) form.append('note', note.trim());
-    form.append('post', String(post));
-    form.append('idempotency_key', retry.current.key);
-    void run(async () => {
-      const result = await api.createDraft(period.ref, form);
-      retry.current = null; setPaycheck(null); setDeposits(null); setNote(''); formRef.current?.reset();
-      return result;
-    });
   };
   return <div className="space-y-4">
     {mode === 'status' && can('acknowledge') && current && <div className="space-y-2">
@@ -100,27 +46,6 @@ function StaffActions({ period, onDone, mode = 'draft', busy, setBusy }: { mode?
       <Button type="button" disabled={busy} onClick={() => void run(() => api.acknowledge(period.ref, current.id))}>Confirm receipt of revision {current.revision}</Button>
     </div>}
     {mode === 'status' && can('start_review') && <Button type="button" variant="outline" disabled={busy} onClick={() => void run(() => api.startReview(period.ref))}>Start review</Button>}
-    {mode === 'draft' && unposted && can('post_draft') && <div className="rounded-lg border border-warning-200 bg-warning-50 p-3">
-      <p className="text-sm text-neutral-800">Draft {unposted.revision} is saved for staff only.</p>
-      <Button type="button" className="mt-2" disabled={busy} onClick={() => void run(() => api.postDraft(period.ref, unposted.id))}>Post draft {unposted.revision} to the client</Button>
-    </div>}
-    {mode === 'draft' && can('save_draft') && <form ref={formRef} className="space-y-3" onSubmit={(e: FormEvent) => { e.preventDefault(); draft(true); }}>
-      <label className="block text-sm font-medium">Draft paychecks (PDF)
-        <input type="file" accept="application/pdf,.pdf" onChange={e => setPaycheck(e.target.files?.[0] || null)} className="mt-1 block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3" /></label>
-      <label className="block text-sm font-medium">Draft direct deposits (PDF)
-        <input type="file" accept="application/pdf,.pdf" onChange={e => setDeposits(e.target.files?.[0] || null)} className="mt-1 block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3" /></label>
-      <LabeledTextarea label="Note to the client (optional)" value={note} onChange={e => setNote(e.target.value)} rows={2} />
-      <div className="flex flex-col gap-2 sm:flex-row">
-        {can('post_draft') ? <Button type="submit" disabled={busy}>Post draft for review</Button>
-          : <p className="text-sm text-neutral-700">Confirm receipt of the latest files before posting a draft.</p>}
-        <Button type="button" variant="outline" disabled={busy} onClick={() => draft(false)}>Save staff-only</Button>
-      </div>
-    </form>}
-    {mode === 'status' && can('mark_paid') && (confirmPaid
-      ? <div className="flex flex-col gap-2 sm:flex-row sm:items-center"><span className="text-sm">{period.status === 'approved' ? 'Mark this period paid?' : 'The client has not approved in the portal. Mark paid anyway?'}</span>
-        <Button type="button" disabled={busy} onClick={() => void run(() => api.markPaid(period.ref))}>Yes, mark paid</Button>
-        <Button type="button" variant="outline" onClick={() => setConfirmPaid(false)}>Cancel</Button></div>
-      : <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmPaid(true)}>Mark paid</Button>)}
     {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
   </div>;
 }
@@ -199,26 +124,27 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
             {audience === 'client' && canSubmit && current && !editing && <Button type="button" variant="outline" onClick={() => setEditing(true)}>Send an update or replace a file</Button>}
           </div>
           {period.submissions.length ? period.submissions.filter(revision => revision.current).map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} />)
-            : <p className="text-sm text-neutral-600">{canSendFiles ? 'No files for this period yet.' : 'Use this period to exchange messages and review drafts.'}</p>}
+            : <p className="text-sm text-neutral-600">{canSendFiles ? 'No files for this period yet.' : 'Use this period for source files and messages. Review payroll in the preview section.'}</p>}
         </section>
 
         {audience === 'staff' && <section aria-labelledby="next-step" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
           <h2 id="next-step" className="text-base font-semibold">Next step</h2>
           {current && (companyId || activeCompanyId) ? <PortalImportAction key={current.id} period={period} companyId={Number(companyId || activeCompanyId)} onApplied={() => void load()} />
-            : <p className="text-sm text-neutral-700">{canSendFiles ? 'Client files are needed before import review.' : 'Review drafts or exchange a message below.'}</p>}
+            : <p className="text-sm text-neutral-700">{canSendFiles ? 'Client files are needed before import review.' : 'Open the payroll preview review or exchange a message below.'}</p>}
         </section>}
         <section aria-labelledby="draft-section" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
-          <h2 id="draft-section" className="text-base font-semibold">Draft for client review</h2>
+          <h2 id="draft-section" className="text-base font-semibold">Payroll preview review</h2>
+          <p className="text-sm text-neutral-700">Review and approve the preview on the pay run. Payroll files finish when Cornerstone commits that run. Earlier uploaded drafts remain below as history.</p>
+          {period.review_pay_period_id && <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={audience === 'staff' ? `/companies/${companyId || activeCompanyId}/pay-runs/${period.review_pay_period_id}` : `/companies/${companyId || activeCompanyId}/pay-runs/${period.review_pay_period_id}`}>Open payroll preview review</Link>}
           {audience === 'staff' && <StaffActions busy={staffBusy} setBusy={setStaffBusy} period={period} onDone={detail => { setNotice(null); accept(detail); }} />}
 
         {currentDraft && <div aria-labelledby="draft-review" className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2"><h3 id="draft-review" className="text-base font-semibold text-neutral-950">Draft {currentDraft.revision} for review</h3><Badge variant="info">Current</Badge></div>
+          <div className="flex flex-wrap items-center gap-2"><h3 id="draft-review" className="text-base font-semibold text-neutral-950">Earlier draft {currentDraft.revision}</h3><Badge variant="outline">History</Badge></div>
           <p className="text-sm text-neutral-700">Posted by {currentDraft.posted_by_name} · {formatGuam(currentDraft.posted_at)}</p>
           {currentDraft.note && <p className="whitespace-pre-wrap break-words text-sm text-neutral-800">{currentDraft.note}</p>}
           <DraftFiles draft={currentDraft} api={api} audience={audience} />
-          {audience === 'client' && period.allowed_actions.includes('approve') && <ClientDecision period={period} draft={currentDraft} onDone={detail => { setNotice(detail.status === 'approved' ? 'Approved. Cornerstone has been told.' : 'Change request sent to Cornerstone.'); accept(detail); }} />}
         </div>}
-        {audience === 'client' && !currentDraft && !otherDrafts.length && <p className="text-sm text-neutral-600">Cornerstone hasn’t posted a draft for this period yet.</p>}
+        {audience === 'client' && !currentDraft && !otherDrafts.length && <p className="text-sm text-neutral-600">No earlier uploaded drafts for this period.</p>}
         {otherDrafts.map(draft => <details key={draft.id} className="py-3">
           <summary className="cursor-pointer font-semibold text-neutral-800">Draft {draft.revision} {draft.posted ? <Badge variant="outline" className="ml-2">Superseded</Badge> : <Badge variant="warning" className="ml-2">Staff only, not shared</Badge>}</summary>
           <div className="mt-3"><DraftFiles draft={draft} api={api} audience={audience} /></div>
