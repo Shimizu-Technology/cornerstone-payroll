@@ -5,7 +5,7 @@ module Api
     module Admin
       class PayrollImportsController < BaseController
         before_action :set_pay_period
-        around_action :with_import_lock, only: %i[preview rematch remove_source tip_treatment apply resolve_portal_source]
+        around_action :with_import_lock, only: %i[preview rematch remove_source tip_treatment installment_loan apply resolve_portal_source]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/supplemental_template
         def supplemental_template
@@ -93,8 +93,9 @@ module Api
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/rematch_import
         # Matches the current review's retained files again, for example after
-        # a worker it names was reactivated. No upload or reason is needed; an
-        # unchanged roster returns the same review.
+        # a worker it names was reactivated or a loan was set up. No upload or
+        # reason is needed; an optional reason is recorded on the new version.
+        # An unchanged roster and loan setup return the same review.
         def rematch
           unless @pay_period.can_edit?
             return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
@@ -110,7 +111,8 @@ module Api
           end
 
           package_result = PayrollIntake::PreviewService.new(
-            pay_period: @pay_period, source_type: "mosa_revel", files: [], actor: current_user, carry_forward: true
+            pay_period: @pay_period, source_type: "mosa_revel", files: [], actor: current_user, carry_forward: true,
+            supersession_reason: params[:reason].to_s.strip.first(500).presence
           ).call
           # A tip choice follows the workbook it was made for (see tip_confirmation_for).
           import_record = persist_preview(package_result, nil, nil, tips_paid_out_from_tips: false)
@@ -192,6 +194,69 @@ module Api
             "tip_treatment_confirmed" => { "source" => "review", "user_id" => current_user.id, "at" => Time.current.iso8601 }
           ))
           render json: preview_response(import_record, { session: current, duplicate: false })
+        end
+
+        # POST /api/v1/admin/pay_periods/:pay_period_id/import_installment_loan
+        # Sets up, or resumes, the Employee Loan for an installment the current
+        # review found in the workbook, with the same rules and access as the
+        # Employee Loans screen. The browser then matches the files again so
+        # the review reconciles. A repeat request never creates a second loan.
+        def installment_loan
+          skip_default_audit_log!
+          unless @pay_period.can_edit?
+            return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
+          end
+          access = loan_setup_access
+          return render json: { error: access[:reason] }, status: :forbidden unless access[:allowed]
+
+          current = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          import_record = PayrollImport::CurrentReview.import_record_for(@pay_period, current)
+          unless current&.applyable? && import_record && import_record.id.to_s == params[:import_id].to_s
+            return render json: { error: "This review is no longer current. Reopen the current import." }, status: :unprocessable_entity
+          end
+          row = import_record.matched_data.find { |candidate| candidate["employee_id"].to_s == params[:employee_id].to_s }
+          offer = row && row["installment_loan_setup"].to_h
+          employee = row && Employee.find_by(id: row["employee_id"], company_id: @pay_period.company_id)
+          unless employee && offer.present?
+            return render json: { error: "This review has no installment loan to set up for that worker. Reload the review." }, status: :unprocessable_entity
+          end
+          unless employee.active?
+            return render json: { error: "#{employee.full_name} isn't active. Reactivate them before setting up the loan." }, status: :unprocessable_entity
+          end
+
+          # Its own savepoint: a failed setup leaves no partial loan behind.
+          employee.with_lock(requires_new: true) do
+            open_loans = employee.employee_loans.where(tracking_mode: "balance_tracked", status: %w[active suspended]).order(:id).to_a
+            if offer["action"] == "resume"
+              loan = open_loans.find { |candidate| candidate.id.to_s == offer["employee_loan_id"].to_s }
+              raise ArgumentError, "#{offer['name']} is no longer paused or open in Employee Loans. Reload the review." unless loan
+              if loan.active?
+                next render(json: { loan_id: loan.id, already_set_up: true })
+              end
+
+              loan.reactivate!(notes: "Resumed from payroll import review for pay date #{@pay_period.pay_date.iso8601}.")
+              record_loan_audit!("employee_loans#reactivate", loan, offer)
+              next render(json: { loan_id: loan.id, already_set_up: false })
+            end
+
+            # Someone already set it up, for example from another window.
+            existing = open_loans.find { |candidate| candidate.active? && candidate.repayment_schedule_active_on?(@pay_period.pay_date) }
+            next render(json: { loan_id: existing.id, already_set_up: true }) if existing
+            if open_loans.any?
+              raise ArgumentError, "#{employee.full_name} already has #{open_loans.map(&:name).to_sentence} in Employee Loans. Review it there instead of adding another loan."
+            end
+
+            loan = EmployeeLoanSetupService.new(company: @pay_period.company, actor: current_user).create!(
+              employee: employee, attributes: installment_loan_attributes(offer), schedule_kind: "new",
+              setup_mode: offer["beginning_balance"].to_d.positive? ? "existing_balance" : "new_loan"
+            )
+            record_loan_audit!("employee_loans#create", loan, offer)
+            render json: { loan_id: loan.id, already_set_up: false }, status: :created
+          end
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/apply_import
@@ -293,6 +358,7 @@ module Api
                 raise ArgumentError, "Choose a job and rate from this employee's saved rates. Preview again if rates changed."
               end
               row[:selected_wage_rate_id] = id.to_i
+              row[:wage_rate_needs_review] = false
             end
 
             if selection
@@ -509,9 +575,66 @@ module Api
             pay_period: { start_date: @pay_period.start_date, end_date: @pay_period.end_date },
             duplicate: package_result[:duplicate], portal_source: portal_source_json(selection),
             pending_portal_source: pending_portal_source_json,
+            loan_setup: loan_setup_access,
             client_change_prefill: (selection ? change_prefill(selection.payroll_submission, preview[:matched]) : nil),
             pending_change_prefill: (!selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission, preview[:matched]) : nil)
           }
+        end
+
+        # The Employee Loans screen's own access rules decide who may set up a
+        # loan from the review; the review shows the reason to everyone else.
+        def loan_setup_access
+          path = "api/v1/admin/employee_loans"
+          capability = StaffRolePolicy.capability_for(controller_path: path, action_name: "create")
+          allowed = (!capability || StaffRolePolicy.allowed?(current_user, capability, company: current_company)) &&
+            TestWorkspaceAccessPolicy.allowed?(user: current_user, company: current_company, request_method: "POST",
+              capability: capability, controller_path: path, action_name: "create") &&
+            !(current_company&.test_workspace? && TestWorkspaceSafetyPolicy.blocked?(controller_path: path, action_name: "create", request_method: "POST"))
+          return { allowed: true, reason: nil } if allowed
+
+          { allowed: false, reason: "Your access can't set up employee loans for this client. Ask an admin to set up the loan in Employee Loans, then match the files again." }
+        end
+
+        # Staff confirm or edit the workbook's figures before the loan is created.
+        def installment_loan_attributes(offer)
+          input = params.permit(:name, :starting_balance, :payment_amount, :first_deduction_date)
+          name = input[:name].to_s.strip.presence || offer["name"]
+          raise ArgumentError, "Loan name must be 100 characters or fewer" if name.length > 100
+
+          starting = BigDecimal(input.fetch(:starting_balance, offer["starting_balance"]).to_s, exception: false)
+          payment = BigDecimal(input.fetch(:payment_amount, offer["payment_amount"]).to_s, exception: false)
+          first_date = Date.iso8601(input.fetch(:first_deduction_date, offer["first_deduction_date"]).to_s)
+          raise ArgumentError, "Starting balance must be greater than zero" unless starting&.positive?
+          raise ArgumentError, "Payment per payroll must be greater than zero" unless payment&.positive?
+          raise ArgumentError, "Payment per payroll can't be more than the starting balance" if payment > starting
+
+          note = "Set up from the tips & loans workbook in payroll import review (pay date #{@pay_period.pay_date.iso8601})."
+          # The loan's balance stands as of its first deduction, so earlier
+          # paydays never deduct it and this payroll reconciles to it.
+          if offer["beginning_balance"].to_d.positive?
+            { employee_id: offer_employee_id, name: name, tracking_mode: "balance_tracked", payment_amount: payment.round(2),
+              first_deduction_date: first_date, opening_balance: starting.round(2), balance_as_of: first_date,
+              balance_source: "other_verified", principal_amount_known: false, notes: note }
+          else
+            { employee_id: offer_employee_id, name: name, tracking_mode: "balance_tracked", payment_amount: payment.round(2),
+              first_deduction_date: first_date, original_amount: starting.round(2), start_date: first_date, notes: note }
+          end
+        rescue Date::Error
+          raise ArgumentError, "Enter the first deduction pay date"
+        end
+
+        def offer_employee_id
+          params[:employee_id].to_i
+        end
+
+        def record_loan_audit!(action, loan, offer)
+          AuditLog.record!(user: current_user, company_id: @pay_period.company_id, action: action,
+            record_type: "employee_loans", record_id: loan.id, subject_name: loan.employee.full_name,
+            metadata: { source: "payroll_import_review", pay_period_id: @pay_period.id, import_id: params[:import_id].to_i,
+              loan_name: loan.name, current_balance: loan.current_balance&.to_s("F"), payment_amount: loan.payment_amount&.to_s("F"),
+              first_deduction_date: loan.first_deduction_date, balance_as_of: loan.balance_as_of,
+              workbook: offer.slice("beginning_balance", "new_amount", "starting_balance", "payment_amount", "estimated_ending_balance") },
+            ip_address: request.remote_ip, user_agent: request.user_agent, request_id: request.request_id)
         end
 
         def change_prefill(submission, rows)

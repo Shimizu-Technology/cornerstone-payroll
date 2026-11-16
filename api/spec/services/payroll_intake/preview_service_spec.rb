@@ -101,6 +101,48 @@ RSpec.describe PayrollIntake::PreviewService do
     expect(PayrollIntakeSession.count).to eq(1)
   end
 
+  def installment_loan!
+    EmployeeLoan.create!(company: company, employee: employee, name: "Advance", original_amount: 300, opening_balance: 300,
+      current_balance: 300, balance_as_of: run.pay_date, balance_source: "new_loan", payment_amount: 25, first_deduction_date: run.pay_date)
+  end
+
+  def roster_only_hash(source = nil)
+    service = described_class.new(pay_period: run, source_type: "mosa_revel", actor: actor, storage: storage,
+      portal_submission: source, files: [ portal_upload("revel.pdf", bytes, "application/pdf") ])
+    service.send(:snapshot_files!)
+    service.send(:roster_import_hash)
+  end
+
+  it "makes the same files a new review after a loan is set up, because the review reconciles each worker's loans" do
+    first = preview.fetch(:session)
+    expect(preview).to include(duplicate: true, session: first)
+
+    installment_loan!
+    second = preview(carry_forward: true)
+    expect(second[:duplicate]).to be(false)
+    expect(second[:session]).to have_attributes(supersedes_id: first.id)
+    expect(preview(carry_forward: true)).to include(duplicate: true, session: second[:session])
+  end
+
+  it "deduplicates a plain retry against a package keyed before loans joined the import key, until a loan changes" do
+    first = preview.fetch(:session)
+    first.update_columns(import_hash: roster_only_hash, created_at: 1.minute.ago)
+
+    expect(preview).to include(duplicate: true, session: first)
+    installment_loan!
+    expect { preview }.to raise_error(described_class::ReplacementRequiredError)
+    expect(PayrollIntakeSession.count).to eq(1)
+  end
+
+  it "finds a changes-only client revision keyed before loans joined the import key" do
+    applied(submission(1))
+    corrected = submission(2, "200")
+    second = preview(corrected).fetch(:session)
+    second.update_columns(import_hash: Digest::SHA256.hexdigest("#{roster_only_hash(corrected)}\nclient-revision:#{corrected.id}"), created_at: 1.minute.ago)
+
+    expect(preview(corrected)).to include(duplicate: true, session: second)
+  end
+
   it "requires a replacement for a pre-deploy package once a new active worker is added" do
     first = preview.fetch(:session)
     first.update_columns(import_hash: first.evidence_snapshot.fetch("source_import_hash"),

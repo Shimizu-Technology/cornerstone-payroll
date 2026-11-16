@@ -108,8 +108,11 @@ module PayrollSubmissions
           row[:missing_revel_hours_with_deductions] = false
           # An employee absent from both files has no review job picker; the client
           # already named the saved job for these hours. Hours of their own still
-          # need a staff choice, so only preselect when they have none.
-          row[:selected_wage_rate_id] ||= change[:employee_wage_rate_id] if row[:payroll_setup_only] && own_hours(change[:employee_id]).zero?
+          # need a staff choice, so only preselect when they have none. The
+          # client's job also replaces the primary-job fallback for equal rates.
+          if row[:payroll_setup_only] && own_hours(change[:employee_id]).zero? && (row[:selected_wage_rate_id].blank? || row[:wage_rate_needs_review])
+            row[:selected_wage_rate_id] = change[:employee_wage_rate_id]
+          end
         end
         row[:client_change_evidence] = change.merge(submission_id: @submission.id, reviewed_value: value) if field == :hours || row.dig(:period_pay_evidence, :source_type) == "client_submission"
         applied_value = field == :hours ? value : (row[:period_pay].presence || change[:saved_period_pay] || value)
