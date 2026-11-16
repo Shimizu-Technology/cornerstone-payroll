@@ -19,7 +19,7 @@ it('saves an owner default without amounts, then an extra-hours default with an 
   await screen.findByLabelText('Employee');
   fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '1' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save default' }));
-  await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/admin/payroll_standing_changes', { standing_change: { kind: 'owner_pay', employee_id: 1, employee_wage_rate_id: null, position: 0, active: true } }));
+  await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/admin/payroll_standing_changes', { standing_change: { kind: 'owner_pay', employee_id: 1, employee_wage_rate_id: null, position: 0, active: true, required: true } }));
   await screen.findByRole('status');
   fireEvent.change(screen.getByLabelText('Change'), { target: { value: 'extra_hours' } });
   fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '2' } });
@@ -31,7 +31,7 @@ it('shows unavailable defaults and prevents saves without configuration capabili
   mocks.get.mockResolvedValue({ ...fixture, defaults: [{ id: 9, kind: 'extra_hours', employee_id: 2, employee_wage_rate_id: null, position: 0, active: true, availability_error: 'Saved job missing' }] });
   mocks.canEdit = false;
   render(<StandingChangesSettings />);
-  await screen.findByText('Saved job missing');
+  await screen.findByText('Needs attention in Settings: Saved job missing');
   expect((screen.getByRole('button', { name: 'Remove default for Jordan Worker' }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByLabelText('Employee').closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
   expect(mocks.patch).not.toHaveBeenCalled();

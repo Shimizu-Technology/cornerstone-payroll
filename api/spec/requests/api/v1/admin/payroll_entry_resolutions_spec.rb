@@ -7,7 +7,7 @@ RSpec.describe "Expected payroll entries", type: :request do
   let(:staff) { create(:user, company: company, role: "accountant") }
   let(:period) { create(:pay_period, company: company) }
   let(:owner) { create(:employee, :salary, company: company, salary_type: "variable", pay_rate: 0) }
-  let(:field) { PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay", label: "Owner amount") }
+  let(:field) { PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay", label: "Owner amount", required: true) }
   let(:url) { "/api/v1/admin/pay_periods/#{period.id}/entry_resolutions" }
   before { ensure_verified_test_tax_years(2024) }
   before { stub_portal_user(Api::V1::Admin::PayrollEntryResolutionsController, staff, company) }
@@ -41,6 +41,26 @@ RSpec.describe "Expected payroll entries", type: :request do
     expect(response.parsed_body.dig("results", "errors")).to be_empty
     expect(period.payroll_items.find_by!(employee: owner).salary_override).to eq(850)
     expect(response.parsed_body.dig("pay_period", "expected_entries", "fields").sole).to include("status" => "filled", "value" => "850.0")
+  end
+
+  it "calculates the full draft roster while expected owner amounts are entered" do
+    field
+    second = create(:employee, :salary, company: company, salary_type: "variable", pay_rate: 0)
+    fixed = create(:employee, :salary, company: company, salary_type: "per_period", pay_rate: 1200)
+    PayrollStandingChange.create!(company: company, employee: second, kind: "owner_pay", required: true)
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    calculation_url = "/api/v1/admin/pay_periods/#{period.id}/run_payroll"
+    roster = [ owner.id, second.id, fixed.id ]
+    post calculation_url, params: { employee_ids: roster, salary_overrides: { owner.id.to_s => 850 } }, as: :json
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("results", "errors")).not_to be_empty
+    expect(period.reload).to be_draft
+    expect(period.payroll_items.find_by!(employee: fixed).gross_pay).to eq(1200)
+    post calculation_url, params: { employee_ids: roster, salary_overrides: { owner.id.to_s => 850, second.id.to_s => 950 } }, as: :json
+    expect(response.parsed_body.dig("results", "errors")).to be_empty
+    expect(period.reload).to be_calculated
+    expect(period.payroll_items.pluck(:employee_id)).to match_array(roster)
+    expect(PayrollExpectedEntries.new(period).payload[:outstanding]).to be_empty
   end
 
   it "rejects foreign employees, clients, disallowed none, and locked periods" do

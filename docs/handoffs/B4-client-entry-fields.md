@@ -4,9 +4,9 @@ Implementation context: main at 1ad7656a, November 16–17, 2026. Staff prepare 
 
 ## Implementation decisions
 
-Extend the existing audited PayrollStandingChange rather than introduce a second client configuration model. Its owner_pay / extra_hours kinds, employee identity, saved rate, active uniqueness, availability checks and delegated configuration permission already match this requirement. Added optional label/help text, required and allow_none flags. Existing defaults receive required=true and allow_none=true; blank labels use the employee name and entry kind. Staff use Settings → Standing Changes to configure fields, order them, deactivate them and set the missing-regular rule.
+Extend the existing audited PayrollStandingChange rather than introduce a second client configuration model. Its owner_pay / extra_hours kinds, employee identity, saved rate, active uniqueness, availability checks and delegated configuration permission already match this requirement. Added optional label/help text, required and allow_none flags. Round 2 supersedes the original required default: existing defaults receive required=false and allow_none=true; blank labels use the employee name and entry kind. Staff use Settings → Standing Changes to configure fields, order them, deactivate them and set the missing-regular rule.
 
-PayrollExpectedEntries projects saved payroll facts. A positive salary_override fills owner pay; a positive hours total for the mapped saved job fills hours. Basic legacy hours count only when that employee has one active saved job matching the field. A bonus alone does not fill owner pay. Other saved job buckets survive inline hours entry. The panel uses the existing run_payroll endpoint with salary_overrides or rate-specific hours, calculating the selected employee through the established payroll calculator. Unsaved worksheet changes disable panel writes so they are not discarded by its reload.
+PayrollExpectedEntries projects saved payroll facts. A positive salary_override fills owner pay; a positive hours total for the mapped saved job fills hours. Basic legacy hours count only when that employee has one active saved job matching the field. A bonus alone does not fill owner pay. Other saved job buckets survive inline hours entry. The panel uses the existing run_payroll endpoint with salary_overrides or rate-specific hours, now merging panel values into worksheet state and calculating the full roster through handleRunPayroll (round 2). Unsaved worksheet changes disable panel writes so they are not discarded by its reload.
 
 PayrollEntryResolution records field-specific None this period or employee-specific Not paid this period, optional notes, and audited undo. Mutations lock company then period and revalidate payroll_operations access. Configuration and threshold edits lock the same company and require manage_client_configuration, including delegated accountants. Approved/committed runs cannot change resolutions.
 
@@ -45,3 +45,24 @@ Limits: mobile coverage is Chromium resizing, not Safari or physical-device keyb
 Lead owns merge and deployment. Do not merge/deploy from this worker. Other workers' ImportModal, preview PDF and FICA warning slices were not edited. Payroll workflow files may need normal integration conflict review.
 
 Worktree: /Users/agent/work/worktrees/cp-b4-entries, branch feat/client-entry-fields. Task servers 5413/5414 and the owned shared-browser tab were closed and lifecycle status showed no owned resources. Shared PostgreSQL remains available. The task-only cp_test_b4_entries database is dropped after final checks. Leave the clean worktree for the lead.
+
+
+## Round 2 — independent review fixes (November 17, 2026)
+
+Continued from lead commit 6b4f4912 in the same isolated worktree; origin/main was already included. No production access, merge or deployment.
+
+Panel saves now merge the entered value into worksheet state and invoke the existing full-roster handleRunPayroll. Staff can enter draft amounts directly; the standard calculation errors and coverage acknowledgement still apply. Calculation errors retain staged values rather than trigger a reload. This is more direct than requiring staff to calculate first just to enter a required amount. Rate-specific panel writes retain other job rows. Legacy hours without job attribution on multi-job employees disable inline hours saving with worksheet guidance, preventing data loss.
+
+Staff/portal exclusions resolve both configured fields (including allow_none=false) and missing regulars, with their exclusion reason shown. Unavailable fields stay visible with “Needs attention in Settings” warnings in the panel and Settings, but are omitted from outstanding. Any financially reportable current item covers a missing regular, including tips, service-charge wages or bonus alone.
+
+The migration adds required with database default false, preserving existing portal defaults as optional. The new-field Settings draft explicitly sends required=true; existing rows remain editable without conversion. Deploy note: runs already approved before deployment are checked again at commit. If outstanding entries appear, staff must unapprove, resolve the entries, then re-approve before committing. Previously committed runs remain unchanged.
+
+Round-2 local gate: 44 focused RSpec examples; 21 Vitest tests across panel, Settings, processing actions and FICA disclosure; full frontend lint, tsc --noEmit and tsc -b; RuboCop on all five changed Ruby files; Brakeman zero warnings; Impeccable advisory []. Final tips-only spec uses reported_tips. Initial fixture slug collisions were resolved by rerunning RSpec on a clean dedicated database after browser QA.
+
+Agent-executed Chromium affected-flow QA against these changes, synthetic local client:
+- 1280×800: fresh draft with two owner fields and an hourly field. Save owner 1=1000; full-roster attempt reports missing owner 2 and leaves draft. Save owner 2=1500; approval disabled specifically for Kitchen hours.
+- 390×844: save Kitchen hours=40; all expected fields filled, both approval controls enabled. Database verified owner overrides 1000/1500 and hourly hours=40 across three payroll items. No approval/commit performed in this round.
+- Both sizes: exclusions show “Excluded this period” and “Client confirmed no pay”; multi-job legacy hours show worksheet guidance with Save disabled; inactive saved-job warning remains visible in panel and Settings and absent from outstanding. No horizontal overflow in panel or Settings (document widths 1280/390). New Settings draft required checkbox checked.
+- Limits: Chromium CSS resizing only; Safari, physical-device input and separate missing-regular browser history setup not run. Missing-regular exclusions/tips and unavailable setup variants have automated specs. Browser fixture retries created duplicate synthetic warning rows; all were isolated in the database that is dropped below.
+
+Cleanup: task API/frontend processes and preview tab closed; lifecycle manual-20261117-002433-45801-c28e reports no active owned resources. Dedicated cp_test_b4_entries is dropped after final verification; shared PostgreSQL stays running. Preserve this worktree and branch for lead review. Lead owns final-head independent review, CI assessment, merge and deployment.

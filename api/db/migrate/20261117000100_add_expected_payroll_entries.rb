@@ -4,7 +4,7 @@ class AddExpectedPayrollEntries < ActiveRecord::Migration[8.1]
   def change
     add_column :payroll_standing_changes, :label, :string
     add_column :payroll_standing_changes, :help_text, :text
-    add_column :payroll_standing_changes, :required, :boolean, null: false, default: true
+    add_column :payroll_standing_changes, :required, :boolean, null: false, default: false
     add_column :payroll_standing_changes, :allow_none, :boolean, null: false, default: true
     add_column :companies, :regular_pay_lookback, :integer, null: false, default: 4
     add_column :companies, :regular_pay_threshold, :integer, null: false, default: 3

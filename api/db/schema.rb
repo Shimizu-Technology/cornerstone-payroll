@@ -3306,7 +3306,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_000100) do
     t.index [ "company_id", "kind", "employee_id" ], name: "idx_standing_changes_active_employee_kind", unique: true, where: "active"
     t.string "label"
     t.text "help_text"
-    t.boolean "required", default: true, null: false
+    t.boolean "required", default: false, null: false
     t.boolean "allow_none", default: true, null: false
   end
 

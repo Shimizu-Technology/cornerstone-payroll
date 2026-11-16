@@ -7,7 +7,7 @@ RSpec.describe PayrollExpectedEntries do
   let(:period) { create(:pay_period, :calculated, company: company, start_date: "2024-06-01", end_date: "2024-06-14", pay_date: "2024-06-19") }
   let(:employee) { create(:employee, company: company) }
   let(:rate) { create(:employee_wage_rate, employee: employee, rate: 20) }
-  let(:field) { PayrollStandingChange.create!(company: company, employee: employee, employee_wage_rate: rate, kind: "extra_hours", label: "Manual hours") }
+  let(:field) { PayrollStandingChange.create!(company: company, employee: employee, employee_wage_rate: rate, kind: "extra_hours", label: "Manual hours", required: true) }
   before { ensure_verified_test_tax_years(2024) }
 
   def data
@@ -51,16 +51,43 @@ RSpec.describe PayrollExpectedEntries do
     field
     employee.update!(status: "terminated")
     expect(data[:fields].sole[:availability_error]).to include("terminated")
+    expect(data[:outstanding]).to be_empty
     expect(field.update(active: false)).to be(true)
   end
 
   it "requires explicit owner period pay rather than a bonus" do
     owner = create(:employee, :salary, company: company, salary_type: "variable", pay_rate: 0)
-    PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay", label: "Owner pay")
+    PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay", label: "Owner pay", required: true)
     item = create(:payroll_item, :salary, pay_period: period, employee: owner, bonus: 100, salary_override: nil)
     expect(data[:outstanding]).to eq([ "Owner pay" ])
     item.update!(salary_override: 900)
     expect(data[:fields].sole).to include(status: "filled", value: "900.0")
+  end
+
+  it "resolves a required field with a staff or portal exclusion even when none is disallowed" do
+    field.update!(allow_none: false)
+    period.pay_period_excluded_employees.create!(employee: employee, reason: "Client confirmed no pay")
+    expect(data[:fields].sole).to include(status: "excluded", note: "Client confirmed no pay")
+    expect(data[:outstanding]).to be_empty
+  end
+
+  it "blocks inline hours writes when legacy multi-job hours cannot be attributed safely" do
+    field
+    create(:employee_wage_rate, employee: employee, label: "Other", rate: 30)
+    create(:payroll_item, pay_period: period, employee: employee, hours_worked: 12, wage_rate_hours: [])
+    expect(data[:fields].sole[:inline_save_error]).to include("Assign them in the worksheet")
+  end
+
+  it "keeps deactivated jobs and changed salary setup visible without blocking" do
+    field
+    rate.update!(active: false)
+    expect(data[:fields].sole[:availability_error]).to be_present
+    expect(data[:outstanding]).to be_empty
+    owner = create(:employee, :salary, company: company, salary_type: "variable", pay_rate: 0)
+    PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay", required: true)
+    owner.update!(salary_type: "per_period", pay_rate: 1000)
+    expect(data[:fields].last[:availability_error]).to be_present
+    expect(data[:outstanding]).to be_empty
   end
 
   context "recent regulars" do
@@ -91,6 +118,19 @@ RSpec.describe PayrollExpectedEntries do
       PayrollEntryResolution.create!(pay_period: period, employee: employee, note: "No work this period")
       expect { service.approve! }.not_to raise_error
       expect(period.reload).to be_approved
+    end
+
+    it "resolves missing regulars with the exclusion reason" do
+      period.pay_period_excluded_employees.create!(employee: employee, reason: "No pay this period")
+      expect(data[:missing_regulars].sole).to include(resolved: true, excluded: true, note: "No pay this period")
+      expect(data[:outstanding]).to be_empty
+    end
+
+    %i[reported_tips service_charge_wages bonus].each do |earning|
+      it "counts a reportable #{earning}-only item as covered" do
+        create(:payroll_item, pay_period: period, employee: employee, gross_pay: 0, hours_worked: 0, earning => 50)
+        expect(data[:missing_regulars]).to be_empty
+      end
     end
 
     it "honors threshold edges, excludes configured people, and clears when pay is entered" do

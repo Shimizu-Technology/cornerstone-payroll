@@ -21,6 +21,15 @@ RSpec.describe "Every-period client change settings", type: :request do
     expect(AuditLog.where(record_type: "PayrollStandingChange", record_id: id).last).to have_attributes(company_id: company.id)
   end
 
+  it "keeps legacy defaults optional and requires newly configured fields only when requested" do
+    legacy = PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay")
+    expect(legacy).not_to be_required
+    legacy.destroy!
+    post url, params: { standing_change: { kind: "owner_pay", employee_id: owner.id, required: true } }, as: :json
+    expect(response).to have_http_status(:created)
+    expect(PayrollStandingChange.where(company: company).sole).to be_required
+  end
+
   it "rejects foreign employees, missing defaults and unsupported kinds" do
     post url, params: { standing_change: { kind: "owner_pay", employee_id: create(:employee).id } }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)

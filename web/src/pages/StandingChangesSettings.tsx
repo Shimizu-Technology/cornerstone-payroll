@@ -11,7 +11,7 @@ import api from '@/services/api';
 type DefaultRow = { label?: string; help_text?: string; required?: boolean; allow_none?: boolean; id?: number; kind: 'owner_pay' | 'extra_hours'; employee_id: number; employee_wage_rate_id: number | null; position: number; active: boolean; availability_error?: string };
 type Settings = { regular_pay_rule?: { lookback: number; threshold: number }; defaults: DefaultRow[]; employees: { id: number; name: string; status: string; variable_salary: boolean; hourly: boolean; wage_rates: { id: number; label: string; rate: string }[] }[] };
 const root = '/admin/payroll_standing_changes';
-const blank = (): DefaultRow => ({ kind: 'owner_pay', employee_id: 0, employee_wage_rate_id: null, position: 0, active: true });
+const blank = (): DefaultRow => ({ kind: 'owner_pay', employee_id: 0, employee_wage_rate_id: null, position: 0, active: true, required: true });
 
 export default function StandingChangesSettings() {
   const { activeCompany, activeCompanyId } = useCompany();
@@ -68,7 +68,7 @@ export default function StandingChangesSettings() {
           return <li key={row.id} className="space-y-2 rounded-lg border border-neutral-200 p-4">
             <p className="font-medium">{row.label || (row.kind === 'owner_pay' ? 'Owner pay' : 'Extra hours')} · {employee?.name || 'Missing employee'}</p>
             {rate && <p className="text-sm">{rate.label} · ${rate.rate}/hr</p>}
-            {row.availability_error && <p role="alert" className="text-sm text-danger-700">{row.availability_error}</p>}
+            {row.availability_error && <p role="alert" className="text-sm text-danger-700">Needs attention in Settings: {row.availability_error}</p>}
             <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={!canEdit || busy} onClick={() => setDraft(row)}>Edit default for {employee?.name}</Button><Button type="button" variant="outline" disabled={!canEdit || busy} onClick={() => void save({ ...row, active: false })}>Remove default for {employee?.name}</Button></div>
           </li>;
         })}</ul>
