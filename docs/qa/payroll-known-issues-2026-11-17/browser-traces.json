@@ -49,8 +49,7 @@
       "checked": false,
       "disabled": true,
       "overflow": false
-    },
-    "screenshot": "browser-screenshot-127-0-0-1-mwjti84z-86c15e08.png"
+    }
   },
   {
     "id": 5,
@@ -113,8 +112,7 @@
       "checked": false,
       "disabled": true,
       "overflow": false
-    },
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtibsb-638b3a9b.png"
+    }
   },
   {
     "id": 6,
@@ -155,8 +153,7 @@
   {
     "id": 7,
     "scenario": "happy",
-    "phase": "review",
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtizx5-9d809d53.png"
+    "phase": "review"
   },
   {
     "id": 7,
@@ -210,14 +207,12 @@
       "checked": false,
       "disabled": true,
       "overflow": false
-    },
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtj3nb-feec8e2e.png"
+    }
   },
   {
     "id": 8,
     "scenario": "requests",
-    "phase": "review",
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtj452-cef40593.png"
+    "phase": "review"
   },
   {
     "id": 8,
@@ -282,14 +277,12 @@
       "checked": false,
       "disabled": true,
       "overflow": false
-    },
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtjc6g-8fe76c5e.png"
+    }
   },
   {
     "id": 9,
     "scenario": "counter",
-    "phase": "review",
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtjd2t-e783a63d.png"
+    "phase": "review"
   },
   {
     "id": 9,
@@ -331,8 +324,7 @@
   {
     "id": 10,
     "scenario": "happy",
-    "phase": "review",
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtk9x6-19ffc1e0.png"
+    "phase": "review"
   },
   {
     "id": 10,
@@ -385,14 +377,12 @@
       ],
       "disabled": false,
       "overflow": false
-    },
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtkc7k-5ef3a397.png"
+    }
   },
   {
     "id": 11,
     "scenario": "requests",
-    "phase": "review",
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtkclq-4a50c235.png"
+    "phase": "review"
   },
   {
     "id": 11,
@@ -454,14 +444,12 @@
       "checked": false,
       "disabled": true,
       "overflow": false
-    },
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtkelx-c82ae4d7.png"
+    }
   },
   {
     "id": 12,
     "scenario": "counter",
-    "phase": "review",
-    "screenshot": "browser-screenshot-127-0-0-1-mwjtkfa1-9bf12975.png"
+    "phase": "review"
   },
   {
     "id": 12,

@@ -635,20 +635,20 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     expect { service.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /pending portal revision/)
   end
 
-  it "lets only the catalog's eligible regular run claim an unlinked period" do
+  it "rejects supplemental claimants and lets staff explicitly choose a matching regular run for ambiguous dates" do
     source = revision
     period.update!(pay_period: nil)
     supplemental = create(:pay_period, company: company, cycle: "supplemental", corrects_pay_period: run,
       start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
-    expect(PayrollIntake::PreviewService).not_to receive(:new)
     post "/api/v1/admin/pay_periods/#{supplemental.id}/preview_import", params: { submission_id: source.id }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body["error"]).to match(/matching regular pay run/)
     expect(period.reload.pay_period_id).to be_nil
     duplicate = create(:pay_period, company: company, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
-    preview(source)
-    expect(response).to have_http_status(:unprocessable_entity)
     expect(period.reload.pay_period_id).to be_nil
+    preview(source)
+    expect(response).to have_http_status(:ok), response.body
+    expect(period.reload.pay_period_id).to eq(run.id)
     expect(run.pending_portal_submission?).to be(true)
     expect(duplicate.pending_portal_submission?).to be(true)
   end
