@@ -131,7 +131,7 @@ const unmatchedIntakeRow = {
   errors: [{ code: 'unmatched_employee', message: 'Select or create an employee.', severity: 'error' }],
 };
 
-test('ImportModal blocks dismissal while parsing and applying, then recovers after failures', async ({ page }): Promise<void> => {
+test('ImportModal blocks dismissal while parsing and applying, then recovers after failures', async ({ page }, testInfo): Promise<void> => {
   await mountHarness(page, 'mountImportModalHarness');
   const dialogName = 'Import Payroll Data';
   const dialog = page.getByRole('dialog', { name: dialogName });
@@ -226,7 +226,10 @@ test('ImportModal blocks dismissal while parsing and applying, then recovers aft
     const applying = dialog.getByRole('button', { name: 'Applying import…' });
     await expect(applying).toBeDisabled();
     await expect(applying).toHaveAttribute('aria-busy', 'true');
+    const reducedMotion = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches);
+    await expect(applying.locator('svg')).toHaveCSS('animation-name', reducedMotion ? 'none' : 'spin');
     await expect(dialog.getByRole('status').filter({ hasText: 'Importing payroll data and calculating taxes…' })).toBeVisible();
+    await dialog.screenshot({ path: testInfo.outputPath('applying-import.png') });
     await expectBusyDialogCannotDismiss(page, dialogName);
     applyFailure.release();
     await expect(dialog.getByText('Import apply failed')).toBeVisible();
