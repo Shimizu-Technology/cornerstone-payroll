@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { SavedTransmittal, TransmittalPreview } from '../src/services/api';
 
 const previewPattern = '**/admin/reports/transmittal_preview?*';
+const savedDocumentsPattern = '**/admin/reports/saved_documents?*';
 const modulePath = '/e2e/fixtures/reports-followup-harness.tsx';
 
 function preview(notes: string[] | null, totalFica = 1234.56, fit = 789.12): TransmittalPreview {
@@ -33,7 +34,9 @@ function preview(notes: string[] | null, totalFica = 1234.56, fit = 789.12): Tra
 
 async function mountPanel(page: Page, response: TransmittalPreview): Promise<{ failPreview: () => void }> {
   let fail = false;
+  let previewRequests = 0;
   await page.route(previewPattern, async (route) => {
+    previewRequests += 1;
     await route.fulfill({
       status: fail ? 503 : 200,
       contentType: 'application/json',
@@ -43,13 +46,23 @@ async function mountPanel(page: Page, response: TransmittalPreview): Promise<{ f
   await page.route('**/admin/reports/check_signoff_preview?*', async (route) => {
     await route.fulfill({ json: { company_name: 'Test client', entries: [], saved_signoff: null } });
   });
+  // The panel reads only last-saved times on mount; the audited preview loads
+  // when the editor opens.
+  await page.route(savedDocumentsPattern, async (route) => {
+    await route.fulfill({ json: {
+      transmittal: response.saved_transmittal ? { generated_at: response.saved_transmittal.generated_at } : null,
+      check_signoff: null,
+    } });
+  });
   await page.goto('/');
-  const initialPreview = page.waitForResponse((response) => response.url().includes('/admin/reports/transmittal_preview'));
+  const savedSummary = page.waitForResponse((response) => response.url().includes('/admin/reports/saved_documents'));
   await page.addScriptTag({
     type: 'module',
     content: `import { mountReportsDownloadPanelHarness } from '${modulePath}'; mountReportsDownloadPanelHarness();`,
   });
-  await initialPreview;
+  await savedSummary;
+  await expect(page.getByText('Full Print Package', { exact: true })).toBeVisible();
+  expect(previewRequests).toBe(0);
   return { failPreview: () => { fail = true; } };
 }
 

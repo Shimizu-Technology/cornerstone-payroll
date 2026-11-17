@@ -96,6 +96,96 @@ describe('RecordActivityTimeline', () => {
     expect(screen.queryByText('After')).toBeNull();
   });
 
+  it('marks approve, roll back and approve again as separate milestones', async () => {
+    apiMocks.list.mockResolvedValue({
+      data: [
+        { ...activity, id: 3, action: 'pay_periods#approve', display_action: 'Morgan Manager approved payroll again', metadata: {} },
+        { ...activity, id: 2, action: 'pay_periods#unapprove', display_action: 'Morgan Manager reopened payroll approval', metadata: {} },
+        { ...activity, id: 1, action: 'pay_periods#approve', display_action: 'Morgan Manager approved payroll', metadata: {} },
+      ],
+      meta: { current_page: 1, per_page: 20, total_count: 3, total_pages: 1 },
+    });
+
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
+
+    expect(await screen.findByText('Morgan Manager approved payroll again')).toBeTruthy();
+    expect(screen.getAllByText('Approved')).toHaveLength(2);
+    expect(screen.getByText('Approval rolled back')).toBeTruthy();
+  });
+
+  it('lists whose entries a calculation changed', async () => {
+    apiMocks.list.mockResolvedValue({
+      data: [{
+        ...activity,
+        id: 93,
+        action: 'pay_periods#run_payroll',
+        display_action: 'Morgan Manager calculated payroll with changed entries for 12 employees',
+        detail_lines: Array.from({ length: 11 }, (_, index) => `Worker ${index + 1}: regular hours 0 → 40`),
+        metadata: { input_change_count: 12 },
+      }],
+      meta: { current_page: 1, per_page: 20, total_count: 1, total_pages: 1 },
+    });
+
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
+
+    expect(await screen.findByText('Worker 1: regular hours 0 → 40')).toBeTruthy();
+    expect(screen.getByText('Worker 10: regular hours 0 → 40')).toBeTruthy();
+    expect(screen.queryByText('Worker 11: regular hours 0 → 40')).toBeNull();
+    expect(screen.getByText('and 2 more')).toBeTruthy();
+  });
+
+  it('hides report editor loads until asked, then reloads with them', async () => {
+    apiMocks.list
+      .mockResolvedValueOnce({
+        data: [activity],
+        meta: { current_page: 1, per_page: 20, total_count: 1, total_pages: 1, hidden_detail_count: 3 },
+      })
+      .mockResolvedValueOnce({
+        data: [activity, { ...activity, id: 45, display_action: 'Morgan Manager viewed a preview of the transmittal log' }],
+        meta: { current_page: 1, per_page: 20, total_count: 2, total_pages: 1, hidden_detail_count: 0 },
+      });
+
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
+
+    expect(await screen.findByText(/3 report editor loads and pay stub views are hidden/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Show them' }));
+
+    expect(await screen.findByText('Morgan Manager viewed a preview of the transmittal log')).toBeTruthy();
+    expect(apiMocks.list).toHaveBeenLastCalledWith('pay_periods', 12, { page: 1, per_page: 20, include_hidden_details: true }, 7);
+    expect(screen.getByRole('button', { name: 'Hide them' })).toBeTruthy();
+  });
+
+  it('offers the hidden rows even when nothing else has been recorded', async () => {
+    apiMocks.list.mockResolvedValue({
+      data: [],
+      meta: { current_page: 1, per_page: 20, total_count: 0, total_pages: 0, hidden_detail_count: 1 },
+    });
+
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
+
+    expect(await screen.findByText('No other recorded activity yet')).toBeTruthy();
+    expect(screen.getByText(/1 report editor load or pay stub view is hidden/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Show them' })).toBeTruthy();
+  });
+
+  it('keeps the first page hidden count when older pages load', async () => {
+    apiMocks.list
+      .mockResolvedValueOnce({
+        data: [activity],
+        meta: { current_page: 1, per_page: 20, total_count: 2, total_pages: 2, hidden_detail_count: 4 },
+      })
+      .mockResolvedValueOnce({
+        data: [{ ...activity, id: 46, display_action: 'Morgan Manager calculated payroll' }],
+        meta: { current_page: 2, per_page: 20, total_count: 2, total_pages: 2 },
+      });
+
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load older activity' }));
+
+    expect(await screen.findByText('Morgan Manager calculated payroll')).toBeTruthy();
+    expect(screen.getByText(/4 report editor loads and pay stub views are hidden/)).toBeTruthy();
+  });
+
   it('loads older activity without replacing the newest entries', async () => {
     apiMocks.list
       .mockResolvedValueOnce({

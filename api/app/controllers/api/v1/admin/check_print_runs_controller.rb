@@ -102,6 +102,19 @@ module Api
           @run = CheckPrintRun.where(company_id: current_company_id).find(params[:id])
         end
 
+        def audit_pay_period_id
+          @pay_period&.id || @run&.pay_period_id
+        end
+
+        def audit_record_metadata(_record)
+          return {} unless action_name == "pdf" && @run
+
+          {
+            package_number: @run.package_number,
+            access_type: params[:disposition] == "attachment" ? "download" : "view"
+          }
+        end
+
         def run_payload(run, confirmation_state: nil)
           confirmation_state, confirmation_issue = confirmation_state || confirmation_state_for(run)
           {

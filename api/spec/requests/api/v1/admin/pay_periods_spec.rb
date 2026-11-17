@@ -477,6 +477,34 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json.dig("pay_period", "lifecycle", "unapproved")).not_to have_key("actor_id")
       expect(json.dig("pay_period", "lifecycle", "unapproved")).not_to have_key("actor_email")
     end
+
+    it "counts each approval so a re-approval is not mistaken for the first" do
+      2.times do
+        AuditLog.create!(user: admin_user, company: company, action: "pay_periods#approve",
+          record_type: "pay_periods", record_id: pay_period.id, metadata: {})
+      end
+      AuditLog.create!(user: admin_user, company: company, action: "pay_periods#unapprove",
+        record_type: "pay_periods", record_id: pay_period.id, metadata: {})
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      lifecycle = response.parsed_body.dig("pay_period", "lifecycle")
+      expect(lifecycle.dig("approved", "count")).to eq(2)
+      expect(lifecycle.dig("unapproved", "count")).to eq(1)
+    end
+
+    it "counts only completed calculations as the calculation milestone" do
+      completed = AuditLog.create!(user: admin_user, company: company, action: "pay_periods#run_payroll", record_type: "pay_periods",
+        record_id: pay_period.id, metadata: { business_summary: { outcome: "completed" } }, created_at: 2.hours.ago)
+      AuditLog.create!(user: admin_user, company: company, action: "pay_periods#run_payroll", record_type: "pay_periods",
+        record_id: pay_period.id, metadata: { business_summary: { outcome: "partial" } }, created_at: 1.hour.ago)
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      calculated = response.parsed_body.dig("pay_period", "lifecycle", "calculated")
+      expect(calculated["count"]).to eq(1)
+      expect(Time.zone.parse(calculated["timestamp"])).to be_within(1.second).of(completed.created_at)
+    end
   end
 
   describe "POST /api/v1/admin/pay_periods" do
@@ -1342,6 +1370,57 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
       audit = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
       expect(audit.metadata.fetch("source_coverage_reason")).to eq("Manual hours verified against approved timecards.")
+    end
+
+    it "records whose hours a calculation changed, and nothing when they are unchanged" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 8 } } }
+      expect(response).to have_http_status(:ok), response.body
+      first = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(first.metadata.fetch("input_changes")).to eq([ {
+        "employee_id" => employee.id, "employee_name" => "John Doe",
+        "before_values" => {}, "after_values" => { "hours_worked" => "8.0" }
+      } ])
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 12 } } }
+      second = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(second.metadata.fetch("input_changes").sole).to include(
+        "before_values" => { "hours_worked" => "8.0" }, "after_values" => { "hours_worked" => "12.0" }
+      )
+      expect(AuditLogPresenter.new(second, run_context_id: pay_period.id).headline)
+        .to eq("Pay Period Admin calculated payroll with new entries for John Doe: 12 regular")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 12 } } }
+      unchanged = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(unchanged.metadata).not_to have_key("input_changes")
+    end
+
+    it "records hours cleared to zero even though the empty row is removed" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 8 } } }
+      expect(response).to have_http_status(:ok), response.body
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 0 } } }
+
+      expect(pay_period.payroll_items.where(employee: employee)).to be_empty
+      audit = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(audit.metadata.fetch("input_changes").sole).to include(
+        "before_values" => { "hours_worked" => "8.0" }, "after_values" => { "hours_worked" => "0.0" }
+      )
+    end
+
+    it "does not report a loan payment the calculator took as a staff entry" do
+      deduction_type = DeductionType.create!(company: company, name: "Employee Loan", category: "post_tax", sub_category: "loan", active: true)
+      EmployeeDeduction.create!(employee: employee, deduction_type: deduction_type, amount: 50.0, is_percentage: false, active: true)
+      EmployeeLoan.create!(employee: employee, company: company, deduction_type: deduction_type, name: "Tool Advance",
+        original_amount: 200.0, current_balance: 200.0, payment_amount: 50.0, status: "active")
+      PayrollItem.create!(pay_period: pay_period, employee: employee, company: company, employment_type: "hourly",
+        pay_rate: 15.00, hours_worked: 80)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 80 } } }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(pay_period.payroll_items.sole.loan_payment).to eq(50)
+      audit = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(audit.metadata).not_to have_key("input_changes")
     end
 
     it "calculates payroll for employees with pay activity" do

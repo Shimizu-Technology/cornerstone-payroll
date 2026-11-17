@@ -168,6 +168,7 @@ class CheckNumberCorrectionService
       record_id: payroll_item.id,
       subject_name: payroll_item.employee&.full_name,
       metadata: {
+        pay_period_id: payroll_item.pay_period_id,
         changed_fields: [ "check_number" ],
         before_values: { "check_number" => old_check_number },
         after_values: { "check_number" => new_check_number },

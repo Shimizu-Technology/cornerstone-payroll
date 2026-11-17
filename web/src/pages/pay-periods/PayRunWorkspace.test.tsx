@@ -24,6 +24,7 @@ const apiMocks = vi.hoisted(() => ({
   signoffPdf: vi.fn(),
   transmittalPdf: vi.fn(),
   packagePdf: vi.fn(),
+  savedDocuments: vi.fn(() => Promise.resolve({ transmittal: null, check_signoff: null })),
   isAdmin: true,
   activeCompany: { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: true } as Record<string, unknown>,
 }));
@@ -51,7 +52,7 @@ vi.mock('@/services/api', () => ({
   checksApi: { rehearsalPreviewPdf: apiMocks.rehearsalPreviewPdf, printQueue: apiMocks.printQueue },
   payrollItemsApi: { get: apiMocks.getPayrollItem, updatePaymentMethod: apiMocks.updatePaymentMethod },
   transmittalApi: { preview: apiMocks.reportTransmittalPreview },
-  reportsApi: { checkSignoffPreview: apiMocks.reportSignoffPreview, checkSignoffPdf: apiMocks.signoffPdf, transmittalLogPdf: apiMocks.transmittalPdf, fullPrintPackagePdf: apiMocks.packagePdf },
+  reportsApi: { savedDocuments: apiMocks.savedDocuments, checkSignoffPreview: apiMocks.reportSignoffPreview, checkSignoffPdf: apiMocks.signoffPdf, transmittalLogPdf: apiMocks.transmittalPdf, fullPrintPackagePdf: apiMocks.packagePdf },
 }));
 
 vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({
@@ -395,6 +396,27 @@ describe('PayRunWorkspace rehearsal checks', () => {
     await waitFor(() => {
       expect(apiMocks.recordActivities).toHaveBeenCalledWith('pay_periods', 12, { page: 1, per_page: 20 }, 7);
     });
+  });
+
+  it('lists milestones in the order they last happened and counts a re-approval', async () => {
+    apiMocks.getPayPeriod.mockResolvedValue({ pay_period: { ...payRun, status: 'approved', lifecycle: {
+      created: { timestamp: '2026-09-21T01:00:00Z', actor_name: 'Dana Admin', count: 0 },
+      calculated: { timestamp: '2026-09-21T03:00:00Z', actor_name: 'Dana Admin', count: 2 },
+      approved: { timestamp: '2026-09-21T04:00:00Z', actor_name: 'Dana Admin', count: 2 },
+      unapproved: { timestamp: '2026-09-21T02:00:00Z', actor_name: 'Dana Admin', count: 1 },
+    } } });
+    render(
+      <MemoryRouter initialEntries={['/companies/7/pay-runs/12/activity']}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const card = (await screen.findByText('Payroll milestones')).closest('div.rounded-2xl, section, [class*="card"]')?.parentElement ?? document.body;
+    const labels = Array.from(card.querySelectorAll('ol > li p.font-semibold')).map((node) => node.firstChild?.textContent);
+    expect(labels).toEqual(['Created', 'Approval rolled back', 'Calculated', 'Approved']);
+    expect(screen.getAllByText('2 times · latest shown')).toHaveLength(2);
   });
 });
 

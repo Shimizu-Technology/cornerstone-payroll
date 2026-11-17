@@ -28,6 +28,38 @@ interface RecordActivityTimelineProps {
 }
 
 const PAGE_SIZE = 20;
+const DETAIL_LINE_LIMIT = 10;
+
+interface Milestone {
+  label: string;
+  badgeClass: string;
+  dotClass: string;
+}
+
+// Run milestones stand out so approve → roll back → approve again reads as
+// separate steps in the story.
+const MILESTONES: Record<string, Milestone> = {
+  'pay_periods#approve': {
+    label: 'Approved',
+    badgeClass: 'border-success-200 bg-success-50 text-success-800',
+    dotClass: 'border-success-600 bg-success-600',
+  },
+  'pay_periods#unapprove': {
+    label: 'Approval rolled back',
+    badgeClass: 'border-warning-300 bg-warning-50 text-warning-900',
+    dotClass: 'border-warning-500 bg-warning-500',
+  },
+  'pay_periods#commit': {
+    label: 'Committed',
+    badgeClass: 'border-primary-200 bg-primary-50 text-primary-800',
+    dotClass: 'border-primary-600 bg-primary-600',
+  },
+  'pay_periods#void': {
+    label: 'Voided',
+    badgeClass: 'border-danger-200 bg-danger-50 text-danger-800',
+    dotClass: 'border-danger-600 bg-danger-600',
+  },
+};
 
 export function RecordActivityTimeline({
   companyId,
@@ -44,6 +76,8 @@ export function RecordActivityTimeline({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [includeHiddenDetails, setIncludeHiddenDetails] = useState(false);
+  const [hiddenDetails, setHiddenDetails] = useState(0);
   const requestIdRef = useRef(0);
 
   const loadPage = useCallback(async (nextPage: number, append: boolean): Promise<void> => {
@@ -56,6 +90,7 @@ export function RecordActivityTimeline({
       const response = await recordActivitiesApi.list(recordType, recordId, {
         page: nextPage,
         per_page: PAGE_SIZE,
+        ...(includeHiddenDetails ? { include_hidden_details: true } : {}),
       }, companyId);
       if (requestId !== requestIdRef.current) return;
 
@@ -68,6 +103,8 @@ export function RecordActivityTimeline({
       });
       setPage(response.meta.current_page);
       setTotalPages(response.meta.total_pages || 1);
+      // Only the first page reports the hidden count.
+      if (!append) setHiddenDetails(response.meta.hidden_detail_count ?? 0);
     } catch (loadError) {
       if (requestId !== requestIdRef.current) return;
       setError(loadError instanceof Error ? loadError.message : 'Activity history could not be loaded.');
@@ -77,7 +114,7 @@ export function RecordActivityTimeline({
         setLoadingMore(false);
       }
     }
-  }, [companyId, recordId, recordType]);
+  }, [companyId, includeHiddenDetails, recordId, recordType]);
 
   useEffect(() => {
     setLogs([]);
@@ -91,6 +128,21 @@ export function RecordActivityTimeline({
   }, [loadPage]);
 
   const groups = useMemo(() => groupAuditEntries(logs), [logs]);
+  const hiddenDetailsToggle = hiddenDetails > 0 || includeHiddenDetails ? (
+    <div className="border-b border-neutral-100 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 sm:px-6">
+      {includeHiddenDetails
+        ? 'Showing report editor loads and pay stub views by workers and clients.'
+        : `${hiddenDetails} report editor ${hiddenDetails === 1 ? 'load or pay stub view is' : 'loads and pay stub views are'} hidden. Every report staff opened or downloaded is listed.`}
+      {' '}
+      <button
+        type="button"
+        className="inline-flex min-h-11 items-center font-medium text-primary-700 underline sm:min-h-0"
+        onClick={() => setIncludeHiddenDetails((current) => !current)}
+      >
+        {includeHiddenDetails ? 'Hide them' : 'Show them'}
+      </button>
+    </div>
+  ) : null;
 
   return (
     <Card>
@@ -132,15 +184,19 @@ export function RecordActivityTimeline({
             </Button>
           </div>
         ) : logs.length === 0 ? (
-          <div className="flex min-h-56 flex-col items-center justify-center px-6 py-10 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-500">
-              <Clock3 className="h-6 w-6" aria-hidden="true" />
-            </span>
-            <p className="mt-4 font-semibold text-neutral-950">No recorded activity yet</p>
-            <p className="mt-2 max-w-md text-sm leading-6 text-neutral-500">New changes will appear here as they are recorded.</p>
-          </div>
+          <>
+            {hiddenDetailsToggle}
+            <div className="flex min-h-56 flex-col items-center justify-center px-6 py-10 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-500">
+                <Clock3 className="h-6 w-6" aria-hidden="true" />
+              </span>
+              <p className="mt-4 font-semibold text-neutral-950">{hiddenDetails > 0 ? 'No other recorded activity yet' : 'No recorded activity yet'}</p>
+              <p className="mt-2 max-w-md text-sm leading-6 text-neutral-500">New changes will appear here as they are recorded.</p>
+            </div>
+          </>
         ) : (
           <>
+            {hiddenDetailsToggle}
             <ol className="divide-y divide-neutral-100">
               {groups.map((group) => <ActivityEntry key={group.key} group={group} />)}
             </ol>
@@ -168,12 +224,21 @@ export function RecordActivityTimeline({
 function ActivityEntry({ group }: { group: AuditEntryGroup }): ReactElement {
   const log = group.primary;
   const facts = auditBusinessFacts(log).slice(0, 3);
+  const milestone = MILESTONES[log.action];
+  const detailLines = log.detail_lines ?? [];
+  const changedCount = Number(log.metadata?.input_change_count ?? detailLines.length);
+  const hiddenDetailLines = Math.max(changedCount, detailLines.length) - Math.min(detailLines.length, DETAIL_LINE_LIMIT);
 
   return (
     <li className="relative px-4 py-5 sm:px-6">
       <div className="grid gap-4 sm:grid-cols-[12px_minmax(0,1fr)_auto] sm:gap-5">
-        <span className="mt-1 hidden h-3 w-3 rounded-full border-[3px] border-primary-200 bg-white sm:block" aria-hidden="true" />
+        <span className={`mt-1 hidden h-3 w-3 rounded-full border-[3px] sm:block ${milestone ? milestone.dotClass : 'border-primary-200 bg-white'}`} aria-hidden="true" />
         <div className="min-w-0">
+          {milestone && (
+            <span className={`mb-2 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${milestone.badgeClass}`}>
+              {milestone.label}
+            </span>
+          )}
           <p className="font-semibold leading-6 text-neutral-950">{displayAuditGroupAction(group)}</p>
           <p className="mt-1 text-sm text-neutral-500">
             {log.actor_email || (log.actor_role ? humanizeAuditKey(log.actor_role) : 'Actor details unavailable')}
@@ -183,6 +248,13 @@ function ActivityEntry({ group }: { group: AuditEntryGroup }): ReactElement {
           {formatGuamDateTime(log.created_at)}
         </time>
       </div>
+
+      {detailLines.length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm text-neutral-700 sm:ml-8">
+          {detailLines.slice(0, DETAIL_LINE_LIMIT).map((line, index) => <li key={`${log.id}-${index}`} className="break-words">{line}</li>)}
+          {hiddenDetailLines > 0 && <li className="text-neutral-500">and {hiddenDetailLines} more</li>}
+        </ul>
+      )}
 
       {facts.length > 0 && (
         <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-sm text-neutral-600 sm:ml-8">

@@ -27,9 +27,10 @@ module Api
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
           logs = ordered(scope).includes(:user, :company, :organization).offset((page - 1) * per_page).limit(per_page).to_a
           pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(logs)
+          employee_names = AuditLogPresenter.preload_employee_names(logs)
 
           render json: {
-            data: logs.map { |log| AuditLogSerializer.call(log, pay_period_subjects: pay_period_subjects) },
+            data: logs.map { |log| AuditLogSerializer.call(log, pay_period_subjects: pay_period_subjects, employee_names: employee_names) },
             meta: {
               current_page: page,
               per_page: per_page,
@@ -161,9 +162,10 @@ module Api
               break if batch.empty?
 
               pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(batch)
+              employee_names = AuditLogPresenter.preload_employee_names(batch)
 
               batch.each do |log|
-                presenter = AuditLogPresenter.new(log, pay_period_subjects: pay_period_subjects)
+                presenter = AuditLogPresenter.new(log, pay_period_subjects: pay_period_subjects, employee_names: employee_names)
                 stream << CSV.generate_line([
                   log.created_at&.iso8601,
                   log.actor_name.presence || log.user&.name || "System",

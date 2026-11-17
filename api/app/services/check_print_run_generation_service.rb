@@ -310,6 +310,7 @@ class CheckPrintRunGenerationService
       subject_name: "Check package for #{pay_period.start_date} through #{pay_period.end_date}",
       metadata: {
         pay_period_id: pay_period.id,
+        package_number: run.package_number,
         selected_count: run.selected_count,
         employee_check_count: payroll_items.size,
         non_employee_check_count: non_employee_checks.size,

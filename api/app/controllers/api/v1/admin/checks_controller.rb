@@ -908,6 +908,16 @@ module Api
           end
         end
 
+        def audit_pay_period_id
+          @pay_period&.id || @payroll_item&.pay_period_id
+        end
+
+        def audit_record_metadata(_record)
+          return {} unless @payroll_item
+
+          { payroll_item_id: @payroll_item.id, employee_name: @payroll_item.employee&.full_name }.compact
+        end
+
         def set_payroll_item
           @payroll_item = PayrollItem.includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, check_events: :user, employee: :department, pay_period: :company }).find(params[:payroll_item_id])
           unless @payroll_item.pay_period.company_id == current_company_id

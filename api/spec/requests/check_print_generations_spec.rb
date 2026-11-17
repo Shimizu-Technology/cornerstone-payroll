@@ -67,6 +67,10 @@ RSpec.describe "Check print generations", type: :request do
 
     expect(CheckPrintGeneration.count).to eq(1)
     expect(CheckPrintGenerationJob).to have_received(:perform_later).once
+    # The repeat returns the package already in progress; only one request is recorded.
+    requests = AuditLog.where(action: "check_print_generations#create")
+    expect(requests.count).to eq(1)
+    expect(requests.sole.metadata).to include("pay_period_id" => pay_period.id, "selected_count" => 1)
   end
 
   it "rejects reuse of an idempotency key for a different selection" do

@@ -1155,7 +1155,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
     mode: 'preview' | 'download';
   }>({ open: false, key: null, label: '', mode: 'preview' });
   const [form500Open, setForm500Open] = useState(false);
-  const [savedTransmittal, setSavedTransmittal] = useState<SavedTransmittal | null>(null);
+  // Only the last-saved time; the saved contents load when someone opens the report.
+  const [savedTransmittal, setSavedTransmittal] = useState<{ generated_at: string | null } | null>(null);
   const [signoffEditor, setSignoffEditor] = useState<{
     open: boolean;
     mode: 'view' | 'download';
@@ -1179,12 +1180,30 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
   const loadingKey = (reportKey: ReportKey, action: ReportAction) => `${reportKey}:${action}`;
   const isReportLoading = (reportKey: ReportKey, action: ReportAction) => Boolean(loading[loadingKey(reportKey, action)]);
 
+  // The panel's "Last saved" labels come from a summary that is not recorded
+  // as a report view; opening or downloading a report is what gets audited.
+  // A summary that arrives after a newer save, or for another pay period,
+  // must not overwrite the labels.
+  const savedSummaryRequest = useRef({ transmittal: 0, signoff: 0 });
+  useEffect(() => () => {
+    savedSummaryRequest.current.transmittal += 1;
+    savedSummaryRequest.current.signoff += 1;
+  }, [payPeriodId]);
+  const refreshSavedState = useCallback(() => {
+    // Each document has its own token: saving one discards only that part
+    // of a summary still in flight.
+    const transmittalToken = ++savedSummaryRequest.current.transmittal;
+    const signoffToken = ++savedSummaryRequest.current.signoff;
+    reportsApi.savedDocuments(payPeriodId).then((data) => {
+      if (transmittalToken === savedSummaryRequest.current.transmittal) setSavedTransmittal(data.transmittal);
+      if (signoffToken === savedSummaryRequest.current.signoff) setSignoffSavedAt(data.check_signoff?.generated_at ?? null);
+    }).catch(() => { /* labels are optional */ });
+  }, [payPeriodId]);
+
   useEffect(() => {
     if (!isReady || readOnly) return;
-    transmittalApi.preview(payPeriodId).then((data) => {
-      setSavedTransmittal(data.saved_transmittal);
-    }).catch(() => { /* ignore */ });
-  }, [payPeriodId, isReady, readOnly]);
+    refreshSavedState();
+  }, [isReady, readOnly, refreshSavedState]);
 
   const needsTransmittalEditor = (key: ReportKey) => key === 'transmittalLog' || key === 'fullPrintPackage';
 
@@ -1324,19 +1343,20 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
     if (!savedTransmittal) return;
     try {
       const preview = await transmittalApi.preview(payPeriodId);
-      setSavedTransmittal(preview.saved_transmittal);
-      const saved = preview.saved_transmittal || savedTransmittal;
+      const saved = preview.saved_transmittal;
+      if (!saved) {
+        savedSummaryRequest.current.transmittal += 1;
+        setSavedTransmittal(null);
+        setTransmittalEditor({ open: true, key: reportKey, label, mode: 'preview' });
+        return;
+      }
+      savedSummaryRequest.current.transmittal += 1;
+      setSavedTransmittal({ generated_at: saved.generated_at ?? null });
       await handlePreview(reportKey, label, savedToOptions(saved, preview));
       refreshSavedState();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh transmittal data');
     }
-  };
-
-  const refreshSavedState = () => {
-    transmittalApi.preview(payPeriodId).then((data) => {
-      setSavedTransmittal(data.saved_transmittal);
-    }).catch(() => {});
   };
 
   const handleTransmittalGenerate = async (options: TransmittalOptions) => {
@@ -1372,15 +1392,6 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
     }
   };
 
-  useEffect(() => {
-    if (!isReady || readOnly) return;
-    reportsApi.checkSignoffPreview(payPeriodId).then((data) => {
-      if (data.saved_signoff?.generated_at) {
-        setSignoffSavedAt(data.saved_signoff.generated_at);
-      }
-    }).catch(() => {});
-  }, [payPeriodId, isReady, readOnly]);
-
   const handleSignoffGenerate = async (entries: { name: string; check_number: string }[], notes: string[]) => {
     if (readOnly) return;
     const { mode } = signoffEditor;
@@ -1401,6 +1412,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
         if (request !== signoffRequest.current) return;
         downloadBlob(blobData, 'check_signoff_sheet.xlsx');
       }
+      savedSummaryRequest.current.signoff += 1;
       setSignoffSavedAt(new Date().toISOString());
     } catch (err) {
       if (request !== signoffRequest.current) return;

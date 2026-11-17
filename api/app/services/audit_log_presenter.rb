@@ -120,6 +120,27 @@ class AuditLogPresenter
       end
   end
 
+  # Older run rows stored only an employee ID. Names are read in one query,
+  # each within the row's own client.
+  def self.preload_employee_names(logs)
+    references = logs.filter_map do |log|
+      next unless PayRunActivityPhrase.handles?(log.action) && log.company_id.present?
+      next if log.subject_name.present? || log.metadata&.dig("employee_name").present?
+
+      employee_id = log.metadata&.dig("employee_id") || log.metadata&.dig("resolution", "employee_id")
+      [ log.company_id, employee_id.to_i ] if employee_id.present?
+    end.uniq
+    return {} if references.empty?
+
+    reference_set = references.index_with(true)
+    Employee.where(company_id: references.map(&:first).uniq, id: references.map(&:last).uniq)
+      .select(:id, :company_id, :first_name, :middle_name, :last_name)
+      .each_with_object({}) do |employee, names|
+        reference = [ employee.company_id, employee.id ]
+        names[reference] = employee.full_name if reference_set.key?(reference)
+      end
+  end
+
   def self.pay_period_reference(log)
     pay_period_id = if %w[PayPeriod pay_period payperiod pay_periods].include?(log.record_type)
       log.record_id
@@ -131,14 +152,22 @@ class AuditLogPresenter
     [ log.company_id, pay_period_id.to_i ]
   end
 
-  def initialize(log, pay_period_subjects: {})
+  # run_context_id names the pay run being viewed, so its own actions can say
+  # "this run"; elsewhere they name the run's dates.
+  def initialize(log, pay_period_subjects: {}, run_context_id: nil, employee_names: nil)
     @log = log
     @pay_period_subjects = pay_period_subjects
+    @run_context_id = run_context_id
+    @employee_names = employee_names
   end
 
   def headline
     @headline ||= if log.action == "authentication#signed_in"
       "#{actor_name} signed in"
+    elsif (worker_headline = PayRunActivityPhrase.worker_headline(log))
+      worker_headline
+    elsif (phrase = pay_run_phrase)
+      "#{actor_name} #{phrase}"
     elsif report_action?
       report_headline
     else
@@ -197,6 +226,32 @@ class AuditLogPresenter
 
   def pay_period_record?
     %w[PayPeriod pay_period payperiod pay_periods].include?(log.record_type)
+  end
+
+  def pay_run_phrase
+    return unless PayRunActivityPhrase.handles?(log.action)
+
+    PayRunActivityPhrase.call(log, run_label: run_label, lookup_employee_name: method(:company_employee_name))
+  end
+
+  def run_label
+    pay_period_id = self.class.pay_period_reference(log)&.last
+    # Inside a run's feed, older rows without a run ID were found through it.
+    return "this run" if @run_context_id.present? && (pay_period_id.blank? || pay_period_id == @run_context_id)
+    return "the run" if pay_period_id.blank?
+
+    subject = @pay_period_subjects[[ log.company_id, pay_period_id ]] ||
+      AuditRecordSnapshot.subject_name(PayPeriod.select(:start_date, :end_date).find_by(id: pay_period_id, company_id: log.company_id))
+    subject.present? ? "the #{subject} run" : "the run"
+  end
+
+  # Older rows stored only an employee ID; the name is read within the
+  # row's own client.
+  def company_employee_name(employee_id)
+    return if log.company_id.blank?
+    return @employee_names[[ log.company_id, employee_id.to_i ]] if @employee_names
+
+    Employee.select(:id, :first_name, :middle_name, :last_name).find_by(company_id: log.company_id, id: employee_id)&.full_name.presence
   end
 
   def report_action?
