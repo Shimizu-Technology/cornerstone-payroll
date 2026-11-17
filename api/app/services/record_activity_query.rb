@@ -73,11 +73,13 @@ class RecordActivityQuery
 
   attr_reader :record_type, :record_id, :company_id, :include_hidden_details
 
-  # Everything done inside one pay run, collected once per request. Each arm
+  # Everything done inside one pay run. Each arm
   # can use its own index: new rows carry metadata.pay_period_id, older rows
   # are found through the run's own items, imports, packages and revisions.
+  # The UNION stays in the database as a subquery, so a long run never sends
+  # a large list of IDs back and forth.
   def pay_run_log_ids
-    @pay_run_log_ids ||= AuditLog.connection.select_values(pay_run_log_ids_sql)
+    AuditLog.unscoped.from(Arel.sql("(#{pay_run_log_ids_sql}) AS audit_logs")).select(:id)
   end
 
   def pay_run_log_ids_sql

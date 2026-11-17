@@ -249,6 +249,22 @@ RSpec.describe "Pay run activity feed", type: :request do
       expect(metadata.dig("before_values", "check_memo")).to be_nil
     end
 
+    it "records text and list fields entered when a row is added" do
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      pay_period.update!(status: "draft")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items",
+        params: { employee_id: nadine.id, payroll_item: { hours_worked: 8, check_memo: "Training day",
+          custom_earnings: [ { label: "Meal", amount: 12.5 } ] } }, as: :json
+
+      expect(response).to have_http_status(:created), response.body
+      metadata = AuditLog.find_by!(action: "payroll_items#create").metadata
+      expect(metadata.fetch("changed_fields")).to include("check_memo", "employment_type", "custom_earnings", "hours_worked")
+      expect(metadata.dig("after_values", "check_memo")).to eq("Training day")
+      expect(metadata.dig("after_values", "employment_type")).to eq(nadine.employment_type)
+      expect(metadata.fetch("changed_fields")).not_to include("bonus", "overtime_hours")
+    end
+
     it "names the employee and note when someone is marked Not paid, and when it is undone" do
       stub_portal_user(Api::V1::Admin::PayrollEntryResolutionsController, staff, company)
       url = "/api/v1/admin/pay_periods/#{pay_period.id}/entry_resolutions"

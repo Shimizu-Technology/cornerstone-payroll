@@ -213,7 +213,7 @@ module Api
           changes = if @payroll_item_audit_before_values
             AuditRecordSnapshot.changes_from(@payroll_item, @payroll_item_audit_before_values)
           elsif action_name == "create"
-            entered = AuditRecordSnapshot.values_for(@payroll_item).reject { |_field, value| value.blank? || value.to_s.to_d.zero? }
+            entered = AuditRecordSnapshot.values_for(@payroll_item).reject { |_field, value| value.blank? || (value.is_a?(Numeric) && value.zero?) }
             empty.merge(after_values: entered, changed_fields: entered.keys.sort)
           else
             empty
