@@ -492,6 +492,19 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(lifecycle.dig("approved", "count")).to eq(2)
       expect(lifecycle.dig("unapproved", "count")).to eq(1)
     end
+
+    it "counts only completed calculations as the calculation milestone" do
+      completed = AuditLog.create!(user: admin_user, company: company, action: "pay_periods#run_payroll", record_type: "pay_periods",
+        record_id: pay_period.id, metadata: { business_summary: { outcome: "completed" } }, created_at: 2.hours.ago)
+      AuditLog.create!(user: admin_user, company: company, action: "pay_periods#run_payroll", record_type: "pay_periods",
+        record_id: pay_period.id, metadata: { business_summary: { outcome: "partial" } }, created_at: 1.hour.ago)
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      calculated = response.parsed_body.dig("pay_period", "lifecycle", "calculated")
+      expect(calculated["count"]).to eq(1)
+      expect(Time.zone.parse(calculated["timestamp"])).to be_within(1.second).of(completed.created_at)
+    end
   end
 
   describe "POST /api/v1/admin/pay_periods" do
@@ -1379,6 +1392,19 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 12 } } }
       unchanged = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
       expect(unchanged.metadata).not_to have_key("input_changes")
+    end
+
+    it "records hours cleared to zero even though the empty row is removed" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 8 } } }
+      expect(response).to have_http_status(:ok), response.body
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 0 } } }
+
+      expect(pay_period.payroll_items.where(employee: employee)).to be_empty
+      audit = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(audit.metadata.fetch("input_changes").sole).to include(
+        "before_values" => { "hours_worked" => "8.0" }, "after_values" => { "hours_worked" => "0.0" }
+      )
     end
 
     it "does not report a loan payment the calculator took as a staff entry" do

@@ -149,6 +149,10 @@ class PayRunActivityPhrase
   end
 
   def input_value(field, value)
+    # A pay amount entered for the first time had no earlier value; a real
+    # zero still reads as 0 or $0.00.
+    return "not set" if value.blank?
+
     field.end_with?("_hours") || field == "hours_worked" ? number(value) : money(value)
   end
 

@@ -31,7 +31,8 @@ class RecordActivityQuery
     "payroll_items" => %w[payroll_items checks PayrollItem],
     "check_print_runs" => %w[check_print_runs],
     "check_print_generations" => %w[check_print_generations],
-    "payroll_review_packages" => %w[PayrollReviewPackage]
+    "payroll_review_packages" => %w[PayrollReviewPackage],
+    "non_employee_checks" => %w[non_employee_checks NonEmployeeCheck]
   }.freeze
 
   def initialize(record_type:, record_id:, company_id:, include_hidden_details: false)

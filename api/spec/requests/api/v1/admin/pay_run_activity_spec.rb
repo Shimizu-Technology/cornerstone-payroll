@@ -110,6 +110,33 @@ RSpec.describe "Pay run activity feed", type: :request do
     expect(ids).not_to include(other_item_log.id, other_period_log.id, settings_log.id)
   end
 
+  it "finds older non-employee check rows through the run's checks" do
+    check = create(:non_employee_check, company: company, pay_period: pay_period)
+    check.update_columns(id: pay_period.id + 5_000) if check.id == pay_period.id
+    expect(check.id).not_to eq(pay_period.id)
+    renumbered = log!("non_employee_checks#updated", record_type: "non_employee_checks", record_id: check.id,
+      subject_name: check.payable_to, metadata: {})
+    voided = log!("void_non_employee_check", record_type: "NonEmployeeCheck", record_id: check.id, metadata: {})
+    other_check = create(:non_employee_check, company: company, pay_period: other_period)
+    elsewhere = log!("non_employee_checks#updated", record_type: "non_employee_checks", record_id: other_check.id)
+
+    ids = headlines.keys
+
+    expect(ids).to include(renumbered.id, voided.id)
+    expect(ids).not_to include(elsewhere.id)
+  end
+
+  it "says not set for a pay amount entered for the first time" do
+    log = log!("pay_periods#run_payroll", metadata: {
+      input_change_count: 1,
+      input_changes: [ { employee_id: avery.id, employee_name: "Leilani Reyes",
+        before_values: {}, after_values: { salary_override: "8807.5" } } ]
+    })
+
+    entry = feed.fetch("data").find { |row| row["id"] == log.id }
+    expect(entry.fetch("detail_lines")).to eq([ "Leilani Reyes: pay not set → $8,807.50" ])
+  end
+
   it "stays inside the current client" do
     foreign = create(:audit_log, company: other_company, action: "payroll_items#destroy", record_type: "payroll_items",
       record_id: 1, metadata: { pay_period_id: pay_period.id })
@@ -247,6 +274,19 @@ RSpec.describe "Pay run activity feed", type: :request do
       expect(metadata.fetch("changed_fields")).to include("check_memo", "withholding_tax_override")
       expect(metadata.dig("after_values", "check_memo")).to eq("Final check")
       expect(metadata.dig("before_values", "check_memo")).to be_nil
+    end
+
+    it "does not mark job hours or payroll fields changed when they were sent unchanged" do
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      item = create(:payroll_item, pay_period: pay_period, employee: avery)
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{item.id}",
+        params: { payroll_item: { check_memo: "Memo only", payroll_field_entries: [] } }, as: :json
+
+      expect(response).to have_http_status(:ok), response.body
+      changed = AuditLog.find_by!(action: "payroll_items#update").metadata.fetch("changed_fields")
+      expect(changed).to include("check_memo")
+      expect(changed).not_to include("payroll_field_entries", "wage_rate_hours")
     end
 
     it "records text and list fields entered when a row is added" do

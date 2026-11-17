@@ -107,6 +107,7 @@ module Api
           end
           @payroll_item.reload
           @payroll_item_audit_before_values = AuditRecordSnapshot.values_for(@payroll_item)
+          @payroll_item_structured_before = structured_audit_values(PayrollItem.find(@payroll_item.id))
 
           attrs = payroll_item_params
           PayrollCorrectionPayBasisGuard.validate!(@payroll_item, proposed_attributes: attrs)
@@ -216,10 +217,25 @@ module Api
             entered = AuditRecordSnapshot.values_for(@payroll_item).reject { |_field, value| value.blank? || (value.is_a?(Numeric) && value.zero?) }
             empty.merge(after_values: entered, changed_fields: entered.keys.sort)
           else
-            empty
+            return empty
           end
-          structured = %w[wage_rate_hours payroll_field_entries].select { |field| params[:payroll_item]&.key?(field) }
+          # Both sides are read from the database so stored values compare alike.
+          before = @payroll_item_structured_before || {}
+          after = structured_audit_values(PayrollItem.find(@payroll_item.id))
+          structured = after.keys.select { |field| after[field] != (before[field] || []) }
           changes.merge(changed_fields: (changes[:changed_fields] | structured).sort)
+        end
+
+        # Job-hour splits and payroll field rows have no single value; their
+        # contents are compared to tell whether a save changed them.
+        def structured_audit_values(item)
+          {
+            "wage_rate_hours" => Array(item.wage_rate_hours).map { |row| row.to_h.stringify_keys.except("source_lines") },
+            "payroll_field_entries" => item.payroll_item_field_entries.map do |entry|
+              entry.attributes.slice("payroll_field_definition_id", "label", "amount", "active", "tax_treatment", "category")
+                .transform_values(&:to_s)
+            end.sort_by(&:to_s)
+          }
         end
 
         def audit_record_metadata(_record)
