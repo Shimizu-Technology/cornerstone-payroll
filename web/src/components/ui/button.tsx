@@ -44,8 +44,18 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         aria-busy={loading || undefined}
         {...props}
       >
-        {loading && <LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" />}
-        {loading && loadingLabel ? <span>{loadingLabel}</span> : children}
+        {loadingLabel ? (
+          <span className="grid min-w-0">
+            <span className={cn('col-start-1 row-start-1 inline-flex items-center justify-center', loading && 'invisible')} aria-hidden={loading || undefined}>{children}</span>
+            <span className={cn('col-start-1 row-start-1 inline-flex items-center justify-center gap-2', !loading && 'invisible')} aria-hidden={!loading || undefined}>
+              <LoaderCircle aria-hidden="true" className={cn('h-4 w-4 shrink-0', loading && 'animate-spin motion-reduce:animate-none')} />
+              {loadingLabel}
+            </span>
+          </span>
+        ) : <>
+          {loading && <LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" />}
+          {children}
+        </>}
       </button>
     );
   }
