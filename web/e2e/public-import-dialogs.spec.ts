@@ -223,7 +223,10 @@ test('ImportModal blocks dismissal while parsing and applying, then recovers aft
   try {
     await dialog.getByRole('button', { name: /Apply Import/ }).click();
     await applyFailure.started;
-    await expect(dialog.getByText('Importing payroll data and calculating taxes...')).toBeVisible();
+    const applying = dialog.getByRole('button', { name: 'Applying import…' });
+    await expect(applying).toBeDisabled();
+    await expect(applying).toHaveAttribute('aria-busy', 'true');
+    await expect(dialog.getByRole('status').filter({ hasText: 'Importing payroll data and calculating taxes…' })).toBeVisible();
     await expectBusyDialogCannotDismiss(page, dialogName);
     applyFailure.release();
     await expect(dialog.getByText('Import apply failed')).toBeVisible();
