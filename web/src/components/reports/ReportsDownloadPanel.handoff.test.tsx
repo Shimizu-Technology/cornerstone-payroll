@@ -85,8 +85,8 @@ it('loads only the saved-state summary when the panel opens, so no report view i
  expect(api.preview).not.toHaveBeenCalled();expect(api.signoff).not.toHaveBeenCalled();
 });
 
-it('keeps a just-saved sign-off date when an older summary arrives late', async (): Promise<void> => {
- let finishSummary!: (value: {transmittal: null; check_signoff: null}) => void;
+it('keeps a just-saved sign-off date when an older summary arrives late, and still applies its transmittal part', async (): Promise<void> => {
+ let finishSummary!: (value: {transmittal: {generated_at: string}; check_signoff: null}) => void;
  api.saved.mockImplementation(() => new Promise(resolve => { finishSummary = resolve; }));
  api.signoffPdf.mockResolvedValue({blob:new Blob(['pdf']),filename:'signoff.pdf'});
  const user=userEvent.setup();render(<MemoryRouter><ReportsDownloadPanel payPeriodId={2} payPeriodStatus="committed" payDate="2026-10-15" /></MemoryRouter>);
@@ -95,8 +95,10 @@ it('keeps a just-saved sign-off date when an older summary arrives late', async 
  await within(editor).findByDisplayValue('Example, Avery');await user.click(within(editor).getByRole('button',{name:'Generate Sign-Off Sheet'}));
  await screen.findByRole('dialog',{name:'Check Sign-Off Sheet'});
  await waitFor(()=>expect(within(row).getByText(/· Last:/)).toBeTruthy());
- await act(async (): Promise<void> => { finishSummary({ transmittal: null, check_signoff: null }); });
+ await act(async (): Promise<void> => { finishSummary({ transmittal: { generated_at: '2026-10-16T09:00:00Z' }, check_signoff: null }); });
  expect(within(row).getByText(/· Last:/)).toBeTruthy();
+ const transmittalRow=screen.getByText('Transmittal Log',{exact:true}).closest('div.flex.items-center.justify-between') as HTMLElement;
+ expect(within(transmittalRow).getByText(/· Last: Oct 16/)).toBeTruthy();
 });
 
 it('ignores a summary that arrives after the panel moved to another pay period', async (): Promise<void> => {

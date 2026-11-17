@@ -289,6 +289,24 @@ RSpec.describe "Pay run activity feed", type: :request do
       expect(changed).not_to include("payroll_field_entries", "wage_rate_hours")
     end
 
+    it "marks payroll field entries changed when only an entry's notes change" do
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      item = create(:payroll_item, pay_period: pay_period, employee: avery)
+      field = PayrollFieldDefinition.create!(company: company, name: "Loan", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "loan")
+      entry = item.payroll_item_field_entries.create!(payroll_field_definition: field, label: "Loan", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "loan", amount: 10, source: "manual", notes: "Week one")
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{item.id}", params: { payroll_item: {
+        payroll_field_entries: [ { id: entry.id, payroll_field_definition_id: field.id, label: "Loan", kind: "deduction",
+          tax_treatment: "post_tax_deduction", category: "loan", amount: 10, source: "manual", notes: "Week two", active: true } ]
+      } }, as: :json
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(entry.reload.notes).to eq("Week two")
+      expect(AuditLog.find_by!(action: "payroll_items#update").metadata.fetch("changed_fields")).to include("payroll_field_entries")
+    end
+
     it "records text and list fields entered when a row is added" do
       stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
       pay_period.update!(status: "draft")
