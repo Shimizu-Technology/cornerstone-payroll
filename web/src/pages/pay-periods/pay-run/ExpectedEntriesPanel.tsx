@@ -26,7 +26,7 @@ export function ExpectedEntriesPanel({ payPeriod, disabled, onSaved, onEnterPay,
   // made here shows too if the reload after it failed.
   const saved = data?.added_back || [];
   const fresh = addBackNotice?.source === 'expected_entries' && !saved.some(entry => entry.employee_id === addBackNotice.result.employee_id)
-    ? [{ ...addBackNotice.result, hours_entered: addBackNotice.hoursEntered }] : [];
+    ? [{ ...addBackNotice.result, hours_entered: addBackNotice.hoursEntered, no_hours: false }] : [];
   const notices = [...saved, ...fresh];
   if (!data || payPeriod.correction_status === 'voided' || !['draft', 'calculated', 'approved'].includes(payPeriod.status) || (!data.fields.length && !data.missing_regulars.length && !notices.length)) return null;
   const act = async (key: string, message: string, action: () => Promise<unknown>, reload = true) => {
@@ -51,7 +51,7 @@ export function ExpectedEntriesPanel({ payPeriod, disabled, onSaved, onEnterPay,
     return data.missing_regulars.some(row => row.employee_id === employeeId) ? 'e' + employeeId : null;
   };
   const noticesFor = (row: string) => notices.filter(notice => noticeRow(notice.employee_id) === row)
-    .map(notice => <AddBackNotice key={'n' + notice.employee_id} result={notice} hoursEntered={notice.hours_entered} />);
+    .map(notice => <AddBackNotice key={'n' + notice.employee_id} result={notice} hoursEntered={notice.hours_entered} noHours={notice.no_hours} />);
   const announcement = addBackNotice?.source === 'expected_entries' ? addBackSummary(addBackNotice.result, addBackNotice.hoursEntered) : '';
   return <section id="expected-payroll-entries" tabIndex={-1} aria-label="Expected entries" className="space-y-3 [&_button]:max-w-full [&_button]:whitespace-normal rounded-xl border border-neutral-200 bg-white p-4">
     <h2 className="font-semibold">Expected entries</h2>
@@ -59,7 +59,7 @@ export function ExpectedEntriesPanel({ payPeriod, disabled, onSaved, onEnterPay,
     {approved && (data.outstanding.length > 0 || data.fields.some(field => field.status === 'missing') || data.missing_regulars.some(row => !row.resolved)) && <div className="flex flex-wrap items-center gap-2 text-sm text-neutral-600"><p>To enter pay, unapprove first.</p><Button variant="outline" disabled={disabled || busy} loading={pending?.key === 'unapprove'} loadingLabel="Unapproving…" onClick={() => void act('unapprove', 'Unapproving payroll…', async () => { await onUnapprove(); }, false)}>Unapprove to enter pay</Button></div>}
     {/* Stays mounted so the add-back result is announced when it arrives. */}
     <p aria-live="polite" aria-atomic="true" className="sr-only" data-testid="add-back-announcement">{announcement}</p>
-    {notices.filter(notice => !noticeRow(notice.employee_id)).map(notice => <AddBackNotice key={'n' + notice.employee_id} result={notice} hoursEntered={notice.hours_entered} />)}
+    {notices.filter(notice => !noticeRow(notice.employee_id)).map(notice => <AddBackNotice key={'n' + notice.employee_id} result={notice} hoursEntered={notice.hours_entered} noHours={notice.no_hours} />)}
     {error && <p role="alert" className="text-danger-700">{error}</p>}
     {data.fields.map(field => <div key={field.id} className="space-y-2 border-t border-neutral-200 pt-3">
       <p className="font-medium">{field.label} · {field.status === 'filled' ? 'Filled: ' + (field.kind === 'owner_pay' ? formatCurrency(Number(field.value)) : field.value + ' h') : field.status === 'excluded' ? 'Excluded this period' : field.status === 'none' ? 'None this period' : 'Missing'}{!field.required && ' (optional)'}</p>

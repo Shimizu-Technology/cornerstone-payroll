@@ -88,9 +88,10 @@ class PayrollExpectedEntries
       next if result[:restored].empty? && result[:not_restored].empty?
 
       hours = items.any? { |item| item.employee_id == result[:employee_id] && hours_or_pay?(item) }
-      next if hours && result[:not_restored].empty?
+      no_hours = resolutions.any? { |row| row.employee_id == result[:employee_id] && row.payroll_standing_change_id.nil? }
+      next if (hours || no_hours) && result[:not_restored].empty?
 
-      result.merge(hours_entered: hours)
+      result.merge(hours_entered: hours, no_hours: no_hours && !hours)
     end
   end
 
