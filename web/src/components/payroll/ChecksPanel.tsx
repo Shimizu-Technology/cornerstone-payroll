@@ -309,38 +309,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
     }
   };
 
-  const handleDirectDepositStubs = async (print: boolean) => {
-    setBatchLoading(true);
-    setBatchAction(print ? 'Opening direct-deposit stubs...' : 'Downloading direct-deposit stubs...');
-    try {
-      const result = await payStubsApi.directDepositStubsPdf(payPeriod.id);
-      const url = URL.createObjectURL(result.blob);
-      if (print) {
-        const printWindow = window.open(url);
-        if (!printWindow) {
-          URL.revokeObjectURL(url);
-          notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups to print direct-deposit stubs.' });
-          return;
-        }
-        printWindow.addEventListener('load', () => {
-          printWindow.print();
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-        });
-      } else {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = result.filename || `direct_deposit_stubs_${payPeriod.pay_date ?? 'undated'}.pdf`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 100);
-      }
-    } catch (err) {
-      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to generate direct-deposit stubs' });
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
   const checkNumberChanges = useMemo(() => checks.filter((item) =>
     !item.voided && (checkNumberDrafts[item.id] ?? item.check_number ?? '').trim() !== (item.check_number || '').trim()
   ), [checkNumberDrafts, checks]);
@@ -448,7 +416,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const stubEligibleIds = filteredStatements.map((item) => item.id);
   const allVisibleStubsSelected = stubEligibleIds.length > 0 && stubEligibleIds.every((id) => selectedStubIdSet.has(id));
   const hasPrintableStub = statementItems.length > 0;
-  const hasNonCheckStub = statementItems.some((item) => item.statement_only || item.payment_delivery_method !== 'paper_check');
+  // The checks index serializes this run's effective method as payment_delivery_method.
+  const hasNonCheckStub = statementItems.some((item) =>
+    item.statement_only || item.payment_delivery_method !== 'paper_check' || Number(item.net_pay) <= 0);
   const hasPhysicalChecks = checks.some((item) => !item.voided && Number(item.net_pay) > 0);
   const directDepositCount = statementItems.filter((item) => !item.statement_only && item.payment_delivery_method === 'direct_deposit').length;
   const statementOnlyCount = statementItems.filter((item) => item.statement_only).length;
@@ -577,12 +547,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           <Button size="sm" variant="outline" onClick={() => void handlePrintPayStubs(true)} disabled={batchLoading || !hasPrintableStub}>Print all earnings statements</Button>
           <Button size="sm" variant="outline" onClick={() => void handleDownloadPayStubs(true)} disabled={batchLoading || !hasPrintableStub}>Download all earnings statements</Button>
         </div>
-        {directDepositCount > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(true)} disabled={batchLoading}>Print direct-deposit statements</Button>
-            <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(false)} disabled={batchLoading}>Download direct-deposit statements</Button>
-          </div>
-        )}
         {statementItems.length > 0 ? (
           <>
             <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
