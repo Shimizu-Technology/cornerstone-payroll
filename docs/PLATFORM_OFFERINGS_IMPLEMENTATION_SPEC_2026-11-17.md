@@ -25,7 +25,7 @@ These rules apply to every offering:
 1. **Profile settings, not code branches.** An offering is a named preset of settings in the client's operating profile (§3). Moving a client from one offering to another means changing its profile, with an effective date. No code may test a client's name, company id or source type to decide what a feature does.
 2. **Payroll owns the records.** People, pay, tax, W-2GU/1099, deductions, benefits, PTO balances and HR documents all live in Payroll. Time apps own punches, schedules, time approvals and leave requests, and they never calculate pay.
 3. **One HR engine, two front doors.** The Cornerstone employee portal and each time app read and write through the same Payroll services, so the numbers cannot disagree.
-4. **Sensitive changes are approved in Payroll.** Bank account, W-4, SSN, legal name, pay and address changes go through Payroll's approval queue, whether they come from the client portal, the employee portal or a time app. Payroll does its own verification (§6) and never trusts another app's login for these.
+4. **Sensitive changes are approved in Payroll.** Bank account, W-4, SSN, legal name and classification changes always go through Payroll's approval queue, whichever app they come from. Pay and address changes from employees or time apps always do too. From client admins, they follow the client's review settings (§6). Payroll does its own verification and never trusts another app's login for these.
 5. **AIRE keeps working byte for byte.** Nothing changes AIRE's My Pay, batches, calendar or cockpit unless a contract test in both repos proves it (§5).
 
 ## 2. Findings that shape the plan
@@ -53,7 +53,7 @@ These rules apply to every offering:
    - So new employee-API permissions must be **grants stored in Payroll**, not capabilities AIRE advertises.
 5. **AIRE's My Pay contract is unwritten and fails silently.**
    - AIRE allowlists about 40 response fields and validates their formats (`my_pay_presenter.rb`).
-   - When one drifts, rows just disappear, for example a money value that doesn't match `\d+\.\d{2}`.
+   - When one drifts, data quietly disappears. An earnings, tax or deduction line whose amount doesn't match `/\A-?\d{1,9}\.\d{2}\z/` is dropped. A summary amount that doesn't match becomes blank.
    - The test fakes have already drifted from real responses.
    - An unmapped worker must keep returning **404**. AIRE shows "not linked" for that, and shows "unavailable" for 401 or 403.
 6. **The change-request queue is a good base but too narrow.**
@@ -67,11 +67,11 @@ These rules apply to every offering:
    - `ApplicationController` also has a development bypass that falls back to an admin.
    - The employee namespace needs its own verifier and its own base controller.
 8. **Security gaps that must close before employees are invited:**
-   - **MFA is not enforced.** `REQUIRE_MFA: false` in `api/config/deploy.yml:65`, and no code reads Clerk's `fva` claim.
-   - **No SMS provider** exists in Payroll.
-   - **`AuditLog` only records a `user_id`**, and `Auditable` skips logging when there is no `current_user`.
-   - **The client pay-stub scope includes practice-copy baseline runs** (`PayPeriod.client_finished`, `pay_period.rb:330`). Employees must see committed runs only.
-   - **AIRE's statement PDF is sent `inline` with no `Cache-Control`** (`worker_statements_controller.rb:49`).
+   - **MFA is not enforced.** `REQUIRE_MFA: false` in `api/config/deploy.yml:65` is only an attestation that `production_readiness.rb` reads; nothing enforces it. No code reads Clerk's `fva` claim. Enforcing MFA needs three things: Clerk's "Require MFA" setting, an `fva` check in the API, and the identity cutover runbook.
+   - **No SMS provider** exists in Payroll or AIRE. AIRE's `.env.example` lists ClickSend variables, but no code sends SMS.
+   - **Employee actions can't be audited yet.** `AuditLog` has `user_id` plus actor email, name, role and metadata, which the worker-statement endpoint already uses for source actors. But `Auditable` skips logging when there is no `current_user`, so an `employee/*` controller would log nothing until that changes.
+   - **Practice copies.** The client pay-stub scope (`PayPeriod.client_finished`, `pay_period.rb:330`) includes the baseline runs that exist only in practice-copy companies. An employee link must never point at a test or practice workspace, and the employee scope uses committed runs only.
+   - **Minor:** Payroll's server-to-server statement PDF (`worker_statements_controller.rb:49`) is sent `inline` with no `Cache-Control`. AIRE's own browser response already sends it as an attachment with `no-store` (`my_pay_controller.rb:39,58`), so this is tidying, not a gap.
 9. **Client portal plan status:**
    - Done: boundary fixes, Unicode PDFs, notifications, reports (6a/6b), most document and messaging work.
    - **Not built:** effective-dated pay (audit PR 5), the change policy with direct edits and terminations (PR 6), readable change diffs, record-view and sign-out events, and letting all of a company's client users see its requests.
@@ -98,11 +98,11 @@ These rules apply to every offering:
 The `options` keys, each defined in the catalog:
 
 - **Intake:** `intake.required_sources`, `tips.default` (`paid_in_check` or `already_paid_out`), `overtime.mode` (`source_reports`, `weekly_split`, `total_as_regular_warn_over_80`, `daily_records`), `workweek.alignment` (`aligned` or `warn_if_offset`).
-- **Client portal:** `client_portal.review_first` (a map of field group to boolean, for profile, contact, pay, w4, bank, termination), `client_portal.uploaders` (`all_client_users` or a named list), `client_portal.sensitive_documents_visible` (bool, default false).
+- **Client portal:** `client_portal.review_first` (a map of field group to boolean, using the same groups as §6: profile, contact, address, pay, termination; bank, w4 and identity are always reviewed and have no switch), `client_portal.uploaders` (`all_client_users` or a named list), `client_portal.sensitive_documents_visible` (bool, default false).
 - **Employee portal:** `employee_portal.features` (stubs, tax_forms, profile_requests, documents, pto, bank_requests, w4_requests) and `employee_portal.former_access_years` (default 6).
 - **Year-end:** `year_end.kind_of_employer` (default `N`), `year_end.contact` (name, phone, email).
 
-**`OperatingProfileCatalog`** is a Ruby module copied from AIRE's `settings_catalog.rb` pattern. Each entry has:
+**`OperatingProfileCatalog`** is a Ruby class copied from AIRE's `SettingsCatalog` pattern (`settings_catalog.rb`). Each entry has:
 - `id`, `label`, `section`, `type`, `default`, `allowed`
 - `capability` (a `StaffRolePolicy` capability)
 - `what`, `example`, `effect`
@@ -114,7 +114,7 @@ A spec fails when any key is missing a catalog entry, as AIRE's `settings_catalo
 
 | Setting group | Capability |
 |---|---|
-| Offering, portals, client-portal options | `manage_client_administration` |
+| Offering, portals, client-portal options | `manage_client_administration`. An offering preset that would change the hours source also needs `manage_organization`; without it, the preset leaves the hours source alone and says so. |
 | Hours source, connected app | `manage_organization` |
 | Intake, tips, overtime | `manage_client_configuration` |
 | Year-end fields | `manage_filing_review` |
@@ -126,7 +126,7 @@ A spec fails when any key is missing a catalog entry, as AIRE's `settings_catalo
   - `GET /admin/companies/:id/operating_profile?on=` returns `{ effective, history, catalog, editable_keys }`.
   - `PATCH` takes `{ effective_on, changes, reason }` and inserts a new version. Old rows are never edited.
   - Each change writes an `AuditLog` before/after diff.
-  - `effective_on` may not fall on or before the latest committed period.
+  - `effective_on` must be the start date of a pay period that hasn't been calculated, approved or committed. A change can't take effect partway through a period.
 - **`/auth/me`** adds a compact `features` summary, so routes and the sidebar don't need extra calls.
 - **Web:** a "How this client runs" settings page. It has one section per catalog group, (i) help on every setting, an offering preset picker that fills in defaults, and a readiness panel that flags mismatches (for example "Workforce suite, but no active connected source").
 
@@ -231,7 +231,7 @@ descriptor(
 4. **Installation pinning on statement calls.**
    - First, Payroll validates `X-Payroll-Source-Instance-Id` only when the header is present, returning 409 on a mismatch.
    - Next, AIRE starts sending it. Before that AIRE deploy, confirm the production pinned id matches.
-5. **Response headers.** Add `Cache-Control: private, no-store` to the statement PDF. This is a header-only change; check that AIRE's client ignores it.
+5. **Response headers (tidying).** Add `Cache-Control: private, no-store` to the server-to-server statement PDF. This is a header-only change; check that AIRE's client ignores it.
 
 ### Must stay green throughout
 
@@ -253,7 +253,7 @@ descriptor(
 
 **Configure the time app, not fork it.** In the AIRE codebase, for the next own-clock-in client:
 - `SOURCE_TYPE` and the installation identity come from the environment, defaulting to `aire_services`
-- the app advertises its policy constraints
+- the app advertises its policy constraints. **Not for AIRE's existing source:** Payroll compares advertised `policy_constraints` the same way it compares capabilities, and AIRE's pinned value is empty, so sending constraints would break AIRE's connection until it is re-tested. New installations advertise them from day one. AIRE only changes in a planned deploy followed by a connection re-test.
 - one setting holds the time zone and workweek, replacing about 20 hard-coded Guam references
 - the public website sits behind a flag
 - the kiosk gets neutral routes, with the AIRE aliases kept
@@ -277,7 +277,7 @@ descriptor(
   - the source secret must match exactly one active source that holds the grant;
   - the installation id must be present and match for every new grant;
   - the worker is resolved only through `TimeTrackingEmployeeMapping`;
-  - optionally, a signed worker assertion lasting 60 seconds or less, which limits a leaked secret to replay instead of enumeration.
+  - a signed worker assertion lasting 60 seconds or less: optional for reads, **required for every write grant**. A leaked source secret alone then can't submit changes for arbitrary workers.
 - **Audit:** `actor_type: "source_worker"`, with the source, installation, worker UUID, grant and forwarded request id. `PayRunActivityPhrase` should use the source's name instead of "in the AIRE app".
 - **Rate limits:** keyed by source id rather than IP, because one time app proxies every worker. Writes are limited to about 5 per hour per worker, plus a cap on OTP attempts.
 
@@ -291,7 +291,7 @@ The base is `employee_change_requests`. It already provides row locks, a stale-v
 |---|---|
 | Requester | `requester_type` (`client_user`, `employee_account`, `time_source`, `staff`), plus `employee_account_id` and `time_tracking_source_id` next to `requested_by_id`. A check constraint requires exactly one. |
 | Idempotency | `source_idempotency_key`, unique per source |
-| Field group | `field_group` (`profile`, `contact`, `pay`, `w4`, `bank`, `identity`, `termination`) |
+| Field group | `field_group` (`profile`, `contact`, `address`, `pay`, `w4`, `bank`, `identity`, `termination`) |
 | One pending per group | Replace `idx_employee_change_requests_one_pending` with a unique index on `(employee_id, field_group)` over the pending and verification-pending statuses |
 | Statuses | Add `verification_pending`, `withdrawn`, `expired`, `superseded` |
 | Timing | `effective_pay_period_id`, `effective_on`, `cooling_off_until` |
@@ -305,17 +305,30 @@ New tables:
 
 ### Rules by field group
 
-These are defaults. Each client's `review_first` settings can only make a group *stricter* than this table, never looser.
+The table is each channel's baseline. A client's `review_first` switch can add Cornerstone review to a group the client admin would otherwise change directly. Nothing removes a Payroll-side verification. Bank, W-4, identity and classification are always reviewed.
+
+"Contact on file" means the employee record in Payroll (`employees`), not the login account. A contact change updates the employee record. Changing the login identifier itself happens in Clerk, with a notice to the old address.
 
 | Group | Client admin | Employee portal | Time app | Payroll-side verification | Takes effect |
 |---|---|---|---|---|---|
 | Contact (phone, email) | Direct | Request, approved automatically after OTP to the *old* contact, with a notice to the old contact | Request plus Payroll OTP | OTP to the contact on file | Immediately |
-| Address | Direct or review | Request | Request plus OTP | None beyond the request | Immediately |
-| Pay rate | Request (direct when review-first is off) | Not offered | Not offered | Staff review | The chosen pay period (effective-dated) |
-| W-4 | Request plus the signed form | Electronic W-4 (Phase 2) | Request plus OTP | Staff review of the form | The next payroll not yet approved |
+| Address | Direct (review when review-first is on) | Request | Request plus OTP | Notice to the old address or email. From December 1 until W-2s are mailed, employee and time-app changes need staff review. | Immediately, except during the year-end window |
+| Pay rate | Direct, effective-dated (review when review-first is on) | Not offered | Not offered | Staff review when it goes through the queue | The chosen pay period (effective-dated) |
+| W-4 | Request plus the signed form | Electronic W-4 (Phase 2) | Not offered directly. The time app links to Payroll's signing page, because an OTP doesn't meet the e-W-4 jurat and signature rules. | Staff review of the form | The next payroll not yet approved |
 | Bank account | Request | Request (Phase 2) | Request plus OTP | Staff approval plus a callback or prenote recorded in `employee_change_verifications`; alerts to the old and new contacts | The next payroll not yet approved, after verification |
 | SSN, legal name, W-2/1099 classification | Request; Cornerstone only | Request plus a document | Not offered | Document check | Immediately after approval |
 | Termination | Records the last day worked | Not offered | Not offered | Staff review | The chosen date; the employee link becomes `former` |
+
+### Payroll-diversion protection
+
+- A bank change within 30 days of a contact change, a new login, or account recovery always needs staff review, with a callback to the number on file *before* the contact change. `cooling_off_until` holds it until then.
+- Every bank change sends a notice to the old and new contacts, and to the client admin.
+
+### Account recovery
+
+- Recovery is never self-serve. A lost phone or MFA device goes through staff-assisted re-proofing: known facts plus a new invite token, issued by Cornerstone or the client admin.
+- The re-proofing is logged, and it starts the 30-day bank-change hold.
+- Former employees recover through Cornerstone.
 
 ### Staff review screen
 
@@ -342,6 +355,7 @@ These are defaults. Each client's `review_first` settings can only make a group 
   3. Every failure returns the same response with the same timing, and never says which fact failed.
   4. Each link locks after N attempts. Activation is throttled by IP, by link and by account, through Rack::Attack.
   5. MFA is required at activation, and a personal email is recommended.
+- **Practice copies.** A link may never point at a test or practice workspace company (check constraint plus validation).
 - **Termination.** The link becomes `former`, with read-only access to stubs and tax forms for `former_access_years`. `revoked` is only for fraud or a mislinked account.
 - **AuditLog** gains `actor_type` and `employee_account_id`, so employee activity is logged.
 
@@ -374,7 +388,7 @@ The employee always comes from the session plus an `X-Employee-Link-Id` header, 
 
 ### Gates before the first invite
 
-1. Staff and client MFA enforced in production (`REQUIRE_MFA=true`, with `fva` checked), and MFA required in the employee Clerk app.
+1. Staff and client MFA enforced in production: Clerk's "Require MFA" setting on, the API checking `fva`, and the `REQUIRE_MFA` attestation set to true. MFA also required in the employee Clerk app.
 2. The AIRE contract fixtures (Workstream C step 1) and `EmployeePay::StatementService` are merged.
 3. A penetration-style review of `employee/*`. One employee must not be able to see a coworker's data through any id, header or cache.
 4. A pilot with Cornerstone's own employees, then MoSa's, with Dafne's sign-off.
@@ -416,16 +430,18 @@ Year-end forms (the W-2GU plan, steps 0–5) take priority over everything here 
 | D1 | Change-request extensions (requester types, field group, statuses, per-group index), readable diffs, visibility for all client users | Payroll | A1 | Yes | Existing client edit specs green |
 | D2 | Effective-dated compensation (audit PR 5) | Payroll | D1 | Yes | Approved and committed runs never change |
 | D3 | Change policy and direct client edits by field group with `review_first` (audit PR 6), terminations | Payroll | A2, D2 | Yes | Policy matrix specs |
+| N1 | OTP and SMS service: provider integration, hashed codes, TTL and attempt caps, delivery audit | Payroll | Leon's provider decision | New only | Delivery tested to Guam numbers |
+| D4 | `employee_payment_accounts`, `employee_change_verifications`, bank review screen with Approve disabled until verified, diversion hold and recovery hold | Payroll | D1, N1 | Yes | Fraud-path specs |
 | S1 | Enforce staff and client MFA in production; per-audience Clerk verifier refactor | Payroll | none | Yes (sign-in) | Identity cutover runbook |
 | E1 | Employee identity tables, second Clerk app, `Employee::BaseController`, AuditLog actor | Payroll | S1 | No user-facing | Isolation specs |
-| E2 | Invitations and activation (staff and client employee records), Rack::Attack rules | Payroll | E1, D1 | Yes | Enumeration and lockout specs |
-| E3 | Employee portal Phase 1 API and web: pay, history, profile, contact and address requests, documents, switcher, former access | Payroll | E2, C2 | Yes | Pilot on Cornerstone staff |
+| E2 | Invitations and activation (staff and client employee records), Rack::Attack rules, account recovery. Behind a platform flag that is off by default; no invites until E3's gates pass. | Payroll | E1, D1 | No (flag off) | Enumeration and lockout specs |
+| E3 | Employee portal Phase 1 API and web: pay, history, profile, contact and address requests, documents, switcher, former access | Payroll | E2, C2, D3, N1 | Yes | Isolation review, then pilot on Cornerstone staff; this is when the flag turns on |
 | E4 | Tax-form posting, consents, W-2 notice email and bounce handling | Payroll | E3, year-end per-employee PDFs | Yes | Disclosure text reviewed by Dafne |
 | C4 | Installation-id pinning on statement calls | Payroll, then AIRE | C3 | No if the ids match | Pinned id checked on production |
 | C5 | Generalize history approval, category mapping and evidence; remove the company-2 check; neutral namespace | Payroll | C3 | No for AIRE | AIRE regression suite |
 | C6 | Employee API v1 reads (ytd, tax forms, profile, documents) | Payroll | C3, E4 | New only | Contract fixtures extended |
-| C7 | Employee API v1 change requests with Payroll OTP (needs the SMS provider) | Payroll + AIRE | D1, C6 | New only | Approval only inside Payroll |
-| F1–F5 | PTO, documents and acknowledgments (after scanning is on), e-W-4, bank changes, benefits view | Payroll + AIRE | D, E | Yes | Per-feature acceptance |
+| C7 | Employee API v1 change requests with Payroll OTP and required signed worker assertions | Payroll + AIRE | D1, D4, N1, C6 | New only | Approval only inside Payroll |
+| F1–F5 | PTO, documents and acknowledgments (after scanning is on), e-W-4, bank changes (needs D4), benefits view | Payroll + AIRE | D1–D4, E3 | Yes | Per-feature acceptance |
 | W1–W2 | Configuration readiness in the AIRE codebase, then the second client's deployment | AIRE | C5 | No for AIRE | AIRE production unchanged |
 | B8–B9 | Universal workbook adapter; merge the two apply paths | Payroll | B7 | Yes | Parity run |
 
@@ -438,7 +454,7 @@ Year-end forms (the W-2GU plan, steps 0–5) take priority over everything here 
 ## 10. Decisions for Leon
 
 1. **Close PR #139** and build the operating profile fresh. Recommended.
-2. **SMS provider:** reuse ClickSend (as AIRE does), or choose Twilio. Recommended: ClickSend, for one vendor.
+2. **SMS provider:** neither app sends SMS today (AIRE only has unused ClickSend placeholders), so either choice is new work. Options: ClickSend or Twilio. Recommended: pick whichever has confirmed delivery and pricing to Guam numbers, and use it in both apps.
 3. **Clerk:** a separate Pro application for employees, about $25 a month plus per-user and SMS costs. Recommended.
 4. **Turn on MFA for staff and client users** in production before any employee is invited. Recommended. Today it is off.
 5. **Bank changes from time apps:** allow them in Phase 2 with a Payroll OTP plus staff verification, or keep them to the Cornerstone portal only at first. Recommended: portal only at first, and time apps after a pilot.
