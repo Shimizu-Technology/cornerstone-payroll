@@ -11,6 +11,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { BusyStatus } from '@/components/ui/busy-status';
 import {
   Table,
   TableBody,
@@ -839,7 +840,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
 
   // Review uses the full width with the retained source files beside it.
   const sourceFiles = importSourceFiles(previewData?.source_package.documents);
-  const showSources = step === 'preview' && Boolean(previewData) && Boolean(sourceFiles.pdf || sourceFiles.workbook);
+  const showSources = (step === 'preview' || step === 'applying') && Boolean(previewData) && Boolean(sourceFiles.pdf || sourceFiles.workbook);
 
   return (
     <Dialog open={open} onOpenChange={handleClose} dismissOnEscape={!loading && step !== 'applying'}>
@@ -848,12 +849,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <DialogTitle>Import Payroll Data</DialogTitle>
           <DialogDescription>
             {step === 'upload' && 'Upload the Revel hours PDF and the tips & loans workbook, together or one at a time.'}
-            {step === 'preview' && (unresolvedCount > 0
+            {(step === 'preview' || step === 'applying') && (unresolvedCount > 0
               ? `${unresolvedCount} source row${unresolvedCount === 1 ? ' needs' : 's need'} attention before this import can be applied.`
               : missingPeriodPay.length > 0
                 ? 'Enter the missing period pay before applying this import.'
                 : `${reviewedEmployeeCount} employees are ready. Review the source matches and apply.`)}
-            {step === 'applying' && 'Applying import...'}
             {step === 'done' && 'Import complete.'}
           </DialogDescription>
         </DialogHeader>
@@ -867,7 +867,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <Button disabled={loading} onClick={() => void handlePreview(duplicateRevision.id)}>Use this import for the client’s revision {duplicateRevision.revision}</Button>
         </div>}
 
-        <div className={showSources ? 'flex flex-col gap-4 xl:flex-row xl:items-start' : 'contents'}>
+        <div inert={step === 'applying'} className={showSources ? 'flex flex-col gap-4 xl:flex-row xl:items-start' : 'contents'}>
         {showSources && previewData && (
           <ImportSourcePanel key={previewData.source_package.id} className="xl:order-2" payPeriodId={payPeriodId}
             importId={previewData.source_package.id} documents={previewData.source_package.documents} />
@@ -1028,7 +1028,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <p className="text-sm text-neutral-500">Older workbook only: an optional BONUSES sheet uses row 4 headers, column C last name, D first name, and F bonus amount. The current workbook uses dedicated OWNER PERIOD PAY and ONE-TIME COMPONENTS sheets.</p>
         )}
 
-        {step === 'preview' && previewData && (
+        {(step === 'preview' || step === 'applying') && previewData && (
           <div ref={reviewRef} className="space-y-3">
             {missingRateChoices.length > 0 && <p role="alert" data-attention="rate-choices" tabIndex={-1} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Choose a job and rate for {missingRateChoices.map((row) => row.employee_name).join(', ')} using the Job and rate selectors below before applying.</p>}
             {packageSources.length > 0 ? (
@@ -1473,17 +1473,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           </div>
         )}
 
-        {/* Applying Step */}
-        {step === 'applying' && (
-          <div className="py-8 text-center text-neutral-500">
-            Importing payroll data and calculating taxes...
-          </div>
-        )}
-
-        <div className={step === 'preview' ? 'sticky -bottom-4 z-10 -mx-4 border-t border-neutral-200 bg-white px-4 pb-4 sm:-bottom-6 sm:-mx-6 sm:px-6 sm:pb-6' : undefined}>
+        <div className={(step === 'preview' || step === 'applying') ? 'sticky -bottom-4 z-10 -mx-4 border-t border-neutral-200 bg-white px-4 pb-4 sm:-bottom-6 sm:-mx-6 sm:px-6 sm:pb-6' : undefined}>
           {step === 'preview' && applyBlockedReason && (
             <p id="apply-blocked-reason" role="status" className="pt-3 text-sm font-medium text-amber-900">{applyBlockedReason}</p>
           )}
+          <BusyStatus className="pt-3" busy={step === 'applying'}>Importing payroll data and calculating taxes…</BusyStatus>
           <DialogFooter>
             {step === 'upload' && (
               <>
@@ -1493,9 +1487,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 </Button>
               </>
             )}
-            {step === 'preview' && (
+            {(step === 'preview' || step === 'applying') && (
               <>
-                <Button variant="outline" disabled={loading} onClick={() => {
+                <Button variant="outline" disabled={loading || step === 'applying'} onClick={() => {
                   if (loading) return;
                   if (initialPreview) { handleClose(); return; }
                   // A worker still loading for this review must not open over the upload step.
@@ -1511,7 +1505,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                 }}>
                   Back
                 </Button>
-                <Button onClick={handleApply} disabled={!canApply} aria-describedby={applyBlockedReason ? 'apply-blocked-reason' : undefined}>
+                <Button loading={step === 'applying'} loadingLabel="Applying import…" onClick={handleApply} disabled={!canApply || step === 'applying'} aria-describedby={applyBlockedReason ? 'apply-blocked-reason' : undefined}>
                   Apply Import ({reviewedEmployeeCount} employees)
                 </Button>
               </>

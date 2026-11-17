@@ -345,3 +345,20 @@ it('retains the existing zero-on-clear behavior for ordinary numeric hours', asy
   await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
   expect(mocks.update.mock.calls[0][2].hours_worked).toBe(0);
 });
+
+it('keeps removal confirmation cancellable and announces saving while blocking repeated submissions', async () => {
+  const user = userEvent.setup();
+  mountSaved();
+  await user.click(screen.getByRole('button', { name: 'Remove from Payroll' }));
+  expect(screen.getByRole('button', { name: 'Yes, Remove' }).className).toContain('min-h-11');
+  expect(screen.getByRole('button', { name: 'No' }).className).toContain('min-h-11');
+  await user.click(screen.getByRole('button', { name: 'No' }));
+  expect(screen.queryByRole('button', { name: 'Yes, Remove' })).toBeNull();
+  mocks.update.mockReturnValue(new Promise(() => {}));
+  await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
+  const save = screen.getByRole('button', { name: 'Saving and recalculating…' });
+  expect(save).toHaveProperty('disabled', true);
+  expect(save.getAttribute('aria-busy')).toBe('true');
+  expect(screen.getByRole('status').lastElementChild?.textContent).toBe('Saving and recalculating payroll…');
+  expect(screen.getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', true);
+});

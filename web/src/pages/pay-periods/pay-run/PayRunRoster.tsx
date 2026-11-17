@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { BusyStatus } from '@/components/ui/busy-status';
 
 import type { PayRunSectionProps } from './usePayRunController';
 
@@ -18,6 +19,7 @@ export function PayRunRoster({
   payPeriod,
   payrollItems,
   processing,
+  processingAction,
   setAdditionalEmployeeIds,
   setBonusEdits,
   setBonusMap,
@@ -29,15 +31,16 @@ export function PayRunRoster({
   setTipsMap,
   setTipsPaidOutMap
 }: PayRunSectionProps<'roster'>) {
-  const [restoring, setRestoring] = useState(false);
+  const [restoringId, setRestoringId] = useState<number | null>(null);
+  const restoring = restoringId !== null;
   const [restoreError, setRestoreError] = useState('');
   const [restored, setRestored] = useState(false);
   const restore = async (employeeId: number) => {
-    setRestoring(true);
+    setRestoringId(employeeId);
     setRestoreError('');
     try { await handleRestoreEmployee(employeeId); setRestored(true); }
     catch (error) { setRestoreError(error instanceof Error ? error.message : 'Could not add employee back'); }
-    finally { setRestoring(false); }
+    finally { setRestoringId(null); }
   };
   return (<>
 {restored && (isCalculated || isDraft) && <p role="status" className="text-sm text-neutral-600">Imported hours aren't brought back. Enter hours or import again.</p>}
@@ -48,9 +51,10 @@ export function PayRunRoster({
     <ul className="mt-3 space-y-3">
       {payPeriod.excluded_employees.map(employee => <li key={employee.employee_id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 break-words"><p className="text-sm font-medium">{employee.name}</p><p className="text-sm text-neutral-600">{employee.reason || 'Removed from pay period'}</p></div>
-        <Button className="min-h-11 shrink-0" size="sm" variant="outline" disabled={restoring || processing || financialActionsHeld || !canEditPayPeriod || hasStagedWorksheetChanges} onClick={() => void restore(employee.employee_id)} aria-label={`Add back ${employee.name}`}>Add back</Button>
+        <Button className="min-h-11 shrink-0" size="sm" variant="outline" disabled={restoring || processing || financialActionsHeld || !canEditPayPeriod || hasStagedWorksheetChanges} loading={restoringId === employee.employee_id} loadingLabel="Adding back…" onClick={() => void restore(employee.employee_id)} aria-label={restoringId === employee.employee_id ? `Adding back ${employee.name}…` : `Add back ${employee.name}`}>Add back</Button>
       </li>)}
     </ul>
+    <BusyStatus className="mt-2" busy={restoring}>Adding employee back to this run…</BusyStatus>
     {hasStagedWorksheetChanges && <p className="mt-2 text-sm text-neutral-600">Calculate your worksheet edits first, then add someone back.</p>}
   </section>
 )}
@@ -105,9 +109,9 @@ export function PayRunRoster({
                   </ul>
                 </div>
                 {additionalEmployeeIds.size > 0 && (
-                  <Button size="sm" className="min-h-11" variant="outline" onClick={() => void handleRunPayroll()} disabled={processing || financialActionsHeld}>
+                  <div><Button size="sm" className="min-h-11" variant="outline" loading={processing && processingAction === 'calculate'} loadingLabel={isDraft ? 'Calculating…' : 'Recalculating…'} onClick={() => void handleRunPayroll()} disabled={processing || financialActionsHeld}>
                     {isDraft ? 'Calculate' : 'Recalculate'} with {additionalEmployeeIds.size} added
-                  </Button>
+                  </Button><BusyStatus className="mt-1" busy={processing && processingAction === 'calculate'}>Calculating payroll… This can take a few seconds.</BusyStatus></div>
                 )}
               </div>
             </div>

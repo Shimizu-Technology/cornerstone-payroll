@@ -712,7 +712,7 @@ it('keeps the dialog open, blocks duplicate writes and leaves a failed commit vi
   fireEvent.click(confirm); fireEvent.click(confirm);
   expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12, { acknowledged_outstanding_file_request_ids: [] });
   expect(screen.getByRole('dialog')).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Committing…' })).toHaveProperty('disabled', true);
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Committing…' })).toHaveProperty('disabled', true);
   await act(async () => rejectCommit(new Error('Commit rejected: stale approval')));
   const feedback = await screen.findByText('Commit rejected: stale approval');
   expect(feedback.closest('[role="dialog"]')).toBeTruthy();

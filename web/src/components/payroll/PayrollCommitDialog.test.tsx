@@ -45,6 +45,8 @@ describe('Payroll commit confirmation', () => {
     const state = props(); state.onConfirm.mockReturnValue(new Promise(() => {}));
     render(<PayrollCommitDialog {...state} />); await loaded();
     fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
+    expect(screen.getByRole('button', { name: 'Committing…' }).getAttribute('aria-busy')).toBe('true');
+    expect(screen.getAllByRole('status').some(status => status.lastElementChild?.textContent === 'Committing payroll… This can take a few seconds.')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Committing…' }));
     fireEvent.click(screen.getByRole('button', { name: 'Keep reviewing' })); fireEvent.keyDown(document, { key: 'Escape' });
     expect(state.onConfirm).toHaveBeenCalledOnce(); expect(state.onCancel).not.toHaveBeenCalled();
@@ -119,7 +121,7 @@ describe('Payroll commit confirmation', () => {
     const stale = { ...period, outstanding_file_requests: [request], payroll_items: [] };
     const state = props(stale);
     const view = render(<PayrollCommitDialog {...state} />);
-    expect(screen.getByRole('status')).toBeTruthy();
+    expect(screen.getByText('Loading current requests and check numbering…').getAttribute('role')).toBe('status');
     expect(screen.queryByText(/Riley's timesheet/)).toBeNull();
     expect(screen.queryByText('Total net pay')).toBeNull();
     expect(screen.queryByText('$0.00')).toBeNull();
@@ -128,7 +130,7 @@ describe('Payroll commit confirmation', () => {
     api.get.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     state.onConfirm.mockRejectedValueOnce(new ApiError('Changed. Reload the record.', 409, undefined, { code: 'check_number_changed' }));
     fireEvent.click(screen.getByRole('checkbox')); fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
-    await screen.findByRole('status');
+    await screen.findByText('Loading current requests and check numbering…');
     expect(screen.queryByText(/Riley's timesheet/)).toBeNull();
     expect(screen.queryByText('$1,234.56')).toBeNull();
     expect(screen.queryByText(/numbered from 1200/)).toBeNull();
