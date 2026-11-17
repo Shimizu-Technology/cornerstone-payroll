@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -73,4 +73,52 @@ it('links the unapproved commit reason directly to results and opens collapsed a
   await userEvent.click(link);
   expect(document.querySelector<HTMLDetailsElement>('#payroll-results')?.open).toBe(true);
   expect(screen.getByRole('button', { name: 'Approve reviewed payroll' })).toBeTruthy();
+});
+
+it.each([
+  ['draft', 'hours', 'calculate', 'Calculating…', 'Calculating payroll for 1 employee…'],
+  ['calculated', 'hours', 'calculate', 'Recalculating…', 'Recalculating payroll for 1 employee…'],
+  ['calculated', 'results', 'approve', 'Approving…', 'Approving payroll…'],
+  ['approved', 'commit', 'commit', 'Committing…', 'Committing payroll…'],
+] as const)('announces %s %s work only on the action actually in progress', (status, step, processingAction, label, message) => {
+  const props = { step, companyId: 1, payPeriod: { id: 2, status, run_purpose: 'regular' }, isDraft: status === 'draft', isCalculated: status === 'calculated', isApproved: status === 'approved', processing: true, processingAction,
+    hasManualHours: true, calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [] } as unknown as ComponentProps<typeof PayRunStepAction>;
+  render(<MemoryRouter><PayRunStepAction {...props} /></MemoryRouter>);
+  const button = screen.getByRole('button', { name: label });
+  expect(button).toHaveProperty('disabled', true);
+  expect(button.getAttribute('aria-busy')).toBe('true');
+  expect(button.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
+  const statusLine = screen.getByRole('status');
+  expect(statusLine.getAttribute('aria-live')).toBe('polite');
+  expect(statusLine.lastElementChild?.textContent).toContain(message);
+});
+
+it('does not label approval as busy while a calculation is running', () => {
+  const props = { step: 'results', companyId: 1, payPeriod: { id: 2, status: 'calculated' }, isCalculated: true, processing: true, processingAction: 'calculate', calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [] } as unknown as ComponentProps<typeof PayRunStepAction>;
+  render(<MemoryRouter><PayRunStepAction {...props} /></MemoryRouter>);
+  expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true);
+  expect(screen.getByRole('button', { name: 'Approve' }).getAttribute('aria-busy')).toBeNull();
+});
+
+it('shows unapproval feedback without marking Commit as busy', () => {
+  const props = { companyId: 1, payRunId: 2, payPeriod: { id: 2, status: 'approved', run_purpose: 'regular', excluded_employee_ids: [7] }, isApproved: true, processing: true, processingAction: 'unapprove',
+    calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [], handleUnapprove: vi.fn() } as unknown as ComponentProps<typeof PayRunProcessingActions>;
+  render(<MemoryRouter><PayRunProcessingActions {...props} /></MemoryRouter>);
+  expect(screen.getAllByRole('button', { name: 'Unapproving…' }).every(button => button.getAttribute('aria-busy') === 'true' && (button as HTMLButtonElement).disabled)).toBe(true);
+  expect(screen.getAllByRole('status').some(status => status.lastElementChild?.textContent === 'Unapproving payroll…')).toBe(true);
+  expect(screen.getByRole('button', { name: 'Commit' }).getAttribute('aria-busy')).toBeNull();
+});
+
+it('keeps the unapproval menu visible until the action finishes', async () => {
+  let finish!: () => void;
+  const unapprove = vi.fn().mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+  const props = { companyId: 1, payRunId: 2, payPeriod: { id: 2, status: 'approved', run_purpose: 'regular' }, isApproved: true,
+    calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [], handleUnapprove: unapprove } as unknown as ComponentProps<typeof PayRunProcessingActions>;
+  render(<MemoryRouter><PayRunProcessingActions {...props} /></MemoryRouter>);
+  const summary = screen.getByLabelText('More payroll actions');
+  await userEvent.click(summary);
+  await userEvent.click(screen.getByRole('button', { name: 'Roll Back Approval' }));
+  expect(summary.closest('details')).toHaveProperty('open', true);
+  finish();
+  await waitFor(() => expect(summary.closest('details')).toHaveProperty('open', false));
 });

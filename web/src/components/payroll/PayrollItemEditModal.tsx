@@ -9,6 +9,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { BusyStatus } from '@/components/ui/busy-status';
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
@@ -952,15 +953,16 @@ export function PayrollItemEditModal({
           </div>
         </div>
 
-        <DialogFooter className="!items-stretch gap-3 sm:items-center sm:justify-between">
+        <BusyStatus className="mt-4" busy={saving || removing}>{removing ? 'Removing employee from payroll…' : 'Saving and recalculating payroll…'}</BusyStatus>
+        <DialogFooter className="!flex-row flex-wrap !items-center gap-3 !justify-between sm:!space-x-0">
           <div>
             {confirmRemove ? (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-red-600">Remove this employee from payroll?</span>
-                <Button variant="destructive" size="sm" onClick={handleRemoveFromPayroll} disabled={saving || removing}>
-                  {removing ? 'Removing...' : 'Yes, Remove'}
+                <Button className="h-11" variant="destructive" loading={removing} loadingLabel="Removing…" onClick={handleRemoveFromPayroll} disabled={saving || removing}>
+                  Yes, Remove
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setConfirmRemove(false)} disabled={removing}>
+                <Button className="h-11" variant="outline" onClick={() => setConfirmRemove(false)} disabled={removing}>
                   No
                 </Button>
               </div>
@@ -976,12 +978,12 @@ export function PayrollItemEditModal({
               </Button>
             )}
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving || removing}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button className="h-11" variant="outline" onClick={() => onOpenChange(false)} disabled={saving || removing}>
               Cancel
             </Button>
-            <Button onClick={handleSaveAndRecalculate} disabled={saving || removing}>
-              {saving ? 'Saving...' : 'Save & Recalculate'}
+            <Button className="h-11" loading={saving} loadingLabel="Saving and recalculating…" onClick={handleSaveAndRecalculate} disabled={saving || removing}>
+              Save & Recalculate
             </Button>
           </div>
         </DialogFooter>

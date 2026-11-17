@@ -105,3 +105,33 @@ it('does not prompt for unapproval when approved fields are filled and no entrie
   expect(screen.queryByText('To enter pay, unapprove first.')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Unapprove to enter pay' })).toBeNull();
 });
+
+it('shows busy calculation feedback, preserves the entered value after failure, and permits retry', async () => {
+  let fail!: (error: Error) => void;
+  const calculate = vi.fn().mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; })).mockResolvedValue(undefined);
+  render(<ExpectedEntriesPanel onUnapprove={vi.fn()} payPeriod={period} disabled={false} onRestore={vi.fn()} onCalculate={calculate} onSaved={vi.fn()} onEnterPay={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('Hours: Manual hours'), { target: { value: '16' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save and calculate' }));
+  const busy = screen.getByRole('button', { name: 'Saving and calculating…' });
+  expect(busy).toHaveProperty('disabled', true);
+  expect(busy.getAttribute('aria-busy')).toBe('true');
+  expect(screen.getByRole('status').getAttribute('aria-live')).toBe('polite');
+  expect(screen.getByRole('status').lastElementChild?.textContent).toContain('Saving and calculating payroll…');
+  fireEvent.click(busy);
+  expect(calculate).toHaveBeenCalledOnce();
+  fail(new Error('Synthetic calculation failed'));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Synthetic calculation failed'));
+  expect(screen.getByLabelText('Hours: Manual hours')).toHaveProperty('value', '16');
+  fireEvent.click(screen.getByRole('button', { name: 'Save and calculate' }));
+  await waitFor(() => expect(calculate).toHaveBeenCalledTimes(2));
+});
+
+it('shows add-back feedback only on the selected employee while all other writes wait', async () => {
+  const excluded = { ...period, expected_entries: { ...period.expected_entries!, fields: [{ ...period.expected_entries!.fields[0], status: 'excluded' as const }] } };
+  const restore = vi.fn().mockReturnValue(new Promise(() => {}));
+  render(<ExpectedEntriesPanel onUnapprove={vi.fn()} payPeriod={excluded} disabled={false} onRestore={restore} onCalculate={vi.fn()} onSaved={vi.fn()} onEnterPay={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add back to this run' }));
+  expect(screen.getByRole('button', { name: 'Adding back…' }).getAttribute('aria-busy')).toBe('true');
+  expect(screen.getByRole('button', { name: 'Not paid this period' })).toHaveProperty('disabled', true);
+  expect(screen.getByRole('status').lastElementChild?.textContent).toBe('Adding employee back to this run…');
+});

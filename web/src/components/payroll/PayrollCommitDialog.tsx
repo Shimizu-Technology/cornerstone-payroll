@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError, payPeriodsApi, type PayrollCommitSnapshot } from '@/services/api';
 import { payrollClientCommitReason } from '@/lib/payrollClientCommitReason';
 import { Button } from '@/components/ui/button';
+import { BusyStatus } from '@/components/ui/busy-status';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatCurrency, formatDateRange, formatDate } from '@/lib/utils';
 import type { PayPeriod } from '@/types';
@@ -155,9 +156,10 @@ export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyNam
         {clientCommitReason && <p role="alert" className={`${warningStyle} whitespace-pre-wrap break-words`}>{clientCommitReason}</p>}
         <p className="text-sm leading-6 text-neutral-600">Review this run before confirming. Later payroll changes must use the corrections workflow.</p>
       </div>}
+      <BusyStatus className="mt-3" busy={busy}>Committing payroll… This can take a few seconds.</BusyStatus>
       <DialogFooter className="gap-2 sm:gap-0">
         <Button className="max-sm:min-h-[44px]" type="button" variant="outline" disabled={busy} onClick={onCancel}>Keep reviewing</Button>
-        <Button className="max-sm:min-h-[44px]" type="button" disabled={!canConfirm} onClick={() => void confirm()}>{busy ? 'Committing…' : 'Confirm commit'}</Button>
+        <Button className="max-sm:min-h-[44px]" type="button" loading={busy} loadingLabel="Committing…" disabled={!canConfirm} onClick={() => void confirm()}>Confirm commit</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>;
