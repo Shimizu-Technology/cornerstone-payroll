@@ -10,7 +10,7 @@
 - One file covers both. SSA's EFW2 text format is what SSA's Business Services Online (BSO) accepts, and DRT's GuamTax.com "E-File W-3/W-2GU" upload accepts **the same EFW2 format**.
 - 1099-NEC and 1096 go to **Guam DRT, not the IRS**. GuamTax.com takes them as an IRS Publication 1220 text file.
 - Due date is **Monday, February 1, 2027**, because January 31 is a Sunday. SSA states this. DRT has not posted a 2026 alert yet, so confirm its date.
-- Payers with **10 or more returns** (W-2s and 1099s counted together, to be safe) must e-file with both SSA and DRT. MoSa's is well over that.
+- Payers with **10 or more returns** must e-file with both SSA and DRT. To be safe, count every return DRT includes (W-2GU, 1099-NEC, 1099-MISC, 1098 variants and W-2G) together. MoSa's is well over that.
 - Last year Cornerstone used **ezW2 2025** (Halfpricesoft, 2-user network edition, about $139). It's a Windows desktop program activated by a license key, with no web account. Its website never mentions W-2GU or W-3SS. Before relying on last year's output, look at one of its EFW2 files to see whether it was filed as a W-2GU or as an ordinary US W-2.
 - The app already prepares W-2GU numbers and a 1099-NEC summary, but it does not produce official forms or any filing file. A realistic build fits before the deadline, provided the accounts and lead-time items below start now.
 
@@ -22,16 +22,16 @@ Cornerstone's own Client Compliance tracker (October 2026) agrees: "W-2GU / W-3S
 |---|---|---|---|
 | W-2GU, with W-3SS totals | SSA | EFW2 text file uploaded to BSO ("Report Wages to Social Security") | Feb 1, 2027 |
 | W-2GU, with W-3SS (Copy 1) | Guam DRT | The same EFW2 file uploaded at GuamTax.com ("E-File W-3/W-2GU"). An e-file counts as the official filing, so no paper is needed. | Jan 31 / Feb 1, 2027 (confirm) |
-| W-2GU Copies B, C and 2 | Each employee | Paper or PDF. Plain paper is fine for employee copies. | Feb 1, 2027 |
-| 1099-NEC, with 1096 | Guam DRT | Pub 1220 text file uploaded at GuamTax.com ("E-File 1096/1099"), or paper below 10 returns | Feb 1, 2027 |
-| 1099-NEC Copy B | Each contractor | Paper or PDF | Feb 1, 2027 |
+| W-2GU Copies B, C and 2 | Each employee | Paper. Plain paper is fine for employee copies. PDF-only delivery requires the employee's prior electronic consent (26 CFR 31.6051-1(j)); otherwise paper. | Feb 1, 2027 |
+| 1099-NEC, with 1096 | Guam DRT | Pub 1220 text file uploaded at GuamTax.com ("E-File 1096/1099"), or paper only when the payer's combined count of all DRT information returns is under 10 | Feb 1, 2027 |
+| 1099-NEC Copy B | Each contractor | Paper. PDF-only delivery requires the payee's affirmative consent (IRS Pub 1179 / 1099 general instructions); otherwise paper. Confirm DRT applies the same rule. | Feb 1, 2027 |
 
 Notes:
 
 - **No paper W-3SS when e-filing.** Instructions for Form W-3SS: "Do not send Form W-3SS if you filed electronically with the SSA." DRT says the GuamTax e-file "constitutes official filing."
 - **1099 threshold:** $2,000 for payments made after 2025 (1099-NEC and most 1099-MISC). The app already uses this (`db/seeds/information_return_thresholds.rb`).
 - **Corrections:** W-2c goes to SSA as an EFW2C file or through W-2c Online. If the original had to be e-filed, the correction must be too. DRT does not take corrections online, so they go on paper.
-- **Guam e-file mandate:** GTITC §6011(e)(2)(A), effective for tax year 2023 filings, per DRT Tax Alert 23-01-ITAPB. The alert says the 10-return rule applies "separately for each type of form" and also says to add all returns together. The safe reading is to e-file everything once the combined count reaches 10. There is no automatic 30-day extension.
+- **Guam e-file mandate:** GTITC §6011(e)(2)(A), effective for tax year 2023 filings, per DRT Tax Alert 23-01-ITAPB. The alert says the 10-return rule applies "separately for each type of form" and also says to add all returns together. The safe reading is to e-file everything once the combined count of all DRT information returns (W-2GU, 1099-NEC, 1099-MISC, 1098 variants, W-2G) reaches 10. There is no automatic 30-day extension; Form 8809 can request 30 more days to file with DRT, but not to furnish copies to workers.
 - **SSA e-file mandate:** 10 or more returns combined, since 2024. A waiver uses Form 8508.
 
 ## 2. The EFW2 file (SSA and GuamTax)
@@ -82,7 +82,7 @@ Testing and upload:
 
 - **Same upload format as SSA.** GuamTax help: "W-3/W-2GU data must be in ASCII text format in the same file format defined in the Social Security Administration's (SSA's) Specifications for Filing Forms W-2GU Electronically (EFW2)."
 - **Business account required.** Clients need a GuamTax business account (ID and PIN) to e-file.
-- **Payroll processors.** A processor that uploads several companies in one file needs its account flagged. That takes a registration form (`GuamTax_SWICA_PayrollProcessors20240715.pdf`) that DRT approves and then mails back with an ID and access code. Because it goes by mail, **start this now** if Cornerstone wants to upload all clients at once.
+- **Payroll processors.** To e-file W-3/W-2GU data **for other companies at all**, whether in one combined file or one file per client, Cornerstone's GuamTax account must be flagged as a payroll processor account. That takes a registration form (`GuamTax_SWICA_PayrollProcessors20240715.pdf`), faxed or mailed to DRT's PIN Administrator ((671) 635-1809, pinadmin@revtax.guam.gov), which DRT approves and then mails back with an ID and access code. Without it, each client has to upload under its own GuamTax account. Because it goes by mail, **start this now**.
 - **1099 upload.** ASCII text following **IRS Publication 1220** (the old IRS FIRE layout). DRT e-files 1099-MISC, 1099-NEC, 1098 variants, W-2GU and W-2G.
 - **The FIRE shutdown.** The IRS shuts FIRE down after November 19, 2026, and the latest Pub 1220 is "For Tax Year 2025 (Rev. 5-2026)." There may never be a tax year 2026 edition, so ask DRT which Pub 1220 version it validates against.
 - **Quarterly withholding returns.** DRT also e-files the quarterly W-1. There is no separate annual withholding reconciliation form.
@@ -144,7 +144,8 @@ These are about correct numbers, so they come first.
 5. **MoSa's tips before cutover.** Box 12 TP and TT come only from live payroll. QuickBooks-era history is marked unclassified. If MoSa's staff earned tips before August 24, those need a manual review.
 6. **Addresses.** The QuickBooks parser drops Nevada addresses, so some imported workers may have blank addresses.
 7. **Box 12 and Box 14 coverage.** Only code D (401(k)) is modeled. Codes DD (employer health cost), W, C, Box 10 (dependent care), Box 8 (allocated tips), Box 14 "other" and third-party sick pay are not modeled. Confirm whether any client needs them this year.
-8. **Labels and fields.** The W-2 CSV calls Box 2 "Federal Income Tax Withheld". On a W-2GU it is Guam income tax withheld. Employees have no name-suffix field, which EFW2 RW records include.
+8. **Prior-provider overlap.** Opening YTD balances are included in W-2GU totals. If a prior provider files a W-2 covering part of 2026, those wages must not be reported again. Before building, record for each client and period who files, and block "ready" when imported opening balances cover periods a prior provider is filing. The existing filing-responsibility setting is where this belongs (`payroll_filing_responsibility_gate.rb`).
+9. **Labels and fields.** The W-2 CSV calls Box 2 "Federal Income Tax Withheld". On a W-2GU it is Guam income tax withheld. Employees have no name-suffix field, which EFW2 RW records include.
 
 ## 8. Build plan
 
@@ -153,10 +154,10 @@ The work happens in this order because each step depends on the numbers from the
 | Step | Work | Done when |
 |---|---|---|
 | 0 (now, Cornerstone) | Confirm BSO access and any new authorization steps. Confirm the GuamTax business accounts, and start the payroll-processor registration if wanted. Answer the questions in §9. | Accounts confirmed, answers recorded |
-| 1 | Data fixes from §7: Box 1 basis, 941/W-1 reconciliation, blocking warnings, contractor checks in 1099 totals | Reconciliation ties out for each client on staging copies |
+| 1 | Data fixes from §7: Box 1 basis, 941/W-1 reconciliation, blocking warnings, contractor checks in 1099 totals, prior-provider overlap check | Reconciliation ties out for each client on staging copies |
 | 2 | W-2GU employee and DRT copies through `OfficialPdfOverlay`, with an audited full-SSN path | Dafne reviews sample copies for one client |
 | 3 | W-3SS totals and the EFW2 generator, with byte-length and total checks; the employer fields it needs; a per-company "kind of employer" setting | The file passes AccuWage; a GuamTax test upload succeeds |
-| 4 | 1099-NEC copies, the 1096 and the Pub 1220 file for GuamTax | DRT accepts a test upload, or Cornerstone files on paper below 10 returns |
+| 4 | 1099-NEC copies, the 1096 and the Pub 1220 file for GuamTax | DRT accepts a test upload, or Cornerstone files on paper for a payer whose combined DRT return count is under 10 |
 | 5 | Filing workflow: generate, review, upload outside the app, record acceptance evidence (`PayrollFilingRecord`) | First client filed and accepted |
 | Later | W-2c / EFW2C, employee e-delivery with consent, 1099-MISC if needed | Before the 2027 season |
 
@@ -170,11 +171,11 @@ Built this way, the year-end work is the same for every client. It is driven by 
 
 1. **Last year's files.** Can we have one client's EFW2 `.txt` from ezW2, plus a printed W-2? We'll check whether it was filed as W-2GU (RE position 220 = `G`, Guam tax in RO records) and use it as a format reference.
 2. **SSA access.** Who holds Cornerstone's BSO login? Has SSA asked them to complete the new authorization (company officer and third-party submitter)?
-3. **GuamTax.** Does each client have its own GuamTax business account, or does Cornerstone file for them? Does Cornerstone want the payroll-processor registration so it can upload all clients in one file?
+3. **GuamTax.** Does each client have its own GuamTax business account, or does Cornerstone file for them? If Cornerstone files for them, its account needs the payroll-processor registration (§3) whether it uploads one file or one per client.
 4. **1099s last year.** Were they filed with DRT on paper or by upload? How many clients have 1099 payees, and roughly how many forms each?
 5. **Pre-tax deductions.** Does any client have pre-tax health insurance, cafeteria-plan (Section 125), dependent care or HSA deductions? This decides the Box 1 fix and Box 12/Box 10 coverage.
 6. **Other W-2 items.** Does any client report employer health cost (Box 12 DD), allocated tips (Box 8) or third-party sick pay?
-7. **Prior payroll provider.** Which clients had a provider before Cornerstone during 2026, so that provider files part of the year? The app has a filing-responsibility setting for this.
+7. **Prior payroll provider.** Which clients had a provider before Cornerstone during 2026, and for which periods does that provider file? This has to be settled per client before the build starts, so opening balances aren't reported twice (§7 item 8).
 8. **Delivery.** Does each client want paper copies for employees, PDFs, or both? Electronic delivery of a W-2 needs each employee's prior consent.
 9. **DRT confirmations** (Cornerstone can ask DRT, or we can draft the email): the 2026 due date; which Pub 1220 version GuamTax accepts for tax year 2026; and whether a Guam business paying an off-island contractor still files the 1099 with DRT.
 

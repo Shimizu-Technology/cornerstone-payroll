@@ -100,7 +100,7 @@ This plan proposes one change to that decision. Self-service for pay and HR reco
 
 **Rules we have to follow:**
 
-- **W-2 e-delivery** (26 CFR 31.6051-1(j)). The employee consents electronically and in advance, after the required disclosures. The notice email's subject line reads "IMPORTANT TAX RETURN DOCUMENT AVAILABLE". If that email bounces, a paper notice follows within 30 days. The form stays posted through October 15 of the next year. Paper is the default for anyone who hasn't consented. Guam follows the same rule through its mirror code (inferred; confirm with DRT).
+- **W-2 e-delivery** (26 CFR 31.6051-1(j)). The employee consents electronically and in advance, after the required disclosures. The notice email's subject line reads "IMPORTANT TAX RETURN DOCUMENT AVAILABLE". If that email bounces, a paper notice follows within 30 days. The form stays posted through October 15 of the next year (the next business day if that falls on a weekend or holiday). A corrected W-2 stays posted through that date or 90 days after it is posted, whichever is later. Paper is the default for anyone who hasn't consented. Guam follows the same rule through its mirror code (inferred; confirm with DRT).
 - **Electronic W-4** (31.3402(f)(5)-1). The system must reasonably confirm the signer is the employee, include the perjury statement, and make the e-signature the final entry.
 - **Guam pay statements.** The DOL poster says employers "must show, on a check stub or pay statement, all deductions taken… and a copy of it must be given to the employee." Whether an electronic stub counts as "given" is not confirmed. Until it is, paper stays available.
 - **Record retention.** Guam requires wage records for at least 6 years (17 GAR §4104), the IRS 4, FLSA 3. Design for 6+ years.
@@ -159,10 +159,11 @@ Don't reuse staff and client `users`. Add:
 **Activation, following ADP's pattern:**
 
 1. Cornerstone or the client admin sends an invite from the employee record.
-2. The employee confirms their date of birth and the last four digits of their SSN.
+2. The employee confirms two facts on file: normally date of birth and the last four digits of the SSN.
+   - **When those aren't on file** (a missing DOB or SSN, or a business contractor identified by an EIN), use another check: the EIN's last four plus the ZIP code on file, or a one-time activation code that Cornerstone or the client admin hands over in person or prints on a stub. Staff record which method was used.
 3. They verify a code sent by email or text.
 4. They set up MFA.
-5. They add a personal email, which keeps working after they leave the job.
+5. They're asked to add a personal email, which keeps working after they leave the job. It's recommended, not required: a verified phone-only account is allowed. Phone-only accounts get W-2 and 1099 notices by paper where e-delivery rules require it.
 
 **Termination:** when the employee is terminated in Payroll, the link becomes *former*. Former employees keep read-only access to stubs and W-2s for the retention period (6 years) and lose everything else.
 
