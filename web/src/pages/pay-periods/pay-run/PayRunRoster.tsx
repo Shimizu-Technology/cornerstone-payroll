@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { BusyStatus } from '@/components/ui/busy-status';
+import { AddBackNotice } from './AddBackNotice';
+import { addBackSummary } from './addBackText';
 
 import type { PayRunSectionProps } from './usePayRunController';
 
@@ -12,6 +14,7 @@ export function PayRunRoster({
   financialActionsHeld,
   handleRunPayroll,
   handleRestoreEmployee,
+  addBackNotice,
   canEditPayPeriod,
   hasStagedWorksheetChanges,
   isCalculated,
@@ -34,16 +37,20 @@ export function PayRunRoster({
   const [restoringId, setRestoringId] = useState<number | null>(null);
   const restoring = restoringId !== null;
   const [restoreError, setRestoreError] = useState('');
-  const [restored, setRestored] = useState(false);
   const restore = async (employeeId: number) => {
     setRestoringId(employeeId);
     setRestoreError('');
-    try { await handleRestoreEmployee(employeeId); setRestored(true); }
+    try { await handleRestoreEmployee(employeeId, 'roster'); }
     catch (error) { setRestoreError(error instanceof Error ? error.message : 'Could not add employee back'); }
     finally { setRestoringId(null); }
   };
+  // Expected entries shows an add-back it lists; this covers the rest.
+  const rosterNotice = addBackNotice?.source === 'roster' &&
+    !payPeriod.expected_entries?.added_back?.some(entry => entry.employee_id === addBackNotice.result.employee_id) ? addBackNotice : null;
   return (<>
-{restored && (isCalculated || isDraft) && <p role="status" className="text-sm text-neutral-600">Imported hours aren't brought back. Enter hours or import again.</p>}
+{rosterNotice && (isCalculated || isDraft) && <AddBackNotice result={rosterNotice.result} hoursEntered={rosterNotice.hoursEntered} />}
+{/* Stays mounted so the add-back result is announced when it arrives. */}
+<p aria-live="polite" aria-atomic="true" className="sr-only" data-testid="add-back-announcement">{addBackNotice?.source === 'roster' ? addBackSummary(addBackNotice.result, addBackNotice.hoursEntered) : ''}</p>
 {(isCalculated || isDraft) && !!payPeriod.excluded_employees?.length && (
   <section aria-label="Removed from this run" className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
     <h3 className="font-medium text-neutral-800">Removed from this run ({payPeriod.excluded_employees.length})</h3>

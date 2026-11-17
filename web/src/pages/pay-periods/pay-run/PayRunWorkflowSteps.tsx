@@ -43,7 +43,7 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
       <p>For workers without AIRE time or tax evidence, use Edit payroll → Remove from Payroll, or reactivate them, before approving or committing. No paychecks are removed automatically.</p>
     </div>}
     <ExpectedEntriesPanel key={payPeriod.id} onUnapprove={sections.processing.handleUnapprove} payPeriod={payPeriod} disabled={sections.roster.processing || sections.roster.financialActionsHeld || !sections.roster.canEditPayPeriod || (payPeriod.status !== 'approved' && sections.roster.hasStagedWorksheetChanges)}
-      onRestore={sections.roster.handleRestoreEmployee} onCalculate={sections.roster.onCalculateExpectedEntry} onSaved={() => sections.roster.loadPayPeriod(payPeriod.id, true, true)} onEnterPay={id => {
+      onRestore={employeeId => sections.roster.handleRestoreEmployee(employeeId)} addBackNotice={sections.roster.addBackNotice} onCalculate={sections.roster.onCalculateExpectedEntry} onSaved={() => sections.roster.loadPayPeriod(payPeriod.id, true, true)} onEnterPay={id => {
         sections.roster.setAdditionalEmployeeIds(prev => new Set([...prev, id]));
         sections.roster.setHoursMap(prev => ({ ...prev, [id]: prev[id] || { regular: 0, overtime: 0 } }));
         const step = document.getElementById('payroll-hours') as HTMLDetailsElement | null;

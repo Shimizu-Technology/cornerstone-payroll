@@ -105,6 +105,27 @@ For each entry:
 - **Enter pay for Name** adds them to the hours worksheet so you can enter hours, then calculate.
 - **Not paid this period** records that they're intentionally not paid this run. You can add an optional note. **Undo not paid for Name** reverses it.
 
+**Removing someone and adding them back.** If a worker's hours haven't arrived (Addison, for example), remove them with **⋯ → Edit payroll → Remove from Payroll**. They show as **Excluded this period**, and in **Removed from this run** on the Hours step. When the hours arrive, unapprove if needed (**Unapprove to add someone back**), then choose **Add back to this run** (or **Add back** on the Hours step).
+
+Adding someone back brings back what the current import applied for them, except hours:
+
+- the workbook loan, tips, bonus and one-time items come back as the import applied them, with the same loan checks;
+- hours don't come back, so enter them in Expected entries or the worksheet, then calculate;
+- **Pay this period** doesn't come back; enter it in Expected entries.
+
+The panel says what came back next to the worker, for example *"Jordan Parker is back. Restored from the import: Loan $150.00. Hours aren't brought back. Enter hours, then calculate."* The message stays after a page refresh until hours are entered and nothing is left to enter. A newer import applied afterwards replaces it.
+
+Until hours are entered, the worker stays **Missing** under **Usually paid**, so the run can't be approved without them. If their only pay this period really is tips or a bonus, choose **No hours this period**. It records that answer in the audit log, and **Undo no hours for Name** reverses it.
+
+Some amounts aren't brought back automatically. The panel lists each one with its amount and what to do:
+
+- **Employee Loans changed since the import** (a loan was set up, paused or rescheduled): the panel says what Employee Loans will deduct this payday and what the workbook said. Fix it in **Employee Loans**. Don't enter the workbook loan by hand, because Employee Loans may already deduct it and the check would come out short.
+- **newer files replaced the import**: apply the current import review. The panel asks you to enter an amount by hand only when Employee Loans won't deduct a loan this payday.
+- **a one-time item no longer passes the import's checks**: add it in **Edit payroll**.
+- **the worker already has a payroll row in this run**: check that row's amounts instead of entering anything again.
+
+Removing and adding back again, or applying the import again afterwards, doesn't double any amount. The audit log records the add-back with what was restored and what wasn't.
+
 The panel's first line says **Resolve these entries before approval: …** until everything is filled or answered. Then it says **All expected entries are resolved.** Approve and Commit stay off until it's resolved. The panel only shows while the run is a draft or calculated, so unapprove first if you need to change an entry after approving.
 
 ## 4. Calculate, review, approve

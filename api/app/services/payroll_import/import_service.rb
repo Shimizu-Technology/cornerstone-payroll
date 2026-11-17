@@ -159,7 +159,72 @@ module PayrollImport
       end
     end
 
+    # Rebuilds an added-back worker's row from this import's applied row,
+    # without hours; staff enter hours next. The caller holds the locks and
+    # leaves out anything that is no longer safe to restore.
+    def restore_without_hours!(employee:, row:, tips_paid_out_from_tips:, evidence: {})
+      raise ArgumentError, "Employee must belong to this client" unless employee.company_id == company_id
+
+      payroll_item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+      raise ArgumentError, "#{employee.full_name} already has a payroll row in this run." if payroll_item.persisted?
+
+      payroll_item.company_id = pay_period.company_id
+      apply_employment!(payroll_item, employee)
+      deductions = row[:loan_deduction].to_d.positive? || Array(row[:loan_reconciliation_matches]).any? ||
+        Array(row[:payroll_components]).any? { |component| component.to_h.with_indifferent_access[:kind] == "deduction" }
+      payroll_item.custom_columns_data = payroll_item.custom_columns_data.to_h.merge(
+        "mosa_missing_revel_hours" => deductions,
+        # No hours came back, so a later Revel import asks before replacing
+        # the hours staff enter now.
+        "mosa_imported_hours" => { "regular_hours" => "0.0", "overtime_hours" => "0.0" },
+        "import_add_back" => evidence.deep_stringify_keys
+      )
+      apply_source_amounts!(payroll_item, employee, row, tips_paid_out_from_tips: tips_paid_out_from_tips)
+      payroll_item.calculate!
+      payroll_item
+    end
+
+    # Whether Employee Loans or other loan setup deducts on its own this payday.
+    def loan_setup_due?(employee)
+      configured_loan_due?(employee)
+    end
+
+    # Why apply would refuse this one-time item, or nil.
+    def component_error(component)
+      validate_component!(component)
+      nil
+    rescue ArgumentError => e
+      e.message
+    end
+
     private
+
+    def apply_employment!(payroll_item, employee)
+      payroll_item.employment_type = employee.employment_type
+      payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
+      payroll_item.pay_rate = employee.pay_rate
+      payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
+    end
+
+    # Everything a source row writes besides hours and period pay.
+    def apply_source_amounts!(payroll_item, employee, row, tips_paid_out_from_tips:)
+      # Set tips from Excel — reported_tips is the taxable tip source of truth.
+      # Legacy `tips` is cleared to prevent historical double counting.
+      payroll_item.reported_tips = row[:total_tips].to_f
+      row_tips_paid_out = if row[:tips_already_paid].nil?
+        tips_paid_out_from_tips
+      else
+        row[:tips_already_paid]
+      end
+      payroll_item.tips_paid_out = row_tips_paid_out ? row[:total_tips].to_f : 0.0
+      payroll_item.tips = 0.0  # Reset to avoid double-counting
+      payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
+      payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
+      PayrollBonusInput.import!(payroll_item, row[:bonus])
+      payroll_item.import_source = "mosa_revel"
+      payroll_item.sync_default_payroll_adjustments!(employee)
+      apply_imported_components!(payroll_item, row[:payroll_components])
+    end
 
     # What an earlier import wrote, or no hours at all when none did.
     def hours_imported_before(payroll_item)
@@ -235,11 +300,7 @@ module PayrollImport
 
           begin
             PayrollItem.transaction(requires_new: true) do
-              # Set employment info
-              payroll_item.employment_type = employee.employment_type
-              payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
-              payroll_item.pay_rate = employee.pay_rate
-              payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
+              apply_employment!(payroll_item, employee)
               apply_period_pay!(payroll_item, employee, row)
 
               # Keep emailed hours on workbook-only rows, even under force_overwrite.
@@ -268,22 +329,7 @@ module PayrollImport
                 }
               )
 
-              # Set tips from Excel — reported_tips is the taxable tip source of truth.
-              # Legacy `tips` is cleared to prevent historical double counting.
-              payroll_item.reported_tips = row[:total_tips].to_f
-              row_tips_paid_out = if row[:tips_already_paid].nil?
-                tips_paid_out_from_tips
-              else
-                row[:tips_already_paid]
-              end
-              payroll_item.tips_paid_out = row_tips_paid_out ? row[:total_tips].to_f : 0.0
-              payroll_item.tips = 0.0  # Reset to avoid double-counting
-              payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
-              payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
-              PayrollBonusInput.import!(payroll_item, row[:bonus])
-              payroll_item.import_source = "mosa_revel"
-              payroll_item.sync_default_payroll_adjustments!(employee)
-              apply_imported_components!(payroll_item, row[:payroll_components])
+              apply_source_amounts!(payroll_item, employee, row, tips_paid_out_from_tips: tips_paid_out_from_tips)
 
               # Calculate payroll (taxes, deductions, net pay)
               payroll_item.calculate!
