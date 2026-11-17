@@ -2169,6 +2169,76 @@ it('restores a removed expected-hours employee and keeps inline hours entry enab
   expect(await screen.findByText('Manual worker hours · Filled: 16 h')).toBeTruthy();
 });
 
+it('treats a row the add-back rebuilt from the import as saved, so hours entry stays enabled and the loan is kept', async () => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Avery', last_name: 'Monroe', employment_type: 'hourly', pay_rate: 35, status: 'active', pay_frequency: 'biweekly',
+    wage_rates: [{ id: 3, label: 'Maintenance', rate: 35, is_primary: true, active: true }] } as Employee;
+  const field = { id: 4, employee_id: 30, employee_wage_rate_id: 3, wage_rate: '35', label: 'Avery Monroe · maintenance hours', kind: 'extra_hours', required: true, allow_none: true, status: 'excluded', value: '0' };
+  const period = { ...initialPayPeriod, status: 'calculated', run_purpose: 'regular', payroll_items: [], excluded_employee_ids: [30],
+    excluded_employees: [{ employee_id: 30, name: 'Avery Monroe', reason: 'Removed from pay period' }],
+    expected_entries: { fields: [field], missing_regulars: [], outstanding: [] } } as unknown as PayPeriod;
+  const restoredItem = { id: 91, employee_id: 30, employee_name: 'Avery Monroe', employment_type: 'hourly', pay_rate: 35, hours_worked: 0, overtime_hours: 0,
+    loan_deduction: 0, requested_loan_deduction: 159.1, reported_tips: 0, tips_paid_out: 0, bonus: 0, gross_pay: 0, net_pay: 0, wage_rate_hours: [], import_source: 'mosa_revel' };
+  const restored = { ...period, status: 'draft', payroll_items: [restoredItem], excluded_employee_ids: [], excluded_employees: [],
+    expected_entries: { fields: [{ ...field, status: 'missing' }], missing_regulars: [], outstanding: ['Avery Monroe · maintenance hours'] } } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.restoreEmployee.mockResolvedValue({ add_back: { employee_id: 30, employee_name: 'Avery Monroe', restored: [{ kind: 'loan', label: 'Loan', amount: '159.1' }], not_restored: [] } });
+  apiMocks.get.mockResolvedValue({ pay_period: restored });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: restored, results: { success: [], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add back to this run' }));
+  // Shown in the row and announced by the mounted live region.
+  expect(await screen.findAllByText(/Avery Monroe is back\. Restored from the import: Loan \$159\.10\./)).toHaveLength(2);
+  const hours = await screen.findByLabelText('Hours: Avery Monroe · maintenance hours');
+  await waitFor(() => expect(hours).toHaveProperty('disabled', false));
+  fireEvent.change(hours, { target: { value: '40' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save and calculate' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledOnce());
+  const payload = apiMocks.runPayroll.mock.calls[0][1];
+  expect(payload.hours['30'].wage_rates).toContainEqual(expect.objectContaining({ employee_wage_rate_id: 3, regular_hours: 40 }));
+  expect(payload.loan_deductions?.['30'] ?? 159.1).toBe(159.1);
+});
+
+it('keeps what was not brought back on screen when the reload after an add-back fails', async () => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Avery', last_name: 'Monroe', employment_type: 'hourly', pay_rate: 35, status: 'active', pay_frequency: 'biweekly',
+    wage_rates: [{ id: 3, label: 'Maintenance', rate: 35, is_primary: true, active: true }] } as Employee;
+  const field = { id: 4, employee_id: 30, employee_wage_rate_id: 3, wage_rate: '35', label: 'Avery Monroe · maintenance hours', kind: 'extra_hours', required: true, allow_none: true, status: 'excluded', value: '0' };
+  const period = { ...initialPayPeriod, status: 'calculated', run_purpose: 'regular', payroll_items: [], excluded_employee_ids: [30],
+    excluded_employees: [{ employee_id: 30, name: 'Avery Monroe', reason: 'Removed from pay period' }],
+    expected_entries: { fields: [field], missing_regulars: [], outstanding: [] } } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.restoreEmployee.mockResolvedValue({ add_back: { employee_id: 30, employee_name: 'Avery Monroe', restored: [],
+    not_restored: [{ key: 'loan', kind: 'loan', label: 'Loan', amount: '159.1', enter_by_hand: true, reason: 'The import was replaced by newer files. Apply the current import review, or enter it by hand. Enter it under Hours → Tips & Deductions.' }] } });
+  apiMocks.get.mockRejectedValue(new Error('Network down'));
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add back to this run' }));
+  expect(await screen.findByText('Employee added back, but the run could not reload. Try Add back again to refresh it.')).toBeTruthy();
+  expect(screen.getByText(/Loan \$159\.10: The import was replaced by newer files\./)).toBeTruthy();
+});
+
+it('keeps the roster add-back notice after the run returns to draft', async () => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Avery', last_name: 'Monroe', employment_type: 'hourly', pay_rate: 35, status: 'active', pay_frequency: 'biweekly' } as Employee;
+  const period = { ...initialPayPeriod, status: 'calculated', run_purpose: 'regular', payroll_items: [], excluded_employee_ids: [30],
+    excluded_employees: [{ employee_id: 30, name: 'Avery Monroe', reason: 'Removed from pay period' }] } as unknown as PayPeriod;
+  const restoredItem = { id: 91, employee_id: 30, employee_name: 'Avery Monroe', employment_type: 'hourly', pay_rate: 35, hours_worked: 0, overtime_hours: 0,
+    loan_deduction: 0, requested_loan_deduction: 159.1, gross_pay: 0, net_pay: 0, wage_rate_hours: [], import_source: 'mosa_revel' };
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.restoreEmployee.mockResolvedValue({ add_back: { employee_id: 30, employee_name: 'Avery Monroe', restored: [{ kind: 'loan', label: 'Loan', amount: '159.1' }], not_restored: [] } });
+  apiMocks.get.mockResolvedValue({ pay_period: { ...period, status: 'draft', payroll_items: [restoredItem], excluded_employee_ids: [], excluded_employees: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add back Avery Monroe' }));
+  await waitFor(() => expect(apiMocks.restoreEmployee).toHaveBeenCalledExactlyOnceWith(12, 30));
+  expect(await screen.findAllByText("Avery Monroe is back. Restored from the import: Loan $159.10. Hours aren't brought back. Enter hours, then calculate.")).toHaveLength(2);
+});
+
 it('honors a fresh dialog confirmation when the page still has an older client-review blocker', async () => {
   vi.clearAllMocks();
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });

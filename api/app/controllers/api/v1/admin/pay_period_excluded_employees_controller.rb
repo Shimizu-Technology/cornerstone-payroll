@@ -17,6 +17,7 @@ module Api
 
             employee = Employee.where(company: current_company).lock.find(params[:employee_id])
             exclusion = period.pay_period_excluded_employees.find_by(employee: employee)
+            add_back = nil
             if exclusion
               unless Employee.where(company: current_company).eligible_for_payroll_run(period, explicitly_selected: true).exists?(id: employee.id)
                 return render json: { error: "This employee is not eligible for this run's dates. Review their employment status before adding them back." }, status: :unprocessable_entity
@@ -24,12 +25,23 @@ module Api
 
               reason = exclusion.reason
               exclusion.destroy!
+              # Hours stay out; staff enter them next. The import's other
+              # amounts come back so the check isn't short a deduction.
+              add_back = PayrollImport::AddBackRestore.new(pay_period: period, employee: employee, actor: current_user).call
+              if add_back&.dig(:restored)&.any?
+                period.invalidate_calculation!(reason: "An employee was added back with amounts restored from the import.")
+              end
               AuditLog.record!(user: current_user, company_id: current_company.id,
                 action: "pay_period_excluded_employees#destroy", record_type: "PayPeriod", record_id: period.id,
-                subject_name: employee.full_name, metadata: { employee_id: employee.id, original_exclusion_reason: reason })
+                subject_name: employee.full_name, metadata: { employee_id: employee.id, original_exclusion_reason: reason,
+                  import_id: add_back&.dig(:import_id), restored_import_amounts: add_back&.dig(:restored),
+                  not_restored_import_amounts: add_back&.dig(:not_restored) }.compact)
             end
             skip_default_audit_log!
-            render json: { expected_entries: PayrollExpectedEntries.new(period).payload }
+            # A repeat after a lost response gets the add-back already recorded.
+            add_back ||= PayrollImport::AddBackRestore.recent(period)[employee.id] unless exclusion
+            render json: { expected_entries: PayrollExpectedEntries.new(period).payload,
+              add_back: add_back || { employee_id: employee.id, employee_name: employee.full_name, restored: [], not_restored: [] } }
           end
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Pay run or employee not found" }, status: :not_found

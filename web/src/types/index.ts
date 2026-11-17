@@ -1286,8 +1286,22 @@ export interface AirePayrollCommandResponse {
 
 export interface ExpectedEntries {
   fields: { id: number; employee_id: number; employee_wage_rate_id: number | null; wage_rate?: string; wage_rate_label?: string; saved_wage_rate_hours?: PayrollItemWageRateHours[]; label: string; help_text?: string; kind: 'owner_pay' | 'extra_hours'; required: boolean; allow_none: boolean; availability_error?: string; inline_save_error?: string; source_revision?: number; status: 'filled' | 'missing' | 'none' | 'excluded'; value: string; note?: string }[];
-  missing_regulars: { employee_id: number; label: string; resolved: boolean; excluded?: boolean; note?: string }[];
+  missing_regulars: { employee_id: number; label: string; resolved: boolean; excluded?: boolean; awaiting_hours?: boolean; note?: string }[];
   outstanding: string[];
+  /** Recent add-backs and what came back, kept until hours are in and nothing is left to enter. */
+  added_back?: (AddBackResult & { hours_entered: boolean })[];
+}
+
+export interface AddBackAmount { key?: string; kind: 'loan' | 'scheduled_loan' | 'tips' | 'bonus' | 'component' | 'period_pay'; label: string; amount: string }
+
+/** What came back from the import when staff added someone back to a run. */
+export interface AddBackResult {
+  employee_id: number;
+  employee_name: string;
+  import_id?: number;
+  restored: AddBackAmount[];
+  /** enter_by_hand: the reason asks staff to enter the amount themselves. */
+  not_restored: (AddBackAmount & { reason: string; enter_by_hand?: boolean })[];
 }
 
 export interface PayPeriod {
