@@ -32,6 +32,13 @@ class CheckPrintRun < ApplicationRecord
     status == "prepared"
   end
 
+  # Staff call the packages for a run #1, #2, … in the order they were made.
+  def package_number
+    return unless persisted?
+
+    CheckPrintRun.where(pay_period_id: pay_period_id).where(id: ..id).count
+  end
+
   private
 
   def manifest_matches_selected_count

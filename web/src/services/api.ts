@@ -890,6 +890,8 @@ export interface AuditLogEntry {
   display_action: string;
   display_subject: string;
   summary: string;
+  // Per-employee lines for a calculation that changed hours or amounts.
+  detail_lines?: string[];
   record_type: string | null;
   record_id: number | null;
   user_id: number | null;
@@ -943,13 +945,17 @@ export const auditLogsApi = {
 
 export interface RecordCreatorInfo { name: string; role: string | null; created_at: string }
 
+// hidden_report_detail_count: report editor loads left out of a pay run's
+// feed unless include_report_details is set.
+export type RecordActivityMeta = PaginationMeta & { hidden_report_detail_count?: number };
+
 export const recordActivitiesApi = {
   list: (
     recordType: 'employees' | 'pay_periods' | 'companies',
     recordId: number,
-    params: { page?: number; per_page?: number } = {},
+    params: { page?: number; per_page?: number; include_report_details?: boolean } = {},
     companyId?: number,
-  ): Promise<{ creator?: RecordCreatorInfo | null; data: AuditLogEntry[]; meta: PaginationMeta }> => api.get<{ creator?: RecordCreatorInfo | null; data: AuditLogEntry[]; meta: PaginationMeta }>(
+  ): Promise<{ creator?: RecordCreatorInfo | null; data: AuditLogEntry[]; meta: RecordActivityMeta }> => api.get<{ creator?: RecordCreatorInfo | null; data: AuditLogEntry[]; meta: RecordActivityMeta }>(
     `/admin/record_activities/${recordType}/${recordId}`,
     params,
     { companyId },
@@ -3553,6 +3559,12 @@ export const reportsApi = {
       ...(notes && notes.length > 0 ? { notes } : {}),
       ...(entries && entries.length > 0 ? { entries } : {}),
     }),
+  // Last-saved times only. Unlike the previews, loading this is not a report view.
+  savedDocuments: (payPeriodId: number) =>
+    api.get<{
+      transmittal: { generated_at: string | null } | null;
+      check_signoff: { generated_at: string | null } | null;
+    }>('/admin/reports/saved_documents', { pay_period_id: payPeriodId }),
   checkSignoffPreview: (payPeriodId: number) =>
     api.get<{
       company_name: string;

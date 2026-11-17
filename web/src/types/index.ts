@@ -1492,6 +1492,8 @@ export interface PayrollLiabilityReconciliation {
 export interface PayPeriodLifecycleEvent {
   timestamp?: string | null;
   actor_name?: string | null;
+  // How many times it happened; timestamp and actor describe the latest.
+  count?: number;
 }
 
 export interface PayPeriodComparisonMetric {

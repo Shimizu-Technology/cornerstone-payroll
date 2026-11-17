@@ -644,14 +644,18 @@ function PayRunActivity({ companyId, payRun, workspaceReturnTo }: PayRunActivity
     { label: 'Approved', event: lifecycle.approved, icon: CheckCircle2 },
     { label: 'Approval rolled back', event: lifecycle.unapproved, icon: RefreshCw },
     { label: 'Committed', event: lifecycle.committed, icon: CalendarCheck2 },
-  ].filter((item) => item.event?.timestamp);
+  ]
+    .filter((item) => item.event?.timestamp)
+    // In the order they last happened, so a rollback before a re-approval
+    // reads in sequence.
+    .sort((a, b) => new Date(a.event?.timestamp ?? 0).getTime() - new Date(b.event?.timestamp ?? 0).getTime());
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
       <RecordActivityTimeline companyId={companyId} recordId={payRun.id} recordType="pay_periods" />
       <Card>
         <CardHeader><CardTitle>Payroll milestones</CardTitle><p className="mt-2 text-sm leading-6 text-neutral-500">The run's key processing states, preserved alongside the complete change history.</p></CardHeader>
         <CardContent>
-          {events.length ? <ol className="space-y-4">{events.map(({ label, event, icon: Icon }) => <li key={`${label}-${event?.timestamp}`} className="border-l-2 border-primary-100 pl-4"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><Icon className="h-4 w-4" /></span><p className="mt-3 font-semibold text-neutral-950">{label}</p><p className="mt-2 text-sm text-neutral-500">{event?.actor_name ? `by ${event.actor_name}` : 'Actor not recorded'}</p><p className="mt-2 text-xs font-medium text-neutral-600">{formatGuamDateTime(event?.timestamp)}</p></li>)}</ol> : <WorkspaceEmptyState icon={Activity} message="No lifecycle activity has been recorded for this run yet." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}
+          {events.length ? <ol className="space-y-4">{events.map(({ label, event, icon: Icon }) => <li key={`${label}-${event?.timestamp}`} className="border-l-2 border-primary-100 pl-4"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><Icon className="h-4 w-4" /></span><p className="mt-3 font-semibold text-neutral-950">{label}{(event?.count ?? 0) > 1 && <span className="ml-2 text-sm font-medium text-neutral-500">{event?.count} times · latest shown</span>}</p><p className="mt-2 text-sm text-neutral-500">{event?.actor_name ? `by ${event.actor_name}` : 'Actor not recorded'}</p><p className="mt-2 text-xs font-medium text-neutral-600">{formatGuamDateTime(event?.timestamp)}</p></li>)}</ol> : <WorkspaceEmptyState icon={Activity} message="No lifecycle activity has been recorded for this run yet." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}
         </CardContent>
       </Card>
     </div>

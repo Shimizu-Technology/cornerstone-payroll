@@ -106,6 +106,7 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
           @payroll_item.reload
+          @payroll_item_audit_before_values = AuditRecordSnapshot.values_for(@payroll_item)
 
           attrs = payroll_item_params
           PayrollCorrectionPayBasisGuard.validate!(@payroll_item, proposed_attributes: attrs)
@@ -197,6 +198,36 @@ module Api
         end
 
         private
+
+        def audit_record
+          @payroll_item
+        end
+
+        # Create lists what was entered; update lists what changed. A removal
+        # is described by its headline alone.
+        def audit_record_changes
+          empty = { before_values: {}, after_values: {}, changed_fields: [], redacted_fields: [] }
+          return empty unless @payroll_item&.persisted?
+          return AuditRecordSnapshot.changes_from(@payroll_item, @payroll_item_audit_before_values) if @payroll_item_audit_before_values
+          return empty unless action_name == "create"
+
+          entered = AuditRecordSnapshot.values_for(@payroll_item).reject { |_field, value| value.blank? || value.to_s.to_d.zero? }
+          empty.merge(after_values: entered, changed_fields: entered.keys.sort)
+        end
+
+        def audit_record_metadata(_record)
+          return {} unless @payroll_item
+
+          employee = @payroll_item.employee
+          {
+            employee_id: @payroll_item.employee_id,
+            employee_name: employee&.full_name,
+            owner_pay: PayrollStandingChange.where(company_id: current_company_id, employee_id: @payroll_item.employee_id,
+              kind: "owner_pay", active: true).exists?,
+            auto_calculated: ActiveModel::Type::Boolean.new.cast(params[:auto_calculate]) || nil,
+            source: ("import_review" if params.key?(:expected_import_id))
+          }.compact
+        end
 
         # The import review saves a person's missing period pay through create
         # or update. Refuse it when that review is no longer the current one,

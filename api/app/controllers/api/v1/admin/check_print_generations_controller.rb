@@ -22,6 +22,7 @@ module Api
 
           enqueue_generation(generation) if created || generation.retry_queue_failure!
           generation.reload
+          @audit_generation = generation
           render json: { check_print_generation: generation_payload(generation) }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -54,6 +55,12 @@ module Api
 
         def set_pay_period
           @pay_period = PayPeriod.where(company_id: current_company_id).find(params[:pay_period_id])
+        end
+
+        def audit_record_metadata(_record)
+          return {} unless @audit_generation
+
+          { generation_id: @audit_generation.id, selected_count: @audit_generation.total_items }
         end
 
         def set_generation

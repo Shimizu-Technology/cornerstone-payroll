@@ -383,6 +383,9 @@ module Api
             company_id: current_company_id
           )
 
+          input_snapshots = payroll_input_snapshots
+          @payroll_input_changes = []
+
           employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]
             unless employee
@@ -546,6 +549,7 @@ module Api
                   raise ArgumentError, "#{employee.full_name} has a zero-pay payroll item with source or payment evidence. Review or remove it before finalizing this run."
                 else
                   results[:success] << { employee_id: employee.id, name: employee.full_name }
+                  track_payroll_input_change(payroll_item, employee, input_snapshots[employee.id])
                 end
               end
             rescue *PayrollCalculationHistory::ERRORS => e
@@ -1092,6 +1096,10 @@ module Api
             metadata[:acknowledged_outstanding_file_request_ids] = @acknowledged_outstanding_file_requests.pluck(:id)
             metadata[:outstanding_file_requests] = @acknowledged_outstanding_file_requests
           end
+          if action_name == "run_payroll" && @payroll_input_changes.present?
+            metadata[:input_change_count] = @payroll_input_changes.size
+            metadata[:input_changes] = @payroll_input_changes.first(AUDITED_INPUT_CHANGE_LIMIT)
+          end
           if %w[run_payroll refresh_setup].include?(action_name) && params[:source_coverage_reason].present?
             metadata[:source_coverage_reason] = params[:source_coverage_reason].to_s.strip.truncate(1000)
             metadata[:source_coverage_acknowledged] = params[:source_coverage_acknowledged] == true
@@ -1104,6 +1112,30 @@ module Api
             }
           end
           metadata
+        end
+
+        AUDITED_INPUT_CHANGE_LIMIT = 25
+        AUDITED_INPUT_FIELDS = (AuditRecordSnapshot::SAFE_FIELDS.fetch("PayrollItem") - %w[check_number]).freeze
+
+        # Hours and amounts saved before this calculation, keyed by employee,
+        # so the audit can say whose entries the calculation changed.
+        def payroll_input_snapshots
+          @pay_period.payroll_items.select(:id, :employee_id, *AUDITED_INPUT_FIELDS).to_h do |item|
+            [ item.employee_id, AuditRecordSnapshot.values_for(item).slice(*AUDITED_INPUT_FIELDS) ]
+          end
+        end
+
+        def track_payroll_input_change(payroll_item, employee, before)
+          after = AuditRecordSnapshot.values_for(payroll_item).slice(*AUDITED_INPUT_FIELDS)
+          before ||= {}
+          changed = AUDITED_INPUT_FIELDS.reject { |field| before[field].to_s.to_d == after[field].to_s.to_d }
+          return if changed.empty?
+
+          @payroll_input_changes << {
+            employee_id: employee.id, employee_name: employee.full_name,
+            before_values: before.slice(*changed).transform_values(&:to_s),
+            after_values: after.slice(*changed).transform_values(&:to_s)
+          }
         end
 
         def pay_period_business_summary(record, include_voided_period: false)
@@ -1941,15 +1973,16 @@ module Api
           )
         end
 
+        # count says how many times it happened (approve, unapprove, approve
+        # again), while timestamp and actor describe the latest time.
         def lifecycle_event_from_saved_or_log(pay_period, logs, action, timestamp:, user_id: nil)
           log_event = lifecycle_event_from_log(logs, action)
+          count = logs.count { |entry| entry.action == action }
           event = lifecycle_event_json(
             timestamp: timestamp,
             actor_name: historical_user_name(user_id) || log_event[:actor_name]
           )
-          return event if timestamp.present?
-
-          log_event
+          (timestamp.present? ? event : log_event).merge(count: count)
         end
 
         def lifecycle_event_json(timestamp:, actor_name: nil)
