@@ -422,10 +422,10 @@ describe('PayPeriods check numbering', () => {
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Commit' }))[0]);
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/Paper checks will be numbered from 1001/)).toBeTruthy();
+    expect(await within(dialog).findByText(/Paper checks will be numbered from 1001/)).toBeTruthy();
     expect(within(dialog).getByRole('alert').textContent).toMatch(/at or below the last one used \(5000\)/);
     expect(apiMocks.commit).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm commit' }));
-    await waitFor(() => expect(apiMocks.commit).toHaveBeenCalledWith(12));
+    await waitFor(() => expect(apiMocks.commit).toHaveBeenCalledWith(12, { acknowledged_outstanding_file_request_ids: [], expected_next_check_number: 1001 }));
   });
 });

@@ -35,9 +35,7 @@ module PayrollSubmissions
         raise ArgumentError, "Only the matching regular pay run may use a client revision"
       end
       if @period.pay_period_id.nil?
-        catalog = Catalog.new(company: @run.company)
-        eligible = catalog.live_pay_period(catalog.resolve(@period.id))
-        unless eligible&.id == @run.id
+        unless PayPeriod.portal_submission_runs.exists?(id: @run.id)
           raise ArgumentError, "Only the matching regular pay run offered by the portal may use this revision"
         end
         @period.pay_period = @run

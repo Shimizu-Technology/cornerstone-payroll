@@ -60,6 +60,7 @@ RSpec.describe "Portal file requests", type: :request do
     expect(response).to have_http_status(:created)
     request = PortalFileRequest.find(data.fetch("id"))
     period = PayrollSubmissionPeriod.find_by!(company_id: company.id, start_date: Date.new(2026, 11, 2))
+    expect(period.pay_period_id).to eq(pay_period.id)
     expect(request).to have_attributes(status: "requested", employee_id: employee.id, payroll_submission_period_id: period.id,
       due_on: Date.new(2026, 11, 18), client_portal_thread_id: period.client_portal_thread_id)
     expect(response.parsed_body.dig("thread", "messages", 0)).to include("kind" => "file_request", "body" => "Please send Riley's paper timesheet.")
@@ -326,12 +327,98 @@ RSpec.describe "Portal file requests", type: :request do
     PortalFileRequest.find(request_id).update!(status: "responded")
     post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
     expect(response).to have_http_status(:unprocessable_entity)
-    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: { acknowledge_outstanding_file_requests: true }, as: :json
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: { acknowledged_outstanding_file_request_ids: [ request_id ], expected_next_check_number: company.reload.next_check_number }, as: :json
     expect(response).to have_http_status(:ok), response.body
     expect(pay_period.reload).to be_committed
     log = AuditLog.where(action: "pay_periods#commit", record_id: pay_period.id).last!
     expect(log.metadata).to include("acknowledge_outstanding_file_requests" => true,
+      "acknowledged_outstanding_file_request_ids" => [ request_id ],
       "outstanding_file_requests" => [ { "id" => request_id, "title" => "Riley's timesheet", "status" => "responded" } ])
     expect(PortalFileRequest.find(request_id).status).to eq("responded")
+  end
+  def ready_for_commit
+    ensure_verified_test_tax_years(2026)
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    pay_period.update!(status: "calculated", calculated_at: Time.current)
+    create(:payroll_item, company: company, employee: employee, pay_period: pay_period,
+      hours_worked: 80, gross_pay: 1_200, net_pay: 1_100)
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+    expect(response).to have_http_status(:ok), response.body
+  end
+
+  it "refuses a new request arriving after an empty list was reviewed, then accepts the refreshed IDs" do
+    ready_for_commit
+    request_file
+    request_id = data.fetch("id")
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: {
+      acknowledged_outstanding_file_request_ids: [], expected_next_check_number: company.next_check_number }, as: :json
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body["code"]).to eq("outstanding_file_requests_changed")
+    expect(pay_period.reload).to be_approved
+    expect(AuditLog.where(action: "pay_periods#commit", record_id: pay_period.id)).to be_empty
+    expect(pay_period.payroll_items.pluck(:check_number)).to eq([ nil ])
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: {
+      acknowledged_outstanding_file_request_ids: [ request_id ], expected_next_check_number: company.next_check_number }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+  end
+
+  it "refuses resolved or foreign request IDs rather than accepting a stale acknowledgement" do
+    ready_for_commit
+    request_file
+    request = PortalFileRequest.find(data.fetch("id"))
+    post "/api/v1/admin/portal_file_requests/#{request.id}/withdraw", params: { body: "No longer needed" }, as: :json
+    expect(response).to have_http_status(:created)
+    [ [ request.id ], [ request.id + 1000 ] ].each do |ids|
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: { acknowledged_outstanding_file_request_ids: ids }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["code"]).to eq("outstanding_file_requests_changed")
+      expect(pay_period.reload).to be_approved
+    end
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: { acknowledged_outstanding_file_request_ids: [] }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+  end
+
+  it "rejects a changed check counter without side effects, then commits from the number reviewed again" do
+    ready_for_commit
+    get "/api/v1/admin/pay_periods/#{pay_period.id}"
+    seen_number = response.parsed_body.dig("pay_period", "check_number_summary", "next_check_number")
+    company.update!(next_check_number: seen_number + 20)
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: {
+      acknowledged_outstanding_file_request_ids: [], expected_next_check_number: seen_number }, as: :json
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body["code"]).to eq("check_number_changed")
+    expect(pay_period.reload).to be_approved
+    expect(pay_period.payroll_items.pluck(:check_number)).to eq([ nil ])
+    expect(PayrollLiabilityPosting.where(pay_period: pay_period)).to be_empty
+    expect(AuditLog.where(action: "pay_periods#commit", record_id: pay_period.id)).to be_empty
+    get "/api/v1/admin/pay_periods/#{pay_period.id}"
+    expect(response.parsed_body.dig("pay_period", "check_number_summary", "next_check_number")).to eq(seen_number + 20)
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: {
+      acknowledged_outstanding_file_request_ids: [], expected_next_check_number: seen_number + 20 }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(pay_period.payroll_items.pluck(:check_number)).to eq([ (seen_number + 20).to_s ])
+  end
+
+  it "surfaces ambiguous unlinked files to staff and blocks commit instead of choosing a run" do
+    ready_for_commit
+    request_file
+    period = PortalFileRequest.find(data.fetch("id")).payroll_submission_period
+    other = create(:pay_period, company: company, start_date: pay_period.start_date, end_date: pay_period.end_date, pay_date: pay_period.pay_date)
+    period.update_column(:pay_period_id, nil) # Simulate ambiguous pre-rollout rows.
+    get "/api/v1/admin/payroll_submission_periods/#{period.id}"
+    expect(response).to have_http_status(:ok), response.body
+    expect(data["pay_period_id"]).to be_nil
+    expect(data["pay_period_link_error"]).to include(pay_period.id.to_s, other.id.to_s, "multiple pay runs")
+    get "/api/v1/admin/pay_periods/#{pay_period.id}"
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("pay_period", "client_file_link_error")).to include("multiple pay runs")
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/commit", params: { acknowledged_outstanding_file_request_ids: [] }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("multiple pay runs")
+    expect(pay_period.reload).to be_approved
+    period.update!(pay_period: pay_period) # Explicit staff selection resolves ambiguity.
+    get "/api/v1/admin/pay_periods/#{pay_period.id}"
+    expect(response.parsed_body.dig("pay_period", "client_file_link_error")).to be_nil
+    expect(response.parsed_body.dig("pay_period", "outstanding_file_requests").map { |r| r["id"] }).to eq(period.file_requests.pluck(:id))
   end
 end

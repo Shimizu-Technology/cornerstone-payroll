@@ -1,0 +1,491 @@
+[
+  {
+    "id": 4,
+    "scenario": "happy",
+    "phase": "saved",
+    "before": {
+      "disabled": true,
+      "number": 7103
+    },
+    "saved": {
+      "calls": [
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              4
+            ],
+            "expected_next_check_number": 7103
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7103"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 5,
+    "scenario": "requests",
+    "phase": "conflict",
+    "before": {
+      "disabled": true,
+      "number": 7104
+    },
+    "conflict": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              5
+            ],
+            "expected_next_check_number": 7104
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "overflow": false
+    }
+  },
+  {
+    "id": 5,
+    "scenario": "requests",
+    "phase": "saved",
+    "before": {
+      "disabled": true,
+      "number": 7104
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              5
+            ],
+            "expected_next_check_number": 7104
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              5,
+              14
+            ],
+            "expected_next_check_number": 7104
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7104"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 6,
+    "scenario": "counter",
+    "phase": "conflict",
+    "before": {
+      "disabled": true,
+      "number": 7105
+    },
+    "conflict": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              6
+            ],
+            "expected_next_check_number": 7105
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "overflow": false
+    }
+  },
+  {
+    "id": 6,
+    "scenario": "counter",
+    "phase": "saved",
+    "before": {
+      "disabled": true,
+      "number": 7105
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              6
+            ],
+            "expected_next_check_number": 7105
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              6
+            ],
+            "expected_next_check_number": 7205
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7205"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 7,
+    "scenario": "happy",
+    "phase": "review"
+  },
+  {
+    "id": 7,
+    "scenario": "happy",
+    "phase": "saved",
+    "before": {
+      "disabled": true,
+      "number": 7206,
+      "overflow": false
+    },
+    "saved": {
+      "calls": [
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              7
+            ],
+            "expected_next_check_number": 7206
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7206"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 8,
+    "scenario": "requests",
+    "phase": "conflict",
+    "before": {
+      "disabled": true,
+      "number": 7207,
+      "overflow": false
+    },
+    "conflict": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              8
+            ],
+            "expected_next_check_number": 7207
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "overflow": false
+    }
+  },
+  {
+    "id": 8,
+    "scenario": "requests",
+    "phase": "review"
+  },
+  {
+    "id": 8,
+    "scenario": "requests",
+    "phase": "saved",
+    "before": {
+      "disabled": true,
+      "number": 7207,
+      "overflow": false
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              8
+            ],
+            "expected_next_check_number": 7207
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              8,
+              15
+            ],
+            "expected_next_check_number": 7207
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7207"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 9,
+    "scenario": "counter",
+    "phase": "conflict",
+    "before": {
+      "disabled": true,
+      "number": 7208,
+      "overflow": false
+    },
+    "conflict": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              9
+            ],
+            "expected_next_check_number": 7208
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "overflow": false
+    }
+  },
+  {
+    "id": 9,
+    "scenario": "counter",
+    "phase": "review"
+  },
+  {
+    "id": 9,
+    "scenario": "counter",
+    "phase": "saved",
+    "before": {
+      "disabled": true,
+      "number": 7208,
+      "overflow": false
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              9
+            ],
+            "expected_next_check_number": 7208
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              9
+            ],
+            "expected_next_check_number": 7308
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7308"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 10,
+    "scenario": "happy",
+    "phase": "review"
+  },
+  {
+    "id": 10,
+    "scenario": "happy",
+    "phase": "saved",
+    "before": {
+      "disabled": true,
+      "number": 7309,
+      "overflow": false
+    },
+    "saved": {
+      "calls": [
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              10
+            ],
+            "expected_next_check_number": 7309
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7309"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 11,
+    "scenario": "requests",
+    "phase": "conflict",
+    "before": {
+      "disabled": true,
+      "number": 7310,
+      "overflow": false
+    },
+    "conflict": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              11
+            ],
+            "expected_next_check_number": 7310
+          },
+          "status": 409
+        }
+      ],
+      "disabled": false,
+      "overflow": false
+    }
+  },
+  {
+    "id": 11,
+    "scenario": "requests",
+    "phase": "review"
+  },
+  {
+    "id": 11,
+    "scenario": "requests",
+    "phase": "saved",
+    "before": {
+      "disabled": true,
+      "number": 7310,
+      "overflow": false
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "outstanding_file_requests_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              11
+            ],
+            "expected_next_check_number": 7310
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [],
+            "expected_next_check_number": 7310
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7310"
+      ],
+      "status": "committed"
+    }
+  },
+  {
+    "id": 12,
+    "scenario": "counter",
+    "phase": "conflict",
+    "before": {
+      "disabled": true,
+      "number": 7311,
+      "overflow": false
+    },
+    "conflict": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              12
+            ],
+            "expected_next_check_number": 7311
+          },
+          "status": 409
+        }
+      ],
+      "checked": false,
+      "disabled": true,
+      "overflow": false
+    }
+  },
+  {
+    "id": 12,
+    "scenario": "counter",
+    "phase": "review"
+  },
+  {
+    "id": 12,
+    "scenario": "counter",
+    "phase": "saved",
+    "before": {
+      "disabled": true,
+      "number": 7311,
+      "overflow": false
+    },
+    "saved": {
+      "calls": [
+        {
+          "code": "check_number_changed",
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              12
+            ],
+            "expected_next_check_number": 7311
+          },
+          "status": 409
+        },
+        {
+          "payload": {
+            "acknowledged_outstanding_file_request_ids": [
+              12
+            ],
+            "expected_next_check_number": 7411
+          },
+          "status": 200
+        }
+      ],
+      "checks": [
+        "7411"
+      ],
+      "status": "committed"
+    }
+  }
+]

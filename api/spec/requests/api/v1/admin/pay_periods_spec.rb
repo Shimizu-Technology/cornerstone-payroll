@@ -992,6 +992,19 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   end
 
   describe "DELETE /api/v1/admin/pay_periods/:id" do
+    it "deletes an auto-linked mistaken draft without deleting client submissions" do
+      period = PayrollSubmissionPeriod.create!(company: company, source: "schedule",
+        start_date: pay_period.start_date + 14, end_date: pay_period.end_date + 14)
+      source = period.submissions.create!(company: company, revision: 1, submitted_by: admin_user, submitted_at: Time.current,
+        content_fingerprint: "delete-client-source", request_fingerprint: "delete-client-source")
+      mistaken = create(:pay_period, company: company, start_date: period.start_date, end_date: period.end_date, pay_date: period.end_date + 5)
+      expect(period.reload.pay_period_id).to eq(mistaken.id)
+      delete "/api/v1/admin/pay_periods/#{mistaken.id}"
+      expect(response).to have_http_status(:no_content), response.body
+      expect(period.reload.pay_period_id).to be_nil
+      expect(source.reload.payroll_submission_period_id).to eq(period.id)
+    end
+
     it "keeps every saved input when review evidence refuses deletion" do
       pay_period.update!(status: "calculated")
       item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)

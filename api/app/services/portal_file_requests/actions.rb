@@ -7,7 +7,7 @@ module PortalFileRequests
   # transaction: the request's state, its typed message, the audit entry and
   # the notification are saved together or not at all.
   #
-  # Locks are always taken in the same order (pay period, conversation,
+  # Locks are always taken in the same order (company, period, conversation,
   # request, files), so these steps cannot deadlock with ordinary messages.
   class Actions
     class Conflict < StandardError; end
@@ -36,6 +36,7 @@ module PortalFileRequests
       request = nil
       replayed = false
       PortalFileRequest.transaction do
+        Company.lock.find(@company.id)
         # Serializes this person's retries, including simultaneous ones.
         User.lock.find(@actor.id)
         if key && (request = PortalFileRequest.find_by(company_id: @company.id, requested_by_id: @actor.id, idempotency_key: key))
@@ -126,6 +127,7 @@ module PortalFileRequests
       message = nil
       replayed = false
       PortalFileRequest.transaction do
+        Company.lock.find(@company.id)
         request.client_portal_thread.lock!
         request.lock!
         if key && (message = request.client_portal_thread.messages.find_by(author_id: @actor.id, idempotency_key: key))
