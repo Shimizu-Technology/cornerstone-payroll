@@ -544,6 +544,8 @@ module Api
                   # The worksheet includes the active roster, but an employee
                   # with no payroll activity is not part of this pay period.
                   payroll_item.destroy!
+                  # Clearing someone's hours (8 → 0) is still a staff entry.
+                  track_payroll_input_change(payroll_item, employee, input_snapshots[employee.id])
                   results[:skipped] << { employee_id: employee.id, name: employee.full_name, reason: "No payroll activity" }
                 when :review
                   raise ArgumentError, "#{employee.full_name} has a zero-pay payroll item with source or payment evidence. Review or remove it before finalizing this run."
@@ -1970,7 +1972,7 @@ module Api
         end
 
         def lifecycle_event_from_log(logs, action, fallback_timestamp: nil)
-          log = logs.select { |entry| entry.action == action }.last
+          log = completed_lifecycle_logs(logs, action).last
           return lifecycle_event_json(timestamp: fallback_timestamp) unless log
 
           lifecycle_event_json(
@@ -1983,12 +1985,20 @@ module Api
         # again), while timestamp and actor describe the latest time.
         def lifecycle_event_from_saved_or_log(pay_period, logs, action, timestamp:, user_id: nil)
           log_event = lifecycle_event_from_log(logs, action)
-          count = logs.count { |entry| entry.action == action }
+          count = completed_lifecycle_logs(logs, action).size
           event = lifecycle_event_json(
             timestamp: timestamp,
             actor_name: historical_user_name(user_id) || log_event[:actor_name]
           )
           (timestamp.present? ? event : log_event).merge(count: count)
+        end
+
+        # A calculation that returned employee errors stays in the Activity
+        # feed but is not a milestone.
+        def completed_lifecycle_logs(logs, action)
+          logs.select do |entry|
+            entry.action == action && entry.metadata&.dig("business_summary", "outcome") != "partial"
+          end
         end
 
         def lifecycle_event_json(timestamp:, actor_name: nil)

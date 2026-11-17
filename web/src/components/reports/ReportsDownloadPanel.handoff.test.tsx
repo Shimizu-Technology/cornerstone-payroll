@@ -84,3 +84,27 @@ it('loads only the saved-state summary when the panel opens, so no report view i
  expect((await screen.findAllByText(/· Last: Nov 16/)).length).toBeGreaterThan(0);
  expect(api.preview).not.toHaveBeenCalled();expect(api.signoff).not.toHaveBeenCalled();
 });
+
+it('keeps a just-saved sign-off date when an older summary arrives late', async (): Promise<void> => {
+ let finishSummary!: (value: {transmittal: null; check_signoff: null}) => void;
+ api.saved.mockImplementation(() => new Promise(resolve => { finishSummary = resolve; }));
+ api.signoffPdf.mockResolvedValue({blob:new Blob(['pdf']),filename:'signoff.pdf'});
+ const user=userEvent.setup();render(<MemoryRouter><ReportsDownloadPanel payPeriodId={2} payPeriodStatus="committed" payDate="2026-10-15" /></MemoryRouter>);
+ const row=screen.getByText('Check Sign-Off Sheet',{exact:true}).parentElement!.parentElement!;
+ await user.click(within(row).getByRole('button',{name:'View'}));const editor=await screen.findByRole('dialog',{name:'Edit Check Sign-Off Sheet'});
+ await within(editor).findByDisplayValue('Example, Avery');await user.click(within(editor).getByRole('button',{name:'Generate Sign-Off Sheet'}));
+ await screen.findByRole('dialog',{name:'Check Sign-Off Sheet'});
+ await waitFor(()=>expect(within(row).getByText(/· Last:/)).toBeTruthy());
+ await act(async (): Promise<void> => { finishSummary({ transmittal: null, check_signoff: null }); });
+ expect(within(row).getByText(/· Last:/)).toBeTruthy();
+});
+
+it('ignores a summary that arrives after the panel moved to another pay period', async (): Promise<void> => {
+ let finishSummary!: (value: {transmittal: {generated_at: string}; check_signoff: {generated_at: string}}) => void;
+ api.saved.mockImplementationOnce(() => new Promise(resolve => { finishSummary = resolve; }));
+ const view=render(<MemoryRouter><ReportsDownloadPanel payPeriodId={2} payPeriodStatus="committed" payDate="2026-10-15" /></MemoryRouter>);
+ view.rerender(<MemoryRouter><ReportsDownloadPanel payPeriodId={3} payPeriodStatus="committed" payDate="2026-10-29" /></MemoryRouter>);
+ await waitFor(()=>expect(api.saved).toHaveBeenLastCalledWith(3));
+ await act(async (): Promise<void> => { finishSummary({ transmittal: { generated_at: '2026-10-16T09:00:00Z' }, check_signoff: { generated_at: '2026-10-16T09:00:00Z' } }); });
+ expect(screen.queryByText(/· Last:/)).toBeNull();
+});
