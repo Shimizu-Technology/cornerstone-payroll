@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class InvoicePayloadBuilder
-  def self.call(invoice, detailed: false, as_of: Date.current)
+  def self.call(invoice, detailed: false, as_of: PayrollBusinessClock.today)
     new(invoice, detailed: detailed, as_of: as_of).call
   end
 

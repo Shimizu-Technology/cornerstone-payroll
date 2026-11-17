@@ -1,6 +1,7 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
+  include ActiveSupport::Testing::TimeHelpers
   let!(:company) { create(:company) }
   let!(:other_company) { create(:company) }
   let!(:department) { create(:department, company: company) }
@@ -43,6 +44,38 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
   before do
     allow_any_instance_of(Api::V1::Admin::EmployeeLoansController).to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Admin::EmployeeLoansController).to receive(:current_user).and_return(admin_user)
+  end
+
+  it "dates loan balances, payments, advances and payoffs on the Guam business day" do
+    travel_to(Time.utc(2026, 11, 16, 22, 31)) do
+      loan = EmployeeLoan.create!(employee: employee, company: company, name: "Synthetic advance",
+        original_amount: 100, current_balance: 100, payment_amount: 25)
+      expect(loan.balance_as_of).to eq(Date.new(2026, 11, 17))
+      loan.record_addition!(amount: 50.to_d)
+      loan.record_payment!(amount: 25.to_d)
+      loan.mark_paid_off!
+      expect(loan.reload.paid_off_date).to eq(Date.new(2026, 11, 17))
+      expect(loan.loan_transactions.pluck(:transaction_date).uniq).to eq([ Date.new(2026, 11, 17) ])
+    end
+  end
+
+  it "shows a repayment schedule ending yesterday in Guam as inactive" do
+    travel_to(Time.utc(2026, 11, 16, 22, 31)) do
+      loan = EmployeeLoan.create!(employee: employee, company: company, name: "Synthetic advance",
+        original_amount: 100, current_balance: 100, payment_amount: 25)
+      field = PayrollFieldDefinition.create!(company: company, name: "Loan schedule", kind: "deduction",
+        category: "loan", tax_treatment: "post_tax_deduction", amount_type: "fixed")
+      assignment = EmployeePayrollField.create!(employee: employee, employee_loan: loan, payroll_field_definition: field,
+        amount: 25, active: true, end_date: "2026-11-16")
+      get "/api/v1/admin/employee_loans"
+      expect(response).to have_http_status(:ok), response.body
+      payload = response.parsed_body.fetch("loans").find { |row| row["id"] == loan.id }
+      expect(payload["schedule_active"]).to be(false)
+      assignment.update!(end_date: "2026-11-17")
+      get "/api/v1/admin/employee_loans"
+      payload = response.parsed_body.fetch("loans").find { |row| row["id"] == loan.id }
+      expect(payload["schedule_active"]).to be(true)
+    end
   end
 
   describe "GET /api/v1/admin/employee_loans" do

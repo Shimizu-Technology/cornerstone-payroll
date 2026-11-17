@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::EmployeeRetirementElections", type: :request do
+  include ActiveSupport::Testing::TimeHelpers
   let(:company) { create(:company) }
   let(:employee) { create(:employee, company: company, department: create(:department, company: company), date_of_birth: Date.new(1970, 1, 1)) }
   let(:user) { create(:user, company: company, organization: company.organization, role: :manager) }
@@ -40,6 +41,27 @@ RSpec.describe "Api::V1::Admin::EmployeeRetirementElections", type: :request do
       .to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Admin::EmployeeRetirementElectionsController)
       .to receive(:current_user).and_return(user)
+  end
+
+  it "shows current and upcoming elections on the Guam date in staff and client profiles" do
+    travel_to(Time.utc(2026, 11, 16, 22, 31)) do
+      current = employee.employee_retirement_elections.create!(company: company, effective_on: "2026-11-17",
+        participating: true, traditional_rate: 0.05, source: "staff", reason: "Signed election")
+      upcoming = employee.employee_retirement_elections.create!(company: company, effective_on: "2026-11-18",
+        participating: true, traditional_rate: 0.06, source: "staff", reason: "Future election")
+      stub_portal_user(Api::V1::Admin::EmployeesController, user, company)
+      get "/api/v1/admin/employees/#{employee.id}"
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "current_retirement_election", "id")).to eq(current.id)
+      expect(response.parsed_body.dig("data", "upcoming_retirement_election", "id")).to eq(upcoming.id)
+
+      client = create(:user, company: company, role: "client")
+      CompanyAssignment.create!(user: client, company: company)
+      stub_portal_user(Api::V1::Client::EmployeesController, client, company)
+      get "/api/v1/client/employees/#{employee.id}"
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "current_retirement_election", "id")).to eq(current.id)
+    end
   end
 
   it "explains how to resolve an unconfirmed Roth employer destination" do

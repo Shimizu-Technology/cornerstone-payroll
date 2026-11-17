@@ -152,7 +152,7 @@ class Invoice < ApplicationRecord
     end
   end
 
-  def reader_status(as_of: Date.current)
+  def reader_status(as_of: PayrollBusinessClock.today)
     return "draft" if draft?
     return "voided" if voided?
     return "uncollectible" if uncollectible?

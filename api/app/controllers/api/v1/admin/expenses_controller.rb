@@ -133,7 +133,7 @@ module Api
                         expense.payment_included_at_creation? ? "purchase" : "bill" ]
             end
           end
-          send_data csv, type: "text/csv", filename: "expenses-#{Date.current.iso8601}.csv", disposition: "attachment"
+          send_data csv, type: "text/csv", filename: "expenses-#{PayrollBusinessClock.today.iso8601}.csv", disposition: "attachment"
         rescue Date::Error
           render json: { error: "Date filters must use YYYY-MM-DD" }, status: :unprocessable_entity
         rescue ArgumentError => e
@@ -218,11 +218,11 @@ module Api
           balance = "expenses.total_amount - #{payment_total}"
           case status
           when "paid" then rows.where("#{balance} = 0")
-          when "overdue" then rows.where("#{balance} > 0 AND expenses.due_on < ?", Date.current)
+          when "overdue" then rows.where("#{balance} > 0 AND expenses.due_on < ?", PayrollBusinessClock.today)
           when "partial" then rows.where("#{payment_total} > 0 AND #{balance} > 0 AND " \
-                                          "(expenses.due_on IS NULL OR expenses.due_on >= ?)", Date.current)
+                                          "(expenses.due_on IS NULL OR expenses.due_on >= ?)", PayrollBusinessClock.today)
           when "open" then rows.where("#{payment_total} = 0 AND " \
-                                       "(expenses.due_on IS NULL OR expenses.due_on >= ?)", Date.current)
+                                       "(expenses.due_on IS NULL OR expenses.due_on >= ?)", PayrollBusinessClock.today)
           else raise ArgumentError, "Unknown expense status"
           end
         end
@@ -241,7 +241,7 @@ module Api
           totals = rows.group(:currency).sum(:total_amount)
           paid = ExpensePayment.active.joins(:expense).where(expense_id: rows.select(:id))
                                .group("expenses.currency").sum(:amount)
-          overdue = rows.where("due_on < ?", Date.current).where(
+          overdue = rows.where("due_on < ?", PayrollBusinessClock.today).where(
             "total_amount > COALESCE((SELECT SUM(amount) FROM expense_payments WHERE expense_payments.expense_id = expenses.id AND expense_payments.reversed_at IS NULL), 0)"
           ).count
           {

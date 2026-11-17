@@ -89,7 +89,7 @@ class EmployeeLoan < ApplicationRecord
 
       actual_payment = balance_tracked? ? [ amount, current_balance ].min : amount
       balance_before = balance_tracked? ? current_balance : nil
-      transaction_date = date || Date.current
+      transaction_date = date || PayrollBusinessClock.today
 
       loan_transactions.create!(
         pay_period: pay_period,
@@ -121,7 +121,7 @@ class EmployeeLoan < ApplicationRecord
       raise ArgumentError, "A recurring deduction without a balance should be stopped, not marked paid off" unless balance_tracked?
       raise ArgumentError, "Loan is already paid off" if paid_off?
 
-      transaction_date = date || Date.current
+      transaction_date = date || PayrollBusinessClock.today
       if current_balance.positive?
         loan_transactions.create!(
           transaction_type: "payment",
@@ -186,7 +186,7 @@ class EmployeeLoan < ApplicationRecord
         amount: amount,
         balance_before: balance_before,
         balance_after: balance_before + amount,
-        transaction_date: date || Date.current,
+        transaction_date: date || PayrollBusinessClock.today,
         notes: notes,
         source: "manual",
         recorded_by: recorded_by
@@ -222,7 +222,7 @@ class EmployeeLoan < ApplicationRecord
       loan_transactions.create!(
         transaction_type: "adjustment", source: "payroll", amount: payment.amount,
         balance_before: current_balance, balance_after: new_balance,
-        transaction_date: Date.current, payroll_item: payment.payroll_item,
+        transaction_date: PayrollBusinessClock.today, payroll_item: payment.payroll_item,
         pay_period: payment.pay_period, reverses_transaction: payment,
         recorded_by: actor, notes: "Payroll void: #{reason}"
       )
@@ -311,7 +311,7 @@ class EmployeeLoan < ApplicationRecord
   end
 
   def transaction_pay_date(pay_period, date)
-    pay_period&.pay_date || date || Date.current
+    pay_period&.pay_date || date || PayrollBusinessClock.today
   end
 
   def initialize_balance_provenance
@@ -326,7 +326,7 @@ class EmployeeLoan < ApplicationRecord
     end
 
     self.opening_balance ||= original_amount
-    self.balance_as_of ||= start_date || Date.current
+    self.balance_as_of ||= start_date || PayrollBusinessClock.today
     self.balance_source ||= "new_loan"
   end
 
