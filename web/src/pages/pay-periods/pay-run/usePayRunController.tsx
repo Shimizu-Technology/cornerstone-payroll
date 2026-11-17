@@ -213,6 +213,9 @@ export function usePayRunController({
   }, []);
 
   const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<'loaded' | 'superseded' | 'failed'> => {
+    // A late input-preserving reload for a run the user has left must not
+    // supersede the current run's load or touch any state.
+    if (preserveInputs && periodId !== activePageScopeRef.current.payRunId) return 'superseded';
     const requestId = ++loadRequestIdRef.current;
     // Saved check, correction and payment changes invalidate the final record
     // even if the surrounding pay-run reload subsequently fails.
