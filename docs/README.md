@@ -45,6 +45,8 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 
 Implementation plans explain why a change was designed a certain way and what a particular PR delivered. They do not replace the current authority documents above. Notable current records include:
 
+- [W-2GU and 1099 year-end filing plan](W2GU_1099_YEAR_END_FILING_RESEARCH_2026-11-17.md) — SSA and Guam DRT filing rules, EFW2 Guam fields, ezW2 findings, gaps, build order and questions for Cornerstone (Planned).
+- [Employee portal and repeatable client platform](EMPLOYEE_PORTAL_AND_PLATFORM_PLAN_2026-11-17.md) — employee self-service architecture, separate employee identity, generic intake and connected-time paths, AIRE guardrails and decisions (Planned).
 - [Mark accountant feedback and recurring bonus investigation](MARK_ACCOUNTANT_FEEDBACK_AND_RECURRING_BONUS_INVESTIGATION_2026-09-02.md) — confirmed recurring-adjustment synchronization defect, redacted production evidence, deployment blocker, and prioritized implementation plan.
 - [Mark accountant-feedback clarification questions](MARK_ACCOUNTANT_FEEDBACK_CLARIFICATION_QUESTIONS_2026-09-03.md) — decisions Cornerstone must confirm before loan, retirement, garnishment, approval-control, or other domain-sensitive behavior is implemented.
 - [Pay schedules, salary timekeeping, and client cloning](PAY_SCHEDULE_SALARY_TIMEKEEPING_AND_CLIENT_CLONE_DESIGN_2026-08-03.md)
