@@ -121,9 +121,10 @@ Approval is blocked by a different FICA message: *"Recalculate — another payro
 
 A calculated or approved run has **Download preview**. It's on the **Checks & payments** tab and next to Approve or Commit in the run header. Choose one of:
 
-- **Checks and pay stubs**: paper checks first, then a pay stub for every employee, including direct deposit and $0 net.
+- **Checks and pay stubs**: positive-net paper checks first, then separate stubs for direct deposit and $0-net statement-only employees. Each person appears once; paper checks already include their own stub.
 - **Checks only**
-- **Pay stubs only**
+- **Pay stubs only**: direct deposit and statement-only employees, excluding positive-net paper checks.
+- **All pay stubs (including paper-check employees)**: a separate statement for every employee with payroll activity.
 
 Every page is marked PREVIEW and check numbers are blank. Check-stub year-to-date includes this paycheck. The file name ends in the review revision, for example `…_PREVIEW_2026-11-19_rev3.pdf`.
 
@@ -173,7 +174,7 @@ On **Checks & payments**:
 2. Check each **Check number** against the stock. Change any that don't match, then **Save check numbers**.
 3. Choose **Generate and save package**, then **Open saved PDF to print** (or **Download**).
 
-Direct-deposit stubs are separate from paper checks. Printing a stub doesn't start a bank transfer. The **Reports** tab has the **Full Print Package** with the transmittal. Reports downloaded before commit are marked "PREVIEW, payroll not yet committed". After commit they aren't.
+**Print non-check statements** and **Download non-check statements** include direct deposit and statement-only employees, using the payment method saved for this run. **Print all earnings statements** and **Download all earnings statements** are secondary options that also include paper-check employees. You can also select individual employees. Printing a stub doesn't start a bank transfer. The **Reports** tab has the **Full Print Package** with the transmittal and payroll reports; it does not include checks or individual earnings statements. Reports downloaded before commit are marked "PREVIEW, payroll not yet committed". After commit they aren't.
 
 ## Mark inactive
 

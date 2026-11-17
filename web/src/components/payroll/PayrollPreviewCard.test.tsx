@@ -39,11 +39,11 @@ describe('PayrollPreviewCard', () => {
     expect(screen.getByText('The last preview was revision 2; download a new one.')).toBeTruthy();
   });
 
-  it.each(['calculated', 'approved'] as const)('offers the three preview parts on %s payroll', async status => {
+  it.each(['calculated', 'approved'] as const)('offers the four preview parts on %s payroll', async status => {
     vi.mocked(checksApi.previewPdf).mockResolvedValue({ blob: new Blob(['pdf']), filename: 'Example_PREVIEW_2026-11-19_rev3.pdf' });
     render(<PayrollPreviewCard payPeriod={{ ...period, status }} />);
     expect(screen.getByText('Watermarked PREVIEW, no check numbers. Send it to the client to review before you commit.')).toBeTruthy();
-    for (const [label, part] of [['Checks and pay stubs', undefined], ['Checks only', 'checks'], ['Pay stubs only', 'stubs']] as const) {
+    for (const [label, part] of [['Checks and pay stubs', undefined], ['Checks only', 'checks'], ['Pay stubs only', 'stubs'], ['All pay stubs (including paper-check employees)', 'all_stubs']] as const) {
       fireEvent.click(screen.getByRole('button', { name: label }));
       await waitFor(() => expect(checksApi.previewPdf).toHaveBeenLastCalledWith(11, 2, part));
       await waitFor(() => expect(screen.getByRole('button', { name: 'Download preview' }).hasAttribute('disabled')).toBe(false));

@@ -207,6 +207,12 @@ module Api
             skipped_count = all_items.count - items.count
           end
 
+          if ActiveModel::Type::Boolean.new.cast(params[:non_check_only])
+            separate_items = items.select { |item| EarningsStatementEligibility.separate_statement?(item) }
+            skipped_count += items.size - separate_items.size
+            items = separate_items
+          end
+
           items = items.sort_by { |item| [ item.employee&.last_name.to_s.downcase, item.employee&.first_name.to_s.downcase, item.id ] }
 
           if items.empty?
