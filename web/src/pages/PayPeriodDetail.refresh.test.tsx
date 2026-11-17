@@ -7,6 +7,7 @@ import { Link, createMemoryRouter, RouterProvider, MemoryRouter, Route, Routes, 
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
 import { PayPeriodDetail as PayPeriodDetailPage } from './PayPeriodDetail';
+import { PayRunSteps } from './pay-periods/pay-run/PayRunWorkflowSteps';
 import { usePayRunController } from './pay-periods/pay-run/usePayRunController';
 import { payrollFinalRecordFixture, voidedFinalRecordFixture } from '@/components/payroll/PayrollFinalRecordPanel.fixtures';
 
@@ -34,6 +35,7 @@ async function findPayRunButton(name: string): Promise<HTMLElement> {
 
 const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
+  delete: vi.fn(),
   clientReview: vi.fn(),
   recordClientApproval: vi.fn(),
   liabilities: vi.fn(),
@@ -57,6 +59,7 @@ const componentMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/services/api', () => ({
+  default: { delete: apiMocks.delete },
   ApiError: class ApiError extends Error {},
   payPeriodsApi: {
     get: apiMocks.get,
@@ -2187,4 +2190,113 @@ it('honors a fresh dialog confirmation when the page still has an older client-r
   act(() => controller.dialogs.setCommitPeriodId(12));
   await act(async () => controller.dialogs.handleCommit(12, { acknowledged_outstanding_file_request_ids: [] }));
   expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12, { acknowledged_outstanding_file_request_ids: [] });
+});
+
+
+it('restores a former worker on an adjustment run, then enters pay and calculates', async () => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Former', last_name: 'Worker', employment_type: 'hourly',
+    pay_rate: 15, status: 'terminated', termination_date: '2026-08-31', pay_frequency: 'biweekly' } as Employee;
+  const period = { ...initialPayPeriod, status: 'calculated', run_purpose: 'adjustment', payroll_items: [],
+    excluded_employee_ids: [30], excluded_employees: [{ employee_id: 30, name: 'Former Worker', reason: 'No pay entered' }] } as unknown as PayPeriod;
+  const restored = { ...period, excluded_employee_ids: [], excluded_employees: [] };
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.restoreEmployee.mockResolvedValue({});
+  apiMocks.get.mockResolvedValue({ pay_period: restored });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...restored, payroll_items: [{ id: 90, employee_id: 30,
+    employee_name: 'Former Worker', employment_type: 'hourly', pay_rate: 15, hours_worked: 16, overtime_hours: 0, gross_pay: 240, net_pay: 220 }] },
+    results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add back Former Worker' }));
+  await screen.findByText('No pay in this period for 1 eligible employee');
+  expect(apiMocks.restoreEmployee).toHaveBeenCalledExactlyOnceWith(12, 30);
+  expect(apiMocks.employeesList).toHaveBeenLastCalledWith({ eligible_pay_period_id: 12, per_page: 100, page: 1 });
+  fireEvent.click(screen.getByRole('button', { name: 'Enter pay' }));
+  const card = await screen.findByRole('region', { name: 'Payroll entry for Former Worker' });
+  fireEvent.change(within(card).getByLabelText('Regular hours'), { target: { value: '16' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Recalculate with 1 added' }));
+  await screen.findByText('Payroll calculated for 1 employee. Review the results before approval.');
+  expect(apiMocks.runPayroll).toHaveBeenCalledOnce();
+  expect(apiMocks.runPayroll.mock.calls[0][1]).toEqual(expect.objectContaining({ employee_ids: [30], hours: { '30': expect.objectContaining({ regular: 16 }) } }));
+});
+
+it('preserves staged worksheet hours when undoing an approved-run expected-entry resolution', async () => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 15, status: 'active', pay_frequency: 'biweekly' } as Employee;
+  const field = { id: 4, employee_id: 30, label: 'Manual hours', kind: 'extra_hours', required: true, allow_none: true, status: 'none', value: '0' };
+  const period = { ...initialPayPeriod, status: 'approved', payroll_items: [{ id: 90, employee_id: 30,
+    employment_type: 'hourly', hours_worked: 4, overtime_hours: 0, pay_rate: 15, gross_pay: 60, net_pay: 55 }],
+    expected_entries: { fields: [field], missing_regulars: [], outstanding: [] } } as unknown as PayPeriod;
+  const updated = { ...period, expected_entries: { fields: [{ ...field, status: 'missing' }], missing_regulars: [], outstanding: ['Manual hours'] } } as unknown as PayPeriod;
+  apiMocks.get.mockResolvedValue({ pay_period: updated });
+  apiMocks.delete.mockResolvedValue({});
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  let controller!: Extract<ReturnType<typeof usePayRunController>, { status: 'ready' }>['sections'];
+  function Page() {
+    const result = usePayRunController({ initialPayPeriod: period });
+    if (result.status !== 'ready') return null;
+    controller = result.sections;
+    return <><output aria-label="Staged hours">{controller.hours.hoursMap['30']?.regular}</output>
+      <PayRunSteps sections={controller} /></>;
+  }
+  // Stage through the real controller setter while approved UI correctly keeps pay inputs read-only.
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<Page />} /></Routes></MemoryRouter>);
+  await screen.findByRole('button', { name: 'Undo none for Manual hours' });
+  act(() => controller.roster.setHoursMap(previous => ({ ...previous, '30': { ...previous['30'], regular: 19 } })));
+  fireEvent.click(screen.getByRole('button', { name: 'Undo none for Manual hours' }));
+  await screen.findByText('Manual hours · Missing');
+  expect(apiMocks.delete).toHaveBeenCalledExactlyOnceWith('/admin/pay_periods/12/entry_resolutions', { data: { employee_id: 30, payroll_standing_change_id: 4, note: '' } });
+  expect(screen.getByLabelText('Staged hours').textContent).toBe('19');
+});
+
+
+it('supersedes an old input-preserving reload while the new run is still loading', async () => {
+  vi.clearAllMocks();
+  const oldPeriod = { ...initialPayPeriod, status: 'draft' } as PayPeriod;
+  const newPeriod = { ...oldPeriod, id: 13, notes: 'New run loaded', payroll_items: [{ id: 91, employee_id: 31, hours_worked: 8, overtime_hours: 0 }] } as unknown as PayPeriod;
+  const employee = { id: 31, company_id: 7, first_name: 'New', last_name: 'Worker', employment_type: 'hourly', pay_rate: 15, status: 'active', pay_frequency: 'biweekly' } as Employee;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  let controller!: Extract<ReturnType<typeof usePayRunController>, { status: 'ready' }>['sections'];
+  function Page() {
+    const navigate = useNavigate();
+    const result = usePayRunController({ initialPayPeriod: oldPeriod });
+    if (result.status !== 'ready') return <output>Run loading</output>;
+    controller = result.sections;
+    return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Next run</button>
+      <output>{controller.processing.payPeriod.notes || 'Old run loaded'}</output>
+      <output aria-label="Current run hours">{controller.hours.hoursMap['31']?.regular}</output></>;
+  }
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<Page />} /></Routes></MemoryRouter>);
+  await screen.findByText('Old run loaded');
+  let finishOld!: (value: { pay_period: PayPeriod }) => void;
+  let finishNew!: (value: { pay_period: PayPeriod }) => void;
+  apiMocks.get.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }))
+    .mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve; }));
+  const oldReload = controller.roster.loadPayPeriod;
+  let pending!: ReturnType<typeof oldReload>;
+  act(() => { pending = oldReload(12, true, true); });
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
+  fireEvent.click(screen.getByRole('button', { name: 'Next run' }));
+  await screen.findByText('Run loading');
+  await waitFor(() => expect(apiMocks.get).toHaveBeenLastCalledWith(13));
+  await act(async () => {
+    finishOld({ pay_period: { ...oldPeriod, notes: 'Stale resolution reload' } });
+    expect(await pending).toBe('superseded');
+    // An old callback that starts after navigation must not supersede the new request either.
+    expect(await oldReload(12, true, true)).toBe('superseded');
+  });
+  expect(screen.getByText('Run loading')).toBeTruthy();
+  expect(screen.queryByText('Stale resolution reload')).toBeNull();
+  expect(apiMocks.get).toHaveBeenCalledTimes(2);
+  await act(async () => { finishNew({ pay_period: newPeriod }); });
+  await screen.findByText('New run loaded');
+  expect(screen.getByLabelText('Current run hours').textContent).toBe('8');
+  expect(controller.processing.payPeriod.id).toBe(13);
+  expect(controller.hours.employees).toEqual([employee]);
 });

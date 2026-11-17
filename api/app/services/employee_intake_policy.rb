@@ -38,7 +38,7 @@ class EmployeeIntakePolicy
       "created_by_id" => actor&.id, "follow_up_owner_id" => actor&.id,
       "authorized_by_name" => User.find_by(id: employee.company.employee_intake_enabled_by_id)&.name,
       "created_by_name" => actor&.name, "follow_up_owner_name" => actor&.name,
-      "follow_up_due_on" => (Date.current + 7.days).iso8601,
+      "follow_up_due_on" => (PayrollBusinessClock.today + 7.days).iso8601,
       "created_at" => Time.current.iso8601
     }
   end

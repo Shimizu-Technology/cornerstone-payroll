@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe EmployeeRetirementElectionChangeService do
+  include ActiveSupport::Testing::TimeHelpers
   let(:company) { create(:company) }
   let(:actor) { create(:user, company: company, role: "admin") }
   let(:employee) { create(:employee, company: company, department: create(:department, company: company), date_of_birth: Date.new(1970, 1, 1)) }
@@ -30,6 +31,17 @@ RSpec.describe EmployeeRetirementElectionChangeService do
       employer_match_destination: "traditional",
       true_up_policy: "year_to_date"
     }
+  end
+
+  it "syncs today's Guam election before UTC midnight while leaving tomorrow's election upcoming" do
+    travel_to(Time.utc(2026, 11, 16, 22, 31)) do
+      described_class.new(employee: employee, attributes: attributes.merge(effective_on: "2026-11-17"),
+        actor: actor, source: "staff", reason: "Signed election").call!
+      expect(employee.reload.retirement_rate).to eq(0.06.to_d)
+      described_class.new(employee: employee, attributes: attributes.merge(effective_on: "2026-11-18", traditional_rate: 0.08),
+        actor: actor, source: "staff", reason: "Future election").call!
+      expect(employee.reload.retirement_rate).to eq(0.06.to_d)
+    end
   end
 
   it "appends an election and keeps legacy percentage caches compatible" do

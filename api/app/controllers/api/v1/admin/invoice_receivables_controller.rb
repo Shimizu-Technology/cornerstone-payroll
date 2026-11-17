@@ -10,7 +10,7 @@ module Api
           render json: InvoiceReceivablesSummary.new(
             finance_book: current_finance_book,
             billing_profile_id: params[:billing_profile_id],
-            as_of: params[:as_of].present? ? Date.iso8601(params[:as_of]) : Date.current
+            as_of: params[:as_of].present? ? Date.iso8601(params[:as_of]) : PayrollBusinessClock.today
           ).call
         rescue Date::Error => e
           render json: { error: e.message }, status: :unprocessable_entity

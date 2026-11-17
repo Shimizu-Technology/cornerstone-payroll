@@ -100,7 +100,7 @@ class EmployeeLoanSetupService
 
       attributes[:opening_balance] = original_amount
       attributes[:current_balance] = original_amount
-      attributes[:balance_as_of] = attributes[:start_date].presence || Date.current
+      attributes[:balance_as_of] = attributes[:start_date].presence || PayrollBusinessClock.today
       attributes[:balance_source] = "new_loan"
       attributes[:principal_amount_known] = true
     end

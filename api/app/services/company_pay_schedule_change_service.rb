@@ -73,7 +73,7 @@ class CompanyPayScheduleChangeService
   end
 
   def configuration_date
-    Time.find_zone!("Pacific/Guam").today
+    PayrollBusinessClock.today
   end
 
   def validate_effective_date!(*records)

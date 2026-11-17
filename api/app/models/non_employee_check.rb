@@ -163,7 +163,7 @@ class NonEmployeeCheck < ApplicationRecord
   end
 
   def effective_payment_date
-    payment_date || pay_period&.pay_date || created_at&.to_date || Date.current
+    payment_date || pay_period&.pay_date || (created_at && PayrollBusinessClock.date_for(created_at)) || PayrollBusinessClock.today
   end
 
   def voucher_line_items

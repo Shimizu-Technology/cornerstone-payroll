@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe PayrollReminderService do
+  include ActiveSupport::Testing::TimeHelpers
   before { ensure_verified_test_tax_years(2024, 2026) }
   let(:company) { create(:company, name: "Test Corp", pay_frequency: "biweekly") }
 
@@ -13,6 +14,29 @@ RSpec.describe PayrollReminderService do
     allow(ENV).to receive(:[]).with("RESEND_FROM_EMAIL").and_return("payroll@test.com")
     allow(ENV).to receive(:[]).with("MAILER_FROM_EMAIL").and_return(nil)
     allow(ENV).to receive(:fetch).with("FRONTEND_URL").and_return("https://app.test.com")
+  end
+
+  describe "Guam morning reminders" do
+    around { |example| travel_to(Time.utc(2026, 11, 16, 22, 31)) { example.run } }
+
+    it "classifies yesterday as overdue and includes the last upcoming day in Guam" do
+      create(:payroll_reminder_config, company: company, enabled: true, recipients: [ "boss@test.com" ],
+        days_before_due: 3, send_overdue_alerts: true)
+      yesterday = create(:pay_period, company: company, start_date: "2026-11-01", end_date: "2026-11-10", pay_date: "2026-11-16")
+      today = create(:pay_period, company: company, start_date: "2026-11-01", end_date: "2026-11-10", pay_date: "2026-11-17")
+      deadline = create(:pay_period, company: company, start_date: "2026-11-01", end_date: "2026-11-10", pay_date: "2026-11-20")
+      after_deadline = create(:pay_period, company: company, start_date: "2026-11-01", end_date: "2026-11-10", pay_date: "2026-11-21")
+      sent = []
+      allow(Resend::Emails).to receive(:send) { |payload| sent << payload }
+
+      described_class.run_all!
+
+      expect(PayrollReminderLog.find_by!(pay_period: yesterday).reminder_type).to eq("overdue")
+      expect(PayrollReminderLog.find_by!(pay_period: today).reminder_type).to eq("upcoming")
+      expect(PayrollReminderLog.find_by!(pay_period: deadline).reminder_type).to eq("upcoming")
+      expect(PayrollReminderLog.where(pay_period: after_deadline)).to be_empty
+      expect(sent.map { |payload| payload[:html] }.join).to include("1 day past due", "Today", "in 3 days")
+    end
   end
 
   describe ".run_all!" do
@@ -37,9 +61,9 @@ RSpec.describe PayrollReminderService do
       let!(:pay_period) do
         create(:pay_period,
                company: company,
-               start_date: Date.current - 14,
-               end_date: Date.current,
-               pay_date: Date.current + 2,
+               start_date: PayrollBusinessClock.today - 14,
+               end_date: PayrollBusinessClock.today,
+               pay_date: PayrollBusinessClock.today + 2,
                status: "draft")
       end
 
@@ -82,9 +106,9 @@ RSpec.describe PayrollReminderService do
       let!(:pay_period) do
         create(:pay_period,
                company: company,
-               start_date: Date.current - 21,
-               end_date: Date.current - 7,
-               pay_date: Date.current - 3,
+               start_date: PayrollBusinessClock.today - 21,
+               end_date: PayrollBusinessClock.today - 7,
+               pay_date: PayrollBusinessClock.today - 3,
                status: "draft")
       end
 
@@ -118,9 +142,9 @@ RSpec.describe PayrollReminderService do
       let!(:last_committed) do
         create(:pay_period,
                company: company,
-               start_date: Date.current - 19,
-               end_date: Date.current - 6,
-               pay_date: Date.current - 1,
+               start_date: PayrollBusinessClock.today - 19,
+               end_date: PayrollBusinessClock.today - 6,
+               pay_date: PayrollBusinessClock.today - 1,
                status: "committed")
       end
 
@@ -131,27 +155,27 @@ RSpec.describe PayrollReminderService do
         # Let's adjust the last period so the next expected pay_date is within the window
 
         last_committed.update!(
-          start_date: Date.current - 28,
-          end_date: Date.current - 15,
-          pay_date: Date.current - 10,
+          start_date: PayrollBusinessClock.today - 28,
+          end_date: PayrollBusinessClock.today - 15,
+          pay_date: PayrollBusinessClock.today - 10,
           status: "committed"
         )
         # Next expected: start=current-14, end=current-1, pay_date=current+4
         # Trigger = current+4 - 3 = current+1 → not yet
         # Adjust further so pay_date is within 3 days:
         last_committed.update!(
-          start_date: Date.current - 25,
-          end_date: Date.current - 12,
-          pay_date: Date.current - 7,
+          start_date: PayrollBusinessClock.today - 25,
+          end_date: PayrollBusinessClock.today - 12,
+          pay_date: PayrollBusinessClock.today - 7,
           status: "committed"
         )
         # Next expected: start=current-11, end=current+2, pay_date=current+7
         # Trigger date: current+7-3 = current+4 → still future
         # Let's make it tight:
         last_committed.update!(
-          start_date: Date.current - 30,
-          end_date: Date.current - 17,
-          pay_date: Date.current - 14,
+          start_date: PayrollBusinessClock.today - 30,
+          end_date: PayrollBusinessClock.today - 17,
+          pay_date: PayrollBusinessClock.today - 14,
           status: "committed"
         )
         # Next expected: start=current-16, end=current-3, pay_date=current
@@ -167,23 +191,23 @@ RSpec.describe PayrollReminderService do
         log = PayrollReminderLog.where(reminder_type: "create_payroll").last
         expect(log).to be_present
         expect(log.pay_period_id).to be_nil
-        expect(log.expected_pay_date).to eq(Date.current)
+        expect(log.expected_pay_date).to eq(PayrollBusinessClock.today)
       end
 
       it "does not send create_payroll if the next period already exists" do
         last_committed.update!(
-          start_date: Date.current - 30,
-          end_date: Date.current - 17,
-          pay_date: Date.current - 14,
+          start_date: PayrollBusinessClock.today - 30,
+          end_date: PayrollBusinessClock.today - 17,
+          pay_date: PayrollBusinessClock.today - 14,
           status: "committed"
         )
 
         # Create the expected next period (upcoming reminder may fire, but create_payroll should not)
         create(:pay_period,
                company: company,
-               start_date: Date.current - 16,
-               end_date: Date.current - 3,
-               pay_date: Date.current,
+               start_date: PayrollBusinessClock.today - 16,
+               end_date: PayrollBusinessClock.today - 3,
+               pay_date: PayrollBusinessClock.today,
                status: "draft")
 
         allow(Resend::Emails).to receive(:send)
@@ -194,9 +218,9 @@ RSpec.describe PayrollReminderService do
 
       it "does not send duplicate create_payroll reminders" do
         last_committed.update!(
-          start_date: Date.current - 30,
-          end_date: Date.current - 17,
-          pay_date: Date.current - 14,
+          start_date: PayrollBusinessClock.today - 30,
+          end_date: PayrollBusinessClock.today - 17,
+          pay_date: PayrollBusinessClock.today - 14,
           status: "committed"
         )
 
@@ -235,9 +259,9 @@ RSpec.describe PayrollReminderService do
         create(
           :pay_period,
           company: workspace,
-          start_date: Date.current - 14,
-          end_date: Date.current,
-          pay_date: Date.current + 2,
+          start_date: PayrollBusinessClock.today - 14,
+          end_date: PayrollBusinessClock.today,
+          pay_date: PayrollBusinessClock.today + 2,
           status: "draft"
         )
       end

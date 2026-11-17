@@ -55,7 +55,7 @@ module Api
         end
 
         def configuration_date
-          Time.find_zone!("Pacific/Guam").today
+          PayrollBusinessClock.today
         end
 
         def payload(schedule, workweek)
