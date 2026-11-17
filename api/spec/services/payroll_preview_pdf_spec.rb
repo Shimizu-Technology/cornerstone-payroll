@@ -13,6 +13,54 @@ RSpec.describe PayrollPreviewPdf do
     PDF::Reader.new(StringIO.new(data)).pages
   end
 
+  describe "preview parts" do
+    let!(:paper) { item }
+    let!(:deposit) do
+      create(:payroll_item, company: company, pay_period: period,
+        employee: create(:employee, company: company, first_name: "Alex", last_name: "Adams"),
+        payment_delivery_method: "direct_deposit", gross_pay: 200, net_pay: 180)
+    end
+    let!(:zero) do
+      create(:payroll_item, company: company, pay_period: period,
+        employee: create(:employee, company: company, first_name: "Zoe", last_name: "Adams"), gross_pay: 50, net_pay: 0)
+    end
+    let!(:empty) { create(:payroll_item, company: company, pay_period: period, gross_pay: 0, net_pay: 0) }
+
+    before do
+      paper.employee.update!(first_name: "Paper", last_name: "Worker", payment_delivery_method: "direct_deposit")
+      paper.update!(payment_delivery_method: "paper_check")
+      zero.update!(payment_delivery_method: "paper_check")
+    end
+
+    { nil => [ "Paper Worker", "Alex Adams", "Zoe Adams" ],
+      "checks" => [ "Paper Worker" ], "stubs" => [ "Alex Adams", "Zoe Adams" ],
+      "all_stubs" => [ "Alex Adams", "Zoe Adams", "Paper Worker" ] }.each do |part, names|
+      it "renders #{part || 'combined'} using run methods, without empty rows and in name order" do
+        rendered = []
+        allow(CheckGenerator).to receive(:generate_preview_batch).and_wrap_original do |original, checks, **options|
+          rendered.concat(checks.map { |row| row.employee.full_name })
+          original.call(checks, **options)
+        end
+        allow(PayStubGenerator).to receive(:new).and_wrap_original do |original, row, **options|
+          rendered << row.employee.full_name
+          original.call(row, **options)
+        end
+        pages = pdf_pages(described_class.generate(pay_period: period, company: company, part: part))
+        expect(pages.size).to eq(names.size)
+        expect(rendered).to eq(names)
+        expect(rendered).not_to include(empty.employee.full_name)
+      end
+    end
+
+    it "respects a run override from paper check to deposit" do
+      paper.update!(payment_delivery_method: "direct_deposit")
+      paper.employee.update!(payment_delivery_method: "paper_check")
+      allow(PayStubGenerator).to receive(:new).and_call_original
+      expect(PayStubGenerator).to receive(:new).with(have_attributes(id: paper.id), preview: true).and_call_original
+      described_class.generate(pay_period: period, company: company, part: "stubs")
+    end
+  end
+
   it "renders first-class check and stub previews with identical page dimensions and a replaced footer" do
     normal = pdf_pages(CheckGenerator.new(item).generate)
     preview = pdf_pages(CheckGenerator.new(item, preview: true).generate)

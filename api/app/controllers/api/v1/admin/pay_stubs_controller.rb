@@ -144,6 +144,7 @@ module Api
 
         def batch_pdf
           deposit_only = action_name == "direct_deposit_stubs_pdf"
+          non_check_only = ActiveModel::Type::Boolean.new.cast(params[:non_check_only])
           pay_period = PayPeriod.find(params[:pay_period_id])
 
           unless pay_period.company_id == current_company_id
@@ -207,6 +208,12 @@ module Api
             skipped_count = all_items.count - items.count
           end
 
+          if non_check_only
+            separate_items = items.select { |item| EarningsStatementEligibility.separate_statement?(item) }
+            skipped_count += items.size - separate_items.size
+            items = separate_items
+          end
+
           items = items.sort_by { |item| [ item.employee&.last_name.to_s.downcase, item.employee&.first_name.to_s.downcase, item.id ] }
 
           if items.empty?
@@ -217,7 +224,9 @@ module Api
           response.set_header("X-Pay-Stubs-Generated", items.count.to_s)
           response.set_header("X-Pay-Stubs-Skipped", skipped_count.to_s)
           pay_date = pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
-          filename_prefix = if deposit_only
+          filename_prefix = if non_check_only
+            requested_ids.any? ? "selected_non_check_statements" : "non_check_statements"
+          elsif deposit_only
             requested_ids.any? ? "selected_direct_deposit_stubs" : "direct_deposit_stubs"
           else
             requested_ids.any? ? "selected_paystubs" : "paystubs"
