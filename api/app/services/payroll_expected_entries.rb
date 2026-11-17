@@ -8,7 +8,7 @@ class PayrollExpectedEntries
 
   def payload
     # Only open runs need entries: commit checks them while the run is still approved.
-    return { fields: [], missing_regulars: [], outstanding: [] } unless @period.regular_cycle? && @period.regular_run? &&
+    return { fields: [], missing_regulars: [], outstanding: [], added_back: [] } unless @period.regular_cycle? && @period.regular_run? &&
       @period.status.in?(%w[draft calculated approved])
 
     fields = PayrollStandingChange.where(company_id: @period.company_id).active.ordered.includes(:employee, :employee_wage_rate).map do |field|
@@ -28,7 +28,7 @@ class PayrollExpectedEntries
     regulars = missing_regulars(fields.select { |field| field[:availability_error].blank? }.map { |field| field[:employee_id] })
     outstanding = fields.select { |field| field[:required] && field[:status] == "missing" && field[:availability_error].blank? }.map { |field| field[:label] } +
       regulars.reject { |row| row[:resolved] }.map { |row| row[:label] }
-    { fields: fields, missing_regulars: regulars, outstanding: outstanding }
+    { fields: fields, missing_regulars: regulars, outstanding: outstanding, added_back: added_back }
   end
 
   private
@@ -81,6 +81,29 @@ class PayrollExpectedEntries
     end.to_s("F")
   end
 
+  # What each add-back brought back from the import, kept until the worker's
+  # hours are in and nothing is left for staff to enter.
+  def added_back
+    PayrollImport::AddBackRestore.recent(@period).values.filter_map do |result|
+      next if result[:restored].empty? && result[:not_restored].empty?
+
+      hours = items.any? { |item| item.employee_id == result[:employee_id] && hours_or_pay?(item) }
+      no_hours = resolutions.any? { |row| row.employee_id == result[:employee_id] && row.payroll_standing_change_id.nil? }
+      next if (hours || no_hours) && result[:not_restored].empty?
+
+      result.merge(hours_entered: hours, no_hours: no_hours && !hours)
+    end
+  end
+
+  def awaiting_hours?(item)
+    item.custom_columns_data.to_h["import_add_back"].present? && item.employment_type != "salary" && !hours_or_pay?(item)
+  end
+
+  def hours_or_pay?(item)
+    item.salary_override.to_d.positive? ||
+      %i[hours_worked overtime_hours holiday_hours pto_hours].any? { |field| item.public_send(field).to_d.positive? }
+  end
+
   def missing_regulars(covered)
     company = @period.company
     recent = PayPeriod.where(company_id: company.id, status: "committed", cycle: "regular", run_purpose: "regular",
@@ -88,12 +111,16 @@ class PayrollExpectedEntries
       .order(pay_date: :desc, id: :desc).limit(company.regular_pay_lookback).pluck(:id)
     counts = PayrollItem.financially_reportable.where(pay_period_id: recent).where("gross_pay > 0")
       .group(:employee_id).having("COUNT(DISTINCT pay_period_id) >= ?", company.regular_pay_threshold).count
-    paid = items.map(&:employee_id)
+    # A worker added back with the import's amounts but no hours yet is still
+    # missing until staff enter their hours.
+    awaiting = items.select { |item| awaiting_hours?(item) }.map(&:employee_id)
+    paid = items.map(&:employee_id) - awaiting
     Employee.where(company_id: company.id, status: "active", id: counts.keys).where.not(id: covered + paid)
       .order(:last_name, :first_name).map do |employee|
         resolution = resolutions.find { |row| row.employee_id == employee.id && row.payroll_standing_change_id.nil? }
         exclusion = exclusions.find { |row| row.employee_id == employee.id }
-        { employee_id: employee.id, label: employee.full_name, resolved: resolution.present? || exclusion.present?, excluded: exclusion.present?, note: exclusion&.reason || resolution&.note }
+        { employee_id: employee.id, label: employee.full_name, resolved: resolution.present? || exclusion.present?, excluded: exclusion.present?,
+          awaiting_hours: awaiting.include?(employee.id), note: exclusion&.reason || resolution&.note }
       end
   end
 end

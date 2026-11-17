@@ -37,15 +37,18 @@ it.each(['availability_error', 'inline_save_error'] as const)('blocks unsafe inl
 });
 it('restores excluded fields and regulars while retaining the original reasons', async () => {
   const data = { ...period, expected_entries: { fields: [{ ...period.expected_entries!.fields[0], status: 'excluded' as const, note: 'No work scheduled' }], missing_regulars: [{ employee_id: 8, label: 'Regular Worker', resolved: true, excluded: true, note: 'Client no pay' }], outstanding: [] } };
-  const restore = vi.fn().mockResolvedValue(undefined);
-  render(<ExpectedEntriesPanel onUnapprove={vi.fn()} payPeriod={data} disabled={false} onRestore={restore} onCalculate={vi.fn()} onSaved={vi.fn()} onEnterPay={vi.fn()} />);
+  const restore = vi.fn().mockResolvedValue({ employee_id: 7, employee_name: 'Manual Worker', restored: [], not_restored: [] });
+  const view = render(<ExpectedEntriesPanel onUnapprove={vi.fn()} payPeriod={data} disabled={false} onRestore={restore} onCalculate={vi.fn()} onSaved={vi.fn()} onEnterPay={vi.fn()} />);
   expect(screen.getByText(/Excluded this period/)).toBeTruthy();
   expect(screen.getByText('No work scheduled')).toBeTruthy();
   expect(screen.getByText('Client no pay')).toBeTruthy();
   const actions = screen.getAllByRole('button', { name: 'Add back to this run' });
   fireEvent.click(actions[0]);
   await waitFor(() => expect(restore).toHaveBeenCalledWith(7));
-  expect(await screen.findByText("Imported hours aren't brought back. Enter hours or import again.")).toBeTruthy();
+  // The controller hands back the result; the panel shows and announces it.
+  view.rerender(<ExpectedEntriesPanel onUnapprove={vi.fn()} payPeriod={data} disabled={false} onRestore={restore} onCalculate={vi.fn()} onSaved={vi.fn()} onEnterPay={vi.fn()}
+    addBackNotice={{ source: 'expected_entries', result: { employee_id: 7, employee_name: 'Manual Worker', restored: [], not_restored: [] }, hoursEntered: false }} />);
+  expect(screen.getAllByText("Manual Worker is back. Hours aren't brought back. Enter hours or import again.")).toHaveLength(2);
   await waitFor(() => expect(actions[1]).toHaveProperty('disabled', false));
   fireEvent.click(actions[1]);
   await waitFor(() => expect(restore).toHaveBeenCalledWith(8));
@@ -134,4 +137,53 @@ it('shows add-back feedback only on the selected employee while all other writes
   expect(screen.getByRole('button', { name: 'Adding back…' }).getAttribute('aria-busy')).toBe('true');
   expect(screen.getByRole('button', { name: 'Not paid this period' })).toHaveProperty('disabled', true);
   expect(screen.getByRole('status').lastElementChild?.textContent).toBe('Adding employee back to this run…');
+});
+
+it('shows a saved add-back in the worker row, announces a fresh one, and keeps the live region mounted', async () => {
+  const excluded = { ...period, expected_entries: { ...period.expected_entries!, fields: [{ ...period.expected_entries!.fields[0], status: 'excluded' as const }], missing_regulars: [] } };
+  const result = { employee_id: 7, employee_name: 'Avery Monroe', import_id: 3,
+    restored: [{ key: 'loan', kind: 'loan' as const, label: 'Loan', amount: '159.1' }],
+    not_restored: [{ key: 'tips', kind: 'tips' as const, label: 'Tips', amount: '20.0', enter_by_hand: true, reason: 'The import was replaced by newer files. Enter them under Hours → Tips & Deductions.' }] };
+  const props = { onUnapprove: vi.fn(), disabled: false, onRestore: vi.fn().mockResolvedValue(result), onCalculate: vi.fn(), onSaved: vi.fn(), onEnterPay: vi.fn() };
+  const view = render(<ExpectedEntriesPanel {...props} payPeriod={excluded} />);
+  const live = screen.getByTestId('add-back-announcement');
+  expect(live.getAttribute('aria-live')).toBe('polite');
+  expect(live.textContent).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: 'Add back to this run' }));
+  await waitFor(() => expect(props.onRestore).toHaveBeenCalledWith(7));
+  // After the reload: the server lists the add-back, which survives a page refresh.
+  const reloaded = { ...excluded, expected_entries: { ...excluded.expected_entries, fields: [{ ...excluded.expected_entries.fields[0], status: 'missing' as const }],
+    added_back: [{ ...result, hours_entered: false }] } };
+  view.rerender(<ExpectedEntriesPanel {...props} payPeriod={reloaded} addBackNotice={{ source: 'expected_entries', result, hoursEntered: false }} />);
+  expect(screen.getByTestId('add-back-announcement')).toBe(live);
+  expect(live.textContent).toBe("Avery Monroe is back. Restored from the import: Loan $159.10. Hours aren't brought back. Enter hours, then calculate.");
+  const row = screen.getByLabelText('Hours: Manual hours').closest('div.border-t');
+  expect(row?.textContent).toContain('Restored from the import: Loan $159.10.');
+  expect(row?.textContent).toContain('Tips $20.00: The import was replaced by newer files. Enter them under Hours → Tips & Deductions.');
+  // Hours saved; the tips still need entering, so the notice stays with the new next step.
+  view.rerender(<ExpectedEntriesPanel {...props} payPeriod={{ ...reloaded, expected_entries: { ...reloaded.expected_entries, fields: [{ ...reloaded.expected_entries.fields[0], status: 'filled' as const, value: '40' }],
+    added_back: [{ ...result, hours_entered: true }] } }} />);
+  expect(screen.getByText('Avery Monroe is back. Restored from the import: Loan $159.10. Hours are entered.')).toBeTruthy();
+});
+
+it('shows the add-back result when the reload after it failed', () => {
+  const excluded = { ...period, expected_entries: { ...period.expected_entries!, fields: [{ ...period.expected_entries!.fields[0], status: 'excluded' as const }], missing_regulars: [] } };
+  const result = { employee_id: 7, employee_name: 'Avery Monroe', restored: [],
+    not_restored: [{ key: 'loan', kind: 'loan' as const, label: 'Loan', amount: '159.1', enter_by_hand: true, reason: 'The import was replaced by newer files. Apply the current import review, or enter it by hand. Enter it under Hours → Tips & Deductions.' }] };
+  render(<ExpectedEntriesPanel onUnapprove={vi.fn()} payPeriod={excluded} disabled={false} onRestore={vi.fn()} onCalculate={vi.fn()} onSaved={vi.fn()} onEnterPay={vi.fn()}
+    addBackNotice={{ source: 'expected_entries', result, hoursEntered: false }} />);
+  expect(screen.getByRole('listitem').textContent).toBe('Loan $159.10: The import was replaced by newer files. Apply the current import review, or enter it by hand. Enter it under Hours → Tips & Deductions.');
+});
+
+it('offers an honest no-hours answer for a usually-paid worker added back with import amounts', async () => {
+  mocks.post.mockResolvedValue({}); mocks.delete.mockResolvedValue({});
+  const awaiting = { ...period, expected_entries: { fields: [], missing_regulars: [{ employee_id: 8, label: 'Regular Worker', resolved: false, awaiting_hours: true }], outstanding: ['Regular Worker'] } };
+  const props = { onUnapprove: vi.fn(), disabled: false, onRestore: vi.fn(), onCalculate: vi.fn(), onSaved: vi.fn().mockResolvedValue(undefined), onEnterPay: vi.fn() };
+  const view = render(<ExpectedEntriesPanel {...props} payPeriod={awaiting} />);
+  expect(screen.queryByRole('button', { name: 'Not paid this period' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'No hours this period' }));
+  await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/admin/pay_periods/1/entry_resolutions', { employee_id: 8, payroll_standing_change_id: undefined, note: '' }));
+  view.rerender(<ExpectedEntriesPanel {...props} payPeriod={{ ...awaiting, expected_entries: { ...awaiting.expected_entries, missing_regulars: [{ ...awaiting.expected_entries.missing_regulars[0], resolved: true }], outstanding: [] } }} />);
+  expect(screen.getByText('Regular Worker · No hours this period')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Undo no hours for Regular Worker' })).toBeTruthy();
 });

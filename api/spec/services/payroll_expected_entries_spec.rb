@@ -141,6 +141,29 @@ RSpec.describe PayrollExpectedEntries do
       end
     end
 
+    it "keeps a worker added back with import amounts missing until hours are entered" do
+      item = create(:payroll_item, pay_period: period, employee: employee, employment_type: "hourly", gross_pay: 50, hours_worked: 0,
+        reported_tips: 50, loan_deduction: 159.10, custom_columns_data: { "import_add_back" => { "import_id" => 1 } })
+      expect(data[:missing_regulars].sole).to include(employee_id: employee.id, resolved: false, awaiting_hours: true)
+      expect(data[:outstanding]).to eq([ employee.full_name ])
+      item.update!(hours_worked: 40)
+      expect(data[:missing_regulars]).to be_empty
+    end
+
+    it "lets staff confirm an added-back worker has no hours when tips are their only pay" do
+      create(:payroll_item, pay_period: period, employee: employee, employment_type: "hourly", gross_pay: 50, hours_worked: 0,
+        reported_tips: 50, custom_columns_data: { "import_add_back" => { "import_id" => 1 } })
+      AuditLog.create!(company_id: company.id, action: "pay_period_excluded_employees#destroy", record_type: "PayPeriod", record_id: period.id,
+        subject_name: employee.full_name, metadata: { employee_id: employee.id, restored_import_amounts: [ { kind: "tips", label: "Tips", amount: "50.0" } ],
+          not_restored_import_amounts: [] })
+      expect(data[:added_back]).to contain_exactly(include(employee_id: employee.id, hours_entered: false, no_hours: false))
+      PayrollEntryResolution.create!(pay_period: period, employee: employee, note: "Tips only this period")
+      expect(data[:missing_regulars].sole).to include(resolved: true, awaiting_hours: true, note: "Tips only this period")
+      expect(data[:outstanding]).to be_empty
+      # Answered, and nothing left to enter: the add-back notice is done.
+      expect(data[:added_back]).to be_empty
+    end
+
     it "honors threshold edges, excludes configured people, and clears when pay is entered" do
       company.update!(regular_pay_threshold: 4)
       expect(data[:missing_regulars]).to be_empty
