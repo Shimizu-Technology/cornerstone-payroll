@@ -307,6 +307,46 @@ RSpec.describe "Pay run activity feed", type: :request do
       expect(AuditLog.find_by!(action: "payroll_items#update").metadata.fetch("changed_fields")).to include("payroll_field_entries")
     end
 
+    context "with a manual loan entry carrying request intent" do
+      let!(:item) { create(:payroll_item, pay_period: pay_period, employee: avery) }
+      let!(:field) do
+        PayrollFieldDefinition.create!(company: company, name: "Loan", kind: "deduction",
+          tax_treatment: "post_tax_deduction", category: "loan")
+      end
+      let!(:entry) do
+        item.payroll_item_field_entries.create!(payroll_field_definition: field, label: "Loan", kind: "deduction",
+          tax_treatment: "post_tax_deduction", category: "loan", amount: 10, source: "manual", notes: "Advance",
+          metadata: { "loan_requested_amount" => "50.0" })
+      end
+
+      def send_entry(extra = {})
+        stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+        patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{item.id}", params: { payroll_item: {
+          payroll_field_entries: [ { id: entry.id, payroll_field_definition_id: field.id, label: "Loan", kind: "deduction",
+            tax_treatment: "post_tax_deduction", category: "loan", amount: 10, source: "manual", notes: "Advance",
+            active: true }.merge(extra) ]
+        } }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        AuditLog.where(action: "payroll_items#update").last.metadata.fetch("changed_fields")
+      end
+
+      it "marks payroll field entries changed when a replace request only clears the loan request" do
+        changed = send_entry(replace_request: true)
+
+        remaining = item.reload.payroll_item_field_entries.active.sole
+        expect(remaining.metadata.to_h).not_to have_key("loan_requested_amount")
+        expect(remaining.attributes.slice("label", "amount", "notes", "source")).to eq(entry.attributes.slice("label", "amount", "notes", "source"))
+        expect(changed).to include("payroll_field_entries")
+      end
+
+      it "does not mark an unchanged entry that is sent back as is" do
+        changed = send_entry
+
+        expect(item.reload.payroll_item_field_entries.active.sole.metadata.to_h).to include("loan_requested_amount" => "50.0")
+        expect(changed).not_to include("payroll_field_entries")
+      end
+    end
+
     it "records text and list fields entered when a row is added" do
       stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
       pay_period.update!(status: "draft")
