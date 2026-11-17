@@ -1184,14 +1184,19 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
   // as a report view; opening or downloading a report is what gets audited.
   // A summary that arrives after a newer save, or for another pay period,
   // must not overwrite the labels.
-  const savedSummaryRequest = useRef(0);
-  useEffect(() => () => { savedSummaryRequest.current += 1; }, [payPeriodId]);
+  const savedSummaryRequest = useRef({ transmittal: 0, signoff: 0 });
+  useEffect(() => () => {
+    savedSummaryRequest.current.transmittal += 1;
+    savedSummaryRequest.current.signoff += 1;
+  }, [payPeriodId]);
   const refreshSavedState = useCallback(() => {
-    const request = ++savedSummaryRequest.current;
+    // Each document has its own token: saving one discards only that part
+    // of a summary still in flight.
+    const transmittalToken = ++savedSummaryRequest.current.transmittal;
+    const signoffToken = ++savedSummaryRequest.current.signoff;
     reportsApi.savedDocuments(payPeriodId).then((data) => {
-      if (request !== savedSummaryRequest.current) return;
-      setSavedTransmittal(data.transmittal);
-      setSignoffSavedAt(data.check_signoff?.generated_at ?? null);
+      if (transmittalToken === savedSummaryRequest.current.transmittal) setSavedTransmittal(data.transmittal);
+      if (signoffToken === savedSummaryRequest.current.signoff) setSignoffSavedAt(data.check_signoff?.generated_at ?? null);
     }).catch(() => { /* labels are optional */ });
   }, [payPeriodId]);
 
@@ -1340,12 +1345,12 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
       const preview = await transmittalApi.preview(payPeriodId);
       const saved = preview.saved_transmittal;
       if (!saved) {
-        savedSummaryRequest.current += 1;
+        savedSummaryRequest.current.transmittal += 1;
         setSavedTransmittal(null);
         setTransmittalEditor({ open: true, key: reportKey, label, mode: 'preview' });
         return;
       }
-      savedSummaryRequest.current += 1;
+      savedSummaryRequest.current.transmittal += 1;
       setSavedTransmittal({ generated_at: saved.generated_at ?? null });
       await handlePreview(reportKey, label, savedToOptions(saved, preview));
       refreshSavedState();
@@ -1407,7 +1412,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
         if (request !== signoffRequest.current) return;
         downloadBlob(blobData, 'check_signoff_sheet.xlsx');
       }
-      savedSummaryRequest.current += 1;
+      savedSummaryRequest.current.signoff += 1;
       setSignoffSavedAt(new Date().toISOString());
     } catch (err) {
       if (request !== signoffRequest.current) return;

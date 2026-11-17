@@ -226,13 +226,20 @@ module Api
           changes.merge(changed_fields: (changes[:changed_fields] | structured).sort)
         end
 
+        # Every payroll field entry attribute staff can submit (see
+        # payroll_item_params), so an edit to any one of them is noticed.
+        AUDITED_FIELD_ENTRY_ATTRIBUTES = %w[
+          id payroll_field_definition_id label kind tax_treatment category reporting_group
+          amount source employee_paid employer_paid active notes
+        ].freeze
+
         # Job-hour splits and payroll field rows have no single value; their
         # contents are compared to tell whether a save changed them.
         def structured_audit_values(item)
           {
             "wage_rate_hours" => Array(item.wage_rate_hours).map { |row| row.to_h.stringify_keys.except("source_lines") },
             "payroll_field_entries" => item.payroll_item_field_entries.map do |entry|
-              entry.attributes.slice("payroll_field_definition_id", "label", "amount", "active", "tax_treatment", "category")
+              entry.attributes.slice(*AUDITED_FIELD_ENTRY_ATTRIBUTES)
                 .transform_values(&:to_s)
             end.sort_by(&:to_s)
           }
