@@ -76,8 +76,9 @@ module Api
               metadata: { pay_period_id: @pay_period.id, revision: package.revision, part: params[:part].presence || "combined" })
           end
           response.headers["Cache-Control"] = "private, no-store"
+          part_token = params[:part].present? ? "_#{params[:part]}" : ""
           send_data pdf, type: "application/pdf", disposition: "attachment",
-            filename: "Payroll_PREVIEW_#{@pay_period.pay_date.iso8601}_rev#{package.revision}.pdf"
+            filename: "Payroll_PREVIEW_#{@pay_period.pay_date.iso8601}_rev#{package.revision}#{part_token}.pdf"
         rescue PayrollReview::RevisionService::StaleRevisionError => e
           render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
         rescue PayrollReview::RevisionService::Error, ArgumentError => e

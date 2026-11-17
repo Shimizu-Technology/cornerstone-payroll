@@ -52,6 +52,7 @@ RSpec.describe "Published payroll review loop", type: :request do
       expect(response).to have_http_status(:ok), response.body
       pages = PDF::Reader.new(StringIO.new(response.body)).pages
       expect(pages.size).to eq(count)
+      expect(response.headers["Content-Disposition"]).to include("_#{part}.pdf") if part
       text = pages.map(&:text).join
       if part == "stubs"
         expect(text).to include(deposit.employee.full_name, zero.employee.full_name)
