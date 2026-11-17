@@ -736,7 +736,7 @@ module Api
           send_data pdf_data,
             type: "application/pdf",
             disposition: "inline",
-            filename: "test_check_#{sample_type}_#{Date.current}.pdf"
+            filename: "test_check_#{sample_type}_#{PayrollBusinessClock.today}.pdf"
         rescue StandardError => e
           render json: { error: "Failed to generate test check: #{e.message}" }, status: :unprocessable_entity
         end
@@ -821,7 +821,7 @@ module Api
           send_data pdf_data,
             type: "application/pdf",
             disposition: "attachment",
-            filename: "alignment_test_#{@company.name.parameterize}_#{Date.current}.pdf"
+            filename: "alignment_test_#{@company.name.parameterize}_#{PayrollBusinessClock.today}.pdf"
         rescue StandardError => e
           render json: { error: "Failed to generate alignment test: #{e.message}" }, status: :unprocessable_entity
         end
@@ -1154,9 +1154,9 @@ module Api
           pay_period = company.pay_periods.order(created_at: :desc).first ||
             PayPeriod.new(
               company: company,
-              start_date: Date.current.beginning_of_month,
-              end_date: Date.current,
-              pay_date: Date.current,
+              start_date: PayrollBusinessClock.today.beginning_of_month,
+              end_date: PayrollBusinessClock.today,
+              pay_date: PayrollBusinessClock.today,
               status: "committed"
             )
 
@@ -1185,9 +1185,9 @@ module Api
         def build_test_payroll_item(company)
           pay_period = PayPeriod.new(
             company: company,
-            start_date: Date.current.beginning_of_month,
-            end_date: Date.current.beginning_of_month + 13.days,
-            pay_date: Date.current,
+            start_date: PayrollBusinessClock.today.beginning_of_month,
+            end_date: PayrollBusinessClock.today.beginning_of_month + 13.days,
+            pay_date: PayrollBusinessClock.today,
             status: "committed"
           )
           employee = Employee.new(
@@ -1241,12 +1241,12 @@ module Api
               payable_to: "Treasurer of Guam",
               amount: 438.22,
               check_type: "grt",
-              memo: "GRT payment for #{Date.current.strftime('%B %Y')}",
+              memo: "GRT payment for #{PayrollBusinessClock.today.strftime('%B %Y')}",
               description: "Sample Gross Receipts Tax payment",
               reference_number: "GRT-TEST",
               payment_period_type: "month",
-              tax_year: Date.current.year,
-              tax_month: Date.current.month
+              tax_year: PayrollBusinessClock.today.year,
+              tax_month: PayrollBusinessClock.today.month
             }
           else
             {
@@ -1263,7 +1263,7 @@ module Api
           NonEmployeeCheck.new(attrs.merge(
             company: company,
             check_number: "TEST",
-            payment_date: Date.current,
+            payment_date: PayrollBusinessClock.today,
             created_at: Time.current,
             updated_at: Time.current
           ))

@@ -28,7 +28,7 @@ class PayrollReminderService
       return if company.test_workspace?
       return if config.recipients.blank?
 
-      today = Date.current
+      today = PayrollBusinessClock.today
       deadline = today + config.days_before_due.days
 
       # 1) "Create payroll" — no pay period exists yet for the next expected cycle
@@ -344,7 +344,7 @@ class PayrollReminderService
     end
 
     def upcoming_html(company:, pay_period:, days_before:)
-      days_until = (pay_period.pay_date - Date.current).to_i
+      days_until = (pay_period.pay_date - PayrollBusinessClock.today).to_i
       urgency_label = days_until <= 0 ? "Today" : days_until == 1 ? "Tomorrow" : "in #{days_until} days"
       pay_periods_link = "#{frontend_url}/pay-periods/#{pay_period.id}"
 
@@ -400,7 +400,7 @@ class PayrollReminderService
     end
 
     def overdue_html(company:, pay_period:)
-      days_overdue = (Date.current - pay_period.pay_date).to_i
+      days_overdue = (PayrollBusinessClock.today - pay_period.pay_date).to_i
       pay_periods_link = "#{frontend_url}/pay-periods/#{pay_period.id}"
 
       email_wrapper do

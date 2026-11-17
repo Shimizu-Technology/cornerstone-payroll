@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class FinanceOverviewSummary
-  def initialize(finance_book:, as_of: Date.current)
+  def initialize(finance_book:, as_of: PayrollBusinessClock.today)
     @finance_book = finance_book
     @as_of = as_of
   end

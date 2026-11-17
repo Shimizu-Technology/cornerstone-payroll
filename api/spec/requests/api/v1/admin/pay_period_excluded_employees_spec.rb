@@ -137,6 +137,49 @@ RSpec.describe "Restore removed pay-run employees", type: :request do
     end
   end
 
+  it "lists a restored former worker for explicit pay entry and calculates their adjustment" do
+    period.update!(status: "draft")
+    period.update!(run_purpose: "adjustment")
+    employee.update!(status: "terminated", termination_date: period.start_date - 1.day)
+    expect(period.payroll_items).to be_empty
+
+    delete url, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    stub_portal_user(Api::V1::Admin::EmployeesController, staff, company)
+    get "/api/v1/admin/employees", params: { eligible_pay_period_id: period.id }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("data").map { |row| row.fetch("id") }).to include(employee.id)
+
+    stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
+    post "/api/v1/admin/pay_periods/#{period.id}/run_payroll", params: {
+      employee_ids: [ employee.id ], hours: { employee.id.to_s => { regular: 16, overtime: 0 } }
+    }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("results", "errors")).to be_empty
+    expect(period.reload.payroll_items.find_by!(employee: employee)).to have_attributes(hours_worked: 16, gross_pay: 240)
+  end
+
+  %w[final correction adjustment regular bonus].each do |purpose|
+    it "lists only explicitly eligible #{purpose} choices within this company" do
+      period.update!(status: "draft")
+      period.update!(run_purpose: purpose)
+      employee.update!(status: "terminated", termination_date: period.start_date - 1.day)
+      other = create(:employee, status: "terminated", termination_date: period.start_date - 1.day)
+      unconfirmed = create(:employee, company: company)
+      unconfirmed.update_columns(intake_exception: { "reason" => "Missing I-9" }, intake_payroll_confirmed_at: nil)
+      stub_portal_user(Api::V1::Admin::EmployeesController, staff, company)
+      get "/api/v1/admin/employees", params: { eligible_pay_period_id: period.id }
+      expect(response).to have_http_status(:ok), response.body
+      ids = response.parsed_body.fetch("data").pluck("id")
+      expect(ids).not_to include(other.id, unconfirmed.id)
+      if %w[final correction adjustment].include?(purpose)
+        expect(ids).to include(employee.id)
+      else
+        expect(ids).not_to include(employee.id)
+      end
+    end
+  end
+
   it "still requires intake payroll confirmation on an explicit adjustment run" do
     period.update!(status: "draft")
     period.update!(run_purpose: "adjustment")
