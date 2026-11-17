@@ -392,6 +392,8 @@ Rails.application.routes.draw do
           end
         end
 
+        delete "pay_periods/:pay_period_id/excluded_employees/:employee_id", to: "pay_period_excluded_employees#destroy"
+
         resources :pay_periods do
           resource :aire_payroll_calendar, only: [ :show ], controller: :aire_payroll_calendars do
             post :publish

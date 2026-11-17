@@ -1333,6 +1333,7 @@ export interface PayPeriod {
     } | null;
   };
   excluded_employee_ids?: number[];
+  excluded_employees?: { employee_id: number; name: string; reason: string | null }[];
   notes?: string;
   period_description?: string;
   payroll_intake_source_types?: string[];

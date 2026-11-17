@@ -69,11 +69,70 @@ RSpec.describe "Expected payroll entries", type: :request do
     field.update!(allow_none: false)
     post url, params: { payroll_standing_change_id: field.id }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
-    period.update!(status: "approved")
+    period.update!(status: "committed", committed_at: Time.current)
     post url, params: { employee_id: owner.id }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
     staff.update!(role: "client")
     post url, params: { employee_id: owner.id }, as: :json
     expect(response).to have_http_status(:forbidden)
+  end
+end
+
+RSpec.describe "Approved-run payroll entry resolutions", type: :request do
+  let(:company) { create(:company, client_payroll_approval_required: true) }
+  let(:staff) { create(:user, company: company, role: "accountant") }
+  let(:period) { create(:pay_period, company: company, status: "calculated") }
+  let(:worker) { create(:employee, company: company) }
+  let(:field) { PayrollStandingChange.create!(company: company, employee: worker, kind: "owner_pay", required: true) }
+  let(:url) { "/api/v1/admin/pay_periods/#{period.id}/entry_resolutions" }
+
+  before do
+    ensure_verified_test_tax_years(2024)
+    stub_portal_user(Api::V1::Admin::PayrollEntryResolutionsController, staff, company)
+  end
+
+  it "saves and undoes none and not-paid without changing approval, amounts or the published client revision" do
+    worker.update!(employment_type: "salary", salary_type: "variable", pay_rate: 0)
+    field
+    paid_worker = create(:employee, company: company)
+    item = create(:payroll_item, company: company, pay_period: period, employee: paid_worker)
+    period.update!(status: "approved")
+    service = PayrollReview::RevisionService.new(pay_period: period, actor: staff)
+    package = service.publish!
+    client = create(:user, company: company, organization: company.organization, role: "client")
+    CompanyAssignment.create!(user: client, company: company)
+    service.approve!(approver: client, recorded_by: client, method: "client_portal",
+      acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT, revision_id: package.id)
+    snapshot = package.reload.attributes
+    amounts = item.attributes
+    [ { payroll_standing_change_id: field.id, employee_id: worker.id }, { employee_id: create(:employee, company: company).id } ].each do |params|
+      post url, params: params.merge(note: "Confirmed no pay"), as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(period.reload).to be_approved
+      expect(package.reload.attributes).to eq(snapshot)
+      expect(item.reload.attributes).to eq(amounts)
+      expect(service.verify_current_checksum!(package)).to be(true)
+      expect(AuditLog.where(action: "payroll_entry_resolutions#save").last.user_id).to eq(staff.id)
+      expect(AuditLog.where(action: "payroll_entry_resolutions#save").last.metadata).to include(
+        "pay_period_status" => "approved", "client_review_revision" => package.revision)
+      delete url, params: params, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(period.reload).to be_approved
+      expect(package.reload.attributes).to eq(snapshot)
+      expect(item.reload.attributes).to eq(amounts)
+      expect(service.verify_current_checksum!(package)).to be(true)
+      expect(AuditLog.where(action: "payroll_entry_resolutions#destroy").last.user_id).to eq(staff.id)
+      expect(AuditLog.where(action: "payroll_entry_resolutions#destroy").last.metadata).to include(
+        "pay_period_status" => "approved", "client_review_revision" => package.revision)
+    end
+    expect(PayrollExpectedEntries.new(period).payload[:fields].sole[:status]).to eq("missing")
+  end
+
+  it "rejects changes on voided runs" do
+    period.update!(status: "committed", committed_at: Time.current, correction_status: "voided", voided_at: Time.current, void_reason: "QA void")
+    post url, params: { employee_id: worker.id }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    delete url, params: { employee_id: worker.id }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 end

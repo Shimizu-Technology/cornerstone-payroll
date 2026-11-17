@@ -9,7 +9,7 @@ class PayPeriodDefaultRoster
     @pay_period = pay_period
   end
 
-  def employee_ids(additional_employee_ids: [])
+  def employee_ids(additional_employee_ids: [], excluded_employee_ids: nil)
     saved_ids = @pay_period.payroll_items.pluck(:employee_id)
     ids = if initial_regular_run?
       eligible = @pay_period.company.employees.eligible_for_period(@pay_period.start_date, @pay_period.end_date)
@@ -26,7 +26,7 @@ class PayPeriodDefaultRoster
     end
 
     additional_employee_ids = [] if @pay_period.correction_run?
-    (ids + additional_employee_ids).map(&:to_i).uniq - @pay_period.pay_period_excluded_employees.pluck(:employee_id)
+    (ids + additional_employee_ids).map(&:to_i).uniq - (excluded_employee_ids || @pay_period.pay_period_excluded_employees.pluck(:employee_id))
   end
 
   private
