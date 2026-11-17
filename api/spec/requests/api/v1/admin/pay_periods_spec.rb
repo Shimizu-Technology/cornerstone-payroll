@@ -1435,6 +1435,26 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response.parsed_body.dig("results", "errors", 0, "name")).to eq(variable.full_name)
     end
 
+    it "reports a saved paycheck whose employee is no longer eligible instead of keeping it silently" do
+      pay_period.payroll_items.create!(company: company, employee: employee, employment_type: employee.employment_type,
+        pay_rate: employee.pay_rate, hours_worked: 7, gross_pay: 105, net_pay: 100)
+      employee.update_columns(intake_exception: { "reason" => "Missing I-9" }, intake_payroll_confirmed_at: nil)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { employee_ids: [ employee.id ], hours: { employee.id.to_s => { regular: 8 } } }
+
+      expect(response.parsed_body.dig("results", "errors").pluck("employee_id")).to eq([ employee.id ])
+      expect(response.parsed_body.dig("results", "errors", 0, "error")).to include("no longer eligible")
+    end
+
+    it "reports an explicitly chosen employee who is not eligible instead of dropping their hours" do
+      employee.update_columns(intake_exception: { "reason" => "Missing I-9" }, intake_payroll_confirmed_at: nil)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { employee_ids: [ employee.id ], hours: { employee.id.to_s => { regular: 8 } } }
+
+      expect(response.parsed_body.dig("results", "errors").pluck("employee_id")).to eq([ employee.id ])
+      expect(pay_period.reload.payroll_items).to be_empty
+    end
+
     it "rejects a post-cutover live calculation without changing payroll state" do
       existing_item = pay_period.payroll_items.create!(
         company: company,
