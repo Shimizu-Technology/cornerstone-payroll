@@ -959,10 +959,10 @@ export function PayrollItemEditModal({
             {confirmRemove ? (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-red-600">Remove this employee from payroll?</span>
-                <Button variant="destructive" loading={removing} loadingLabel="Removing…" onClick={handleRemoveFromPayroll} disabled={saving || removing}>
+                <Button className="h-11" variant="destructive" loading={removing} loadingLabel="Removing…" onClick={handleRemoveFromPayroll} disabled={saving || removing}>
                   Yes, Remove
                 </Button>
-                <Button variant="outline" onClick={() => setConfirmRemove(false)} disabled={removing}>
+                <Button className="h-11" variant="outline" onClick={() => setConfirmRemove(false)} disabled={removing}>
                   No
                 </Button>
               </div>
@@ -979,10 +979,10 @@ export function PayrollItemEditModal({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving || removing}>
+            <Button className="h-11" variant="outline" onClick={() => onOpenChange(false)} disabled={saving || removing}>
               Cancel
             </Button>
-            <Button loading={saving} loadingLabel="Saving and recalculating…" onClick={handleSaveAndRecalculate} disabled={saving || removing}>
+            <Button className="h-11" loading={saving} loadingLabel="Saving and recalculating…" onClick={handleSaveAndRecalculate} disabled={saving || removing}>
               Save & Recalculate
             </Button>
           </div>

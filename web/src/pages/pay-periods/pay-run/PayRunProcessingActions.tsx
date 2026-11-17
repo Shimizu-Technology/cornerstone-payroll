@@ -53,6 +53,11 @@ export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>)
     document.addEventListener('pointerdown', closeOutside);
     return () => document.removeEventListener('pointerdown', closeOutside);
   }, []);
+  const unapprove = async () => {
+    await handleUnapprove();
+    menu.current?.removeAttribute('open');
+    menu.current?.querySelector('summary')?.focus();
+  };
   const connectedPaused = payPeriod.time_tracking?.connected_payroll?.enabled === false;
   const needsHours = isDraft && canImportTimeTracking && needsSourceCoverageAcknowledgement(payPeriod);
   const openHours = () => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); };
@@ -64,7 +69,7 @@ export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>)
     <PayrollPreviewCard key={payPeriod.id} payPeriod={payPeriod} compact onDownloaded={props.onPreviewDownloaded} />
     <details ref={menu} className="relative shrink-0" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); menu.current?.removeAttribute('open'); menu.current?.querySelector('summary')?.focus(); } }}>
       <summary aria-label="More payroll actions" className="flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center rounded-full border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-primary-700 [&::-webkit-details-marker]:hidden"><MoreHorizontal className="h-5 w-5" aria-hidden="true" /></summary>
-      <div className="absolute right-0 top-full z-30 mt-2 flex max-h-[70vh] w-72 max-w-[calc(100vw-2rem)] flex-col items-stretch gap-2 overflow-y-auto rounded-xl border border-neutral-200 bg-white p-3 shadow-lg" onClick={event => { if ((event.target as HTMLElement).closest('button:not(:disabled), a')) { menu.current?.removeAttribute('open'); menu.current?.querySelector('summary')?.focus(); } }}>
+      <div className="absolute right-0 top-full z-30 mt-2 flex max-h-[70vh] w-72 max-w-[calc(100vw-2rem)] flex-col items-stretch gap-2 overflow-y-auto rounded-xl border border-neutral-200 bg-white p-3 shadow-lg" onClick={event => { if ((event.target as HTMLElement).closest('button:not(:disabled), a') && !(event.target as HTMLElement).closest('[data-payroll-unapprove]')) { menu.current?.removeAttribute('open'); menu.current?.querySelector('summary')?.focus(); } }}>
         {hasLinkedAireRecord && <Button variant="outline" onClick={() => setAireRecordsOpen(true)}>View linked time record</Button>}
         {isCommitted && !isVoided && <>
           {canLinkAireRecord && !hasLinkedAireRecord && <Button variant="outline" onClick={openHours}>Link time tracking record</Button>}
@@ -79,7 +84,7 @@ export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>)
           <Button className="w-full" variant="outline" disabled={processing || savedImportReloadRequired || hasStagedWorksheetChanges} title={hasStagedWorksheetChanges ? 'Calculate your worksheet edits first so they are saved.' : undefined} onClick={() => { setRefreshRecurring(payPeriod.includes_recurring_items); setRefreshBaseSalary(payPeriod.includes_base_salary); setRefreshSetupOpen(true); }}>Refresh current setup</Button>
           {hasStagedWorksheetChanges && <p className="mt-1 text-xs text-neutral-600">Calculate your worksheet edits first, then refresh current setup.</p>}
         </div>}
-        {isApproved && <Button variant="outline" loading={processing && processingAction === 'unapprove'} loadingLabel="Unapproving…" onClick={handleUnapprove} disabled={processing || savedImportReloadRequired}>Roll Back Approval</Button>}
+        {isApproved && <Button data-payroll-unapprove variant="outline" loading={processing && processingAction === 'unapprove'} loadingLabel="Unapproving…" onClick={() => void unapprove()} disabled={processing || savedImportReloadRequired}>Roll Back Approval</Button>}
         {(isCommitted || isVoided || payPeriod.run_purpose === 'correction') && <Link className="inline-flex min-h-11 items-center justify-center rounded-full border border-neutral-300 px-4 text-sm font-semibold text-neutral-700" to={route('activity', '#payroll-corrections')}>Payroll corrections</Link>}
       </div>
     </details>

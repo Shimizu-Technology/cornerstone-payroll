@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -107,4 +107,18 @@ it('shows unapproval feedback without marking Commit as busy', () => {
   expect(screen.getAllByRole('button', { name: 'Unapproving…' }).every(button => button.getAttribute('aria-busy') === 'true' && (button as HTMLButtonElement).disabled)).toBe(true);
   expect(screen.getAllByRole('status').some(status => status.lastElementChild?.textContent === 'Unapproving payroll…')).toBe(true);
   expect(screen.getByRole('button', { name: 'Commit' }).getAttribute('aria-busy')).toBeNull();
+});
+
+it('keeps the unapproval menu visible until the action finishes', async () => {
+  let finish!: () => void;
+  const unapprove = vi.fn().mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+  const props = { companyId: 1, payRunId: 2, payPeriod: { id: 2, status: 'approved', run_purpose: 'regular' }, isApproved: true,
+    calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [], handleUnapprove: unapprove } as unknown as ComponentProps<typeof PayRunProcessingActions>;
+  render(<MemoryRouter><PayRunProcessingActions {...props} /></MemoryRouter>);
+  const summary = screen.getByLabelText('More payroll actions');
+  await userEvent.click(summary);
+  await userEvent.click(screen.getByRole('button', { name: 'Roll Back Approval' }));
+  expect(summary.closest('details')).toHaveProperty('open', true);
+  finish();
+  await waitFor(() => expect(summary.closest('details')).toHaveProperty('open', false));
 });
