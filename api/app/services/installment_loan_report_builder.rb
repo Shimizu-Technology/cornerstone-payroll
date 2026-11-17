@@ -6,7 +6,7 @@ class InstallmentLoanReportBuilder
   def initialize(company, as_of_date: nil, pay_period_scope: nil)
     @pay_period_scope = pay_period_scope
     @company = company
-    @as_of_date = as_of_date || Date.current
+    @as_of_date = as_of_date || PayrollBusinessClock.today
   end
 
   def loans

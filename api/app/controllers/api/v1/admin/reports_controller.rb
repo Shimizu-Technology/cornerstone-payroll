@@ -882,7 +882,7 @@ module Api
           return if performed?
 
           send_spreadsheet!(
-            filename: "employee_installment_loans_#{as_of || Date.current}.xlsx",
+            filename: "employee_installment_loans_#{as_of || PayrollBusinessClock.today}.xlsx",
             sheets: installment_loans_sheets(company, as_of_date: as_of)
           )
         end
@@ -4572,7 +4572,7 @@ module Api
         end
 
         def installment_loans_sheets(company, as_of_date: nil)
-          as_of = as_of_date || Date.current
+          as_of = as_of_date || PayrollBusinessClock.today
           rows = [ [ "Last Name", "First Name", "Employee Name", "Loan", "Status", "Original Amount", "Balance As Of", "As Of Date", "Date", "Type", "Amount", "Beginning Balance", "Ending Balance" ] ]
           InstallmentLoanReportBuilder.new(company, as_of_date: as_of, pay_period_scope: loan_report_pay_periods).loans.each do |snapshot|
             loan = snapshot[:loan]
