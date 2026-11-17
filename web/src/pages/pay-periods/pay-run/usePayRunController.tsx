@@ -64,6 +64,7 @@ export function usePayRunController({
   const [calculationNotice, setCalculationNotice] = useState<string | null>(null);
   const [worksheetRefreshWarning, setWorksheetRefreshWarning] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [processingAction, setProcessingAction] = useState<'calculate' | 'approve' | 'unapprove' | 'commit' | 'refresh' | 'restore' | null>(null);
   const [sourceCoverageOpen, setSourceCoverageOpen] = useState(false);
   const [sourceCoverageReason, setSourceCoverageReason] = useState('');
   const [sourceCoverageAcknowledged, setSourceCoverageAcknowledged] = useState(false);
@@ -305,6 +306,7 @@ export function usePayRunController({
     if (refreshInFlightRouteRef.current !== null) {
       refreshInFlightRouteRef.current = null;
       setProcessing(false);
+      setProcessingAction(null);
     }
     setCalculationFailures([]);
     setCalculationNotice(null);
@@ -572,6 +574,7 @@ export function usePayRunController({
       return;
     }
     try {
+      setProcessingAction('calculate');
       setProcessing(true);
       setError(null);
       setCalculationFailures([]);
@@ -771,6 +774,7 @@ export function usePayRunController({
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
     } finally {
       setProcessing(false);
+      setProcessingAction(null);
     }
   };
 
@@ -787,6 +791,7 @@ export function usePayRunController({
     const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
       scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
     refreshInFlightRouteRef.current = scope.generation;
+    setProcessingAction('refresh');
     setProcessing(true);
     setError(null);
     setCalculationFailures([]);
@@ -817,6 +822,7 @@ export function usePayRunController({
       if (isCurrentRoute()) {
         refreshInFlightRouteRef.current = null;
         setProcessing(false);
+        setProcessingAction(null);
       }
     }
   };
@@ -841,6 +847,7 @@ export function usePayRunController({
     const heldItem = payrollItems.find(item => !item.voided && worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
     if (heldItem) { setError(worksheetPayBasisHold(heldItem, employees.find(employee => employee.id === heldItem.employee_id))!.reason); return; }
     try {
+      setProcessingAction('approve');
       setProcessing(true);
       setError(null);
       const response = await payPeriodsApi.approve(payPeriod.id);
@@ -849,6 +856,7 @@ export function usePayRunController({
       setError(err instanceof Error ? err.message : 'Failed to approve');
     } finally {
       setProcessing(false);
+      setProcessingAction(null);
     }
   };
 
@@ -900,6 +908,7 @@ export function usePayRunController({
       : '';
     if (!confirm('Roll back approval? This will return the pay period to "Calculated" status.' + clientReviewWarning)) return;
     try {
+      setProcessingAction('unapprove');
       setProcessing(true);
       setError(null);
       const response = await payPeriodsApi.unapprove(payPeriod.id);
@@ -908,6 +917,7 @@ export function usePayRunController({
       setError(err instanceof Error ? err.message : 'Failed to unapprove');
     } finally {
       setProcessing(false);
+      setProcessingAction(null);
     }
   };
 
@@ -929,6 +939,7 @@ export function usePayRunController({
     commitInFlightRef.current = true;
     const currentRouteGeneration = commitRouteGenerationRef.current;
     const isCurrentRoute = () => currentRouteGeneration === commitRouteGenerationRef.current;
+    setProcessingAction('commit');
     setProcessing(true);
     setError(null);
     try {
@@ -942,6 +953,7 @@ export function usePayRunController({
     } finally {
       commitInFlightRef.current = false;
       setProcessing(false);
+      setProcessingAction(null);
     }
   };
 
@@ -1077,6 +1089,7 @@ export function usePayRunController({
     const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
       scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
     refreshInFlightRouteRef.current = scope.generation;
+    setProcessingAction('restore');
     setProcessing(true);
     try {
       await payPeriodsApi.restoreEmployee(payRunId, employeeId);
@@ -1088,6 +1101,7 @@ export function usePayRunController({
       if (isCurrentRoute()) {
         refreshInFlightRouteRef.current = null;
         setProcessing(false);
+        setProcessingAction(null);
       }
     }
   };
@@ -1570,7 +1584,7 @@ export function usePayRunController({
     reviewDialogs: { companyId, currentPath, loadPayPeriod, payPeriod, payRunId, paymentMethodItem, reviewingItem, setPaymentMethodItem, setReviewingItem },
     summary: { payRunId, contractorItems, hasCorrectionPayBasisHold, payrollItems, totalContractorPay, totalDRTDeposit, totalDeductions, totalGross, totalNet },
     processing: { onPreviewDownloaded: (revision: number) => setPayPeriod(current => current?.id === payRunId && current.company_id === companyId
-      ? { ...current, last_preview_download: { revision, downloaded_at: new Date().toISOString() } } : current), hasManualHours: Object.values(hoursMap).some(entry => toNumber(entry.regular) + toNumber(entry.overtime) > 0), calculationFailures, canEditPayPeriod, canImportMosa, canImportSpikeIntake, canImportTimeTracking, canLinkAireRecord, companyId, correctionCalculationHeld, financialActionsHeld, handleApprove, handleRunPayroll, handleUnapprove, hasLinkedAireRecord, hasPendingCalculationChanges, hasStagedWorksheetChanges, isApproved, isCalculated, isCommitted, isDraft, isVoided, openPayDateCorrection, payPeriod, payRunId, payrollItems, processing, returnTo, savedImportReloadRequired, setAireRecordsOpen, setCommitPeriodId, setImportModalOpen, setPayrollIntakeImportOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, setTimeTrackingAutoPreview, setTimeTrackingImportOpen, standaloneLoanConflicts },
+      ? { ...current, last_preview_download: { revision, downloaded_at: new Date().toISOString() } } : current), hasManualHours: Object.values(hoursMap).some(entry => toNumber(entry.regular) + toNumber(entry.overtime) > 0), calculationFailures, canEditPayPeriod, canImportMosa, canImportSpikeIntake, canImportTimeTracking, canLinkAireRecord, companyId, correctionCalculationHeld, financialActionsHeld, handleApprove, handleRunPayroll, handleUnapprove, hasLinkedAireRecord, hasPendingCalculationChanges, hasStagedWorksheetChanges, isApproved, isCalculated, isCommitted, isDraft, isVoided, openPayDateCorrection, payPeriod, payRunId, payrollItems, processing, processingAction, returnTo, savedImportReloadRequired, setAireRecordsOpen, setCommitPeriodId, setImportModalOpen, setPayrollIntakeImportOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, setTimeTrackingAutoPreview, setTimeTrackingImportOpen, standaloneLoanConflicts },
     feedback: { calculationFailures, calculationNotice, calendarRefreshError, companyId, currentPath, employees, error, errorFeedbackAttempt, payPeriod, payrollItems, processing, reloadSavedSourceImport, savedImportReloadRequired, timeTrackingImportOpen, worksheetRefreshWarning },
     blockers: { adoptingConfirmedWorkweek, canImportMosa, canImportSpikeIntake, clientApprovalLoading, handleAdoptConfirmedWorkweek, hasPendingCalculationChanges, openClientApproval, payPeriod, setImportModalOpen, setPayrollIntakeImportOpen },
     source: { sourceCoverageProcessing: processing, onReviewSourceCoverage: isDraft || isCalculated ? () => { if (!processing) void handleRunPayroll(); } : undefined, aireSourceRefreshToken, companyId, currentAireRecord, hoursMap, invalidateAireSource, loadPayPeriod, payPeriod, setTimeTrackingAutoPreview, setTimeTrackingImportOpen },
@@ -1578,7 +1592,7 @@ export function usePayRunController({
     refreshDialog: { error, handleRefreshSetup, processing, refreshBaseSalary, refreshRecurring, refreshSetupOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, sourceCoverageOpen },
     loans: { additionalEmployeeIds, canEditPayPeriod, employees, isCalculated, isDraft, namedLoanDrafts, namedLoanOptions, payPeriod, payrollItems, setNamedLoanDrafts, standaloneLoanConflicts },
     comparison: { comparison, comparisonError, comparisonFlagTone, comparisonHiddenRows, comparisonHighlights, comparisonLoading, comparisonRows, comparisonTotalRows, isApproved, isCalculated, isCommitted, loadComparison, payPeriod, payrollItems },
-    roster: { handleRestoreEmployee, onCalculateExpectedEntry: (field: ExpectedEntries['fields'][number], value: number) => handleRunPayroll(undefined, { field, value }), loadPayPeriod, hasStagedWorksheetChanges, canEditPayPeriod, additionalEmployeeIds, employees, financialActionsHeld, handleRunPayroll, isCalculated, isDraft, payPeriod, payrollItems, processing, setAdditionalEmployeeIds, setBonusEdits, setBonusMap, setHoursMap, setLoansMap, setNamedLoanDrafts, setPayrollFieldDrafts, setSalaryOverrideMap, setTipsMap, setTipsPaidOutMap },
+    roster: { handleRestoreEmployee, onCalculateExpectedEntry: (field: ExpectedEntries['fields'][number], value: number) => handleRunPayroll(undefined, { field, value }), loadPayPeriod, hasStagedWorksheetChanges, canEditPayPeriod, additionalEmployeeIds, employees, financialActionsHeld, handleRunPayroll, isCalculated, isDraft, payPeriod, payrollItems, processing, processingAction, setAdditionalEmployeeIds, setBonusEdits, setBonusMap, setHoursMap, setLoansMap, setNamedLoanDrafts, setPayrollFieldDrafts, setSalaryOverrideMap, setTipsMap, setTipsPaidOutMap },
     hours: { hasStagedWorksheetChanges, additionalEmployeeIds, bonusEdits, bonusMap, companyId, currentPath, departmentFilter, departmentOptions, displayEmployeesForHours, employeeTypeFilter, employees, employmentGroupKey, employmentGroupLabel, employmentGroupTone, estimateWorksheetGross, hoursMap, hoursSortBy, hoursSortDirection, hoursTableOpen, isCalculated, isDraft, loansMap, namedLoanDrafts, namedLoanOptions, payPeriod, payrollFieldAssignmentLookup, payrollFieldDrafts, payrollItemByEmployeeId, payrollItems, resetPayrollFieldDraft, retainedRetirementEntries, salaryOverrideMap, searchTerm, setBonusEdits, setBonusMap, setDepartmentFilter, setEmployeeTypeFilter, setHoursSortBy, setHoursSortDirection, setHoursTableOpen, setNamedLoanDrafts, setSearchTerm, setShowPayrollFields, setShowTipsLoans, showPayrollFields, showTipsLoans, tipsLoansVisibilityModeRef, tipsMap, tipsPaidOutMap, updateHours, updateLoan, updatePayrollFieldDraft, updateSalaryOverride, updateTip, updateTipsPaidOut, updateWageRateHours, worksheetPayrollFields },
     results: { companyId, currentPath, departmentFilter, departmentOptions, employeeLookup, employeeTypeFilter, employmentGroupKey, employmentGroupLabel, employmentGroupTone, isCalculated, isCommitted, isDraft, payPeriod, payrollItemDisplayedHours, payrollItemNameParts, payrollItems, registerPayrollFieldTotals, registerTotals, resultsSortBy, resultsSortDirection, searchTerm, setCorrectingItem, setDepartmentFilter, setEditingItem, setEmployeeTypeFilter, setReplacingItem, setResultsSortBy, setResultsSortDirection, setReviewingItem, setSearchTerm, sortPayrollItems, visiblePayrollFields },
     employerTaxes: { fitDivergence, isDraft, payrollItems, totalDRTDeposit, totalEmployerMedicare, totalEmployerSS, totalMedicare, totalSS, totalWithholding },
