@@ -198,6 +198,27 @@ describe('ChecksPanel earnings statements', () => {
     await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledWith(8, undefined));
   });
 
+  it.each([0, -10])('enables non-check statements for paper-check net pay %s even without the statement-only flag', async netPay => {
+    renderStatements([{ ...paperStatement, net_pay: netPay, statement_only: false }]);
+    const print = await screen.findByRole('button', { name: 'Print non-check statements' });
+    expect((print as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(print);
+    await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledWith(8, undefined, true));
+  });
+
+  it('refreshes default eligibility after the run payment method changes in either direction', async () => {
+    const view = renderStatements([paperStatement]);
+    expect((await screen.findByRole('button', { name: 'Print non-check statements' }) as HTMLButtonElement).disabled).toBe(true);
+    apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [], earnings_statement_items: [{ ...paperStatement, payment_delivery_method: 'direct_deposit' }], meta });
+    view.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} refreshToken={1} /></FeedbackProvider>);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Print non-check statements' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Download non-check statements' }));
+    await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledWith(8, undefined, true));
+    apiMocks.list.mockResolvedValue({ checks: [check], direct_deposit_items: [], earnings_statement_items: [paperStatement], meta });
+    view.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} refreshToken={2} /></FeedbackProvider>);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Print non-check statements' }) as HTMLButtonElement).disabled).toBe(true));
+  });
+
   it('keeps selections across searches and prints exactly the selected statement IDs', async () => {
     renderStatements();
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Select earnings statement for Casey Zero' }));
@@ -242,10 +263,11 @@ describe('ChecksPanel earnings statements', () => {
     await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:statement-test'));
   });
 
-  it('keeps deposit-only printing separate and refresh removes an obsolete selected row', async () => {
+  it('offers only non-check and all statement actions, and refresh removes an obsolete selected row', async () => {
     const view = renderStatements();
-    fireEvent.click(await screen.findByRole('button', { name: 'Print direct-deposit statements' }));
-    await waitFor(() => expect(apiMocks.directDepositStubsPdf).toHaveBeenCalledWith(8));
+    await screen.findByRole('button', { name: 'Print non-check statements' });
+    expect(screen.queryByRole('button', { name: 'Print direct-deposit statements' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download direct-deposit statements' })).toBeNull();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select earnings statement for Casey Zero' }));
     apiMocks.list.mockResolvedValue({ checks: [check], direct_deposit_items: [], earnings_statement_items: [paperStatement], meta });
     view.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} refreshToken={1} /></FeedbackProvider>);
