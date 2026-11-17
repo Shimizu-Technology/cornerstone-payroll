@@ -222,6 +222,13 @@ class PayPeriod < ApplicationRecord
                (will_save_change_to_status? && status != "draft")
            }
 
+  PORTAL_LINK_FIELDS = %w[cycle run_purpose correction_status start_date end_date parallel_run test_workspace_role].freeze
+  before_create :lock_company_for_linking, if: :portal_submission_run?
+  after_create :link_payroll_submission_period, if: :portal_submission_run?
+  before_update :lock_company_for_linking, if: :portal_link_will_change?
+  after_update :refresh_payroll_submission_link, if: :portal_link_changed?
+  after_destroy :relink_released_submission_period
+
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
   before_validation :force_test_workspace_to_parallel
   before_update :prevent_retired_history_mutation
@@ -263,10 +270,11 @@ class PayPeriod < ApplicationRecord
 
   def prevent_finalized_run_deletion
     reason = deletion_blocker
-    return unless reason
-
-    errors.add(:base, reason)
-    throw :abort
+    if reason
+      errors.add(:base, reason)
+      throw :abort
+    end
+    @released_submission_period = PayrollSubmissions::LinkPayPeriod.release_automatic!(self)
   end
 
   def deletion_blocker
@@ -293,6 +301,10 @@ class PayPeriod < ApplicationRecord
 
     if non_employee_checks.any? { |check| check.paid_at.present? || check.printed? || check.prepared_at.present? || check.payroll_liability_check_allocations.exists? }
       return "This run has payment checks that were paid, printed, or prepared. Keep it for its payment history, or ask an admin."
+    end
+
+    if PayrollSubmissions::LinkPayPeriod.retained_selection?(self)
+      return "This run has retained client file import or selection evidence. Keep it for its payroll history, or ask an admin."
     end
 
     # Check all declared retained associations before dependent destroy callbacks
@@ -335,7 +347,7 @@ class PayPeriod < ApplicationRecord
   }
   # Cycle scopes
   scope :regular_cycle, -> { where(cycle: "regular") }
-  scope :portal_submission_runs, -> { where(cycle: "regular", run_purpose: "regular", correction_status: nil, test_workspace_role: nil) }
+  scope :portal_submission_runs, -> { where(cycle: "regular", run_purpose: "regular", correction_status: nil, test_workspace_role: nil, parallel_run: false) }
   scope :supplemental_cycle, -> { where(cycle: "supplemental") }
 
   # CPR-71: correction scopes
@@ -360,10 +372,28 @@ class PayPeriod < ApplicationRecord
     status == "approved"
   end
 
+  def portal_submission_run?
+    cycle == "regular" && run_purpose == "regular" && correction_status.nil? && test_workspace_role.nil? && !parallel_run?
+  end
+
+  def client_file_link_error
+    period = PayrollSubmissionPeriod.find_by(company_id: company_id, pay_period_id: nil, start_date: start_date, end_date: end_date)
+    return unless period
+
+    ids = PayrollSubmissions::LinkPayPeriod.candidates(period).order(:id).pluck(:id)
+    return unless ids.include?(id) && ids.many? && period.outstanding_file_requests.exists?
+
+    "Payroll files match multiple pay runs (#{ids.join(', ')}). Open the correct run and import the files to link this period, or withdraw requests that are no longer needed before committing."
+  end
+
   def outstanding_client_file_requests
     periods = PayrollSubmissionPeriod.where(company_id: company_id)
-    periods = periods.where(pay_period_id: id).or(periods.where(pay_period_id: nil, start_date: start_date, end_date: end_date))
-    PortalFileRequest.where(company_id: company_id, payroll_submission_period_id: periods.select(:id)).outstanding.order(:id)
+    unlinked = periods.find_by(pay_period_id: nil, start_date: start_date, end_date: end_date)
+    linked = periods.where(pay_period_id: id)
+    if unlinked && PayrollSubmissions::LinkPayPeriod.candidates(unlinked).pluck(:id) == [ id ]
+      linked = linked.or(periods.where(id: unlinked.id))
+    end
+    PortalFileRequest.where(company_id: company_id, payroll_submission_period_id: linked.select(:id)).outstanding.order(:id)
   end
 
   def committed?
@@ -664,14 +694,40 @@ class PayPeriod < ApplicationRecord
 
   private
 
+  def lock_company_for_linking
+    Company.lock.find(company_id)
+  end
+
+  def link_payroll_submission_period
+    PayrollSubmissions::LinkPayPeriod.for_run(self)
+  end
+
+  def portal_link_will_change?
+    (changes_to_save.keys & PORTAL_LINK_FIELDS).any? &&
+      (portal_submission_run? || PayrollSubmissionPeriod.exists?(pay_period_id: id))
+  end
+
+  def portal_link_changed?
+    (saved_changes.keys & PORTAL_LINK_FIELDS).any? &&
+      (portal_submission_run? || PayrollSubmissionPeriod.exists?(pay_period_id: id))
+  end
+
+  def refresh_payroll_submission_link
+    PayrollSubmissions::LinkPayPeriod.refresh_for_run(self)
+  end
+
+  def relink_released_submission_period
+    PayrollSubmissions::LinkPayPeriod.call(@released_submission_period) if @released_submission_period
+  end
+
   # A duplicate regular run cannot escape another run's pending same-date
   # source. Linked evidence remains authoritative even after run date edits.
   def portal_submission_candidates
     periods = PayrollSubmissionPeriod.where(company_id: company_id)
     linked = periods.find_by(pay_period_id: id) if persisted?
     matching = periods.where(start_date: start_date, end_date: end_date)
-    eligible = cycle == "regular" && run_purpose == "regular" && correction_status.nil? && test_workspace_role.nil?
-    matching = matching.where(pay_period_id: nil) unless eligible
+    return [ linked, [] ] unless portal_submission_run?
+
     [ linked, matching.to_a ]
   end
 

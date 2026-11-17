@@ -54,6 +54,9 @@ class PayrollSubmissionPeriod < ApplicationRecord
     file_requests.outstanding
   end
 
+  before_create :lock_company_for_linking
+  after_create :link_regular_pay_period
+
   validates :start_date, :end_date, presence: true
   validates :status, inclusion: { in: STATUSES }
   validates :source, inclusion: { in: %w[pay_period schedule] }
@@ -146,6 +149,14 @@ class PayrollSubmissionPeriod < ApplicationRecord
   end
 
   private
+
+  def lock_company_for_linking
+    Company.lock.find(company_id)
+  end
+
+  def link_regular_pay_period
+    PayrollSubmissions::LinkPayPeriod.call(self) unless pay_period_id
+  end
 
   def event_status_allowed?(event, rule)
     return true if rule[:from].include?(status)

@@ -409,6 +409,11 @@ class ApiClient {
   }
 }
 
+export type PayrollCommitSnapshot = {
+  acknowledged_outstanding_file_request_ids: number[];
+  expected_next_check_number?: number;
+};
+
 export class ApiError extends Error {
   status: number;
   details?: Record<string, string[] | Record<string, unknown>[] | number>;
@@ -1557,8 +1562,8 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
   unapprove: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
-  commit: (id: number, acknowledgeOutstandingFileRequests?: boolean) =>
-    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`, acknowledgeOutstandingFileRequests ? { acknowledge_outstanding_file_requests: true } : undefined),
+  commit: (id: number, snapshot?: PayrollCommitSnapshot) =>
+    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`, snapshot),
   promotedPaymentPreview: (id: number) =>
     api.get<{ promoted_payment: PromotedPaymentPreview }>(`/admin/pay_periods/${id}/promoted_payment_preview`),
   preparePromotedPayment: (id: number, data: { acknowledgement: string; starting_check_number: string; check_date: string }) =>
