@@ -63,7 +63,6 @@ export function PayRunDialogs({
   recordClientApproval,
   reloadSavedSourceImport,
   replacingItem,
-  reportablePayrollItems,
   setAdditionalEmployeeIds,
   setAireRecordsOpen,
   setClientApprovalConfirmed,
@@ -87,8 +86,7 @@ export function PayRunDialogs({
   setTimeTrackingAutoPreview,
   setTimeTrackingImportOpen,
   timeTrackingAutoPreview,
-  timeTrackingImportOpen,
-  totalNet
+  timeTrackingImportOpen
 }: PayRunSectionProps<'dialogs'>) {
   const workerStatusAccess = useOptionalWorkerStatusAccess(Number(companyId));
   return (<>
@@ -252,8 +250,8 @@ export function PayRunDialogs({
       </Dialog>
 <PayrollCommitDialog open={commitPeriodId === payRunId && payPeriod.id === payRunId && isApproved && !isVoided}
         payPeriod={payPeriod} companyName={activeCompany && activeCompany.id === payPeriod.company_id ? activeCompany.name : `Company #${payPeriod.company_id || companyId}`}
-        itemCount={reportablePayrollItems.length} totalNet={totalNet} processing={processing}
-        onCancel={() => setCommitPeriodId(null)} onConfirm={(confirmedPeriodId, acknowledged) => void handleCommit(confirmedPeriodId, acknowledged)} />
+        processing={processing}
+        onCancel={() => setCommitPeriodId(null)} onConfirm={handleCommit} />
 <Dialog
         open={payDateCorrectionOpen}
         onOpenChange={(open) => {

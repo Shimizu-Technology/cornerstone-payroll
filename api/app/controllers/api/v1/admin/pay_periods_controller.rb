@@ -648,9 +648,12 @@ module Api
         # Final lock - no more changes allowed
         def commit
           service = lifecycle_service
-          service.commit!(acknowledge_outstanding_file_requests: params[:acknowledge_outstanding_file_requests])
+          service.commit!(acknowledged_outstanding_file_request_ids: params[:acknowledged_outstanding_file_request_ids],
+            expected_next_check_number: params[:expected_next_check_number])
           @acknowledged_outstanding_file_requests = service.acknowledged_outstanding_file_requests
           render json: { pay_period: pay_period_json(@pay_period) }
+        rescue PayPeriodLifecycleService::CommitConflict => e
+          render json: { error: e.message, code: e.code }, status: :conflict
         rescue PayPeriodCorrectionService::CorrectionError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue PayrollLiabilityPostingService::Error => e
@@ -1075,6 +1078,7 @@ module Api
           metadata = { business_summary: summary }
           if action_name == "commit" && @acknowledged_outstanding_file_requests.present?
             metadata[:acknowledge_outstanding_file_requests] = true
+            metadata[:acknowledged_outstanding_file_request_ids] = @acknowledged_outstanding_file_requests.pluck(:id)
             metadata[:outstanding_file_requests] = @acknowledged_outstanding_file_requests
           end
           if %w[run_payroll refresh_setup].include?(action_name) && params[:source_coverage_reason].present?
@@ -1434,6 +1438,7 @@ module Api
             json[:last_preview_download] = last_preview && {
               revision: last_preview.metadata["revision"], downloaded_at: last_preview.created_at.iso8601
             }
+            json[:client_file_link_error] = pay_period.client_file_link_error if pay_period.approved?
             json[:outstanding_file_requests] = (pay_period.approved? ? pay_period.outstanding_client_file_requests : []).map do |request|
               { id: request.id, title: request.title, status: request.status, status_label: request.status_label }
             end
