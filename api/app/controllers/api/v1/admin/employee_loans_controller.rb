@@ -284,7 +284,7 @@ module Api
           legacy_schedule = loan.employee.employee_deductions.find_by(deduction_type_id: loan.deduction_type_id) if loan.deduction_type_id
           schedule = field_schedule || legacy_schedule
           schedule_active = schedule&.active? && loan.active?
-          schedule_active &&= field_schedule.payroll_field_definition.active? && (field_schedule.end_date.blank? || field_schedule.end_date >= Date.current) if field_schedule
+          schedule_active &&= field_schedule.payroll_field_definition.active? && (field_schedule.end_date.blank? || field_schedule.end_date >= PayrollBusinessClock.today) if field_schedule
           schedule_active &&= loan.deduction_type.active? if legacy_schedule
           payload = {
             id: loan.id,

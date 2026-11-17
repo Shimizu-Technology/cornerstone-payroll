@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class InvoiceReceivablesSummary
-  def initialize(finance_book:, billing_profile_id: nil, as_of: Date.current)
+  def initialize(finance_book:, billing_profile_id: nil, as_of: PayrollBusinessClock.today)
     @finance_book = finance_book
     @billing_profile_id = billing_profile_id
     @as_of = as_of

@@ -24,7 +24,7 @@ module Api
             period = PayPeriod.find_by(id: params[:eligible_pay_period_id], company_id: current_company_id)
             return render json: { error: "Pay period not found" }, status: :not_found unless period
 
-            employees = employees.eligible_for_period(period.start_date, period.end_date)
+            employees = employees.eligible_for_payroll_run(period, explicitly_selected: true)
           end
           employees = apply_filters(employees)
           employees = apply_sort(employees)
@@ -553,18 +553,18 @@ module Api
             latest_election = elections.first
             data.merge!(latest_election.profile_attributes.stringify_keys) if latest_election
             data["w4_elections"] = elections.map { |election| serialize_w4_election(election) }
-            data["current_w4_election"] = serialize_w4_election(employee.w4_election_on(Date.current))
+            data["current_w4_election"] = serialize_w4_election(employee.w4_election_on(PayrollBusinessClock.today))
             data["upcoming_w4_election"] = serialize_w4_election(
-              elections.select { |election| election.effective_on > Date.current }.min_by { |election| [ election.effective_on, election.id ] }
+              elections.select { |election| election.effective_on > PayrollBusinessClock.today }.min_by { |election| [ election.effective_on, election.id ] }
             )
           end
 
           if include_retirement_history
             elections = employee.employee_retirement_elections.includes(:created_by).recent_first.to_a
             data["retirement_elections"] = elections.map { |election| serialize_retirement_election(election) }
-            data["current_retirement_election"] = serialize_retirement_election(employee.retirement_election_on(Date.current))
+            data["current_retirement_election"] = serialize_retirement_election(employee.retirement_election_on(PayrollBusinessClock.today))
             data["upcoming_retirement_election"] = serialize_retirement_election(
-              elections.select { |election| election.effective_on > Date.current }.min_by { |election| [ election.effective_on, election.id ] }
+              elections.select { |election| election.effective_on > PayrollBusinessClock.today }.min_by { |election| [ election.effective_on, election.id ] }
             )
           end
 

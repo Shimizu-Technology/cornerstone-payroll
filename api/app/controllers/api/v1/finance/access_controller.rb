@@ -29,7 +29,7 @@ module Api
           raw_date = params[:as_of]
           raise ArgumentError, "As-of date must use YYYY-MM-DD" unless raw_date.nil? || raw_date.is_a?(String)
 
-          as_of = raw_date.present? ? Date.iso8601(raw_date) : Date.current
+          as_of = raw_date.present? ? Date.iso8601(raw_date) : PayrollBusinessClock.today
           render_scoped(overview: FinanceOverviewSummary.new(finance_book: @book, as_of: as_of).call)
         rescue Date::Error
           render json: { error: "As-of date must use YYYY-MM-DD" }, status: :unprocessable_entity

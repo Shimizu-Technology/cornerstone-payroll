@@ -40,7 +40,7 @@ class EmployeeRetirementElectionChangeService
           reason: reason.presence || "Initial retirement election"
         )
       )
-      sync_legacy_rates!(election) if election.effective_on <= Date.current
+      sync_legacy_rates!(election) if election.effective_on <= PayrollBusinessClock.today
       election
     end
   end

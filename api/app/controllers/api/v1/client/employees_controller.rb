@@ -258,7 +258,7 @@ module Api
               active: rate.active
             }
           end
-          current_retirement = employee.retirement_election_on(Date.current)
+          current_retirement = employee.retirement_election_on(PayrollBusinessClock.today)
           data["current_retirement_election"] = current_retirement&.as_json(except: [ :created_by_id ])
 
           if include_department && employee.department

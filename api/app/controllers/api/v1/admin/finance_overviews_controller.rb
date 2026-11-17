@@ -9,7 +9,7 @@ module Api
         def show
           raise Date::Error unless params[:as_of].nil? || params[:as_of].is_a?(String)
 
-          as_of = params[:as_of].present? ? Date.iso8601(params[:as_of]) : Date.current
+          as_of = params[:as_of].present? ? Date.iso8601(params[:as_of]) : PayrollBusinessClock.today
           render json: FinanceOverviewSummary.new(finance_book: current_finance_book, as_of: as_of).call
         rescue Date::Error
           render json: { error: "As-of date must use YYYY-MM-DD" }, status: :unprocessable_entity
