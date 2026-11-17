@@ -138,21 +138,52 @@ describe('RecordActivityTimeline', () => {
     apiMocks.list
       .mockResolvedValueOnce({
         data: [activity],
-        meta: { current_page: 1, per_page: 20, total_count: 1, total_pages: 1, hidden_report_detail_count: 3 },
+        meta: { current_page: 1, per_page: 20, total_count: 1, total_pages: 1, hidden_detail_count: 3 },
       })
       .mockResolvedValueOnce({
         data: [activity, { ...activity, id: 45, display_action: 'Morgan Manager viewed a preview of the transmittal log' }],
-        meta: { current_page: 1, per_page: 20, total_count: 2, total_pages: 1, hidden_report_detail_count: 0 },
+        meta: { current_page: 1, per_page: 20, total_count: 2, total_pages: 1, hidden_detail_count: 0 },
       });
 
     renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
 
-    expect(await screen.findByText(/3 transmittal and sign-off detail loads are hidden/)).toBeTruthy();
+    expect(await screen.findByText(/3 report editor loads and pay stub views are hidden/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Show them' }));
 
     expect(await screen.findByText('Morgan Manager viewed a preview of the transmittal log')).toBeTruthy();
-    expect(apiMocks.list).toHaveBeenLastCalledWith('pay_periods', 12, { page: 1, per_page: 20, include_report_details: true }, 7);
+    expect(apiMocks.list).toHaveBeenLastCalledWith('pay_periods', 12, { page: 1, per_page: 20, include_hidden_details: true }, 7);
     expect(screen.getByRole('button', { name: 'Hide them' })).toBeTruthy();
+  });
+
+  it('offers the hidden rows even when nothing else has been recorded', async () => {
+    apiMocks.list.mockResolvedValue({
+      data: [],
+      meta: { current_page: 1, per_page: 20, total_count: 0, total_pages: 0, hidden_detail_count: 1 },
+    });
+
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
+
+    expect(await screen.findByText('No other recorded activity yet')).toBeTruthy();
+    expect(screen.getByText(/1 report editor load or pay stub view is hidden/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Show them' })).toBeTruthy();
+  });
+
+  it('keeps the first page hidden count when older pages load', async () => {
+    apiMocks.list
+      .mockResolvedValueOnce({
+        data: [activity],
+        meta: { current_page: 1, per_page: 20, total_count: 2, total_pages: 2, hidden_detail_count: 4 },
+      })
+      .mockResolvedValueOnce({
+        data: [{ ...activity, id: 46, display_action: 'Morgan Manager calculated payroll' }],
+        meta: { current_page: 2, per_page: 20, total_count: 2, total_pages: 2 },
+      });
+
+    renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="pay_periods" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load older activity' }));
+
+    expect(await screen.findByText('Morgan Manager calculated payroll')).toBeTruthy();
+    expect(screen.getByText(/4 report editor loads and pay stub views are hidden/)).toBeTruthy();
   });
 
   it('loads older activity without replacing the newest entries', async () => {

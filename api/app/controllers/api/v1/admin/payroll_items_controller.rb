@@ -204,15 +204,22 @@ module Api
         end
 
         # Create lists what was entered; update lists what changed. A removal
-        # is described by its headline alone.
+        # is described by its headline alone. Job-hour splits and payroll field
+        # rows have no flat value, so they are named without one.
         def audit_record_changes
           empty = { before_values: {}, after_values: {}, changed_fields: [], redacted_fields: [] }
           return empty unless @payroll_item&.persisted?
-          return AuditRecordSnapshot.changes_from(@payroll_item, @payroll_item_audit_before_values) if @payroll_item_audit_before_values
-          return empty unless action_name == "create"
 
-          entered = AuditRecordSnapshot.values_for(@payroll_item).reject { |_field, value| value.blank? || value.to_s.to_d.zero? }
-          empty.merge(after_values: entered, changed_fields: entered.keys.sort)
+          changes = if @payroll_item_audit_before_values
+            AuditRecordSnapshot.changes_from(@payroll_item, @payroll_item_audit_before_values)
+          elsif action_name == "create"
+            entered = AuditRecordSnapshot.values_for(@payroll_item).reject { |_field, value| value.blank? || value.to_s.to_d.zero? }
+            empty.merge(after_values: entered, changed_fields: entered.keys.sort)
+          else
+            empty
+          end
+          structured = %w[wage_rate_hours payroll_field_entries].select { |field| params[:payroll_item]&.key?(field) }
+          changes.merge(changed_fields: (changes[:changed_fields] | structured).sort)
         end
 
         def audit_record_metadata(_record)

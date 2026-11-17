@@ -76,8 +76,8 @@ export function RecordActivityTimeline({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [includeReportDetails, setIncludeReportDetails] = useState(false);
-  const [hiddenReportDetails, setHiddenReportDetails] = useState(0);
+  const [includeHiddenDetails, setIncludeHiddenDetails] = useState(false);
+  const [hiddenDetails, setHiddenDetails] = useState(0);
   const requestIdRef = useRef(0);
 
   const loadPage = useCallback(async (nextPage: number, append: boolean): Promise<void> => {
@@ -90,7 +90,7 @@ export function RecordActivityTimeline({
       const response = await recordActivitiesApi.list(recordType, recordId, {
         page: nextPage,
         per_page: PAGE_SIZE,
-        ...(includeReportDetails ? { include_report_details: true } : {}),
+        ...(includeHiddenDetails ? { include_hidden_details: true } : {}),
       }, companyId);
       if (requestId !== requestIdRef.current) return;
 
@@ -103,7 +103,8 @@ export function RecordActivityTimeline({
       });
       setPage(response.meta.current_page);
       setTotalPages(response.meta.total_pages || 1);
-      setHiddenReportDetails(response.meta.hidden_report_detail_count ?? 0);
+      // Only the first page reports the hidden count.
+      if (!append) setHiddenDetails(response.meta.hidden_detail_count ?? 0);
     } catch (loadError) {
       if (requestId !== requestIdRef.current) return;
       setError(loadError instanceof Error ? loadError.message : 'Activity history could not be loaded.');
@@ -113,7 +114,7 @@ export function RecordActivityTimeline({
         setLoadingMore(false);
       }
     }
-  }, [companyId, includeReportDetails, recordId, recordType]);
+  }, [companyId, includeHiddenDetails, recordId, recordType]);
 
   useEffect(() => {
     setLogs([]);
@@ -127,6 +128,21 @@ export function RecordActivityTimeline({
   }, [loadPage]);
 
   const groups = useMemo(() => groupAuditEntries(logs), [logs]);
+  const hiddenDetailsToggle = hiddenDetails > 0 || includeHiddenDetails ? (
+    <div className="border-b border-neutral-100 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 sm:px-6">
+      {includeHiddenDetails
+        ? 'Showing report editor loads and pay stub views by workers and clients.'
+        : `${hiddenDetails} report editor ${hiddenDetails === 1 ? 'load or pay stub view is' : 'loads and pay stub views are'} hidden. Every report staff opened or downloaded is listed.`}
+      {' '}
+      <button
+        type="button"
+        className="inline-flex min-h-11 items-center font-medium text-primary-700 underline sm:min-h-0"
+        onClick={() => setIncludeHiddenDetails((current) => !current)}
+      >
+        {includeHiddenDetails ? 'Hide them' : 'Show them'}
+      </button>
+    </div>
+  ) : null;
 
   return (
     <Card>
@@ -168,33 +184,22 @@ export function RecordActivityTimeline({
             </Button>
           </div>
         ) : logs.length === 0 ? (
-          <div className="flex min-h-56 flex-col items-center justify-center px-6 py-10 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-500">
-              <Clock3 className="h-6 w-6" aria-hidden="true" />
-            </span>
-            <p className="mt-4 font-semibold text-neutral-950">No recorded activity yet</p>
-            <p className="mt-2 max-w-md text-sm leading-6 text-neutral-500">New changes will appear here as they are recorded.</p>
-          </div>
+          <>
+            {hiddenDetailsToggle}
+            <div className="flex min-h-56 flex-col items-center justify-center px-6 py-10 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-500">
+                <Clock3 className="h-6 w-6" aria-hidden="true" />
+              </span>
+              <p className="mt-4 font-semibold text-neutral-950">{hiddenDetails > 0 ? 'No other recorded activity yet' : 'No recorded activity yet'}</p>
+              <p className="mt-2 max-w-md text-sm leading-6 text-neutral-500">New changes will appear here as they are recorded.</p>
+            </div>
+          </>
         ) : (
           <>
+            {hiddenDetailsToggle}
             <ol className="divide-y divide-neutral-100">
               {groups.map((group) => <ActivityEntry key={group.key} group={group} />)}
             </ol>
-            {(hiddenReportDetails > 0 || includeReportDetails) && (
-              <div className="border-t border-neutral-100 px-4 py-3 text-sm text-neutral-600 sm:px-6">
-                {includeReportDetails
-                  ? 'Showing transmittal and sign-off detail loads.'
-                  : `${hiddenReportDetails} transmittal and sign-off detail ${hiddenReportDetails === 1 ? 'load is' : 'loads are'} hidden. Every report opened or downloaded is still listed.`}
-                {' '}
-                <button
-                  type="button"
-                  className="inline-flex min-h-11 items-center font-medium text-primary-700 underline sm:min-h-0"
-                  onClick={() => setIncludeReportDetails((current) => !current)}
-                >
-                  {includeReportDetails ? 'Hide them' : 'Show them'}
-                </button>
-              </div>
-            )}
             {(page < totalPages || error) && (
               <div className="border-t border-neutral-100 p-4 text-center">
                 {error && <p className="mb-3 text-sm text-danger-700" role="alert">{error}</p>}
@@ -246,7 +251,7 @@ function ActivityEntry({ group }: { group: AuditEntryGroup }): ReactElement {
 
       {detailLines.length > 0 && (
         <ul className="mt-3 space-y-1 text-sm text-neutral-700 sm:ml-8">
-          {detailLines.slice(0, DETAIL_LINE_LIMIT).map((line) => <li key={line} className="break-words">{line}</li>)}
+          {detailLines.slice(0, DETAIL_LINE_LIMIT).map((line, index) => <li key={`${log.id}-${index}`} className="break-words">{line}</li>)}
           {hiddenDetailLines > 0 && <li className="text-neutral-500">and {hiddenDetailLines} more</li>}
         </ul>
       )}

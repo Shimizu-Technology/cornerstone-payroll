@@ -596,8 +596,6 @@ module Api
           }
         end
 
-        # The Employee Loans screen's own access rules decide who may set up a
-        # loan from the review; the review shows the reason to everyone else.
         # Names the files and people an import step covered, for the run's
         # Activity feed. File names and row details stay on the import itself.
         def audit_record_metadata(_record)
@@ -619,6 +617,8 @@ module Api
           metadata
         end
 
+        # The Employee Loans screen's own access rules decide who may set up a
+        # loan from the review; the review shows the reason to everyone else.
         def loan_setup_access
           path = "api/v1/admin/employee_loans"
           capability = StaffRolePolicy.capability_for(controller_path: path, action_name: "create")

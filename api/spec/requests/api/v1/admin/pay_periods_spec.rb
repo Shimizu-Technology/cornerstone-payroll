@@ -1381,6 +1381,22 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(unchanged.metadata).not_to have_key("input_changes")
     end
 
+    it "does not report a loan payment the calculator took as a staff entry" do
+      deduction_type = DeductionType.create!(company: company, name: "Employee Loan", category: "post_tax", sub_category: "loan", active: true)
+      EmployeeDeduction.create!(employee: employee, deduction_type: deduction_type, amount: 50.0, is_percentage: false, active: true)
+      EmployeeLoan.create!(employee: employee, company: company, deduction_type: deduction_type, name: "Tool Advance",
+        original_amount: 200.0, current_balance: 200.0, payment_amount: 50.0, status: "active")
+      PayrollItem.create!(pay_period: pay_period, employee: employee, company: company, employment_type: "hourly",
+        pay_rate: 15.00, hours_worked: 80)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 80 } } }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(pay_period.payroll_items.sole.loan_payment).to eq(50)
+      audit = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(audit.metadata).not_to have_key("input_changes")
+    end
+
     it "calculates payroll for employees with pay activity" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
         hours: { employee.id.to_s => { regular: 80, overtime: 0 } }

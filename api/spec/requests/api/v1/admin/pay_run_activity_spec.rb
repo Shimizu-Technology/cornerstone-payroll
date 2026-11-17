@@ -154,11 +154,59 @@ RSpec.describe "Pay run activity feed", type: :request do
 
     default_view = feed
     expect(default_view.fetch("data").pluck("id")).to eq([ document.id ])
-    expect(default_view.dig("meta", "hidden_report_detail_count")).to eq(1)
+    expect(default_view.dig("meta", "hidden_detail_count")).to eq(1)
 
-    full_view = feed(include_report_details: true)
+    full_view = feed(include_hidden_details: true)
     expect(full_view.fetch("data").pluck("id")).to contain_exactly(document.id, detail.id)
-    expect(full_view.dig("meta", "hidden_report_detail_count")).to eq(0)
+    expect(full_view.dig("meta", "hidden_detail_count")).to eq(0)
+  end
+
+  it "hides worker and client pay stub views by default and labels them when shown" do
+    item = create(:payroll_item, pay_period: pay_period, employee: avery)
+    worker_view = create(:audit_log, company: company, organization: organization, user: nil, action: "worker_statement#viewed",
+      record_type: "PayrollItem", record_id: item.id, subject_name: "Avery Monroe", event_category: "integration",
+      metadata: { employee_id: avery.id, payroll_item_id: item.id })
+    client_download = log!("client_pay_stubs#download", record_type: "PayrollItem", record_id: item.id,
+      event_category: "document_access", metadata: { employee_id: avery.id, pay_period_id: pay_period.id })
+    staff_change = log!("payroll_items#update", record_type: "payroll_items", record_id: item.id, subject_name: "Avery Monroe")
+
+    default_view = feed
+    expect(default_view.fetch("data").pluck("id")).to eq([ staff_change.id ])
+    expect(default_view.dig("meta", "hidden_detail_count")).to eq(2)
+
+    shown = headlines(include_hidden_details: true)
+    expect(shown.fetch(worker_view.id)).to eq("Avery Monroe viewed their pay stub in the AIRE app")
+    expect(shown.fetch(client_download.id)).to eq("Dana Admin downloaded the pay stub for Avery Monroe from the client portal")
+  end
+
+  it "counts hidden rows only for the first page" do
+    3.times { |index| log!("pay_periods#run_payroll", created_at: index.minutes.ago) }
+    log!("reports#transmittal_preview", record_type: "reports", metadata: { pay_period_id: pay_period.id })
+
+    expect(feed(per_page: 2).dig("meta", "hidden_detail_count")).to eq(1)
+    expect(feed(per_page: 2, page: 2).fetch("meta")).not_to have_key("hidden_detail_count")
+  end
+
+  it "names the run in company-wide history, where there is no run to call this one" do
+    log = log!("payroll_items#destroy", record_type: "payroll_items", record_id: 1, subject_name: "Avery Monroe",
+      metadata: { pay_period_id: pay_period.id })
+
+    expect(AuditLogPresenter.new(log).headline).to eq("Dana Admin removed Avery Monroe from the Nov 2, 2026 – Nov 15, 2026 run")
+  end
+
+  it "reads older rows' employee names in one query" do
+    logs = 3.times.map do
+      log!("payroll_entry_resolutions#save", record_type: "PayPeriod", metadata: { resolution: { employee_id: nadine.id } })
+    end
+    names = AuditLogPresenter.preload_employee_names(logs)
+
+    employee_queries = 0
+    counter = ->(*, payload) { employee_queries += 1 if payload[:sql].include?('FROM "employees"') }
+    ActiveSupport::Notifications.subscribed(counter, "sql.active_record") do
+      headlines = logs.map { |entry| AuditLogPresenter.new(entry, employee_names: names).headline }
+      expect(headlines.uniq).to eq([ "Dana Admin marked Nadine Robles Not paid this period" ])
+    end
+    expect(employee_queries).to eq(0)
   end
 
   describe "rows written by real requests" do
@@ -185,6 +233,20 @@ RSpec.describe "Pay run activity feed", type: :request do
 
       actions = headlines.values
       expect(actions).to include("Dana Admin saved owner pay for Leilani Reyes: $8,807.50", "Dana Admin removed Avery Monroe from this run")
+    end
+
+    it "keeps the detail of edits to fields outside hours and pay" do
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      item = create(:payroll_item, pay_period: pay_period, employee: avery, check_memo: nil)
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{item.id}",
+        params: { payroll_item: { check_memo: "Final check", withholding_tax_override: 25 } }, as: :json
+
+      expect(response).to have_http_status(:ok), response.body
+      metadata = AuditLog.find_by!(action: "payroll_items#update").metadata
+      expect(metadata.fetch("changed_fields")).to include("check_memo", "withholding_tax_override")
+      expect(metadata.dig("after_values", "check_memo")).to eq("Final check")
+      expect(metadata.dig("before_values", "check_memo")).to be_nil
     end
 
     it "names the employee and note when someone is marked Not paid, and when it is undone" do

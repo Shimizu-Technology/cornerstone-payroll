@@ -38,8 +38,10 @@ class PayRunActivityPhrase
     "salary_override" => "pay", "hours_worked" => "regular hours", "overtime_hours" => "overtime hours",
     "holiday_hours" => "holiday hours", "pto_hours" => "PTO hours", "bonus" => "bonus", "reported_tips" => "reported tips",
     "tips_paid_out" => "tips paid out", "non_taxable_pay" => "non-taxable pay", "service_charge_wages" => "service charge",
-    "loan_payment" => "loan payment", "additional_withholding" => "extra withholding"
+    "loan_payment" => "loan payment", "loan_deduction" => "loan deduction", "additional_withholding" => "extra withholding"
   }.freeze
+  # Saving a row re-reads the employee's rate and type; they are not entries.
+  ROW_CONTEXT_FIELDS = %w[pay_rate employment_type wage_rate_hours].freeze
   PHRASED_ACTIONS = %w[
     pay_periods#run_payroll
     checks#preview_pdf client_payroll_review#preview_pdf
@@ -51,7 +53,19 @@ class PayRunActivityPhrase
     check_print_generations#create check_print_runs#generated check_print_runs#pdf
     checks#check_number_updated checks#update_check_number
     payroll_review#published payroll_review#withdrawn payroll_review#changes_requested payroll_review#approved
+    client_pay_stubs#download
   ].freeze
+
+  # A worker opening their own pay stub in the AIRE app has no staff actor.
+  WORKER_STATEMENT_HEADLINES = {
+    "worker_statement#viewed" => "viewed their pay stub in the AIRE app",
+    "worker_statement#pdf_downloaded" => "downloaded their pay stub PDF from the AIRE app"
+  }.freeze
+
+  def self.worker_headline(log)
+    phrase = WORKER_STATEMENT_HEADLINES[log.action]
+    "#{log.subject_name.presence || 'A worker'} #{phrase}" if phrase
+  end
 
   def self.handles?(action)
     FIXED.key?(action) || ITEM_CHECK_ACTIONS.key?(action) || PHRASED_ACTIONS.include?(action)
@@ -104,6 +118,7 @@ class PayRunActivityPhrase
     when "payroll_review#withdrawn" then "withdrew #{revision_label} from client review"
     when "payroll_review#changes_requested" then "asked for changes to #{revision_label}"
     when "payroll_review#approved" then "recorded client approval of #{revision_label}"
+    when "client_pay_stubs#download" then "downloaded the pay stub for #{name || 'an employee'} from the client portal"
     end
   end
 
@@ -192,7 +207,7 @@ class PayRunActivityPhrase
     return pay_saved(after) if after["salary_override"].present?
 
     hours = hours_summary(after)
-    return "saved hours for #{name || 'an employee'}: #{hours}" if hours && (after.keys - HOUR_FIELDS.keys).empty?
+    return "saved hours for #{name || 'an employee'}: #{hours}" if hours && (after.keys - HOUR_FIELDS.keys - ROW_CONTEXT_FIELDS).empty?
 
     entered = entered_summary(after)
     "updated payroll for #{name || 'an employee'}#{": #{entered}" if entered}"
@@ -209,7 +224,7 @@ class PayRunActivityPhrase
     {
       "bonus" => "bonus", "reported_tips" => "reported tips", "tips_paid_out" => "tips paid out",
       "non_taxable_pay" => "non-taxable pay", "service_charge_wages" => "service charge",
-      "loan_payment" => "loan payment", "additional_withholding" => "extra withholding"
+      "loan_payment" => "loan payment", "loan_deduction" => "loan deduction", "additional_withholding" => "extra withholding"
     }.each { |field, label| parts << "#{label} #{money(values[field])}" if values.key?(field) }
     parts << "check #{values['check_number']}" if values["check_number"].present?
     parts.compact.join(", ").presence
