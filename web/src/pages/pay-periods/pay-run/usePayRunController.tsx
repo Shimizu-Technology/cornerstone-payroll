@@ -22,8 +22,11 @@ import { useCompany } from '@/contexts/CompanyContext';
 
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
-import type { ExpectedEntries, PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
+import type { AddBackResult, ExpectedEntries, PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
 import { preservesWorksheetJobHours, type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, unavailableSavedWageRateLabels, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, taxSyncStatusConfig, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
+
+export type AddBackSource = 'expected_entries' | 'roster';
+export interface AddBackNoticeState { source: AddBackSource; result: AddBackResult; hoursEntered: boolean }
 
 export function usePayRunController({
   active = true,
@@ -44,6 +47,12 @@ export function usePayRunController({
   const lastRefreshTokenRef = useRef(refreshToken);
   const loadedPeriodIdRef = useRef<number | null>(null);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
+  // Read by an input-preserving reload to spot rows it adds.
+  const payrollItemsRef = useRef(payrollItems);
+  payrollItemsRef.current = payrollItems;
+  // The latest add-back's result, kept here so it survives the Hours step
+  // remounting and a reload that fails after the add-back succeeded.
+  const [addBack, setAddBack] = useState<{ payRunId: number; source: AddBackSource; result: AddBackResult } | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
   const [estimateOnlyAssignments, setEstimateOnlyAssignments] = useState<NonNullable<PayPeriodPayrollFieldInputs['estimate_only_assignments']>>([]);
@@ -260,6 +269,9 @@ export function usePayRunController({
       // A late input-preserving reload (after a resolution or restore) must not
       // replace the run the user has since opened.
       if (preserveInputs && periodId !== activePageScopeRef.current.payRunId) return 'superseded';
+      // Rows this reload adds, such as one an add-back rebuilt from the import.
+      const knownEmployeeIds = new Set(payrollItemsRef.current.map(item => item.employee_id));
+      const addedItems = (ppResponse.pay_period.payroll_items || []).filter(item => !knownEmployeeIds.has(item.employee_id));
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
@@ -269,7 +281,23 @@ export function usePayRunController({
         // Keep drafts, but give newly listed employees (such as one just added
         // back) their per-job hour rows.
         const fresh = buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse);
-        setHoursMap(previous => ({ ...fresh, ...previous }));
+        const addedIds = new Set(addedItems.map(item => String(item.employee_id)));
+        setHoursMap(previous => ({ ...fresh, ...previous, ...Object.fromEntries(Object.entries(fresh).filter(([id]) => addedIds.has(id))) }));
+        // A new row's saved amounts are its starting values, not staged edits:
+        // replace whatever was staged for that employee with them.
+        if (addedItems.length) {
+          const added = derivePayrollUiState(addedItems);
+          const reset = <T,>(previous: Record<string, T>, saved: Record<string, T>) => ({
+            ...Object.fromEntries(Object.entries(previous).filter(([employeeId]) => !addedIds.has(employeeId))), ...saved
+          });
+          setSalaryOverrideMap(previous => reset(previous, added.salaryOverrides));
+          setBonusMap(previous => reset(previous, added.bonuses));
+          setBonusEdits(previous => reset(previous, {}));
+          setTipsMap(previous => reset(previous, added.tips));
+          tipsPaidOutMapRef.current = reset(tipsPaidOutMapRef.current, added.tipsPaidOut);
+          setTipsPaidOutMap(tipsPaidOutMapRef.current);
+          setLoansMap(previous => reset(previous, added.loans));
+        }
       } else {
         setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
         syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
@@ -1083,8 +1111,9 @@ export function usePayRunController({
 
   const correctionRouteGeneration = commitRouteGenerationRef.current;
 
-  const handleRestoreEmployee = async (employeeId: number) => {
+  const handleRestoreEmployee = async (employeeId: number, source: AddBackSource = 'expected_entries'): Promise<AddBackResult | undefined> => {
     if (!payPeriod || payPeriod.id !== payRunId || processing || savedImportReloadRequiredRef.current || refreshInFlightRouteRef.current !== null) return;
+    setAddBack(null);
     const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
     const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
       scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
@@ -1092,11 +1121,14 @@ export function usePayRunController({
     setProcessingAction('restore');
     setProcessing(true);
     try {
-      await payPeriodsApi.restoreEmployee(payRunId, employeeId);
+      const { add_back: result } = await payPeriodsApi.restoreEmployee(payRunId, employeeId);
       if (!isCurrentRoute()) return;
-      const result = await loadPayPeriod(payRunId, true, true);
-      if (!isCurrentRoute() || result === 'superseded') return;
-      if (result === 'failed') throw new Error('Employee added back, but the run could not reload. Try Add back again to refresh it.');
+      // Shown even if the reload below fails, so what wasn't brought back is never lost.
+      if (result) setAddBack({ payRunId, source, result });
+      const reload = await loadPayPeriod(payRunId, true, true);
+      if (!isCurrentRoute() || reload === 'superseded') return result;
+      if (reload === 'failed') throw new Error('Employee added back, but the run could not reload. Try Add back again to refresh it.');
+      return result;
     } finally {
       if (isCurrentRoute()) {
         refreshInFlightRouteRef.current = null;
@@ -1105,6 +1137,12 @@ export function usePayRunController({
       }
     }
   };
+
+  const addBackNotice: AddBackNoticeState | null = addBack?.payRunId === payRunId ? {
+    source: addBack.source, result: addBack.result,
+    hoursEntered: payrollItems.some(item => item.employee_id === addBack.result.employee_id &&
+      (toNumber(item.salary_override) > 0 || [item.hours_worked, item.overtime_hours, item.holiday_hours, item.pto_hours].some(hours => toNumber(hours) > 0)))
+  } : null;
 
   if (loading) {
     return { status: 'loading' as const, fallback: <WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" /> };
@@ -1592,7 +1630,7 @@ export function usePayRunController({
     refreshDialog: { error, handleRefreshSetup, processing, refreshBaseSalary, refreshRecurring, refreshSetupOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, sourceCoverageOpen },
     loans: { additionalEmployeeIds, canEditPayPeriod, employees, isCalculated, isDraft, namedLoanDrafts, namedLoanOptions, payPeriod, payrollItems, setNamedLoanDrafts, standaloneLoanConflicts },
     comparison: { comparison, comparisonError, comparisonFlagTone, comparisonHiddenRows, comparisonHighlights, comparisonLoading, comparisonRows, comparisonTotalRows, isApproved, isCalculated, isCommitted, loadComparison, payPeriod, payrollItems },
-    roster: { handleRestoreEmployee, onCalculateExpectedEntry: (field: ExpectedEntries['fields'][number], value: number) => handleRunPayroll(undefined, { field, value }), loadPayPeriod, hasStagedWorksheetChanges, canEditPayPeriod, additionalEmployeeIds, employees, financialActionsHeld, handleRunPayroll, isCalculated, isDraft, payPeriod, payrollItems, processing, processingAction, setAdditionalEmployeeIds, setBonusEdits, setBonusMap, setHoursMap, setLoansMap, setNamedLoanDrafts, setPayrollFieldDrafts, setSalaryOverrideMap, setTipsMap, setTipsPaidOutMap },
+    roster: { handleRestoreEmployee, addBackNotice, onCalculateExpectedEntry: (field: ExpectedEntries['fields'][number], value: number) => handleRunPayroll(undefined, { field, value }), loadPayPeriod, hasStagedWorksheetChanges, canEditPayPeriod, additionalEmployeeIds, employees, financialActionsHeld, handleRunPayroll, isCalculated, isDraft, payPeriod, payrollItems, processing, processingAction, setAdditionalEmployeeIds, setBonusEdits, setBonusMap, setHoursMap, setLoansMap, setNamedLoanDrafts, setPayrollFieldDrafts, setSalaryOverrideMap, setTipsMap, setTipsPaidOutMap },
     hours: { hasStagedWorksheetChanges, additionalEmployeeIds, bonusEdits, bonusMap, companyId, currentPath, departmentFilter, departmentOptions, displayEmployeesForHours, employeeTypeFilter, employees, employmentGroupKey, employmentGroupLabel, employmentGroupTone, estimateWorksheetGross, hoursMap, hoursSortBy, hoursSortDirection, hoursTableOpen, isCalculated, isDraft, loansMap, namedLoanDrafts, namedLoanOptions, payPeriod, payrollFieldAssignmentLookup, payrollFieldDrafts, payrollItemByEmployeeId, payrollItems, resetPayrollFieldDraft, retainedRetirementEntries, salaryOverrideMap, searchTerm, setBonusEdits, setBonusMap, setDepartmentFilter, setEmployeeTypeFilter, setHoursSortBy, setHoursSortDirection, setHoursTableOpen, setNamedLoanDrafts, setSearchTerm, setShowPayrollFields, setShowTipsLoans, showPayrollFields, showTipsLoans, tipsLoansVisibilityModeRef, tipsMap, tipsPaidOutMap, updateHours, updateLoan, updatePayrollFieldDraft, updateSalaryOverride, updateTip, updateTipsPaidOut, updateWageRateHours, worksheetPayrollFields },
     results: { companyId, currentPath, departmentFilter, departmentOptions, employeeLookup, employeeTypeFilter, employmentGroupKey, employmentGroupLabel, employmentGroupTone, isCalculated, isCommitted, isDraft, payPeriod, payrollItemDisplayedHours, payrollItemNameParts, payrollItems, registerPayrollFieldTotals, registerTotals, resultsSortBy, resultsSortDirection, searchTerm, setCorrectingItem, setDepartmentFilter, setEditingItem, setEmployeeTypeFilter, setReplacingItem, setResultsSortBy, setResultsSortDirection, setReviewingItem, setSearchTerm, sortPayrollItems, visiblePayrollFields },
     employerTaxes: { fitDivergence, isDraft, payrollItems, totalDRTDeposit, totalEmployerMedicare, totalEmployerSS, totalMedicare, totalSS, totalWithholding },
