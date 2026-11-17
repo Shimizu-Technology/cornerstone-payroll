@@ -1289,7 +1289,7 @@ export interface ExpectedEntries {
   missing_regulars: { employee_id: number; label: string; resolved: boolean; excluded?: boolean; awaiting_hours?: boolean; note?: string }[];
   outstanding: string[];
   /** Recent add-backs and what came back, kept until hours are in and nothing is left to enter. */
-  added_back?: (AddBackResult & { hours_entered: boolean })[];
+  added_back?: (AddBackResult & { hours_entered: boolean; no_hours?: boolean })[];
 }
 
 export interface AddBackAmount { key?: string; kind: 'loan' | 'scheduled_loan' | 'tips' | 'bonus' | 'component' | 'period_pay'; label: string; amount: string }
