@@ -209,9 +209,11 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
 
     add_back = add_back_addison!
 
-    expect(add_back["not_restored"]).to contain_exactly(include("kind" => "loan", "enter_by_hand" => false,
+    # Nothing will be deducted, so staff resume the loan or enter a one-time amount; never both.
+    expect(add_back["not_restored"]).to contain_exactly(include("kind" => "loan", "enter_by_hand" => true,
       "reason" => a_string_starting_with("Kitchen loan is paused").and(ending_with(
-        "Employee Loans will deduct nothing this payday; the workbook says $159.10. Check it in Employee Loans. Don't enter the workbook loan by hand."))))
+        "Employee Loans will deduct nothing this payday; the workbook says $159.10. Resume the loan in Employee Loans, " \
+        "or, if the workbook amount really is one-time this period, enter it under Hours → Tips & Deductions."))))
     expect_no_loan_overdeduction!(add_back, calculate_addison!)
   end
 
@@ -225,6 +227,33 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
     expect(add_back["not_restored"]).to include(include("kind" => "loan", "enter_by_hand" => false,
       "reason" => a_string_including("Employee Loans will deduct $100.00 this payday (Kitchen loan)")))
     expect_no_loan_overdeduction!(add_back, calculate_addison!)
+  end
+
+  it "clears an earlier Not paid this period answer, so approval waits for the added-back worker's hours" do
+    # Addison is usually paid: paid in three of the last four committed runs,
+    # kept in the prior tax year so this year's FICA history isn't involved.
+    4.times do |index|
+      offset = 1.year + (index * 14).days
+      past = create(:pay_period, company: company, start_date: run.start_date - offset, end_date: run.end_date - offset,
+        pay_date: run.pay_date - offset)
+      create(:payroll_item, pay_period: past, employee: addison, gross_pay: 200) if index < 3
+      # History only; these runs are never recalculated here.
+      past.update_columns(status: "committed", committed_at: Time.current)
+    end
+    # Before the files arrived, staff answered Not paid this period.
+    resolution = PayrollEntryResolution.create!(pay_period: run, employee: addison, note: "No shifts yet")
+    import_and_remove!
+
+    add_back_addison!
+
+    expect(PayrollEntryResolution.exists?(resolution.id)).to be(false)
+    audit = AuditLog.where(action: "pay_period_excluded_employees#destroy").sole
+    expect(audit.metadata["cleared_entry_resolutions"]).to eq([ { "payroll_standing_change_id" => nil, "note" => "No shifts yet" } ])
+    entries = PayrollExpectedEntries.new(run.reload).payload
+    expect(entries[:missing_regulars]).to include(include(employee_id: addison.id, resolved: false, awaiting_hours: true))
+    expect(entries[:outstanding]).to include(addison.full_name)
+    calculate_addison!(hours: 0)
+    expect(PayrollExpectedEntries.new(run.reload).payload[:outstanding]).to include(addison.full_name)
   end
 
   it "returns the recorded add-back when the request is repeated, and keeps it in Expected entries until hours are in" do

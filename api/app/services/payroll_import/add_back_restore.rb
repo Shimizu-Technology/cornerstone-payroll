@@ -47,8 +47,8 @@ module PayrollImport
 
       if superseded?
         candidates.each do |candidate|
-          if candidate[:kind] == "scheduled_loan" || (candidate[:kind] == "loan" && loan_setup_due?)
-            skip!(candidate, "The import was replaced by newer files. #{employee_loans_guidance}")
+          if candidate[:kind] == "scheduled_loan" || (candidate[:kind] == "loan" && !employee_loans_deduct_nothing?)
+            skip!(candidate, "The import was replaced by newer files. #{employee_loans_guidance}", by_hand: employee_loans_deduct_nothing?, next_step: nil)
           else
             skip!(candidate, "The import was replaced by newer files. Apply the current import review, or enter it by hand.", by_hand: true)
           end
@@ -117,8 +117,9 @@ module PayrollImport
         # workbook loan is written to the row.
         row[:loan_deduction] = 0
         row[:loan_reconciliation_matches] = []
+        # Hand entry is offered only when Employee Loans deducts nothing.
         candidates.select { |candidate| candidate[:kind].in?(%w[loan scheduled_loan]) }
-          .each { |candidate| skip!(candidate, "#{@loan_reason} #{employee_loans_guidance}") }
+          .each { |candidate| skip!(candidate, "#{@loan_reason} #{employee_loans_guidance}", by_hand: employee_loans_deduct_nothing?, next_step: nil) }
       end
       kept_components = components.each_with_index.filter_map do |component, index|
         error = import_service.component_error(component)
@@ -164,18 +165,28 @@ module PayrollImport
     end
 
     # What Employee Loans takes on its own this payday, against the workbook.
-    # Entering the workbook loan as well could deduct it twice.
+    # When it takes something, entering the workbook loan as well could deduct
+    # it twice. When it takes nothing, staff either resume the loan or, for a
+    # one-time amount, enter it by hand.
     def employee_loans_guidance
       loans = scheduled_loans
       amount = loans.sum { |loan| scheduled_amount(loan) }
+      workbook = currency(loan_source_row[:loan_deduction])
+      if employee_loans_deduct_nothing?
+        return "Employee Loans will deduct nothing this payday; the workbook says #{workbook}. Resume the loan in Employee Loans, " \
+          "or, if the workbook amount really is one-time this period, enter it under Hours → Tips & Deductions."
+      end
+
       deducts = if amount.positive?
         "Employee Loans will deduct #{currency(amount)} this payday (#{loans.map(&:name).to_sentence})"
-      elsif loan_setup_due?
-        "#{@employee.full_name}'s payroll setup already deducts a loan this payday"
       else
-        "Employee Loans will deduct nothing this payday"
+        "#{@employee.full_name}'s payroll setup already deducts a loan this payday"
       end
-      "#{deducts}; the workbook says #{currency(loan_source_row[:loan_deduction])}. Check it in Employee Loans. Don't enter the workbook loan by hand."
+      "#{deducts}; the workbook says #{workbook}. Check it in Employee Loans. Don't enter the workbook loan by hand."
+    end
+
+    def employee_loans_deduct_nothing?
+      scheduled_loans.none? && !loan_setup_due?
     end
 
     def scheduled_loans
@@ -221,11 +232,12 @@ module PayrollImport
       { key: key, kind: kind, label: label, amount: money(amount).to_s("F") }
     end
 
-    # by_hand: the reason tells staff to enter this amount themselves, and where.
-    def skip!(candidate, reason, by_hand: false)
+    # by_hand: the reason tells staff they may enter this amount themselves.
+    # next_step defaults to where to enter it; pass nil when the reason says so.
+    def skip!(candidate, reason, by_hand: false, next_step: WHERE_TO_ENTER[candidate[:kind]])
       return if @skipped.key?(candidate[:key])
 
-      next_step = WHERE_TO_ENTER.fetch(candidate[:kind]) if by_hand
+      next_step = nil unless by_hand
       @skipped[candidate[:key]] = { reason: [ reason.to_s.strip, next_step ].compact.join(" "), enter_by_hand: by_hand }
     end
 

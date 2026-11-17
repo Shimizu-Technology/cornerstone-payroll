@@ -115,11 +115,13 @@ Adding someone back brings back what the current import applied for them, except
 
 The panel says what came back next to the worker, for example *"Addison Moyer is back. Restored from the import: Loan $159.10. Hours aren't brought back. Enter hours, then calculate."* The message stays after a page refresh until hours are entered and nothing is left to enter. A newer import applied afterwards replaces it.
 
-Until hours are entered, the worker stays **Missing** under **Usually paid**, so the run can't be approved without them. If their only pay this period really is tips or a bonus, choose **No hours this period**. It records that answer in the audit log, and **Undo no hours for Name** reverses it.
+Adding someone back clears any earlier **Not paid this period** or **None this period** answer for them in this run, and the audit log records what was cleared. Until hours are entered, the worker stays **Missing** under **Usually paid**, so the run can't be approved without them. If their only pay this period really is tips or a bonus, choose **No hours this period**. It records that answer in the audit log, and **Undo no hours for Name** reverses it.
 
 Some amounts aren't brought back automatically. The panel lists each one with its amount and what to do:
 
-- **Employee Loans changed since the import** (a loan was set up, paused or rescheduled): the panel says what Employee Loans will deduct this payday and what the workbook said. Fix it in **Employee Loans**. Don't enter the workbook loan by hand, because Employee Loans may already deduct it and the check would come out short.
+- **Employee Loans changed since the import** (a loan was set up, paused or rescheduled): the panel says what Employee Loans will deduct this payday and what the workbook said.
+  - If Employee Loans deducts something, fix it there. Don't enter the workbook loan by hand, because the check would come out short.
+  - If it deducts nothing (for example a paused loan), resume the loan in **Employee Loans**. If the workbook amount really is one-time this period, enter it under **Hours → Tips & Deductions** instead. Never do both.
 - **newer files replaced the import**: apply the current import review. The panel asks you to enter an amount by hand only when Employee Loans won't deduct a loan this payday.
 - **a one-time item no longer passes the import's checks**: add it in **Edit payroll**.
 - **the worker already has a payroll row in this run**: check that row's amounts instead of entering anything again.

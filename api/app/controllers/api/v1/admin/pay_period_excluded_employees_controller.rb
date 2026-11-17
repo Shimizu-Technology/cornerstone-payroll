@@ -25,6 +25,12 @@ module Api
 
               reason = exclusion.reason
               exclusion.destroy!
+              # Staff are adding them back to pay them. An earlier "Not paid
+              # this period" or "None this period" answer for them no longer
+              # holds, so the run waits for their hours again.
+              cleared_resolutions = PayrollEntryResolution.where(pay_period: period, employee: employee).map do |resolution|
+                { payroll_standing_change_id: resolution.payroll_standing_change_id, note: resolution.note }.tap { resolution.destroy! }
+              end
               # Hours stay out; staff enter them next. The import's other
               # amounts come back so the check isn't short a deduction.
               add_back = PayrollImport::AddBackRestore.new(pay_period: period, employee: employee, actor: current_user).call
@@ -35,7 +41,8 @@ module Api
                 action: "pay_period_excluded_employees#destroy", record_type: "PayPeriod", record_id: period.id,
                 subject_name: employee.full_name, metadata: { employee_id: employee.id, original_exclusion_reason: reason,
                   import_id: add_back&.dig(:import_id), restored_import_amounts: add_back&.dig(:restored),
-                  not_restored_import_amounts: add_back&.dig(:not_restored) }.compact)
+                  not_restored_import_amounts: add_back&.dig(:not_restored),
+                  cleared_entry_resolutions: cleared_resolutions.presence }.compact)
             end
             skip_default_audit_log!
             # A repeat after a lost response gets the add-back already recorded.
