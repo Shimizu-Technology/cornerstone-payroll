@@ -8,6 +8,15 @@ RSpec.describe EarningsStatementEligibility do
     described_class.printable?(item)
   end
 
+  it "uses the run delivery method for separate statements regardless of check stock" do
+    item = build(:payroll_item, gross_pay: 100, net_pay: 90, payment_delivery_method: "paper_check")
+    item.company = build(:company, check_stock_type: "first_hawaiian_4up")
+    expect(described_class.printable?(item)).to be true
+    expect(described_class.separate_statement?(item)).to be false
+    item.payment_delivery_method = "direct_deposit"
+    expect(described_class.separate_statement?(item)).to be true
+  end
+
   it "includes earned wages entirely consumed by taxes and loan repayment" do
     expect(printable(gross_pay: 197.67, total_deductions: 197.67, loan_payment: 182.54)).to be true
   end
