@@ -255,14 +255,16 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
   const notifySkippedPayStubs = (skippedCount?: number) => {
     if (!skippedCount || selectedStubIds.length > 0) return;
-    notify({ tone: 'info', message: `${skippedCount} employee${skippedCount === 1 ? '' : 's'} with no pay activity were skipped.` });
+    notify({ tone: 'info', message: `${skippedCount} employee${skippedCount === 1 ? '' : 's'} outside this statement selection were skipped.` });
   };
 
-  const handleDownloadPayStubs = async () => {
+  const handleDownloadPayStubs = async (all = false) => {
     setBatchLoading(true);
     setBatchAction(selectedStubIds.length > 0 ? 'Generating selected pay stubs...' : 'Generating pay stubs...');
     try {
-      const result = await payStubsApi.batchPdf(payPeriod.id, selectedStubRequestIds());
+      const result = all || selectedStubIds.length > 0
+        ? await payStubsApi.batchPdf(payPeriod.id, all ? undefined : selectedStubRequestIds())
+        : await payStubsApi.batchPdf(payPeriod.id, undefined, true);
       setBatchAction('Downloading pay stubs...');
       const url = URL.createObjectURL(result.blob);
       const a = document.createElement('a');
@@ -279,11 +281,13 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
     }
   };
 
-  const handlePrintPayStubs = async () => {
+  const handlePrintPayStubs = async (all = false) => {
     setBatchLoading(true);
     setBatchAction(selectedStubIds.length > 0 ? 'Generating selected pay stubs...' : 'Generating pay stubs...');
     try {
-      const result = await payStubsApi.batchPdf(payPeriod.id, selectedStubRequestIds());
+      const result = all || selectedStubIds.length > 0
+        ? await payStubsApi.batchPdf(payPeriod.id, all ? undefined : selectedStubRequestIds())
+        : await payStubsApi.batchPdf(payPeriod.id, undefined, true);
       setBatchAction('Opening pay stubs...');
       const url = URL.createObjectURL(result.blob);
       const printWindow = window.open(url);
@@ -299,38 +303,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       }
     } catch (err) {
       notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to print pay stubs' });
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
-  const handleDirectDepositStubs = async (print: boolean) => {
-    setBatchLoading(true);
-    setBatchAction(print ? 'Opening direct-deposit stubs...' : 'Downloading direct-deposit stubs...');
-    try {
-      const result = await payStubsApi.directDepositStubsPdf(payPeriod.id);
-      const url = URL.createObjectURL(result.blob);
-      if (print) {
-        const printWindow = window.open(url);
-        if (!printWindow) {
-          URL.revokeObjectURL(url);
-          notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups to print direct-deposit stubs.' });
-          return;
-        }
-        printWindow.addEventListener('load', () => {
-          printWindow.print();
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-        });
-      } else {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = result.filename || `direct_deposit_stubs_${payPeriod.pay_date ?? 'undated'}.pdf`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 100);
-      }
-    } catch (err) {
-      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to generate direct-deposit stubs' });
     } finally {
       setBatchLoading(false);
       setBatchAction(null);
@@ -444,6 +416,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const stubEligibleIds = filteredStatements.map((item) => item.id);
   const allVisibleStubsSelected = stubEligibleIds.length > 0 && stubEligibleIds.every((id) => selectedStubIdSet.has(id));
   const hasPrintableStub = statementItems.length > 0;
+  // The checks index serializes this run's effective method as payment_delivery_method.
+  const hasNonCheckStub = statementItems.some((item) =>
+    item.statement_only || item.payment_delivery_method !== 'paper_check' || Number(item.net_pay) <= 0);
   const hasPhysicalChecks = checks.some((item) => !item.voided && Number(item.net_pay) > 0);
   const directDepositCount = statementItems.filter((item) => !item.statement_only && item.payment_delivery_method === 'direct_deposit').length;
   const statementOnlyCount = statementItems.filter((item) => item.statement_only).length;
@@ -559,20 +534,19 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
             <p className="mt-2 text-sm text-neutral-600">{statementItems.length} statement{statementItems.length === 1 ? '' : 's'} · {directDepositCount} direct deposit{directDepositCount === 1 ? '' : 's'} · {statementOnlyCount} statement only</p>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end">
-            <Button size="sm" onClick={() => void handlePrintPayStubs()} disabled={batchLoading || !hasPrintableStub}>
-              {selectedStubIds.length ? `Print ${selectedStubIds.length} selected statement${selectedStubIds.length === 1 ? '' : 's'}` : 'Print all earnings statements'}
+            <Button size="sm" onClick={() => void handlePrintPayStubs()} disabled={batchLoading || (!selectedStubIds.length && !hasNonCheckStub)}>
+              {selectedStubIds.length ? `Print ${selectedStubIds.length} selected statement${selectedStubIds.length === 1 ? '' : 's'}` : 'Print non-check statements'}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => void handleDownloadPayStubs()} disabled={batchLoading || !hasPrintableStub}>
-              {selectedStubIds.length ? 'Download selected statements' : 'Download all earnings statements'}
+            <Button size="sm" variant="outline" onClick={() => void handleDownloadPayStubs()} disabled={batchLoading || (!selectedStubIds.length && !hasNonCheckStub)}>
+              {selectedStubIds.length ? 'Download selected statements' : 'Download non-check statements'}
             </Button>
           </div>
         </div>
-        {directDepositCount > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(true)} disabled={batchLoading}>Print direct-deposit statements</Button>
-            <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(false)} disabled={batchLoading}>Download direct-deposit statements</Button>
-          </div>
-        )}
+        <p className="mt-3 text-sm text-neutral-600">Non-check statements include direct deposit and statement-only employees. Top-check stock already includes a stub. Use all statements when separate paper-check stubs are needed. Select employees below to print specific statements.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={() => void handlePrintPayStubs(true)} disabled={batchLoading || !hasPrintableStub}>Print all earnings statements</Button>
+          <Button size="sm" variant="outline" onClick={() => void handleDownloadPayStubs(true)} disabled={batchLoading || !hasPrintableStub}>Download all earnings statements</Button>
+        </div>
         {statementItems.length > 0 ? (
           <>
             <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

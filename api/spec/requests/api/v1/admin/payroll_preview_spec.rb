@@ -38,16 +38,17 @@ RSpec.describe "Payroll preview downloads", type: :request do
   end
 
   %w[calculated approved].each do |status|
-    it "allows #{status}, renders checks first and every eligible stub, and audits its revision" do
+    it "allows #{status}, renders checks first and only non-check stubs, and audits its revision" do
       period.update_columns(status: status)
       expect { download }.to change { AuditLog.where(action: "checks#preview_pdf").count }.by(1)
       expect(response).to have_http_status(:ok)
       expect(response.headers["Content-Disposition"]).to include("Example_Payroll_PREVIEW_2024-01-19_rev3.pdf")
       expect(response.headers["Cache-Control"]).to include("no-store")
-      expect(pages.size).to eq(4)
+      expect(pages.size).to eq(3)
       expect(pages.first).to include("Paper Worker")
       expect(pages.first).not_to include("Deposit Worker")
-      expect(pages.drop(1).join).to include("Paper Worker", "Deposit Worker", "ZeroNet Worker")
+      expect(pages.drop(1).join).to include("Deposit Worker", "ZeroNet Worker")
+      expect(pages.drop(1).join).not_to include("Paper Worker")
       pages.each do |text|
         expect(text).to include("PREVIEW")
         expect(text).not_to match(/VOID|NOT FINAL|official earnings statement/)
@@ -76,8 +77,14 @@ RSpec.describe "Payroll preview downloads", type: :request do
     expect(pages.first).not_to include("Deposit Worker")
     download("stubs")
     expect(response).to have_http_status(:ok)
+    expect(pages.size).to eq(2)
+    expect(pages.join).to include("Deposit Worker", "ZeroNet Worker")
+    expect(pages.join).not_to include("Paper Worker")
+    download("all_stubs")
+    expect(response).to have_http_status(:ok)
     expect(pages.size).to eq(3)
-    expect(pages.join).to include("Deposit Worker")
+    expect(pages.join).to include("Paper Worker", "Deposit Worker", "ZeroNet Worker")
+    expect(AuditLog.where(action: "checks#preview_pdf").last.metadata["part"]).to eq("all_stubs")
   end
 
   it "writes only the audit entry, including no payroll, numbering, print, review or activity updates" do

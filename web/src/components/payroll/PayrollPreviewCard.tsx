@@ -4,7 +4,7 @@ import { ReportDownloadMenu } from '@/components/reports/ReportDownloadMenu';
 import { ActionFeedback, useFeedbackState } from '@/components/ui/action-feedback';
 import type { PayPeriod } from '@/types';
 
-type Part = 'combined' | 'checks' | 'stubs';
+type Part = 'combined' | 'checks' | 'stubs' | 'all_stubs';
 
 export function PayrollPreviewCard({ payPeriod, compact = false, onDownloaded }: {
   payPeriod: PayPeriod; compact?: boolean; onDownloaded?: (revision: number) => void | Promise<void>;
@@ -47,8 +47,11 @@ export function PayrollPreviewCard({ payPeriod, compact = false, onDownloaded }:
 
   const menu = <ReportDownloadMenu className="[&_button]:min-h-11" disabled={busy !== null} buttonLabel={busy ? 'Preparing preview…' : 'Download preview'}
     formats={([
-      ['combined', 'Checks and pay stubs'], ['checks', 'Checks only'], ['stubs', 'Pay stubs only'],
-    ] as const).map(([part, label]) => ({ key: part, label, kind: 'pdf', loading: busy === part, onSelect: () => save(part) }))} />;
+      ['combined', 'Checks and pay stubs', 'Paper checks, plus separate stubs for direct deposit and statement-only employees.'],
+      ['checks', 'Checks only', 'Positive-net paper checks.'],
+      ['stubs', 'Pay stubs only', 'Direct deposit and statement-only employees. Paper-check employees are excluded.'],
+      ['all_stubs', 'All pay stubs (including paper-check employees)', 'A separate statement for every employee with payroll activity.'],
+    ] as const).map(([part, label, description]) => ({ key: part, label, description, kind: 'pdf', loading: busy === part, onSelect: () => save(part) }))} />;
   const feedback = <>
     {stale && <p role="status" className="text-sm text-warning-900">The last preview was revision {lastRevision}; download a new one.</p>}
     {download?.runId === payPeriod.id && !stale && <p role="status" className="text-sm text-neutral-600">Downloaded preview revision {download.revision}.</p>}

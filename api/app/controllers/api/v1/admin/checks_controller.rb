@@ -101,7 +101,7 @@ module Api
           }
         end
 
-        # GET /pay_periods/:pay_period_id/checks/preview_pdf?part=checks|stubs
+        # GET /pay_periods/:pay_period_id/checks/preview_pdf?part=checks|stubs|all_stubs
         def preview_pdf
           if @pay_period.correction_status == "voided"
             return render json: { error: "Voided pay runs cannot be previewed" }, status: :unprocessable_entity
