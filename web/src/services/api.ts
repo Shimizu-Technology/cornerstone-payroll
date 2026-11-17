@@ -1560,8 +1560,8 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/adopt_confirmed_workweek`),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
-  restoreEmployee: (id: number, employeeId: number) =>
-    api.delete(`/admin/pay_periods/${id}/excluded_employees/${employeeId}`),
+  restoreEmployee: (id: number, employeeId: number): Promise<{ expected_entries: PayPeriod['expected_entries'] }> =>
+    api.delete<{ expected_entries: PayPeriod['expected_entries'] }>(`/admin/pay_periods/${id}/excluded_employees/${employeeId}`),
   unapprove: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
   commit: (id: number, snapshot?: PayrollCommitSnapshot) =>

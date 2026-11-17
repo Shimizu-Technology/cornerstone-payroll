@@ -385,7 +385,16 @@ module Api
 
           employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]
-            next unless employee
+            unless employee
+              # A saved paycheck for someone no longer eligible would otherwise
+              # survive a "successful" recalculation unchanged.
+              stale = @pay_period.payroll_items.find_by(employee_id: employee_id.to_i)&.employee
+              if stale
+                results[:errors] << { employee_id: stale.id, name: stale.full_name,
+                  error: "#{stale.full_name} is no longer eligible for this run (status or new-hire paperwork). Resolve it, or remove them from payroll, then calculate again." }
+              end
+              next
+            end
             if history_errors[employee.id]
               results[:errors] << { employee_id: employee.id, name: employee.full_name, error: history_errors[employee.id] }
               next

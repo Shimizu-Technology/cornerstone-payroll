@@ -253,12 +253,20 @@ export function usePayRunController({
       ]);
 
       if (!isCurrentRequest()) return 'superseded';
+      // A late input-preserving reload (after a resolution or restore) must not
+      // replace the run the user has since opened.
+      if (preserveInputs && periodId !== activePageScopeRef.current.payRunId) return 'superseded';
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
       if (!retainInputs) syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
       setLiabilityReconciliation(liabilityResponse?.payroll_liability_reconciliation || null);
-      if (!retainInputs) {
+      if (retainInputs) {
+        // Keep drafts, but give newly listed employees (such as one just added
+        // back) their per-job hour rows.
+        const fresh = buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse);
+        setHoursMap(previous => ({ ...fresh, ...previous }));
+      } else {
         setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
         syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
         // Canonical reloads after import, commit, or saved check changes must
