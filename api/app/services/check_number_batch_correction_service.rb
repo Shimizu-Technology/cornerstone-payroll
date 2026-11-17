@@ -190,6 +190,7 @@ class CheckNumberBatchCorrectionService
       record_id: record.id,
       subject_name: subject_name,
       metadata: {
+        pay_period_id: pay_period.id,
         changed_fields: [ "check_number" ],
         before_values: { "check_number" => old_number },
         after_values: { "check_number" => new_number },

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_17_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_17_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -293,6 +293,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_160000) do
     t.string "subject_name"
     t.string "user_agent"
     t.bigint "user_id"
+    t.index "company_id, ((metadata ->> 'pay_period_id'::text))", name: "idx_audit_logs_company_pay_period"
     t.index [ "company_id" ], name: "index_audit_logs_on_company_id"
     t.index [ "created_at" ], name: "index_audit_logs_on_created_at"
     t.index [ "organization_id", "created_at", "id" ], name: "idx_audit_logs_org_history"

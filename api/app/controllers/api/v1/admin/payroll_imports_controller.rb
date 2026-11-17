@@ -446,7 +446,7 @@ module Api
                 period.transition!("import", actor: current_user,
                   submission: selection.payroll_submission, note: ([ "Imported revision #{selection.payroll_submission.revision} into payroll review." ] + review_notes).join(" "))
                 PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#import",
-                  metadata: { submission_id: selection.payroll_submission_id, current_submission_id: selection.current_submission_id,
+                  metadata: { pay_period_id: @pay_period.id, submission_id: selection.payroll_submission_id, current_submission_id: selection.current_submission_id,
                     superseded_reason: selection.superseded_reason, source_route: selection.source_route,
                     staff_workbook_document_id: selection.staff_workbook_document_id,
                     client_change_decisions: client_changes.review_decisions,
@@ -465,6 +465,8 @@ module Api
               }, status: :unprocessable_entity
             end
 
+            @audit_import_record = import_record
+            @audit_import_results = results
             render json: {
               results: results,
               client_change_decisions: client_changes&.review_decisions || [],
@@ -494,7 +496,7 @@ module Api
           end
           period.transition!("resolve_source", actor: current_user, submission: source, note: reason)
           PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#resolve_source",
-            metadata: { submission_id: source.id, revision: source.revision, reason: reason })
+            metadata: { pay_period_id: @pay_period.id, submission_id: source.id, revision: source.revision, reason: reason })
           render json: { resolved_submission_id: source.id }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Portal period not found" }, status: :not_found
@@ -519,7 +521,7 @@ module Api
               end
             end
             PayrollSubmissions::Audit.record!(actor: current_user, period: submission.period, action: "payroll_submissions#open_import",
-              metadata: { submission_id: submission.id, revision: submission.revision, current_submission_id: current.id,
+              metadata: { pay_period_id: @pay_period.id, submission_id: submission.id, revision: submission.revision, current_submission_id: current.id,
                 superseded_reason: reason, import_id: record.id, duplicate: result[:duplicate],
                 staff_workbook_document_id: selection.staff_workbook_document_id,
                 staff_workbook_sha256: selection.staff_workbook_document&.sha256 })
@@ -575,6 +577,7 @@ module Api
         end
 
         def preview_response(import_record, package_result, selection: nil)
+          @audit_import_record = import_record
           source_package = package_result.fetch(:session)
           preview = preview_from_source_package(source_package)
           preview[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(import_record.raw_data.to_h["tips_paid_out_from_tips"])
@@ -591,6 +594,27 @@ module Api
             client_change_prefill: (selection ? change_prefill(selection.payroll_submission, preview[:matched]) : nil),
             pending_change_prefill: (!selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission, preview[:matched]) : nil)
           }
+        end
+
+        # Names the files and people an import step covered, for the run's
+        # Activity feed. File names and row details stay on the import itself.
+        def audit_record_metadata(_record)
+          return {} unless @audit_import_record
+
+          metadata = { import_id: @audit_import_record.id, source_files: [
+            ("revel_hours" if @audit_import_record.pdf_filename.present?),
+            ("supplemental_workbook" if @audit_import_record.excel_filename.present?)
+          ].compact }
+          metadata[:matched_count] = Array(@audit_import_record.matched_data).size unless action_name == "apply"
+          if @audit_import_results
+            metadata[:applied_count] = @audit_import_results.fetch(:success, []).size
+            metadata[:skipped_count] = @audit_import_results.fetch(:skipped, []).size
+          end
+          metadata[:source_role] = params[:source_role].to_s if action_name == "remove_source"
+          if action_name == "tip_treatment"
+            metadata[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips])
+          end
+          metadata
         end
 
         # The Employee Loans screen's own access rules decide who may set up a

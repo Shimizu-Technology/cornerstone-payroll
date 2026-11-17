@@ -106,6 +106,8 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
           @payroll_item.reload
+          @payroll_item_audit_before_values = AuditRecordSnapshot.values_for(@payroll_item)
+          @payroll_item_structured_before = structured_audit_values(PayrollItem.find(@payroll_item.id))
 
           attrs = payroll_item_params
           PayrollCorrectionPayBasisGuard.validate!(@payroll_item, proposed_attributes: attrs)
@@ -197,6 +199,67 @@ module Api
         end
 
         private
+
+        def audit_record
+          @payroll_item
+        end
+
+        # Create lists what was entered; update lists what changed. A removal
+        # is described by its headline alone. Job-hour splits and payroll field
+        # rows have no flat value, so they are named without one.
+        def audit_record_changes
+          empty = { before_values: {}, after_values: {}, changed_fields: [], redacted_fields: [] }
+          return empty unless @payroll_item&.persisted?
+
+          changes = if @payroll_item_audit_before_values
+            AuditRecordSnapshot.changes_from(@payroll_item, @payroll_item_audit_before_values)
+          elsif action_name == "create"
+            entered = AuditRecordSnapshot.values_for(@payroll_item).reject { |_field, value| value.blank? || (value.is_a?(Numeric) && value.zero?) }
+            empty.merge(after_values: entered, changed_fields: entered.keys.sort)
+          else
+            return empty
+          end
+          # Both sides are read from the database so stored values compare alike.
+          before = @payroll_item_structured_before || {}
+          after = structured_audit_values(PayrollItem.find(@payroll_item.id))
+          structured = after.keys.select { |field| after[field] != (before[field] || []) }
+          changes.merge(changed_fields: (changes[:changed_fields] | structured).sort)
+        end
+
+        # Every payroll field entry attribute staff can submit (see
+        # payroll_item_params), plus the loan request intent a replace_request
+        # can clear, so an edit to any one of them is noticed.
+        AUDITED_FIELD_ENTRY_ATTRIBUTES = %w[
+          id payroll_field_definition_id label kind tax_treatment category reporting_group
+          amount source employee_paid employer_paid active notes
+        ].freeze
+
+        # Job-hour splits and payroll field rows have no single value; their
+        # contents are compared to tell whether a save changed them.
+        def structured_audit_values(item)
+          {
+            "wage_rate_hours" => Array(item.wage_rate_hours).map { |row| row.to_h.stringify_keys.except("source_lines") },
+            "payroll_field_entries" => item.payroll_item_field_entries.map do |entry|
+              entry.attributes.slice(*AUDITED_FIELD_ENTRY_ATTRIBUTES)
+                .merge(entry.metadata.to_h.slice(*PayrollFieldRequestIntent::METADATA_KEYS))
+                .transform_values(&:to_s)
+            end.sort_by(&:to_s)
+          }
+        end
+
+        def audit_record_metadata(_record)
+          return {} unless @payroll_item
+
+          employee = @payroll_item.employee
+          {
+            employee_id: @payroll_item.employee_id,
+            employee_name: employee&.full_name,
+            owner_pay: PayrollStandingChange.where(company_id: current_company_id, employee_id: @payroll_item.employee_id,
+              kind: "owner_pay", active: true).exists?,
+            auto_calculated: ActiveModel::Type::Boolean.new.cast(params[:auto_calculate]) || nil,
+            source: ("import_review" if params.key?(:expected_import_id))
+          }.compact
+        end
 
         # The import review saves a person's missing period pay through create
         # or update. Refuse it when that review is no longer the current one,

@@ -1,14 +1,16 @@
 # frozen_string_literal: true
 
 class AuditLogSerializer
-  def self.call(log, pay_period_subjects: {})
-    presenter = AuditLogPresenter.new(log, pay_period_subjects: pay_period_subjects)
+  def self.call(log, pay_period_subjects: {}, run_context_id: nil, employee_names: nil)
+    presenter = AuditLogPresenter.new(log, pay_period_subjects: pay_period_subjects, run_context_id: run_context_id,
+      employee_names: employee_names)
     {
       id: log.id,
       action: log.action,
       display_action: presenter.headline,
       display_subject: presenter.subject,
       summary: presenter.summary,
+      detail_lines: PayRunActivityPhrase.detail_lines(log),
       event_category: log.event_category,
       record_type: log.record_type,
       record_id: log.record_id,

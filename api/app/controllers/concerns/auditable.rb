@@ -96,7 +96,7 @@ module Auditable
       record_type: record_type,
       record_id: record_id,
       subject_name: AuditRecordSnapshot.subject_name(record).presence || subject_name_from(response_subject),
-      metadata: base_metadata.merge(audit_metadata_for_log(record)),
+      metadata: base_metadata.merge(audit_pay_period_metadata).merge(audit_metadata_for_log(record)),
       ip_address: request.remote_ip,
       user_agent: request.user_agent,
       request_id: request.request_id,
@@ -158,6 +158,18 @@ module Auditable
     return audit_record_metadata(record) if respond_to?(:audit_record_metadata, true)
 
     {}
+  end
+
+  # Tags every request made inside a pay run so the run's Activity feed can
+  # find it, whatever record type the controller audits under.
+  def audit_pay_period_metadata
+    pay_period_id = audit_pay_period_id
+    pay_period_id.present? ? { pay_period_id: pay_period_id } : {}
+  end
+
+  def audit_pay_period_id
+    period = @pay_period if instance_variable_defined?(:@pay_period)
+    period.id if period.is_a?(PayPeriod)
   end
 
   def safe_field_names(prefix, value)
