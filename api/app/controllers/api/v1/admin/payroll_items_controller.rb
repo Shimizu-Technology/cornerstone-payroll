@@ -227,7 +227,8 @@ module Api
         end
 
         # Every payroll field entry attribute staff can submit (see
-        # payroll_item_params), so an edit to any one of them is noticed.
+        # payroll_item_params), plus the loan request intent a replace_request
+        # can clear, so an edit to any one of them is noticed.
         AUDITED_FIELD_ENTRY_ATTRIBUTES = %w[
           id payroll_field_definition_id label kind tax_treatment category reporting_group
           amount source employee_paid employer_paid active notes
@@ -240,6 +241,7 @@ module Api
             "wage_rate_hours" => Array(item.wage_rate_hours).map { |row| row.to_h.stringify_keys.except("source_lines") },
             "payroll_field_entries" => item.payroll_item_field_entries.map do |entry|
               entry.attributes.slice(*AUDITED_FIELD_ENTRY_ATTRIBUTES)
+                .merge(entry.metadata.to_h.slice(*PayrollFieldRequestIntent::METADATA_KEYS))
                 .transform_values(&:to_s)
             end.sort_by(&:to_s)
           }
