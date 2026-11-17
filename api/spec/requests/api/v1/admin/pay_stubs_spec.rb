@@ -321,6 +321,18 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
         payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 600, net_pay: 500)
     end
 
+    it "retains voided paper-check wages in explicit all statements while non-check defaults follow the run method" do
+      payroll_item.update!(voided: true, check_number: "8101")
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: pay_period.id, non_check_only: true }
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join
+      expect(text).not_to include(employee.full_name)
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: pay_period.id }
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join
+      expect(text).to include(employee.full_name, deposit_employee.full_name)
+    end
+
     it "includes deposits and zero-net activity in non-check statements using this run's method" do
       zero = create(:payroll_item, pay_period: pay_period,
         employee: create(:employee, company: company, first_name: "Zoe", last_name: "Zero"),
@@ -331,6 +343,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join
       expect(text).to include(deposit_employee.full_name, zero.employee.full_name)
       expect(text).not_to include("Pat Stub", "Alex Ledger")
+      expect(response.headers["Content-Disposition"]).to include("non_check_statements_2026-04-15.pdf")
       expect(response.headers["X-Pay-Stubs-Generated"]).to eq("2")
     end
 

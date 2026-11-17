@@ -1,0 +1,130 @@
+[
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev1.pdf",
+    "option": "combined",
+    "people": 52,
+    "pages": 56,
+    "membership_and_order": "passed",
+    "viewport": "desktop"
+  },
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev1_checks.pdf",
+    "option": "checks",
+    "people": 9,
+    "pages": 9,
+    "membership_and_order": "passed",
+    "viewport": "desktop"
+  },
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev2_stubs.pdf",
+    "option": "stubs",
+    "people": 43,
+    "pages": 47,
+    "membership_and_order": "passed",
+    "viewport": "desktop"
+  },
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev2_all_stubs.pdf",
+    "option": "all_stubs",
+    "people": 52,
+    "pages": 56,
+    "membership_and_order": "passed",
+    "viewport": "desktop"
+  },
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev2.pdf",
+    "option": "combined",
+    "people": 52,
+    "pages": 56,
+    "membership_and_order": "passed",
+    "viewport": "mobile"
+  },
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev2_checks.pdf",
+    "option": "checks",
+    "people": 9,
+    "pages": 9,
+    "membership_and_order": "passed",
+    "viewport": "mobile"
+  },
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev2_stubs.pdf",
+    "option": "stubs",
+    "people": 43,
+    "pages": 47,
+    "membership_and_order": "passed",
+    "viewport": "mobile"
+  },
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev2_all_stubs.pdf",
+    "option": "all_stubs",
+    "people": 52,
+    "pages": 56,
+    "membership_and_order": "passed",
+    "viewport": "mobile"
+  },
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev2_checks.pdf",
+    "option": "checks",
+    "people": 9,
+    "pages": 9,
+    "membership_and_order": "passed",
+    "viewport": "mobile"
+  },
+  {
+    "file": "Hale_s_Grill_Bar_Inc_PREVIEW_2026-11-19_rev2_checks.pdf",
+    "option": "checks",
+    "people": 9,
+    "pages": 9,
+    "membership_and_order": "passed",
+    "viewport": "desktop"
+  },
+  {
+    "file": "paystubs_2026-11-19.pdf",
+    "option": "non_check",
+    "people": 43,
+    "pages": 47,
+    "membership_and_order": "passed",
+    "viewport": "desktop"
+  },
+  {
+    "file": "paystubs_2026-11-19.pdf",
+    "option": "all",
+    "people": 52,
+    "pages": 56,
+    "membership_and_order": "passed",
+    "viewport": "desktop"
+  },
+  {
+    "file": "selected_paystubs_2026-11-19.pdf",
+    "option": "selected",
+    "people": 1,
+    "pages": 1,
+    "membership_and_order": "passed",
+    "viewport": "desktop"
+  },
+  {
+    "file": "paystubs_2026-11-19.pdf",
+    "option": "non_check",
+    "people": 43,
+    "pages": 47,
+    "membership_and_order": "passed",
+    "viewport": "mobile"
+  },
+  {
+    "file": "paystubs_2026-11-19.pdf",
+    "option": "all",
+    "people": 52,
+    "pages": 56,
+    "membership_and_order": "passed",
+    "viewport": "mobile"
+  },
+  {
+    "file": "selected_paystubs_2026-11-19.pdf",
+    "option": "selected",
+    "people": 1,
+    "pages": 1,
+    "membership_and_order": "passed",
+    "viewport": "mobile"
+  }
+]

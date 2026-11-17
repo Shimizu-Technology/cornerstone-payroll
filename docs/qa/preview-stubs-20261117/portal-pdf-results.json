@@ -1,0 +1,30 @@
+[
+  {
+    "viewport": "mobile",
+    "option": "combined",
+    "file": "Payroll_PREVIEW_2026-11-19_rev2.pdf",
+    "people": 52,
+    "membership_and_order": "passed"
+  },
+  {
+    "viewport": "mobile",
+    "option": "all_stubs",
+    "file": "Payroll_PREVIEW_2026-11-19_rev2.pdf",
+    "people": 52,
+    "membership_and_order": "passed"
+  },
+  {
+    "viewport": "desktop",
+    "option": "combined",
+    "file": "Payroll_PREVIEW_2026-11-19_rev2.pdf",
+    "people": 52,
+    "membership_and_order": "passed"
+  },
+  {
+    "viewport": "desktop",
+    "option": "all_stubs",
+    "file": "Payroll_PREVIEW_2026-11-19_rev2_all_stubs.pdf",
+    "people": 52,
+    "membership_and_order": "passed"
+  }
+]
