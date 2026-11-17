@@ -38,6 +38,55 @@ RSpec.describe "Published payroll review loop", type: :request do
     post "#{base}/approve_review", params: { revision_id: id, acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT, notes: "Reviewed preview" }
   end
 
+  it "filters each client preview part and audits the exact selection" do
+    deposit = create(:payroll_item, company: company, pay_period: period,
+      employee: create(:employee, company: company, first_name: "Dina", last_name: "Deposit"),
+      payment_delivery_method: "direct_deposit", gross_pay: 200, net_pay: 180)
+    zero = create(:payroll_item, company: company, pay_period: period,
+      employee: create(:employee, company: company, first_name: "Zoe", last_name: "Zero"), gross_pay: 50, net_pay: 0)
+    PayrollReview::RevisionService.new(pay_period: period.reload, actor: staff).issue!
+    staff_approve
+    @actor = client
+    { nil => 3, "checks" => 1, "stubs" => 2, "all_stubs" => 3 }.each do |part, count|
+      get "#{base}/preview_pdf", params: { revision_id: review.id, part: part }.compact
+      expect(response).to have_http_status(:ok), response.body
+      pages = PDF::Reader.new(StringIO.new(response.body)).pages
+      expect(pages.size).to eq(count)
+      text = pages.map(&:text).join
+      if part == "stubs"
+        expect(text).to include(deposit.employee.full_name, zero.employee.full_name)
+        expect(text).not_to include(employee.full_name)
+      end
+      expect(AuditLog.where(action: "client_payroll_review#preview_pdf").last.metadata["part"]).to eq(part || "combined")
+    end
+  end
+
+  it "regenerates preview amounts and advances the filename revision after hours change and reapproval" do
+    employee.update!(pay_rate: 20, payment_delivery_method: "direct_deposit")
+    period.update!(status: "draft")
+    amounts = []
+    filenames = []
+    [ 40, 60 ].each_with_index do |hours, index|
+      if index.positive?
+        post "#{admin}/unapprove"
+        expect(response).to have_http_status(:ok), response.body
+      end
+      post "#{admin}/run_payroll", params: { employee_ids: [ employee.id ], hours: { employee.id.to_s => { regular: hours, overtime: 0 } } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("results", "errors")).to eq([])
+      staff_approve
+      get "/api/v1/admin/pay_periods/#{period.id}/checks/preview_pdf", params: { part: "stubs" }
+      expect(response).to have_http_status(:ok), response.body
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join
+      amounts << employee.payroll_items.find_by!(pay_period: period).gross_pay
+      expect(amounts.last).to eq(hours * 20)
+      expect(text.delete(",")).to include(format("%0.2f", amounts.last))
+      expect(text.delete(",")).not_to include(format("%0.2f", amounts.first)) if index.positive?
+      filenames << response.headers["Content-Disposition"]
+    end
+    expect(filenames.last[/_rev(\d+)/, 1].to_i).to be > filenames.first[/_rev(\d+)/, 1].to_i
+  end
+
   it "publishes at staff approval, audits preview access, notifies both ways and commits only after exact client approval" do
     @actor = client
     get base

@@ -75,3 +75,12 @@ it('hides an already published review when the setting is disabled', () => {
   const { container } = render(<ClientPayrollReview payPeriod={{ ...period, client_payroll_approval_required: false }} companyId={3} onDone={onDone} />);
   expect(container.textContent).toBe('');
 });
+
+it('offers all pay stubs explicitly and preserves a failed download for retry', async () => {
+  vi.mocked(clientPayPeriodsApi.previewPdf).mockRejectedValueOnce(new Error('Download failed. Try again.'));
+  render(<ClientPayrollReview payPeriod={period} companyId={3} onDone={onDone} />);
+  fireEvent.click(screen.getByRole('button', { name: 'All pay stubs (including paper-check employees)' }));
+  expect(await screen.findByText('Download failed. Try again.')).toBeTruthy();
+  expect(clientPayPeriodsApi.previewPdf).toHaveBeenCalledWith(5, 3, 11, 'all_stubs');
+  expect((screen.getByRole('button', { name: 'All pay stubs (including paper-check employees)' }) as HTMLButtonElement).disabled).toBe(false);
+});

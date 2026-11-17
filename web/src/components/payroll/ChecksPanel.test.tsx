@@ -140,7 +140,7 @@ describe('ChecksPanel earnings statements', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Preview' })[0]);
     expect(await screen.findByText('Shared PDF preview')).toBeTruthy();
     expect(apiMocks.checkPdf).toHaveBeenCalledWith(42, undefined);
-    expect(screen.getByRole('button', { name: 'Download all earnings statements' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Download non-check statements' })).toBeTruthy();
   });
 
   it('retains an issued-check draft after denied save and a capability refresh', async () => {
@@ -175,11 +175,27 @@ describe('ChecksPanel earnings statements', () => {
     expect(screen.getByText('Statement only · no payment issued (1)')).toBeTruthy();
   });
 
-  it('prints all methods including zero-net statements through the all-statements endpoint', async () => {
+  it('keeps all methods available as a secondary statement action', async () => {
     renderStatements();
     fireEvent.click(await screen.findByRole('button', { name: 'Print all earnings statements' }));
     await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledWith(8, undefined));
     expect(apiMocks.directDepositStubsPdf).not.toHaveBeenCalled();
+  });
+
+  it('defaults to non-check statements, including zero-net rows, for print and download', async () => {
+    renderStatements();
+    fireEvent.click(await screen.findByRole('button', { name: 'Print non-check statements' }));
+    await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledWith(8, undefined, true));
+    fireEvent.click(screen.getByRole('button', { name: 'Download non-check statements' }));
+    await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledTimes(2));
+    expect(apiMocks.batchPdf).toHaveBeenLastCalledWith(8, undefined, true);
+  });
+
+  it('disables the default action for a paper-check-only run and keeps all statements available', async () => {
+    renderStatements([paperStatement]);
+    expect((await screen.findByRole('button', { name: 'Print non-check statements' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Print all earnings statements' }));
+    await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledWith(8, undefined));
   });
 
   it('keeps selections across searches and prints exactly the selected statement IDs', async () => {
@@ -190,7 +206,7 @@ describe('ChecksPanel earnings statements', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Print 2 selected statements' }));
     await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledWith(8, [43, 44]));
     fireEvent.click(screen.getByRole('button', { name: 'Clear selection (2)' }));
-    expect(screen.getByRole('button', { name: 'Print all earnings statements' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Print non-check statements' })).toBeTruthy();
   });
 
   it('applies local statement search within the parent search results', async () => {
@@ -213,7 +229,7 @@ describe('ChecksPanel earnings statements', () => {
   it('works for a run containing only statement-only rows and can view or download one', async () => {
     renderStatements([statementOnly]);
     const statement = await screen.findByRole('listitem', { name: 'Earnings statement for Casey Zero' });
-    expect((screen.getByRole('button', { name: 'Print all earnings statements' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Print non-check statements' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(within(statement).getByRole('button', { name: 'View' }));
     const preview = await screen.findByRole('dialog', { name: 'Earnings statement — Casey Zero' });
     expect(within(preview).getByText('Shared PDF preview')).toBeTruthy();
@@ -234,7 +250,7 @@ describe('ChecksPanel earnings statements', () => {
     apiMocks.list.mockResolvedValue({ checks: [check], direct_deposit_items: [], earnings_statement_items: [paperStatement], meta });
     view.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} refreshToken={1} /></FeedbackProvider>);
     await waitFor(() => expect(screen.queryByText('Casey Zero')).toBeNull());
-    expect(screen.getByRole('button', { name: 'Print all earnings statements' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Print non-check statements' })).toBeTruthy();
   });
 
   it('ignores a stale list response after moving to another pay run', async () => {
@@ -255,14 +271,14 @@ describe('ChecksPanel earnings statements', () => {
   it('explains an empty run, empty search, and failed statement generation', async () => {
     const view = renderStatements([]);
     await screen.findByText(/No earnings statements are needed/);
-    expect((screen.getByRole('button', { name: 'Print all earnings statements' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Print non-check statements' }) as HTMLButtonElement).disabled).toBe(true);
     cleanup();
     renderStatements([statementOnly]);
     await screen.findByText('Casey Zero');
     fireEvent.change(screen.getByRole('textbox', { name: 'Search earnings statements' }), { target: { value: 'not found' } });
     expect(screen.getByText('No earnings statements match this search.')).toBeTruthy();
     apiMocks.batchPdf.mockRejectedValue(new Error('Statement could not be generated. Try again.'));
-    fireEvent.click(screen.getByRole('button', { name: 'Download all earnings statements' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download non-check statements' }));
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Statement could not be generated'));
     view.unmount();
   });
@@ -284,7 +300,7 @@ describe('ChecksPanel earnings statements', () => {
     await screen.findByText('Bank paid 2026-10-07 · QA-BANK-44');
     expect(onChecksChanged).toHaveBeenCalledOnce();
     expect(screen.queryByRole('dialog', { name: 'Confirm bank payment' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Print all earnings statements' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Print non-check statements' })).toBeTruthy();
     expect(screen.getByText('Bank payment recorded for Drew Deposit.')).toBeTruthy();
   });
 

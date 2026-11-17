@@ -35,11 +35,13 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
   };
   useEffect(() => { setConfirmed(false); setArtifact(null); }, [review?.id]);
 
-  const preview = async (view: boolean) => {
+  const preview = async (view: boolean, allStubs = false) => {
     if (!review) return;
     setBusy(true); setError(null);
     try {
-      const file = await clientPayPeriodsApi.previewPdf(payPeriod.id, companyId, review.id);
+      const file = allStubs
+        ? await clientPayPeriodsApi.previewPdf(payPeriod.id, companyId, review.id, 'all_stubs')
+        : await clientPayPeriodsApi.previewPdf(payPeriod.id, companyId, review.id);
       const filename = file.filename || `Payroll_PREVIEW_rev${review.revision}.pdf`;
       if (view) setArtifact({ blob: file.blob, filename, title: `PREVIEW · revision ${review.revision}` });
       else {
@@ -77,6 +79,8 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
           <Button variant="outline" disabled={busy} onClick={() => void preview(true)}>View preview</Button>
           <Button variant="outline" disabled={busy} onClick={() => void preview(false)}>Download preview</Button>
         </div>
+        <p className="text-sm text-neutral-600">The preview includes paper checks, plus separate stubs for direct deposit and statement-only employees.</p>
+        <Button variant="outline" className="h-auto whitespace-normal text-left" disabled={busy} onClick={() => void preview(false, true)}>All pay stubs (including paper-check employees)</Button>
       </>}
       {review?.status === 'approved' && <p role="status" className="font-semibold text-success-800">Revision {review.revision} approved by {review.approved_by_name}. Cornerstone has been notified.</p>}
       {review?.change_request_note && <div role="status" className="space-y-1 rounded-lg bg-warning-50 p-4 text-warning-950">
