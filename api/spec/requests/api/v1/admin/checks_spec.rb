@@ -126,6 +126,20 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response.parsed_body.dig("meta", "direct_deposit_count")).to eq(1)
     end
 
+    it "serializes the effective run method after overrides in either direction" do
+      employee_a.update!(payment_delivery_method: "direct_deposit")
+      item_a.update!(payment_delivery_method: "paper_check")
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/checks"
+      statement = response.parsed_body.fetch("earnings_statement_items").find { |row| row.fetch("id") == item_a.id }
+      expect(statement.fetch("payment_delivery_method")).to eq("paper_check")
+
+      employee_a.update!(payment_delivery_method: "paper_check")
+      item_a.update!(payment_delivery_method: "direct_deposit", check_number: nil)
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/checks"
+      statement = response.parsed_body.fetch("earnings_statement_items").find { |row| row.fetch("id") == item_a.id }
+      expect(statement.fetch("payment_delivery_method")).to eq("direct_deposit")
+    end
+
     it "lists zero-net wage statements without putting them in the payment queue" do
       zero_employee = create(:employee, company: company, first_name: "Avery", last_name: "Example")
       zero_item = create(:payroll_item, pay_period: pay_period, employee: zero_employee,

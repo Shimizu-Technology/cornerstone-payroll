@@ -1736,8 +1736,8 @@ export const clientPayPeriodsApi = {
     api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/client/pay_periods/${id}/approve_review`, data, { companyId }),
   requestChanges: (id: number, companyId: number, data: { revision_id: number; note: string }) =>
     api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/client/pay_periods/${id}/request_changes`, data, { companyId }),
-  previewPdf: (id: number, companyId: number, revisionId: number) =>
-    api.getBlobWithParams(`/client/pay_periods/${id}/preview_pdf`, { revision_id: revisionId }, { companyId }),
+  previewPdf: (id: number, companyId: number, revisionId: number, part?: 'all_stubs') =>
+    api.getBlobWithParams(`/client/pay_periods/${id}/preview_pdf`, { revision_id: revisionId, part }, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },
@@ -3699,10 +3699,11 @@ export const payStubsApi = {
     `${API_BASE_URL}/admin/pay_stubs/${payrollItemId}/download`,
   batchGenerate: (payPeriodId: number) =>
     api.post<{ pay_period_id: number; total: number; generated: number; errors: number }>('/admin/pay_stubs/batch_generate', { pay_period_id: payPeriodId }),
-  batchPdf: (payPeriodId: number, payrollItemIds?: number[]) =>
+  batchPdf: (payPeriodId: number, payrollItemIds?: number[], nonCheckOnly?: boolean) =>
     api.postBlob('/admin/pay_stubs/batch_pdf', {
       pay_period_id: payPeriodId,
       payroll_item_ids: payrollItemIds && payrollItemIds.length > 0 ? payrollItemIds : undefined,
+      non_check_only: nonCheckOnly,
     }),
   directDepositStubsPdf: (payPeriodId: number) =>
     api.postBlob('/admin/pay_stubs/direct_deposit_stubs_pdf', { pay_period_id: payPeriodId }),
@@ -3734,7 +3735,7 @@ export const checksApi = {
       `/admin/pay_periods/${payPeriodId}/check_print_generations/${generationId}`
     ),
 
-  previewPdf: (payPeriodId: number, companyId?: number, part?: 'checks' | 'stubs') =>
+  previewPdf: (payPeriodId: number, companyId?: number, part?: 'checks' | 'stubs' | 'all_stubs') =>
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/checks/preview_pdf`, { part }, { companyId }),
 
   rehearsalPreviewPdf: (payPeriodId: number, startingSlot?: number) =>

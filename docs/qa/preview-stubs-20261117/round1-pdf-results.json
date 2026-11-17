@@ -1,0 +1,30 @@
+[
+  {
+    "viewport": "desktop",
+    "file": "non_check_statements_2026-11-19.pdf",
+    "option": "non_check",
+    "people": 43,
+    "membership_and_order": "passed"
+  },
+  {
+    "viewport": "desktop",
+    "file": "paystubs_2026-11-19.pdf",
+    "option": "all",
+    "people": 52,
+    "membership_and_order": "passed"
+  },
+  {
+    "viewport": "mobile",
+    "file": "non_check_statements_2026-11-19.pdf",
+    "option": "non_check",
+    "people": 43,
+    "membership_and_order": "passed"
+  },
+  {
+    "viewport": "mobile",
+    "file": "paystubs_2026-11-19.pdf",
+    "option": "all",
+    "people": 52,
+    "membership_and_order": "passed"
+  }
+]

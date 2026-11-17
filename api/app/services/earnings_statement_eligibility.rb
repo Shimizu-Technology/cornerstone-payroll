@@ -9,6 +9,12 @@ class EarningsStatementEligibility
     insurance_payment loan_payment
   ]).uniq.freeze
 
+  # Positive-net paper checks already carry their payment stub. Zero-net
+  # activity still needs a statement regardless of the run's delivery method.
+  def self.separate_statement?(item)
+    printable?(item) && !(item.effective_payment_delivery_method == "paper_check" && item.net_pay.to_d.positive?)
+  end
+
   def self.printable?(item)
     return false unless item.payroll_included?
     return true if item.check_number.present?
