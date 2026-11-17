@@ -30,9 +30,7 @@ module PayrollSubmissions
           raise ArgumentError, "This portal period is linked to another pay run"
         end
         unless period.pay_period_id
-          catalog = Catalog.new(company: @run.company)
-          eligible = catalog.live_pay_period(catalog.resolve(period.id))
-          unless eligible&.id == @run.id
+          unless PayPeriod.portal_submission_runs.exists?(id: @run.id)
             raise ArgumentError, "Only the matching regular pay run offered by the portal can claim this period"
           end
           period.update!(pay_period: @run)

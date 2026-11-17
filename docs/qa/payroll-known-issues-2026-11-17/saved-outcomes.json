@@ -1,0 +1,419 @@
+[
+  {
+    "run_id": 1,
+    "fixture": "desktop run happy",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7000"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        1
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 1,
+          "title": "desktop run happy timesheet",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 1,
+        "title": "desktop run happy timesheet",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 2,
+    "fixture": "desktop run requests",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7001"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        2,
+        13
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 2,
+          "title": "desktop run requests timesheet",
+          "status": "requested"
+        },
+        {
+          "id": 13,
+          "title": "Late desktop run workbook",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 2,
+        "title": "desktop run requests timesheet",
+        "status": "requested"
+      },
+      {
+        "id": 13,
+        "title": "Late desktop run workbook",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 3,
+    "fixture": "desktop run counter",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7102"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        3
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 3,
+          "title": "desktop run counter timesheet",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 3,
+        "title": "desktop run counter timesheet",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 4,
+    "fixture": "desktop list happy",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7103"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        4
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 4,
+          "title": "desktop list happy timesheet",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 4,
+        "title": "desktop list happy timesheet",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 5,
+    "fixture": "desktop list requests",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7104"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        5,
+        14
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 5,
+          "title": "desktop list requests timesheet",
+          "status": "requested"
+        },
+        {
+          "id": 14,
+          "title": "Late desktop list workbook",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 5,
+        "title": "desktop list requests timesheet",
+        "status": "requested"
+      },
+      {
+        "id": 14,
+        "title": "Late desktop list workbook",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 6,
+    "fixture": "desktop list counter",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7205"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        6
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 6,
+          "title": "desktop list counter timesheet",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 6,
+        "title": "desktop list counter timesheet",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 7,
+    "fixture": "mobile run happy",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7206"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        7
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 7,
+          "title": "mobile run happy timesheet",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 7,
+        "title": "mobile run happy timesheet",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 8,
+    "fixture": "mobile run requests",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7207"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        8,
+        15
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 8,
+          "title": "mobile run requests timesheet",
+          "status": "requested"
+        },
+        {
+          "id": 15,
+          "title": "Late mobile run workbook",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 8,
+        "title": "mobile run requests timesheet",
+        "status": "requested"
+      },
+      {
+        "id": 15,
+        "title": "Late mobile run workbook",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 9,
+    "fixture": "mobile run counter",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7308"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        9
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 9,
+          "title": "mobile run counter timesheet",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 9,
+        "title": "mobile run counter timesheet",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 10,
+    "fixture": "mobile list happy",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7309"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        10
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 10,
+          "title": "mobile list happy timesheet",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 10,
+        "title": "mobile list happy timesheet",
+        "status": "requested"
+      }
+    ]
+  },
+  {
+    "run_id": 11,
+    "fixture": "mobile list requests",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7310"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {},
+    "requests": [
+      {
+        "id": 11,
+        "title": "mobile list requests timesheet",
+        "status": "withdrawn"
+      }
+    ]
+  },
+  {
+    "run_id": 12,
+    "fixture": "mobile list counter",
+    "status": "committed",
+    "items": [
+      {
+        "gross": "1200.0",
+        "net": "1100.0",
+        "check_number": "7411"
+      }
+    ],
+    "commit_audit_count": 1,
+    "audit": {
+      "acknowledge_outstanding_file_requests": true,
+      "acknowledged_outstanding_file_request_ids": [
+        12
+      ],
+      "outstanding_file_requests": [
+        {
+          "id": 12,
+          "title": "mobile list counter timesheet",
+          "status": "requested"
+        }
+      ]
+    },
+    "requests": [
+      {
+        "id": 12,
+        "title": "mobile list counter timesheet",
+        "status": "requested"
+      }
+    ]
+  }
+]

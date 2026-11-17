@@ -135,6 +135,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
         <section aria-labelledby="draft-section" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
           <h2 id="draft-section" className="text-base font-semibold">Payroll preview review</h2>
           <p className="text-sm text-neutral-700">Review and approve the preview on the pay run. Payroll files finish when Cornerstone commits that run. Earlier uploaded drafts remain below as history.</p>
+          {audience === 'staff' && period.pay_period_link_error && <p role="alert" className="break-words text-sm text-warning-950">{period.pay_period_link_error}</p>}
           {period.review_pay_period_id && <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={audience === 'staff' ? `/companies/${companyId || activeCompanyId}/pay-runs/${period.review_pay_period_id}` : `/companies/${companyId || activeCompanyId}/pay-runs/${period.review_pay_period_id}`}>Open payroll preview review</Link>}
           {audience === 'staff' && <StaffActions busy={staffBusy} setBusy={setStaffBusy} period={period} onDone={detail => { setNotice(null); accept(detail); }} />}
 

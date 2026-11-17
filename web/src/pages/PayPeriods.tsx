@@ -40,7 +40,7 @@ import { canWriteCompany } from '@/lib/company-write-access';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
 import { correctionRunPath, currentAppPath, importedPayRunPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
-import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollGoLiveGateState, type PayrollHistoryRecord } from '@/services/api';
+import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollCommitSnapshot, type PayrollGoLiveGateState, type PayrollHistoryRecord } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
 import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
@@ -237,6 +237,7 @@ export function PayPeriods() {
     setIsCreateOpen(false);
     setIsEditOpen(false);
     setDeletingPeriod(null);
+    setCommitReview(null);
     setDeleteAcknowledged(false);
     setDeleteSuccess(null);
     setIsSubmitting(false);
@@ -556,20 +557,19 @@ export function PayPeriods() {
     }
   };
 
-  const confirmCommit = async (id: number, acknowledgeOutstandingFileRequests?: boolean) => {
+  const confirmCommit = async (id: number, snapshot: PayrollCommitSnapshot) => {
     if (readOnlyWorkspace) return;
     const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`commit-${id}`);
       setError(null);
-      await (acknowledgeOutstandingFileRequests ? payPeriodsApi.commit(id, true) : payPeriodsApi.commit(id));
+      await payPeriodsApi.commit(id, snapshot);
       if (!isCurrentMutation()) return;
       setCommitReview(null);
       void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
-      setCommitReview(null);
-      setError(err instanceof Error ? err.message : 'Failed to commit pay period');
+      throw err;
     } finally {
       if (isCurrentMutation()) setActionInFlight(null);
     }
@@ -1221,10 +1221,8 @@ export function PayPeriods() {
       {/* Create Pay Period Modal */}
       {commitReview && <PayrollCommitDialog open payPeriod={commitReview}
         companyName={activeCompany?.name ?? `Company #${commitReview.company_id ?? ''}`}
-        itemCount={(commitReview.payroll_items ?? []).filter((item) => item.payroll_included !== false).length}
-        totalNet={(commitReview.payroll_items ?? []).filter((item) => item.payroll_included !== false).reduce((sum, item) => sum + Number(item.net_pay || 0), 0)}
         processing={actionInFlight === `commit-${commitReview.id}`}
-        onCancel={() => setCommitReview(null)} onConfirm={(id, acknowledged) => void confirmCommit(id, acknowledged)} />}
+        onCancel={() => setCommitReview(null)} onConfirm={confirmCommit} />}
       <Dialog open={deletingPeriod !== null} onOpenChange={(open) => {
         if (!open && actionInFlight === null) {
           setDeletingPeriod(null);
