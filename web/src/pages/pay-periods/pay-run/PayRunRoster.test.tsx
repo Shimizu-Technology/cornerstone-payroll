@@ -46,3 +46,17 @@ it.each(['regular', 'bonus'] as const)('shows removed employees on draft %s runs
   view.rerender(<PayRunRoster {...data} isCalculated={false} payPeriod={{ ...data.payPeriod, status: 'approved' }} />);
   expect(screen.queryByRole('region', { name: 'Removed from this run' })).toBeNull();
 });
+
+it('announces the selected add-back action while preventing repeated writes', () => {
+  const data = props();
+  data.handleRestoreEmployee = vi.fn().mockReturnValue(new Promise(() => {}));
+  render(<PayRunRoster {...data} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add back Manual Worker' }));
+  const busy = screen.getByRole('button', { name: 'Adding back Manual Worker…' });
+  expect(busy.getAttribute('aria-busy')).toBe('true');
+  expect(busy).toHaveProperty('disabled', true);
+  expect(screen.getByRole('status').getAttribute('aria-live')).toBe('polite');
+  expect(screen.getByRole('status').lastElementChild?.textContent).toBe('Adding employee back to this run…');
+  fireEvent.click(busy);
+  expect(data.handleRestoreEmployee).toHaveBeenCalledOnce();
+});

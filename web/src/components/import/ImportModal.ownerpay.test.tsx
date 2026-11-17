@@ -408,3 +408,22 @@ it('keeps adjustment and decline reasons independent', () => {
   fireEvent.click(screen.getByLabelText('Don’t apply this change for Monique Owner'));
   expect(screen.getByLabelText("Reason for changing Monique Owner's entry")).toHaveProperty('value', 'Corrected amount');
 });
+
+it('keeps the reviewed import in place, shows a busy Apply button, and permits retry after failure', async () => {
+  let fail!: (error: Error) => void;
+  mocks.applyImport.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+  open(preview([]));
+  await waitFor(() => expect(applyButton().disabled).toBe(false));
+  fireEvent.click(applyButton());
+  const applying = screen.getByRole('button', { name: 'Applying import…' });
+  expect(applying.getAttribute('aria-busy')).toBe('true');
+  expect(applying).toHaveProperty('disabled', true);
+  expect(screen.getByRole('button', { name: 'Back' })).toHaveProperty('disabled', true);
+  expect(screen.getAllByRole('status').some(status => status.lastElementChild?.textContent === 'Importing payroll data and calculating taxes…')).toBe(true);
+  expect(screen.getByRole('region', { name: 'Source row for Avery Server' }).closest('[inert]')).toBeTruthy();
+  fireEvent.click(applying);
+  expect(mocks.applyImport).toHaveBeenCalledOnce();
+  fail(new Error('Synthetic import failure'));
+  await waitFor(() => expect(applyButton().disabled).toBe(false));
+  expect(screen.getByText('Synthetic import failure')).toBeTruthy();
+});
