@@ -40,6 +40,23 @@ RSpec.describe "Restore removed pay-run employees", type: :request do
     expect(period.payroll_items.find_by!(employee: employee).gross_pay).to be_positive
   end
 
+  it "clears earlier answers for the worker so the run waits for their entries again, and audits them" do
+    field = PayrollStandingChange.create!(company: company, employee: employee, kind: "extra_hours", allow_none: true,
+      employee_wage_rate: create(:employee_wage_rate, employee: employee, is_primary: true), label: "Manual hours", required: true)
+    PayrollEntryResolution.create!(pay_period: period, employee: employee, payroll_standing_change: field, note: "None before files")
+    PayrollEntryResolution.create!(pay_period: period, employee: employee, note: "Not paid before files")
+    other = PayrollEntryResolution.create!(pay_period: period, employee: create(:employee, company: company), note: "Someone else")
+
+    delete url, as: :json
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(PayrollEntryResolution.where(pay_period: period).to_a).to eq([ other ])
+    expect(response.parsed_body.dig("expected_entries", "fields").sole).to include("status" => "missing")
+    cleared = AuditLog.find_by!(action: "pay_period_excluded_employees#destroy").metadata["cleared_entry_resolutions"]
+    expect(cleared).to contain_exactly({ "payroll_standing_change_id" => field.id, "note" => "None before files" },
+      { "payroll_standing_change_id" => nil, "note" => "Not paid before files" })
+  end
+
   it "allows restore from draft special runs" do
     period.update!(status: "draft")
     period.update!(run_purpose: "bonus")
