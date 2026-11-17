@@ -13,7 +13,11 @@ class AuditRecordSnapshot
       run_purpose includes_base_salary includes_recurring_items parallel_run notes
       correction_status voided_at void_reason
     ],
-    "Company" => %w[name legal_name email phone address_line1 address_line2 city state zip status]
+    "Company" => %w[name legal_name email phone address_line1 address_line2 city state zip status],
+    "PayrollItem" => %w[
+      salary_override hours_worked overtime_hours holiday_hours pto_hours bonus reported_tips tips_paid_out
+      non_taxable_pay service_charge_wages loan_payment additional_withholding check_number
+    ]
   }.freeze
   SENSITIVE_PATTERNS = /(ssn|password|token|secret|cipher|routing|account_number|bank_account|date_of_birth)/i
 
@@ -66,6 +70,7 @@ class AuditRecordSnapshot
 
     def subject_name(record)
       return if record.blank?
+      return record.employee&.full_name if record.is_a?(PayrollItem)
       return record.display_name if record.respond_to?(:display_name) && record.display_name.present?
       return record.name if record.respond_to?(:name) && record.name.present?
       return record.full_name if record.respond_to?(:full_name) && record.full_name.present?

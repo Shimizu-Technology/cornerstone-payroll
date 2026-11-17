@@ -887,6 +887,22 @@ module Api
           )
         end
 
+        # GET /api/v1/admin/reports/saved_documents
+        # When the transmittal and check sign-off sheet were last saved, for the
+        # report panel's labels. It carries no report contents, so loading the
+        # panel is not recorded as anyone viewing a report.
+        def saved_documents
+          pp = find_pay_period_for_report
+          return unless pp
+
+          transmittal = pp.transmittal
+          signoff = CheckSignoffSheet.find_by(pay_period_id: pp.id)
+          render json: {
+            transmittal: transmittal && { generated_at: transmittal.generated_at&.iso8601 },
+            check_signoff: signoff && { generated_at: signoff.generated_at&.iso8601 }
+          }
+        end
+
         # GET /api/v1/admin/reports/transmittal_preview
         def transmittal_preview
           pp = find_pay_period_for_report

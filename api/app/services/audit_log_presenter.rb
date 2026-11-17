@@ -131,14 +131,19 @@ class AuditLogPresenter
     [ log.company_id, pay_period_id.to_i ]
   end
 
-  def initialize(log, pay_period_subjects: {})
+  # run_context_id names the pay run being viewed, so its own actions can say
+  # "this run"; elsewhere they name the run's dates.
+  def initialize(log, pay_period_subjects: {}, run_context_id: nil)
     @log = log
     @pay_period_subjects = pay_period_subjects
+    @run_context_id = run_context_id
   end
 
   def headline
     @headline ||= if log.action == "authentication#signed_in"
       "#{actor_name} signed in"
+    elsif (phrase = pay_run_phrase)
+      "#{actor_name} #{phrase}"
     elsif report_action?
       report_headline
     else
@@ -197,6 +202,29 @@ class AuditLogPresenter
 
   def pay_period_record?
     %w[PayPeriod pay_period payperiod pay_periods].include?(log.record_type)
+  end
+
+  def pay_run_phrase
+    return unless PayRunActivityPhrase.handles?(log.action)
+
+    PayRunActivityPhrase.call(log, run_label: run_label, lookup_employee_name: method(:company_employee_name))
+  end
+
+  def run_label
+    pay_period_id = self.class.pay_period_reference(log)&.last
+    return "this run" if pay_period_id.blank? || pay_period_id == @run_context_id
+
+    subject = @pay_period_subjects[[ log.company_id, pay_period_id ]] ||
+      AuditRecordSnapshot.subject_name(PayPeriod.select(:start_date, :end_date).find_by(id: pay_period_id, company_id: log.company_id))
+    subject.present? ? "the #{subject} run" : "the run"
+  end
+
+  # Older rows stored only an employee ID; the name is read within the
+  # row's own client.
+  def company_employee_name(employee_id)
+    return if log.company_id.blank?
+
+    Employee.select(:id, :first_name, :middle_name, :last_name).find_by(company_id: log.company_id, id: employee_id)&.full_name.presence
   end
 
   def report_action?

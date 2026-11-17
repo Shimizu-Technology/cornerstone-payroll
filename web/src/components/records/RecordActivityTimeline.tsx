@@ -28,6 +28,38 @@ interface RecordActivityTimelineProps {
 }
 
 const PAGE_SIZE = 20;
+const DETAIL_LINE_LIMIT = 10;
+
+interface Milestone {
+  label: string;
+  badgeClass: string;
+  dotClass: string;
+}
+
+// Run milestones stand out so approve → roll back → approve again reads as
+// separate steps in the story.
+const MILESTONES: Record<string, Milestone> = {
+  'pay_periods#approve': {
+    label: 'Approved',
+    badgeClass: 'border-success-200 bg-success-50 text-success-800',
+    dotClass: 'border-success-600 bg-success-600',
+  },
+  'pay_periods#unapprove': {
+    label: 'Approval rolled back',
+    badgeClass: 'border-warning-300 bg-warning-50 text-warning-900',
+    dotClass: 'border-warning-500 bg-warning-500',
+  },
+  'pay_periods#commit': {
+    label: 'Committed',
+    badgeClass: 'border-primary-200 bg-primary-50 text-primary-800',
+    dotClass: 'border-primary-600 bg-primary-600',
+  },
+  'pay_periods#void': {
+    label: 'Voided',
+    badgeClass: 'border-danger-200 bg-danger-50 text-danger-800',
+    dotClass: 'border-danger-600 bg-danger-600',
+  },
+};
 
 export function RecordActivityTimeline({
   companyId,
@@ -44,6 +76,8 @@ export function RecordActivityTimeline({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [includeReportDetails, setIncludeReportDetails] = useState(false);
+  const [hiddenReportDetails, setHiddenReportDetails] = useState(0);
   const requestIdRef = useRef(0);
 
   const loadPage = useCallback(async (nextPage: number, append: boolean): Promise<void> => {
@@ -56,6 +90,7 @@ export function RecordActivityTimeline({
       const response = await recordActivitiesApi.list(recordType, recordId, {
         page: nextPage,
         per_page: PAGE_SIZE,
+        ...(includeReportDetails ? { include_report_details: true } : {}),
       }, companyId);
       if (requestId !== requestIdRef.current) return;
 
@@ -68,6 +103,7 @@ export function RecordActivityTimeline({
       });
       setPage(response.meta.current_page);
       setTotalPages(response.meta.total_pages || 1);
+      setHiddenReportDetails(response.meta.hidden_report_detail_count ?? 0);
     } catch (loadError) {
       if (requestId !== requestIdRef.current) return;
       setError(loadError instanceof Error ? loadError.message : 'Activity history could not be loaded.');
@@ -77,7 +113,7 @@ export function RecordActivityTimeline({
         setLoadingMore(false);
       }
     }
-  }, [companyId, recordId, recordType]);
+  }, [companyId, includeReportDetails, recordId, recordType]);
 
   useEffect(() => {
     setLogs([]);
@@ -144,6 +180,21 @@ export function RecordActivityTimeline({
             <ol className="divide-y divide-neutral-100">
               {groups.map((group) => <ActivityEntry key={group.key} group={group} />)}
             </ol>
+            {(hiddenReportDetails > 0 || includeReportDetails) && (
+              <div className="border-t border-neutral-100 px-4 py-3 text-sm text-neutral-600 sm:px-6">
+                {includeReportDetails
+                  ? 'Showing transmittal and sign-off detail loads.'
+                  : `${hiddenReportDetails} transmittal and sign-off detail ${hiddenReportDetails === 1 ? 'load is' : 'loads are'} hidden. Every report opened or downloaded is still listed.`}
+                {' '}
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 items-center font-medium text-primary-700 underline sm:min-h-0"
+                  onClick={() => setIncludeReportDetails((current) => !current)}
+                >
+                  {includeReportDetails ? 'Hide them' : 'Show them'}
+                </button>
+              </div>
+            )}
             {(page < totalPages || error) && (
               <div className="border-t border-neutral-100 p-4 text-center">
                 {error && <p className="mb-3 text-sm text-danger-700" role="alert">{error}</p>}
@@ -168,12 +219,21 @@ export function RecordActivityTimeline({
 function ActivityEntry({ group }: { group: AuditEntryGroup }): ReactElement {
   const log = group.primary;
   const facts = auditBusinessFacts(log).slice(0, 3);
+  const milestone = MILESTONES[log.action];
+  const detailLines = log.detail_lines ?? [];
+  const changedCount = Number(log.metadata?.input_change_count ?? detailLines.length);
+  const hiddenDetailLines = Math.max(changedCount, detailLines.length) - Math.min(detailLines.length, DETAIL_LINE_LIMIT);
 
   return (
     <li className="relative px-4 py-5 sm:px-6">
       <div className="grid gap-4 sm:grid-cols-[12px_minmax(0,1fr)_auto] sm:gap-5">
-        <span className="mt-1 hidden h-3 w-3 rounded-full border-[3px] border-primary-200 bg-white sm:block" aria-hidden="true" />
+        <span className={`mt-1 hidden h-3 w-3 rounded-full border-[3px] sm:block ${milestone ? milestone.dotClass : 'border-primary-200 bg-white'}`} aria-hidden="true" />
         <div className="min-w-0">
+          {milestone && (
+            <span className={`mb-2 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${milestone.badgeClass}`}>
+              {milestone.label}
+            </span>
+          )}
           <p className="font-semibold leading-6 text-neutral-950">{displayAuditGroupAction(group)}</p>
           <p className="mt-1 text-sm text-neutral-500">
             {log.actor_email || (log.actor_role ? humanizeAuditKey(log.actor_role) : 'Actor details unavailable')}
@@ -183,6 +243,13 @@ function ActivityEntry({ group }: { group: AuditEntryGroup }): ReactElement {
           {formatGuamDateTime(log.created_at)}
         </time>
       </div>
+
+      {detailLines.length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm text-neutral-700 sm:ml-8">
+          {detailLines.slice(0, DETAIL_LINE_LIMIT).map((line) => <li key={line} className="break-words">{line}</li>)}
+          {hiddenDetailLines > 0 && <li className="text-neutral-500">and {hiddenDetailLines} more</li>}
+        </ul>
+      )}
 
       {facts.length > 0 && (
         <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-sm text-neutral-600 sm:ml-8">

@@ -4,10 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { ReportsDownloadPanel } from './ReportsDownloadPanel';
-const api = vi.hoisted(() => ({ preview: vi.fn(), defaults: vi.fn(), pdf: vi.fn(), signoff: vi.fn(), formPdf: vi.fn(), signoffPdf: vi.fn() }));
-vi.mock('@/services/api', () => ({ transmittalApi: { preview: api.preview }, form500Api: { defaults: api.defaults, preview: api.formPdf }, reportsApi: { fullPrintPackagePdf: api.pdf, checkSignoffPreview: api.signoff, checkSignoffPdf: api.signoffPdf } }));
+const api = vi.hoisted(() => ({ preview: vi.fn(), defaults: vi.fn(), pdf: vi.fn(), signoff: vi.fn(), formPdf: vi.fn(), signoffPdf: vi.fn(), saved: vi.fn() }));
+vi.mock('@/services/api', () => ({ transmittalApi: { preview: api.preview }, form500Api: { defaults: api.defaults, preview: api.formPdf }, reportsApi: { fullPrintPackagePdf: api.pdf, checkSignoffPreview: api.signoff, checkSignoffPdf: api.signoffPdf, savedDocuments: api.saved } }));
 const preview = { company: { name: 'Synthetic' }, payroll_checks: { numbers: [], count: 0 }, non_employee_checks: [], tax_totals: { fit: 20, total_fica: 10 }, saved_transmittal: { notes: [], report_list: [], payroll_check_numbers: [], custom_entries: [] } };
 beforeEach((): void => {
+  api.saved.mockResolvedValue({ transmittal: { generated_at: null }, check_signoff: null });
   api.preview.mockResolvedValue(preview);api.signoff.mockResolvedValue({company_name:'Synthetic',entries:[{name:'Example, Avery',check_number:'101'}],saved_signoff:null});api.defaults.mockResolvedValue({data:{company_name:'Synthetic',tax_year:'2026',tax_period_quarter:4}});api.pdf.mockResolvedValue({blob:new Blob(['pdf']),filename:'package.pdf'});
   vi.spyOn(HTMLElement.prototype,'offsetParent','get').mockImplementation(function(this:HTMLElement): Element | null { return this.parentElement; });
   vi.stubGlobal('URL', {createObjectURL:vi.fn(()=> 'blob:synthetic'),revokeObjectURL:vi.fn()});
@@ -74,4 +75,12 @@ it('hands sign-off generation to its preview after exit and ignores a cancelled 
  const pdf=await screen.findByRole('dialog',{name:'Check Sign-Off Sheet'});await waitFor(()=>expect(pdf.contains(document.activeElement)).toBe(true));
  await user.keyboard('{Escape}');await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect((trigger as HTMLButtonElement).disabled).toBe(false);expect(document.activeElement).toBe(trigger);
  await act(async (): Promise<void> => { finish({blob:new Blob(['late signoff']),filename:'signoff.pdf'}); });expect(URL.createObjectURL).not.toHaveBeenCalled();expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('loads only the saved-state summary when the panel opens, so no report view is recorded', async (): Promise<void> => {
+ api.saved.mockResolvedValue({ transmittal: { generated_at: '2026-11-16T09:00:00Z' }, check_signoff: { generated_at: '2026-11-16T09:00:00Z' } });
+ render(<MemoryRouter><ReportsDownloadPanel payPeriodId={2} payPeriodStatus="committed" payDate="2026-10-15" /></MemoryRouter>);
+ await waitFor(()=>expect(api.saved).toHaveBeenCalledWith(2));
+ expect((await screen.findAllByText(/· Last: Nov 16/)).length).toBeGreaterThan(0);
+ expect(api.preview).not.toHaveBeenCalled();expect(api.signoff).not.toHaveBeenCalled();
 });
