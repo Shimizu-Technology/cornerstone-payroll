@@ -16,7 +16,7 @@ module Api
             record_type: params[:record_type],
             record_id: params[:record_id],
             company_id: current_company_id,
-            include_report_details: ActiveModel::Type::Boolean.new.cast(params[:include_report_details]) == true
+            include_hidden_details: ActiveModel::Type::Boolean.new.cast(params[:include_hidden_details]) == true
           )
           scope = query.call
           page = [ params.fetch(:page, 1).to_i, 1 ].max
@@ -29,17 +29,19 @@ module Api
                        .limit(per_page)
                        .to_a
           pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(logs)
+          employee_names = AuditLogPresenter.preload_employee_names(logs)
 
           render json: {
             creator: RecordCreator.call(query.record),
-            data: logs.map { |log| record_activity_json(log, pay_period_subjects, run_context_id: query.record.id) },
+            data: logs.map { |log| record_activity_json(log, pay_period_subjects, employee_names, run_context_id: query.record.id) },
             meta: {
               current_page: page,
               per_page: per_page,
               total_count: total,
               total_pages: (total.to_f / per_page).ceil,
-              hidden_report_detail_count: query.hidden_report_detail_count
-            }
+              # The toggle sits above the first page; later pages skip the count.
+              hidden_detail_count: (query.hidden_detail_count if page == 1)
+            }.compact
           }
         rescue RecordActivityQuery::RecordNotFoundError
           render json: { error: "Record not found" }, status: :not_found
@@ -47,9 +49,10 @@ module Api
 
         private
 
-        def record_activity_json(log, pay_period_subjects, run_context_id:)
+        def record_activity_json(log, pay_period_subjects, employee_names, run_context_id:)
           run_context_id = nil unless params[:record_type] == "pay_periods"
-          payload = AuditLogSerializer.call(log, pay_period_subjects: pay_period_subjects, run_context_id: run_context_id)
+          payload = AuditLogSerializer.call(log, pay_period_subjects: pay_period_subjects, run_context_id: run_context_id,
+            employee_names: employee_names)
           return payload if StaffRolePolicy.allowed?(current_user, :view_audit_history)
 
           metadata = payload.fetch(:metadata, {}) || {}

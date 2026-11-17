@@ -1115,18 +1115,24 @@ module Api
         end
 
         AUDITED_INPUT_CHANGE_LIMIT = 25
-        AUDITED_INPUT_FIELDS = (AuditRecordSnapshot::SAFE_FIELDS.fetch("PayrollItem") - %w[check_number]).freeze
+        # What staff enter on the calculation worksheet. Fields the calculator
+        # writes itself (loan_payment, pay_rate, withholding) are left out so a
+        # calculation never reports entries nobody made.
+        AUDITED_INPUT_FIELDS = %w[
+          salary_override hours_worked overtime_hours holiday_hours pto_hours bonus
+          reported_tips tips_paid_out service_charge_wages loan_deduction
+        ].freeze
 
         # Hours and amounts saved before this calculation, keyed by employee,
         # so the audit can say whose entries the calculation changed.
         def payroll_input_snapshots
           @pay_period.payroll_items.select(:id, :employee_id, *AUDITED_INPUT_FIELDS).to_h do |item|
-            [ item.employee_id, AuditRecordSnapshot.values_for(item).slice(*AUDITED_INPUT_FIELDS) ]
+            [ item.employee_id, AUDITED_INPUT_FIELDS.index_with { |field| item.public_send(field) } ]
           end
         end
 
         def track_payroll_input_change(payroll_item, employee, before)
-          after = AuditRecordSnapshot.values_for(payroll_item).slice(*AUDITED_INPUT_FIELDS)
+          after = AUDITED_INPUT_FIELDS.index_with { |field| payroll_item.public_send(field) }
           before ||= {}
           changed = AUDITED_INPUT_FIELDS.reject { |field| before[field].to_s.to_d == after[field].to_s.to_d }
           return if changed.empty?

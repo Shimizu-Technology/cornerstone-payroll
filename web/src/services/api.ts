@@ -945,15 +945,16 @@ export const auditLogsApi = {
 
 export interface RecordCreatorInfo { name: string; role: string | null; created_at: string }
 
-// hidden_report_detail_count: report editor loads left out of a pay run's
-// feed unless include_report_details is set.
-export type RecordActivityMeta = PaginationMeta & { hidden_report_detail_count?: number };
+// hidden_detail_count (first page only): report editor loads and worker or
+// client pay stub views left out of a pay run's feed unless
+// include_hidden_details is set.
+export type RecordActivityMeta = PaginationMeta & { hidden_detail_count?: number };
 
 export const recordActivitiesApi = {
   list: (
     recordType: 'employees' | 'pay_periods' | 'companies',
     recordId: number,
-    params: { page?: number; per_page?: number; include_report_details?: boolean } = {},
+    params: { page?: number; per_page?: number; include_hidden_details?: boolean } = {},
     companyId?: number,
   ): Promise<{ creator?: RecordCreatorInfo | null; data: AuditLogEntry[]; meta: RecordActivityMeta }> => api.get<{ creator?: RecordCreatorInfo | null; data: AuditLogEntry[]; meta: RecordActivityMeta }>(
     `/admin/record_activities/${recordType}/${recordId}`,

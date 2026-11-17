@@ -20,9 +20,15 @@ module Api
             }, status: :conflict
           end
 
-          enqueue_generation(generation) if created || generation.retry_queue_failure!
+          started = created || generation.retry_queue_failure!
+          enqueue_generation(generation) if started
           generation.reload
-          @audit_generation = generation
+          # Returning a package already in progress is not a new request.
+          if started
+            @audit_generation = generation
+          else
+            skip_default_audit_log!
+          end
           render json: { check_print_generation: generation_payload(generation) }, status: :accepted
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
