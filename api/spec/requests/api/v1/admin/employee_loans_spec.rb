@@ -59,6 +59,17 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
     end
   end
 
+  it "dates a loan created through the loans screen on the Guam business day" do
+    travel_to(Time.utc(2026, 11, 16, 22, 31)) do
+      post "/api/v1/admin/employee_loans", params: { employee_loan: { employee_id: employee.id, name: "Synthetic screen advance",
+        original_amount: 100.00, payment_amount: 25.00, deduction_type_id: deduction_type.id, status: "active" } }, as: :json
+      expect(response.status).to be_between(200, 201), response.body
+      loan = EmployeeLoan.find_by!(name: "Synthetic screen advance")
+      expect(loan.balance_as_of).to eq(Date.new(2026, 11, 17))
+      expect(loan.loan_transactions.pluck(:transaction_date).uniq).to eq([ Date.new(2026, 11, 17) ])
+    end
+  end
+
   it "shows a repayment schedule ending yesterday in Guam as inactive" do
     travel_to(Time.utc(2026, 11, 16, 22, 31)) do
       loan = EmployeeLoan.create!(employee: employee, company: company, name: "Synthetic advance",
