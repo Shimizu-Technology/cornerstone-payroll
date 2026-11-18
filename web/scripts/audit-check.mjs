@@ -128,7 +128,7 @@ export function runAudit(target) {
   const lockSnapshot = readFileSync(lockPath, 'utf8')
   let output
   try {
-    output = execFileSync('npm', ['audit', '--json', '--include=dev', '--include=optional', '--include=peer'], { cwd: target, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    output = execFileSync('npm', ['audit', '--json', '--include=dev', '--include=optional', '--include=peer', '--offline=false', '--prefer-offline=false', '--prefer-online=true'], { cwd: target, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   } catch (error) {
     // npm uses exit 1 for advisories. Signals, spawn errors and other statuses
     // are operational failures even if stdout happens to contain valid JSON.
