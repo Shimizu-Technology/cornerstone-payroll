@@ -10,6 +10,19 @@
     "nodes": [
       "node_modules/picomatch"
     ],
-    "range": "*"
+    "range": "*",
+    "reviewedConsumers": [
+      "@typescript-eslint/eslint-plugin",
+      "@typescript-eslint/parser",
+      "@typescript-eslint/type-utils",
+      "@typescript-eslint/typescript-estree",
+      "@typescript-eslint/utils",
+      "fdir",
+      "tinyglobby",
+      "typescript-eslint",
+      "vite",
+      "vitest"
+    ],
+    "devOnly": true
   }
 ]
