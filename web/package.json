@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "gate": "./scripts/gate.sh",
+    "audit:gate": "node scripts/audit-gate.mjs",
     "test:e2e": "playwright test --project=public",
     "test:e2e:public": "playwright test --project=public",
     "test:e2e:connected": "playwright test --config=playwright.connected.config.ts",
