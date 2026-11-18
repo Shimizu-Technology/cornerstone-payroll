@@ -136,6 +136,7 @@ A feature counts as done only when every line below is true.
   - approvals
   - a cutoff lifecycle
 - **To build, as a multi-tenant module:**
+  - overtime calculation carried over from AIRE: Guam's weekly 40-hour rule, plus any daily rule a client sets
   - punches with optional photo
   - geofences per location
   - kiosk tablets with an offline queue and signed timestamps
@@ -330,7 +331,7 @@ Each release ships complete for its scope and ends with Cornerstone's acceptance
 | **R2: Employee app and portal** | Pay (masked, breakdown, compare, YTD, PDFs), W-2GU copies and consent, profile and emergency contacts, documents and policy acknowledgements, credentials, task inbox, manager approvals, contractor W-9s | Cornerstone's own staff, then MoSa's and KPI |
 | **R3: Leave** | Policies, ledger, requests, calendar with paydays and holidays, approvals with delegation, leave into payroll, balances on stubs | MoSa's (if it has a policy), others |
 | **R4: Onboarding and offboarding** | New-hire packet, e-W-4, direct-deposit changes with verification and the fraud hold, I-9, new-hire reporting, offboarding checklist and final pay | All portal clients |
-| **R5: Time and scheduling** | The multi-tenant time module (punches, kiosk with offline queue, geofences, missed punches, meal and split-shift checks, alerts, approvals), scheduling, job and task codes, native iOS and Android apps | The next client that wants its own clock-in |
+| **R5: Time and scheduling** | The multi-tenant time module (overtime calculation, punches, kiosk with offline queue, geofences, missed punches, meal and split-shift checks, alerts, approvals), scheduling, job and task codes, native iOS and Android apps | The next client that wants its own clock-in |
 | **R6: Benefits, reports, construction** | Benefits and life events, the report builder and dashboards, the H-2B pack, prevailing wages, certified payroll, job costing | Construction and larger clients |
 | **R7: Year-end service** | Year-end filing for employers that keep their own payroll | Outside employers, for tax year 2027 (January 2028) |
 
@@ -362,7 +363,7 @@ The Cornerstone Tax app (`cornerstone-accounting.tax/admin/time`) already has mo
 | Order: Client → Category → Task → Period → Comments | The form asks Category, then Client (optional), then Description. Category is a flat list, so "Bank Reconciliation" is a category. | Reorder the form. Use the existing `service_types` as Category and `service_tasks` as Task (already linked to time entries). |
 | Period (optional) | No such field | Add a period: a month, a quarter or a year, or none. |
 | Comments | Called "Description" | Rename it. |
-| Reports | By user, category and client | Add task and period, and show hours by client → category → task → period. This answers the CEO's November 2 ask for per-client hours and profitability. |
+| Reports | By user, category and client | Add task and period, and show hours by client → category → task → period. This answers the CEO's November 2 ask for per-client hours. Profitability also needs each client's fee (for example Spike's $700 a month) and each staff member's cost rate. Neither is in the app today, so it waits on question 32. |
 
 This is a small, contained change to the Cornerstone Tax app. An earlier note held changes to that app until AIRE was proven on production; Dafne's request is a reason to lift the hold for this change. **Decision for Leon:** go ahead now. Recommended. The task lists and period choices come from the questions below.
 
