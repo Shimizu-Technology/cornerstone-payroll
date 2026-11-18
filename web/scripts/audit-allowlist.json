@@ -23,6 +23,19 @@
       "vite",
       "vitest"
     ],
-    "devOnly": true
+    "devOnly": true,
+    "reviewedConsumerNodes": [
+      "node_modules/@tailwindcss/vite",
+      "node_modules/@typescript-eslint/eslint-plugin",
+      "node_modules/@typescript-eslint/parser",
+      "node_modules/@typescript-eslint/type-utils",
+      "node_modules/@typescript-eslint/typescript-estree",
+      "node_modules/@typescript-eslint/utils",
+      "node_modules/fdir",
+      "node_modules/tinyglobby",
+      "node_modules/typescript-eslint",
+      "node_modules/vite",
+      "node_modules/vitest"
+    ]
   }
 ]
