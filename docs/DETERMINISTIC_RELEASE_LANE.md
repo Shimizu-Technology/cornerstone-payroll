@@ -53,7 +53,7 @@ Recreate and reseed the dedicated database before every fresh run. Drop only tha
 GitHub Quality runs three independent jobs:
 
 - `backend`: schema-only database setup, the complete RSpec suite, Brakeman, and Bundler Audit;
-- `frontend`: npm audit, typecheck, lint, production build, and public Playwright checks; and
+- `frontend`: npm audit (through `web/scripts/audit-gate.mjs`, which fails at moderate and above except reviewed, expiring exceptions), typecheck, lint, production build, and public Playwright checks; and
 - `browser`: fresh PostgreSQL, application seeds, the guarded synthetic fixture, Rails, Vite, and the no-retry Gate 0 suite.
 
 The browser job retains the Playwright report, failure traces/screenshots/videos when present, and the non-secret synthetic manifest for 14 days. A release requires all three checks on the current PR head and a green resulting `main` commit. These checks do not replace the staging payroll, backup/restore, object storage, mail, queue, monitoring, MFA, or filing-output evidence in the production-readiness checklist.
