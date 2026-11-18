@@ -1,0 +1,19 @@
+name: Netlify staging configuration
+on:
+  pull_request:
+    paths:
+      - 'web/scripts/netlify-staging-*'
+      - 'web/netlify.toml'
+      - '.github/workflows/netlify-staging.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  staging-build-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test web/scripts/netlify-staging-build.test.mjs
