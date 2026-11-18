@@ -1,0 +1,15 @@
+[
+  {
+    "advisory": "GHSA-fc5q-39xc-vjpf",
+    "package": "picomatch",
+    "project": ".",
+    "via": "Vite / ESLint / translation CLI trusted project-file discovery",
+    "reason": "No patched release exists as of 2026-11-18 (latest 4.0.7). This transitive dependency matches repository-controlled glob patterns in development/build tools. Application source does not import it or accept user-supplied globs; it is not used by the deployed static app. Keep development servers private. Remove when a compatible patched release exists.",
+    "reviewBy": "2026-12-18",
+    "isDirect": false,
+    "nodes": [
+      "node_modules/picomatch"
+    ],
+    "range": "*"
+  }
+]
