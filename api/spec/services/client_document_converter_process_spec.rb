@@ -52,9 +52,11 @@ RSpec.describe "Converter environment isolation" do
     Dir.mktmpdir do |dir|
       allow(ClientDocumentConverterProcess).to receive(:network_sandbox) { |command, _directory| command }
       ENV["PORTAL_CONVERTER_TEST_SECRET"] = "must-not-inherit"
-      out, err, status = ClientDocumentConverterProcess.capture(RbConfig.ruby, "-rjson", "-e", "puts ENV.to_h.to_json", directory: dir)
+      # Disable RubyGems so runtime plugins cannot add variables after exec.
+      # This asserts the environment passed by the converter, not Ruby startup hooks.
+      out, err, status = ClientDocumentConverterProcess.capture(RbConfig.ruby, "--disable-gems", "-e", 'ENV.each { |key, value| puts "#{key}=#{value}" }', directory: dir)
       expect(status).to be_success, err
-      environment = JSON.parse(out)
+      environment = out.lines.to_h { |line| line.chomp.split("=", 2) }
       expect(environment.keys - [ "__CF_USER_TEXT_ENCODING" ]).to contain_exactly("PATH", "HOME", "TMPDIR", "LANG")
       expect(environment).to include("HOME" => dir, "TMPDIR" => dir)
     ensure
