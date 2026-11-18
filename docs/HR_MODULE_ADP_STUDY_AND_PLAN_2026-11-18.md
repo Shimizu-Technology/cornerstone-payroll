@@ -112,7 +112,7 @@ From a read-only code audit of Payroll and AIRE on November 18, 2026.
 | Year-end forms | **Partial** | W-2GU and 1099-NEC aggregates, preflight and filing records exist. Missing: official employee copies, W-3SS, EFW2, 1096, Pub 1220 file, 1099-MISC, W-2c. Due February 1, 2027. |
 
 **Where AIRE already beats ADP:**
-- **Hours behind each check.** My Pay links every statement line to the shifts it came from (`source_entries`). ADP doesn't show this.
+- **Hours behind each check.** My Pay lists the shifts behind each statement (`source_entries`). ADP doesn't show this.
 - **A settings catalog** with plain-language help for each setting (`settings_catalog.rb`), a good model for client HR settings.
 - **Stubs without a login,** by kiosk request or a one-time emailed link.
 - **Approvals people can trust:** undoable approval batches, optimistic locking, self-approval blocked, and the employee's original value kept when a correction is rejected.
@@ -180,7 +180,7 @@ Their pain points are filing twice (SSA and DRT), strict file formats, correctio
 
 ### Guam rules the product must handle
 
-From Guam DOL's FLSA handbook (February 2026; the meal, split-shift, records, tips and pay-timing rows were checked against its text) [28], the H-2B booklet (August 2026) [29] and other primary sources. Cornerstone should still confirm each one before it becomes a rule in the software.
+From Guam DOL's FLSA handbook (February 2026; the meal, split-shift, records, tips, deductions and pay-timing rows were checked against its text) [28], the H-2B booklet (August 2026) [29] and other primary sources. Cornerstone should still confirm each one before it becomes a rule in the software.
 
 | Topic | Rule |
 |---|---|
@@ -190,13 +190,13 @@ From Guam DOL's FLSA handbook (February 2026; the meal, split-shift, records, ti
 | Meals | A 30-minute meal period for a work period over 5 hours. If 6 hours or less completes the day, it can be waived by mutual consent. The meal period is unpaid unless the employee can't be relieved of duty [28]. |
 | Split shifts | Must fall within 14 hours [28]. |
 | Paying wages | Within 7 days after the pay period ends. When someone is fired, immediately or by the next business day. When someone quits, within 7 days after the pay period ends [28]. |
-| Deductions | Need written authorization. Fines are banned [28]. |
+| Deductions | Deductions required by federal or territorial law (taxes) or by court process need no authorization. Any other deduction needs the employee's written authorization. Fines are banned and can't be authorized (22 GCA §3203–3204) [28]. |
 | Pay statements | Must show every deduction, and the employee gets a copy. No Guam rule on electronic stubs was found (*unverified*; ask Guam DOL Wage and Hour) [28]. |
 | Records | Keep wage and hour records for 6 years. Alien workers' records need passport numbers [28]. |
 | Holidays | 12 legal holidays (1 GCA §1000, amended June 2025), plus one-off holidays by executive order [31]. Whether private employers must give them off is *unverified*. |
 | New hires | Report to the Attorney General's Child Support Enforcement Division [32]. |
-| H-2B (construction) | <ul><li>Register each worker with Guam DOL within 24 hours of arrival. No work before the Guam DOL ID card. $2,091 per worker per year.</li><li>Monthly report by the 7th: IDs, visa and certification dates, project, deductions, transfers, departures.</li><li>Meals and lodging (standard $80 a week deduction).</li><li>Prevailing wages (for example carpenters $19.10, electricians $21.36 from August 24, 2026).</li><li>US workers in the same job earn at least the H-2 wage [29].</li></ul> |
-| E-Verify | Required for federal contractors, including on Guam [33]. |
+| H-2B (construction) | <ul><li>Register each worker with Guam DOL within 24 hours of arrival. No work before the Guam DOL ID card. $2,091 per worker per year.</li><li>Monthly report by the 7th: IDs, visa and certification dates, project, deductions, transfers, departures.</li><li>Employers with more than five H-2B workers must provide meals and lodging. They may deduct the standard allowable $80 a week for board and lodging actually provided, with the worker's signed authorization. A different amount needs Guam DOL approval first.</li><li>Prevailing wages (for example carpenters $19.10, electricians $21.36 from August 24, 2026).</li><li>US workers in the same job earn at least the H-2 wage [29].</li></ul> |
+| E-Verify | Required on covered federal contracts, including on Guam. Not every federal contract is covered: FAR 22.1803 excludes, for example, contracts shorter than 120 days and those under the simplified acquisition threshold. Reminders must follow the contract's terms [33]. |
 | Davis-Bacon | Doesn't cover direct federal construction on Guam, but some federally funded "Related Acts" projects do. Certified payroll is due within 7 days of each payday [34]. |
 | Year-end | W-2GU and W-3SS to SSA, Copy 1 to DRT by January 31 (February 1 in 2027). The same EFW2 file is uploaded to GuamTax. Payroll processors need a flagged account. Details are in the [year-end plan](W2GU_1099_YEAR_END_FILING_RESEARCH_2026-11-17.md) [35]. |
 
@@ -419,6 +419,6 @@ Dafne is in charge at the airport now. GIAA is a public corporation, so any sale
 30. https://www.kuam.com/story/53407012/bill-4-renews-debate-over-inflationtied-wage-increases-on-guam
 31. https://col.guamcourts.gov/sites/default/files/01gc010.pdf
 32. https://oagguam.org/cs-employers
-33. https://www.law.cornell.edu/cfr/text/48/52.222-54
+33. https://www.law.cornell.edu/cfr/text/48/52.222-54 ; https://www.acquisition.gov/far/22.1803
 34. https://www.dol.gov/sites/dolgov/files/WHD/prevailing-wage-presentations/DBA_Coverage.pdf ; https://www.dol.gov/sites/dolgov/files/WHD/legacy/files/DBRA_013026-Public.pdf
 35. https://www.guamtax.com/help/help_w2w3.html ; https://irs.gov/pub/irs-prior/fw3ss--2025.pdf
