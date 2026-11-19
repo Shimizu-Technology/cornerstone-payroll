@@ -36,7 +36,7 @@ These are build requirements. Each one traces to a section below.
    - An employee who quits is paid on the **next regular payday** (§ 3201(b)).
    - Block or warn on any schedule that breaks these rules. Give termination a "final pay due now" workflow.
 6. When payroll will be late, generate the **§ 3213 statement**. It goes to each employee and to the Director of Labor within 5 working days and shows correct hours, wages, legal deductions, and net payable.
-7. Remit withheld amounts that are owed to third parties (child support, loans, benefits) within **5 days of payday**. Missing that window counts as "failure to pay wages" (§ 3217(b)).
+7. Remit withheld amounts that are owed to third parties (child support, loans, benefits) within **5 days after the day the employee's pay is due**. Missing that window counts as "failure to pay wages" (§ 3217(b)).
 
 **Wage and hour rules engine**
 
@@ -73,7 +73,7 @@ These are build requirements. Each one traces to a section below.
 20. W-2GU:
     - File Copy A with SSA through Business Services Online (BSO), EFW2 format.
     - Upload Copy 1 to Guam DRT through GuamTax.com. Use a **payroll processor account** and keep **one GuamTax account per client EIN**.
-    - Deadline is **Jan 31** (Feb 1, 2027 for tax year 2026).
+    - Deadline is **Jan 31**. For tax year 2026 (Jan 31, 2027 is a Sunday), DRT's date and weekend rule are **unconfirmed**. Plan to file with DRT by **Friday, Jan 29, 2027** unless DRT confirms Feb 1. The IRS Feb 1, 2027 date covers SSA filing and employee copies only.
     - E-filing is mandatory at **10 or more** combined information returns.
     - DRT copies need **full SSNs**.
     - GuamTax.com does not accept corrections, so build a paper W-2c / W-3cSS path.
@@ -434,7 +434,7 @@ Under Guam UETA, an electronic record satisfies a legal retention requirement if
   - "If you have companies with different EINs, you must establish a separate GuamTax account for each EIN." (The FAQ describes this for registrants. Ask how it interacts with the processor flag.)
   - **Corrected W-2GUs cannot be e-filed** on GuamTax ("only… original W-3/W-2GU reports").
   - Zero-employee reports must be filed on paper.
-- **Deadline:** Jan 31, for paper and e-file, with **no automatic 30-day extension** (DRT Tax Alert 23-01). For tax year 2026, the IRS instructions give **Feb 1, 2027** for SSA filing and employee furnishing, because Jan 31 is a Sunday. **[Confirmed]** <https://www.guamtax.com/notices/TaxAlert23-01-ITAPB-EmployerNotificationW3SSW2GUAND10961099-2023UPDATED12202023.pdf>
+- **Deadline:** Jan 31, for paper and e-file, with **no automatic 30-day extension** (DRT Tax Alert 23-01). For tax year 2026, the IRS instructions give **Feb 1, 2027** for SSA filing and employee furnishing, because Jan 31 is a Sunday. **[Confirmed]** for SSA and employees. The Tax Alert covers 2023 forms and doesn't state DRT's 2026 date or weekend rule. **[Not found]**: ask DRT, and file with DRT by Jan 29, 2027 until it answers. <https://www.guamtax.com/notices/TaxAlert23-01-ITAPB-EmployerNotificationW3SSW2GUAND10961099-2023UPDATED12202023.pdf>
 - **E-file threshold:** 10 or more information returns, counting W-2GUs and 1099s together, under the Guam Territorial Income Tax Code § 6011(e)(2)(A) and T.D. 9972. **[Confirmed]** The alert also says the requirement "applies separately for each type of form," which conflicts with the aggregation language. Ask DRT.
 - **Full SSNs and EINs:** DRT requires them on W-3SS/W-2GU and 1096/1099 forms. **[Confirmed]** Employee-copy truncation is allowed federally. Whether DRT accepts truncated employee copies: **[Not found]**.
 
@@ -458,7 +458,7 @@ Under Guam UETA, an electronic record satisfies a legal retention requirement if
 - Provide a paper W-2c / W-3cSS workflow.
 - Enforce a year-end calendar that warns 30 days before Jan 31 and adjusts for weekends.
 - Run the electronic-W-2GU consent flow above, separate from the pay-stub consent, because the IRS consent has its own disclosure set. Print paper W-2GUs for non-consenters.
-- Keep W-2GUs online through Oct 15, then archive them.
+- Keep W-2GUs online through Oct 15, then archive them. Keep corrected W-2GUs online through the later of Oct 15 or 90 days after posting.
 
 ---
 
@@ -676,7 +676,7 @@ Under Guam UETA, an electronic record satisfies a legal retention requirement if
 **What the product should do.**
 
 - Add an employee "visa class" field.
-- **H-2B board-and-lodging deduction type:** blocked unless a GDOL-filed written authorization is attached; capped at $80/week unless a GDOL approval notice is on file.
+- **H-2B board-and-lodging deduction type:** blocked unless a GDOL-filed written authorization is attached. Capped at the **lower of actual cost or $80/week**, unless a GDOL approval notice is on file. Store the actual weekly cost and check the deduction against it.
 - Monthly **GDOL Workplace Report** export.
 - **Wage-parity check:** compare each local worker's rate with the rates of H-2B workers in the same occupation.
 - Never allow a "remittance" deduction for H-2B workers.
@@ -810,7 +810,7 @@ Sources: Leon's answers, and a read-only review of the Cornerstone mailbox. No e
 | Logins and passwords | Some client EFTPS and other logins appear to be exchanged by email (based on subject lines; I did not open them). | This is a Safeguards Rule and WISP risk. The platform should never ask for or store client bank or EFTPS passwords. Cornerstone should keep them in a password manager with MFA. |
 | Security plan | In March 2026 Cornerstone scheduled mandatory staff training on IRS Pubs 4557, 5708 (WISP template), 5709 and 5417. I found no finished WISP. | Ask whether the WISP was finished. If so, add this platform as a covered system. |
 | Engagement letters | The Cornerstone letters I found are short. A Nov 2025 tax engagement lists scope, fees and short responsibility bullets: confidentiality, timely information, notice of delays, 30-day termination. MoSa's has a July 2024 quote listing payroll, tax payments, quarterly returns, W-2s, GRT and 1099s. I found no payroll-specific agreement covering penalties, funding deadlines or accuracy of hours. | Write a new payroll service agreement and data processing addendum using the Q12 checklist. |
-| 401(k) deposits | In 2024–2026 there was correspondence about late 401(k) contributions and a plan compliance notice. | Withheld amounts owed to others are "unpaid wages" if not remitted within 5 days of payday (22 GCA § 3217(b)). Federal plan-deposit rules also apply. The product should track and alert on remittance due dates for every third-party deduction. |
+| 401(k) deposits | In 2024–2026 there was correspondence about late 401(k) contributions and a plan compliance notice. | Withheld amounts owed to others are "unpaid wages" if not remitted within 5 days after the day the employee's pay is due (22 GCA § 3217(b)). Federal plan-deposit rules also apply. The product should track and alert on remittance due dates for every third-party deduction. |
 | Client differences | Meal waivers, holiday pay, I-9 handling and new-hire reporting differ by client (per Leon). | Make all of these per-employer settings, as Part 1 assumes. |
 | W-2GU delivery | Cornerstone used outside software before. The new system should offer both electronic and paper delivery. | Build the Q7 consent flow and paper printing. Electronic delivery waits on the DRT answer (Part 4B, item 1). |
 | H-2B and Davis-Bacon | No current clients have them. They are wanted later. | Leave the Q11 modules out of the first release. Keep the data model ready (visa class, project and classification fields). |
