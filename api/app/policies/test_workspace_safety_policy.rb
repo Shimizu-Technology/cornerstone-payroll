@@ -2,6 +2,7 @@
 
 class TestWorkspaceSafetyPolicy
   BLOCKED_ACTIONS = {
+    "api/v1/admin/filing_submitters" => %w[update],
     # These records are shared across live companies, rather than copied into a workspace.
     "api/v1/admin/annual_retirement_limits" => %w[create update],
     "api/v1/admin/tax_configs" => %w[

@@ -4,7 +4,8 @@ module YearEnd
   # The year-end clients list: every live client a staff member can open, with
   # a plain status and the things left to fix, worst first.
   #
-  # Every check here is a fixed number of grouped queries for the whole list.
+  # W-2 clients run the same format preflight as their detail page.
+  # Other clients use grouped lookups.
   # Decisions, employer details, employees and 1099 payees are checked the
   # same way the checklist checks them. The numeric checks (reconciliation,
   # judgment warnings, overlap, fingerprint) run on the client's own
@@ -94,6 +95,14 @@ module YearEnd
         issues.concat(payee_issues(company)) if files_1099
       end
 
+      if files_w2
+        issues << { code: "EMPLOYER_CONTACT_NAME_MISSING", label: "Add the employer filing contact name" } if company.filing_contact_name.blank?
+        if year == 2026
+          preflight = Checklist.new(company: company, year: year, user: user)
+          issues.concat(preflight.efw2_employer_issues.map { |entry| { code: entry[:code], label: entry[:message] } })
+          issues.concat(preflight.efw2_people_issues.map { |entry| { code: entry[:code], label: entry[:message] } })
+        end
+      end
       readiness = readinesses[company.id]
       marked = files_w2 && readiness&.status == "filing_ready" && readiness.marked_ready_at.present?
       unchanged = ready_checks[company.id].present? && ready_checks[company.id] == input_revisions[company.id]

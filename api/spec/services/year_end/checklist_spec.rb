@@ -38,6 +38,17 @@ RSpec.describe YearEnd::Checklist do
     result[:steps].find { |entry| entry[:key] == key }
   end
 
+  it "keeps the clients list and checklist in parity with a NULL filing contact" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    company.update_columns(filing_contact_name: nil)
+    result = checklist
+    row = YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:clients].find { |entry| entry[:company_id] == company.id }
+    expect(row[:issue_count]).to eq(result[:issue_count])
+    expect(row[:status]).to eq(result[:status])
+    expect(step(result, "employer")[:issues]).to include(a_hash_including(code: "EMPLOYER_CONTACT_NAME_MISSING"))
+  end
+
   it "requires the filing decision before anything else" do
     pay(Date.new(2026, 3, 6))
 
@@ -163,7 +174,7 @@ RSpec.describe YearEnd::Checklist do
 
     expect(step(result, "employer")[:issues].map { |issue| issue[:code] }).to eq(%w[EMPLOYER_EIN_MISSING EMPLOYER_PHONE_MISSING])
     people = step(result, "people")
-    expect(people[:issues]).to contain_exactly(a_hash_including(code: "EMPLOYEE_DETAILS_MISSING", employee_id: worker.id))
+    expect(people[:issues]).to include(a_hash_including(code: "EMPLOYEE_DETAILS_MISSING", employee_id: worker.id))
     expect(people.dig(:data, :employees, 0)).to include(employee_id: worker.id, missing_fields: %w[ssn address])
     expect(people.to_json).not_to include("ssn_encrypted")
 
@@ -173,7 +184,7 @@ RSpec.describe YearEnd::Checklist do
     expect(step(result, "employer")[:status]).to eq("done")
     expect(step(result, "people").dig(:data, :employees, 0, :missing_fields)).to eq(%w[ssn])
 
-    worker.update_columns(ssn_encrypted: "900-70-1234")
+    worker.update_columns(ssn_encrypted: "123-70-1234")
     expect(step(checklist, "people")[:status]).to eq("done")
   end
 

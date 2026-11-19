@@ -6,10 +6,12 @@ export function W2FilingFileRow({
   companyId,
   year,
   ready,
+  canDownloadEfile = false,
 }: {
   companyId: number;
   year: number;
   ready: boolean;
+  canDownloadEfile?: boolean;
 }) {
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -41,12 +43,12 @@ export function W2FilingFileRow({
   return (
     <section
       className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4"
-      aria-label="W-2 filing files"
+      aria-label="W-2 e-file"
     >
-      <h3 className="font-semibold">W-2 filing files</h3>
+      <h3 className="font-semibold">W-2 e-file</h3>
       <p className="text-sm text-neutral-700">
         {ready
-          ? 'Download the EFW2 file for SSA and GuamTax. Keep W-3SS for your records.'
+          ? 'Mark W-2s ready again if you change client or wage details.'
           : 'Test file — don’t upload as your filing. Mark W-2s ready before downloading a final file.'}
       </p>
       {!ready && (
@@ -56,27 +58,27 @@ export function W2FilingFileRow({
             checked={confirmed}
             onChange={(e) => setConfirmed(e.target.checked)}
           />
-          I understand this is a test file for AccuWage.
+          Test file only — check it in SSA's AccuWage, but don't upload it as your filing.
         </label>
       )}
+      {!canDownloadEfile && <p className="text-sm text-neutral-700">Needs client-management access (contains full SSNs).</p>}
       <div className="flex flex-wrap gap-2">
         <Button
-          disabled={busy || (!ready && !confirmed)}
+          disabled={busy || !canDownloadEfile || (!ready && !confirmed)}
           onClick={() => void download(false)}
         >
-          Download {ready ? '' : 'draft '}EFW2
+          Download {ready ? '' : 'draft '}W-2 e-file
         </Button>
         <Button
           variant="outline"
           disabled={busy || (!ready && !confirmed)}
           onClick={() => void download(true)}
         >
-          W-3SS records PDF
+          W-3SS totals (for your records)
         </Button>
       </div>
       <p className="text-xs text-neutral-600">
-        Contains full SSNs. Store securely. For your records — do not mail W-3SS
-        when you e-file.
+        One file for both SSA (BSO) and GuamTax. Contains full SSNs — store it securely.
       </p>
       {error && (
         <p role="alert" className="text-sm text-danger-700">

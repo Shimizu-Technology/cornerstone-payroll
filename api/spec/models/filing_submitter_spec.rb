@@ -11,6 +11,12 @@ RSpec.describe FilingSubmitter do
     expect(profile).not_to be_valid
   end
 
+  it "rejects the same invalid RA fields at save time as the generator" do
+    profile = described_class.new(organization: create(:organization), ein: "00-1234567", contact_phone: "67155512345", contact_email: "filing.@example.com", state: "XX", zip: "123")
+    expect(profile).not_to be_valid
+    expect(profile.errors.full_messages.join).to include("EIN", "10 digits", "SSA email", "ZIP")
+  end
+
   it "enforces one profile per practice" do
     first = described_class.create!(organization: create(:organization))
     expect(described_class.new(organization: first.organization)).not_to be_valid

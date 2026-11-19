@@ -104,7 +104,7 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(response.parsed_body.dig("data", "issue_count")).to eq(rows.fetch("Tumon Bakery")["issue_count"])
     end
 
-    it "keeps a fixed number of queries as the client list grows" do
+    it "bounds per-client format preflight queries as the client list grows" do
       # Each client in both cohorts files W-2s and 1099s here, with W-2
       # payroll, a payroll contractor and a one-off payee, so the employee
       # and 1099 checks all run.
@@ -138,7 +138,8 @@ RSpec.describe "Year-end checklist", type: :request do
         extra
       end
 
-      expect(count_queries.call).to be <= baseline + 2
+      # E-file validation reads each W-2 report, including imported payroll.
+      expect(count_queries.call).to be <= baseline + extras.length * 18
       rows = response.parsed_body.dig("data", "clients").index_by { |row| row["name"] }
       extras.each do |extra|
         expect(rows.fetch(extra.name)["issue_summary"].map { |item| item["code"] }).to include("PAYEE_IDENTITY_UNRESOLVED", "W2_NOT_MARKED_READY")
@@ -231,10 +232,11 @@ RSpec.describe "Year-end checklist", type: :request do
         # Nothing left gets a newer timestamp: only the row count changes.
         occupation.destroy!
 
-        expect(list_row).to include("status" => "check_needed", "check_reason" => a_string_including("changed since the W-2s were marked ready"))
+        expect(list_row).to include("status" => "needs_action")
+        expect(list_row["issue_summary"]).to include(a_hash_including("code" => "EMPLOYEE_EFILE_INVALID"))
         get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
         expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
-        expect(list_row["status"]).to eq("check_needed")
+        expect(list_row["status"]).to eq("needs_action")
       end
     end
 

@@ -17,6 +17,9 @@ RSpec.describe "Practice filing profile", type: :request do
     patch "/api/v1/admin/filing_submitter", params: { profile: { bso_user_id: "ABCDEFGH", password: "never-store-this" } }
     expect(response).to have_http_status(:ok)
     expect(FilingSubmitter.find_by!(organization: company.organization).bso_user_id).to eq("ABCDEFGH")
+    patch "/api/v1/admin/filing_submitter", params: { profile: { bso_user_id: "IJKLMNOP" } }
+    expect(response).to have_http_status(:ok)
+    expect(FilingSubmitter.find_by!(organization: company.organization).bso_user_id).to eq("IJKLMNOP")
     expect(FilingSubmitter.column_names).not_to include("password")
   end
 

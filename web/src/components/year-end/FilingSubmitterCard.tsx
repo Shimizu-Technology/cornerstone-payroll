@@ -19,6 +19,8 @@ const fields: Record<string, string> = {
 export function FilingSubmitterCard() {
   const [profile, setProfile] = useState<Record<string, string | null>>({});
   const [missing, setMissing] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [problems, setProblems] = useState<string[]>([]);
   const [canEdit, setCanEdit] = useState(false);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
@@ -29,13 +31,15 @@ export function FilingSubmitterCard() {
       .get()
       .then((r) => {
         if (active) {
+          setLoading(false);
+          setProblems(r.problems ?? []);
           setProfile(r.profile);
           setMissing(r.missing_fields);
           setCanEdit(r.can_edit);
         }
       })
       .catch(() => {
-        if (active) setError('Could not load the submitter profile.');
+        if (active) { setLoading(false); setError('Could not load Cornerstone’s e-file details.'); }
       });
     return () => {
       active = false;
@@ -48,6 +52,7 @@ export function FilingSubmitterCard() {
       await filingSubmitterApi.update(profile);
       const r = await filingSubmitterApi.get();
       setMissing(r.missing_fields);
+      setProblems(r.problems ?? []);
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save.');
@@ -60,14 +65,16 @@ export function FilingSubmitterCard() {
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm">
-          {missing.length
-            ? 'Submitter profile incomplete — needed for EFW2 files.'
-            : 'Practice submitter profile'}
+          Cornerstone's e-file details
         </p>
-        <Button variant="outline" onClick={() => setOpen(!open)}>
+        <Button disabled={loading || !!error && !Object.keys(profile).length} variant="outline" onClick={() => setOpen(!open)}>
           {open ? 'Close' : 'View submitter profile'}
         </Button>
       </div>
+      <p className="text-sm text-neutral-600">Used in every client's W-2 e-file. The BSO User ID is your SSA login ID, not a password.</p>
+      {loading && <p role="status">Loading e-file details…</p>}
+      {!loading && missing.length > 0 && <p className="text-sm">Missing: {missing.map((key) => fields[key] ?? key).join(', ')}.</p>}
+      {!loading && problems.length > 0 && <ul className="list-disc pl-5 text-sm">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>}
       {open && (
         <form
           className="space-y-3"
