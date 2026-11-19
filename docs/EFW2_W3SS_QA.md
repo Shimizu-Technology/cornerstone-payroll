@@ -20,7 +20,7 @@ The saved-outcome check caught the employer fields missing from strong parameter
 
 Automated verification:
 
-- Focused generator/model/settings/download/checklist specs: 42 examples, zero failures before the final email-format case; final combined counts are recorded in the PR.
+- Final combined generator/model/migration/settings/download/company/year-end specs: 95 examples, zero failures.
 - Migration round-trip on populated tables: 1 example, zero failures.
 - Frontend: lint and `tsc --noEmit` pass; Vitest 205 files / 2,047 tests pass.
 - RuboCop: 1,921 files, no offenses at the recorded pass.

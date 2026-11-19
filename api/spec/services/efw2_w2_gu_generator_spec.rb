@@ -104,5 +104,4 @@ RSpec.describe Efw2W2GuGenerator do
     submitter.update_columns(contact_email: "filing.@example.com")
     expect { generator.generate }.to raise_error(described_class::InvalidFile, /Submitter contact email.*Employer contact email/)
   end
-
 end
