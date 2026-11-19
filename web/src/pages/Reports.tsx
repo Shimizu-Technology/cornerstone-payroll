@@ -30,6 +30,8 @@ import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibilityPanel';
 import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
 import { buildPayrollHistoryPackage } from '@/lib/payrollHistoryPackage';
+import { yearEndChecklistPath } from '@/lib/routes';
+import { FIRST_YEAR_END_TAX_YEAR } from '@/lib/year-end';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   Employee,
@@ -867,6 +869,11 @@ export function W2GuPanel() {
           <CardDescription>
             Guam Territorial W-2 preparation summary — review before filing with DRT.
           </CardDescription>
+          {activeCompany && year >= FIRST_YEAR_END_TAX_YEAR && (
+            <Link to={yearEndChecklistPath(activeCompany.id, year)} className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-primary-700 underline sm:min-h-0">
+              Open the {year} year-end checklist
+            </Link>
+          )}
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">

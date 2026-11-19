@@ -2307,7 +2307,7 @@ export interface CheckLayoutResponse {
 // W-2GU Report (CPR-68)
 // ----------------
 
-export type PayrollFilingType = 'form_941' | 'guam_withholding' | 'swica' | 'w2_gu';
+export type PayrollFilingType = 'form_941' | 'guam_withholding' | 'swica' | 'w2_gu' | 'form_1099';
 
 export interface PayrollFilingSourceCoverage {
   native_pay_period_count: number;
@@ -2325,9 +2325,10 @@ export interface PayrollFilingResponsibilityDecision {
   filing_type: PayrollFilingType;
   tax_year: number;
   quarter: number | null;
-  responsible_party: 'external_provider' | 'cornerstone';
+  responsible_party: 'external_provider' | 'cornerstone' | 'client' | 'no_filing';
   imported_payroll_inclusion: 'included' | 'excluded';
   source_cutoff_date: string | null;
+  prior_provider_through?: string | null;
   reviewed_at: string | null;
   reviewed_by: {
     id: number | null;
@@ -2355,7 +2356,7 @@ export interface PayrollFilingGate {
   responsibility_required: boolean;
   decision_recorded: boolean;
   responsibility: PayrollFilingResponsibilityDecision | null;
-  status: 'responsibility_not_required' | 'responsibility_required' | 'external_provider_responsible' | 'historical_payroll_excluded' | 'review_stale' | 'cornerstone_responsible';
+  status: 'responsibility_not_required' | 'responsibility_required' | 'external_provider_responsible' | 'client_responsible' | 'no_filing' | 'historical_payroll_excluded' | 'review_stale' | 'cornerstone_responsible';
   blockers: PayrollFilingBlocker[];
   capabilities: {
     can_review_draft: boolean;

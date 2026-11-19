@@ -11,6 +11,7 @@ import {
   Users,
   Building,
   CalendarDays,
+  CalendarCheck,
   FileBarChart2,
   FileSpreadsheet,
   WalletCards,
@@ -68,6 +69,7 @@ const clientNavigation: NavItem[] = [
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Checks & Payments', href: '/checks-payments', icon: <WalletCards className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Year-End Filing', href: '/year-end', icon: <CalendarCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee Loans', href: '/employee-loans', icon: <HandCoins className="h-[18px] w-[18px] shrink-0" /> },
 ];
 

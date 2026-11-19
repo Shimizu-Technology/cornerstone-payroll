@@ -3478,9 +3478,10 @@ export const reportsApi = {
     tax_year: number;
     quarter?: number;
     filing_types: PayrollFilingType[];
-    responsible_party: 'external_provider' | 'cornerstone';
+    responsible_party: 'external_provider' | 'cornerstone' | 'client' | 'no_filing';
     imported_payroll_inclusion: 'included' | 'excluded';
     source_cutoff_date?: string;
+    prior_provider_through?: string | null;
     notes?: string;
   }) => api.put<PayrollFilingResponsibilityUpdateResponse>(
     '/admin/payroll_filing_responsibilities',
@@ -4234,6 +4235,15 @@ interface AuthApiUser {
   capabilities: string[];
   company_capabilities?: Record<string, string[]>;
 }
+
+export const yearEndApi = {
+  clients: (year: number) =>
+    api.get<{ data: import('@/lib/year-end').YearEndClientsOverview }>('/admin/year_end/clients', { year }),
+  checklist: (year: number, companyId?: number) =>
+    api.get<{ data: import('@/lib/year-end').YearEndChecklist }>('/admin/year_end/checklist', { year }, { companyId }),
+  acknowledge: (input: { tax_year: number; warning_code: string; warning_digest: string; note: string }) =>
+    api.post<{ data: unknown }>('/admin/year_end/acknowledgements', { acknowledgement: input }),
+};
 
 export const companiesApi = {
   list: (params?: { active?: boolean }) => {

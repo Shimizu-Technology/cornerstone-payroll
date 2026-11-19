@@ -46,6 +46,8 @@ const CheckSettingsPage = lazy(() => import('@/pages/CheckSettings').then((modul
 const EmployeeLoans = lazy(() => import('@/pages/EmployeeLoans'));
 const PayrollFields = lazy(() => import('@/pages/PayrollFields'));
 const Clients = lazy(() => import('@/pages/Clients').then((module) => ({ default: module.Clients })));
+const YearEnd = lazy(() => import('@/pages/YearEnd').then((module) => ({ default: module.YearEnd })));
+const YearEndChecklist = lazy(() => import('@/pages/YearEndChecklist').then((module) => ({ default: module.YearEndChecklist })));
 const TimecardOcrTool = lazy(() => import('@/pages/TimecardOcrTool').then((module) => ({ default: module.TimecardOcrTool })));
 const GeneralTransmittals = lazy(() => import('@/pages/GeneralTransmittals').then((module) => ({ default: module.GeneralTransmittals })));
 const InvoiceMaker = lazy(() => import('@/pages/InvoiceMaker').then((module) => ({ default: module.InvoiceMaker })));
@@ -368,12 +370,14 @@ function AppRoutes() {
           <Route path="prior-provider-history" element={<StaffOnlyRoute><PriorProviderHistory /></StaffOnlyRoute>} />
           <Route path="payroll-go-live" element={<StaffOnlyRoute><PayrollGoLive /></StaffOnlyRoute>} />
           <Route path="payroll-fields" element={<CapabilityRoute capability="manage_payroll_fields"><PayrollFields /></CapabilityRoute>} />
+          <Route path="year-end" element={<StaffOnlyRoute><YearEndChecklist /></StaffOnlyRoute>} />
         </Route>
         <Route path="historical-payroll" element={<HistoricalPayrollRoute><HistoricalPayroll /></HistoricalPayrollRoute>} />
         <Route path="checks-payments" element={<StaffOnlyRoute><ChecksPayments /></StaffOnlyRoute>} />
         <Route path="pay-periods/:id/form-500" element={<StaffOnlyRoute><Form500Page /></StaffOnlyRoute>} />
         <Route path="payroll/run" element={<Navigate to="/pay-periods" replace />} />
         <Route path="reports" element={isClient ? <ClientReports /> : <Reports />} />
+        <Route path="year-end" element={<StaffOnlyRoute><YearEnd /></StaffOnlyRoute>} />
         <Route path="documents" element={<ClientOnlyRoute><ClientDocuments /></ClientOnlyRoute>} />
         <Route path="change-requests" element={<ClientOnlyRoute><ClientChangeRequests /></ClientOnlyRoute>} />
         <Route path="employee-loans" element={<StaffOnlyRoute><EmployeeLoans /></StaffOnlyRoute>} />
