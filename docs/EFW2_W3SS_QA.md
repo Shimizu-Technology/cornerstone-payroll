@@ -25,7 +25,12 @@ Automated verification:
 - Frontend: lint and `tsc --noEmit` pass; Vitest 206 files / 2,048 tests pass.
 - RuboCop: 1,921 files, no offenses at the recorded pass.
 - Impeccable 4.6.0, telemetry disabled, all changed UI paths: `[]` findings.
-- Full backend suite: final result is recorded in the PR and final task report.
+- Full backend suite: 7,540 examples, 3 failures, 4 pending (13m29s). The in-flight process had loaded the old Companies editable-fields assertion before it was corrected; that corrected assertion passes in the 95-example run and the final 27-example recheck. A timing-sensitive `time_tracking/response_deadline_spec` slow-drip GET test failed once (consumed zero chunks) and passes on recheck. The existing converter environment-isolation spec consistently fails because this host's Ruby adds `PKG_CONFIG_PATH` even under `env -i`; the converter implementation and spec are unchanged by this PR. The full gate is therefore not reported green.
+- Final Companies + response-deadline recheck: 27 examples, zero failures. An earlier 67-example company/year-end/converter/prior-provider run had only the converter failure; the retained-register failure from the first full run did not reproduce.
+
+Commands: `RAILS_ENV=test TEST_DATABASE_URL=postgres://localhost/<task-db> bundle exec rspec`, `bundle exec rubocop`; `npm run lint`, `npx tsc --noEmit`, `npm test`; `IMPECCABLE_NO_TELEMETRY=1 npx impeccable@4.6.0 detect --json <changed UI paths>`. Database identities were checked before schema loading; all task databases were dropped after checks. Test logs remain under `/tmp/cp-efw2-*.log` on the mini.
+
+All claimed Rails/Vite/browser resources are cleaned; lifecycle session `manual-20261120-080542-32165-1166` reports no active owned resources. The shared PostgreSQL service remains running. The host shared-guidance helper reported a missing `~/.config/shimizu-technology/agent-context.json`; applicable synced guidance was read directly and host setup was left unchanged.
 
 Deployment requires one additive migration, the API and website. There is no data backfill; existing employers get N/R defaults. Add employer filing contacts and the practice submitter profile before export. Existing readiness fingerprints change because filing identity/settings now participate. The checked-in 2026 IRS PDF is the only spec/form PDF added; SSA PDFs remain outside Git.
 
