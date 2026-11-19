@@ -8,6 +8,7 @@ import { reportsApi } from '@/services/api';
 import type {
   PayrollFilingGate,
   PayrollFilingGateGroup,
+  PayrollFilingResponsibilityDecision,
   PayrollFilingType,
 } from '@/types';
 
@@ -16,6 +17,7 @@ const FILING_LABELS: Record<PayrollFilingType, string> = {
   guam_withholding: 'Guam withholding (Form 500 / W-1)',
   swica: 'SWICA wage report',
   w2_gu: 'W-2GU annual filing',
+  form_1099: '1099 annual filing',
 };
 
 function filingStatus(gate: PayrollFilingGate) {
@@ -24,6 +26,10 @@ function filingStatus(gate: PayrollFilingGate) {
       return { label: 'Cornerstone responsible', variant: 'success' as const };
     case 'external_provider_responsible':
       return { label: 'External provider', variant: 'warning' as const };
+    case 'client_responsible':
+      return { label: 'Client files', variant: 'warning' as const };
+    case 'no_filing':
+      return { label: 'No forms this year', variant: 'outline' as const };
     case 'responsibility_required':
       return { label: 'Review required', variant: 'danger' as const };
     case 'historical_payroll_excluded':
@@ -48,9 +54,11 @@ interface FilingResponsibilityPanelProps {
 
 export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: FilingResponsibilityPanelProps) {
   const [editing, setEditing] = useState<PayrollFilingType | null>(null);
-  const [responsibleParty, setResponsibleParty] = useState<'cornerstone' | 'external_provider'>('cornerstone');
+  const [responsibleParty, setResponsibleParty] = useState<PayrollFilingResponsibilityDecision['responsible_party']>('cornerstone');
   const [importedInclusion, setImportedInclusion] = useState<'included' | 'excluded'>('included');
   const [sourceCutoffDate, setSourceCutoffDate] = useState('');
+  // Set on the year-end checklist; kept so editing here does not clear it.
+  const [priorProviderThrough, setPriorProviderThrough] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -65,6 +73,7 @@ export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: Filing
     setResponsibleParty(decision?.responsible_party ?? 'cornerstone');
     setImportedInclusion(decision?.imported_payroll_inclusion ?? 'included');
     setSourceCutoffDate(decision?.source_cutoff_date ?? '');
+    setPriorProviderThrough(decision?.prior_provider_through ?? null);
     setNotes(decision?.notes ?? '');
     setError(null);
   }
@@ -81,6 +90,7 @@ export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: Filing
         responsible_party: responsibleParty,
         imported_payroll_inclusion: importedInclusion,
         source_cutoff_date: sourceCutoffDate || undefined,
+        prior_provider_through: responsibleParty === 'cornerstone' ? priorProviderThrough : null,
         notes: notes.trim() || undefined,
       });
       onUpdated(response.filing_gate);
@@ -177,6 +187,8 @@ export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: Filing
                           >
                             <option value="cornerstone">Cornerstone</option>
                             <option value="external_provider">External payroll provider</option>
+                            {gate.scope === 'annual' && <option value="client">The client</option>}
+                            {gate.scope === 'annual' && <option value="no_filing">No forms this year</option>}
                           </select>
                         </label>
                         <label className="text-sm font-medium text-neutral-800">
