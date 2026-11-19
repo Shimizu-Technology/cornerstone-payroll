@@ -11,6 +11,7 @@ import { EmployerStep } from '@/components/year-end/EmployerStep';
 import { FilingDecisionStep } from '@/components/year-end/FilingDecisionStep';
 import { MarkReadyStep } from '@/components/year-end/MarkReadyStep';
 import { PeopleStep } from '@/components/year-end/PeopleStep';
+import { PrintAndFileStep } from '@/components/year-end/PrintAndFileStep';
 import { ReconciliationStep } from '@/components/year-end/ReconciliationStep';
 import { ReviewWarningsStep } from '@/components/year-end/ReviewWarningsStep';
 import { IssueList, StepCard } from '@/components/year-end/StepCard';
@@ -37,8 +38,14 @@ function stepBody(checklist: Checklist, step: YearEndStep, onSaved: (message: st
         </div>
       ) : null;
     case 'mark_ready': return <MarkReadyStep checklist={checklist} step={step} onSaved={onSaved} />;
+    case 'print_and_file': return <PrintAndFileStep checklist={checklist} step={step} />;
     default: return null;
   }
+}
+
+// Final copies open the step; drafts stay folded under the work still to do.
+function finalDocumentsReady(step: YearEndStep): boolean {
+  return step.key === 'print_and_file' && step.status === 'available' && step.data.final;
 }
 
 function StatusPanel({ checklist }: { checklist: Checklist }): ReactElement {
@@ -173,7 +180,7 @@ export function YearEndChecklist(): ReactElement {
             <ol className="space-y-3" aria-busy={loading || undefined}>
               {checklist.steps.map((step) => (
                 <li key={`${checklist.company.id}-${step.key}-${step.status}`}>
-                  <StepCard step={step} isNext={checklist.next_step === step.key}>
+                  <StepCard step={step} isNext={checklist.next_step === step.key} defaultOpen={finalDocumentsReady(step)}>
                     {stepBody(checklist, step, onSaved, onRefresh)}
                   </StepCard>
                 </li>

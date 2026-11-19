@@ -4254,6 +4254,11 @@ export const yearEndApi = {
     api.get<{ data: import('@/lib/year-end').YearEndChecklist }>('/admin/year_end/checklist', { year }, { companyId }),
   acknowledge: (input: { tax_year: number; warning_code: string; warning_digest: string; note: string }, companyId: number) =>
     api.post<{ data: unknown }>('/admin/year_end/acknowledgements', { acknowledgement: input }, { companyId }),
+  /** A "Print and file" document; the checklist names its admin endpoint and params. */
+  downloadDocument: (download: { path: string; params: Record<string, string | number> }, companyId: number) => {
+    if (!download.path.startsWith('/admin/')) return Promise.reject(new Error('This document has no download.'));
+    return api.getBlobWithParams(download.path, download.params, { companyId });
+  },
 };
 
 export const companiesApi = {
