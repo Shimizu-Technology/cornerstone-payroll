@@ -166,6 +166,8 @@ RSpec.describe "Year-end checklist", type: :request do
     include ActiveSupport::Testing::TimeHelpers
 
     let(:start) { 1.hour.from_now.change(usec: 0) }
+    # The list's Ready rests on the last successful check, kept in the cache.
+    let(:cache) { ActiveSupport::Cache::MemoryStore.new }
     def list_row
       get "/api/v1/admin/year_end/clients", params: { year: 2026 }
       expect(response).to have_http_status(:ok), response.body
@@ -179,6 +181,7 @@ RSpec.describe "Year-end checklist", type: :request do
     end
 
     before do
+      allow(Rails).to receive(:cache).and_return(cache)
       pay(company, Date.new(2026, 3, 6), worker: employee)
       record_decision(filing_types: %w[w2_gu], party: "cornerstone")
       record_decision(filing_types: %w[form_1099], party: "no_filing")
@@ -203,7 +206,6 @@ RSpec.describe "Year-end checklist", type: :request do
     end
 
     it "returns to Ready once the full checklist re-checks an unrelated change" do
-      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
       travel_to(start + 0.hours) { mark_ready }
       travel_to(start + 1.hours) do
         employee.touch
@@ -213,6 +215,48 @@ RSpec.describe "Year-end checklist", type: :request do
         get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
         expect(response.parsed_body.dig("data", "status")).to eq("ready")
         expect(list_row["status"]).to eq("ready")
+      end
+    end
+
+    it "shows Check needed, not Ready, after a tipped employee's only occupation code is deleted" do
+      occupation = create(:employee_tipped_occupation, employee: employee)
+      pay(company, Date.new(2026, 5, 8), worker: employee, reported_tips: 200, cash_tips_reported: 200,
+        social_security_taxable_wages: 1_800, social_security_taxable_tips: 200)
+      travel_to(start + 0.hours) { mark_ready }
+      travel_to(start + 1.hours) do
+        get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+        expect(response.parsed_body.dig("data", "status")).to eq("ready")
+        expect(list_row["status"]).to eq("ready")
+
+        # Nothing left gets a newer timestamp: only the row count changes.
+        occupation.destroy!
+
+        expect(list_row).to include("status" => "check_needed", "check_reason" => a_string_including("changed since the W-2s were marked ready"))
+        get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+        expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
+        expect(list_row["status"]).to eq("check_needed")
+      end
+    end
+
+    it "stops showing Ready once a checklist run finds a blocker or fails" do
+      travel_to(start + 0.hours) { mark_ready }
+      travel_to(start + 1.hours) do
+        expect(list_row["status"]).to eq("ready")
+
+        # Something the input revision does not see makes the totals uncomparable.
+        allow_any_instance_of(YearEnd::Reconciliation).to receive(:call).and_return(YearEnd::Reconciliation.unavailable("synthetic outage"))
+        get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+        expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
+        expect(list_row["status"]).to eq("check_needed")
+
+        allow_any_instance_of(YearEnd::Reconciliation).to receive(:call).and_call_original
+        get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+        expect(response.parsed_body.dig("data", "status")).to eq("ready")
+        expect(list_row["status"]).to eq("ready")
+
+        allow_any_instance_of(YearEnd::Reconciliation).to receive(:call).and_raise(RuntimeError, "synthetic failure")
+        expect { YearEnd::Checklist.new(company: company, year: 2026, user: admin).call }.to raise_error(RuntimeError, "synthetic failure")
+        expect(list_row["status"]).to eq("check_needed")
       end
     end
 

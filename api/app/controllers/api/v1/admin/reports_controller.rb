@@ -737,8 +737,16 @@ module Api
             end
 
             if YearEnd::Checklist.applies_to?(year)
-              year_end_blockers = YearEnd::Checklist.new(company: company, year: year, user: current_user).w2_mark_ready_blockers
+              # The clients list shows Ready only at the revision this gate checked.
+              year_end_revision = YearEnd::InputRevision.for(company.id, year)[company.id]
+              year_end_blockers = begin
+                YearEnd::Checklist.new(company: company, year: year, user: current_user).w2_mark_ready_blockers
+              rescue StandardError
+                YearEnd::ReadyCheck.clear(company.id, year)
+                raise
+              end
               if year_end_blockers.any?
+                YearEnd::ReadyCheck.clear(company.id, year)
                 return render json: {
                   error: "Finish the #{year} year-end checklist before marking W-2GU filing ready",
                   year_end_blockers: year_end_blockers,
@@ -765,6 +773,7 @@ module Api
               }, status: :conflict
             end
             if filing.current?(fingerprint)
+              YearEnd::ReadyCheck.record(company.id, year, year_end_revision) if year_end_revision
               return render json: { filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate }
             end
 
@@ -778,6 +787,7 @@ module Api
               "marked_ready_by_id" => filing.marked_ready_by_id, "notes" => filing.notes
             } ]
             filing.save!
+            YearEnd::ReadyCheck.record(company.id, year, year_end_revision) if year_end_revision
             render json: {
               filing: filing_readiness_payload(filing, fingerprint: fingerprint),
               revalidation: revalidation_payload(fresh_preflight), filing_gate: filing_gate
