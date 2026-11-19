@@ -6,6 +6,7 @@ import { MemoryRouter, useNavigate } from 'react-router';
 import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
 import type { ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { Form941GuPanel, QuarterlyCompliancePacketPanel } from './Reports';
+import { PeriodKeyed } from '@/lib/report-period';
 
 const mocks = vi.hoisted(() => ({ worksheet: vi.fn(), packet: vi.fn(), pdf: vi.fn(), packetPdf: vi.fn(), xlsx: vi.fn(), defaults: vi.fn() }));
 vi.mock('@/services/api', () => ({
@@ -53,18 +54,37 @@ describe('A linked year and quarter', () => {
     expect(mocks.packet).toHaveBeenCalledWith(2025, 3);
   });
 
+  function Nav() {
+    const navigate = useNavigate();
+    return <>
+      <button onClick={() => navigate('/reports?report=941-gu&year=2025&quarter=3')}>To Q3</button>
+      <button onClick={() => navigate('/reports?report=941-gu&year=2026&quarter=1')}>To 2026 Q1</button>
+      <button onClick={() => navigate(-1)}>Back</button>
+    </>;
+  }
+  const mountLinked = (path: string) => render(<MemoryRouter initialEntries={[path]}><PdfPreviewProvider><Nav /><PeriodKeyed><Form941GuPanel /></PeriodKeyed></PdfPreviewProvider></MemoryRouter>);
+
   it('follows the URL when it changes after the panel mounted (Back/Forward)', () => {
-    function Nav() {
-      const navigate = useNavigate();
-      return <><button onClick={() => navigate('/reports?report=941-gu&year=2025&quarter=3')}>To Q3</button><button onClick={() => navigate(-1)}>Back</button></>;
-    }
-    render(<MemoryRouter initialEntries={['/reports?report=941-gu&year=2025&quarter=1']}><PdfPreviewProvider><Nav /><Form941GuPanel /></PdfPreviewProvider></MemoryRouter>);
+    mountLinked('/reports?report=941-gu&year=2025&quarter=1');
     expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
     fireEvent.click(screen.getByRole('button', { name: 'To Q3' }));
     expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '3');
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
     expect(screen.getByLabelText('Year')).toHaveProperty('value', '2025');
+  });
+
+  it('reapplies an unchanged quarter from the URL and drops the old period\'s report on navigation', async () => {
+    mocks.worksheet.mockResolvedValue({ report: worksheet(2025, false) });
+    mountLinked('/reports?report=941-gu&year=2025&quarter=1');
+    fireEvent.change(screen.getByLabelText('Quarter'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'View Worksheet' }));
+    await screen.findByText(message);
+
+    fireEvent.click(screen.getByRole('button', { name: 'To 2026 Q1' }));
+    expect(screen.getByLabelText('Year')).toHaveProperty('value', '2026');
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
+    expect(screen.queryByText(message)).toBeNull();
   });
 
   it('keeps its own default for a period it cannot show', () => {
