@@ -27,6 +27,9 @@ class W2GuTaxableWages
       uncapped_wages = [ uncapped_wages, 0.to_d ].max
       uncapped_tips = [ tips, [ medicare, 0.to_d ].max ].min
     end
+    # The paycheck withheld FICA on these benefits; W-2 Boxes 3/5 then disagree
+    # with Boxes 4/6 and the 941s until payroll is corrected (refund + 941-X).
+    fica_on_benefits = benefits.positive? && item.medicare_taxable_wages.present? && item.medicare_taxable_wages.to_d > medicare
     ss_wages = benefits.nonzero? ? uncapped_wages : (item.social_security_taxable_wages || wages)
     ss_tips = benefits.nonzero? ? uncapped_tips : (item.social_security_taxable_tips || tips)
     {
@@ -35,6 +38,7 @@ class W2GuTaxableWages
       uncapped_ss_wages: uncapped_wages,
       uncapped_ss_tips: uncapped_tips,
       benefit_item_count: benefits.nonzero? ? 1 : 0,
+      fica_on_benefits_count: fica_on_benefits ? 1 : 0,
       ss_tips: ss_tips.to_d,
       medicare: item.medicare_taxable_wages == medicare ? item.medicare_taxable_wages.to_d : medicare,
       inconsistent_fit_count: item.fit_taxable_wages.present? && item.fit_taxable_wages != fit ? 1 : 0

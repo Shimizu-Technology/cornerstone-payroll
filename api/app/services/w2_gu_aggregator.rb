@@ -252,6 +252,7 @@ class W2GuAggregator
 
       missing_committed_tax_bases: sums&.missing_tax_base_count.to_i.positive?,
       inconsistent_fit_taxable_wages: year_end_wages.dig(employee.id, :inconsistent_fit_count).to_i.positive?,
+      fica_withheld_on_section_125: year_end_wages.dig(employee.id, :fica_on_benefits_count).to_i.positive?,
       missing_tip_classification: sums&.missing_tip_classification_count.to_i.positive? || historical.any? { |balance| balance.reported_tips.nonzero? },
       missing_qualified_overtime: sums&.missing_qualified_overtime_count.to_i.positive? || historical_overtime?(historical),
       negative_box12_tp: cash_tips_total.negative?,
@@ -299,6 +300,12 @@ class W2GuAggregator
 
     missing_bases = rows.count { |r| r[:missing_committed_tax_bases] }
     issues << "#{missing_bases} employee(s) have legacy payroll rows without committed taxable wage bases" if missing_bases.positive?
+
+    fica_on_benefits = rows.count { |row| row[:fica_withheld_on_section_125] }
+    if fica_on_benefits.positive?
+      issues << "#{fica_on_benefits} employee(s) had Social Security and Medicare withheld on Section 125 benefits. " \
+                "Correct those paychecks (refund the employee and file a 941-X) before filing W-2s"
+    end
 
     inconsistent_fit = rows.count { |row| row[:inconsistent_fit_taxable_wages] }
     issues << "#{inconsistent_fit} employee(s) have stored FIT wages inconsistent with saved paycheck components; year-end wages use saved components" if inconsistent_fit.positive?
