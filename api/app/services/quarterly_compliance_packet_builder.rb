@@ -19,6 +19,11 @@ class QuarterlyCompliancePacketBuilder
     raise ArgumentError, "quarter must be 1, 2, 3, or 4" unless MONTHS_BY_QUARTER.key?(@quarter)
   end
 
+  # The quarter's W-1 Guam withholding total, without building the full packet.
+  def w1_total
+    w1_section[:total_guam_withholding]
+  end
+
   def generate
     report = {
       meta: meta,
