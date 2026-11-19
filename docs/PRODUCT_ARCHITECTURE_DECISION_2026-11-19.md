@@ -260,7 +260,7 @@ The full scope is still about nine to twelve months. Dates for milestones 2 onwa
 - If a new client needs time tracking before milestone 6, a copy of AIRE's app is the stopgap. It moves at milestone 7 with AIRE.
 - The time module could move ahead of leave and onboarding if a paying time client is waiting and the HR pilot isn't.
 
-**Open for Leon:** milestones 1 and 2 touch different code (year-end is in Payroll; most of the profit work is in Tax). The recommendation is to build milestone 2 while Dafne tests milestone 1. The rule above still holds, because milestone 2 doesn't go live until milestone 1 passes.
+**Overlap (Leon, November 19):** milestone 2 is built while Dafne tests milestone 1, since they touch different code (year-end is in Payroll; most of the profit work is in Tax). The go-live rule still holds: milestone 2 doesn't go live until milestone 1 passes.
 
 ## 7. Questions
 
