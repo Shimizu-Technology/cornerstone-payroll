@@ -1,0 +1,197 @@
+# frozen_string_literal: true
+
+require "digest"
+
+module YearEnd
+  # Turns the W-2GU report's review warnings into year-end checklist items.
+  #
+  # A warning whose data can be corrected (negative annual Box 12 amounts, a
+  # tipped employee without a Treasury occupation code) blocks until it is
+  # fixed. A warning that needs a reviewer's judgment (unclassified tips or
+  # overtime, legacy tax bases, opening balances with no paycheck dates) needs
+  # an explicit, audited acknowledgement. An acknowledgement counts only while
+  # its digest matches the warning computed from current data.
+  class JudgmentWarnings
+    DEFINITIONS = {
+      "negative_box12_amounts" => {
+        kind: "blocker",
+        title: "Negative annual tips or overtime",
+        explanation: "A W-2 cannot report a negative Box 12 TP or TT amount. Correct the payroll for these employees before filing."
+      },
+      "tipped_occupation_code_missing" => {
+        kind: "blocker",
+        title: "Tipped employees without an occupation code",
+        explanation: "Box 14b needs a Treasury tipped occupation code for each employee with tips. Add the code on each employee's profile."
+      },
+      "tip_classification_unreviewed" => {
+        kind: "acknowledge",
+        title: "Tips without 2026 cash-tip classification",
+        explanation: "These employees have tips that were not classified as cash tips (for example QuickBooks-era history), so Box 12 TP may be understated. Review the tips and record what you confirmed."
+      },
+      "qualified_overtime_unreviewed" => {
+        kind: "acknowledge",
+        title: "Overtime without qualified-overtime amounts",
+        explanation: "These employees have overtime with no stored qualified-overtime amount, so Box 12 TT may be understated. Review the overtime and record what you confirmed."
+      },
+      "box14b_more_than_two_codes" => {
+        kind: "acknowledge",
+        title: "More than two tipped occupation codes",
+        explanation: "Box 14b holds two codes. The W-2 will show the first two codes in order. Confirm that is right for these employees."
+      },
+      "legacy_tax_bases" => {
+        kind: "acknowledge",
+        title: "Older payroll without stored taxable wages",
+        explanation: "Some payroll rows were committed before taxable wage bases were stored, so their W-2 amounts use a compatibility calculation. Confirm the reconciliation above ties out for these employees."
+      },
+      "legacy_employer_benefit_unclassified" => {
+        kind: "acknowledge",
+        title: "Employer benefit history not yet classified",
+        explanation: PayrollReportComponentReview::MESSAGE
+      },
+      "opening_balances_compare_filed_returns" => {
+        kind: "acknowledge",
+        title: "Opening balances to compare with filed returns",
+        explanation: "Opening balances cover pay dates before this client's payroll started here. This app has no paychecks for them, so it cannot rebuild those quarters' 941s and W-1s. Compare the opening balance amounts in the reconciliation with the returns that were filed for those quarters."
+      }
+    }.freeze
+
+    def self.digest_for(code, evidence)
+      Digest::SHA256.hexdigest(JSON.generate([ code, evidence ]))
+    end
+
+    def initialize(company:, year:, w2_report:, reconciliation: nil, acknowledgements: nil)
+      @company = company
+      @year = Integer(year)
+      @w2_report = w2_report
+      @reconciliation = reconciliation
+      @acknowledgements = acknowledgements || company.year_end_acknowledgements.where(tax_year: @year).index_by(&:warning_code)
+    end
+
+    def call
+      detected.map { |code, evidence| warning_payload(code, evidence) }
+    end
+
+    # Current digest by code, for validating an acknowledgement request.
+    def digests
+      detected.to_h { |code, evidence| [ code, self.class.digest_for(code, evidence.except(:names)) ] }
+    end
+
+    private
+
+    attr_reader :company, :year, :w2_report, :reconciliation, :acknowledgements
+
+    def rows
+      Array(w2_report[:employees])
+    end
+
+    def tip_rules_year?
+      year >= 2026
+    end
+
+    # Evidence for each code is the sorted, minimal data the reviewer saw. Any
+    # new payroll for an affected employee changes it and needs a new review.
+    def detected
+      @detected ||= begin
+        found = {}
+        add(found, "negative_box12_amounts", rows.select { |row| row[:negative_box12_tp] || row[:negative_box12_tt] }) do |row|
+          [ row[:employee_id], row[:negative_box12_tp], row[:negative_box12_tt] ]
+        end
+        if tip_rules_year?
+          add(found, "tipped_occupation_code_missing", rows.select { |row| row[:reported_tips_total].to_d.positive? && row[:box14b_tipped_occupation_codes].blank? }) do |row|
+            [ row[:employee_id] ]
+          end
+          add(found, "tip_classification_unreviewed", rows.select { |row| row[:missing_tip_classification] }) do |row|
+            [ row[:employee_id], money(row[:reported_tips_total]), money(box12_amount(row, "TP")), payroll_item_count(row) ]
+          end
+          add(found, "qualified_overtime_unreviewed", rows.select { |row| row[:missing_qualified_overtime] }) do |row|
+            [ row[:employee_id], money(box12_amount(row, "TT")), payroll_item_count(row) ]
+          end
+          add(found, "box14b_more_than_two_codes", rows.select { |row| row[:excess_box14b_tipped_occupation_codes] }) do |row|
+            [ row[:employee_id], Array(row[:box14b_tipped_occupation_codes]) ]
+          end
+        end
+        add(found, "legacy_tax_bases", rows.select { |row| row[:missing_committed_tax_bases] }) do |row|
+          [ row[:employee_id], payroll_item_count(row) ]
+        end
+        add_review_warnings(found)
+        add_opening_balances(found)
+        found
+      end
+    end
+
+    def add(found, code, affected)
+      return if affected.empty?
+
+      found[code] = {
+        employees: affected.sort_by { |row| row[:employee_id] }.map { |row| yield(row) },
+        names: affected.to_h { |row| [ row[:employee_id], row[:employee_name] ] }
+      }
+    end
+
+    def add_review_warnings(found)
+      warnings = Array(w2_report[:review_warnings]).select { |warning| warning[:code] == PayrollReportComponentReview::CODE }
+      return if warnings.empty?
+
+      names = rows.to_h { |row| [ row[:employee_id], row[:employee_name] ] }
+      ids = warnings.map { |warning| warning[:employee_id] }.compact.uniq.sort
+      found["legacy_employer_benefit_unclassified"] = {
+        employees: ids.map { |id| [ id, warnings.count { |warning| warning[:employee_id] == id } ] },
+        names: ids.index_with { |id| names[id] }
+      }
+    end
+
+    def add_opening_balances(found)
+      return unless reconciliation&.dig(:opening_balances, :present)
+
+      amounts = Array(reconciliation[:lines]).map { |line| [ line[:key], money(line[:opening_balances]) ] }
+      found["opening_balances_compare_filed_returns"] = {
+        employees: [],
+        names: {},
+        amounts: amounts,
+        period: reconciliation[:opening_balances].values_at(:first_pay_date, :last_pay_date)
+      }
+    end
+
+    def warning_payload(code, evidence)
+      definition = DEFINITIONS.fetch(code)
+      digest = self.class.digest_for(code, evidence.except(:names))
+      acknowledgement = acknowledgements[code]
+      current = acknowledgement && acknowledgement.warning_digest == digest
+      status = if definition[:kind] == "blocker"
+        "blocked"
+      elsif current
+        "reviewed"
+      else
+        "needs_review"
+      end
+      ids = evidence[:employees].map(&:first)
+
+      {
+        code: code,
+        kind: definition[:kind],
+        title: definition[:title],
+        explanation: definition[:explanation],
+        status: status,
+        digest: digest,
+        period: evidence[:period],
+        employees: ids.map do |id|
+          { employee_id: id, name: evidence[:names][id], edit_path: "/companies/#{company.id}/employees/#{id}" }
+        end,
+        acknowledgement: definition[:kind] == "acknowledge" && acknowledgement ? acknowledgement.payload : nil,
+        acknowledgement_stale: definition[:kind] == "acknowledge" && acknowledgement.present? && !current
+      }
+    end
+
+    def box12_amount(row, code)
+      Array(row[:box12]).select { |entry| entry[:code] == code }.sum(0.to_d) { |entry| entry[:amount].to_d }
+    end
+
+    def payroll_item_count(row)
+      row.dig(:source_summary, :cornerstone_payroll_item_count).to_i
+    end
+
+    def money(value)
+      BigDecimal(value.to_s.presence || "0").round(2).to_s("F")
+    end
+  end
+end

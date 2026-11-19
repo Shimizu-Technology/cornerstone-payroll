@@ -12,16 +12,23 @@ class W2FilingInputsFingerprint
                   medicare_taxable_wages cash_tips_reported qualified_overtime_compensation
                   tax_rule_snapshot].freeze
 
-  def initialize(company:, year:)
+  # A caller that already generated this year's W-2GU report may pass it in so
+  # the aggregation runs once; it must be the unmodified aggregator output.
+  def initialize(company:, year:, report: nil)
     @company = company
     @year = year.to_i
+    @report = report
   end
 
   def call
-    report = begin
-      W2GuAggregator.new(company, year).generate
-    rescue ArgumentError => e
-      { input_error: e.message }
+    report = if @report
+      @report.deep_dup
+    else
+      begin
+        W2GuAggregator.new(company, year).generate
+      rescue ArgumentError => e
+        { input_error: e.message }
+      end
     end
     report[:meta]&.delete(:generated_at)
     ids = Array(report[:employees]).map { |row| row.fetch(:employee_id) }
