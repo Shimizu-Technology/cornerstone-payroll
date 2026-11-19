@@ -191,10 +191,16 @@ RSpec.describe W2GuOfficialCopies do
       expect { generate(rows: rows) }.to raise_error(described_class::DoesNotFit, /Ana Cruz: 5 Box 12 entries, but one W-2 holds 4/)
     end
 
-    it "refuses an employee with more tipped occupation codes than Box 14b holds" do
-      rows = report.merge(employees: [ row(cruz, box1: 1_000, occupations: %w[101 202]).merge(excess_box14b_tipped_occupation_codes: true) ])
+    # The IRS allows any two codes when tips came from more than two
+    # occupations; the aggregator picks them (keeping 000).
+    it "prints the two Box 14b codes the aggregator chose for tips from more than two occupations" do
+      rows = report.merge(employees: [ row(cruz, box1: 1_000, occupations: %w[000 101]).merge(excess_box14b_tipped_occupation_codes: true) ])
 
-      expect { generate(rows: rows) }.to raise_error(described_class::DoesNotFit, /Ana Cruz: more than two tipped occupation codes/)
+      page = PDF::Reader.new(StringIO.new(generate(rows: rows))).pages.first
+      printed = described_class::FIELDS[:box14b].map do |rect|
+        text_in_box(page, [ rect[0], rect[1], rect[2], rect[3] + described_class::TEXT_LIFT ])
+      end
+      expect(printed).to eq(%w[000 101])
     end
   end
 

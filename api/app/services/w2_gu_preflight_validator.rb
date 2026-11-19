@@ -5,11 +5,6 @@
 # Returns machine-readable findings grouped by blocking/warning severity.
 class W2GuPreflightValidator
   Finding = Struct.new(:severity, :code, :message, :employee_id, keyword_init: true)
-  # Shared with the year-end checklist, which shows the same blocker.
-  TOO_MANY_OCCUPATION_CODES = lambda do |name, codes, year|
-    "#{name} has #{codes.length} tipped occupation codes for #{year} (#{codes.join(', ')}), but W-2 Box 14b holds two. " \
-      "End the extra codes on the employee's profile so the W-2 lists the right ones."
-  end
 
   attr_reader :company, :year
 
@@ -75,7 +70,7 @@ class W2GuPreflightValidator
       return out
     end
 
-    Employee.where(company_id: company.id, id: employee_ids).includes(:employee_tipped_occupations).find_each do |employee|
+    Employee.where(company_id: company.id, id: employee_ids).find_each do |employee|
       unless employee.valid_filing_ssn?
         out << Finding.new(
           severity: "blocking",
@@ -90,18 +85,6 @@ class W2GuPreflightValidator
           severity: "blocking",
           code: "EMPLOYEE_ADDRESS_INCOMPLETE",
           message: "Employee #{employee.full_name} has incomplete address.",
-          employee_id: employee.id
-        )
-      end
-
-      # Box 14b holds two codes. More would be cut from the W-2 without
-      # notice, so the extra codes have to be ended first.
-      codes = W2GuAggregator.tipped_occupation_codes(employee, year)
-      if codes.length > 2
-        out << Finding.new(
-          severity: "blocking",
-          code: "EMPLOYEE_TIPPED_OCCUPATION_CODES_EXCESS",
-          message: TOO_MANY_OCCUPATION_CODES.call(employee.full_name, codes, year),
           employee_id: employee.id
         )
       end

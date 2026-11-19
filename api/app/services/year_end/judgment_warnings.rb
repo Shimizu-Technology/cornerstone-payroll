@@ -43,6 +43,11 @@ module YearEnd
         title: "Stored Guam taxable wages disagree with the paycheck",
         explanation: "For these employees, the taxable wages saved on some paychecks do not match the paycheck's own pay and pre-tax deductions. Box 1 uses the paycheck amounts. Open one affected paycheck per employee, confirm Box 1 is right and that Guam tax was withheld on the right wages, and record what you found."
       },
+      "box14b_more_than_two_codes" => {
+        kind: "acknowledge",
+        title: "Tips received in more than two occupations",
+        explanation: "Tips were received in more than two occupations. The W-2 shows two codes, as the IRS allows, and always includes 000 when any tips came from a nonqualifying occupation. Confirm these are right."
+      },
       "legacy_tax_bases" => {
         kind: "acknowledge",
         title: "Older payroll without stored taxable wages",
@@ -138,6 +143,9 @@ module YearEnd
           end
           add(found, "qualified_overtime_unreviewed", rows.select { |row| row[:missing_qualified_overtime] }) do |row|
             [ row[:employee_id], money(box12_amount(row, "TT")), *source_evidence("qualified_overtime_unreviewed", row) ]
+          end
+          add(found, "box14b_more_than_two_codes", rows.select { |row| row[:excess_box14b_tipped_occupation_codes] }) do |row|
+            [ row[:employee_id], Array(row[:box14b_tipped_occupation_codes]) ]
           end
         end
         add(found, "legacy_tax_bases", rows.select { |row| row[:missing_committed_tax_bases] }) do |row|

@@ -513,6 +513,59 @@ describe('Year-end checklist', () => {
     click.mockRestore();
   });
 
+  it.each([
+    { change: 'client', outcome: 'finishes' },
+    { change: 'client', outcome: 'fails' },
+    { change: 'tax year', outcome: 'finishes' },
+    { change: 'tax year', outcome: 'fails' },
+  ])('drops a download that $outcome after the user switches $change, even when the new checklist loads at once', async ({ change, outcome }) => {
+    // January, so both 2026 and 2027 can be chosen.
+    vi.setSystemTime(new Date('2027-01-15T12:00:00+10:00'));
+    const createObjectURL = vi.fn(() => 'blob:w2');
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    let finish: () => void = () => {};
+    mocks.downloadDocument.mockReturnValueOnce(new Promise((resolve, reject) => {
+      finish = () => (outcome === 'finishes'
+        ? resolve({ blob: new Blob(['%PDF'], { type: 'application/pdf' }), filename: 'W-2GU_2026_Tumon_Bakery_Employee_Copies_B_C.pdf' })
+        : reject(new ApiError("This client's W-2 data changed while the file was being made. Download again.", 409)));
+    }));
+    const next = change === 'client'
+      ? { company: { id: 8, name: 'Agana Auto', active: true, test_workspace: false } }
+      : { tax_year: 2027 };
+    // Resolved at once, so the new checklist can arrive in the same render
+    // that clears the old one.
+    mocks.checklist
+      .mockResolvedValueOnce(checklist([...working(), printAndFile(true)], { status: 'ready', issue_count: 0, next_step: null }))
+      .mockResolvedValue(checklist([...working(), printAndFile(true)], { status: 'ready', issue_count: 0, next_step: null, ...next }));
+
+    renderPage();
+
+    const before = await screen.findByRole('region', { name: /Print and file/ });
+    fireEvent.click(within(before).getByRole('button', { name: 'Download PDF' }));
+    expect(mocks.downloadDocument).toHaveBeenCalledWith(expect.objectContaining({ params: { year: 2026 } }), 7);
+    if (change === 'client') fireEvent.click(screen.getByRole('button', { name: 'Open Agana Auto' }));
+    else fireEvent.change(screen.getByLabelText('Tax year'), { target: { value: '2027' } });
+    await waitFor(() => expect(mocks.checklist).toHaveBeenCalledTimes(2));
+    expect(mocks.checklist).toHaveBeenLastCalledWith(change === 'client' ? 2026 : 2027, change === 'client' ? 8 : 7);
+
+    // The new client's or year's step: its own row, not the old one still loading.
+    const after = await screen.findByRole('region', { name: /Print and file/ });
+    expect(after).not.toBe(before);
+    expect(before.isConnected).toBe(false);
+    await waitFor(() => expect(within(after).queryByRole('button', { name: /Preparing PDF/ })).toBeNull());
+    expect(within(after).getByRole('button', { name: 'Download PDF' })).toHaveProperty('disabled', false);
+
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/data changed while the file was being made/)).toBeNull();
+    click.mockRestore();
+  });
+
   it('runs a fresh preflight, then marks ready on that fingerprint', async () => {
     const markedReady = step('mark_ready', 7, 'Mark W-2s ready', 'done', { data: { filing: { status: 'filing_ready', stale: false, marked_ready_at: '2026-11-19T02:00:00Z', notes: 'Checked' }, can_mark_ready: true, remaining_before_ready: 0 } });
     mocks.checklist.mockResolvedValueOnce(checklist(working())).mockResolvedValue(checklist(working({ markReady: markedReady })));

@@ -12,24 +12,14 @@ RSpec.describe W2GuPreflightValidator do
       social_security_taxable_wages: 2_000, social_security_taxable_tips: 0, medicare_taxable_wages: 2_000, fit_taxable_wages: 2_000)
   end
 
-  def findings
-    described_class.new(company: company, year: 2026).run[:findings].select { |finding| finding[:code] == "EMPLOYEE_TIPPED_OCCUPATION_CODES_EXCESS" }
-  end
+  # IRS General Instructions for Forms W-2 and W-3 (2026), Box 14b: with tips
+  # from more than two occupations, any two codes go on the W-2.
+  it "does not block an employee with tips from more than two occupations" do
+    %w[303 101 000].each { |code| create(:employee_tipped_occupation, employee: employee, occupation_code: code) }
 
-  it "blocks an employee with more tipped occupation codes than Box 14b holds, naming them" do
-    %w[303 101 202].each { |code| create(:employee_tipped_occupation, employee: employee, occupation_code: code) }
+    result = described_class.new(company: company, year: 2026).run
 
-    expect(findings).to eq([ {
-      severity: "blocking", code: "EMPLOYEE_TIPPED_OCCUPATION_CODES_EXCESS", employee_id: employee.id,
-      message: "Ana Cruz has 3 tipped occupation codes for 2026 (101, 202, 303), but W-2 Box 14b holds two. " \
-               "End the extra codes on the employee's profile so the W-2 lists the right ones."
-    } ])
-  end
-
-  it "allows two codes, and ignores codes that ended before the year" do
-    %w[101 202].each { |code| create(:employee_tipped_occupation, employee: employee, occupation_code: code) }
-    create(:employee_tipped_occupation, employee: employee, occupation_code: "303", effective_from: Date.new(2025, 1, 1), effective_to: Date.new(2025, 12, 31))
-
-    expect(findings).to be_empty
+    expect(result[:findings].map { |finding| finding[:code] }).not_to include(a_string_matching(/OCCUPATION/))
+    expect(result[:findings].select { |finding| finding[:employee_id] == employee.id && finding[:severity] == "blocking" }).to be_empty
   end
 end

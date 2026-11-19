@@ -14,6 +14,10 @@ class W2GuAggregator
     2025 => 176_100.00,
     2026 => 184_500.00
   }.freeze
+  # Box 14b holds two Treasury tipped occupation codes; "000" marks tips
+  # from a nonqualifying occupation.
+  BOX14B_CODE_LIMIT = 2
+  NONQUALIFYING_OCCUPATION_CODE = "000"
 
   attr_reader :company, :year, :include_historical
 
@@ -234,7 +238,7 @@ class W2GuAggregator
 
       # Box 12: Coded amounts (D=401k, AA=Roth 401k)
       box12: box12,
-      box14b_tipped_occupation_codes: tipped_occupation_codes.first(2),
+      box14b_tipped_occupation_codes: self.class.box14b_codes(tipped_occupation_codes),
       excess_box14b_tipped_occupation_codes: tipped_occupation_codes.length > 2,
 
       # Box 13: Checkboxes
@@ -282,7 +286,7 @@ class W2GuAggregator
   end
 
   # The employee's Treasury tipped occupation codes in effect during year,
-  # sorted. Box 14b prints the first two; preflight blocks more than two.
+  # sorted. Box 14b prints two of them: see box14b_codes.
   def self.tipped_occupation_codes(employee, year)
     return [] if year < 2026
 
@@ -292,6 +296,18 @@ class W2GuAggregator
             .map(&:occupation_code)
             .uniq
             .sort
+  end
+
+  # The two codes Box 14b shows. The IRS General Instructions for Forms W-2
+  # and W-3 allow any two when tips came from more than two occupations, but
+  # when any tips came from a nonqualifying occupation, "000" must be one of
+  # them.
+  def self.box14b_codes(codes)
+    codes = Array(codes).uniq
+    return codes if codes.length <= BOX14B_CODE_LIMIT
+    return codes.first(BOX14B_CODE_LIMIT) unless codes.include?(NONQUALIFYING_OCCUPATION_CODE)
+
+    [ NONQUALIFYING_OCCUPATION_CODE, *(codes - [ NONQUALIFYING_OCCUPATION_CODE ]).first(BOX14B_CODE_LIMIT - 1) ]
   end
 
   def compliance_issues(rows)
@@ -337,7 +353,7 @@ class W2GuAggregator
 
       excess_occupation_codes = rows.count { |row| row[:excess_box14b_tipped_occupation_codes] }
       if excess_occupation_codes.positive?
-        issues << "#{excess_occupation_codes} employee(s) have more than two tipped occupation codes; review Box 14b before filing"
+        issues << "#{excess_occupation_codes} employee(s) received tips in more than two occupations; Box 14b shows two codes, as the IRS allows. Confirm them before filing"
       end
     end
 

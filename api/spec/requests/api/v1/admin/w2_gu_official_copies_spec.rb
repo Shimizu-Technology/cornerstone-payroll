@@ -165,6 +165,52 @@ RSpec.describe "W-2GU official copies", type: :request do
       expect(copy_logs.where("metadata->>'status' = 'final'")).to be_empty
     end
 
+    it "sends nothing when the sign-off is withdrawn while the recheck itself runs" do
+      mark_ready
+      calls = 0
+      allow_any_instance_of(W2FilingInputsFingerprint).to receive(:call).and_wrap_original do |original, *args|
+        calls += 1
+        # The second fingerprint is the recheck's, after the file was drawn.
+        W2FilingReadiness.find_by!(company: company, year: 2026).update!(status: "draft", ready_fingerprint: nil) if calls == 2
+        original.call(*args)
+      end
+
+      download("drt")
+
+      expect(calls).to eq(2)
+      expect(response).to have_http_status(:conflict)
+      expect(response.body).not_to include("123-45-6789")
+      expect(copy_logs).to be_empty
+    end
+
+    it "rechecks the sign-off and writes the audit entry under the company lock that mark-ready and preflight take" do
+      mark_ready
+      depths = { fingerprint: [], audit: [] }
+      company_locks = []
+      allow_any_instance_of(W2FilingInputsFingerprint).to receive(:call).and_wrap_original do |original, *args|
+        depths[:fingerprint] << ActiveRecord::Base.connection.open_transactions
+        original.call(*args)
+      end
+      allow(AuditLog).to receive(:record!).and_wrap_original do |original, **kwargs|
+        depths[:audit] << ActiveRecord::Base.connection.open_transactions
+        original.call(**kwargs)
+      end
+      lock_sql = lambda do |*, payload|
+        company_locks << payload[:sql] if payload[:sql].match?(/FROM "companies".*FOR UPDATE/m)
+      end
+
+      ActiveSupport::Notifications.subscribed(lock_sql, "sql.active_record") { download("drt") }
+
+      expect(response).to have_http_status(:ok), response.body
+      # One lock for the snapshot, a second for the recheck and the audit entry.
+      expect(company_locks.length).to eq(2)
+      first_lock_depth, recheck_depth = depths[:fingerprint]
+      expect(recheck_depth).to eq(first_lock_depth)
+      # The audit write runs in a savepoint inside that lock.
+      expect(depths[:audit]).to eq([ first_lock_depth + 1 ])
+      expect(copy_logs.count).to eq(1)
+    end
+
     it "refuses copies whose names or addresses can't print whole, naming each employee and box" do
       employee.update!(first_name: "Maria", address_line1: "Lot 1234 Unit 5678 " * 40)
 
