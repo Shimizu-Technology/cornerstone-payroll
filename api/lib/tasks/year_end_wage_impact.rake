@@ -14,6 +14,9 @@ namespace :year_end do
       companies.order(:id).find_each do |company|
         impact = W2GuWageImpact.new(company, year).generate
         puts CSV.generate_line([ company.id, year, *impact.values_at(:box1, :box3, :box5).flatten.map { |amount| format("%.2f", amount) } ])
+      rescue StandardError => e
+        # One company's problem must not hide every other company's result.
+        warn "company #{company.id}: #{e.class}: #{e.message.to_s.lines.first.to_s.strip}"
       end
     end
   end

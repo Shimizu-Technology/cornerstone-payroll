@@ -41,6 +41,7 @@ class Form1099NecAggregator
           "The configured #{year} filing threshold is $#{filing_threshold.to_f}.",
           "Verify TIN/SSN for each contractor before filing.",
           "One-off contractor checks are grouped by exact payee name. They have no worker/TIN link; reconcile identity with payroll contractors before filing.",
+          *unissued_contractor_check_note,
           "Box 1 = Total gross payments to contractor during the tax year.",
           "Box 4 = Federal income tax withheld (typically $0 for contractors without backup withholding)."
         ]
@@ -96,9 +97,7 @@ class Form1099NecAggregator
   def standalone_contractor_rows
     # No employee/TIN foreign key exists on these checks. Do not silently merge
     # people by display name. Preserve the amounts and flag identity resolution.
-    checks = company.non_employee_checks.active.where(check_type: "contractor").includes(:pay_period)
-      .select { |check| (Date.new(year, 1, 1)..Date.new(year, 12, 31)).cover?(check.effective_payment_date) }
-    checks.group_by(&:payable_to).map do |name, payments|
+    standalone_contractor_checks.group_by(&:payable_to).map do |name, payments|
       total = payments.sum(0.to_d, &:amount).round(2)
       issues = [ "Missing SSN/TIN", "Missing address", "W-9 not on file",
         "One-off contractor payee has no worker/TIN link; reconcile with payroll contractor payments before filing" ]
@@ -114,6 +113,21 @@ class Form1099NecAggregator
         compliance_issues: issues
       }
     end
+  end
+
+  # Only checks that were printed or paid count; an unissued draft is not a payment.
+  def standalone_contractor_checks
+    @standalone_contractor_checks ||= year_contractor_checks.select { |check| check.printed_at.present? || check.paid_at.present? }
+  end
+
+  def year_contractor_checks
+    @year_contractor_checks ||= company.non_employee_checks.active.where(check_type: "contractor").includes(:pay_period)
+      .select { |check| (Date.new(year, 1, 1)..Date.new(year, 12, 31)).cover?(check.effective_payment_date) }
+  end
+
+  def unissued_contractor_check_note
+    unissued = year_contractor_checks.length - standalone_contractor_checks.length
+    unissued.positive? ? [ "#{unissued} contractor check(s) dated #{year} are not printed or paid yet and are not counted." ] : []
   end
 
   def contractor_row(contractor)
