@@ -7,7 +7,7 @@ RSpec.describe YearEnd::Reconciliation do
   let(:department) { create(:department, company: company) }
   let(:employee) { create(:employee, company: company, department: department) }
 
-  def pay(pay_date, **amounts)
+  def pay(pay_date, employee: self.employee, **amounts)
     period = create(:pay_period, :committed, company: company,
       start_date: pay_date - 17.days, end_date: pay_date - 3.days, pay_date: pay_date)
     create(:payroll_item, {
@@ -196,10 +196,12 @@ RSpec.describe YearEnd::Reconciliation do
     end
 
     it "explains a quarter whose 941 caps a legacy employee at the wage base" do
-      [ Date.new(2026, 2, 6), Date.new(2026, 5, 8) ].each do |pay_date|
+      # One employee crossing the base in Q2, withheld correctly on the capped $84,500.
+      { Date.new(2026, 2, 6) => 6_200, Date.new(2026, 5, 8) => 5_239 }.each do |pay_date, social_security_tax|
         pay(pay_date, gross_pay: 100_000,
           social_security_taxable_wages: nil, social_security_taxable_tips: nil, medicare_taxable_wages: nil,
-          social_security_tax: 6_200, employer_social_security_tax: 6_200, medicare_tax: 1_450, employer_medicare_tax: 1_450)
+          social_security_tax: social_security_tax, employer_social_security_tax: social_security_tax,
+          medicare_tax: 1_450, employer_medicare_tax: 1_450)
       end
       w2 = W2GuAggregator.new(company, 2026).generate
 
@@ -209,7 +211,62 @@ RSpec.describe YearEnd::Reconciliation do
       expect(wages).to include(w2_total: 184_500.0, quarterly_total: 184_500.0, difference: 0.0, status: "explained")
       expect(wages[:quarters][1]).to include(amount: 84_500.0, payroll_records: 100_000.0)
       expect(wages[:note]).to include("Q2 941 caps legacy paychecks at the Social Security wage base")
-      expect(result[:blockers].map { |blocker| blocker[:line] }).not_to include("social_security_wages", "social_security_tips")
+      expect(result[:status]).to eq("match"), result[:blockers].inspect
+      expect(result[:blockers]).to be_empty
+    end
+
+    it "does not let another employee's room over the wage base explain an employee who is nowhere near it" do
+      employee_a = employee
+      employee_b = create(:employee, company: company, department: department)
+      # A's Q1 paycheck stores $2,200 of Social Security wages on $2,000 gross
+      # with no tip base, so the Q1 941 falls back to $2,000. A then earns
+      # $182,500 in Q2, and the annual wage base hides the extra $200.
+      pay(Date.new(2026, 2, 6), employee: employee_a, social_security_taxable_wages: 2_200, social_security_taxable_tips: nil)
+      pay(Date.new(2026, 5, 8), employee: employee_a, gross_pay: 182_500,
+        social_security_taxable_wages: 182_500, social_security_taxable_tips: 0, medicare_taxable_wages: 182_500,
+        social_security_tax: 11_315, employer_social_security_tax: 11_315, medicare_tax: 2_646.25, employer_medicare_tax: 2_646.25)
+      # B is correctly capped, but has no stored FIT wages, which used to put
+      # B's $15,500 over the base into a company-wide allowance.
+      pay(Date.new(2026, 3, 6), employee: employee_b, gross_pay: 200_000, fit_taxable_wages: nil,
+        social_security_taxable_wages: 184_500, social_security_taxable_tips: 0, medicare_taxable_wages: 200_000,
+        social_security_tax: 11_439, employer_social_security_tax: 11_439, medicare_tax: 2_900, employer_medicare_tax: 2_900)
+      w2 = W2GuAggregator.new(company, 2026).generate
+
+      result = described_class.new(company: company, year: 2026, w2_report: w2).call
+
+      wages = line(result, "social_security_wages")
+      expect(wages).to include(difference: 0.0, status: "mismatch", note: nil)
+      expect(wages[:quarters][0]).to include(quarter: 1, difference: -200.0)
+      expect(wages[:look_at]).to include(a_hash_including(kind: "quarter", quarter: 1, label: "Q1 941"))
+      expect(result[:status]).to eq("mismatch")
+      expect(result[:blockers]).to include(a_hash_including(code: "RECONCILIATION_MISMATCH", line: "social_security_wages"))
+    end
+
+    it "does not let one employee's wage-first split explain another employee's Box 3/Box 7 split" do
+      # The real split: a legacy tipped employee at the wage base.
+      pay(Date.new(2026, 2, 6), gross_pay: 10_000, reported_tips: 5_000,
+        social_security_taxable_wages: nil, social_security_taxable_tips: nil, medicare_taxable_wages: nil,
+        social_security_tax: 620, employer_social_security_tax: 620, medicare_tax: 145, employer_medicare_tax: 145)
+      pay(Date.new(2026, 5, 8), gross_pay: 180_000,
+        social_security_taxable_wages: nil, social_security_taxable_tips: nil, medicare_taxable_wages: nil,
+        social_security_tax: 10_819, employer_social_security_tax: 10_819, medicare_tax: 2_610, employer_medicare_tax: 2_610)
+      # Another tipped employee, well under the base with stored bases (but
+      # missing FIT wages), whose W-2 row moves $100 of tips into wages.
+      other = create(:employee, company: company, department: department)
+      pay(Date.new(2026, 3, 6), employee: other, gross_pay: 2_000, reported_tips: 200, fit_taxable_wages: nil,
+        social_security_taxable_wages: 1_800, social_security_taxable_tips: 200)
+      w2 = W2GuAggregator.new(company, 2026).generate
+      other_row = w2[:employees].find { |row| row[:employee_id] == other.id }
+      expect(other_row).to include(box3_social_security_wages: 1_800.0, box7_social_security_tips: 200.0)
+      other_row.merge!(box3_social_security_wages: 1_900.0, box7_social_security_tips: 100.0)
+      w2[:totals][:box3_social_security_wages] += 100
+      w2[:totals][:box7_social_security_tips] -= 100
+
+      result = described_class.new(company: company, year: 2026, w2_report: w2).call
+
+      expect(line(result, "social_security_wages")).to include(difference: 5_100.0, status: "mismatch", note: nil)
+      expect(line(result, "social_security_tips")).to include(difference: -5_100.0, status: "mismatch")
+      expect(result[:status]).to eq("mismatch")
     end
 
     it "still blocks a wage/tip split that is not explained by employees at the wage base" do

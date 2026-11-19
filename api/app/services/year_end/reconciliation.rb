@@ -12,16 +12,19 @@ module YearEnd
   # totals disagree.
   #
   # The Social Security wage base is applied the same way on both sides:
-  # opening balances use the capped YTD bridge allocation the W-2GU uses, and
-  # when an employee at the wage base (or with legacy tipped rows) splits wages
-  # and tips differently on the W-2GU (wages first, for the year) than on the
-  # 941s (paycheck order), the split is explained as long as Box 3 + Box 7
-  # still equals lines 5a + 5b. Each 941's own withholding reconciliation is
-  # carried through: an unexplained employee-tax difference blocks, and a
-  # recorded-liability residual needs a reviewer's acknowledgement.
+  # opening balances use the capped YTD bridge allocation the W-2GU uses.
+  # Wage-base differences are attributed employee by employee, never pooled:
+  # a quarter's 941 may be lower than its records only by each employee's own
+  # cap, and Box 3/Box 7 may split wages and tips differently from lines 5a
+  # and 5b only where the same employee's W-2 and 941 totals agree. Each 941's
+  # own withholding reconciliation is carried through: an unexplained
+  # employee-tax difference blocks, and a recorded-liability residual needs a
+  # reviewer's acknowledgement.
   class Reconciliation
     TOLERANCE = BigDecimal("0.01")
     QUARTERS = (1..4).freeze
+    SS_KEYS = %w[social_security_wages social_security_tips].freeze
+    STORED_SS_BASES = "social_security_taxable_wages IS NOT NULL AND social_security_taxable_tips IS NOT NULL"
 
     LINES = [
       { key: "social_security_wages", label: "Social Security wages", w2_box: "Box 3",
@@ -64,9 +67,9 @@ module YearEnd
       record_values = payroll_record_values
       opening = opening_balance_values
       lines = LINES.map { |line| line_values(line, quarter_values, record_values, opening) }
-      explain_capped_legacy_quarters(lines)
+      explain_capped_quarters(lines)
       lines.each { |line| line[:status] = line[:difference].abs > TOLERANCE || line[:quarter_mismatches].any? ? "mismatch" : "match" }
-      explain_wage_base_split(lines)
+      explain_wage_base_split(lines, opening)
       lines.each { |line| describe_line(line) }
       mismatched = lines.select { |line| line[:status] == "mismatch" }
       reviews = form_941_reviews
@@ -99,7 +102,11 @@ module YearEnd
     end
 
     def filed_quarter_values(quarter)
-      report = Form941GuAggregator.new(company, year, quarter).generate
+      aggregator = Form941GuAggregator.new(company, year, quarter)
+      report = aggregator.generate
+      filed_by_employee[quarter] = aggregator.ss_taxable_by_employee.transform_values do |values|
+        { "social_security_wages" => values[:wages], "social_security_tips" => values[:tips] }
+      end
       lines = report.fetch(:lines)
       quarter_withholding[quarter] = report.fetch(:withholding_reconciliation).merge(line6_total_taxes: lines[:line6_total_taxes_before_adj])
       detail = report.fetch(:tax_detail)
@@ -113,25 +120,54 @@ module YearEnd
       }.transform_values { |value| decimal(value) }
     end
 
-    # One grouped query for committed Cornerstone payroll, plus dated imported
-    # records, using the stored bases the W-2GU itself sums.
+    # Each employee's 941 lines 5a and 5b, by quarter.
+    def filed_by_employee
+      @filed_by_employee ||= {}
+    end
+
+    # Committed Cornerstone payroll, plus dated imported records, using the
+    # stored bases the W-2GU itself sums.
     def payroll_record_values
       totals = QUARTERS.index_with { Hash.new(0.to_d) }
-      native_quarter_rows.each do |row|
-        quarter = row["quarter"].to_i
-        LINES.each { |line| totals[quarter][line[:key]] += decimal(row[line[:key]]) }
-      end
-      dated_historical_records.each do |record|
-        historical_record_values(record).each { |key, value| totals[quarter_of(record.pay_date)][key] += value }
+      employee_quarter_records.each do |(_employee_id, quarter), values|
+        LINES.each { |line| totals[quarter][line[:key]] += values[line[:key]] }
       end
       totals
     end
 
     def record_counts
-      @record_counts ||= begin
-        counts = native_quarter_rows.to_h { |row| [ row["quarter"].to_i, row["item_count"].to_i ] }
-        dated_historical_records.each { |record| counts[quarter_of(record.pay_date)] = counts.fetch(quarter_of(record.pay_date), 0) + 1 }
-        counts
+      @record_counts ||= employee_quarter_records.each_with_object(Hash.new(0)) do |((_employee_id, quarter), values), counts|
+        counts[quarter] += values[:count]
+      end
+    end
+
+    # Each employee's payroll records per quarter, from one grouped query plus
+    # dated imported records. `basis` is what the 941 allocates before it
+    # applies the wage base: the stored bases when a paycheck has both,
+    # otherwise gross less tips and the tips (its legacy fallback). Imported
+    # paychecks are allocated from their stored amounts.
+    def employee_quarter_records
+      @employee_quarter_records ||= begin
+        records = Hash.new do |hash, key|
+          hash[key] = LINES.to_h { |line| [ line[:key], 0.to_d ] }.merge(count: 0, capped_by_941: false, basis: SS_KEYS.index_with { 0.to_d })
+        end
+        native_employee_quarter_rows.each do |row|
+          values = records[[ row["employee_id"], row["quarter"].to_i ]]
+          LINES.each { |line| values[line[:key]] += decimal(row[line[:key]]) }
+          SS_KEYS.each { |key| values[:basis][key] += decimal(row["#{key}_basis"]) }
+          values[:count] += row["item_count"].to_i
+          values[:capped_by_941] ||= row["legacy_ss_count"].to_i.positive?
+        end
+        dated_historical_records.each do |record|
+          values = records[[ record.employee_id, quarter_of(record.pay_date) ]]
+          amounts = historical_record_values(record)
+          amounts.each { |key, value| values[key] += value }
+          SS_KEYS.each { |key| values[:basis][key] += amounts[key] }
+          values[:count] += 1
+          values[:capped_by_941] = true
+        end
+        records.default_proc = nil
+        records
       end
     end
 
@@ -139,12 +175,16 @@ module YearEnd
       ((date.month - 1) / 3) + 1
     end
 
-    def native_quarter_rows
-      @native_quarter_rows ||= W2PayrollItems.scope(company.id, year)
-        .group(Arel.sql("EXTRACT(QUARTER FROM pay_periods.pay_date)"))
+    def native_employee_quarter_rows
+      @native_employee_quarter_rows ||= W2PayrollItems.scope(company.id, year)
+        .group(Arel.sql("EXTRACT(QUARTER FROM pay_periods.pay_date)"), "payroll_items.employee_id")
         .select(
           Arel.sql("EXTRACT(QUARTER FROM pay_periods.pay_date)::integer AS quarter"),
+          Arel.sql("payroll_items.employee_id AS employee_id"),
           Arel.sql("COUNT(*) AS item_count"),
+          Arel.sql("COUNT(*) FILTER (WHERE NOT (#{STORED_SS_BASES})) AS legacy_ss_count"),
+          Arel.sql("SUM(CASE WHEN #{STORED_SS_BASES} THEN social_security_taxable_wages ELSE GREATEST(gross_pay - reported_tips, 0) END) AS social_security_wages_basis"),
+          Arel.sql("SUM(CASE WHEN #{STORED_SS_BASES} THEN social_security_taxable_tips ELSE reported_tips END) AS social_security_tips_basis"),
           Arel.sql("SUM(COALESCE(social_security_taxable_wages, GREATEST(gross_pay - reported_tips, 0))) AS social_security_wages"),
           Arel.sql("SUM(COALESCE(social_security_taxable_tips, reported_tips)) AS social_security_tips"),
           Arel.sql("SUM(COALESCE(medicare_taxable_wages, gross_pay)) AS medicare_wages"),
@@ -197,7 +237,7 @@ module YearEnd
       dated_employee_ids = dated_historical_records.to_set(&:employee_id)
       records = all_historical_records.reject { |record| dated_keys.include?(record.key) }
       totals = Hash.new(0.to_d)
-      records.group_by(&:employee_id).each do |employee_id, employee_records|
+      by_employee = records.group_by(&:employee_id).to_h do |employee_id, employee_records|
         bridge = bridge_values[employee_id]
         values = if bridge && !dated_employee_ids.include?(employee_id)
           bridge
@@ -205,12 +245,14 @@ module YearEnd
           capped_social_security(sum_values(employee_records), bridge)
         end
         values.each { |key, value| totals[key] += value }
+        [ employee_id, values ]
       end
       {
         present: records.any?,
         first_pay_date: records.map(&:period_start).compact.min,
         last_pay_date: records.map(&:pay_date).compact.max,
-        totals: totals
+        totals: totals,
+        by_employee: by_employee
       }
     end
 
@@ -253,18 +295,24 @@ module YearEnd
 
     # The W-2GU applies the wage base to wages first for the whole year; the
     # 941s apply it paycheck by paycheck. For an employee who reaches the base
-    # with tips (or has legacy tipped rows), the two splits differ while the
-    # Social Security total is the same. That shift is bounded by those
-    # employees' tips. It is an annual difference only: a quarter whose 941
-    # differs from its own payroll records is never explained by it.
-    def explain_wage_base_split(lines)
+    # with tips (or has legacy tipped rows), the two splits differ while that
+    # employee's Social Security total is the same. The split is explained
+    # only when every employee whose Box 3 and Box 7 differ from their own 941
+    # totals is such an employee, their Box 3 + Box 7 equals their lines
+    # 5a + 5b, and those shifts add up to the whole difference. It is an
+    # annual difference only: a quarter whose 941 differs from its own
+    # payroll records is never explained by it.
+    def explain_wage_base_split(lines, opening)
       wages = lines.find { |line| line[:key] == "social_security_wages" }
       tips = lines.find { |line| line[:key] == "social_security_tips" }
       return unless wages[:status] == "mismatch" && tips[:status] == "mismatch"
       return if [ wages, tips ].any? { |line| line[:quarter_mismatches].any? }
 
       shift = wages[:difference]
-      return if (shift + tips[:difference]).abs > TOLERANCE || shift.abs > split_allowance + TOLERANCE
+      return if (shift + tips[:difference]).abs > TOLERANCE
+
+      employee_shifts = wage_tip_shifts_by_employee(opening)
+      return if employee_shifts.nil? || (employee_shifts.values.sum(0.to_d) - shift).abs > TOLERANCE
 
       note = "Box 3 and Box 7 split Social Security wages and tips differently from lines 5a and 5b by #{money(shift.abs)}, " \
              "because the W-2 applies the wage base to wages first. Box 3 + Box 7 equals lines 5a + 5b."
@@ -273,37 +321,77 @@ module YearEnd
       end
     end
 
-    # Legacy paychecks (no stored Social Security bases) are capped at the
-    # wage base paycheck by paycheck on the 941, but their payroll records here
-    # are not capped. A quarter whose 941 is lower than its records by no more
-    # than those employees' wages and tips over the base is explained. A
-    # quarter whose 941 is higher, or lower by more, still blocks.
-    def explain_capped_legacy_quarters(lines)
-      ss_lines = lines.select { |line| line[:key].in?(%w[social_security_wages social_security_tips]) }
-      shortfalls = ss_lines.flat_map { |line| line[:quarter_mismatches] }
-      return if shortfalls.empty? || shortfalls.any? { |quarter| quarter[:difference].positive? }
-      return if shortfalls.sum(0.to_d) { |quarter| quarter[:difference].abs } > legacy_excess_over_base + TOLERANCE
+    # Each employee's Box 3 shift against their own 941 wages and opening
+    # balances, or nil when any employee's difference is not a wage-first
+    # split: their Social Security total differs, the W-2 moves wages into
+    # tips, or they are neither at the wage base nor on paychecks the 941
+    # caps itself.
+    def wage_tip_shifts_by_employee(opening)
+      rows = Array(w2_report[:employees])
+      return nil if rows.any? { |row| row[:employee_id].nil? }
 
-      ss_lines.each do |line|
-        line[:capped_quarters] = line[:quarter_mismatches]
-        line[:quarter_mismatches] = []
+      rows_by_employee = rows.index_by { |row| row[:employee_id] }
+      filed = annual_filed_by_employee
+      (rows_by_employee.keys | filed.keys | opening[:by_employee].keys).each_with_object({}) do |employee_id, shifts|
+        row = rows_by_employee.fetch(employee_id, {})
+        box3 = decimal(row[:box3_social_security_wages])
+        box7 = decimal(row[:box7_social_security_tips])
+        reported = SS_KEYS.to_h do |key|
+          [ key, filed.dig(employee_id, key).to_d + opening[:by_employee].dig(employee_id, key).to_d ]
+        end
+        shift_wages = box3 - reported["social_security_wages"]
+        shift_tips = box7 - reported["social_security_tips"]
+        next if shift_wages.abs <= TOLERANCE && shift_tips.abs <= TOLERANCE
+
+        at_base = box3 + box7 >= ss_wage_base - TOLERANCE
+        capped_by_941 = QUARTERS.any? { |quarter| employee_quarter_records.dig([ employee_id, quarter ], :capped_by_941) }
+        return nil unless (shift_wages + shift_tips).abs <= TOLERANCE && shift_wages.positive? && (at_base || capped_by_941)
+
+        shifts[employee_id] = shift_wages
       end
     end
 
-    def legacy_excess_over_base
-      Array(w2_report[:employees]).sum(0.to_d) do |row|
-        next 0.to_d unless row[:missing_committed_tax_bases]
-
-        [ decimal(row[:box5_medicare_wages_tips]) - decimal(row[:box3_social_security_wages]) - decimal(row[:box7_social_security_tips]), 0.to_d ].max
+    def annual_filed_by_employee
+      filed_by_employee.values.each_with_object({}) do |employees, totals|
+        employees.each do |employee_id, values|
+          employee_totals = totals[employee_id] ||= SS_KEYS.index_with { 0.to_d }
+          SS_KEYS.each { |key| employee_totals[key] += values[key] }
+        end
       end
     end
 
-    def split_allowance
-      base = ss_wage_base - TOLERANCE
-      Array(w2_report[:employees]).sum(0.to_d) do |row|
-        at_base = decimal(row[:box3_social_security_wages]) + decimal(row[:box7_social_security_tips]) >= base
-        at_base || row[:missing_committed_tax_bases] ? decimal(row[:reported_tips_total]).abs : 0.to_d
+    # Legacy paychecks (no stored Social Security bases) and dated imported
+    # paychecks are capped at the wage base paycheck by paycheck on the 941,
+    # but their payroll records here are not capped. A quarter's 941 may be
+    # lower than its records only by each employee's own cap: an employee
+    # whose 941 amount differs from their records is explained only when the
+    # 941 started from exactly those records, so only the cap lowered it. A
+    # quarter whose 941 is higher, or differs for any other reason, still
+    # blocks.
+    def explain_capped_quarters(lines)
+      lines.select { |line| line[:key].in?(SS_KEYS) }.each do |line|
+        capped, unexplained = line[:quarter_mismatches].partition { |quarter| capped_quarter?(line[:key], quarter) }
+        line[:capped_quarters] = capped
+        line[:quarter_mismatches] = unexplained
       end
+    end
+
+    def capped_quarter?(key, quarter)
+      return false unless quarter[:difference].negative?
+
+      filed = filed_by_employee.fetch(quarter[:quarter], {})
+      employee_ids = employee_quarter_records.keys.filter_map { |employee_id, record_quarter| employee_id if record_quarter == quarter[:quarter] }
+      reductions = (employee_ids | filed.keys).sum(0.to_d) do |employee_id|
+        records = employee_quarter_records[[ employee_id, quarter[:quarter] ]]
+        return false if records.nil?
+
+        difference = filed.dig(employee_id, key).to_d - records[key]
+        next 0.to_d if difference.abs <= TOLERANCE
+        return false if difference.positive? || (records[key] - records[:basis][key]).abs > TOLERANCE
+
+        difference
+      end
+      (quarter[:difference] - reductions).abs <= TOLERANCE
     end
 
     def quarter_withholding
