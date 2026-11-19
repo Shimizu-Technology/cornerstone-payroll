@@ -43,7 +43,9 @@ function stepBody(checklist: Checklist, step: YearEndStep, onSaved: (message: st
   }
 }
 
-// Final copies open the step; drafts stay folded under the work still to do.
+// Final copies open the step, including when marking ready on this page
+// makes them final; drafts stay folded under the work still to do. The step
+// stays mounted while folded so a download in progress still saves.
 function finalDocumentsReady(step: YearEndStep): boolean {
   return step.key === 'print_and_file' && step.status === 'available' && step.data.final;
 }
@@ -180,7 +182,12 @@ export function YearEndChecklist(): ReactElement {
             <ol className="space-y-3" aria-busy={loading || undefined}>
               {checklist.steps.map((step) => (
                 <li key={`${checklist.company.id}-${step.key}-${step.status}`}>
-                  <StepCard step={step} isNext={checklist.next_step === step.key} defaultOpen={finalDocumentsReady(step)}>
+                  <StepCard
+                    step={step}
+                    isNext={checklist.next_step === step.key}
+                    defaultOpen={finalDocumentsReady(step)}
+                    keepMounted={step.key === 'print_and_file'}
+                  >
                     {stepBody(checklist, step, onSaved, onRefresh)}
                   </StepCard>
                 </li>

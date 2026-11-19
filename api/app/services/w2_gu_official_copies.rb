@@ -13,8 +13,21 @@
 #             employer's paper record.
 #
 # Box values come straight from W2GuAggregator rows. Boxes the app does not
-# model (8, 10, 11, 14a and the control number) stay blank.
+# model (8, 10, 11, 14a and the control number) stay blank. Nothing is cut
+# short: a value that won't print whole, even at the smallest font size,
+# refuses the whole download with a list of what to shorten.
 class W2GuOfficialCopies < OfficialPdfOverlay
+  # One line per value to fix, naming the person and the box.
+  class DoesNotFit < ArgumentError
+    attr_reader :problems
+
+    def initialize(problems)
+      @problems = problems
+      super("These W-2GU copies can't be made until #{problems.one? ? 'this is' : 'these are'} fixed:\n" +
+        problems.map { |problem| "• #{problem}" }.join("\n"))
+    end
+  end
+
   TEMPLATE_PATH = Rails.root.join("lib/assets/irs_form_w2gu_2026.pdf")
   SUPPORTED_TAX_YEARS = [ 2026 ].freeze
   KINDS = %w[employee drt].freeze
@@ -58,6 +71,15 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   ].freeze
   # The margin above the top form, for the sorting line.
   MARGIN_NOTE = [ 38.0, 758.0, 574.0, 770.0 ].freeze
+  # The values that can run long: how each is drawn (lift 0 puts a block at
+  # the top of its box), and the line that names it when it doesn't fit.
+  TEXT_FIELDS = {
+    first_name: { size: 9, problem: "the first name and middle initial are too long to fit Box e — shorten them on the employee's profile" },
+    last_name: { size: 9, problem: "the last name is too long to fit Box e — shorten it on the employee's profile" },
+    employee_address: { lift: 0, size: 9, valign: :top, min_font_size: 6.5,
+      problem: "the address is too long to fit Box f — shorten it on the employee's profile" }
+  }.freeze
+  EMPLOYER_TEXT = { lift: 0, size: 9, valign: :top, min_font_size: 6.5 }.freeze
 
   Sheet = Struct.new(:top, :bottom, :people, keyword_init: true)
 
@@ -79,13 +101,15 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   end
 
   # report: unmodified W2GuAggregator output for company and its year.
-  def initialize(company:, report:, kind:, draft:)
+  # practice: a test or practice workspace, whose copies are always drafts.
+  def initialize(company:, report:, kind:, draft:, practice: false)
     raise ArgumentError, "Unknown W-2GU copy: #{kind}" unless KINDS.include?(kind.to_s)
 
     @company = company
     @report = report.deep_symbolize_keys
     @kind = kind.to_s
-    @draft = draft
+    @practice = practice
+    @draft = draft || practice
     raise TemplateUnavailableError, self.class.unsupported_message(year) unless self.class.supported_tax_year?(year)
 
     super(template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
@@ -94,6 +118,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   def generate
     raise ArgumentError, "No employees have #{year} W-2 wages" if people.empty?
 
+    check_fit!
     template = load_template!
     overlay = CombinePDF.parse(build_overlay_pdf(sheets.length))
     bases = {}
@@ -117,7 +142,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
 
   private
 
-  attr_reader :company, :report, :kind, :draft
+  attr_reader :company, :report, :kind, :draft, :practice
 
   def year
     report.dig(:meta, :year).to_i
@@ -194,8 +219,39 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   def draw_document_status(pdf, _page_number)
     return unless draft
 
+    reason = practice ? "a practice copy" : "the #{year} W-2s are not marked ready"
     PdfPreviewWatermark.draw_page(pdf, label: "DRAFT", bands: 2,
-      note: "DRAFT — the #{year} W-2s are not marked ready. Do not give to employees or file.")
+      note: "DRAFT — #{reason}. Do not give to employees or file.")
+  end
+
+  # Measures every long value at its box's smallest font size before any
+  # page is drawn, and lists each one that would be cut short. More Box 12
+  # entries than the form holds also need a second W-2, which these copies
+  # don't make.
+  def check_fit!
+    pdf = PdfUnicodeFont.document(page_size: PAGE_SIZE, margin: 0)
+    pdf.font("Helvetica")
+    problems = []
+    unless text_fits?(pdf, FIELDS[:employer], employer_lines.join("\n"), **EMPLOYER_TEXT.except(:lift))
+      problems << "The employer's name and address are too long to fit Box c — shorten them in the client's company settings."
+    end
+    people.each do |person|
+      employee = person[:employee]
+      TEXT_FIELDS.each do |field, options|
+        next if text_fits?(pdf, FIELDS[field], field_text(employee, field), **options.except(:lift, :problem))
+
+        problems << "#{employee.full_name}: #{options[:problem]}."
+      end
+      if person[:row][:excess_box14b_tipped_occupation_codes]
+        problems << "#{employee.full_name}: more than two tipped occupation codes, but Box 14b holds two — end the extra codes on the employee's profile."
+      end
+      box12 = Array(person[:row][:box12]).length
+      if box12 > BOX12.length
+        problems << "#{employee.full_name}: #{box12} Box 12 entries, but one W-2 holds #{BOX12.length}. " \
+                    "The IRS requires a second W-2 for the rest, which these copies can't print."
+      end
+    end
+    raise DoesNotFit, problems if problems.any?
   end
 
   def draw_margin_note(pdf, sheet, page_number)
@@ -221,10 +277,10 @@ class W2GuOfficialCopies < OfficialPdfOverlay
 
     draw_text_box(pdf, at.(FIELDS[:ssn]), ssn_for(employee, row), size: 10)
     draw_text_box(pdf, at.(FIELDS[:ein]), formatted_ein, size: 10)
-    draw_text_box(pdf, at.(FIELDS[:employer], 0), employer_lines.join("\n"), size: 9, valign: :top, min_font_size: 6.5)
-    draw_text_box(pdf, at.(FIELDS[:first_name]), first_name_and_initial(employee), size: 9)
-    draw_text_box(pdf, at.(FIELDS[:last_name]), employee.last_name, size: 9)
-    draw_text_box(pdf, at.(FIELDS[:employee_address], 0), employee_address_lines(employee).join("\n"), size: 9, valign: :top, min_font_size: 6.5)
+    draw_text_box(pdf, at.(FIELDS[:employer], EMPLOYER_TEXT[:lift]), employer_lines.join("\n"), **EMPLOYER_TEXT.except(:lift))
+    TEXT_FIELDS.each do |field, options|
+      draw_text_box(pdf, at.(FIELDS[field], options.fetch(:lift, TEXT_LIFT)), field_text(employee, field), **options.except(:lift, :problem))
+    end
 
     {
       box1: :box1_wages_tips_other_comp,
@@ -236,13 +292,13 @@ class W2GuOfficialCopies < OfficialPdfOverlay
     }.each { |box, key| draw_amount(pdf, at.(FIELDS[box]), row[key]) }
     draw_amount(pdf, at.(FIELDS[:box7]), row[:box7_social_security_tips]) if row[:box7_social_security_tips].to_d.positive?
 
-    Array(row[:box12]).first(BOX12.length).each_with_index do |entry, index|
+    Array(row[:box12]).each_with_index do |entry, index|
       code_rect, amount_rect = BOX12[index]
       draw_text_box(pdf, at.(code_rect), entry[:code], size: 9, align: :center)
       draw_amount(pdf, at.(amount_rect), entry[:amount])
     end
     draw_checkbox(pdf, at.(FIELDS[:box13_retirement_plan], 0), row[:box13_retirement_plan])
-    Array(row[:box14b_tipped_occupation_codes]).first(2).each_with_index do |code, index|
+    Array(row[:box14b_tipped_occupation_codes]).each_with_index do |code, index|
       draw_text_box(pdf, at.(FIELDS[:box14b][index]), code, size: 9, align: :center)
     end
   end
@@ -274,6 +330,14 @@ class W2GuOfficialCopies < OfficialPdfOverlay
     @employer_lines ||= begin
       PdfUnicodeFont.ensure_printable!(company.name, label: "Employer")
       [ company.name, company.address_line1, company.address_line2, city_line(company) ].compact_blank
+    end
+  end
+
+  def field_text(employee, field)
+    case field
+    when :first_name then first_name_and_initial(employee)
+    when :last_name then employee.last_name
+    when :employee_address then employee_address_lines(employee).join("\n")
     end
   end
 

@@ -278,10 +278,17 @@ class W2GuAggregator
   end
 
   def tipped_occupation_codes_for(employee)
+    self.class.tipped_occupation_codes(employee, year)
+  end
+
+  # The employee's Treasury tipped occupation codes in effect during year,
+  # sorted. Box 14b prints the first two; preflight blocks more than two.
+  def self.tipped_occupation_codes(employee, year)
     return [] if year < 2026
 
+    range = Date.new(year, 1, 1)..Date.new(year, 12, 31)
     employee.employee_tipped_occupations
-            .select { |occupation| occupation.effective_from <= year_range.end && (occupation.effective_to.nil? || occupation.effective_to >= year_range.begin) }
+            .select { |occupation| occupation.effective_from <= range.end && (occupation.effective_to.nil? || occupation.effective_to >= range.begin) }
             .map(&:occupation_code)
             .uniq
             .sort

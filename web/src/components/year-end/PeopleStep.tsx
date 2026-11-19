@@ -9,6 +9,7 @@ import { employeesApi, yearEndApi } from '@/services/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { employeeEditPath } from '@/lib/routes';
 import type { YearEndChecklist, YearEndOneOffPayee, YearEndPerson, ActiveYearEndStep } from '@/lib/year-end';
+import { IssueList } from './StepCard';
 import { useStillMounted } from './useStillMounted';
 import { StaleReviewNotice } from './StaleReview';
 import { isStaleReview, useStaleReview } from './useStaleReview';
@@ -262,17 +263,25 @@ export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
   const contractors = step.data.contractors ?? [];
   const oneOffPayees = step.data.one_off_payees ?? [];
   const canEditInline = !checklist.company.test_workspace;
+  // Box 14b holds two codes; these are fixed on the employee's profile.
+  const occupationIssues = step.issues.filter((issue) => issue.code === 'TIPPED_OCCUPATION_CODES_EXCESS');
 
   if (employees.length === 0 && contractors.length === 0 && oneOffPayees.length === 0) {
     return (
-      <p className="text-sm text-neutral-700">
-        {step.data.contractor_error ?? `All ${step.data.w2_employee_count ?? 0} W-2 employees${checklist.files_1099 ? ` and ${step.data.contractor_count ?? 0} 1099 payees` : ''} have what the forms need.`}
-      </p>
+      <div>
+        <IssueList issues={occupationIssues} />
+        {(occupationIssues.length === 0 || step.data.contractor_error) && (
+          <p className="text-sm text-neutral-700">
+            {step.data.contractor_error ?? `All ${step.data.w2_employee_count ?? 0} W-2 employees${checklist.files_1099 ? ` and ${step.data.contractor_count ?? 0} 1099 payees` : ''} have what the forms need.`}
+          </p>
+        )}
+      </div>
     );
   }
 
   return (
     <div className="space-y-5">
+      <IssueList issues={occupationIssues} />
       <PeopleList title="Employees" people={employees} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
       <PeopleList title="1099 payees" people={contractors} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
       <OneOffPayeeList checklist={checklist} payees={oneOffPayees} onSaved={onSaved} onRefresh={onRefresh} />

@@ -2,10 +2,18 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrintAndFileStep } from './PrintAndFileStep';
+import { ApiError } from '@/services/api';
 import type { ActiveYearEndStep, YearEndChecklist, YearEndDocument } from '@/lib/year-end';
 
 const mocks = vi.hoisted(() => ({ downloadDocument: vi.fn() }));
-vi.mock('@/services/api', () => ({ yearEndApi: { downloadDocument: mocks.downloadDocument } }));
+vi.mock('@/services/api', () => ({
+  yearEndApi: { downloadDocument: mocks.downloadDocument },
+  ApiError: class ApiError extends Error {
+    status: number;
+    data: unknown;
+    constructor(message: string, status = 500, _details?: unknown, data?: unknown) { super(message); this.status = status; this.data = data; }
+  },
+}));
 
 const checklist = {
   company: { id: 7, name: 'Tumon Bakery', active: true, test_workspace: false },
@@ -21,7 +29,7 @@ function document(key: string, overrides: Partial<YearEndDocument> = {}): YearEn
     description: drt ? 'Your record; not mailed when you e-file.' : 'Print and give to each employee by Feb 1, 2027.',
     detail: drt ? '4 employees, two to a page.' : '4 employees, one sheet each, by last name.',
     format: 'pdf', contains_full_ssn: drt, draft: true, available: true, unavailable_reason: null,
-    download: { path: '/admin/reports/w2_gu_official_copies', params: { year: 2026, copy: drt ? 'drt' : 'employee' } },
+    download: { path: drt ? '/admin/reports/w2_gu_copy_1_drt' : '/admin/reports/w2_gu_employee_copies', params: { year: 2026 } },
     ...overrides,
   };
 }
@@ -76,7 +84,7 @@ describe('PrintAndFileStep', () => {
 
     fireEvent.click(within(row('Copy 1 for Guam DRT')).getByRole('button', { name: 'Download PDF' }));
 
-    expect(mocks.downloadDocument).toHaveBeenCalledWith({ path: '/admin/reports/w2_gu_official_copies', params: { year: 2026, copy: 'drt' } }, 7);
+    expect(mocks.downloadDocument).toHaveBeenCalledWith({ path: '/admin/reports/w2_gu_copy_1_drt', params: { year: 2026 } }, 7);
     const button = within(row('Copy 1 for Guam DRT')).getByRole('button', { name: /Preparing PDF/ });
     expect(button.getAttribute('aria-busy')).toBe('true');
 
@@ -103,6 +111,49 @@ describe('PrintAndFileStep', () => {
     await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
     expect(mocks.downloadDocument).toHaveBeenCalledTimes(2);
     expect(within(row('Employee copies (B and C)')).queryByRole('alert')).toBeNull();
+  });
+
+  it('asks for a fresh download when the W-2 data changed while the file was made', async () => {
+    const changed = "This client's W-2 data changed while the file was being made. Download again.";
+    mocks.downloadDocument
+      .mockRejectedValueOnce(new ApiError(`${changed} Reload the record and review the latest values before trying again.`, 409, undefined, { error: changed }))
+      .mockResolvedValueOnce({ blob: new Blob(['%PDF']), filename: 'copies.pdf' });
+    render(<PrintAndFileStep checklist={checklist} step={step(true)} />);
+
+    fireEvent.click(within(row('Copy 1 for Guam DRT')).getByRole('button', { name: 'Download PDF' }));
+
+    const alert = await within(row('Copy 1 for Guam DRT')).findByRole('alert');
+    // Only the server's instruction, not the generic reload advice.
+    expect(within(alert).getByText(changed).textContent).toBe(changed);
+    expect(createObjectURL).not.toHaveBeenCalled();
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+  });
+
+  it('keeps each line of a list of fields to shorten', async () => {
+    const message = "These W-2GU copies can't be made until these are fixed:\n• Maria Cruz: the address is too long to fit Box f — shorten it on the employee's profile.\n• Jose Aguon: the last name is too long to fit Box e — shorten it on the employee's profile.";
+    mocks.downloadDocument.mockRejectedValueOnce(new Error(message));
+    render(<PrintAndFileStep checklist={checklist} step={step(false)} />);
+
+    fireEvent.click(within(row('Employee copies (B and C)')).getByRole('button', { name: 'Download draft' }));
+
+    const text = within(await within(row('Employee copies (B and C)')).findByRole('alert')).getByText(/Maria Cruz/);
+    expect(text.textContent).toBe(message);
+    expect(text.className).toContain('whitespace-pre-line');
+  });
+
+  it('withholds Copy 1 in a practice copy, saying why, while employee copies stay available as drafts', () => {
+    const practice = { ...checklist, company: { ...checklist.company, test_workspace: true } };
+    const reason = 'Not available in a practice copy — it contains full SSNs.';
+    render(<PrintAndFileStep checklist={practice} step={step(false, [
+      document('w2_employee_copies'),
+      document('w2_drt_copy_1', { available: false, unavailable_reason: reason }),
+    ])} />);
+
+    const drt = row('Copy 1 for Guam DRT');
+    expect(within(drt).getByText(reason)).toBeTruthy();
+    expect(within(drt).getByRole('button', { name: 'Download draft' }).hasAttribute('disabled')).toBe(true);
+    expect(within(row('Employee copies (B and C)')).getByRole('button', { name: 'Download draft' }).hasAttribute('disabled')).toBe(false);
   });
 
   it('explains a document that cannot be downloaded yet', () => {

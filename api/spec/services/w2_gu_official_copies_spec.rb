@@ -50,8 +50,11 @@ RSpec.describe W2GuOfficialCopies do
     PDF::Reader.new(StringIO.new(described_class.new(company: company, report: report, kind: kind, draft: draft).generate))
   end
 
+  # Both readings of each page: Page#text keeps the template's overlapping
+  # labels legible, and glyph rows (PdfBoxText) keep values a watermark would
+  # make Page#text overwrite.
   def text(reader)
-    reader.pages.map(&:text)
+    reader.pages.map { |page| [ page.text, *pdf_rows(page) ].join("\n") }
   end
 
   describe "employee copies (B and C)" do
@@ -70,7 +73,7 @@ RSpec.describe W2GuOfficialCopies do
     end
 
     it "shows only the last four SSN digits, never the full number" do
-      expect(pages[0].scan("XXX-XX-1234").length).to eq(2)
+      expect(pdf_rows(reader.pages[0]).join("\n").scan("XXX-XX-1234").length).to eq(2)
       expect(pages[4]).to include("XXX-XX-4567")
       all = pages.join(" ")
       [ "234-56-1234", "234561234", "123-45-4567", "123454567", "345-67-7890" ].each { |ssn| expect(all).not_to include(ssn) }
@@ -84,7 +87,7 @@ RSpec.describe W2GuOfficialCopies do
 
       santos_sheet = pages[4]
       expect(santos_sheet).to include("Maria L.", "48250.50", "3749.50")
-      expect(santos_sheet.scan(/\bX\b/).length).to eq(2) # Box 13 retirement plan, on Copy B and Copy C
+      expect(pdf_rows(reader.pages[4]).join("\n").scan(/\bX\b/).length).to eq(2) # Box 13 retirement plan, on Copy B and Copy C
 
       cruz_sheet = pages[2]
       expect(cruz_sheet).to include("27500.75")
@@ -115,6 +118,86 @@ RSpec.describe W2GuOfficialCopies do
     end
   end
 
+  describe "where values print" do
+    fields = described_class::FIELDS
+    box12a_code, box12a_amount = described_class::BOX12.first
+    # Values sit a little above each widget rectangle's bottom rule.
+    lift = ->(rect) { [ rect[0], rect[1], rect[2], rect[3] + described_class::TEXT_LIFT ] }
+    expected_boxes = lambda do |ssn:, box1:, box12a: nil|
+      {
+        lift.(fields[:ssn]) => ssn, lift.(fields[:ein]) => "98-7654321",
+        lift.(fields[:box1]) => box1, lift.(fields[:box2]) => "2150.25", lift.(fields[:box3]) => "52000.00",
+        lift.(fields[:box5]) => "52000.00", lift.(box12a_code) => box12a&.first.to_s, lift.(box12a_amount) => box12a&.last.to_s
+      }
+    end
+
+    def expect_boxes(page, boxes, dy: 0)
+      boxes.each do |rect, value|
+        expect(text_in_box(page, shift_rect(rect, dy))).to eq(value), "expected #{value.inspect} in #{shift_rect(rect, dy).inspect}"
+      end
+    end
+
+    it "puts each value inside its box on Copy B and on Copy C below it" do
+      page = render(kind: "employee", draft: true).pages.first
+      boxes = expected_boxes.(ssn: "XXX-XX-1234", box1: "31000.00", box12a: %w[TP 1250.00])
+
+      expect_boxes(page, boxes)
+      expect_boxes(page, boxes, dy: described_class::HALF_PAGE)
+    end
+
+    it "puts each value inside its box for both employees on a Copy 1 page" do
+      page = render(kind: "drt", draft: false).pages.first
+
+      expect_boxes(page, expected_boxes.(ssn: "234-56-1234", box1: "31000.00", box12a: %w[TP 1250.00]))
+      expect_boxes(page, expected_boxes.(ssn: "345-67-7890", box1: "27500.75"), dy: described_class::HALF_PAGE)
+    end
+  end
+
+  describe "values that don't fit" do
+    def generate(kind: "employee", rows: report)
+      described_class.new(company: company, report: rows, kind: kind, draft: true).generate
+    end
+
+    it "lists every employee and box that would be cut short instead of printing part of it" do
+      santos.update_columns(first_name: "Maria", address_line1: "Lot 1234 Unit 5678 Barrigada Heights " * 20)
+      cruz.update_columns(last_name: "Cruz-Santos de la Torre y Fernandez Aguon")
+
+      expect { generate }.to raise_error(described_class::DoesNotFit) { |error|
+        expect(error.problems).to eq([
+          "Ana Cruz-Santos de la Torre y Fernandez Aguon: the last name is too long to fit Box e — shorten it on the employee's profile.",
+          "Maria Lourdes Santos: the address is too long to fit Box f — shorten it on the employee's profile."
+        ])
+        expect(error.message).to start_with("These W-2GU copies can't be made until these are fixed:\n• Ana Cruz-Santos")
+      }
+    end
+
+    it "names an employer whose name and address can't fit Box c" do
+      company.update_columns(name: "Tumon Bay Bakery and Catering Services of the Western Pacific " * 12)
+
+      expect { generate(kind: "drt") }.to raise_error(described_class::DoesNotFit, /employer's name and address are too long to fit Box c/)
+    end
+
+    it "prints a long value that fits by shrinking it, whole" do
+      santos.update_columns(address_line1: "1234 Chalan Santo Papa Juan Pablo Dos, Unit 5B")
+
+      reader = PDF::Reader.new(StringIO.new(generate))
+      expect(text(reader)[4]).to include("1234 Chalan Santo Papa Juan Pablo Dos, Unit 5B")
+    end
+
+    it "refuses more Box 12 entries than one W-2 holds" do
+      entries = %w[D AA TP TT W].map { |code| { code: code, amount: 10 } }
+      rows = report.merge(employees: [ row(cruz, box1: 1_000, box12: entries) ])
+
+      expect { generate(rows: rows) }.to raise_error(described_class::DoesNotFit, /Ana Cruz: 5 Box 12 entries, but one W-2 holds 4/)
+    end
+
+    it "refuses an employee with more tipped occupation codes than Box 14b holds" do
+      rows = report.merge(employees: [ row(cruz, box1: 1_000, occupations: %w[101 202]).merge(excess_box14b_tipped_occupation_codes: true) ])
+
+      expect { generate(rows: rows) }.to raise_error(described_class::DoesNotFit, /Ana Cruz: more than two tipped occupation codes/)
+    end
+  end
+
   describe "draft watermark" do
     it "marks every page of a draft and none of the final copies" do
       draft = text(render(kind: "employee", draft: true))
@@ -122,6 +205,14 @@ RSpec.describe W2GuOfficialCopies do
 
       final = text(render(kind: "drt", draft: false))
       expect(final.join).not_to include("DRAFT")
+    end
+
+    it "marks a practice copy as a draft even when the W-2s are ready" do
+      copies = described_class.new(company: company, report: report, kind: "employee", draft: false, practice: true)
+
+      pages = text(PDF::Reader.new(StringIO.new(copies.generate)))
+      expect(pages).to all(include("DRAFT — a practice copy. Do not give to employees or file."))
+      expect(copies.filename).to end_with("_DRAFT.pdf")
     end
 
     it "names drafts in the filename" do

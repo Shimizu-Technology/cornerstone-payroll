@@ -45,15 +45,20 @@ RSpec.describe "W-2GU official copies", type: :request do
   end
 
   def download(copy, year: 2026)
-    get "/api/v1/admin/reports/w2_gu_official_copies", params: { year: year, copy: copy }
+    get "/api/v1/admin/reports/#{copy == 'drt' ? 'w2_gu_copy_1_drt' : 'w2_gu_employee_copies'}", params: { year: year }
   end
 
+  def pdf_pages
+    PDF::Reader.new(StringIO.new(response.body)).pages
+  end
+
+  # Text by glyph position; see PdfBoxText for why not Page#text.
   def pdf_text
-    PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+    pdf_pages.flat_map { |page| pdf_rows(page) }.join("\n")
   end
 
   def copy_logs
-    AuditLog.where(action: "reports#w2_gu_official_copies").order(:id)
+    AuditLog.where(action: %w[reports#w2_gu_employee_copies reports#w2_gu_copy_1_drt]).order(:id)
   end
 
   context "when Cornerstone files the W-2s" do
@@ -66,7 +71,11 @@ RSpec.describe "W-2GU official copies", type: :request do
       expect(response.media_type).to eq("application/pdf")
       expect(response.headers["Cache-Control"]).to include("no-store")
       expect(response.headers["Content-Disposition"]).to include("W-2GU_2026_Tumon_Bakery_Employee_Copies_B_C_DRAFT.pdf")
-      expect(pdf_text).to include("DRAFT — the 2026 W-2s are not marked ready", "XXX-XX-6789")
+      expect(pdf_text).to include("DRAFT — the 2026 W-2s are not marked ready")
+      # Copy B on top and Copy C below both show only the last four digits.
+      copy_b_ssn = W2GuOfficialCopies::FIELDS[:ssn]
+      expect(text_in_box(pdf_pages.first, copy_b_ssn)).to eq("XXX-XX-6789")
+      expect(text_in_box(pdf_pages.first, shift_rect(copy_b_ssn, W2GuOfficialCopies::HALF_PAGE))).to eq("XXX-XX-6789")
       expect(pdf_text).not_to include("123-45-6789")
       expect(copy_logs.last.metadata).to include("document_kind" => "w2_gu_employee_copies_b_c", "status" => "draft", "contains_full_ssn" => false)
     end
@@ -103,7 +112,7 @@ RSpec.describe "W-2GU official copies", type: :request do
       )
       expect(log.to_json).not_to include("6789")
       # The request's own generic audit entry is not written as well.
-      expect(AuditLog.where(action: "reports#w2_gu_official_copies").count).to eq(1)
+      expect(AuditLog.where(action: "reports#w2_gu_copy_1_drt").count).to eq(1)
     end
 
     it "sends nothing when the download can't be recorded" do
@@ -117,13 +126,53 @@ RSpec.describe "W-2GU official copies", type: :request do
       expect(response.parsed_body["error"]).to include("not sent")
     end
 
-    it "rejects an unknown copy and a year without the IRS template" do
-      download("copy_a")
-      expect(response).to have_http_status(:unprocessable_content)
-
+    it "rejects a year without the IRS template" do
       download("drt", year: 2025)
       expect(response).to have_http_status(:unprocessable_content)
       expect(response.parsed_body["error"]).to include("2026 only")
+      expect(copy_logs).to be_empty
+    end
+
+    it "sends nothing when the client's W-2 data changes while the file is made" do
+      mark_ready
+      allow_any_instance_of(W2GuOfficialCopies).to receive(:generate).and_wrap_original do |original, *args|
+        pdf = original.call(*args)
+        # Another tab saves a new address after the copies were drawn.
+        employee.update!(address_line1: "200 New Street")
+        pdf
+      end
+
+      download("drt")
+
+      expect(response).to have_http_status(:conflict)
+      expect(response.media_type).to eq("application/json")
+      expect(response.parsed_body["error"]).to eq("This client's W-2 data changed while the file was being made. Download again.")
+      expect(response.body).not_to include("123-45-6789")
+      expect(copy_logs).to be_empty
+    end
+
+    it "sends nothing when the sign-off is withdrawn while the file is made" do
+      mark_ready
+      allow_any_instance_of(W2GuOfficialCopies).to receive(:generate).and_wrap_original do |original, *args|
+        pdf = original.call(*args)
+        W2FilingReadiness.find_by!(company: company, year: 2026).update_columns(ready_fingerprint: nil, status: "draft")
+        pdf
+      end
+
+      download("employee")
+
+      expect(response).to have_http_status(:conflict)
+      expect(copy_logs.where("metadata->>'status' = 'final'")).to be_empty
+    end
+
+    it "refuses copies whose names or addresses can't print whole, naming each employee and box" do
+      employee.update!(first_name: "Maria", address_line1: "Lot 1234 Unit 5678 " * 40)
+
+      download("employee")
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["problems"]).to eq([ "Maria Santos: the address is too long to fit Box f — shorten it on the employee's profile." ])
+      expect(response.parsed_body["error"]).to include("Maria Santos: the address is too long")
       expect(copy_logs).to be_empty
     end
 
@@ -140,6 +189,73 @@ RSpec.describe "W-2GU official copies", type: :request do
       download("drt")
       expect(response).to have_http_status(:forbidden)
       expect(copy_logs).to be_empty
+    end
+  end
+
+  describe "who may download Copy 1" do
+    let!(:accountant) { create(:user, company: company, organization: company.organization, role: "accountant") }
+    let!(:assignment) { create(:company_assignment, user: accountant, company: company, client_management: false, granted_by: admin) }
+
+    before do
+      decide("cornerstone")
+      mark_ready
+    end
+
+    it "gives an accountant without client management the employee copies but not Copy 1" do
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(accountant)
+
+      download("drt")
+      expect(response).to have_http_status(:forbidden)
+      expect(response.body).not_to include("123-45-6789")
+
+      download("employee")
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.media_type).to eq("application/pdf")
+      expect(copy_logs.map { |log| log.metadata["document_kind"] }).to eq([ "w2_gu_employee_copies_b_c" ])
+    end
+
+    it "gives Copy 1 to an accountant with client management for this client" do
+      assignment.update!(client_management: true)
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(accountant)
+
+      download("drt")
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(pdf_text).to include("123-45-6789")
+      expect(copy_logs.last).to have_attributes(user_id: accountant.id)
+    end
+  end
+
+  describe "in a test workspace" do
+    # The client is ready on its live records; then it becomes a sandbox
+    # copy, carrying that ready mark with it.
+    before do
+      decide("cornerstone")
+      mark_ready
+      source = create(:company, organization: company.organization)
+      company.update_columns(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox",
+        migration_source_company_id: source.id, migration_rehearsal_status: "ready", test_workspace_expires_at: 1.day.from_now)
+      fingerprint = W2FilingInputsFingerprint.new(company: company.reload, year: 2026).call
+      expect(W2FilingReadiness.find_by!(company: company, year: 2026).current?(fingerprint)).to be(true)
+    end
+
+    it "refuses Copy 1, which has full SSNs" do
+      download("drt")
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to include("unavailable in a test workspace")
+      expect(response.body).not_to include("123-45-6789")
+      expect(copy_logs).to be_empty
+    end
+
+    it "sends employee copies only as a watermarked practice draft" do
+      download("employee")
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.headers["Content-Disposition"]).to include("_DRAFT.pdf")
+      expect(pdf_text).to include("DRAFT — a practice copy. Do not give to employees or file.")
+      expect(pdf_text).not_to include("123-45-6789")
+      expect(copy_logs.last.metadata).to include("status" => "draft", "contains_full_ssn" => false)
     end
   end
 
