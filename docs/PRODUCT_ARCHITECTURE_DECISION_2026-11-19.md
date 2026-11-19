@@ -94,7 +94,7 @@ Inside one system, most of that becomes ordinary database links and locks.
 
 **Why not A for the long term:** it's fine as a stopgap if a client needs time tracking before the module exists. A copy per client becomes unmanageable at ten clients.
 
-**Why not B:** it is the strongest alternative, and the August plan described it. It keeps the payroll engine separate from public employee traffic, and AIRE wouldn't have to move. It also keeps the connection layer, two copies of each person, two logins for managers and two codebases that both need strict client separation, permanently. C gets the same protection through separate login, API and website boundaries inside one platform (§4). Choose B over C only if Leon wants Workforce to be a product that can be sold without Payroll, to employers whose payroll someone else runs.
+**Why not B:** it is the strongest alternative, and the August plan described it. It keeps the payroll engine separate from public employee traffic, and AIRE wouldn't have to move. It also keeps the connection layer, two copies of each person, two logins for managers and two codebases that both need strict client separation, permanently. C keeps login, API and website boundaries separate inside one platform (§4), but it does not separate payroll's capacity from employee traffic the way B does. §4 item 7 covers that with reserved capacity for payroll. Choose B over C only if Leon wants Workforce to be a product that can be sold without Payroll, to employers whose payroll someone else runs.
 
 ### Decision 2: where HR lives
 
@@ -126,6 +126,7 @@ Dafne wants to see what each client and task costs her, to know where she makes 
 **Recommendation:** T2 now, then T3 once the time module exists.
 - T1 means building AIRE's producer side a second time, in an app whose time tracking we plan to retire.
 - For salaried staff, cost has to be spread across hours anyway, which is exactly what T2 does.
+- Every dollar in the feed has to land somewhere. Cost for a period in which a person logged no hours (paid leave, a holiday, a missing timesheet) goes into an **unallocated** line for that person and period. Allocated cost plus unallocated cost must equal the feed's totals for each pay period, and the report shows the difference if they don't.
 
 The profitability report lives in Tax, where clients and fees are.
 
@@ -176,7 +177,12 @@ Today Payroll serves only Cornerstone staff and client offices. Employee logins 
 4. **Audit for actions with no staff user,** such as employees, kiosks and system jobs.
 5. **Effective-dated pay.** Pay rates are overwritten in place today.
 6. **Document scanning.** It's a placeholder that marks every file "not scanned".
-7. **Rate limits and monitoring** on the employee API. The employee website can be deployed separately from the staff website while sharing the platform.
+7. **Capacity kept for payroll.**
+   - Rate limits and monitoring on the employee API.
+   - Separate web processes and background workers for employee and kiosk traffic, with their own database connection limits, so a rush of clock-ins can't slow a payroll run.
+   - The employee website deployed separately from the staff website.
+
+   If that isn't enough at scale, the employee API can move to its own deployment of the same codebase.
 
 These are mostly the full build plan's R1 foundations. This section makes them a hard gate.
 
