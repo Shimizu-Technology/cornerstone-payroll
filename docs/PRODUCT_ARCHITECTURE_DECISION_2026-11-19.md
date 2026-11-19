@@ -160,7 +160,7 @@ These small changes in Tax make the numbers trustworthy:
 - Record each client's fee, with dates so changes are kept, or import fees from wherever Dafne bills.
 - Show unassigned time in the report, so a gap never looks like profit.
 
-Payroll already has a way to send totals to Tax. It has never been used, and as built it could send other companies' data. The cost feed has to be limited to company 1 and to managers.
+Under the §0 decision, pay data doesn't go to Tax. Tax sends hours by client, category, task and period to the platform, and the platform computes cost and profit. Payroll's existing, never-used feed of totals to Tax could send other companies' data as built. If it's ever kept, it must be limited to company 1 and to managers, and must not carry pay data.
 
 ## 3. How the pieces fit
 
@@ -170,10 +170,12 @@ Payroll already has a way to send totals to Tax. It has never been used, and as 
  (per-client brand) │                         one record per person, per company                          │
  Manager portal ──► │  Settings per client turn modules on: payroll only · + portals · + time (workforce)  │
                     └───────────────▲──────────────────────────────────────────────────▲──────────────────────┘
-                                    │ connector (until AIRE moves)                     │ cost feed (company 1 only)
+                                    │ connector (until AIRE moves)                     │ hours by client, category, task, period
                               AIRE time app                                      Cornerstone Tax
-                         (unchanged; moves later)                       (practice app: clients, returns, fees,
-                                                                        profitability; staff time until T3)
+                         (unchanged; moves later)                       (practice app: clients, returns, fees;
+                                                                        staff time until it moves to the platform)
+
+ Profitability lives in the platform: Tax's hours + Payroll's pay and employer taxes + client fees (pay never leaves Payroll).
 ```
 
 Rules carried forward from the spec still hold:
@@ -268,7 +270,7 @@ Leon's questions from the first version of this document are all answered in §0
 - **Wages are "cash or check"** (22 GCA § 3212(b)). Direct deposit stays opt-in, with a signed authorization and a check fallback, until Guam DOL or the law firm confirms.
 - **Guam has no tip credit.** Payroll needs a below-minimum-wage warning, and service charges need correct handling.
 - **Meal and split-shift rules** go into the time module: flag violations and store waivers.
-- **Pay deadlines:** wages are due within 7 days of the period end, and a discharged employee is paid immediately. Withheld amounts owed to others (child support, 401(k), loans) are due within 5 days of payday.
+- **Pay deadlines:** wages are due within 7 days of the period end, and a discharged employee is paid immediately. Withheld amounts owed to others (child support, 401(k), loans) are due within 5 days after the day the employee's pay is due (22 GCA § 3217(b); to confirm in legal review).
 - **Guam leave laws** go into the leave module.
 - **Records are kept 6 years** by default.
 - **Year-end:** GuamTax rules, and tracking each SSA submission's confirmation number. In 2025, SSA flagged 2024 W-2s that were created but never submitted.
