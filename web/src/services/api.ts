@@ -503,6 +503,7 @@ import type {
   PayrollLiabilityReconciliation,
   PayrollFilingGateGroup,
   PayrollFilingResponsibilityResponse,
+  PayrollFilingResponsibilityDecision,
   PayrollFilingResponsibilityUpdateResponse,
   PayrollFilingType,
 } from '@/types';
@@ -3474,16 +3475,25 @@ export const reportsApi = {
       tax_year: taxYear,
       quarter,
     }),
+  // Either one party for every listed filing type, or `decisions`: several
+  // filing types with their own party, saved together or not at all.
   updatePayrollFilingResponsibility: (responsibility: {
     tax_year: number;
     quarter?: number;
-    filing_types: PayrollFilingType[];
-    responsible_party: 'external_provider' | 'cornerstone' | 'client' | 'no_filing';
     imported_payroll_inclusion: 'included' | 'excluded';
     source_cutoff_date?: string;
-    prior_provider_through?: string | null;
     notes?: string;
-  }, companyId?: number) => api.put<PayrollFilingResponsibilityUpdateResponse>(
+  } & ({
+    filing_types: PayrollFilingType[];
+    responsible_party: PayrollFilingResponsibilityDecision['responsible_party'];
+    prior_provider_through?: string | null;
+  } | {
+    decisions: Array<{
+      filing_type: PayrollFilingType;
+      responsible_party: PayrollFilingResponsibilityDecision['responsible_party'];
+      prior_provider_through?: string | null;
+    }>;
+  }), companyId?: number) => api.put<PayrollFilingResponsibilityUpdateResponse>(
     '/admin/payroll_filing_responsibilities',
     { responsibility },
     { companyId },

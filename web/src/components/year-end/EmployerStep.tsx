@@ -35,6 +35,9 @@ export function EmployerStep({ checklist, step, onSaved }: {
     ...(missing.has('email') ? ['email' as const] : []),
   ];
   const [editable, setEditable] = useState<string[] | null>(null);
+  // A failed lookup is not "read-only": say so and let the user try again.
+  const [permissionError, setPermissionError] = useState(false);
+  const [lookupAttempt, setLookupAttempt] = useState(0);
   const [values, setValues] = useState<Record<Field, string>>(() => ({
     ein: step.data.ein ?? '',
     address_line1: step.data.address_line1 ?? '',
@@ -52,11 +55,12 @@ export function EmployerStep({ checklist, step, onSaved }: {
   useEffect(() => {
     if (fields.length === 0) return;
     let active = true;
+    setPermissionError(false);
     void companiesApi.get(checklist.company.id, checklist.company.id)
       .then((response) => { if (active) setEditable(response.company.editable_fields ?? []); })
-      .catch(() => { if (active) setEditable([]); });
+      .catch(() => { if (active) setPermissionError(true); });
     return () => { active = false; };
-  }, [checklist.company.id, fields.length]);
+  }, [checklist.company.id, fields.length, lookupAttempt]);
 
   const address = [step.data.address_line1, step.data.address_line2, [step.data.city, step.data.state, step.data.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
   const summary = (
@@ -90,7 +94,12 @@ export function EmployerStep({ checklist, step, onSaved }: {
   return (
     <div className="space-y-4">
       <IssueList issues={step.issues} />
-      {editable === null ? (
+      {permissionError ? (
+        <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50/40 p-3">
+          <p className="text-sm text-danger-800">Could not check which employer details you can edit. Check your connection and try again.</p>
+          <Button size="sm" variant="outline" className="mt-2" onClick={() => setLookupAttempt((attempt) => attempt + 1)}>Try again</Button>
+        </div>
+      ) : editable === null ? (
         <p className="text-sm text-neutral-600" role="status">Checking what you can edit…</p>
       ) : (
         <>

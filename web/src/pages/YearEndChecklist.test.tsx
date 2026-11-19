@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { YearEndChecklist } from './YearEndChecklist';
+import { ApiError } from '@/services/api';
 import type { ActiveYearEndStep, YearEndChecklist as Checklist, YearEndIssue, YearEndStep } from '@/lib/year-end';
 
 const mocks = vi.hoisted(() => ({
@@ -19,8 +20,10 @@ vi.mock('@/services/api', () => ({
   companiesApi: { get: mocks.companyGet, update: mocks.companyUpdate },
   employeesApi: { update: mocks.employeeUpdate },
   ApiError: class ApiError extends Error {
+    status: number;
+    details?: unknown;
     data: unknown;
-    constructor(message: string, data?: unknown) { super(message); this.data = data; }
+    constructor(message: string, status = 500, details?: unknown, data?: unknown) { super(message); this.status = status; this.details = details; this.data = data; }
   },
 }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 7, name: 'Tumon Bakery' }, activeCompanyId: 7 }) }));
@@ -47,7 +50,7 @@ function checklist(steps: YearEndStep[], overrides: Partial<Checklist> = {}): { 
 const undecided = [
   step('filing_decision', 1, 'Who files 2026 forms', 'action_needed', {
     issues: [{ code: 'W2_FILER_NOT_CHOSEN', message: 'Choose who files 2026 W-2s.' }],
-    data: { w2: null, form_1099: null, w2_employee_count: 4, contractor_count: 0, has_imported_history: false },
+    data: { w2: null, form_1099: null, w2_employee_count: 4, contractor_count: 0, one_off_payee_count: 0, has_imported_history: false },
   }),
   step('employer', 2, 'Employer details', 'waiting'),
   step('people', 3, 'Employees and payees', 'waiting'),
@@ -58,7 +61,7 @@ const undecided = [
 ];
 
 const decided = step('filing_decision', 1, 'Who files 2026 forms', 'done', {
-  data: { w2_employee_count: 4, contractor_count: 0, has_imported_history: false,
+  data: { w2_employee_count: 4, contractor_count: 0, one_off_payee_count: 0, has_imported_history: false,
     w2: { id: 1, filing_type: 'w2_gu', responsible_party: 'cornerstone', prior_provider_through: null, notes: null, label: 'Cornerstone files', reviewed_at: null, reviewed_by: { id: 1, name: 'Dafne', email: 'd@example.test', role: 'admin' } },
     form_1099: { id: 2, filing_type: 'form_1099', responsible_party: 'no_filing', prior_provider_through: null, notes: null, label: 'No forms this year', reviewed_at: null, reviewed_by: { id: 1, name: 'Dafne', email: 'd@example.test', role: 'admin' } } },
 });
@@ -132,7 +135,7 @@ describe('Year-end checklist', () => {
     expect(screen.getByRole('button', { name: 'Save who files' })).toHaveProperty('disabled', true);
   });
 
-  it('records a prior provider for part of the year as a separate W-2 decision', async () => {
+  it('saves the W-2 decision with its prior provider and the 1099 decision in one request', async () => {
     mocks.checklist.mockResolvedValueOnce(checklist(undecided)).mockResolvedValue(checklist(working()));
 
     renderPage();
@@ -141,10 +144,51 @@ describe('Year-end checklist', () => {
     fireEvent.change(screen.getByLabelText('The prior provider files wages paid through'), { target: { value: '2026-03-31' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save who files' }));
 
-    await waitFor(() => expect(mocks.updateResponsibility).toHaveBeenCalledTimes(2));
-    expect(mocks.updateResponsibility).toHaveBeenNthCalledWith(1, expect.objectContaining({ filing_types: ['w2_gu'], responsible_party: 'cornerstone', prior_provider_through: '2026-03-31', imported_payroll_inclusion: 'included' }), 7);
-    expect(mocks.updateResponsibility).toHaveBeenNthCalledWith(2, expect.objectContaining({ filing_types: ['form_1099'], responsible_party: 'no_filing' }), 7);
+    await waitFor(() => expect(mocks.updateResponsibility).toHaveBeenCalledTimes(1));
+    expect(mocks.updateResponsibility).toHaveBeenCalledWith({
+      tax_year: 2026, imported_payroll_inclusion: 'included', notes: undefined,
+      decisions: [
+        { filing_type: 'w2_gu', responsible_party: 'cornerstone', prior_provider_through: '2026-03-31' },
+        { filing_type: 'form_1099', responsible_party: 'no_filing', prior_provider_through: null },
+      ],
+    }, 7);
     expect(await screen.findByText('Saved who files.')).toBeTruthy();
+  });
+
+  it('keeps both answers on screen and saves nothing else when the combined save is refused', async () => {
+    mocks.checklist.mockResolvedValue(checklist(undecided));
+    mocks.updateResponsibility.mockRejectedValueOnce(new ApiError('Prior provider through must be in 2026', 422));
+
+    renderPage();
+
+    const radio = (group: string, value: string) => document.querySelector<HTMLInputElement>(`input[name="${group}"][value="${value}"]`)!;
+    await screen.findByRole('button', { name: 'Save who files' });
+    fireEvent.click(radio('w2-party', 'cornerstone'));
+    fireEvent.click(radio('form-1099-party', 'client'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save who files' }));
+
+    expect(await screen.findByText('Prior provider through must be in 2026')).toBeTruthy();
+    expect(mocks.updateResponsibility).toHaveBeenCalledTimes(1);
+    expect(mocks.checklist).toHaveBeenCalledTimes(1);
+    expect(radio('w2-party', 'cornerstone').checked).toBe(true);
+    expect(radio('form-1099-party', 'client').checked).toBe(true);
+    expect(screen.getByRole('button', { name: 'Save who files' })).toHaveProperty('disabled', false);
+  });
+
+  it('does not default the 1099 answer to "no 1099s" when the only 1099 activity is one-off checks', async () => {
+    mocks.checklist.mockResolvedValue(checklist(undecided.map((entry) => entry.key === 'filing_decision'
+      ? step('filing_decision', 1, 'Who files 2026 forms', 'action_needed', {
+        issues: entry.issues,
+        data: { w2: null, form_1099: null, w2_employee_count: 0, contractor_count: 0, one_off_payee_count: 1, has_imported_history: false },
+      })
+      : entry)));
+
+    renderPage();
+
+    expect(await screen.findByText('Paid here in 2026: 1 payee paid by one-off contractor checks.')).toBeTruthy();
+    expect(screen.getAllByRole('radio', { checked: true }).map((radio) => radio.getAttribute('name'))).toEqual(['w2-party']);
+    expect((screen.getByRole('radio', { name: /No 1099s for 2026/ }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole('button', { name: 'Save who files' })).toHaveProperty('disabled', true);
   });
 
   it('keeps both decisions on the client it started with and stops when the user opens another client mid-save', async () => {
@@ -160,14 +204,16 @@ describe('Year-end checklist', () => {
     fireEvent.change(screen.getByLabelText('The prior provider files wages paid through'), { target: { value: '2026-03-31' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save who files' }));
     await waitFor(() => expect(mocks.updateResponsibility).toHaveBeenCalledTimes(1));
-    expect(mocks.updateResponsibility).toHaveBeenCalledWith(expect.objectContaining({ filing_types: ['w2_gu'] }), 7);
+    expect(mocks.updateResponsibility).toHaveBeenCalledWith(expect.objectContaining({
+      decisions: [expect.objectContaining({ filing_type: 'w2_gu' }), expect.objectContaining({ filing_type: 'form_1099' })],
+    }), 7);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Agana Auto' }));
     await waitFor(() => expect(mocks.checklist).toHaveBeenCalledWith(2026, 8));
     finishFirst({ data: [] });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    // The 1099 choice was never sent, to either client, and no success shows on the new page.
+    // Both answers went to the first client in one request, and no success shows on the new page.
     expect(mocks.updateResponsibility).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('Saved who files.')).toBeNull();
     expect(mocks.checklist).toHaveBeenLastCalledWith(2026, 8);
@@ -181,7 +227,10 @@ describe('Year-end checklist', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'This record files no 2026 forms' }));
 
-    await waitFor(() => expect(mocks.updateResponsibility).toHaveBeenCalledWith(expect.objectContaining({ filing_types: ['w2_gu', 'form_1099'], responsible_party: 'no_filing' }), 7));
+    await waitFor(() => expect(mocks.updateResponsibility).toHaveBeenCalledWith(expect.objectContaining({ decisions: [
+      { filing_type: 'w2_gu', responsible_party: 'no_filing', prior_provider_through: null },
+      { filing_type: 'form_1099', responsible_party: 'no_filing', prior_provider_through: null },
+    ] }), 7));
     expect(await screen.findByText('No forms by Cornerstone')).toBeTruthy();
     expect(screen.getByText(/It is off the to-do list; nothing was deleted/)).toBeTruthy();
   });
@@ -297,7 +346,7 @@ describe('Year-end checklist', () => {
 
     const region = await screen.findByRole('region', { name: /Employees and payees/ });
     expect(within(region).getByText('Identify this payee')).toBeTruthy();
-    expect(within(region).getByText(/#9001 on May 2, 2026, #9002/)).toBeTruthy();
+    expect(within(region).getByText(/#9001 on May 2, 2026 \(\$1,500\.00\), #9002 on Jun 5, 2026 \(\$1,000\.00\)/)).toBeTruthy();
     expect(within(region).getByRole('link', { name: 'Open checks for Synthetic Roofing' }).getAttribute('href')).toBe('/checks-payments');
     fireEvent.change(within(region).getByLabelText('Who is this payee, and where is their W-9 and TIN?'), { target: { value: 'Synthetic Roofing LLC; W-9 in the client folder.' } });
     fireEvent.click(within(region).getByRole('button', { name: 'Record payee' }));
@@ -364,6 +413,130 @@ describe('Year-end checklist', () => {
     await waitFor(() => expect(mocks.markReady).toHaveBeenCalledWith(2026, 'Checked', 'fp-1', 7));
     expect(mocks.preflight).toHaveBeenCalledWith(2026, 7);
     expect(await screen.findByText('Ready')).toBeTruthy();
+  });
+
+  it('keeps the note after a stale 409, refreshes on request, and needs the new numbers reviewed before resubmitting', async () => {
+    const overtime = (digest: string, employees: number) => step('review_warnings', 5, 'Review warnings', 'action_needed', {
+      issues: [{ code: 'JUDGMENT_WARNING_UNREVIEWED', message: 'y', warning_code: 'qualified_overtime_unreviewed' }],
+      data: { warnings: [
+        { code: 'qualified_overtime_unreviewed', kind: 'acknowledge', title: 'Overtime without qualified-overtime amounts', explanation: 'Review the overtime.', status: 'needs_review', digest, period: null,
+          employees: [{ employee_id: 11, name: 'Ana Cruz', edit_path: '/companies/7/employees/11' }, { employee_id: 12, name: 'Ben Reyes', edit_path: '/companies/7/employees/12' }].slice(0, employees),
+          acknowledgement: null, acknowledgement_stale: false },
+      ] },
+    });
+    mocks.checklist.mockResolvedValueOnce(checklist(working({ warnings: overtime('old', 1) }))).mockResolvedValue(checklist(working({ warnings: overtime('new', 2) })));
+    mocks.acknowledge
+      .mockRejectedValueOnce(new ApiError('The data behind this warning changed. Reload the checklist and review it again.', 409))
+      .mockResolvedValue({ data: {} });
+
+    renderPage();
+
+    const region = () => screen.getByRole('region', { name: /Review warnings/ });
+    await screen.findByRole('region', { name: /Review warnings/ });
+    fireEvent.change(within(region()).getByLabelText('What did you check and confirm?'), { target: { value: 'Salaried manager.' } });
+    fireEvent.click(within(region()).getByRole('button', { name: 'Mark reviewed' }));
+
+    expect(await within(region()).findByText(/changed after this page loaded, so nothing was saved/)).toBeTruthy();
+    expect(within(region()).getByLabelText('What did you check and confirm?')).toHaveProperty('value', 'Salaried manager.');
+    expect(within(region()).getByRole('button', { name: 'Mark reviewed' })).toHaveProperty('disabled', true);
+    expect(mocks.checklist).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(region()).getByRole('button', { name: 'Refresh checklist' }));
+    expect(await within(region()).findByRole('link', { name: 'Ben Reyes' })).toBeTruthy();
+    expect(within(region()).getByLabelText('What did you check and confirm?')).toHaveProperty('value', 'Salaried manager.');
+    // Nothing is resubmitted with the new digest until the reviewer confirms and submits.
+    expect(mocks.acknowledge).toHaveBeenCalledTimes(1);
+    expect(within(region()).getByRole('button', { name: 'Mark reviewed' })).toHaveProperty('disabled', true);
+    fireEvent.click(within(region()).getByLabelText('I reviewed the updated numbers'));
+    fireEvent.click(within(region()).getByRole('button', { name: 'Mark reviewed' }));
+
+    await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledTimes(2));
+    expect(mocks.acknowledge).toHaveBeenLastCalledWith({ tax_year: 2026, warning_code: 'qualified_overtime_unreviewed', warning_digest: 'new', note: 'Salaried manager.' }, 7);
+  });
+
+  it('offers the same stale-check recovery when identifying a one-off payee', async () => {
+    const payee = (digest: string, amount: number) => ({
+      code: 'one_off_payee:non_employee_check:41', payee_key: 'non_employee_check:41', name: 'Synthetic Roofing', total_compensation: 2500, payment_count: 2,
+      checks: [{ id: 41, check_number: '9001', payment_date: '2026-05-02', amount }, { id: 42, check_number: '9002', payment_date: '2026-06-05', amount: 2500 - amount }],
+      checks_path: '/checks-payments', digest, status: 'needs_identity' as const, acknowledgement: null, acknowledgement_stale: false,
+    });
+    const people = (digest: string, amount: number) => step('people', 3, 'Employees and payees', 'action_needed', {
+      issues: [{ code: 'PAYEE_IDENTITY_UNRESOLVED', message: 'Identify Synthetic Roofing.', warning_code: 'one_off_payee:non_employee_check:41' }],
+      data: { w2_employee_count: 4, contractor_count: 0, contractor_error: null, employees: [], contractors: [], one_off_payees: [payee(digest, amount)] },
+    });
+    mocks.checklist.mockResolvedValueOnce(checklist(working({ people: people('old', 1500) }), { files_1099: true }))
+      .mockResolvedValue(checklist(working({ people: people('new', 1200) }), { files_1099: true }));
+    mocks.acknowledge.mockRejectedValueOnce(new ApiError('The data behind this warning changed.', 409));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    fireEvent.change(within(region).getByLabelText('Who is this payee, and where is their W-9 and TIN?'), { target: { value: 'Synthetic Roofing LLC.' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Record payee' }));
+    fireEvent.click(await within(region).findByRole('button', { name: 'Refresh checklist' }));
+
+    expect(await within(screen.getByRole('region', { name: /Employees and payees/ })).findByLabelText('I reviewed the updated checks')).toBeTruthy();
+    expect(screen.getByText(/\(\$1,200\.00\), #9002 on Jun 5, 2026 \(\$1,300\.00\)/)).toBeTruthy();
+    expect(screen.getByLabelText('Who is this payee, and where is their W-9 and TIN?')).toHaveProperty('value', 'Synthetic Roofing LLC.');
+    expect(screen.getByRole('button', { name: 'Record payee' })).toHaveProperty('disabled', true);
+    expect(mocks.acknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a save started under one tax year after the user switches years', async () => {
+    // January, so both 2026 and 2027 can be chosen.
+    vi.setSystemTime(new Date('2027-01-15T12:00:00+10:00'));
+    const warnings = step('review_warnings', 5, 'Review warnings', 'action_needed', {
+      issues: [{ code: 'JUDGMENT_WARNING_UNREVIEWED', message: 'y', warning_code: 'qualified_overtime_unreviewed' }],
+      data: { warnings: [
+        { code: 'qualified_overtime_unreviewed', kind: 'acknowledge', title: 'Overtime without qualified-overtime amounts', explanation: 'Review the overtime.', status: 'needs_review', digest: 'abc', period: null, employees: [], acknowledgement: null, acknowledgement_stale: false },
+      ] },
+    });
+    mocks.checklist.mockImplementation(async (year: number) => checklist(working({ warnings }), { tax_year: year }));
+    let finish: (value: { data: unknown }) => void = () => undefined;
+    mocks.acknowledge.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Review warnings/ });
+    fireEvent.change(within(region).getByLabelText('What did you check and confirm?'), { target: { value: 'Checked.' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Mark reviewed' }));
+    await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith(expect.objectContaining({ tax_year: 2026 }), 7));
+
+    fireEvent.change(screen.getByLabelText('Tax year'), { target: { value: '2027' } });
+    await waitFor(() => expect(mocks.checklist).toHaveBeenLastCalledWith(2027, 7));
+    expect(await screen.findByText('2027 year-end checklist')).toBeTruthy();
+    const calls = mocks.checklist.mock.calls.length;
+    finish({ data: {} });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The 2026 save did not reload 2026 over the 2027 page or report success on it.
+    expect(mocks.checklist).toHaveBeenCalledTimes(calls);
+    expect(mocks.checklist).not.toHaveBeenLastCalledWith(2026, 7);
+    expect(screen.queryByText(/Recorded your review/)).toBeNull();
+  });
+
+  it('says the permission check failed, with a retry, instead of sending the user to a manager', async () => {
+    const employer = step('employer', 2, 'Employer details', 'action_needed', {
+      issues: [{ code: 'EMPLOYER_PHONE_MISSING', message: 'Add the employer phone number for the W-3SS contact.', field: 'phone' }, { code: 'EMPLOYER_EIN_MISSING', message: 'Add the employer EIN.', field: 'ein' }],
+      data: { name: 'Tumon Bakery', ein: null, address_line1: '1 Marine Dr', address_line2: null, city: 'Tamuning', state: 'GU', zip: '96913', phone: null, email: 'office@example.test' },
+    });
+    mocks.checklist.mockResolvedValue(checklist(working().map((entry) => (entry.key === 'employer' ? employer : entry))));
+    mocks.companyGet.mockRejectedValueOnce(new Error('Network error')).mockResolvedValue({ company: { editable_fields: ['phone'] } });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employer details/ });
+    expect(await within(region).findByText(/Could not check which employer details you can edit/)).toBeTruthy();
+    expect(within(region).queryByText(/manager or admin/)).toBeNull();
+    expect(within(region).queryByLabelText('Phone')).toBeNull();
+
+    fireEvent.click(within(region).getByRole('button', { name: 'Try again' }));
+
+    expect(await within(region).findByLabelText('Phone')).toBeTruthy();
+    // EIN is confirmed read-only for this user, so it stays locked.
+    expect(within(region).queryByLabelText('EIN')).toBeNull();
+    expect(within(region).getByText(/A manager or admin adds the EIN/)).toBeTruthy();
+    expect(mocks.companyGet).toHaveBeenCalledTimes(2);
   });
 
   it('shows the load error with a retry', async () => {
