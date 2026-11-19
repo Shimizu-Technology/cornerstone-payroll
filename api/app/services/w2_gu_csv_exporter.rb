@@ -16,7 +16,7 @@ class W2GuCsvExporter
     "Employee Name",
     "SSN (Last 4)",
     "Box 1 — Wages, Tips & Other Comp",
-    "Box 2 — Federal Income Tax Withheld",
+    "Box 2 — Guam Income Tax Withheld",
     "Box 3 — Social Security Wages",
     "Box 4 — SS Tax Withheld",
     "Box 5 — Medicare Wages & Tips",

@@ -54,6 +54,10 @@ RSpec.describe W2GuPdfGenerator do
 
   subject(:generator) { described_class.new(report_data) }
 
+  it "labels Box 2 as Guam income tax withheld" do
+    expect(unicode_pdf_text(generator.generate)).to include("Box 2 — Guam Income Tax Withheld")
+  end
+
   it "prints accented and non-Latin employee names and employers" do
     template = report_data[:employees].first
     report_data[:employer][:name] = "Mañibusan Ştefănescu Enterprises"

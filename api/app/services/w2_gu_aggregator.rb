@@ -44,11 +44,11 @@ class W2GuAggregator
           "This report is a preparation summary and should be reviewed before filing.",
           "Employees missing an SSN are flagged in the compliance issues.",
           "Box labels map to W-2GU concepts but final filing format/export is separate.",
-          "Box 1 = Gross wages minus pre-tax 401(k) deferrals (Code D). Box 5 = Gross wages (not reduced by 401k).",
+          "Box 1 excludes pre-tax deductions. Boxes 3 and 5 exclude FICA-exempt pre-tax benefits, but include 401(k) deferrals.",
           "Box 12 codes: D = 401(k) elective deferrals, AA = Roth 401(k) contributions.",
           "For 2026+, Box 12 code TP reports cash tips and code TT reports qualified overtime compensation; Box 14b reports Treasury tipped occupation codes.",
           "Box 13 Retirement plan checkbox is set when recorded employee 401(k) contributions or an employee retirement contribution rate are present.",
-          "Committed taxable wage bases are used when present. Legacy rows without stored bases use a clearly flagged compatibility fallback.",
+          "Saved taxable wages are checked against saved paycheck components. Missing or inconsistent bases use the documented year-end fallback.",
           "If payroll items were committed before tips were included in gross pay, Box 1/Box 5 may understate total compensation for those periods. Verify transition-year rows manually.",
           *historical_caveats
         ]
@@ -123,13 +123,10 @@ class W2GuAggregator
         "SUM(social_security_tax) AS ss_tax",
         "SUM(medicare_tax) AS medicare_tax",
         "SUM(COALESCE(non_taxable_pay, 0)) AS non_taxable_total",
-        "SUM(COALESCE(social_security_taxable_wages, GREATEST(gross_pay - reported_tips, 0))) AS ss_wages_base",
-        "SUM(COALESCE(social_security_taxable_tips, reported_tips)) AS ss_tips_base",
-        "SUM(COALESCE(medicare_taxable_wages, gross_pay)) AS medicare_wages_base",
         "SUM(COALESCE(cash_tips_reported, reported_tips)) AS cash_tips_total",
         "SUM(COALESCE(qualified_overtime_compensation, 0)) AS qualified_overtime_total",
         "COUNT(*) AS payroll_item_count",
-        "COUNT(*) FILTER (WHERE social_security_taxable_wages IS NULL OR social_security_taxable_tips IS NULL OR medicare_taxable_wages IS NULL) AS missing_tax_base_count",
+        "COUNT(*) FILTER (WHERE fit_taxable_wages IS NULL OR social_security_taxable_wages IS NULL OR social_security_taxable_tips IS NULL OR medicare_taxable_wages IS NULL) AS missing_tax_base_count",
         "COUNT(*) FILTER (WHERE reported_tips <> 0 AND cash_tips_reported IS NULL) AS missing_tip_classification_count",
         "COUNT(*) FILTER (WHERE overtime_hours <> 0 AND qualified_overtime_compensation IS NULL) AS missing_qualified_overtime_count"
       )
@@ -140,6 +137,16 @@ class W2GuAggregator
     @component_review_warnings ||= PayrollReportComponentReview.for_items(live_items.includes(
       :pay_period, { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type
     ))
+  end
+
+  def year_end_wages
+    @year_end_wages ||= live_items.includes(:employee, :pay_period,
+      { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type)
+      .each_with_object({}) do |item, totals|
+        values = W2GuTaxableWages.for_item(item)
+        employee_totals = totals[item.employee_id] ||= Hash.new(0.to_d)
+        values.each { |key, value| employee_totals[key] += value }
+      end
   end
 
   def aggregated_retirement
@@ -172,9 +179,11 @@ class W2GuAggregator
     retirement_total = retirement[:retirement].to_d + reviewed_historical[:retirement]
     roth_retirement_total = retirement[:roth_retirement].to_d + reviewed_historical[:roth_retirement]
     non_taxable_total = sums&.non_taxable_total.to_d + historical_sum(historical, :non_taxable_pay)
-    ss_wages_base = sums&.ss_wages_base.to_d + historical_sum(historical, :social_security_taxable_wages)
-    ss_tips_base = sums&.ss_tips_base.to_d + historical_sum(historical, :social_security_taxable_tips)
-    medicare_wages_base = sums&.medicare_wages_base.to_d + historical_sum(historical, :medicare_taxable_wages)
+    wage_values = year_end_wages.fetch(employee.id, {})
+    rebuild_ss = wage_values[:benefit_item_count].to_i.positive?
+    ss_wages_base = wage_values[rebuild_ss ? :uncapped_ss_wages : :ss_wages].to_d + historical_sum(historical, :social_security_taxable_wages)
+    ss_tips_base = wage_values[rebuild_ss ? :uncapped_ss_tips : :ss_tips].to_d + historical_sum(historical, :social_security_taxable_tips)
+    medicare_wages_base = year_end_wages.dig(employee.id, :medicare).to_d + historical_sum(historical, :medicare_taxable_wages)
     cash_tips_total = sums&.cash_tips_total.to_d
     qualified_overtime_total = sums&.qualified_overtime_total.to_d
 
@@ -184,12 +193,11 @@ class W2GuAggregator
         "clamping wages_only to zero for SS wage-base allocation"
       )
     end
-    # Box 1: Wages minus pre-tax retirement (401k) contributions
-    # Classification evidence does not authorize a historical wage/FIT rewrite.
+    # Historical bridge wages already exclude pre-tax deductions and non-taxable pay.
     historical_box1 = historical.sum(0.to_d) do |balance|
-      balance.source_breakdown.to_h["prior_provider_verified"] ? balance.fit_taxable_wages.to_d : balance.gross_pay.to_d - balance.retirement.to_d
+      balance.fit_taxable_wages.to_d
     end
-    box1 = (sums&.gross_pay.to_d - retirement[:retirement].to_d + historical_box1).round(2)
+    box1 = (year_end_wages.fetch(employee.id, {}).fetch(:box1, 0.to_d) + historical_box1).round(2)
 
     # W-2 convention: allocate SS wage base to Box 3 (wages) first,
     # then Box 7 (tips) gets any remaining SS wage-base room.
@@ -197,7 +205,7 @@ class W2GuAggregator
     remaining_ss_base = [ ss_wage_base - box3, 0.to_d ].max
     box7 = [ ss_tips_base, remaining_ss_base ].min.round(2)
 
-    # Box 5: Medicare wages (gross pay, not reduced by pre-tax retirement)
+    # Box 5 includes tips and 401(k), but excludes FICA-exempt benefits.
     box5 = medicare_wages_base.round(2)
 
     # Box 12: Coded entries for retirement contributions
@@ -243,6 +251,8 @@ class W2GuAggregator
       },
 
       missing_committed_tax_bases: sums&.missing_tax_base_count.to_i.positive?,
+      inconsistent_fit_taxable_wages: year_end_wages.dig(employee.id, :inconsistent_fit_count).to_i.positive?,
+      fica_withheld_on_section_125: year_end_wages.dig(employee.id, :fica_on_benefits_count).to_i.positive?,
       missing_tip_classification: sums&.missing_tip_classification_count.to_i.positive? || historical.any? { |balance| balance.reported_tips.nonzero? },
       missing_qualified_overtime: sums&.missing_qualified_overtime_count.to_i.positive? || historical_overtime?(historical),
       negative_box12_tp: cash_tips_total.negative?,
@@ -290,6 +300,15 @@ class W2GuAggregator
 
     missing_bases = rows.count { |r| r[:missing_committed_tax_bases] }
     issues << "#{missing_bases} employee(s) have legacy payroll rows without committed taxable wage bases" if missing_bases.positive?
+
+    fica_on_benefits = rows.count { |row| row[:fica_withheld_on_section_125] }
+    if fica_on_benefits.positive?
+      issues << "#{fica_on_benefits} employee(s) had Social Security and Medicare withheld on Section 125 benefits. " \
+                "Correct those paychecks (refund the employee and file a 941-X) before filing W-2s"
+    end
+
+    inconsistent_fit = rows.count { |row| row[:inconsistent_fit_taxable_wages] }
+    issues << "#{inconsistent_fit} employee(s) have stored FIT wages inconsistent with saved paycheck components; year-end wages use saved components" if inconsistent_fit.positive?
 
     if year >= 2026
       missing_tip_classification = rows.count { |r| r[:missing_tip_classification] }

@@ -254,6 +254,9 @@ RSpec.describe "Golden payroll regression", type: :request do
     expect(money(w2.dig("totals", "box7_social_security_tips"))).to eq(annual_expected.fetch("w2_box7"))
     expect(money(w2.dig("totals", "box12_code_d_total"))).to eq(annual_expected.fetch("w2_code_d"))
     expect(money(w2.dig("totals", "box12_code_tp_total"))).to eq(annual_expected.fetch("w2_code_tp"))
+    # Box 1 must agree with the FIT wages the paychecks stored (pre-tax items excluded).
+    expect(money(PayrollItem.where(employment_type: %w[hourly salary]).sum(:fit_taxable_wages))).to eq(annual_expected.fetch("w2_box1"))
+    expect(Array(w2.dig("meta", "compliance_issues")) + Array(w2["compliance_issues"])).not_to include(a_string_matching(/inconsistent|941-X/))
 
     get "/api/v1/admin/reports/form_1099_nec", params: { year: 2026 }
     expect(response).to have_http_status(:ok)

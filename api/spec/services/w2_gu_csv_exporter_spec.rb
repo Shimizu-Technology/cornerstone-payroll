@@ -3,6 +3,10 @@
 require "rails_helper"
 
 RSpec.describe W2GuCsvExporter do
+  it "labels Box 2 as Guam income tax withheld" do
+    expect(described_class::HEADERS).to include("Box 2 — Guam Income Tax Withheld")
+  end
+
   let(:report_data) do
     {
       meta: {
