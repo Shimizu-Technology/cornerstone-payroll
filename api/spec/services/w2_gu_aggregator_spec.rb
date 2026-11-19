@@ -301,6 +301,35 @@ RSpec.describe W2GuAggregator do
       expect(report[:meta][:caveats]).to include(a_string_matching(/raw historical paychecks are not added again/i))
     end
 
+    it "looks up the current imported balance for every employee in one query" do
+      history = lambda do |worker|
+        create_historical_filing_source(
+          company: company, employee: worker, pay_date: Date.new(2025, 6, 18),
+          gross_pay: 1_000, federal_income_tax: 100, social_security_tax: 62, medicare_tax: 14.50,
+          employer_social_security_tax: 62, employer_medicare_tax: 14.50, retirement: 50
+        )
+      end
+      balance_lookups = lambda do
+        lookups = 0
+        callback = lambda do |*, payload|
+          lookups += 1 if payload[:sql].match?(/FROM "historical_employee_ytd_balances".*ORDER BY.*through_pay_date/m)
+        end
+        report = ActiveSupport::Notifications.subscribed(callback, "sql.active_record") { described_class.new(company, 2025).generate }
+        [ lookups, report ]
+      end
+      history.call(employee)
+      baseline, = balance_lookups.call
+      workers = Array.new(4) { create(:employee, company: company, department: department, ssn_encrypted: "123-45-6789") }
+      workers.each(&history)
+
+      lookups, report = balance_lookups.call
+
+      expect(baseline).to eq(1)
+      expect(lookups).to eq(baseline)
+      expect(report[:employees].length).to eq(5)
+      expect(report[:employees]).to all(include(box3_social_security_wages: 1_000.0, box12: [ a_hash_including(code: "D", amount: 50.0) ]))
+    end
+
     it "adds imported bridge balances and committed payroll once in a mixed transition year" do
       create_historical_filing_source(
         company: company,
