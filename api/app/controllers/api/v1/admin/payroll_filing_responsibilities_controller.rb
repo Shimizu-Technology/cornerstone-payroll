@@ -37,6 +37,7 @@ module Api
           quarter = parse_optional_quarter!(input[:quarter])
           filing_types = normalized_filing_types(input, quarter: quarter)
           source_cutoff_date = parse_optional_date!(input[:source_cutoff_date])
+          prior_provider_through = parse_optional_date!(input[:prior_provider_through], field: "prior_provider_through")
 
           records = PayrollFilingResponsibilityRecorder.new(
             company: current_company,
@@ -47,6 +48,7 @@ module Api
             responsible_party: input[:responsible_party],
             imported_payroll_inclusion: input[:imported_payroll_inclusion],
             source_cutoff_date: source_cutoff_date,
+            prior_provider_through: prior_provider_through,
             notes: input[:notes]
           ).call
 
@@ -82,6 +84,7 @@ module Api
             :responsible_party,
             :imported_payroll_inclusion,
             :source_cutoff_date,
+            :prior_provider_through,
             :notes,
             filing_types: []
           )
@@ -105,12 +108,12 @@ module Api
           quarter
         end
 
-        def parse_optional_date!(value)
+        def parse_optional_date!(value, field: "source_cutoff_date")
           return if value.blank?
 
           Date.iso8601(value.to_s)
         rescue Date::Error
-          raise ArgumentError, "source_cutoff_date must use YYYY-MM-DD"
+          raise ArgumentError, "#{field} must use YYYY-MM-DD"
         end
 
         def normalized_filing_types(input, quarter:)

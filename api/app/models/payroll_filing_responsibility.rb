@@ -3,8 +3,14 @@
 class PayrollFilingResponsibility < ApplicationRecord
   QUARTERLY_FILING_TYPES = %w[form_941 guam_withholding swica].freeze
   ANNUAL_FILING_TYPES = %w[w2_gu].freeze
-  FILING_TYPES = (QUARTERLY_FILING_TYPES + ANNUAL_FILING_TYPES).freeze
-  RESPONSIBLE_PARTIES = %w[external_provider cornerstone].freeze
+  # Information returns are annual, but stay out of the W-2GU annual gate so a
+  # 1099 decision never blocks W-2GU readiness.
+  INFORMATION_RETURN_FILING_TYPES = %w[form_1099].freeze
+  YEAR_END_FILING_TYPES = (ANNUAL_FILING_TYPES + INFORMATION_RETURN_FILING_TYPES).freeze
+  FILING_TYPES = (QUARTERLY_FILING_TYPES + YEAR_END_FILING_TYPES).freeze
+  # client: the client files its own return. no_filing: this record files no
+  # return of this type for the year (for example an inactive duplicate).
+  RESPONSIBLE_PARTIES = %w[external_provider cornerstone client no_filing].freeze
   IMPORTED_PAYROLL_INCLUSIONS = %w[included excluded].freeze
 
   belongs_to :company
@@ -21,12 +27,13 @@ class PayrollFilingResponsibility < ApplicationRecord
   validates :notes, length: { maximum: 2_000 }, allow_blank: true
   validates :company_id, uniqueness: { scope: %i[tax_year quarter filing_type] }
   validate :quarter_matches_filing_type
+  validate :prior_provider_through_matches_decision
 
   scope :for_year, ->(year) { where(tax_year: year) }
   scope :for_quarter, ->(quarter) { where(quarter: quarter) }
 
   def annual?
-    filing_type.in?(ANNUAL_FILING_TYPES)
+    filing_type.in?(YEAR_END_FILING_TYPES)
   end
 
   def quarterly?
@@ -42,6 +49,7 @@ class PayrollFilingResponsibility < ApplicationRecord
       responsible_party: responsible_party,
       imported_payroll_inclusion: imported_payroll_inclusion,
       source_cutoff_date: source_cutoff_date&.iso8601,
+      prior_provider_through: prior_provider_through&.iso8601,
       reviewed_at: reviewed_at&.iso8601,
       reviewed_by: {
         id: reviewed_by_id,
@@ -61,6 +69,16 @@ class PayrollFilingResponsibility < ApplicationRecord
       errors.add(:quarter, "must be blank for annual filings")
     elsif quarterly? && !quarter.in?(1..4)
       errors.add(:quarter, "must be 1, 2, 3, or 4 for quarterly filings")
+    end
+  end
+
+  def prior_provider_through_matches_decision
+    return if prior_provider_through.blank?
+
+    if !annual? || responsible_party != "cornerstone"
+      errors.add(:prior_provider_through, "applies only when Cornerstone files the year-end return")
+    elsif tax_year.present? && prior_provider_through.year != tax_year
+      errors.add(:prior_provider_through, "must be a date in #{tax_year}")
     end
   end
 end

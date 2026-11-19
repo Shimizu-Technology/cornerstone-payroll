@@ -150,10 +150,10 @@ class PayrollFilingResponsibilityGate
 
   def validate_period!
     unless filing_type.in?(PayrollFilingResponsibility::FILING_TYPES)
-      raise ArgumentError, "filing_type must be form_941, guam_withholding, swica, or w2_gu"
+      raise ArgumentError, "filing_type must be form_941, guam_withholding, swica, w2_gu, or form_1099"
     end
 
-    if filing_type.in?(PayrollFilingResponsibility::ANNUAL_FILING_TYPES)
+    if filing_type.in?(PayrollFilingResponsibility::YEAR_END_FILING_TYPES)
       raise ArgumentError, "quarter must be blank for annual filings" if quarter.present?
     elsif !quarter.in?(1..4)
       raise ArgumentError, "quarter must be 1, 2, 3, or 4 for quarterly filings"
@@ -174,6 +174,8 @@ class PayrollFilingResponsibilityGate
     return "responsibility_not_required" unless source_coverage[:has_historical_payroll] || responsibility
     return "responsibility_required" unless responsibility
     return "external_provider_responsible" if responsibility.responsible_party == "external_provider"
+    return "client_responsible" if responsibility.responsible_party == "client"
+    return "no_filing" if responsibility.responsible_party == "no_filing"
     return "historical_payroll_excluded" if responsibility.imported_payroll_inclusion == "excluded"
     return "review_stale" if responsibility_stale?
 
@@ -194,6 +196,20 @@ class PayrollFilingResponsibilityGate
       return [ blocker(
         code: "EXTERNAL_PROVIDER_RESPONSIBLE",
         message: "An external provider is responsible for this filing. Cornerstone output remains draft/reference only."
+      ) ]
+    end
+
+    if responsibility.responsible_party == "client"
+      return [ blocker(
+        code: "CLIENT_RESPONSIBLE",
+        message: "The client files this return. Cornerstone output remains draft/reference only."
+      ) ]
+    end
+
+    if responsibility.responsible_party == "no_filing"
+      return [ blocker(
+        code: "NO_FILING_THIS_YEAR",
+        message: "This record files no return of this type for the year. Change the year-end decision before marking it ready."
       ) ]
     end
 
