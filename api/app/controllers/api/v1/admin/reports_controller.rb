@@ -572,6 +572,66 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/reports/w2_gu_official_copies
+        # Official IRS W-2GU copies for the year's W-2 employees.
+        # Params:
+        #   year [Integer] – tax year (2026 template only)
+        #   copy [String]  – "employee" (Copies B and C, SSN shown as XXX-XX-1234)
+        #                    or "drt" (Copy 1 for Guam DRT, full SSNs)
+        # The copies are a watermarked draft until the year's W-2s are marked
+        # ready, and again whenever that sign-off no longer matches the inputs.
+        # Every download is audited before the file is sent.
+        def w2_gu_official_copies
+          response.headers["Cache-Control"] = "private, no-store"
+          year = parse_tax_year_param
+          return if performed?
+
+          kind = params[:copy].to_s
+          unless W2GuOfficialCopies::KINDS.include?(kind)
+            return render json: { error: "copy must be employee or drt" }, status: :unprocessable_entity
+          end
+          unless W2GuOfficialCopies.supported_tax_year?(year)
+            return render json: { error: W2GuOfficialCopies.unsupported_message(year) }, status: :unprocessable_entity
+          end
+
+          company = Company.find(current_company_id)
+          # A consistent snapshot of the report, the sign-off and the
+          # employee records; the PDF itself is drawn after the lock.
+          copies, audit = company.with_lock do
+            responsibility = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
+            unless responsibility&.responsible_party == "cornerstone"
+              return render json: {
+                error: "Cornerstone does not file #{year} W-2s for this client, so it has no W-2GU copies to print. Change who files in the #{year} year-end checklist."
+              }, status: :unprocessable_entity
+            end
+
+            report = W2GuAggregator.new(company, year).generate
+            readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
+            fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: report).call
+            final = W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
+            copies = W2GuOfficialCopies.new(company: company, report: report, kind: kind, draft: !final)
+            [ copies, {
+              tax_year: year,
+              document_kind: kind == "drt" ? "w2_gu_copy_1_drt" : "w2_gu_employee_copies_b_c",
+              contains_full_ssn: kind == "drt",
+              status: final ? "final" : "draft",
+              inputs_fingerprint: fingerprint,
+              ready_fingerprint: readiness&.ready_fingerprint,
+              readiness_status: readiness&.review_payload(fingerprint: fingerprint)&.fetch(:status),
+              employee_count: copies.employee_count
+            } ]
+          end
+
+          pdf = copies.generate
+          return unless record_w2_official_copies_access(company, audit)
+
+          send_data pdf, filename: copies.filename, type: "application/pdf", disposition: "attachment"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError, PdfUnicodeFont::UnprintableName, OfficialPdfOverlay::TemplateUnavailableError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         # GET /api/v1/admin/reports/form_1099_nec
         # Annual 1099-NEC summary for contractor filing preparation.
         def form_1099_nec
@@ -4650,6 +4710,30 @@ module Api
               description: REPORT_DESCRIPTIONS[:installment_loans]
             )
           ]
+        end
+
+        # Writes the download's audit entry, or refuses the file when it can't:
+        # a W-2GU copy with full SSNs is never sent unrecorded. The metadata
+        # names the document and sign-off, never an SSN.
+        def record_w2_official_copies_access(company, audit)
+          AuditLog.record!(
+            user: current_user,
+            organization_id: current_user.organization_id,
+            company_id: company.id,
+            action: "reports#w2_gu_official_copies",
+            record_type: "reports",
+            subject_name: "#{audit[:tax_year]} W-2GU #{audit[:contains_full_ssn] ? 'Copy 1 for Guam DRT' : 'employee copies B and C'}",
+            metadata: audit.merge(http_method: request.request_method, path: request.path),
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent,
+            request_id: request.request_id,
+            event_category: "document_access"
+          )
+          true
+        rescue StandardError => e
+          Rails.error.report(e, handled: true, context: { company_id: company.id, tax_year: audit[:tax_year], source: "w2_gu_official_copies" })
+          render json: { error: "The download could not be recorded in the activity log, so the file was not sent. Try again." }, status: :service_unavailable
+          false
         end
 
         def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:, fingerprint: nil)

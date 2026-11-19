@@ -616,6 +616,7 @@ Rails.application.routes.draw do
         get "reports/w2_gu_csv", to: "reports#w2_gu_csv"
         get "reports/w2_gu_pdf", to: "reports#w2_gu_pdf"
         get "reports/w2_gu_xlsx", to: "reports#w2_gu_xlsx"
+        get "reports/w2_gu_official_copies", to: "reports#w2_gu_official_copies"
         get "reports/form_1099_nec", to: "reports#form_1099_nec"
         get "reports/form_1099_nec_csv", to: "reports#form_1099_nec_csv"
         get "reports/form_1099_nec_pdf", to: "reports#form_1099_nec_pdf"

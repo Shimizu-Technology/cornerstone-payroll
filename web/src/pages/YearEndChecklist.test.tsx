@@ -423,6 +423,38 @@ describe('Year-end checklist', () => {
     expect(within(screen.getByRole('region', { name: /Review warnings/ })).getByLabelText('What did you check and confirm?')).toHaveProperty('disabled', false);
   });
 
+  it('adds print and file after the sign-off: folded while it holds drafts, open once the copies are final', async () => {
+    const printStep = (final: boolean) => step('print_and_file', 8, 'Print and file', 'available', {
+      data: {
+        final,
+        documents: [{
+          key: 'w2_employee_copies', title: 'Employee copies (B and C)', description: 'Print and give to each employee by Feb 1, 2027.',
+          detail: '4 employees, one sheet each.', format: 'pdf', contains_full_ssn: false, draft: !final, available: true, unavailable_reason: null,
+          download: { path: '/admin/reports/w2_gu_official_copies', params: { year: 2026, copy: 'employee' } },
+        }],
+      },
+    });
+    const markedReady = step('mark_ready', 7, 'Mark W-2s ready', 'done', { data: { filing: { status: 'filing_ready', stale: false, marked_ready_at: '2026-11-19T02:00:00Z', notes: null }, can_mark_ready: true, remaining_before_ready: 0 } });
+    mocks.checklist.mockResolvedValueOnce(checklist([...working(), printStep(false)], { status: 'needs_action', issue_count: 1, next_step: 'mark_ready' }));
+
+    renderPage();
+
+    const drafts = await screen.findByRole('region', { name: /Print and file/ });
+    expect(within(drafts).getByText('Downloads')).toBeTruthy();
+    expect(within(drafts).queryByText('Employee copies (B and C)')).toBeNull();
+    fireEvent.click(within(drafts).getByRole('button', { name: 'Show Print and file' }));
+    expect(within(drafts).getByRole('button', { name: 'Download draft' })).toBeTruthy();
+    expect(screen.getByText('Next: step 7, mark w-2s ready.')).toBeTruthy();
+
+    cleanup();
+    mocks.checklist.mockResolvedValue(checklist([...working({ markReady: markedReady }), printStep(true)], { status: 'ready', issue_count: 0, next_step: null }));
+    renderPage();
+
+    const final = await screen.findByRole('region', { name: /Print and file/ });
+    expect(within(final).getByRole('button', { name: 'Download PDF' })).toBeTruthy();
+    expect(screen.getByText('Ready')).toBeTruthy();
+  });
+
   it('runs a fresh preflight, then marks ready on that fingerprint', async () => {
     const markedReady = step('mark_ready', 7, 'Mark W-2s ready', 'done', { data: { filing: { status: 'filing_ready', stale: false, marked_ready_at: '2026-11-19T02:00:00Z', notes: 'Checked' }, can_mark_ready: true, remaining_before_ready: 0 } });
     mocks.checklist.mockResolvedValueOnce(checklist(working())).mockResolvedValue(checklist(working({ markReady: markedReady })));

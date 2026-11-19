@@ -399,6 +399,53 @@ RSpec.describe YearEnd::Checklist do
     expect(step(result, "mark_ready")[:issues].first[:message]).to include("changed after the W-2s were marked ready")
   end
 
+  describe "print and file" do
+    it "waits for the W-2 decision and is not needed when the client files its own W-2s" do
+      pay(Date.new(2026, 3, 6))
+      expect(step(checklist, "print_and_file")).to include(status: "waiting", number: 8)
+
+      decide(w2: "client")
+      expect(step(checklist, "print_and_file")).to include(status: "not_needed", data: {})
+    end
+
+    it "lists draft copies before the W-2s are marked ready and final ones after, without changing the checklist's status" do
+      pay(Date.new(2026, 3, 6))
+      decide
+
+      result = checklist
+      print_step = step(result, "print_and_file")
+      expect(print_step).to include(status: "available", number: 8, title: "Print and file", issues: [])
+      expect(print_step.dig(:data, :final)).to be(false)
+      documents = print_step.dig(:data, :documents)
+      expect(documents.map { |document| document[:key] }).to eq(%w[w2_employee_copies w2_drt_copy_1])
+      expect(documents.first).to include(
+        title: "Employee copies (B and C)", description: "Print and give to each employee by Feb 1, 2027.",
+        contains_full_ssn: false, draft: true, available: true, unavailable_reason: nil,
+        download: { path: "/admin/reports/w2_gu_official_copies", params: { year: 2026, copy: "employee" } }
+      )
+      expect(documents.last).to include(title: "Copy 1 for Guam DRT", description: "Your record; not mailed when you e-file.",
+        contains_full_ssn: true, draft: true)
+      expect(result).to include(status: "needs_action", next_step: "mark_ready", issue_count: 1)
+
+      fingerprint = W2FilingInputsFingerprint.new(company: company, year: 2026).call
+      W2FilingReadiness.create!(company: company, year: 2026, status: "filing_ready", preflight_fingerprint: fingerprint,
+        ready_fingerprint: fingerprint, marked_ready_at: Time.current, marked_ready_by: accountant)
+
+      result = checklist
+      expect(result).to include(status: "ready", issue_count: 0, next_step: nil)
+      expect(step(result, "print_and_file").dig(:data, :final)).to be(true)
+      expect(step(result, "print_and_file").dig(:data, :documents).map { |document| document[:draft] }).to eq([ false, false ])
+    end
+
+    it "explains why copies are unavailable when there are no W-2 employees" do
+      decide
+
+      documents = step(checklist, "print_and_file").dig(:data, :documents)
+      expect(documents.map { |document| document[:unavailable_reason] }).to all(eq("No employees have 2026 W-2 wages."))
+      expect(documents.map { |document| document[:available] }).to all(be(false))
+    end
+  end
+
   it "reuses the W-2GU report for the readiness fingerprint" do
     pay(Date.new(2026, 3, 6))
     decide

@@ -1,0 +1,293 @@
+# frozen_string_literal: true
+
+# Official W-2GU copies filled onto the IRS 2026 Form W-2GU. The IRS says the
+# black copies "may be downloaded, completed, printed, and used"; Copy A (red,
+# for SSA) is never produced because W-2s are e-filed.
+#
+#   employee: one sheet per employee, sorted by last name. The front is Copy B
+#             over Copy C; the back is the IRS Notice and Instructions that
+#             print behind those copies, so a double-sided print (flip on the
+#             long edge) matches the IRS form. The SSN prints as XXX-XX-1234.
+#   drt:      Copy 1 for the Guam Department of Revenue and Taxation, two
+#             employees a page, with the full SSN DRT requires. It is also the
+#             employer's paper record.
+#
+# Box values come straight from W2GuAggregator rows. Boxes the app does not
+# model (8, 10, 11, 14a and the control number) stay blank.
+class W2GuOfficialCopies < OfficialPdfOverlay
+  TEMPLATE_PATH = Rails.root.join("lib/assets/irs_form_w2gu_2026.pdf")
+  SUPPORTED_TAX_YEARS = [ 2026 ].freeze
+  KINDS = %w[employee drt].freeze
+  PAGE_SIZE = [ 612.0, 792.0 ].freeze
+  # Each template page holds two forms; the bottom one sits exactly half a
+  # page below the top one.
+  HALF_PAGE = 396.0
+  TEXT_LIFT = 1.5
+
+  # Zero-based template pages.
+  COPY_1 = 2
+  COPY_B = 3
+  COPY_B_BACK = 4
+  COPY_C = 5
+  COPY_C_BACK = 6
+
+  # Field rectangles of the top form, from the template's own (unused) form
+  # widgets, as [left, bottom, right, top] in points.
+  FIELDS = {
+    ssn: [ 153.2, 732.0, 278.8, 744.0 ],
+    ein: [ 38.0, 708.0, 330.2, 720.0 ],
+    employer: [ 38.0, 636.0, 330.2, 696.0 ],
+    first_name: [ 38.0, 588.0, 171.8, 600.0 ],
+    last_name: [ 173.8, 588.0, 308.6, 600.0 ],
+    employee_address: [ 38.0, 528.0, 330.2, 586.0 ],
+    box1: [ 333.2, 708.0, 451.6, 720.0 ],
+    box2: [ 455.6, 708.0, 574.0, 720.0 ],
+    box3: [ 332.2, 684.0, 452.6, 696.0 ],
+    box4: [ 454.6, 684.0, 574.0, 696.0 ],
+    box5: [ 332.2, 660.0, 452.6, 672.0 ],
+    box6: [ 454.6, 660.0, 574.0, 672.0 ],
+    box7: [ 332.2, 636.0, 452.6, 648.0 ],
+    box13_retirement_plan: [ 384.6, 577.7, 394.6, 587.7 ],
+    box14b: [ [ 332.2, 516.0, 391.4, 528.0 ], [ 393.4, 516.0, 452.6, 528.0 ] ]
+  }.freeze
+  BOX12 = [
+    [ [ 462.8, 588.0, 488.6, 600.0 ], [ 490.6, 588.0, 574.0, 600.0 ] ],
+    [ [ 462.8, 564.0, 488.6, 576.0 ], [ 490.6, 564.0, 574.0, 576.0 ] ],
+    [ [ 462.8, 540.0, 488.6, 552.0 ], [ 490.6, 540.0, 574.0, 552.0 ] ],
+    [ [ 462.8, 516.0, 488.6, 528.0 ], [ 490.6, 516.0, 574.0, 528.0 ] ]
+  ].freeze
+  # The margin above the top form, for the sorting line.
+  MARGIN_NOTE = [ 38.0, 758.0, 574.0, 770.0 ].freeze
+
+  Sheet = Struct.new(:top, :bottom, :people, keyword_init: true)
+
+  # Final (unwatermarked) copies need a ready mark on these exact inputs and
+  # a W-2 filing decision that still allows filing-ready output.
+  def self.final?(company:, year:, readiness:, fingerprint:)
+    return false unless readiness&.current?(fingerprint)
+
+    PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:capabilities, :all_filing_ready_exports_allowed) == true
+  end
+
+  def self.supported_tax_year?(tax_year)
+    SUPPORTED_TAX_YEARS.include?(tax_year.to_i)
+  end
+
+  def self.unsupported_message(tax_year)
+    "Official W-2GU copies are available for tax year #{SUPPORTED_TAX_YEARS.to_sentence(last_word_connector: ' and ')} only. " \
+      "For #{tax_year}, use the W-2GU report and the matching IRS form."
+  end
+
+  # report: unmodified W2GuAggregator output for company and its year.
+  def initialize(company:, report:, kind:, draft:)
+    raise ArgumentError, "Unknown W-2GU copy: #{kind}" unless KINDS.include?(kind.to_s)
+
+    @company = company
+    @report = report.deep_symbolize_keys
+    @kind = kind.to_s
+    @draft = draft
+    raise TemplateUnavailableError, self.class.unsupported_message(year) unless self.class.supported_tax_year?(year)
+
+    super(template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
+  end
+
+  def generate
+    raise ArgumentError, "No employees have #{year} W-2 wages" if people.empty?
+
+    template = load_template!
+    overlay = CombinePDF.parse(build_overlay_pdf(sheets.length))
+    bases = {}
+    output = CombinePDF.new
+    sheets.each_with_index do |sheet, index|
+      output << share(bases[[ sheet.top, sheet.bottom ]] ||= compose(template, sheet))
+      output.pages[index] << overlay.pages[index]
+    end
+    output.to_pdf
+  end
+
+  def filename
+    name = ActiveSupport::Inflector.transliterate(company.name.to_s).gsub(/[^A-Za-z0-9]+/, "_").gsub(/\A_+|_+\z/, "").first(40).presence || "Employer"
+    label = kind == "drt" ? "Copy1_DRT" : "Employee_Copies_B_C"
+    "W-2GU_#{year}_#{name}_#{label}#{'_DRAFT' if draft}.pdf"
+  end
+
+  def employee_count
+    people.length
+  end
+
+  private
+
+  attr_reader :company, :report, :kind, :draft
+
+  def year
+    report.dig(:meta, :year).to_i
+  end
+
+  # Employees in last-name order, each with the aggregator's box values and
+  # the name and address parts the form prints separately.
+  def people
+    @people ||= begin
+      rows = Array(report[:employees]).index_by { |row| row[:employee_id] }
+      Employee.where(company_id: company.id, id: rows.keys).to_a
+        .sort_by { |employee| [ employee.last_name.to_s.downcase, employee.first_name.to_s.downcase, employee.id ] }
+        .map do |employee|
+          [ employee.full_name, employee.address_line1, employee.address_line2, employee.city ].each do |value|
+            PdfUnicodeFont.ensure_printable!(value, label: "Employee")
+          end
+          { employee: employee, row: rows.fetch(employee.id) }
+        end
+    end
+  end
+
+  def sheets
+    @sheets ||= if kind == "drt"
+      people.each_slice(2).map { |pair| Sheet.new(top: COPY_1, bottom: pair[1] ? COPY_1 : nil, people: pair) }
+    else
+      people.flat_map do |person|
+        [
+          Sheet.new(top: COPY_B, bottom: COPY_C, people: [ person, person ]),
+          Sheet.new(top: COPY_B_BACK, bottom: COPY_C_BACK, people: [])
+        ]
+      end
+    end
+  end
+
+  # Builds one sheet layout from the template's top and bottom halves. The
+  # form widgets are dropped because values are painted into the page content.
+  def compose(template, sheet)
+    if sheet.top == sheet.bottom
+      page = template.pages[sheet.top].copy
+    else
+      page = clip(template.pages[sheet.top].copy, bottom_half: false)
+      page << clip(template.pages[sheet.bottom].copy, bottom_half: true) if sheet.bottom
+    end
+    page.delete(:Annots)
+    page
+  end
+
+  # A new page drawing the layout's own content streams and resources, so a
+  # client with hundreds of employees doesn't carry hundreds of copies of the
+  # form. Only the page's content list is its own, for the overlay.
+  def share(base)
+    page = base.clone
+    page[:Contents] = base[:Contents].dup
+    page
+  end
+
+  def clip(page, bottom_half:)
+    y = bottom_half ? 0 : HALF_PAGE
+    page.send(:insert_content, "q 0 #{y} #{PAGE_SIZE[0]} #{HALF_PAGE} re W n", 0)
+    page.send(:insert_content, "Q")
+    page
+  end
+
+  def draw_page(pdf, page_number)
+    sheet = sheets.fetch(page_number - 1)
+    return if sheet.people.empty?
+
+    draw_margin_note(pdf, sheet, page_number)
+    sheet.people.each_with_index do |person, index|
+      draw_form(pdf, person, index.zero? ? 0 : -HALF_PAGE)
+    end
+  end
+
+  def draw_document_status(pdf, _page_number)
+    return unless draft
+
+    PdfPreviewWatermark.draw_page(pdf, label: "DRAFT", bands: 2,
+      note: "DRAFT — the #{year} W-2s are not marked ready. Do not give to employees or file.")
+  end
+
+  def draw_margin_note(pdf, sheet, page_number)
+    note = if kind == "drt"
+      "#{company.name} · #{year} W-2GU Copy 1 for Guam DRT · page #{page_number} of #{sheets.length}"
+    else
+      employee = sheet.people.first[:employee]
+      position = (page_number + 1) / 2
+      "#{employee.last_name}, #{employee.first_name} · #{company.name} · #{year} W-2GU · employee #{position} of #{people.length}"
+    end
+    pdf.fill_color "555555"
+    pdf.text_box(note, at: [ MARGIN_NOTE[0], MARGIN_NOTE[3] ], width: MARGIN_NOTE[2] - MARGIN_NOTE[0],
+      height: MARGIN_NOTE[3] - MARGIN_NOTE[1], size: 7.5, overflow: :shrink_to_fit, min_font_size: 6)
+    pdf.fill_color "000000"
+  end
+
+  def draw_form(pdf, person, dy)
+    employee = person[:employee]
+    row = person[:row]
+    # Single-line values sit a little above the widget rectangle, which
+    # touches each box's bottom rule.
+    at = ->(rect, lift = TEXT_LIFT) { [ rect[0], rect[1] + dy + lift, rect[2], rect[3] + dy + lift ] }
+
+    draw_text_box(pdf, at.(FIELDS[:ssn]), ssn_for(employee, row), size: 10)
+    draw_text_box(pdf, at.(FIELDS[:ein]), formatted_ein, size: 10)
+    draw_text_box(pdf, at.(FIELDS[:employer], 0), employer_lines.join("\n"), size: 9, valign: :top, min_font_size: 6.5)
+    draw_text_box(pdf, at.(FIELDS[:first_name]), first_name_and_initial(employee), size: 9)
+    draw_text_box(pdf, at.(FIELDS[:last_name]), employee.last_name, size: 9)
+    draw_text_box(pdf, at.(FIELDS[:employee_address], 0), employee_address_lines(employee).join("\n"), size: 9, valign: :top, min_font_size: 6.5)
+
+    {
+      box1: :box1_wages_tips_other_comp,
+      box2: :box2_federal_income_tax_withheld,
+      box3: :box3_social_security_wages,
+      box4: :box4_social_security_tax_withheld,
+      box5: :box5_medicare_wages_tips,
+      box6: :box6_medicare_tax_withheld
+    }.each { |box, key| draw_amount(pdf, at.(FIELDS[box]), row[key]) }
+    draw_amount(pdf, at.(FIELDS[:box7]), row[:box7_social_security_tips]) if row[:box7_social_security_tips].to_d.positive?
+
+    Array(row[:box12]).first(BOX12.length).each_with_index do |entry, index|
+      code_rect, amount_rect = BOX12[index]
+      draw_text_box(pdf, at.(code_rect), entry[:code], size: 9, align: :center)
+      draw_amount(pdf, at.(amount_rect), entry[:amount])
+    end
+    draw_checkbox(pdf, at.(FIELDS[:box13_retirement_plan], 0), row[:box13_retirement_plan])
+    Array(row[:box14b_tipped_occupation_codes]).first(2).each_with_index do |code, index|
+      draw_text_box(pdf, at.(FIELDS[:box14b][index]), code, size: 9, align: :center)
+    end
+  end
+
+  # Kept clear of the right rule, which is heavy on Copy B's boxes 1 and 2.
+  def draw_amount(pdf, rect, value)
+    left, bottom, right, top = rect
+    draw_text_box(pdf, [ left, bottom, right - 2, top ], money_string(value), size: 10, align: :right)
+  end
+
+  # Employee copies show only the last four digits; DRT's Copy 1 shows the
+  # whole number. The full SSN is read only for Copy 1.
+  def ssn_for(employee, row)
+    if kind == "drt"
+      digits = employee.ssn_digits
+      digits&.length == 9 ? "#{digits[0, 3]}-#{digits[3, 2]}-#{digits[5, 4]}" : nil
+    else
+      last4 = row[:employee_ssn_last4].to_s
+      last4.match?(/\A\d{4}\z/) ? "XXX-XX-#{last4}" : nil
+    end
+  end
+
+  def formatted_ein
+    digits = company.ein.to_s.gsub(/\D/, "")
+    digits.length == 9 ? "#{digits[0, 2]}-#{digits[2, 7]}" : company.ein.to_s
+  end
+
+  def employer_lines
+    @employer_lines ||= begin
+      PdfUnicodeFont.ensure_printable!(company.name, label: "Employer")
+      [ company.name, company.address_line1, company.address_line2, city_line(company) ].compact_blank
+    end
+  end
+
+  def first_name_and_initial(employee)
+    initial = employee.middle_name.to_s.strip.first
+    [ employee.first_name, ("#{initial}." if initial.present?) ].compact.join(" ")
+  end
+
+  def employee_address_lines(employee)
+    [ employee.address_line1, employee.address_line2, city_line(employee) ].compact_blank
+  end
+
+  def city_line(record)
+    city_state = [ record.city.presence, record.state.presence ].compact.join(", ")
+    [ city_state.presence, record.zip.presence ].compact.join(" ")
+  end
+end
