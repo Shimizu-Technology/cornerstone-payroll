@@ -1,6 +1,6 @@
 # One product, three apps: the architecture decision
 
-**Status:** Proposed. For Leon to decide, with questions for Dafne. No code has changed.
+**Status:** Decided by Leon on November 19, 2026. The decisions are in §0. The order of work (§6) is still to be planned with Leon, and Dafne's open questions are in §7. No code has changed.
 **Date:** November 19, 2026.
 **Checked against code:**
 - Payroll `origin/main` `3da73499`
@@ -15,6 +15,29 @@ Everything else in those documents stands.
 
 Leon asked to step back before building anything major. The product now spans payroll, HR, time tracking, client and employee portals, and Cornerstone's own time and profitability. Some of it is built and some isn't. The question is what the whole product should look like, what the options are, and what is best for the long term.
 
+## 0. Decisions (Leon, November 19, 2026)
+
+Where a decision changes a recommendation further down, the decision wins.
+
+| Area | Decision |
+|---|---|
+| **Shape of the product** | **One platform.** The Payroll codebase becomes the whole product. Time tracking becomes a module ported from AIRE's code, and HR lives in the platform (§2). |
+| **AIRE** | AIRE keeps its app as it is, with fixes and changes AIRE asks for, and no new HR features. It moves onto the platform when the time module matches it. AIRE's look, logo, colors and workflows carry over through per-client settings. Its aviation marketing site stays a separate website. Leon tells AIRE himself, when he chooses. |
+| **Logins** | **One login for everyone** (one Clerk app). This replaces the spec's separate employee login app. Accounts are by invitation only. A person's login is separate from their roles: Cornerstone staff, a client user for specific companies, an employee at one or more companies. Each area checks for its own role. MFA is required for staff and client users. Employees confirm sensitive changes with a one-time code. People with more than one role get a role switcher. |
+| **Web addresses** | Client subdomains on shimizu-technology.com. `payroll.shimizu-technology.com` is for Cornerstone staff and client offices. `<client>.shimizu-technology.com` (for example `mosas.`, `aire.`) is for each client's employees, branded for that client. A client's own domain is an optional extra later. |
+| **Separating companies' data** | Postgres row-level security on employee-facing and sensitive tables, behind the controller checks. Automated tests try to read across companies on every change. |
+| **Phone app** | An installable web app first. Native iOS and Android apps come with the time module. |
+| **Bank changes** | In the employee app. The employee confirms with a one-time code, and a fraud-alert email goes to the old address. Cornerstone approves the change in Payroll. A new account is never used for a payday that's already being processed. Direct deposit stays opt-in, with a check fallback (§8). |
+| **Contact changes** | Phone, personal email and emergency contacts apply after a one-time code. Home address is sensitive and goes through approval. |
+| **Per-client settings** | Built fresh from current main. Old PR #139 was closed. |
+| **Cornerstone Tax** | **Joins in stages.** A shared login and a client list linked to Payroll's companies come during the foundations. Staff time tracking moves with the time module, which makes Cornerstone the first time client. Whether the practice side (returns, documents, tax portal) moves is decided after the platform is proven, probably 2028. |
+| **Dafne's profit report** | **Lives in the platform** (this replaces the T2-in-Tax recommendation in §2). Tax sends hours by client, category, task and period to the platform. The platform adds each person's actual pay and employer taxes from Payroll, plus client fees, so pay data never leaves Payroll. Staff cost comes first. Overhead is a separate add-on column: a monthly amount Cornerstone enters, spread across clients by hours. Unallocated cost is shown and reconciles to payroll totals. Every Tax time entry requires a client, with an "Internal – Cornerstone" choice, plus a category and task. One clock session can be split across clients. All of Payroll's companies go into Tax's client list. |
+| **Release acceptance** | Each release is tested by agents on staging. Then Mark and Benjo run a written acceptance script, Dafne signs off, and one pilot client uses it for a pay period before everyone gets it. |
+| **Employee app pilot** | **MoSa's first.** Emma leads day to day, and Sara and Mo (the owners) are admins too. Admin roles are configurable, with several per client. |
+| **Name employees see** | The employer's name and logo, with a small "powered by" footer. |
+| **Engineering calls** | <ul><li>Module boundaries in the codebase are enforced by automated checks.</li><li>Employee and kiosk traffic gets its own server processes and workers.</li><li>The text-message provider is chosen when notifications are built, by delivery and price to Guam numbers.</li><li>AIRE moves after a side-by-side pay period, with its history checksums kept and the old app read-only for a while.</li></ul> |
+| **Deferred on purpose** | MoSa's start date (as soon as possible, done properly), languages, the business side (ownership, sales, pricing, revenue share, product name), the airport, and working directly with the bank on direct deposit. |
+
 ## Summary
 
 - **The product** is one service for Guam employers, run by Cornerstone. It covers payroll, people and HR records, time and attendance, leave, documents, onboarding, year-end forms and reporting. There are three front doors:
@@ -27,12 +50,12 @@ Leon asked to step back before building anything major. The product now spans pa
   - **November 18:** everything in one platform.
 
   Nothing from any of these plans has been built yet, so choosing now costs nothing to undo.
-- **Recommendation:**
+- **Decision** (§0):
   - Make the Payroll codebase the one platform, organized as clear internal modules.
   - Build its time module by porting AIRE's time code, not from scratch and not as copies.
   - Move AIRE onto the platform once the module matches it. Until then, keep AIRE running exactly as it is.
   - Keep Cornerstone Tax as Cornerstone's practice app.
-- **Cornerstone's profitability goal:** it doesn't need the full AIRE-style connection. A small cost feed from Payroll to Tax delivers it soon, alongside client fees and required client tagging. The full connection would duplicate the time module we plan to build anyway.
+- **Cornerstone's profitability goal:** it doesn't need the full AIRE-style connection. The profit report lives in the platform: Tax sends hours by client and task, and the platform adds actual pay cost and fees (§0). The full connection would duplicate the time module we plan to build anyway.
 - **Order:**
   1. Year-end forms, due February 1.
   2. The profitability pieces, which run separately and are small.
@@ -102,7 +125,7 @@ Inside one system, most of that becomes ordinary database links and locks.
 - HR covers people records, leave, documents and policies, onboarding, credentials and the employee app.
 - No new HR features go into AIRE's app. Anything built there would have to be rebuilt in the platform. AIRE's leave requests stay as they are until AIRE moves, then switch to the platform's leave.
 - The employee app is a new front door into the platform:
-  - its own login (a separate Clerk app for employees)
+  - one login shared with staff and client users, with separate roles (§0; this replaces the separate Clerk app)
   - its own API area
   - client branding (logo, colors, a web address per client, the way AIRE's app looks like AIRE)
 - AIRE's "My Pay" already shows the pattern: pay comes from Payroll and is never stored elsewhere.
@@ -128,16 +151,16 @@ Dafne wants to see what each client and task costs her, to know where she makes 
 - For salaried staff, cost has to be spread across hours anyway, which is exactly what T2 does.
 - Every dollar in the feed has to land somewhere. Cost for a period in which a person logged no hours (paid leave, a holiday, a missing timesheet) goes into an **unallocated** line for that person and period. Allocated cost plus unallocated cost must equal the feed's totals for each pay period, and the report shows the difference if they don't.
 
-The profitability report lives in Tax, where clients and fees are.
+**Decided instead (§0):** the profitability report lives in the platform. Tax sends hours by client and task to the platform, and pay data never leaves Payroll. The T2 reasoning still holds for how cost is spread and reconciled.
 
-Alongside T2, these small changes in Tax make the numbers trustworthy:
+These small changes in Tax make the numbers trustworthy:
 - Require a client on every entry, with an "Internal – Cornerstone" choice.
 - Require a category and a task.
 - Let one clock-in session be split across clients.
 - Record each client's fee, with dates so changes are kept, or import fees from wherever Dafne bills.
 - Show unassigned time in the report, so a gap never looks like profit.
 
-Payroll already has a way to send totals to Tax. It has never been used, and as built it could send other companies' data. The cost feed has to be limited to company 1 and to managers.
+Under the §0 decision, pay data doesn't go to Tax. Tax sends hours by client, category, task and period to the platform, and the platform computes cost and profit. Payroll's existing, never-used feed of totals to Tax could send other companies' data as built. If it's ever kept, it must be limited to company 1 and to managers, and must not carry pay data.
 
 ## 3. How the pieces fit
 
@@ -147,10 +170,12 @@ Payroll already has a way to send totals to Tax. It has never been used, and as 
  (per-client brand) │                         one record per person, per company                          │
  Manager portal ──► │  Settings per client turn modules on: payroll only · + portals · + time (workforce)  │
                     └───────────────▲──────────────────────────────────────────────────▲──────────────────────┘
-                                    │ connector (until AIRE moves)                     │ cost feed (company 1 only)
+                                    │ connector (until AIRE moves)                     │ hours by client, category, task, period
                               AIRE time app                                      Cornerstone Tax
-                         (unchanged; moves later)                       (practice app: clients, returns, fees,
-                                                                        profitability; staff time until T3)
+                         (unchanged; moves later)                       (practice app: clients, returns, fees;
+                                                                        staff time until it moves to the platform)
+
+ Profitability lives in the platform: Tax's hours + Payroll's pay and employer taxes + client fees (pay never leaves Payroll).
 ```
 
 Rules carried forward from the spec still hold:
@@ -168,11 +193,8 @@ Added rules:
 
 Today Payroll serves only Cornerstone staff and client offices. Employee logins mean many more users, on phones, on the open internet. Before the first employee logs in:
 
-1. **A separate login for employees:** its own Clerk app, so an employee can never become a staff or client user. Today any verified email that matches gets matched or provisioned.
-2. **Stronger company separation.** Separation is enforced in controllers today. Before employees arrive, add one of these:
-   - a scoped query layer
-   - Postgres row-level security
-   - isolation tests that fail when a query isn't limited to a company
+1. **Safe login for employees (§0: one login).** Invitation-only accounts, login separate from roles, and each area checking for its own role, so an employee can never reach staff or client areas. Today any verified email that matches gets matched or provisioned, and that has to end first.
+2. **Stronger company separation (§0: database-level).** Separation is enforced in controllers today. Add Postgres row-level security on employee-facing and sensitive tables, plus isolation tests that fail when a query isn't limited to a company.
 3. **MFA enforced** for staff and client users. It's configured but nothing checks it.
 4. **Audit for actions with no staff user,** such as employees, kiosks and system jobs.
 5. **Effective-dated pay.** Pay rates are overwritten in place today.
@@ -208,44 +230,50 @@ Any big AIRE feature built before the port gets ported along with it. Anything b
 | Step | What | Why here |
 |---|---|---|
 | 0 | Year-end W-2GU and 1099 (full build R0) | Legal deadline: February 1, 2027 |
-| 1 | Cornerstone profitability: required client and "Internal", split sessions, fees, scoped cost feed, profitability report | Dafne wants it. It's small, independent of the platform, and every day of untagged time is lost |
+| 1 | Cornerstone profitability: required client and "Internal", split sessions, all clients in Tax's list, Tax hours feed into the platform, fees, profitability report in the platform | Dafne wants it. It's small, and every day of untagged time is lost |
 | 2 | Foundations and the §4 safety gate (full build R1) | Every later module needs them |
-| 3 | Employee app: pay, W-2s, profile, documents, policies (R2) | Cornerstone staff first, then MoSa's and KPI |
+| 3 | Employee app: pay, W-2s, profile, documents, policies (R2) | MoSa's first (§0), then KPI and Cornerstone's own staff |
 | 4 | Leave, onboarding and offboarding (R3–R4) | Sellable HR |
 | 5 | Time module, ported from AIRE (R5) | First users are Cornerstone's own staff, since T3 makes Cornerstone the test client, then the next time client |
 | 6 | AIRE moves onto the platform | When the module matches and AIRE agrees |
 | 7 | Benefits, construction, report builder, year-end service (R6–R7) | Larger clients |
 
-The timing estimate stays at nine to twelve months for the full scope.
+This order is a draft. Leon and Claude plan the final order together after Dafne's answers. The timing estimate stays at nine to twelve months for the full scope.
 - If a new client needs time tracking before step 5, a copy of AIRE's app (option A) is the stopgap. It moves at step 6 with AIRE.
 - The time module could move ahead of leave and onboarding if a paying time client is waiting and the HR pilot isn't.
 
 ## 7. Questions
 
-### For Leon
-1. **Time:** approve option C (time as a module of the platform, ported from AIRE)? Or B, if Workforce should be sellable without Payroll?
-2. **AIRE:** agree that AIRE's app gets fixes and requested changes only from now on, and moves when the module matches? Who at AIRE needs to agree, and when should we tell them?
-3. **Cornerstone profitability:** approve T2 (cost feed) now instead of the full Tax connection?
-4. **Employee app address and branding:**
-   - one product name with a web address per client?
-   - or only the client's branding?
+Leon's questions from the first version of this document are all answered in §0.
 
-   This is the spec's open "employee app domain" decision.
-5. **Next time clients:** which clients want clock-in after AIRE, and when? That decides whether the time module or leave and onboarding comes first.
-6. **Still open from the spec:**
-   - MFA first
-   - a separate employee login app
-   - close PR #139
-   - the text-message provider
-   - bank changes through the portal first
-   - contact changes approved with a one-time code
+### For Dafne (email drafted November 19; Leon reviews it before sending)
+1. **Year-end:** does her SSA Business Services Online account cover every employer? Can she send one of last year's ezW2 upload files? Should Cornerstone keep filing through each client's GuamTax account with clients signing their own 941s, or register as a GuamTax payroll processor and possibly as an IRS reporting agent (Form 8655)?
+2. **Fees:** does she bill every client through Payroll's invoices, or are some billed in QuickBooks? Monthly, per job, or both?
+3. **Security plan:** was the written information security plan (WISP) finished after the March 2026 training?
+4. **MoSa's:** PTO or sick policy and who approves, which policies employees acknowledge, health or food-handler permits, where schedules are made, and whether most employees have a smartphone and personal email.
+5. **KPI:** Nan's and Dee's access and notifications.
+6. **For DRT, through her contacts:** the questions in [the legal research](GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md), Part 4.
 
-   Approving C makes the separate employee login required.
+### Answered without asking her
+- How Cornerstone's staff are paid: from Payroll, company 1.
+- Which clients go in the time list: all of them.
+- Tips: per pay period.
+- Benefits: from the deductions set up in Payroll.
+- W-9s for MoSa's payees: already requested in her November 17 email.
+- Direct deposit today: Cornerstone gives MoSa's the stubs, and MoSa's pays through its own ACH agreement with its bank.
+- GuamTax today: each client has its own account, and Cornerstone signs in for them.
 
-### For Dafne
-7. How are Cornerstone's own staff paid today: hourly from logged hours, salaried, or a mix? That tells us how much it matters to pay staff from logged hours.
-8. Where do her client fees live today: QuickBooks, invoices, or agreements? Monthly, per job, or both?
-9. Should profitability include only staff cost (pay and employer taxes), or office overhead as well?
-10. Should every time entry require a client, with an "Internal – Cornerstone" choice for firm work?
+## 8. Legal research
 
-The commercial questions in the full build plan (§9: who owns, sells, supports and bills the product, and pricing) still need answers before the product is sold outside Cornerstone's current clients. They don't block anything above.
+[GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md](GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md) is a sourced research brief for a later law-firm review. It is not legal advice. Its Part 1 is the list of build requirements. The findings that change this plan:
+
+- **Wages are "cash or check"** (22 GCA § 3212(b)). Direct deposit stays opt-in, with a signed authorization and a check fallback, until Guam DOL or the law firm confirms.
+- **Guam has no tip credit.** Payroll needs a below-minimum-wage warning, and service charges need correct handling.
+- **Meal and split-shift rules** go into the time module: flag violations and store waivers.
+- **Pay deadlines:** wages are due within 7 days of the period end, and a discharged employee is paid immediately. Withheld amounts owed to others (child support, 401(k), loans) are due within 5 days after the day the employee's pay is due (22 GCA § 3217(b); to confirm in legal review).
+- **Guam leave laws** go into the leave module.
+- **Records are kept 6 years** by default.
+- **Year-end:** GuamTax rules, and tracking each SSA submission's confirmation number. In 2025, SSA flagged 2024 W-2s that were created but never submitted.
+- **Text messages:** the new opt-out rules take effect November 25, 2026.
+- **Security:** a WISP, the FTC Safeguards Rule and a breach plan. The platform never stores client bank or EFTPS passwords.
+- **H-2B and Davis-Bacon** wait for the construction release.
