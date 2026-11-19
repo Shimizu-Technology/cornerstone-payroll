@@ -232,6 +232,8 @@ export type YearEndStep =
       state: string | null;
       zip: string | null;
       phone: string | null;
+      filing_contact_name?: string | null;
+      kind_of_employer?: string;
       email: string | null;
     }>
   | StepBase<'people', {

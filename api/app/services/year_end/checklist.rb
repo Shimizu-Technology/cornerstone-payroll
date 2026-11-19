@@ -191,6 +191,9 @@ module YearEnd
       if company.email.blank?
         issues << issue("EMPLOYER_EMAIL_MISSING", files?("w2_gu") ? "Add the employer email for the W-3SS contact." : "Add the employer email for the Form 1096 contact.", field: "email")
       end
+      if files?("w2_gu") && company.filing_contact_name.blank?
+        issues << issue("EMPLOYER_CONTACT_NAME_MISSING", "Add the employer filing contact name.", field: "filing_contact_name")
+      end
       forms = [ ("W-2" if files?("w2_gu")), ("1099" if files?("form_1099")) ].compact.join(" and ")
 
       step(
@@ -200,7 +203,8 @@ module YearEnd
           name: company.name, ein: company.ein,
           address_line1: company.address_line1, address_line2: company.address_line2,
           city: company.city, state: company.state, zip: company.zip,
-          phone: company.phone, email: company.email
+          phone: company.phone, email: company.email,
+          filing_contact_name: company.filing_contact_name, kind_of_employer: company.kind_of_employer, employment_code: company.employment_code, establishment_number: company.establishment_number
         }
       )
     end

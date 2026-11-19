@@ -1,3 +1,4 @@
+import { EmployerFilingSettings } from './EmployerFilingSettings';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
@@ -8,9 +9,10 @@ import type { YearEndChecklist, ActiveYearEndStep } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
 
 type EmployerStepData = ActiveYearEndStep<'employer'>;
-type Field = 'ein' | 'address_line1' | 'address_line2' | 'city' | 'state' | 'zip' | 'phone' | 'email';
+type Field = 'filing_contact_name' | 'ein' | 'address_line1' | 'address_line2' | 'city' | 'state' | 'zip' | 'phone' | 'email';
 
 const LABELS: Record<Field, string> = {
+  filing_contact_name: 'Employer filing contact name',
   ein: 'EIN',
   address_line1: 'Street address',
   address_line2: 'Suite or unit (optional)',
@@ -29,6 +31,7 @@ export function EmployerStep({ checklist, step, onSaved }: {
 }): ReactElement {
   const missing = new Set(step.issues.map((issue) => issue.field));
   const fields: Field[] = [
+    ...(missing.has('filing_contact_name') ? ['filing_contact_name' as const] : []),
     ...(missing.has('ein') ? ['ein' as const] : []),
     ...(missing.has('address') ? ['address_line1' as const, 'address_line2' as const, 'city' as const, 'state' as const, 'zip' as const] : []),
     ...(missing.has('phone') ? ['phone' as const] : []),
@@ -39,6 +42,7 @@ export function EmployerStep({ checklist, step, onSaved }: {
   const [permissionError, setPermissionError] = useState(false);
   const [lookupAttempt, setLookupAttempt] = useState(0);
   const [values, setValues] = useState<Record<Field, string>>(() => ({
+    filing_contact_name: step.data.filing_contact_name ?? '',
     ein: step.data.ein ?? '',
     address_line1: step.data.address_line1 ?? '',
     address_line2: step.data.address_line2 ?? '',
@@ -71,7 +75,7 @@ export function EmployerStep({ checklist, step, onSaved }: {
       <div><dt className="text-xs font-semibold text-neutral-600">Contact</dt><dd className="text-neutral-950 [overflow-wrap:anywhere]">{[step.data.phone, step.data.email].filter(Boolean).join(' · ') || 'Missing'}</dd></div>
     </dl>
   );
-  if (fields.length === 0) return summary;
+  if (fields.length === 0) return <>{summary}<EmployerFilingSettings initialKind={step.data.kind_of_employer} companyId={checklist.company.id} onSaved={onSaved} /></>;
 
   const editableFields = fields.filter((field) => editable?.includes(field));
   const lockedFields = editable ? fields.filter((field) => !editable.includes(field)) : [];
@@ -94,6 +98,7 @@ export function EmployerStep({ checklist, step, onSaved }: {
   return (
     <div className="space-y-4">
       <IssueList issues={step.issues} />
+      <EmployerFilingSettings initialKind={step.data.kind_of_employer} companyId={checklist.company.id} onSaved={onSaved} />
       {permissionError ? (
         <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50/40 p-3">
           <p className="text-sm text-danger-800">Could not check which employer details you can edit. Check your connection and try again.</p>

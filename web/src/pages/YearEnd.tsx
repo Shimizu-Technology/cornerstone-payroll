@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { AlertCircle, ArrowRight, CheckCircle2, ClipboardList, RefreshCw } from 'lucide-react';
+import { FilingSubmitterCard } from '@/components/year-end/FilingSubmitterCard';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -207,6 +208,7 @@ export function YearEnd(): ReactElement {
       />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+        <FilingSubmitterCard />
         {error && (
           <Card role="alert" className="border-danger-200 bg-danger-50/40 p-4 sm:p-5">
             <p className="flex gap-2 font-semibold text-danger-800"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />The year-end list could not be loaded.</p>

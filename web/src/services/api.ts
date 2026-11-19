@@ -3361,7 +3361,14 @@ export interface PayrollFinalRecord {
   completion: { status: 'attention_required' | 'in_progress' | 'complete'; blockers: string[]; open_items: string[] };
 }
 
+export const filingSubmitterApi = {
+  get: () => api.get<{ profile: Record<string, string | null>; missing_fields: string[]; can_edit: boolean }>('/admin/filing_submitter'),
+  update: (profile: Record<string, string | null>) => api.patch('/admin/filing_submitter', { profile }),
+};
+
 export const reportsApi = {
+  wageFilingFile: (year: number, companyId: number, mode: 'draft' | 'final', pdf: boolean) =>
+    api.getBlobWithParams(`/admin/reports/${pdf ? 'w3ss_pdf' : 'w2_gu_efw2'}`, { year, mode }, { companyId }),
   dashboard: () =>
     api.get<DashboardResponse>('/admin/reports/dashboard'),
   payrollRegister: (payRunKey: string | number) =>

@@ -6,7 +6,7 @@ import { YearEnd } from './YearEnd';
 import type { YearEndClientRow, YearEndClientsOverview } from '@/lib/year-end';
 
 const mocks = vi.hoisted(() => ({ clients: vi.fn() }));
-vi.mock('@/services/api', () => ({ yearEndApi: { clients: mocks.clients } }));
+vi.mock('@/services/api', () => ({ yearEndApi: { clients: mocks.clients }, filingSubmitterApi: { get: vi.fn().mockResolvedValue({ profile: {}, missing_fields: [], can_edit: false }) } }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, name: 'Tumon Bakery' }, activeCompanyId: 1 }) }));
 
 function row(overrides: Partial<YearEndClientRow>): YearEndClientRow {

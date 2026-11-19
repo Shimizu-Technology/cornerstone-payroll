@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Employee < ApplicationRecord
+  validates :name_suffix, inclusion: { in: %w[JR SR II III IV V VI] }, allow_blank: true
+  before_validation { self.name_suffix = name_suffix.to_s.upcase.delete(".").presence }
   include TracksRecordCreation
 
   belongs_to :created_by, class_name: "User", optional: true

@@ -30,6 +30,7 @@ import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentTy
 const initialFormData: EmployeeFormData = {
   first_name: '',
   middle_name: '',
+  name_suffix: '',
   last_name: '',
   job_title: '',
   ssn: '',
@@ -301,6 +302,7 @@ export function EmployeeForm() {
       const nextForm = {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
+        name_suffix: employee.name_suffix || '',
         last_name: employee.last_name,
         job_title: employee.job_title || '',
         ssn: loadedSsn,
@@ -1187,6 +1189,9 @@ export function EmployeeForm() {
                   onChange={(e) => handleChange('last_name', e.target.value)}
                   error={getFieldError('last_name')}
                 />
+              </div>
+              <div>
+                <Input label="Name suffix (optional: Jr, Sr, II…)" value={form.name_suffix} onChange={e => handleChange('name_suffix', e.target.value)} />
               </div>
             </div>
 

@@ -5,11 +5,11 @@ module Api
     module Admin
       class CompaniesController < BaseController
         STAFF_EDITABLE_COMPANY_FIELDS = %i[
-          address_line1 address_line2 city state zip phone email
+          address_line1 address_line2 city state zip phone email filing_contact_name
         ].freeze
         ADMIN_EDITABLE_COMPANY_FIELDS = (
           %i[
-            name ein pay_frequency active address_line1 address_line2 city state zip
+            filing_contact_name kind_of_employer employment_code establishment_number name ein pay_frequency active address_line1 address_line2 city state zip
             phone email bank_name bank_address check_stock_type check_offset_x check_offset_y
             next_check_number simple_payroll_register_enabled historical_payroll_enabled
             client_payroll_approval_required
@@ -311,6 +311,7 @@ module Api
 
         def company_params
           params.require(:company).permit(
+            :filing_contact_name, :kind_of_employer, :employment_code, :establishment_number,
             :name, :ein, :pay_frequency, :active,
             :address_line1, :address_line2, :city, :state, :zip,
             :phone, :email,
@@ -405,6 +406,7 @@ module Api
               state: company.state,
               zip: company.zip,
               ein: company.ein,
+              filing_contact_name: company.filing_contact_name, kind_of_employer: company.kind_of_employer, employment_code: company.employment_code, establishment_number: company.establishment_number,
               phone: company.phone,
               email: company.email,
               bank_name: company.bank_name,
