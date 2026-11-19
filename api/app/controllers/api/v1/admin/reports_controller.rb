@@ -1933,8 +1933,9 @@ module Api
           company.with_lock do
             final = params[:mode] == "final"
             gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:filings, "w2_gu")
-            capability = final ? :can_export_filing_ready : :can_export_draft
-            raise ArgumentError, gate[:blockers].map { |b| b.is_a?(Hash) ? b[:message] : b }.join("; ") unless gate.dig(:capabilities, capability)
+            decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
+            raise ArgumentError, "Record that Cornerstone files this client's W-2s before downloading" unless decision&.responsible_party == "cornerstone"
+            raise ArgumentError, gate[:blockers].map { |b| b.is_a?(Hash) ? b[:message] : b }.join("; ") if gate[:blockers].any?
 
             report = W2GuAggregator.new(company, year).generate
             fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: report).call

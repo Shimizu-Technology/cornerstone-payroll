@@ -83,6 +83,30 @@ module YearEnd
       w2_blockers_from(steps_before_ready)
     end
 
+    def efw2_employer_issues
+      efw2_problems.select { |message| message.start_with?("Employer", "Invalid employer") }.reject { |message| (company.ein.blank? && message.include?("EIN")) || (company.phone.blank? && message.include?("phone")) || (company.email.blank? && message.include?("email")) || (company.filing_contact_name.blank? && message.include?("contact name")) || ([ company.address_line1, company.city, company.state, company.zip ].any?(&:blank?) && (message.include?("street") || message.include?("ZIP"))) }.map { |message| issue("EMPLOYER_EFILE_INVALID", message, field: message.include?("EIN") ? "ein" : message.include?("ZIP") || message.include?("street") ? "address" : nil) }
+    end
+
+    def efw2_people_issues
+      existing_missing = w2_employees.flat_map do |employee|
+        label = "#{employee.first_name} #{employee.last_name}"
+        messages = []
+        messages << "#{label}: valid SSN required" unless employee.valid_filing_ssn?
+        messages << "#{label}: street and city required" if employee.address_line1.blank? || employee.city.blank?
+        messages << "#{label}: valid US/territory state and ZIP required" if employee.state.blank? || employee.zip.blank?
+        messages
+      end
+      efw2_problems.reject { |message| message.start_with?("Employer", "Invalid employer") || existing_missing.include?(message) }.map { |message| issue("EMPLOYEE_EFILE_INVALID", message) }
+    end
+
+    def efw2_problems
+      return [] unless year == 2026 && files?("w2_gu")
+
+      return [] unless w2_report
+
+      @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).problems.reject { |message| message.start_with?("Submitter", "Add the practice") }
+    end
+
     private
 
     attr_reader :company, :year, :user
@@ -113,7 +137,7 @@ module YearEnd
 
     def w2_blockers_from(steps)
       steps
-        .select { |step| step[:key].in?(%w[filing_decision employer reconciliation review_warnings prior_provider]) }
+        .select { |step| step[:key].in?(%w[filing_decision employer people reconciliation review_warnings prior_provider]) }
         .flat_map { |step| step[:issues] }
         .reject { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) }
     end
@@ -194,6 +218,7 @@ module YearEnd
       if files?("w2_gu") && company.filing_contact_name.blank?
         issues << issue("EMPLOYER_CONTACT_NAME_MISSING", "Add the employer filing contact name.", field: "filing_contact_name")
       end
+      issues += efw2_employer_issues
       forms = [ ("W-2" if files?("w2_gu")), ("1099" if files?("form_1099")) ].compact.join(" and ")
 
       step(
@@ -249,6 +274,7 @@ module YearEnd
         issue("PAYEE_DETAILS_MISSING", "#{row[:name]} is missing #{row[:missing_fields].map { |field| field == 'ssn' ? 'a TIN' : 'an address' }.to_sentence}.",
               employee_id: row[:employee_id])
       end
+      issues += efw2_people_issues
       payees = files?("form_1099") ? one_off_payees : []
       issues += payees.reject { |payee| payee[:status] == "identified" }.map do |payee|
         issue("PAYEE_IDENTITY_UNRESOLVED", one_off_payee_message(payee), warning_code: payee[:code])

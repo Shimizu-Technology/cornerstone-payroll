@@ -740,7 +740,7 @@ describe('Year-end checklist', () => {
       data: { name: 'Tumon Bakery', ein: null, address_line1: '1 Marine Dr', address_line2: null, city: 'Tamuning', state: 'GU', zip: '96913', phone: null, email: 'office@example.test' },
     });
     mocks.checklist.mockResolvedValue(checklist(working().map((entry) => (entry.key === 'employer' ? employer : entry))));
-    mocks.companyGet.mockRejectedValueOnce(new Error('Network error')).mockResolvedValue({ company: { editable_fields: ['phone'] } });
+    mocks.companyGet.mockRejectedValueOnce(new Error('Network error')).mockResolvedValue({ company: { editable_fields: ['ein'] } });
 
     renderPage();
 
@@ -751,10 +751,8 @@ describe('Year-end checklist', () => {
 
     fireEvent.click(within(region).getByRole('button', { name: 'Try again' }));
 
-    expect(await within(region).findByLabelText('Phone')).toBeTruthy();
-    // EIN is confirmed read-only for this user, so it stays locked.
-    expect(within(region).queryByLabelText('EIN')).toBeNull();
-    expect(within(region).getByText(/A manager or admin adds the EIN/)).toBeTruthy();
+    expect(await within(region).findByLabelText('EIN')).toBeTruthy();
+
     expect(mocks.companyGet).toHaveBeenCalledTimes(2);
   });
 

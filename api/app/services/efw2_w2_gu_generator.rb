@@ -3,6 +3,8 @@
 # SSA Pub 42-007, tax year 2026, v4 (11/12/2026). Positions are one-based.
 # Wages come exclusively from W2GuAggregator. This class formats and verifies.
 class Efw2W2GuGenerator
+  include Efw2Formatting
+
   class InvalidFile < ArgumentError
     attr_reader :problems
     def initialize(problems)
@@ -17,8 +19,6 @@ class Efw2W2GuGenerator
   RU_MONEY = ((10..115).step(15).to_a + [ 145 ] + (160..325).step(15).to_a + (355..475).step(15).to_a).freeze
   BOXES = %i[box1_wages_tips_other_comp box2_federal_income_tax_withheld box3_social_security_wages box4_social_security_tax_withheld box5_medicare_wages_tips box6_medicare_tax_withheld box7_social_security_tips].freeze
   BOX12 = { "D" => [ "RW", 287, "RT", 145 ], "AA" => [ "RW", 441, "RT", 370 ], "TA" => [ "RO", 221, "RU", 295 ], "TP" => [ "RO", 232, "RU", 310 ], "TT" => [ "RO", 243, "RU", 325 ] }.freeze
-  STATES = %w[AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY GU AS MP PR VI AA AE AP].freeze
-  BAD_EIN_PREFIXES = %w[00 07 08 09 17 18 19 28 29 49 69 70 78 79 89].freeze
 
   attr_reader :report
 
@@ -40,11 +40,6 @@ class Efw2W2GuGenerator
   end
 
   private
-
-  def clean(value, name: false)
-    text = ActiveSupport::Inflector.transliterate(value.to_s).upcase
-    text.gsub(name ? /[^A-Z '-]/ : /[^ -~]/, "").strip
-  end
 
   def put(record, position, width, value)
     record[position - 1, width] = value.to_s[0, width].ljust(width)
@@ -105,7 +100,7 @@ class Efw2W2GuGenerator
     put(r, 219, 1, @company.employment_code)
     put(r, 220, 1, "G")
     put(r, 221, 1, "0")
-    # The practice is the employer's filing contact for this third-party file.
+    # The employer supplies its own filing contact; RA identifies the practice.
     put(r, 222, 27, clean(@company.filing_contact_name))
     put(r, 249, 15, @company.phone.gsub(/\D/, ""))
     put(r, 279, 40, @company.email)
@@ -133,7 +128,7 @@ class Efw2W2GuGenerator
     put(rw, 486, 1, row[:box13_statutory_employee] ? "1" : "0")
     put(rw, 488, 1, row[:box13_retirement_plan] ? "1" : "0")
     put(rw, 489, 1, row[:box13_third_party_sick_pay] ? "1" : "0")
-    Array(row[:box14b_tipped_occupation_codes]).each_with_index { |code, i| put(rw, 490 + i * 3, 3, code) }
+    Array(row[:box14b_tipped_occupation_codes]).select { Array(row[:box12]).any? { |e| e[:code] == "TP" && cents(e[:amount]).positive? } }.each_with_index { |code, i| put(rw, 490 + i * 3, 3, code) }
     [ rw, ro ]
   end
 
@@ -148,7 +143,9 @@ class Efw2W2GuGenerator
     r
   end
 
-  def validate_inputs!
+  public
+
+  def problems
     problems = []
     problems << "Only tax year 2026 is supported by this EFW2 layout" unless @year == 2026
     problems << "Add the practice submitter profile" unless @submitter
@@ -163,7 +160,7 @@ class Efw2W2GuGenerator
     problems << "Employer contact name is required" if clean(@company.filing_contact_name).blank?
     problems << "Employer contact phone must contain 10 digits" unless @company.phone.to_s.gsub(/\D/, "").match?(/\A\d{10}\z/)
     problems << "Employer contact email is required and must fit 40 ASCII characters" unless valid_contact_email?(@company.email)
-    problems << "Invalid employer filing codes" unless %w[N F S T Y].include?(@company.kind_of_employer) && %w[R A H M Q F].include?(@company.employment_code)
+    problems << "Invalid employer filing codes" unless %w[N F S T Y].include?(@company.kind_of_employer) && %w[R F A M].include?(@company.employment_code)
     problems << "No employee wage records to export" if report[:employees].empty?
     ids = report[:employees].pluck(:employee_id)
     problems << "Duplicate employee rows must be resolved" if ids.uniq.length != ids.length
@@ -175,15 +172,28 @@ class Efw2W2GuGenerator
     report[:employees].each do |row|
       employee = @employees[row[:employee_id]]
       if !employee
-        problems << "Employee #{row[:employee_id]} is unavailable"
+        problems << "An employee wage record is unavailable; refresh the report"
         next
       end
-      label = "Employee #{employee.id}"
+      label = "#{employee.first_name} #{employee.last_name}".strip
       problems << "#{label}: valid SSN required" unless employee.ssn_digits.to_s.match?(/\A(?!000|666|9)\d{3}(?!00)\d{2}(?!0000)\d{4}\z/)
       problems << "#{label}: first and last name required" if clean(employee.first_name, name: true).blank? || clean(employee.last_name, name: true).blank?
       validate_address(employee, label, problems)
       problems << "#{label}: Social Security wages plus tips exceed 2026 wage base" if cents(row[BOXES[2]]) + cents(row[BOXES[6]]) > 18_450_000
       problems << "#{label}: Social Security tax exceeds $11,439.00" if cents(row[BOXES[3]]) > 1_143_900
+      BOXES.each_with_index do |box, i|
+        amount = cents(row[box])
+        problems << "#{label}: Box #{i + 1} is negative" if amount.negative?
+        problems << "#{label}: Box #{i + 1} exceeds the 11-digit e-file field" if amount > 99_999_999_999
+      end
+      ss_wages = cents(row[BOXES[2]]) + cents(row[BOXES[6]])
+      problems << "#{label}: Box 5 Medicare wages must equal or exceed Box 3 wages plus Box 7 tips" if cents(row[BOXES[4]]) < ss_wages
+      problems << "#{label}: Box 4 Social Security tax requires Box 3 wages or Box 7 tips" if cents(row[BOXES[3]]).positive? && ss_wages.zero?
+      problems << "#{label}: Box 6 Medicare tax requires Box 5 Medicare wages" if cents(row[BOXES[5]]).positive? && cents(row[BOXES[4]]).zero?
+      Array(row[:box12]).each do |entry|
+        amount = cents(entry[:amount])
+        problems << "#{label}: Box 12 #{entry[:code]} is negative or exceeds the 11-digit e-file field" unless amount.between?(0, 99_999_999_999)
+      end
       Array(row[:box12]).each { |entry| problems << "#{label}: unsupported Box 12 code #{entry[:code]}" unless BOX12.key?(entry[:code]) }
       entries = Array(row[:box12])
       problems << "#{label}: duplicate Box 12 codes" if entries.pluck(:code).uniq.length != entries.length
@@ -192,31 +202,14 @@ class Efw2W2GuGenerator
       problems << "#{label}: more than two Treasury tipped occupations require review" if row[:excess_box14b_tipped_occupation_codes]
       problems << "#{label}: invalid tipped occupation codes" if codes.length > 2 || codes.any? { |code| !code.to_s.match?(/\A\d{3}\z/) }
     end
-    raise InvalidFile, problems if problems.any?
+    problems.uniq
   end
 
-  def valid_contact_email?(value)
-    email = value.to_s
-    return false unless email.ascii_only? && email.bytesize <= 40 && email.count("@") == 1
+  private
 
-    local, domain = email.split("@", -1)
-    return false if local.blank? || domain.blank? || email.include?("..") || local.start_with?(".") || local.end_with?(".")
-    return false unless local.match?(/\A[A-Za-z0-9.~!#$%^&*_+{}|?'=\/`-]+\z/)
-
-    labels = domain.split(".", -1)
-    labels.length >= 2 && labels.all? { |label| label.match?(/\A[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\z/) } && labels.last.match?(/\A[A-Za-z]{2,}\z/)
-  end
-
-  def validate_identity(object, label, problems)
-    ein = object.ein.to_s.delete("-")
-    problems << "#{label}: valid nine-digit EIN required" unless ein.match?(/\A\d{9}\z/) && !BAD_EIN_PREFIXES.include?(ein[0, 2])
-    problems << "#{label}: name required" if clean(object.name).blank?
-    validate_address(object, label, problems)
-  end
-
-  def validate_address(object, label, problems)
-    problems << "#{label}: street and city required" if clean(object.address_line1).blank? || clean(object.city).blank?
-    problems << "#{label}: valid US/territory state and ZIP required" unless STATES.include?(object.state.to_s.upcase) && object.zip.to_s.match?(/\A\d{5}(-?\d{4})?\z/)
+  def validate_inputs!
+    found = problems
+    raise InvalidFile, found if found.any?
   end
 
   def self_check!(records)

@@ -198,7 +198,7 @@ export function YearEndChecklist(): ReactElement {
                     {stepBody(checklist, step, onSaved, onRefresh)}
                   </StepCard>
                   {step.key === 'mark_ready' && checklist.files_w2 && (
-                    <div className="mt-3"><W2FilingFileRow companyId={checklist.company.id} year={checklist.tax_year} ready={step.status === 'done'} /></div>
+                    <div className="mt-3"><W2FilingFileRow canDownloadEfile={checklist.permissions.can_mark_ready} companyId={checklist.company.id} year={checklist.tax_year} ready={step.status === 'done'} /></div>
                   )}
                 </li>
               ))}

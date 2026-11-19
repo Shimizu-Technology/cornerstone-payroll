@@ -19,6 +19,40 @@ RSpec.describe Efw2W2GuGenerator do
     records.find { |r| r[0, 2] == type }.byteslice(first - 1, last - first + 1)
   end
 
+  it "matches literal 512-byte golden records transcribed from the SSA v4 tables" do
+    company.update!(name: "Island Bakery", address_line1: "2 Palm St", address_line2: nil, city: "Tamuning", state: "GU", zip: "96913")
+    expected = Rails.root.join("spec/fixtures/efw2_2026_golden.txt").read.lines(chomp: true)
+    expect(expected.map(&:bytesize)).to eq([ 512 ] * 7)
+    expect(generator.generate.split("\r\n")).to eq(expected)
+  end
+
+  it "normalizes apostrophes before transliterating employer and employee names" do
+    company.update!(filing_contact_name: "Ma’lia ‘Cruzʼ")
+    employee.update!(first_name: "Ma’lia")
+    records = generator.generate.split("\r\n")
+    expect(field(records, "RE", 222, 248).strip).to eq("MA'LIA 'CRUZ'")
+    expect(field(records, "RW", 12, 26).strip).to eq("MA'LIA")
+  end
+
+  it "returns named box problems without raising or exposing identifiers" do
+    row[:box2_federal_income_tax_withheld] = -1
+    expect(generator.problems).to include("José! O'Neil: Box 2 is negative")
+    expect(generator.problems.join).not_to include(employee.id.to_s + ":", "123456789")
+  end
+
+  it "checks the three SSA relational edits and omits occupation codes without TP" do
+    row[:box3_social_security_wages] = 0
+    row[:box7_social_security_tips] = 0
+    row[:box5_medicare_wages_tips] = 0
+    expect(generator.problems.join).to include("Box 4", "Box 6")
+    row[:box3_social_security_wages] = 100
+    expect(generator.problems.join).to include("Box 5 Medicare wages must")
+    row[:box5_medicare_wages_tips] = 100
+    row[:box12].reject! { |entry| entry[:code] == "TP" }
+    report[:totals] = row.slice(*described_class::BOXES)
+    expect(field(generator.generate.split("\r\n"), "RW", 490, 495)).to eq(" " * 6)
+  end
+
   it "writes ASCII 512-byte records, CRLF, Guam jurisdiction, zero federal fields and numeric totals" do
     file = generator.generate
     records = file.split("\r\n")

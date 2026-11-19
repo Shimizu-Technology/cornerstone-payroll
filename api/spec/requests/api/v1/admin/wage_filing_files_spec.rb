@@ -7,13 +7,41 @@ RSpec.describe "Wage filing files", type: :request do
   let(:company) { create(:company, ein: "66-1234567", filing_contact_name: "Contact", phone: "6715554321", email: "employer@example.com") }
   let(:user) { create(:user, company: company, role: "admin") }
   let(:employee) { create(:employee, company: company, ssn_encrypted: "123-45-6789") }
-  let(:row) { Efw2W2GuGenerator::BOXES.index_with { 100 }.merge(employee_id: employee.id, box12: [ { code: "D", amount: 100 }, { code: "AA", amount: 50 } ]) }
+  let(:row) { Efw2W2GuGenerator::BOXES.index_with { 100 }.merge(employee_id: employee.id, box5_medicare_wages_tips: 200, box12: [ { code: "D", amount: 100 }, { code: "AA", amount: 50 } ]) }
   let(:report) { { meta: { year: 2026 }, employees: [ row ], totals: row.slice(*Efw2W2GuGenerator::BOXES).merge(box12_code_d_total: 100, box12_code_aa_total: 50) } }
   before do
     allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(user)
     allow_any_instance_of(W2GuAggregator).to receive(:generate).and_return(report)
+    create(:payroll_filing_responsibility, company: company, tax_year: 2026, quarter: nil, filing_type: "w2_gu", responsible_party: "cornerstone")
     FilingSubmitter.create!(organization: company.organization, ein: "66-7654321", name: "Practice", address_line1: "1 Main", city: "Hagatna", state: "GU", zip: "96910", contact_name: "Dafne", contact_phone: "6715551234", contact_email: "filing@example.com", bso_user_id: "ABCDEFGH")
+  end
+
+  it "refuses draft and final without a recorded Cornerstone decision" do
+    company.payroll_filing_responsibilities.destroy_all
+    %w[draft final].each do |mode|
+      get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: mode }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("Record that Cornerstone files")
+    end
+  end
+
+  it "denies accountants without client management EFW2 but allows the W-3SS PDF" do
+    user.update!(role: "accountant")
+    %w[draft final].each do |mode|
+      get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: mode }
+      expect(response).to have_http_status(:forbidden)
+    end
+    get "/api/v1/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" }
+    expect(response).to have_http_status(:ok)
+  end
+
+  it "allows accountants delegated client management for this client" do
+    user.update!(role: "accountant")
+    grantor = create(:user, company: company, role: "admin")
+    create(:company_assignment, user: user, company: company, client_management: true, granted_by: grantor)
+    get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }
+    expect(response).to have_http_status(:ok)
   end
 
   it "audits a draft download without SSNs and prevents caching" do
@@ -46,7 +74,7 @@ RSpec.describe "Wage filing files", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body["error"]).to include("Prior provider")
     get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }
-    expect(response).to have_http_status(:ok)
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 
   it "returns a records-only W-3SS with the same totals" do

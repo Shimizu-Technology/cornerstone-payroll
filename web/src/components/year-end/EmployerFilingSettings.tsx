@@ -14,9 +14,7 @@ const kinds: Record<string, string> = {
 const codes: Record<string, string> = {
   R: 'Regular — Form 941',
   A: 'Agriculture — Form 943',
-  H: 'Household',
   M: 'Military',
-  Q: 'Medicare qualified government',
   F: 'Regular — Form 944',
 };
 export function EmployerFilingSettings({
@@ -113,6 +111,7 @@ export function EmployerFilingSettings({
               </option>
             ))}
           </Select>
+          <p className="text-xs text-neutral-600">Most private businesses: None apply.</p>
           <Select
             label="Employment code"
             disabled={!editable.includes('employment_code')}
@@ -125,6 +124,7 @@ export function EmployerFilingSettings({
               </option>
             ))}
           </Select>
+          <p className="text-xs text-neutral-600">Most Guam businesses: Regular (Form 941).</p>
           <Input
             label="Establishment number (optional)"
             disabled={!editable.includes('establishment_number')}
@@ -132,6 +132,7 @@ export function EmployerFilingSettings({
             value={establishment}
             onChange={(e) => setEstablishment(e.target.value)}
           />
+          <p className="text-xs text-neutral-600">Leave blank unless separate locations file under this EIN.</p>
           {Object.entries({
             filing_contact_name: 'Employer filing contact name',
             phone: 'Employer contact phone',
