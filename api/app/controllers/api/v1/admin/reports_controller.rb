@@ -736,6 +736,41 @@ module Api
               }, status: :unprocessable_entity
             end
 
+            if YearEnd::Checklist.applies_to?(year)
+              # The clients list shows Ready only at the revision this gate checked.
+              year_end_revision = YearEnd::InputRevision.for(company.id, year)[company.id]
+              year_end_blockers = begin
+                YearEnd::Checklist.new(company: company, year: year, user: current_user).w2_mark_ready_blockers
+              rescue StandardError
+                YearEnd::ReadyCheck.clear(company.id, year)
+                raise
+              end
+              if year_end_blockers.any?
+                YearEnd::ReadyCheck.clear(company.id, year)
+                return render json: {
+                  error: "Finish the #{year} year-end checklist before marking W-2GU filing ready",
+                  year_end_blockers: year_end_blockers,
+                  filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate
+                }, status: :unprocessable_entity
+              end
+
+              # The stored fingerprint must describe the inputs the checklist
+              # just evaluated. A write that skipped the company lock while
+              # it ran changes the fingerprint or the checklist's input
+              # revision (which also covers inputs outside the W-2 fingerprint,
+              # such as employer tax), so nothing is marked. Read uncached: the
+              # request query cache would replay the first reads.
+              current, current_revision = ActiveRecord::Base.uncached do
+                [ W2FilingInputsFingerprint.new(company: company, year: year).call, YearEnd::InputRevision.for(company.id, year)[company.id] ]
+              end
+              unless current == fingerprint && current_revision == year_end_revision
+                return render json: {
+                  error: "W-2 filing inputs changed while the year-end checklist was checked. Run preflight again, then mark it ready.",
+                  filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate
+                }, status: :conflict
+              end
+            end
+
             unless filing.preflight_current?(fingerprint) &&
                 (params[:preflight_fingerprint].blank? || params[:preflight_fingerprint] == fingerprint)
               return render json: {
@@ -744,6 +779,7 @@ module Api
               }, status: :conflict
             end
             if filing.current?(fingerprint)
+              YearEnd::ReadyCheck.record(company.id, year, year_end_revision) if year_end_revision
               return render json: { filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate }
             end
 
@@ -757,6 +793,7 @@ module Api
               "marked_ready_by_id" => filing.marked_ready_by_id, "notes" => filing.notes
             } ]
             filing.save!
+            YearEnd::ReadyCheck.record(company.id, year, year_end_revision) if year_end_revision
             render json: {
               filing: filing_readiness_payload(filing, fingerprint: fingerprint),
               revalidation: revalidation_payload(fresh_preflight), filing_gate: filing_gate
@@ -4639,25 +4676,7 @@ module Api
 
         def filing_readiness_payload(filing, fingerprint: nil)
           fingerprint ||= W2FilingInputsFingerprint.new(company: filing.company, year: filing.year).call
-          stale = filing.status.in?(%w[filing_ready preflight_passed]) &&
-            !(filing.status == "filing_ready" ? filing.current?(fingerprint) : filing.preflight_current?(fingerprint))
-          {
-            year: filing.year,
-            status: stale ? "stale" : filing.status,
-            stale: stale,
-            preflight_current: filing.preflight_current?(fingerprint),
-            preflight_fingerprint: filing.preflight_fingerprint,
-            ready_fingerprint: filing.ready_fingerprint,
-            attestation_history: filing.attestation_history,
-            blocking_count: filing.blocking_count,
-            warning_count: filing.warning_count,
-            preflight_run_at: filing.preflight_run_at,
-            marked_ready_at: filing.marked_ready_at,
-            marked_ready_by_id: filing.marked_ready_by_id,
-            notes: filing.notes,
-            findings: filing.findings,
-            findings_source: "persisted"
-          }
+          filing.review_payload(fingerprint: fingerprint)
         end
 
         def revalidation_payload(preflight)

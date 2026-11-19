@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useNavigate } from 'react-router';
 import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
 import type { ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { Form941GuPanel, QuarterlyCompliancePacketPanel } from './Reports';
+import { PeriodKeyed } from '@/lib/report-period';
 
 const mocks = vi.hoisted(() => ({ worksheet: vi.fn(), packet: vi.fn(), pdf: vi.fn(), packetPdf: vi.fn(), xlsx: vi.fn(), defaults: vi.fn() }));
 vi.mock('@/services/api', () => ({
@@ -29,10 +30,84 @@ const packet = (year: number, available: boolean) => ({ meta: meta(year), offici
   swica: { totals: { total_wages: 0, employee_count: 0 }, employees: [] },
   federal_941: { deposit_schedule: {}, report: { lines: {} } } });
 
-function mount(panel: ReactNode) {
-  return render(<MemoryRouter><PdfPreviewProvider>{panel}</PdfPreviewProvider></MemoryRouter>);
+function mount(panel: ReactNode, path = '/reports') {
+  return render(<MemoryRouter initialEntries={[path]}><PdfPreviewProvider>{panel}</PdfPreviewProvider></MemoryRouter>);
 }
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+describe('A linked year and quarter', () => {
+  it('opens the Form 941 for the year and quarter the year-end checklist names', async () => {
+    mocks.worksheet.mockResolvedValue({ report: worksheet(2025, false) });
+    mount(<Form941GuPanel />, '/reports?report=941-gu&year=2025&quarter=1');
+    expect(screen.getByLabelText('Year')).toHaveProperty('value', '2025');
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
+    fireEvent.click(screen.getByRole('button', { name: 'View Worksheet' }));
+    await screen.findByText(message);
+    expect(mocks.worksheet).toHaveBeenCalledWith(2025, 1);
+  });
+
+  it('opens the quarterly packet (the W-1 source) for the linked period', async () => {
+    mocks.packet.mockResolvedValue({ report: packet(2025, false) });
+    mount(<QuarterlyCompliancePacketPanel />, '/reports?report=quarterly-compliance-packet&year=2025&quarter=3');
+    fireEvent.click(screen.getByRole('button', { name: 'View Packet' }));
+    await screen.findByText(message);
+    expect(mocks.packet).toHaveBeenCalledWith(2025, 3);
+  });
+
+  function Nav() {
+    const navigate = useNavigate();
+    return <>
+      <button onClick={() => navigate('/reports?report=941-gu&year=2025&quarter=3')}>To Q3</button>
+      <button onClick={() => navigate('/reports?report=941-gu&year=2026&quarter=1')}>To 2026 Q1</button>
+      <button onClick={() => navigate(-1)}>Back</button>
+    </>;
+  }
+  const mountLinked = (path: string) => render(<MemoryRouter initialEntries={[path]}><PdfPreviewProvider><Nav /><PeriodKeyed><Form941GuPanel /></PeriodKeyed></PdfPreviewProvider></MemoryRouter>);
+
+  it('follows the URL when it changes after the panel mounted (Back/Forward)', () => {
+    mountLinked('/reports?report=941-gu&year=2025&quarter=1');
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
+    fireEvent.click(screen.getByRole('button', { name: 'To Q3' }));
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '3');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
+    expect(screen.getByLabelText('Year')).toHaveProperty('value', '2025');
+  });
+
+  it('reapplies an unchanged quarter from the URL and drops the old period\'s report on navigation', async () => {
+    mocks.worksheet.mockResolvedValue({ report: worksheet(2025, false) });
+    mountLinked('/reports?report=941-gu&year=2025&quarter=1');
+    fireEvent.change(screen.getByLabelText('Quarter'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'View Worksheet' }));
+    await screen.findByText(message);
+
+    fireEvent.click(screen.getByRole('button', { name: 'To 2026 Q1' }));
+    expect(screen.getByLabelText('Year')).toHaveProperty('value', '2026');
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
+    expect(screen.queryByText(message)).toBeNull();
+  });
+
+  it('does not show a PDF that arrives after the URL period changed', async () => {
+    mocks.worksheet.mockResolvedValue({ report: worksheet(2026, true) });
+    let resolvePdf: (value: { blob: Blob; filename: string }) => void = () => {};
+    mocks.pdf.mockReturnValue(new Promise((resolve) => { resolvePdf = resolve; }));
+    mountLinked('/reports?report=941-gu&year=2026&quarter=1');
+    fireEvent.click(screen.getByRole('button', { name: 'View Worksheet' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview draft Form 941' }));
+    await waitFor(() => expect(mocks.pdf).toHaveBeenCalledWith(2026, 1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'To Q3' }));
+    await act(async () => { resolvePdf({ blob: new Blob(['%PDF-1.4'], { type: 'application/pdf' }), filename: 'q1.pdf' }); });
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('keeps its own default for a period it cannot show', () => {
+    mount(<Form941GuPanel />, '/reports?report=941-gu&year=1999&quarter=9');
+    expect(screen.getByLabelText('Year')).toHaveProperty('value', String(new Date().getFullYear()));
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', String(Math.ceil((new Date().getMonth() + 1) / 3)));
+  });
+});
 
 describe('Official Form 941 tax-year availability', () => {
   it('retains the 2025 worksheet and spreadsheet while explaining unavailable official PDF', async () => {

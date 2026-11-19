@@ -170,9 +170,9 @@ class W2GuAggregator
     ss_tax = sums&.ss_tax.to_d + historical_sum(historical, :social_security_tax)
     medicare_tax = sums&.medicare_tax.to_d + historical_sum(historical, :medicare_tax)
     retirement = aggregated_retirement.fetch(employee.id, {})
-    current_balance = employee.send(:applied_historical_ytd_balance, year) if include_historical
+    current_balance_id = current_historical_balance_ids[employee.id] if include_historical
     reviewed_historical = historical.each_with_object({ retirement: 0.to_d, roth_retirement: 0.to_d }) do |balance, totals|
-      review = balance.id == current_balance&.id ? nil : {}
+      review = balance.id == current_balance_id ? nil : {}
       projected = HistoricalRetirementProjection.new(employee: employee, tax_year: year, balance: balance, review: review).totals(strict: true)
       totals.each_key { |key| totals[key] += projected.fetch(key) }
     end
@@ -360,6 +360,29 @@ class W2GuAggregator
 
   def historical_balances_by_employee
     @historical_balances_by_employee ||= historical_balances.group_by(&:employee_id)
+  end
+
+  # Employee#applied_historical_ytd_balance for every employee with imported
+  # history, in one query: the latest applied balance by through date, then
+  # bridge applied time and id.
+  def current_historical_balance_ids
+    @current_historical_balance_ids ||= if historical_balances_by_employee.empty?
+      {}
+    else
+      HistoricalEmployeeYtdBalance
+        .joins(:historical_ytd_bridge)
+        .where(employee_id: historical_balances_by_employee.keys, tax_year: year, historical_ytd_bridges: { status: "applied" })
+        .order(
+          "historical_employee_ytd_balances.employee_id",
+          through_pay_date: :desc,
+          "historical_ytd_bridges.applied_at" => :desc,
+          "historical_ytd_bridges.id" => :desc,
+          id: :desc
+        )
+        .pluck(Arel.sql("DISTINCT ON (historical_employee_ytd_balances.employee_id) historical_employee_ytd_balances.employee_id"),
+          "historical_employee_ytd_balances.id")
+        .to_h
+    end
   end
 
   def historical_sum(balances, field)

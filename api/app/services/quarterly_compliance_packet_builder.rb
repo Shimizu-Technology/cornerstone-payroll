@@ -19,6 +19,13 @@ class QuarterlyCompliancePacketBuilder
     raise ArgumentError, "quarter must be 1, 2, 3, or 4" unless MONTHS_BY_QUARTER.key?(@quarter)
   end
 
+  # The quarter's W-1 Guam withholding total as a decimal, without building the
+  # full packet. Like the W-1 worksheet, each pay date is rounded to the cent.
+  def w1_total
+    filing_records.group_by { |record| pay_date_for_record(record) }
+      .sum(0.to_d) { |_pay_date, rows| rows.sum(0.to_d) { |row| row.total_income_tax_withheld.to_d }.round(2) }
+  end
+
   def generate
     report = {
       meta: meta,

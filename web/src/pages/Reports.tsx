@@ -24,12 +24,15 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
-import { PdfPreviewProvider, usePdfPreview } from '@/components/documents/PdfPreview';
+import { PdfPreviewProvider, useMountedPdfPreview, usePdfPreview } from '@/components/documents/PdfPreview';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibilityPanel';
 import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
 import { buildPayrollHistoryPackage } from '@/lib/payrollHistoryPackage';
+import { yearEndChecklistPath } from '@/lib/routes';
+import { yearEndTaxYears } from '@/lib/year-end';
+import { linkedReportQuarter, linkedReportYear, PeriodKeyed } from '@/lib/report-period';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   Employee,
@@ -634,7 +637,7 @@ export function W2GuPanel() {
   const hasClientAdministration = useSelectedCompanyCapability('manage_client_administration');
   const workspaceCanAdminister = canWriteCompany(activeCompany, 'manage_client_administration');
   const canMarkFilingReady = hasClientAdministration && workspaceCanAdminister;
-  const previewPdf = usePdfPreview();
+  const previewPdf = useMountedPdfPreview();
   const currentYear = new Date().getFullYear();
   const earliestSupportedYear = 2020;
   const selectableMaxYear = currentYear + 1;
@@ -642,7 +645,8 @@ export function W2GuPanel() {
     { length: selectableMaxYear - earliestSupportedYear + 1 },
     (_, i) => selectableMaxYear - i
   );
-  const [year, setYear] = useState(currentYear - 1);
+  const [searchParams] = useSearchParams();
+  const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear - 1);
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -867,6 +871,11 @@ export function W2GuPanel() {
           <CardDescription>
             Guam Territorial W-2 preparation summary — review before filing with DRT.
           </CardDescription>
+          {activeCompany && yearEndTaxYears().includes(year) && (
+            <Link to={yearEndChecklistPath(activeCompany.id, year)} className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-primary-700 underline sm:min-h-0">
+              Open the {year} year-end checklist
+            </Link>
+          )}
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
@@ -2428,12 +2437,13 @@ function EmployerLiabilityPanel() {
 // ─── Quarterly Compliance Packet Panel ───────────────────────────────────────
 
 export function QuarterlyCompliancePacketPanel() {
-  const previewPdf = usePdfPreview();
+  const previewPdf = useMountedPdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
-  const [year, setYear] = useState(currentYear);
-  const [quarter, setQuarter] = useState(currentQuarter);
+  const [searchParams] = useSearchParams();
+  const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear);
+  const [quarter, setQuarter] = useState(() => linkedReportQuarter(searchParams) ?? currentQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
@@ -3229,12 +3239,13 @@ function QuarterlyOfficialFormModal({
 // ─── Federal Form 941 Panel ──────────────────────────────────────────────────
 
 export function Form941GuPanel() {
-  const previewPdf = usePdfPreview();
+  const previewPdf = useMountedPdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
-  const [year, setYear] = useState(currentYear);
-  const [quarter, setQuarter] = useState(currentQuarter);
+  const [searchParams] = useSearchParams();
+  const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear);
+  const [quarter, setQuarter] = useState(() => linkedReportQuarter(searchParams) ?? currentQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
@@ -4261,13 +4272,13 @@ function ReportsContent() {
     if (activeReport === 'checks-payments-register') return <ChecksPaymentsRegisterPanel />;
     if (activeReport === 'employee-pay-history') return <EmployeePayHistoryPanel />;
     if (activeReport === 'tax-withholding-summary') return <TaxSummaryPanel />;
-    if (activeReport === 'quarterly-compliance-packet') return <QuarterlyCompliancePacketPanel />;
+    if (activeReport === 'quarterly-compliance-packet') return <PeriodKeyed><QuarterlyCompliancePacketPanel /></PeriodKeyed>;
     if (activeReport === 'ytd-summary') return <YtdSummaryPanel />;
     if (activeReport === 'annual-payroll-summary') return <AnnualPayrollSummaryPanel />;
     if (activeReport === 'employer-liability') return <EmployerLiabilityPanel />;
-    if (activeReport === 'w2-gu') return <W2GuPanel />;
+    if (activeReport === 'w2-gu') return <PeriodKeyed><W2GuPanel /></PeriodKeyed>;
     if (activeReport === '1099-nec') return <Form1099NecPanel />;
-    if (activeReport === '941-gu') return <Form941GuPanel />;
+    if (activeReport === '941-gu') return <PeriodKeyed><Form941GuPanel /></PeriodKeyed>;
     if (activeReport && !PANELS_WITH_UI.includes(activeReport)) {
       return (
         <Card>
