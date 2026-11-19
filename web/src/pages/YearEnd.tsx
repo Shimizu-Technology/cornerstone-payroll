@@ -125,13 +125,13 @@ function ClientSection({ title, rows, description }: { title: string; rows: Year
           <TableBody>
             {rows.map((row) => (
               <TableRow key={row.company_id}>
-                <TableCell className="min-w-[10rem] whitespace-normal">
+                <TableCell className="min-w-[10rem] whitespace-normal!">
                   <p className="font-semibold text-neutral-950">{row.name}</p>
                   {!row.active && <Badge variant="outline" className="mt-1">Inactive record</Badge>}
                 </TableCell>
                 <TableCell className="whitespace-nowrap"><ClientStatus row={row} /></TableCell>
-                <TableCell className="min-w-[14rem] whitespace-normal"><IssueChips row={row} /></TableCell>
-                <TableCell className="min-w-[12rem] whitespace-normal text-sm text-neutral-700">{whoFiles(row) ?? 'Not chosen yet'}</TableCell>
+                <TableCell className="min-w-[14rem] whitespace-normal!"><IssueChips row={row} /></TableCell>
+                <TableCell className="min-w-[12rem] whitespace-normal! text-sm text-neutral-700">{whoFiles(row) ?? 'Not chosen yet'}</TableCell>
                 <TableCell className="text-right"><OpenLink row={row} /></TableCell>
               </TableRow>
             ))}

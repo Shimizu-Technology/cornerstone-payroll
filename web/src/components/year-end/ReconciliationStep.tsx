@@ -125,7 +125,7 @@ export function ReconciliationStep({ step }: { step: ReconciliationStepData }): 
           <TableBody>
             {lines.map((line) => (
               <TableRow key={line.key} className={line.status === 'mismatch' ? 'bg-danger-50/40' : undefined}>
-                <TableCell className="min-w-[13rem] whitespace-normal">
+                <TableCell className="min-w-[13rem] whitespace-normal!">
                   <p className="font-medium text-neutral-950">{line.label} <span className="text-neutral-500">({line.w2_box})</span></p>
                   <p className="text-xs text-neutral-600">vs {line.source_label}</p>
                   <LineNote line={line} />
