@@ -24,7 +24,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
-import { PdfPreviewProvider, usePdfPreview } from '@/components/documents/PdfPreview';
+import { PdfPreviewProvider, useMountedPdfPreview, usePdfPreview } from '@/components/documents/PdfPreview';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibilityPanel';
@@ -637,7 +637,7 @@ export function W2GuPanel() {
   const hasClientAdministration = useSelectedCompanyCapability('manage_client_administration');
   const workspaceCanAdminister = canWriteCompany(activeCompany, 'manage_client_administration');
   const canMarkFilingReady = hasClientAdministration && workspaceCanAdminister;
-  const previewPdf = usePdfPreview();
+  const previewPdf = useMountedPdfPreview();
   const currentYear = new Date().getFullYear();
   const earliestSupportedYear = 2020;
   const selectableMaxYear = currentYear + 1;
@@ -2437,7 +2437,7 @@ function EmployerLiabilityPanel() {
 // ─── Quarterly Compliance Packet Panel ───────────────────────────────────────
 
 export function QuarterlyCompliancePacketPanel() {
-  const previewPdf = usePdfPreview();
+  const previewPdf = useMountedPdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
@@ -3239,7 +3239,7 @@ function QuarterlyOfficialFormModal({
 // ─── Federal Form 941 Panel ──────────────────────────────────────────────────
 
 export function Form941GuPanel() {
-  const previewPdf = usePdfPreview();
+  const previewPdf = useMountedPdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);

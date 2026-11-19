@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, useNavigate } from 'react-router';
 import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
@@ -85,6 +85,21 @@ describe('A linked year and quarter', () => {
     expect(screen.getByLabelText('Year')).toHaveProperty('value', '2026');
     expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
     expect(screen.queryByText(message)).toBeNull();
+  });
+
+  it('does not show a PDF that arrives after the URL period changed', async () => {
+    mocks.worksheet.mockResolvedValue({ report: worksheet(2026, true) });
+    let resolvePdf: (value: { blob: Blob; filename: string }) => void = () => {};
+    mocks.pdf.mockReturnValue(new Promise((resolve) => { resolvePdf = resolve; }));
+    mountLinked('/reports?report=941-gu&year=2026&quarter=1');
+    fireEvent.click(screen.getByRole('button', { name: 'View Worksheet' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview draft Form 941' }));
+    await waitFor(() => expect(mocks.pdf).toHaveBeenCalledWith(2026, 1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'To Q3' }));
+    await act(async () => { resolvePdf({ blob: new Blob(['%PDF-1.4'], { type: 'application/pdf' }), filename: 'q1.pdf' }); });
+
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('keeps its own default for a period it cannot show', () => {
