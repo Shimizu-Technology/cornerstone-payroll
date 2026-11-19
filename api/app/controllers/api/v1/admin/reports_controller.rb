@@ -4483,7 +4483,7 @@ module Api
 
         def w2_gu_sheets(report)
           headers = [
-            "Employee Name", "SSN Last 4", "Box 1 Wages Tips Other Comp", "Box 2 FIT",
+            "Employee Name", "SSN Last 4", "Box 1 Wages Tips Other Comp", "Box 2 Guam Income Tax Withheld",
             "Box 3 SS Wages", "Box 4 SS Tax", "Box 5 Medicare Wages Tips",
             "Box 6 Medicare Tax", "Box 7 SS Tips", "Reported Tips", "Non-Taxable Pay"
           ]
@@ -4498,7 +4498,7 @@ module Api
           end
           [
             { name: "W-2GU", rows: [ headers ] + rows },
-            { name: "Totals", rows: (report[:totals] || {}).to_a },
+            { name: "Totals", rows: (report[:totals] || {}).map { |key, value| [ key.to_s == "box2_federal_income_tax_withheld" ? "Box 2 Guam Income Tax Withheld" : key, value ] } },
             report_info_sheet(report, title: "W-2GU", description: REPORT_DESCRIPTIONS[:w2_gu])
           ]
         end
