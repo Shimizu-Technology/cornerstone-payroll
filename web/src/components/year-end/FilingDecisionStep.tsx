@@ -82,9 +82,26 @@ function initialW2Choice(step: DecisionStep): W2Choice | null {
   return decision.responsible_party === 'cornerstone' && decision.prior_provider_through ? 'cornerstone_after_prior_provider' : decision.responsible_party;
 }
 
+function paidPayees(step: DecisionStep): { contractors: number; oneOff: number } {
+  return { contractors: step.data.contractor_count ?? 0, oneOff: step.data.one_off_payee_count ?? 0 };
+}
+
+// "No 1099s" is offered as the default only when nothing reportable was paid,
+// including one-off contractor checks.
 function initial1099Choice(step: DecisionStep): YearEndParty | null {
   if (step.data.form_1099) return step.data.form_1099.responsible_party;
-  return (step.data.contractor_count ?? 0) > 0 ? null : 'no_filing';
+  const { contractors, oneOff } = paidPayees(step);
+  return contractors + oneOff > 0 ? null : 'no_filing';
+}
+
+function payeeSummary(step: DecisionStep, year: number): string {
+  const { contractors, oneOff } = paidPayees(step);
+  if (contractors + oneOff === 0) return `No contractor payments were made here in ${year}.`;
+  const parts = [
+    contractors > 0 ? `${contractors} contractor${contractors === 1 ? '' : 's'} in payroll` : null,
+    oneOff > 0 ? `${oneOff} payee${oneOff === 1 ? '' : 's'} paid by one-off contractor checks` : null,
+  ].filter(Boolean);
+  return `Paid here in ${year}: ${parts.join(' and ')}.`;
 }
 
 export function FilingDecisionStep({ checklist, step, onSaved }: {
@@ -113,16 +130,18 @@ export function FilingDecisionStep({ checklist, step, onSaved }: {
     setError(null);
     const w2Party: YearEndParty = choices.w2 === 'cornerstone_after_prior_provider' ? 'cornerstone' : choices.w2;
     const through = choices.w2 === 'cornerstone_after_prior_provider' ? priorThrough : null;
-    const common = { tax_year: year, imported_payroll_inclusion: 'included' as const, notes: notes.trim() || undefined };
     try {
-      if (w2Party === choices.form1099 && !through) {
-        await reportsApi.updatePayrollFilingResponsibility({ ...common, filing_types: ['w2_gu', 'form_1099'], responsible_party: w2Party, prior_provider_through: null }, companyId);
-      } else {
-        await reportsApi.updatePayrollFilingResponsibility({ ...common, filing_types: ['w2_gu'], responsible_party: w2Party, prior_provider_through: through }, companyId);
-        // The user left this client while the first save was in flight.
-        if (!stillMounted()) return;
-        await reportsApi.updatePayrollFilingResponsibility({ ...common, filing_types: ['form_1099'], responsible_party: choices.form1099, prior_provider_through: null }, companyId);
-      }
+      // One request: both decisions are saved together or neither is.
+      await reportsApi.updatePayrollFilingResponsibility({
+        tax_year: year,
+        imported_payroll_inclusion: 'included',
+        notes: notes.trim() || undefined,
+        decisions: [
+          { filing_type: 'w2_gu', responsible_party: w2Party, prior_provider_through: through },
+          { filing_type: 'form_1099', responsible_party: choices.form1099, prior_provider_through: null },
+        ],
+      }, companyId);
+      // The user left this client while the save was in flight.
       if (!stillMounted()) return;
       await onSaved(choices.w2 === 'no_filing' && choices.form1099 === 'no_filing'
         ? `${checklist.company.name} files no ${year} year-end forms. It is off the to-do list; nothing was deleted.`
@@ -168,11 +187,7 @@ export function FilingDecisionStep({ checklist, step, onSaved }: {
         </div>
       )}
       <ChoiceGroup legend={`Who files ${year} 1099s?`} name="form-1099-party" options={form1099Options(year)} value={form1099} onChange={setForm1099} disabled={saving} />
-      <p className="text-xs text-neutral-600">
-        {(step.data.contractor_count ?? 0) > 0
-          ? `${step.data.contractor_count} contractor${step.data.contractor_count === 1 ? ' was' : 's were'} paid here in ${year}.`
-          : `No contractor payments were made here in ${year}.`}
-      </p>
+      <p className="text-xs text-neutral-600">{payeeSummary(step, year)}</p>
       <div className="max-w-xl">
         <label htmlFor="year-end-decision-notes" className="mb-1.5 block text-xs font-medium text-neutral-600">Notes (optional)</label>
         <Textarea id="year-end-decision-notes" value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} maxLength={2000} disabled={saving} />

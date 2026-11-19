@@ -201,6 +201,8 @@ export type YearEndStep =
       form_1099: YearEndDecision | null;
       w2_employee_count: number;
       contractor_count: number;
+      /** Payees reached only by printed or paid one-off contractor checks. */
+      one_off_payee_count: number;
       has_imported_history: boolean;
     }>
   | StepBase<'employer', {

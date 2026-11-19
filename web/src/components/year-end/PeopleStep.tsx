@@ -10,6 +10,8 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 import { employeeEditPath } from '@/lib/routes';
 import type { YearEndChecklist, YearEndOneOffPayee, YearEndPerson, ActiveYearEndStep } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
+import { StaleReviewNotice } from './StaleReview';
+import { isStaleReview, useStaleReview } from './useStaleReview';
 
 type PeopleStepData = ActiveYearEndStep<'people'>;
 const PAGE_SIZE = 20;
@@ -146,32 +148,36 @@ function PeopleList({ title, people, companyId, canEditInline, returnTo, onSaved
   );
 }
 
-function IdentifyPayeeForm({ checklist, payee, onSaved }: {
+function IdentifyPayeeForm({ checklist, payee, onSaved, onRefresh }: {
   checklist: YearEndChecklist;
   payee: YearEndOneOffPayee;
   onSaved: (message: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }): ReactElement {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const stillMounted = useStillMounted();
   const noteId = `identify-${payee.payee_key.replace(/\W+/g, '-')}`;
+  const stale = useStaleReview(payee.digest, onRefresh);
 
   return (
     <form
       className="mt-3 space-y-2"
       onSubmit={async (event) => {
         event.preventDefault();
-        if (!note.trim()) return;
+        if (!note.trim() || !stale.canSubmit) return;
         setSaving(true);
         setError(null);
         try {
           await yearEndApi.acknowledge({ tax_year: checklist.tax_year, warning_code: payee.code, warning_digest: payee.digest, note: note.trim() }, checklist.company.id);
           if (!stillMounted()) return;
+          stale.clear();
           await onSaved(`Recorded who ${payee.name} is.`);
         } catch (err) {
           if (!stillMounted()) return;
-          setError(err instanceof Error ? err.message : 'Could not record who this payee is.');
+          if (isStaleReview(err)) stale.markRefused();
+          else setError(err instanceof Error ? err.message : 'Could not record who this payee is.');
         } finally {
           if (stillMounted()) setSaving(false);
         }
@@ -179,16 +185,18 @@ function IdentifyPayeeForm({ checklist, payee, onSaved }: {
     >
       <label htmlFor={noteId} className="block text-xs font-medium text-neutral-700">Who is this payee, and where is their W-9 and TIN?</label>
       <Textarea id={noteId} value={note} onChange={(event) => setNote(event.target.value)} rows={2} maxLength={2000} required disabled={saving} />
+      <StaleReviewNotice stale={stale} idPrefix={noteId} what="checks" />
       {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
-      <Button type="submit" size="sm" disabled={!note.trim()} loading={saving} loadingLabel="Saving…">Record payee</Button>
+      <Button type="submit" size="sm" disabled={!note.trim() || !stale.canSubmit} loading={saving} loadingLabel="Saving…">Record payee</Button>
     </form>
   );
 }
 
-function OneOffPayeeRow({ checklist, payee, onSaved }: {
+function OneOffPayeeRow({ checklist, payee, onSaved, onRefresh }: {
   checklist: YearEndChecklist;
   payee: YearEndOneOffPayee;
   onSaved: (message: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }): ReactElement {
   const identified = payee.status === 'identified';
   return (
@@ -201,7 +209,7 @@ function OneOffPayeeRow({ checklist, payee, onSaved }: {
           </Badge>
           <p className="mt-1 text-sm text-neutral-700">
             {formatCurrency(payee.total_compensation)} in {payee.payment_count} one-off check{payee.payment_count === 1 ? '' : 's'}:{' '}
-            {payee.checks.map((check) => `${check.check_number ? `#${check.check_number}` : 'no number'}${check.payment_date ? ` on ${formatDate(check.payment_date)}` : ''}`).join(', ')}
+            {payee.checks.map((check) => `${check.check_number ? `#${check.check_number}` : 'no number'}${check.payment_date ? ` on ${formatDate(check.payment_date)}` : ''} (${formatCurrency(check.amount)})`).join(', ')}
           </p>
           {identified && payee.acknowledgement && (
             <p className="mt-1 text-sm text-neutral-600 [overflow-wrap:anywhere]">“{payee.acknowledgement.note}” ({payee.acknowledgement.acknowledged_by.name})</p>
@@ -216,16 +224,17 @@ function OneOffPayeeRow({ checklist, payee, onSaved }: {
         </Link>
       </div>
       {!identified && (checklist.permissions.can_acknowledge
-        ? <IdentifyPayeeForm checklist={checklist} payee={payee} onSaved={onSaved} />
+        ? <IdentifyPayeeForm checklist={checklist} payee={payee} onSaved={onSaved} onRefresh={onRefresh} />
         : <p className="mt-2 text-sm text-neutral-600">A filing reviewer records who this payee is.</p>)}
     </li>
   );
 }
 
-function OneOffPayeeList({ checklist, payees, onSaved }: {
+function OneOffPayeeList({ checklist, payees, onSaved, onRefresh }: {
   checklist: YearEndChecklist;
   payees: YearEndOneOffPayee[];
   onSaved: (message: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }): ReactElement | null {
   if (payees.length === 0) return null;
   return (
@@ -235,16 +244,17 @@ function OneOffPayeeList({ checklist, payees, onSaved }: {
         These were paid by contractor checks, not payroll, so there is no contractor record with a TIN or address. If the payee is a contractor in payroll, the 1099 must combine both payments. Say who each one is before the 1099s are ready.
       </p>
       <ul className="divide-y divide-neutral-200">
-        {payees.map((payee) => <OneOffPayeeRow key={payee.code} checklist={checklist} payee={payee} onSaved={onSaved} />)}
+        {payees.map((payee) => <OneOffPayeeRow key={payee.code} checklist={checklist} payee={payee} onSaved={onSaved} onRefresh={onRefresh} />)}
       </ul>
     </div>
   );
 }
 
-export function PeopleStep({ checklist, step, onSaved }: {
+export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
   checklist: YearEndChecklist;
   step: PeopleStepData;
   onSaved: (message: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }): ReactElement {
   const location = useLocation();
   const returnTo = `${location.pathname}${location.search}#step-people`;
@@ -265,7 +275,7 @@ export function PeopleStep({ checklist, step, onSaved }: {
     <div className="space-y-5">
       <PeopleList title="Employees" people={employees} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
       <PeopleList title="1099 payees" people={contractors} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
-      <OneOffPayeeList checklist={checklist} payees={oneOffPayees} onSaved={onSaved} />
+      <OneOffPayeeList checklist={checklist} payees={oneOffPayees} onSaved={onSaved} onRefresh={onRefresh} />
       {step.data.contractor_error && <p className="text-sm text-danger-700">{step.data.contractor_error}</p>}
     </div>
   );

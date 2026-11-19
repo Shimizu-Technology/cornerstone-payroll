@@ -7,6 +7,8 @@ import { yearEndApi } from '@/services/api';
 import { formatGuamDateTimeShort } from '@/lib/utils';
 import type { YearEndChecklist, ActiveYearEndStep, YearEndWarning } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
+import { StaleReviewNotice } from './StaleReview';
+import { isStaleReview, useStaleReview } from './useStaleReview';
 
 type WarningsStepData = ActiveYearEndStep<'review_warnings'>;
 const SHOWN_EMPLOYEES = 6;
@@ -17,32 +19,36 @@ function WarningStatus({ warning }: { warning: YearEndWarning }): ReactElement {
   return <Badge variant="warning">{warning.acknowledgement_stale ? 'Review again' : 'Needs review'}</Badge>;
 }
 
-function AcknowledgeForm({ checklist, warning, onSaved }: {
+function AcknowledgeForm({ checklist, warning, onSaved, onRefresh }: {
   checklist: YearEndChecklist;
   warning: YearEndWarning;
   onSaved: (message: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }): ReactElement {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const noteId = `ack-${warning.code}`;
   const stillMounted = useStillMounted();
+  const stale = useStaleReview(warning.digest, onRefresh);
 
   return (
     <form
       className="mt-3 space-y-2"
       onSubmit={async (event) => {
         event.preventDefault();
-        if (!note.trim()) return;
+        if (!note.trim() || !stale.canSubmit) return;
         setSaving(true);
         setError(null);
         try {
           await yearEndApi.acknowledge({ tax_year: checklist.tax_year, warning_code: warning.code, warning_digest: warning.digest, note: note.trim() }, checklist.company.id);
           if (!stillMounted()) return;
+          stale.clear();
           await onSaved(`Recorded your review of "${warning.title}".`);
         } catch (err) {
           if (!stillMounted()) return;
-          setError(err instanceof Error ? err.message : 'Could not record the review.');
+          if (isStaleReview(err)) stale.markRefused();
+          else setError(err instanceof Error ? err.message : 'Could not record the review.');
         } finally {
           if (stillMounted()) setSaving(false);
         }
@@ -50,16 +56,18 @@ function AcknowledgeForm({ checklist, warning, onSaved }: {
     >
       <label htmlFor={noteId} className="block text-xs font-medium text-neutral-700">What did you check and confirm?</label>
       <Textarea id={noteId} value={note} onChange={(event) => setNote(event.target.value)} rows={2} maxLength={2000} required disabled={saving} />
+      <StaleReviewNotice stale={stale} idPrefix={noteId} what="numbers" />
       {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
-      <Button type="submit" size="sm" disabled={!note.trim()} loading={saving} loadingLabel="Saving…">Mark reviewed</Button>
+      <Button type="submit" size="sm" disabled={!note.trim() || !stale.canSubmit} loading={saving} loadingLabel="Saving…">Mark reviewed</Button>
     </form>
   );
 }
 
-function WarningCard({ checklist, warning, onSaved }: {
+function WarningCard({ checklist, warning, onSaved, onRefresh }: {
   checklist: YearEndChecklist;
   warning: YearEndWarning;
   onSaved: (message: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }): ReactElement {
   const location = useLocation();
   const [showAll, setShowAll] = useState(false);
@@ -105,24 +113,25 @@ function WarningCard({ checklist, warning, onSaved }: {
       )}
       {warning.kind === 'acknowledge' && warning.status !== 'reviewed' && (
         checklist.permissions.can_acknowledge
-          ? <AcknowledgeForm checklist={checklist} warning={warning} onSaved={onSaved} />
+          ? <AcknowledgeForm checklist={checklist} warning={warning} onSaved={onSaved} onRefresh={onRefresh} />
           : <p className="mt-3 text-sm text-neutral-600">A filing reviewer records this review.</p>
       )}
     </li>
   );
 }
 
-export function ReviewWarningsStep({ checklist, step, onSaved }: {
+export function ReviewWarningsStep({ checklist, step, onSaved, onRefresh }: {
   checklist: YearEndChecklist;
   step: WarningsStepData;
   onSaved: (message: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }): ReactElement {
   const warnings = step.data.warnings ?? [];
   if (warnings.length === 0) return <p className="text-sm text-neutral-700">{step.summary}</p>;
   const ordered = [...warnings].sort((a, b) => rank(a) - rank(b));
   return (
     <ul className="space-y-3">
-      {ordered.map((warning) => <WarningCard key={warning.code} checklist={checklist} warning={warning} onSaved={onSaved} />)}
+      {ordered.map((warning) => <WarningCard key={warning.code} checklist={checklist} warning={warning} onSaved={onSaved} onRefresh={onRefresh} />)}
     </ul>
   );
 }

@@ -19,14 +19,14 @@ import { parsePositiveRouteId } from '@/lib/route-params';
 import { yearEndPath } from '@/lib/routes';
 import { clientStatusLabel, isActiveStep, parseYearEndTaxYear, yearEndTaxYears, type YearEndChecklist as Checklist, type YearEndStep } from '@/lib/year-end';
 
-function stepBody(checklist: Checklist, step: YearEndStep, onSaved: (message: string) => Promise<void>): ReactElement | null {
+function stepBody(checklist: Checklist, step: YearEndStep, onSaved: (message: string) => Promise<void>, onRefresh: () => Promise<void>): ReactElement | null {
   if (!isActiveStep(step)) return null;
   switch (step.key) {
     case 'filing_decision': return <FilingDecisionStep checklist={checklist} step={step} onSaved={onSaved} />;
     case 'employer': return <EmployerStep checklist={checklist} step={step} onSaved={onSaved} />;
-    case 'people': return <PeopleStep checklist={checklist} step={step} onSaved={onSaved} />;
+    case 'people': return <PeopleStep checklist={checklist} step={step} onSaved={onSaved} onRefresh={onRefresh} />;
     case 'reconciliation': return <ReconciliationStep step={step} taxYear={checklist.tax_year} />;
-    case 'review_warnings': return <ReviewWarningsStep checklist={checklist} step={step} onSaved={onSaved} />;
+    case 'review_warnings': return <ReviewWarningsStep checklist={checklist} step={step} onSaved={onSaved} onRefresh={onRefresh} />;
     case 'prior_provider':
       return step.issues.length > 0 ? (
         <div>
@@ -115,6 +115,13 @@ export function YearEndChecklist(): ReactElement {
     await load();
   }, [companyId, load, notify, year]);
 
+  // Reloads this client and year only; a refresh asked for on an earlier
+  // one is dropped like a save.
+  const onRefresh = useCallback(async () => {
+    if (`${companyId}:${year}` !== currentScope.current) return;
+    await load();
+  }, [companyId, load, year]);
+
   return (
     <div>
       <Header
@@ -167,7 +174,7 @@ export function YearEndChecklist(): ReactElement {
               {checklist.steps.map((step) => (
                 <li key={`${checklist.company.id}-${step.key}-${step.status}`}>
                   <StepCard step={step} isNext={checklist.next_step === step.key}>
-                    {stepBody(checklist, step, onSaved)}
+                    {stepBody(checklist, step, onSaved, onRefresh)}
                   </StepCard>
                 </li>
               ))}
