@@ -35,6 +35,16 @@ class AddYearEndFilingResponsibilityOptions < ActiveRecord::Migration[8.1]
 
   # The old constraints cannot hold 1099 decisions, client or no-filing
   # parties, or prior-provider dates. Refuse rather than delete them.
+  #
+  # Data-preserving rollback: roll back the application only and leave this
+  # migration applied. The wider constraints still accept every value the
+  # previous release writes. That release ignores form_1099 rows and the
+  # prior-provider date, but it reads a w2_gu decision of "client" or
+  # "no_filing" as Cornerstone-responsible (PayrollFilingResponsibilityGate
+  # treats any party other than external_provider that way). Nothing is filed
+  # automatically, but until the year-end release is restored, staff must not
+  # prepare W-2GUs for those companies; list them with
+  #   PayrollFilingResponsibility.where(filing_type: "w2_gu", responsible_party: %w[client no_filing])
   def down
     blocking = select_value(<<~SQL.squish).to_i
       SELECT COUNT(*) FROM payroll_filing_responsibilities
