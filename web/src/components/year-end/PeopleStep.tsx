@@ -8,10 +8,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { employeesApi, yearEndApi } from '@/services/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { employeeEditPath } from '@/lib/routes';
-import type { YearEndChecklist, YearEndOneOffPayee, YearEndPerson, YearEndStep } from '@/lib/year-end';
+import type { YearEndChecklist, YearEndOneOffPayee, YearEndPerson, ActiveYearEndStep } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
 
-type PeopleStepData = Extract<YearEndStep, { key: 'people' }>;
+type PeopleStepData = ActiveYearEndStep<'people'>;
 const PAGE_SIZE = 20;
 
 function missingLabel(person: YearEndPerson): string {
@@ -62,7 +62,8 @@ function AddressForm({ person, companyId, onSaved, onCancel }: {
         } catch (err) {
           if (!stillMounted()) return;
           setError(err instanceof Error ? err.message : 'Could not save the address.');
-          setSaving(false);
+        } finally {
+          if (stillMounted()) setSaving(false);
         }
       }}
     >
@@ -171,7 +172,8 @@ function IdentifyPayeeForm({ checklist, payee, onSaved }: {
         } catch (err) {
           if (!stillMounted()) return;
           setError(err instanceof Error ? err.message : 'Could not record who this payee is.');
-          setSaving(false);
+        } finally {
+          if (stillMounted()) setSaving(false);
         }
       }}
     >

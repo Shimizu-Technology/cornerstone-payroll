@@ -5,10 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { yearEndApi } from '@/services/api';
 import { formatGuamDateTimeShort } from '@/lib/utils';
-import type { YearEndChecklist, YearEndStep, YearEndWarning } from '@/lib/year-end';
+import type { YearEndChecklist, ActiveYearEndStep, YearEndWarning } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
 
-type WarningsStepData = Extract<YearEndStep, { key: 'review_warnings' }>;
+type WarningsStepData = ActiveYearEndStep<'review_warnings'>;
 const SHOWN_EMPLOYEES = 6;
 
 function WarningStatus({ warning }: { warning: YearEndWarning }): ReactElement {
@@ -43,7 +43,8 @@ function AcknowledgeForm({ checklist, warning, onSaved }: {
         } catch (err) {
           if (!stillMounted()) return;
           setError(err instanceof Error ? err.message : 'Could not record the review.');
-          setSaving(false);
+        } finally {
+          if (stillMounted()) setSaving(false);
         }
       }}
     >

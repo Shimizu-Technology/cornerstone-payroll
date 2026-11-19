@@ -29,10 +29,36 @@ const packet = (year: number, available: boolean) => ({ meta: meta(year), offici
   swica: { totals: { total_wages: 0, employee_count: 0 }, employees: [] },
   federal_941: { deposit_schedule: {}, report: { lines: {} } } });
 
-function mount(panel: ReactNode) {
-  return render(<MemoryRouter><PdfPreviewProvider>{panel}</PdfPreviewProvider></MemoryRouter>);
+function mount(panel: ReactNode, path = '/reports') {
+  return render(<MemoryRouter initialEntries={[path]}><PdfPreviewProvider>{panel}</PdfPreviewProvider></MemoryRouter>);
 }
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+describe('A linked year and quarter', () => {
+  it('opens the Form 941 for the year and quarter the year-end checklist names', async () => {
+    mocks.worksheet.mockResolvedValue({ report: worksheet(2025, false) });
+    mount(<Form941GuPanel />, '/reports?report=941-gu&year=2025&quarter=1');
+    expect(screen.getByLabelText('Year')).toHaveProperty('value', '2025');
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
+    fireEvent.click(screen.getByRole('button', { name: 'View Worksheet' }));
+    await screen.findByText(message);
+    expect(mocks.worksheet).toHaveBeenCalledWith(2025, 1);
+  });
+
+  it('opens the quarterly packet (the W-1 source) for the linked period', async () => {
+    mocks.packet.mockResolvedValue({ report: packet(2025, false) });
+    mount(<QuarterlyCompliancePacketPanel />, '/reports?report=quarterly-compliance-packet&year=2025&quarter=3');
+    fireEvent.click(screen.getByRole('button', { name: 'View Packet' }));
+    await screen.findByText(message);
+    expect(mocks.packet).toHaveBeenCalledWith(2025, 3);
+  });
+
+  it('keeps its own default for a period it cannot show', () => {
+    mount(<Form941GuPanel />, '/reports?report=941-gu&year=1999&quarter=9');
+    expect(screen.getByLabelText('Year')).toHaveProperty('value', String(new Date().getFullYear()));
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', String(Math.ceil((new Date().getMonth() + 1) / 3)));
+  });
+});
 
 describe('Official Form 941 tax-year availability', () => {
   it('retains the 2025 worksheet and spreadsheet while explaining unavailable official PDF', async () => {

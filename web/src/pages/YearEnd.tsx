@@ -145,7 +145,7 @@ function ClientSection({ title, rows, description }: { title: string; rows: Year
 export function YearEnd(): ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
   const year = parseYearEndTaxYear(searchParams.get('year'));
-  const [overview, setOverview] = useState<YearEndClientsOverview | null>(null);
+  const [loaded, setLoaded] = useState<YearEndClientsOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -155,10 +155,10 @@ export function YearEnd(): ReactElement {
     setError(null);
     try {
       const response = await yearEndApi.clients(year);
-      if (!signal.cancelled) setOverview(response.data);
+      if (!signal.cancelled) setLoaded(response.data);
     } catch (err) {
       if (!signal.cancelled) {
-        setOverview(null);
+        setLoaded(null);
         setError(err instanceof Error ? err.message : 'The year-end list could not be loaded.');
       }
     } finally {
@@ -172,6 +172,8 @@ export function YearEnd(): ReactElement {
     return () => { signal.cancelled = true; };
   }, [load, attempt]);
 
+  // Another year's list never shows while the selected year loads.
+  const overview = loaded?.tax_year === year ? loaded : null;
   const rows = overview?.clients ?? [];
   // A client that changed after it was marked ready needs a re-check, so it is on the to-do list too.
   const toDo = rows.filter((row) => row.status === 'needs_action' || row.status === 'check_needed');

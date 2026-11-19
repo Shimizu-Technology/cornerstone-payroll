@@ -1,3 +1,5 @@
+import { reportPeriodPath } from '@/lib/report-period';
+
 export const FIRST_YEAR_END_TAX_YEAR = 2026;
 
 export type YearEndParty = 'cornerstone' | 'client' | 'external_provider' | 'no_filing';
@@ -114,7 +116,10 @@ export interface YearEndReconciliationLine {
   quarterly_total: number;
   opening_balances: number;
   difference: number;
-  /** "explained": the wage base splits wages and tips differently, but Box 3 + Box 7 still equals lines 5a + 5b. */
+  /**
+   * "explained": the wage base splits wages and tips differently while Box 3 + Box 7 still equals lines 5a + 5b,
+   * or a 941 caps legacy paychecks the payroll records do not. A quarter that differs otherwise is always "mismatch".
+   */
   status: 'match' | 'mismatch' | 'explained';
   look_at: Array<{ kind: 'quarter' | 'w2_report'; quarter?: number; label: string; detail: string }>;
   message: string | null;
@@ -175,15 +180,20 @@ export interface YearEndReadiness {
   notes: string | null;
 }
 
-interface StepBase<K extends YearEndStepKey, D> {
+type ActiveStepStatus = Extract<YearEndStepStatus, 'done' | 'action_needed'>;
+
+interface StepCommon<K extends YearEndStepKey> {
   key: K;
   number: number;
   title: string;
-  status: YearEndStepStatus;
   summary: string;
   issues: YearEndIssue[];
-  data: Partial<D>;
 }
+
+/** A step that ran carries its full data; a waiting or not-needed step carries none. */
+type StepBase<K extends YearEndStepKey, D> =
+  | (StepCommon<K> & { status: ActiveStepStatus; data: D })
+  | (StepCommon<K> & { status: Exclude<YearEndStepStatus, ActiveStepStatus>; data: { [P in keyof D]?: never } });
 
 export type YearEndStep =
   | StepBase<'filing_decision', {
@@ -217,6 +227,13 @@ export type YearEndStep =
   | StepBase<'prior_provider', { prior_provider_through: string | null; overlaps: YearEndOverlap[] }>
   | StepBase<'mark_ready', { filing: YearEndReadiness | null; can_mark_ready: boolean; remaining_before_ready: number }>;
 
+/** A step that ran, narrowed by key: its data is complete. */
+export type ActiveYearEndStep<K extends YearEndStepKey> = Extract<YearEndStep, { key: K; status: ActiveStepStatus }>;
+
+export function isActiveStep<S extends YearEndStep>(step: S): step is Extract<S, { status: ActiveStepStatus }> {
+  return step.status === 'done' || step.status === 'action_needed';
+}
+
 export interface YearEndChecklist {
   company: { id: number; name: string; active: boolean; test_workspace: boolean };
   tax_year: number;
@@ -249,6 +266,21 @@ export function yearEndTaxYears(today = new Date()): number[] {
 export function parseYearEndTaxYear(value: string | null, today = new Date()): number {
   const year = Number(value);
   return yearEndTaxYears(today).includes(year) ? year : defaultYearEndTaxYear(today);
+}
+
+export type YearEndLookAt = YearEndReconciliationLine['look_at'][number];
+
+/**
+ * The report a reconciliation line points to, for the checklist's year: the
+ * quarter's Form 941 or W-1 (the quarterly packet), or the W-2GU report.
+ */
+export function reconciliationTargetLink(target: YearEndLookAt, source: YearEndReconciliationLine['source'], taxYear: number): { to: string; label: string } {
+  if (target.kind === 'quarter' && target.quarter) {
+    return source === 'w1'
+      ? { to: reportPeriodPath('quarterly-compliance-packet', taxYear, target.quarter), label: `Open the Q${target.quarter} W-1` }
+      : { to: reportPeriodPath('941-gu', taxYear, target.quarter), label: `Open the Q${target.quarter} Form 941` };
+  }
+  return { to: reportPeriodPath('w2-gu', taxYear), label: 'Open W-2GU report' };
 }
 
 export function clientStatusLabel(row: { status: YearEndClientStatus; issue_count: number }): string {

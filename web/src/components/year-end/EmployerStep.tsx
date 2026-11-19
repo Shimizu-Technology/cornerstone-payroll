@@ -4,10 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { companiesApi } from '@/services/api';
 import { IssueList } from '@/components/year-end/StepCard';
-import type { YearEndChecklist, YearEndStep } from '@/lib/year-end';
+import type { YearEndChecklist, ActiveYearEndStep } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
 
-type EmployerStepData = Extract<YearEndStep, { key: 'employer' }>;
+type EmployerStepData = ActiveYearEndStep<'employer'>;
 type Field = 'ein' | 'address_line1' | 'address_line2' | 'city' | 'state' | 'zip' | 'phone' | 'email';
 
 const LABELS: Record<Field, string> = {

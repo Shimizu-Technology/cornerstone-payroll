@@ -19,10 +19,10 @@ function row(overrides: Partial<YearEndClientRow>): YearEndClientRow {
   };
 }
 
-function overview(clients: YearEndClientRow[], hidden = { test_workspaces: 0, inactive_without_payroll: 0 }): { data: YearEndClientsOverview } {
+function overview(clients: YearEndClientRow[], hidden = { test_workspaces: 0, inactive_without_payroll: 0 }, taxYear = 2026): { data: YearEndClientsOverview } {
   return {
     data: {
-      tax_year: 2026, clients, hidden,
+      tax_year: taxYear, clients, hidden,
       counts: {
         needs_action: clients.filter((client) => client.status === 'needs_action').length,
         check_needed: clients.filter((client) => client.status === 'check_needed').length,
@@ -45,6 +45,27 @@ describe('Year-end clients list', () => {
     vi.setSystemTime(new Date('2026-11-19T12:00:00+10:00'));
   });
   afterEach(() => vi.useRealTimers());
+
+  it('hides the previous year while the newly chosen year loads', async () => {
+    vi.setSystemTime(new Date('2027-03-01T12:00:00+10:00'));
+    let resolve2026: (value: { data: YearEndClientsOverview }) => void = () => {};
+    mocks.clients.mockImplementation((year: number) => year === 2027
+      ? Promise.resolve(overview([row({ company_id: 9, name: 'Yigo Yogurt', issue_count: 5, checklist_path: '/companies/9/year-end?year=2027' })], undefined, 2027))
+      : new Promise((resolve) => { resolve2026 = resolve; }));
+
+    renderPage('/year-end?year=2027');
+    expect((await screen.findAllByText('Yigo Yogurt')).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Tax year'), { target: { value: '2026' } });
+
+    expect(await screen.findByRole('status', { name: 'Loading clients' })).toBeTruthy();
+    expect(screen.queryByText('Yigo Yogurt')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Yigo Yogurt|Fix|Open/ })).toBeNull();
+
+    resolve2026(overview([row({ company_id: 2, name: 'Agana Auto' })]));
+    expect((await screen.findAllByText('Agana Auto')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Yigo Yogurt')).toBeNull();
+  });
 
   it('lists clients with issues first, then ready and not-filed clients, each with one action', async () => {
     mocks.clients.mockResolvedValue(overview([
