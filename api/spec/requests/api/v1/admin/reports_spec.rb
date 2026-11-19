@@ -3614,6 +3614,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  it "labels Box 2 as Guam income tax withheld in W-2GU workbooks" do
+    get "/api/v1/admin/reports/w2_gu_xlsx", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    workbook = Roo::Excelx.new(StringIO.new(response.body))
+    expect(workbook.sheet("W-2GU").row(1)).to include("Box 2 Guam Income Tax Withheld")
+    expect(workbook.sheet("Totals").column(1)).to include("Box 2 Guam Income Tax Withheld")
+  end
+
   describe "filing workbook report info sheets" do
     it "includes client and generated-at metadata for 941-GU, W-2GU, and 1099-NEC sheets" do
       controller = Api::V1::Admin::ReportsController.new

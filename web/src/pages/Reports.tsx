@@ -1091,7 +1091,7 @@ export function W2GuPanel() {
               {/* Totals grid */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <TotalBox label="Box 1 — Wages, Tips & Other Comp" value={report.totals.box1_wages_tips_other_comp} />
-                <TotalBox label="Box 2 — Federal Income Tax Withheld" value={report.totals.box2_federal_income_tax_withheld} />
+                <TotalBox label="Box 2 — Guam Income Tax Withheld" value={report.totals.box2_federal_income_tax_withheld} />
                 <TotalBox label="Box 3 — Social Security Wages" value={report.totals.box3_social_security_wages} />
                 <TotalBox label="Box 4 — SS Tax Withheld" value={report.totals.box4_social_security_tax_withheld} />
                 <TotalBox label="Box 5 — Medicare Wages & Tips" value={report.totals.box5_medicare_wages_tips} />

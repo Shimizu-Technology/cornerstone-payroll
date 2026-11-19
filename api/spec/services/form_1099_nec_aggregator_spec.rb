@@ -81,4 +81,39 @@ RSpec.describe Form1099NecAggregator, type: :service do
     expect(row[:employee_id]).to eq(transitioned_worker.id)
     expect(row[:total_compensation]).to eq(275.00)
   end
+  it "includes active one-off checks by payment year, groups repeated payees, and excludes voids and superseded checks" do
+    first = create(:non_employee_check, company: company, check_type: "contractor", payable_to: "Synthetic Vendor", amount: 300)
+    second = create(:non_employee_check, company: company, check_type: "contractor", payable_to: first.payable_to, amount: 297.50)
+    create(:non_employee_check, company: company, check_type: "contractor", payable_to: first.payable_to, amount: 900,
+      voided: true, voided_at: Time.current, void_reason: "Destroyed")
+    create(:non_employee_check, company: company, check_type: "vendor", amount: 2000)
+    create(:non_employee_check, company: create(:company), check_type: "contractor", amount: 2000)
+    create(:non_employee_check, company: company, check_type: "contractor", payment_date: Date.new(2025, 12, 31), amount: 2000)
+    actor = create(:user, company: company)
+    CheckSupersessionRolloutApproval.create!(company: company, approved_by: create(:user, company: company, role: "org_admin"),
+      reason: "Approved for isolated reconciliation test only", approved_at: Time.current)
+    payroll = create(:payroll_item, :printed, company: company, employee: contractor, pay_period: pay_period,
+      employment_type: "contractor", gross_pay: 2100, net_pay: 2100, check_number: "777", payment_delivery_method: "paper_check")
+    create(:check_event, payroll_item: payroll, user: actor, event_type: "delivered", effective_on: PayrollBusinessClock.today)
+    superseded = create(:non_employee_check, company: company, check_type: "contractor", payable_to: contractor.full_name,
+      amount: 2100, check_number: "777", printed_at: Time.current)
+    NonEmployeeCheckSupersessionService.new(check: superseded, actor: actor).supersede!(payroll_item_id: payroll.id,
+      reason: "Same physical contractor check verified against payroll", recipient_verified: true)
+
+    report = described_class.new(company, 2026).generate
+    check_row = report[:all_contractors].find { |row| row[:employee_id].nil? }
+    expect(check_row).to include(total_compensation: 597.50, payment_count: 2, requires_filing: false,
+      non_employee_check_ids: [ first.id, second.id ])
+    expect(check_row[:compliance_issues]).to include(/no worker\/TIN link/)
+    expect(report[:totals]).to include(total_compensation: 2697.50, reportable_compensation: 2100)
+  end
+
+  it "uses the year-specific threshold for one-off check recipients and the linked pay date fallback" do
+    create(:information_return_threshold, tax_year: 2025, threshold_amount: 600)
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2025, 12, 31))
+    create(:non_employee_check, company: company, check_type: "contractor", pay_period: prior_period, payment_date: nil, amount: 600)
+    create(:non_employee_check, company: company, check_type: "contractor", payment_date: Date.new(2026, 1, 1), amount: 2000)
+    expect(described_class.new(company, 2025).generate[:reportable_contractors].sole[:total_compensation]).to eq(600)
+    expect(described_class.new(company, 2026).generate[:reportable_contractors].sole[:total_compensation]).to eq(2000)
+  end
 end

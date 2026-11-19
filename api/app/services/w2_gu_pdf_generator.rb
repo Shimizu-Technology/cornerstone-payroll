@@ -122,7 +122,7 @@ class W2GuPdfGenerator
 
     rows = [
       [ "Box 1 — Wages, Tips & Other Comp",     fmt(totals[:box1_wages_tips_other_comp]) ],
-      [ "Box 2 — Federal Income Tax Withheld",  fmt(totals[:box2_federal_income_tax_withheld]) ],
+      [ "Box 2 — Guam Income Tax Withheld",  fmt(totals[:box2_federal_income_tax_withheld]) ],
       [ "Box 3 — Social Security Wages",         fmt(totals[:box3_social_security_wages]) ],
       [ "Box 4 — SS Tax Withheld",               fmt(totals[:box4_social_security_tax_withheld]) ],
       [ "Box 5 — Medicare Wages & Tips",         fmt(totals[:box5_medicare_wages_tips]) ],
