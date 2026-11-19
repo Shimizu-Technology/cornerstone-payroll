@@ -8,9 +8,15 @@ import { reconciliationTargetLink, type ActiveYearEndStep, type YearEndReconcili
 
 type ReconciliationStepData = ActiveYearEndStep<'reconciliation'>;
 
+// The year totals agree, but a quarter's return differs from that quarter's payroll records.
+function quartersOnly(line: YearEndReconciliationLine): boolean {
+  return line.status === 'mismatch' && Math.abs(line.difference) <= 0.01;
+}
+
 function LineStatus({ line }: { line: YearEndReconciliationLine }): ReactElement {
   if (line.status === 'match') return <Badge variant="success">Matches</Badge>;
   if (line.status === 'explained') return <Badge variant="info">Matches in total</Badge>;
+  if (quartersOnly(line)) return <Badge variant="danger">Quarters differ</Badge>;
   return <Badge variant="danger">Off by {formatCurrency(Math.abs(line.difference))}</Badge>;
 }
 
@@ -144,9 +150,9 @@ export function ReconciliationStep({ step, taxYear }: { step: ReconciliationStep
                 <TableCell className="text-right">
                   <span className={`inline-flex items-center gap-1 font-semibold tabular-nums ${line.status === 'match' ? 'text-success-800' : line.status === 'explained' ? 'text-neutral-800' : 'text-danger-700'}`}>
                     {line.status === 'match' && <Check className="h-4 w-4" aria-hidden="true" />}
-                    {formatCurrency(line.difference)}
+                    {quartersOnly(line) ? 'Quarters differ' : formatCurrency(line.difference)}
                   </span>
-                  <span className="sr-only">{line.status === 'match' ? 'Matches' : line.status === 'explained' ? 'Matches in total with the other Social Security line' : 'Does not match'}</span>
+                  <span className="sr-only">{line.status === 'match' ? 'Matches' : line.status === 'explained' ? 'Matches in total' : quartersOnly(line) ? 'Matches in total, but quarters differ from their payroll records' : 'Does not match'}</span>
                 </TableCell>
               </TableRow>
             ))}
