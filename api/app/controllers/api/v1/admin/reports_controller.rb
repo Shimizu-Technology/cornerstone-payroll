@@ -756,8 +756,10 @@ module Api
 
               # The stored fingerprint must describe the inputs the checklist
               # just evaluated. A write that skipped the company lock while
-              # it ran changes the fingerprint, so nothing is marked.
-              unless W2FilingInputsFingerprint.new(company: company, year: year).call == fingerprint
+              # it ran changes the fingerprint, so nothing is marked. Read
+              # uncached: the request query cache would replay the first read.
+              current = ActiveRecord::Base.uncached { W2FilingInputsFingerprint.new(company: company, year: year).call }
+              unless current == fingerprint
                 return render json: {
                   error: "W-2 filing inputs changed while the year-end checklist was checked. Run preflight again, then mark it ready.",
                   filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate
