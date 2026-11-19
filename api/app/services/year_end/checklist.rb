@@ -41,11 +41,14 @@ module YearEnd
     FORM_1099_ONLY_CODES = %w[FORM_1099_FILER_NOT_CHOSEN PAYEE_DETAILS_MISSING PAYEES_UNAVAILABLE PAYEE_IDENTITY_UNRESOLVED].freeze
 
     def call
-      started_at = Time.current
+      # Taken before the steps run, so a change made while they run leaves
+      # the list asking for a re-check.
+      revision = InputRevision.for(company.id, year)[company.id]
       steps = build_steps
       status = overall_status(steps)
-      # Lets the clients list keep showing Ready until any input changes.
-      ReadyCheck.record(company.id, year, started_at) if status == "ready"
+      # Lets the clients list keep showing Ready until any input changes, and
+      # stops it showing Ready once a run finds something.
+      status == "ready" ? ReadyCheck.record(company.id, year, revision) : ReadyCheck.clear(company.id, year)
       issue_count = steps.reject { |step| step[:key].in?(SIGN_OFF_STEPS) }.sum { |step| step[:issues].length } +
         (steps.any? { |step| step[:key].in?(SIGN_OFF_STEPS) && step[:status] == "action_needed" } ? 1 : 0)
       next_step = steps.find { |step| step[:status] == "action_needed" }
@@ -66,6 +69,9 @@ module YearEnd
         permissions: permissions,
         steps: steps
       }
+    rescue StandardError
+      ReadyCheck.clear(company.id, year)
+      raise
     end
 
     # Blockers the W-2GU "mark ready" action enforces. Preflight still owns

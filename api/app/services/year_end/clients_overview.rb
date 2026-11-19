@@ -9,9 +9,10 @@ module YearEnd
   # same way the checklist checks them. The numeric checks (reconciliation,
   # judgment warnings, overlap, fingerprint) run on the client's own
   # checklist, and mark ready enforces them, so the list shows Ready only
-  # when the W-2s were marked ready (or the full checklist last came out
-  # ready) and nothing the checklist reads has changed since. Anything that
-  # changed shows "Check needed" rather than a status the list cannot prove.
+  # when the W-2s are marked ready and the last successful check (mark ready
+  # or a ready checklist) was made at the current input revision, which
+  # changes on any create, update or delete the checklist reads. Anything
+  # else shows "Check needed" rather than a status the list cannot prove.
   class ClientsOverview
     def initialize(user:, year:)
       @user = user
@@ -95,8 +96,7 @@ module YearEnd
 
       readiness = readinesses[company.id]
       marked = files_w2 && readiness&.status == "filing_ready" && readiness.marked_ready_at.present?
-      verified_at = [ (readiness.marked_ready_at if marked), ready_checks[company.id] ].compact.max
-      unchanged = verified_at.present? && (last_input_changes[company.id].nil? || last_input_changes[company.id] <= verified_at)
+      unchanged = ready_checks[company.id].present? && ready_checks[company.id] == input_revisions[company.id]
       if files_w2 && !marked
         issues << { code: "W2_NOT_MARKED_READY", label: "Check the numbers and mark W-2s ready" }
       end
@@ -126,7 +126,7 @@ module YearEnd
         w2_employee_count: w2_population.fetch(company.id, Set.new).size,
         employee_details: files_w2 ? { missing_ssn: 0, missing_address: 0 }.merge(employees_missing_details.fetch(company.id, {}).slice(:missing_ssn, :missing_address)) : nil,
         marked_ready_at: marked ? readiness.marked_ready_at.iso8601 : nil,
-        check_reason: status == "check_needed" ? "Something changed since the W-2s were marked ready. Open the checklist to re-check." : nil,
+        check_reason: status == "check_needed" ? "Something may have changed since the W-2s were marked ready. Open the checklist to re-check." : nil,
         checklist_path: "/companies/#{company.id}/year-end?year=#{year}"
       }
     end
@@ -168,33 +168,8 @@ module YearEnd
       @ready_checks ||= ReadyCheck.read_many(company_ids, year)
     end
 
-    # The latest change, per company, to anything the checklist and the W-2
-    # filing fingerprint read. Each is one grouped query for the whole list.
-    def last_input_changes
-      @last_input_changes ||= begin
-        items = PayrollItem.joins(:pay_period).where(company_id: company_ids, pay_periods: { pay_date: year_range })
-        employees = Employee.where(company_id: company_ids)
-        stamps = [
-          accessible_companies.to_h { |company| [ company.id, company.updated_at ] },
-          employees.group(:company_id).maximum(:updated_at),
-          EmployeeTippedOccupation.joins(:employee).merge(employees).group("employees.company_id").maximum("employee_tipped_occupations.updated_at"),
-          PayPeriod.where(company_id: company_ids, pay_date: year_range).group(:company_id).maximum(:updated_at),
-          PayPeriod.where(company_id: company_ids, pay_date: year_range).group(:company_id).maximum(:committed_at),
-          items.group("payroll_items.company_id").maximum("payroll_items.updated_at"),
-          PayrollItemDeduction.joins(payroll_item: :pay_period).merge(items).group("payroll_items.company_id").maximum("payroll_item_deductions.updated_at"),
-          PayrollItemFieldEntry.joins(payroll_item: :pay_period).merge(items).group("payroll_items.company_id").maximum("payroll_item_field_entries.updated_at"),
-          DeductionType.where(company_id: company_ids).group(:company_id).maximum(:updated_at),
-          PayrollFieldDefinition.where(company_id: company_ids).group(:company_id).maximum(:updated_at),
-          PayrollFilingResponsibility.where(company_id: company_ids, tax_year: year).group(:company_id).maximum(:updated_at),
-          HistoricalImportBatch.where(company_id: company_ids).group(:company_id).maximum(:updated_at),
-          HistoricalYtdBridge.where(company_id: company_ids).group(:company_id).maximum(:updated_at),
-          HistoricalPaycheckAdjustment.where(company_id: company_ids).group(:company_id).maximum(:updated_at)
-        ]
-        tax_config = AnnualTaxConfig.where(tax_year: year).maximum(:updated_at)
-        company_ids.index_with do |company_id|
-          [ *stamps.map { |stamp| stamp[company_id] }, tax_config ].compact.max
-        end
-      end
+    def input_revisions
+      @input_revisions ||= InputRevision.for(company_ids, year)
     end
 
     def native_payroll_counts
