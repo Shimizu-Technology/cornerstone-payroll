@@ -384,6 +384,15 @@ RSpec.describe Form941GuAggregator do
       )
     end
 
+    it "reports lines 5a and 5b per employee from the same wage-base allocation" do
+      report = aggregator.generate
+      by_employee = aggregator.ss_taxable_by_employee
+
+      expect(by_employee.keys).to contain_exactly(employee1.id, employee2.id)
+      expect(by_employee.values.sum(0.to_d) { |values| values[:wages] }).to eq(report[:lines][:line5a_ss_wages].to_d)
+      expect(by_employee.values.sum(0.to_d) { |values| values[:tips] }).to eq(report[:lines][:line5b_ss_tips].to_d)
+    end
+
     describe "excludes non-committed pay periods" do
       let!(:draft_pp) do
         create(:pay_period,
