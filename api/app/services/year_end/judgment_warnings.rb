@@ -5,9 +5,9 @@ require "digest"
 module YearEnd
   # Turns the W-2GU report's review warnings into year-end checklist items.
   #
-  # A warning whose data can be corrected (negative annual Box 12 amounts, a
-  # tipped employee without a Treasury occupation code) blocks until it is
-  # fixed. A warning that needs a reviewer's judgment (unclassified tips or
+  # A warning whose data can be corrected (negative annual Box 12 amounts,
+  # FICA withheld on Section 125 benefits, a tipped employee without a
+  # Treasury occupation code) blocks until it is fixed. A warning that needs a reviewer's judgment (unclassified tips or
   # overtime, legacy tax bases, opening balances with no paycheck dates) needs
   # an explicit, audited acknowledgement. An acknowledgement counts only while
   # its digest matches the warning computed from current data.
@@ -17,6 +17,11 @@ module YearEnd
         kind: "blocker",
         title: "Negative annual tips or overtime",
         explanation: "A W-2 cannot report a negative Box 12 TP or TT amount. Correct the payroll for these employees before filing."
+      },
+      "fica_withheld_on_section_125" => {
+        kind: "blocker",
+        title: "Social Security and Medicare withheld on Section 125 benefits",
+        explanation: "A paycheck withheld Social Security and Medicare tax on a cafeteria-plan (Section 125) benefit, so W-2 Boxes 3 and 5 no longer agree with Boxes 4 and 6 or the 941s. Correct those paychecks: refund the employee's over-withheld tax and file a 941-X for each quarter. Then reload this checklist."
       },
       "tipped_occupation_code_missing" => {
         kind: "blocker",
@@ -32,6 +37,11 @@ module YearEnd
         kind: "acknowledge",
         title: "Overtime without qualified-overtime amounts",
         explanation: "These employees have overtime with no stored qualified-overtime amount, so Box 12 TT may be understated. Review the overtime and record what you confirmed."
+      },
+      "inconsistent_fit_taxable_wages" => {
+        kind: "acknowledge",
+        title: "Stored Guam taxable wages disagree with the paycheck",
+        explanation: "For these employees, the taxable wages saved on some paychecks do not match the paycheck's own pay and pre-tax deductions. Box 1 uses the paycheck amounts. Open one affected paycheck per employee, confirm Box 1 is right and that Guam tax was withheld on the right wages, and record what you found."
       },
       "box14b_more_than_two_codes" => {
         kind: "acknowledge",
@@ -66,13 +76,15 @@ module YearEnd
       "tip_classification_unreviewed" => %w[id pay_period_id gross_pay tips reported_tips cash_tips_reported social_security_taxable_tips],
       "qualified_overtime_unreviewed" => %w[id pay_period_id gross_pay pay_rate hours_worked overtime_hours qualified_overtime_compensation],
       "legacy_tax_bases" => %w[id pay_period_id gross_pay reported_tips fit_taxable_wages social_security_taxable_wages
-                               social_security_taxable_tips medicare_taxable_wages withholding_tax social_security_tax medicare_tax]
+                               social_security_taxable_tips medicare_taxable_wages withholding_tax social_security_tax medicare_tax],
+      "inconsistent_fit_taxable_wages" => %w[id pay_period_id gross_pay fit_taxable_wages non_taxable_pay withholding_tax additional_withholding]
     }.freeze
     ROW_EVIDENCE_FIELDS = {
       "tip_classification_unreviewed" => %i[reported_tips_total box3_social_security_wages box7_social_security_tips box5_medicare_wages_tips],
       "qualified_overtime_unreviewed" => %i[box1_wages_tips_other_comp box3_social_security_wages box5_medicare_wages_tips],
       "legacy_tax_bases" => %i[box1_wages_tips_other_comp box2_federal_income_tax_withheld box3_social_security_wages
-                               box4_social_security_tax_withheld box5_medicare_wages_tips box6_medicare_tax_withheld box7_social_security_tips]
+                               box4_social_security_tax_withheld box5_medicare_wages_tips box6_medicare_tax_withheld box7_social_security_tips],
+      "inconsistent_fit_taxable_wages" => %i[box1_wages_tips_other_comp box2_federal_income_tax_withheld]
     }.freeze
 
     def self.digest_for(code, evidence)
@@ -116,6 +128,9 @@ module YearEnd
         add(found, "negative_box12_amounts", rows.select { |row| row[:negative_box12_tp] || row[:negative_box12_tt] }) do |row|
           [ row[:employee_id], row[:negative_box12_tp], row[:negative_box12_tt] ]
         end
+        add(found, "fica_withheld_on_section_125", rows.select { |row| row[:fica_withheld_on_section_125] }) do |row|
+          [ row[:employee_id] ]
+        end
         if tip_rules_year?
           add(found, "tipped_occupation_code_missing", rows.select { |row| row[:reported_tips_total].to_d.positive? && row[:box14b_tipped_occupation_codes].blank? }) do |row|
             [ row[:employee_id] ]
@@ -132,6 +147,9 @@ module YearEnd
         end
         add(found, "legacy_tax_bases", rows.select { |row| row[:missing_committed_tax_bases] }) do |row|
           [ row[:employee_id], *source_evidence("legacy_tax_bases", row) ]
+        end
+        add(found, "inconsistent_fit_taxable_wages", rows.select { |row| row[:inconsistent_fit_taxable_wages] }) do |row|
+          [ row[:employee_id], *source_evidence("inconsistent_fit_taxable_wages", row) ]
         end
         add_review_warnings(found)
         add_form_941_residuals(found)

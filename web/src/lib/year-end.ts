@@ -77,6 +77,25 @@ export interface YearEndPerson {
   edit_path: string;
 }
 
+/** A payee paid only by one-off contractor checks: no contractor record, so no TIN or address. */
+export interface YearEndOneOffPayee {
+  code: string;
+  payee_key: string;
+  name: string;
+  total_compensation: number;
+  payment_count: number;
+  checks: Array<{ id: number; check_number: string | null; payment_date: string | null; amount: number }>;
+  checks_path: string;
+  digest: string;
+  status: 'needs_identity' | 'identified';
+  acknowledgement: {
+    note: string;
+    acknowledged_at: string | null;
+    acknowledged_by: { id: number | null; name: string; role: string };
+  } | null;
+  acknowledgement_stale: boolean;
+}
+
 export interface YearEndReconciliationQuarter {
   quarter: number;
   amount: number;
@@ -188,6 +207,7 @@ export type YearEndStep =
   | StepBase<'people', {
       employees: YearEndPerson[];
       contractors: YearEndPerson[];
+      one_off_payees: YearEndOneOffPayee[];
       w2_employee_count: number;
       contractor_count: number;
       contractor_error: string | null;
