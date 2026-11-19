@@ -17,6 +17,18 @@ RSpec.describe PayrollFilingResponsibility, type: :model do
     expect(record.errors[:quarter]).to include("must be blank for annual filings")
   end
 
+  it "allows the client and no-filing parties only for the year-end W-2GU and 1099 decisions" do
+    %w[client no_filing].each do |party|
+      quarterly = build(:payroll_filing_responsibility, filing_type: "form_941", responsible_party: party)
+      expect(quarterly).not_to be_valid
+      expect(quarterly.errors[:responsible_party]).to include("can be the client or no filing only for W-2GU and 1099 decisions")
+
+      %w[w2_gu form_1099].each do |filing_type|
+        expect(build(:payroll_filing_responsibility, :annual, filing_type: filing_type, responsible_party: party)).to be_valid
+      end
+    end
+  end
+
   it "keeps quarterly filing owners independent" do
     form_941 = create(:payroll_filing_responsibility, filing_type: "form_941")
     swica = build(

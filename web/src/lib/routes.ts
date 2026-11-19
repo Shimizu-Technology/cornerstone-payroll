@@ -62,6 +62,14 @@ export function retirementSetupPath(
   return `${base}${params.size ? `?${params.toString()}` : ''}#${section}`;
 }
 
+export function yearEndPath(year?: number): string {
+  return year ? `/year-end?year=${year}` : '/year-end';
+}
+
+export function yearEndChecklistPath(companyId: number, year?: number): string {
+  return `${companyPath(companyId)}/year-end${year ? `?year=${year}` : ''}`;
+}
+
 export function payRunsPath(companyId: number, query = ''): string {
   return `${companyPath(companyId)}/pay-runs${normalizeQuery(query)}`;
 }

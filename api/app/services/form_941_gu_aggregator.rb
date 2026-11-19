@@ -68,7 +68,7 @@ class Form941GuAggregator
     historical_source.validate!(range: Date.new(year, 1, 1)..quarter_end_date) if include_historical
 
     items = qualifying_payroll_items
-    records = items.to_a + historical_quarter_records
+    records = quarter_records
 
     # --- Payroll detail retained for Guam W-1/SWICA tie-out context ---
     total_gross          = sum(records, :gross_pay)
@@ -228,7 +228,25 @@ class Form941GuAggregator
     }
   end
 
+  # Lines 5a and 5b for each employee, from the same wage-base allocation as
+  # generate. Year-end reconciliation uses it to tell a wage-base cap apart
+  # from a payroll record that disagrees with the 941.
+  def ss_taxable_by_employee
+    prior = prior_ss_taxable_wages_by_employee
+    quarter_records.group_by(&:employee_id).transform_values do |employee_records|
+      allocations = ss_taxable_allocations_by_month(employee_records, prior).values
+      {
+        wages: allocations.sum(0.to_d) { |allocation| allocation[:wages].to_d }.round(2),
+        tips: allocations.sum(0.to_d) { |allocation| allocation[:tips].to_d }.round(2)
+      }
+    end
+  end
+
   private
+
+  def quarter_records
+    @quarter_records ||= qualifying_payroll_items.to_a + historical_quarter_records
+  end
 
   def quarter_start_date
     start_month = ((quarter - 1) * 3) + 1

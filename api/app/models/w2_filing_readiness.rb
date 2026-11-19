@@ -25,6 +25,28 @@ class W2FilingReadiness < ApplicationRecord
     preflight_fingerprint.present? && preflight_fingerprint == fingerprint
   end
 
+  def review_payload(fingerprint:)
+    stale = status.in?(%w[filing_ready preflight_passed]) &&
+      !(status == "filing_ready" ? current?(fingerprint) : preflight_current?(fingerprint))
+    {
+      year: year,
+      status: stale ? "stale" : status,
+      stale: stale,
+      preflight_current: preflight_current?(fingerprint),
+      preflight_fingerprint: preflight_fingerprint,
+      ready_fingerprint: ready_fingerprint,
+      attestation_history: attestation_history,
+      blocking_count: blocking_count,
+      warning_count: warning_count,
+      preflight_run_at: preflight_run_at,
+      marked_ready_at: marked_ready_at,
+      marked_ready_by_id: marked_ready_by_id,
+      notes: notes,
+      findings: findings,
+      findings_source: "persisted"
+    }
+  end
+
   private
 
   def preserve_attestation_history

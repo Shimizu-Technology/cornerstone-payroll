@@ -108,6 +108,50 @@ RSpec.describe PayrollFilingResponsibilityRecorder, :postgres_concurrency, type:
     end
   end
 
+  it "leaves one complete W-2GU and 1099 pair when two paired saves race" do
+    pairs = {
+      cornerstone: { "w2_gu" => "cornerstone", "form_1099" => "cornerstone" },
+      client: { "w2_gu" => "client", "form_1099" => "no_filing" }
+    }
+    pids, results, writers = Queue.new, Queue.new, []
+    Company.transaction do
+      company.lock!
+      writers = pairs.map do |label, pair|
+        Thread.new do
+          ActiveRecord::Base.connection_pool.with_connection do |connection|
+            pids << connection.raw_connection.backend_pid
+            described_class.new(company: Company.find(company.id), actor: User.find(actor.id), tax_year: 2026,
+              imported_payroll_inclusion: "included", notes: "Paired save #{label}",
+              decisions: pair.map { |type, party| { filing_types: [ type ], responsible_party: party } }).call
+            results << :saved
+          rescue StandardError => error
+            results << error
+          end
+        end
+      end
+      waiting = Timeout.timeout(30) { Array.new(2) { pids.pop } }
+      Timeout.timeout(30) do
+        loop do
+          ActiveRecord::Base.connection.execute("SELECT pg_stat_clear_snapshot()")
+          blocked = ActiveRecord::Base.uncached do
+            ActiveRecord::Base.connection.select_values(
+              "SELECT pid FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND pid IN (#{waiting.map { |pid| Integer(pid) }.join(',')})"
+            )
+          end
+          break if blocked.length == 2
+          sleep 0.01
+        end
+      end
+    end
+    Timeout.timeout(30) { writers.each(&:join) }
+    expect(Array.new(2) { results.pop }).to eq([ :saved, :saved ])
+    final = PayrollFilingResponsibility.where(company_id: company.id, tax_year: 2026, filing_type: %w[w2_gu form_1099])
+      .pluck(:filing_type, :responsible_party).to_h
+    expect(pairs.values).to include(final)
+  ensure
+    Timeout.timeout(30) { writers.each(&:join) }
+  end
+
   def record_decision(client, user, party, note)
     described_class.new(company: client, actor: user, tax_year: 2026, quarter: 1,
       filing_types: [ "form_941" ], responsible_party: party,

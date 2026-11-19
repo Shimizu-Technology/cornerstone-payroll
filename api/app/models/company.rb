@@ -91,6 +91,7 @@ class Company < ApplicationRecord
   has_many :payroll_liability_obligation_due_dates, dependent: :restrict_with_error
   has_many :quarterly_compliance_packets, dependent: :destroy
   has_many :payroll_filing_responsibilities, dependent: :restrict_with_error
+  has_many :year_end_acknowledgements, dependent: :restrict_with_error
   has_many :payroll_filing_records, dependent: :restrict_with_error
   has_many :historical_import_batches, dependent: :restrict_with_error
   has_one :prior_provider_history_draft, dependent: :delete
