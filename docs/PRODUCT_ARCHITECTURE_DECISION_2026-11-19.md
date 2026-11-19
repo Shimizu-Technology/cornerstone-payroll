@@ -240,7 +240,7 @@ Pieces of a milestone merge to `main` as they're ready. New features stay switch
 5. It's switched on for one pilot client for a full pay period.
 6. It's switched on for everyone.
 
-If something goes wrong in step 5, it's switched off for that client. Nobody else is affected.
+If something goes wrong in step 5, it's switched off for that client. Nobody else is affected. Switching a feature off never hides or deletes records it created: filing records, acknowledgements and audit history stay visible to staff.
 
 ### The milestones
 
@@ -257,7 +257,7 @@ If something goes wrong in step 5, it's switched off for that client. Nobody els
 
 The full scope is still about nine to twelve months. Dates for milestones 2 onward are set once Dafne answers §7.
 
-- **Year-end fallback, per client:** the filing record is the source of truth. Before ezW2 is used for a client, check that client's filing record and the DRT/SSA acknowledgements. A client whose forms were already submitted or accepted is never filed again through ezW2; any fix goes through a correction (W-2c) instead. ezW2 is only for clients with nothing submitted, and each fallback filing is recorded the same way, so every client is filed exactly once.
+- **Year-end fallback, per client:** the filing record is the source of truth, and it stays available even if year-end is switched off for that client. Before ezW2 is used for a client, staff reconcile every DRT and SSA submission and acknowledgement for that client against its filing record. A client whose forms were already submitted or accepted is never filed again through ezW2; any fix goes through a correction (W-2c) instead. ezW2 is only for clients with nothing submitted, and each fallback filing is recorded the same way, so every client is filed exactly once.
 - If a new client needs time tracking before milestone 6, a copy of AIRE's app is the stopgap. It moves at milestone 7 with AIRE.
 - The time module could move ahead of leave and onboarding if a paying time client is waiting and the HR pilot isn't.
 
