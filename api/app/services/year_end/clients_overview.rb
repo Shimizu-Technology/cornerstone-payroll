@@ -54,15 +54,16 @@ module YearEnd
     end
 
     # Test workspaces never file. An inactive record is listed only while it
-    # still has this year's payroll or a year-end decision, so staff can say it
-    # files no forms instead of leaving it unanswered.
+    # still has this year's payroll, reportable one-off contractor checks or a
+    # year-end decision, so staff can say it files no forms instead of
+    # leaving it unanswered.
     def candidate_companies
       accessible_companies.reject(&:test_workspace?).select { |company| company.active? || relevant_inactive?(company) }
     end
 
     def relevant_inactive?(company)
       native_payroll_counts[company.id].to_i.positive? || historical_payroll_counts[company.id].to_i.positive? ||
-        responsibilities.key?(company.id)
+        one_off_payee_company_ids.include?(company.id) || responsibilities.key?(company.id)
     end
 
     def row(company)
@@ -296,26 +297,32 @@ module YearEnd
 
     # Form1099NecAggregator's one-off contractor payees (printed or paid
     # contractor checks, grouped by exact payee name) that reach the
-    # threshold and have no current identification on record.
+    # threshold, for every candidate company whatever its decision. One query.
+    def reportable_one_off_groups
+      @reportable_one_off_groups ||= OneOffPayees.reportable_groups(
+        OneOffPayees.issued_check_groups(accessible_companies.reject(&:test_workspace?).map(&:id), year), form_1099_threshold
+      )
+    end
+
+    def one_off_payee_company_ids
+      @one_off_payee_company_ids ||= reportable_one_off_groups.keys.to_set(&:first)
+    end
+
+    # The reportable one-off payees of each 1099 client with no current
+    # identification on record.
     def unidentified_one_off_payees
       @unidentified_one_off_payees ||= begin
         if form_1099_company_ids.empty? || form_1099_threshold.nil?
           {}
         else
-          checks = NonEmployeeCheck.active.where(company_id: form_1099_company_ids, check_type: "contractor")
-            .where(payment_date: year_range).or(NonEmployeeCheck.active.where(company_id: form_1099_company_ids, check_type: "contractor", payment_date: nil))
-            .includes(:pay_period).to_a
-            .select { |check| (check.printed_at.present? || check.paid_at.present?) && year_range.cover?(check.effective_payment_date) }
           acknowledgements = YearEndAcknowledgement.where(company_id: form_1099_company_ids, tax_year: year)
             .where("warning_code LIKE ?", "#{OneOffPayees::CODE_PREFIX}%").pluck(:company_id, :warning_code, :warning_digest)
             .to_h { |company_id, code, digest| [ [ company_id, code ], digest ] }
-          checks.group_by { |check| [ check.company_id, check.payable_to ] }.each_with_object(Hash.new(0)) do |((company_id, name), payments), counts|
-            total = payments.sum(0.to_d, &:amount).round(2)
-            next if total < form_1099_threshold
+          reportable_one_off_groups.each_with_object(Hash.new(0)) do |((company_id, name), payments), counts|
+            next unless company_id.in?(form_1099_company_ids)
 
-            ids = payments.map(&:id)
-            code = OneOffPayees.code_for("non_employee_check:#{ids.min}")
-            digest = OneOffPayees.digest_for(code, check_ids: ids, total: total, name: name)
+            code = OneOffPayees.code_for("non_employee_check:#{payments.map(&:id).min}")
+            digest = OneOffPayees.digest_for(code, checks: payments, name: name)
             counts[company_id] += 1 unless acknowledgements[[ company_id, code ]] == digest
           end
         end

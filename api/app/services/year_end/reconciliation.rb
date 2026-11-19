@@ -100,8 +100,8 @@ module YearEnd
 
     def filed_quarter_values(quarter)
       report = Form941GuAggregator.new(company, year, quarter).generate
-      quarter_withholding[quarter] = report.fetch(:withholding_reconciliation)
       lines = report.fetch(:lines)
+      quarter_withholding[quarter] = report.fetch(:withholding_reconciliation).merge(line6_total_taxes: lines[:line6_total_taxes_before_adj])
       detail = report.fetch(:tax_detail)
       {
         "social_security_wages" => lines[:line5a_ss_wages],
@@ -325,6 +325,9 @@ module YearEnd
           employee_difference: employee_difference.to_f,
           expected_employee_total: decimal(review[:expected_employee_total]).to_f,
           recorded_employee_total: decimal(review[:recorded_employee_total]).to_f,
+          recorded_employer_total: decimal(review[:recorded_employer_total]).to_f,
+          recorded_total_liability: decimal(review[:recorded_total_liability]).to_f,
+          line6_total_taxes: decimal(review[:line6_total_taxes]).to_f,
           recorded_liability_residual: decimal(review[:recorded_liability_residual]).to_f,
           message: form_941_review_message(quarter, unexplained, employee_difference, decimal(review[:recorded_liability_residual]))
         }

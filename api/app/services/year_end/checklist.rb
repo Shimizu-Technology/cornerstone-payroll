@@ -147,6 +147,7 @@ module YearEnd
           form_1099: decision_payload(responsibilities["form_1099"]),
           w2_employee_count: w2_employees.size,
           contractor_count: contractor_payee_ids.size,
+          one_off_payee_count: one_off_payee_count,
           has_imported_history: locked_history?
         }
       )
@@ -174,12 +175,19 @@ module YearEnd
       if [ company.address_line1, company.city, company.state, company.zip ].any?(&:blank?)
         issues << issue("EMPLOYER_ADDRESS_INCOMPLETE", "Complete the employer address (street, city, state and ZIP).", field: "address")
       end
-      issues << issue("EMPLOYER_PHONE_MISSING", "Add the employer phone number for the W-3SS contact.", field: "phone") if company.phone.blank?
-      issues << issue("EMPLOYER_EMAIL_MISSING", "Add the employer email for the W-3SS contact.", field: "email") if company.email.blank?
+      # A 1099-only client files no W-3SS: the phone prints in each 1099's
+      # payer box and the contact goes on the Form 1096 transmittal.
+      if company.phone.blank?
+        issues << issue("EMPLOYER_PHONE_MISSING", files?("w2_gu") ? "Add the employer phone number for the W-3SS contact." : "Add the employer phone number. It prints in the payer box on each 1099.", field: "phone")
+      end
+      if company.email.blank?
+        issues << issue("EMPLOYER_EMAIL_MISSING", files?("w2_gu") ? "Add the employer email for the W-3SS contact." : "Add the employer email for the Form 1096 contact.", field: "email")
+      end
+      forms = [ ("W-2" if files?("w2_gu")), ("1099" if files?("form_1099")) ].compact.join(" and ")
 
       step(
         "employer", "Employer details", issues,
-        summary: issues.empty? ? "EIN, address and contact details are complete." : "These print on every W-2 and 1099.",
+        summary: issues.empty? ? "EIN, address and contact details are complete." : "These print on every #{forms}.",
         data: {
           name: company.name, ein: company.ein,
           address_line1: company.address_line1, address_line2: company.address_line2,
@@ -206,6 +214,14 @@ module YearEnd
         .financially_reportable
         .where(pay_periods: { id: PayPeriod.reportable_committed.where(company_id: company.id, pay_date: year_range).select(:id) })
         .distinct.pluck(:employee_id)
+    end
+
+    # Payees reached only by printed or paid one-off contractor checks. Counted
+    # straight from the checks, so a 1099 setup problem never hides them from
+    # the step 1 default.
+    def one_off_payee_count
+      threshold = InformationReturnThreshold.find_by(form_type: "1099_nec", tax_year: year)&.threshold_amount&.to_d
+      OneOffPayees.reportable_groups(OneOffPayees.issued_check_groups([ company.id ], year), threshold).size
     end
 
     def people_step

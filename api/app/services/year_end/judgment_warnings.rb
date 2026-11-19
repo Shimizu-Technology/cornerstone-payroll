@@ -87,6 +87,9 @@ module YearEnd
       "inconsistent_fit_taxable_wages" => %i[box1_wages_tips_other_comp box2_federal_income_tax_withheld]
     }.freeze
 
+    FORM_941_REVIEW_EVIDENCE = %i[recorded_liability_residual employee_difference expected_employee_total recorded_employee_total
+                                  recorded_employer_total recorded_total_liability line6_total_taxes].freeze
+
     def self.digest_for(code, evidence)
       Digest::SHA256.hexdigest(JSON.generate([ code, evidence ]))
     end
@@ -190,7 +193,12 @@ module YearEnd
       found["form_941_liability_residual"] = {
         employees: [],
         names: {},
-        quarters: residuals.map { |review| [ review[:quarter], money(review[:recorded_liability_residual]), money(review[:employee_difference]) ] },
+        # The quarter's expected and recorded tax as well as the residual: an
+        # ordinary paycheck added to the quarter keeps the residual but moves
+        # these, and the reviewer has not seen those numbers.
+        quarters: residuals.map do |review|
+          [ review[:quarter], *review.values_at(*FORM_941_REVIEW_EVIDENCE).map { |value| money(value) } ]
+        end,
         messages: residuals.map { |review| review[:message] }
       }
     end
