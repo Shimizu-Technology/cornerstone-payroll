@@ -7,7 +7,7 @@ Acceptance owner: implementation agent. Fixtures: factory-generated Example Guam
 | Required scenario | Result | Evidence |
 |---|---|---|
 | Year-End shows incomplete practice profile; admin saves it; reload retains it | Passed at desktop and phone widths | `evidence/efw2-w3ss/submitter-desktop.png`, `submitter-phone.png` |
-| Employer defaults remain N/R; Change saves establishment A001; saved value reaches the file | Passed; final file RE 26–30 is `0A001` | Endpoint persistence spec and positional parser; actual downloaded bytes inspected |
+| Employer defaults remain N/R; Change saves establishment A001; saved value reaches the file | Passed; final file RE 26–30 is `0A001` | Endpoint persistence spec and positional parser; actual downloaded bytes inspected; `employer-desktop.png`, `employer-phone.png` show all three employer settings saved/reloaded |
 | Draft requires confirmation and downloads with DRAFT filename | Passed on phone; desktop controls inspected; 7×512-byte ASCII records with CR/LF | Actual local download and component tests |
 | Mark synthetic client ready, download final EFW2 and W-3SS | Passed; final filenames, file contents, PDF and audit contract checked | `final-phone.png`, `final-desktop.png`; request specs |
 | Employee suffix saves and survives reload; changing identity expires readiness | Passed; JR persisted and UI returned to draft; final file RW 62–65 is `JR  ` after renewed sign-off | `suffix-phone.png`; fingerprint and request specs |
@@ -22,7 +22,7 @@ Automated verification:
 
 - Final combined generator/model/migration/settings/download/company/year-end specs: 95 examples, zero failures.
 - Migration round-trip on populated tables: 1 example, zero failures.
-- Frontend: lint and `tsc --noEmit` pass; Vitest 205 files / 2,047 tests pass.
+- Frontend: lint and `tsc --noEmit` pass; Vitest 206 files / 2,048 tests pass.
 - RuboCop: 1,921 files, no offenses at the recorded pass.
 - Impeccable 4.6.0, telemetry disabled, all changed UI paths: `[]` findings.
 - Full backend suite: final result is recorded in the PR and final task report.
