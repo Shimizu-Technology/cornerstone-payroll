@@ -8,11 +8,11 @@ import { ApiError } from '@/services/api';
 import type { ActiveYearEndStep, YearEndChecklist as Checklist, YearEndIssue, YearEndStep } from '@/lib/year-end';
 
 const mocks = vi.hoisted(() => ({
-  checklist: vi.fn(), acknowledge: vi.fn(), updateResponsibility: vi.fn(), preflight: vi.fn(), markReady: vi.fn(),
+  checklist: vi.fn(), acknowledge: vi.fn(), downloadDocument: vi.fn(), updateResponsibility: vi.fn(), preflight: vi.fn(), markReady: vi.fn(),
   companyGet: vi.fn(), companyUpdate: vi.fn(), employeeUpdate: vi.fn(),
 }));
 vi.mock('@/services/api', () => ({
-  yearEndApi: { checklist: mocks.checklist, acknowledge: mocks.acknowledge },
+  yearEndApi: { checklist: mocks.checklist, acknowledge: mocks.acknowledge, downloadDocument: mocks.downloadDocument },
   reportsApi: {
     updatePayrollFilingResponsibility: mocks.updateResponsibility, w2GuPreflight: mocks.preflight, w2GuMarkReady: mocks.markReady,
     payrollFilingRecord: vi.fn(async () => ({ filing: null })),
@@ -74,6 +74,19 @@ function reconciliationLine(status: 'match' | 'mismatch') {
     look_at: status === 'match' ? [] : [{ kind: 'quarter' as const, quarter: 2, label: 'Q2 941', detail: 'The Q2 941 shows $2,000.00, but Q2 payroll records total $1,800.00.' }],
     message: status === 'match' ? null : 'W-2 Box 3 (Social Security wages) is $200.00 less than the 941s and opening balances. Look at the Q2 941.',
   };
+}
+
+function printAndFile(final: boolean): YearEndStep {
+  return step('print_and_file', 8, 'Print and file', 'available', {
+    data: {
+      final,
+      documents: [{
+        key: 'w2_employee_copies', title: 'Employee copies (B and C)', description: 'Print and give to each employee by Feb 1, 2027.',
+        detail: '4 employees, one sheet each.', format: 'pdf', contains_full_ssn: false, draft: !final, available: true, unavailable_reason: null,
+        download: { path: '/admin/reports/w2_gu_employee_copies', params: { year: 2026 } },
+      }],
+    },
+  });
 }
 
 function working(overrides: { reconciliation?: 'match' | 'mismatch'; warnings?: YearEndStep; people?: YearEndStep; markReady?: YearEndStep } = {}): YearEndStep[] {
@@ -430,7 +443,7 @@ describe('Year-end checklist', () => {
         documents: [{
           key: 'w2_employee_copies', title: 'Employee copies (B and C)', description: 'Print and give to each employee by Feb 1, 2027.',
           detail: '4 employees, one sheet each.', format: 'pdf', contains_full_ssn: false, draft: !final, available: true, unavailable_reason: null,
-          download: { path: '/admin/reports/w2_gu_official_copies', params: { year: 2026, copy: 'employee' } },
+          download: { path: '/admin/reports/w2_gu_employee_copies', params: { year: 2026 } },
         }],
       },
     });
@@ -441,7 +454,7 @@ describe('Year-end checklist', () => {
 
     const drafts = await screen.findByRole('region', { name: /Print and file/ });
     expect(within(drafts).getByText('Downloads')).toBeTruthy();
-    expect(within(drafts).queryByText('Employee copies (B and C)')).toBeNull();
+    expect(within(drafts).queryByRole('heading', { name: 'Employee copies (B and C)' })).toBeNull();
     fireEvent.click(within(drafts).getByRole('button', { name: 'Show Print and file' }));
     expect(within(drafts).getByRole('button', { name: 'Download draft' })).toBeTruthy();
     expect(screen.getByText('Next: step 7, mark w-2s ready.')).toBeTruthy();
@@ -453,6 +466,51 @@ describe('Year-end checklist', () => {
     const final = await screen.findByRole('region', { name: /Print and file/ });
     expect(within(final).getByRole('button', { name: 'Download PDF' })).toBeTruthy();
     expect(screen.getByText('Ready')).toBeTruthy();
+  });
+
+  it('opens print and file when marking ready on this page makes the copies final, and keeps a later collapse', async () => {
+    const markedReady = step('mark_ready', 7, 'Mark W-2s ready', 'done', { data: { filing: { status: 'filing_ready', stale: false, marked_ready_at: '2026-11-19T02:00:00Z', notes: null }, can_mark_ready: true, remaining_before_ready: 0 } });
+    mocks.checklist
+      .mockResolvedValueOnce(checklist([...working(), printAndFile(false)]))
+      .mockResolvedValue(checklist([...working({ markReady: markedReady }), printAndFile(true)], { status: 'ready', issue_count: 0, next_step: null }));
+    mocks.preflight.mockResolvedValue({ preflight: { blocking_count: 0, findings: [] }, filing: { preflight_fingerprint: 'fp-1' } });
+    mocks.markReady.mockResolvedValue({ filing: {} });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Print and file/ });
+    expect(within(region).getByRole('button', { name: 'Show Print and file' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark 2026 W-2s ready' }));
+
+    // Same step, not remounted: it opens because the copies became final.
+    expect(await within(region).findByRole('button', { name: 'Download PDF' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: /Print and file/ })).toBe(region);
+
+    fireEvent.click(within(region).getByRole('button', { name: 'Hide Print and file' }));
+    expect(within(region).getByRole('button', { name: 'Show Print and file' })).toBeTruthy();
+    expect(within(region).queryByRole('button', { name: 'Download PDF' })).toBeNull();
+  });
+
+  it('still saves a download when print and file is collapsed while it runs', async () => {
+    const createObjectURL = vi.fn(() => 'blob:w2');
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    let finish: (value: { blob: Blob; filename: string }) => void = () => {};
+    mocks.downloadDocument.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    mocks.checklist.mockResolvedValue(checklist([...working(), printAndFile(true)], { status: 'ready', issue_count: 0, next_step: null }));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Print and file/ });
+    fireEvent.click(within(region).getByRole('button', { name: 'Download PDF' }));
+    fireEvent.click(within(region).getByRole('button', { name: 'Hide Print and file' }));
+    expect(within(region).queryByRole('button', { name: /Preparing PDF/ })).toBeNull();
+
+    finish({ blob: new Blob(['%PDF'], { type: 'application/pdf' }), filename: 'W-2GU_2026_Tumon_Bakery_Employee_Copies_B_C.pdf' });
+
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+    expect(click).toHaveBeenCalledTimes(1);
+    click.mockRestore();
   });
 
   it('runs a fresh preflight, then marks ready on that fingerprint', async () => {

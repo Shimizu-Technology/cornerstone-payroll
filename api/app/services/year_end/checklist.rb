@@ -215,6 +215,17 @@ module YearEnd
       @w2_employees ||= W2GuFilingPopulation.employees(company: company, year: year).to_a
     end
 
+    # W-2 employees with more tipped occupation codes than Box 14b holds.
+    def excess_occupation_code_rows
+      return [] unless files?("w2_gu") && year >= 2026
+
+      ActiveRecord::Associations::Preloader.new(records: w2_employees, associations: :employee_tipped_occupations).call
+      w2_employees.filter_map do |employee|
+        codes = W2GuAggregator.tipped_occupation_codes(employee, year)
+        { employee_id: employee.id, employee_name: employee.full_name, codes: codes } if codes.length > 2
+      end
+    end
+
     def contractor_payee_ids
       @contractor_payee_ids ||= PayrollItem
         .joins(:pay_period)
@@ -239,6 +250,11 @@ module YearEnd
       contractors = files?("form_1099") ? reportable_contractors.filter_map { |employee| person_row(employee, w2: false) } : []
       issues = employees.map do |row|
         issue("EMPLOYEE_DETAILS_MISSING", "#{row[:name]} is missing #{row[:missing_fields].map { |field| field == 'ssn' ? 'an SSN' : 'an address' }.to_sentence}.",
+              employee_id: row[:employee_id])
+      end
+      issues += excess_occupation_code_rows.map do |row|
+        issue("TIPPED_OCCUPATION_CODES_EXCESS",
+              W2GuPreflightValidator::TOO_MANY_OCCUPATION_CODES.call(row[:employee_name], row[:codes], year),
               employee_id: row[:employee_id])
       end
       issues += contractors.map do |row|
@@ -519,10 +535,18 @@ module YearEnd
       return not_needed_step(key, title, "Cornerstone does not file #{year} W-2s for this client.") unless files?("w2_gu")
 
       readiness, fingerprint = w2_readiness
-      final = W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
+      practice = company.test_workspace?
+      final = !practice && W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
+      summary = if practice
+        "This is a practice copy, so every document is a draft. Review them, but don't hand them out or file them."
+      elsif final
+        "The #{year} W-2s are marked ready. Print each document below."
+      else
+        "Drafts until the W-2s are marked ready in step 7. Review them, but don't hand them out yet."
+      end
       {
         key: key, number: STEP_KEYS.index(key) + 1, title: title, status: "available",
-        summary: final ? "The #{year} W-2s are marked ready. Print each document below." : "Drafts until the W-2s are marked ready in step 7. Review them, but don't hand them out yet.",
+        summary: summary,
         issues: [],
         data: { final: final, documents: w2_copy_documents(final) }
       }
@@ -553,11 +577,23 @@ module YearEnd
           contains_full_ssn: true
         }
       ].map do |document|
-        copy = document[:key] == "w2_drt_copy_1" ? "drt" : "employee"
+        drt = document[:key] == "w2_drt_copy_1"
+        # Test and practice workspaces never produce full SSNs.
+        reason = unavailable || (drt_unavailable_reason if drt)
         document.merge(
-          format: "pdf", draft: !final, available: unavailable.nil?, unavailable_reason: unavailable,
-          download: { path: "/admin/reports/w2_gu_official_copies", params: { year: year, copy: copy } }
+          format: "pdf", draft: !final, available: reason.nil?, unavailable_reason: reason,
+          download: { path: "/admin/reports/#{drt ? 'w2_gu_copy_1_drt' : 'w2_gu_employee_copies'}", params: { year: year } }
         )
+      end
+    end
+
+    # Copy 1 carries full SSNs: never in a test or practice workspace, and
+    # only for staff who may sign off the W-2s.
+    def drt_unavailable_reason
+      if company.test_workspace?
+        "Not available in a practice copy — it contains full SSNs."
+      elsif !permissions[:can_mark_ready]
+        "Needs client-management access (contains full SSNs)."
       end
     end
 
@@ -578,13 +614,15 @@ module YearEnd
     end
 
     def permissions
-      can_review = user.present? && user.payroll_access_allowed? && user.can_access_company?(company.id) &&
-        StaffRolePolicy.allowed?(user, :manage_filing_review)
-      {
-        can_record_decision: can_review,
-        can_acknowledge: can_review,
-        can_mark_ready: user.present? && StaffRolePolicy.allowed?(user, :manage_client_administration, company: company)
-      }
+      @permissions ||= begin
+        can_review = user.present? && user.payroll_access_allowed? && user.can_access_company?(company.id) &&
+          StaffRolePolicy.allowed?(user, :manage_filing_review)
+        {
+          can_record_decision: can_review,
+          can_acknowledge: can_review,
+          can_mark_ready: user.present? && StaffRolePolicy.allowed?(user, :manage_client_administration, company: company)
+        }
+      end
     end
 
     def step(key, title, issues, summary:, data:)

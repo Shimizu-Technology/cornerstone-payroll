@@ -421,10 +421,12 @@ RSpec.describe YearEnd::Checklist do
       expect(documents.first).to include(
         title: "Employee copies (B and C)", description: "Print and give to each employee by Feb 1, 2027.",
         contains_full_ssn: false, draft: true, available: true, unavailable_reason: nil,
-        download: { path: "/admin/reports/w2_gu_official_copies", params: { year: 2026, copy: "employee" } }
+        download: { path: "/admin/reports/w2_gu_employee_copies", params: { year: 2026 } }
       )
+      # An accountant without client management can't download full SSNs.
       expect(documents.last).to include(title: "Copy 1 for Guam DRT", description: "Your record; not mailed when you e-file.",
-        contains_full_ssn: true, draft: true)
+        contains_full_ssn: true, draft: true, available: false, unavailable_reason: "Needs client-management access (contains full SSNs).",
+        download: { path: "/admin/reports/w2_gu_copy_1_drt", params: { year: 2026 } })
       expect(result).to include(status: "needs_action", next_step: "mark_ready", issue_count: 1)
 
       fingerprint = W2FilingInputsFingerprint.new(company: company, year: 2026).call
@@ -435,6 +437,49 @@ RSpec.describe YearEnd::Checklist do
       expect(result).to include(status: "ready", issue_count: 0, next_step: nil)
       expect(step(result, "print_and_file").dig(:data, :final)).to be(true)
       expect(step(result, "print_and_file").dig(:data, :documents).map { |document| document[:draft] }).to eq([ false, false ])
+    end
+
+    it "offers Copy 1 to staff who may sign off the W-2s" do
+      pay(Date.new(2026, 3, 6))
+      decide
+      manager = create(:user, company: company, organization: company.organization, role: "manager")
+
+      documents = step(described_class.new(company: company.reload, year: 2026, user: manager).call, "print_and_file").dig(:data, :documents)
+      expect(documents.last).to include(available: true, unavailable_reason: nil)
+    end
+
+    it "keeps a practice copy's documents drafts and withholds Copy 1" do
+      pay(Date.new(2026, 3, 6))
+      decide
+      fingerprint = W2FilingInputsFingerprint.new(company: company, year: 2026).call
+      W2FilingReadiness.create!(company: company, year: 2026, status: "filing_ready", preflight_fingerprint: fingerprint,
+        ready_fingerprint: fingerprint, marked_ready_at: Time.current, marked_ready_by: accountant)
+      company.update_columns(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox",
+        migration_source_company_id: create(:company, organization: company.organization).id, migration_rehearsal_status: "ready")
+      admin = create(:user, company: company, organization: company.organization, role: "admin")
+
+      print_step = step(described_class.new(company: company.reload, year: 2026, user: admin).call, "print_and_file")
+      expect(print_step[:summary]).to start_with("This is a practice copy")
+      expect(print_step.dig(:data, :final)).to be(false)
+      employee_copies, copy_1 = print_step.dig(:data, :documents)
+      expect(employee_copies).to include(draft: true, available: true)
+      expect(copy_1).to include(draft: true, available: false, unavailable_reason: "Not available in a practice copy — it contains full SSNs.")
+    end
+
+    it "blocks the W-2s while an employee has more tipped occupation codes than Box 14b holds" do
+      pay(Date.new(2026, 3, 6))
+      decide
+      %w[101 202 303].each { |code| create(:employee_tipped_occupation, employee: employee, occupation_code: code, effective_from: Date.new(2026, 1, 1)) }
+
+      result = checklist
+      issue = step(result, "people")[:issues].find { |entry| entry[:code] == "TIPPED_OCCUPATION_CODES_EXCESS" }
+      expect(issue).to include(employee_id: employee.id)
+      expect(issue[:message]).to eq("#{employee.full_name} has 3 tipped occupation codes for 2026 (101, 202, 303), but W-2 Box 14b holds two. " \
+        "End the extra codes on the employee's profile so the W-2 lists the right ones.")
+      # Preflight blocks the sign-off itself (see the validator spec); here the step holds it back.
+      expect(result[:status]).to eq("needs_action")
+      expect(step(result, "mark_ready").dig(:data, :can_mark_ready)).to be(false)
+      expect(step(result, "review_warnings").dig(:data, :warnings).map { |warning| warning[:code] }).not_to include("box14b_more_than_two_codes")
     end
 
     it "explains why copies are unavailable when there are no W-2 employees" do

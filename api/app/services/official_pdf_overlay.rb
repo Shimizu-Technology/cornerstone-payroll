@@ -76,13 +76,25 @@ class OfficialPdfOverlay
     # Optional hook for overlays that need a visible review/filing status.
   end
 
-  def draw_text_box(pdf, rect, content, size: 9, align: :left, valign: :center, leading: 0, min_font_size: nil)
-    return if blank_value?(content)
+  # Returns the text that did not fit, which is empty when all of it printed.
+  def draw_text_box(pdf, rect, content, **options)
+    return "" if blank_value?(content)
 
-    left, bottom, right, top = normalize_rect(rect)
     pdf.fill_color "000000"
-    pdf.text_box(
-      content.to_s,
+    pdf.text_box(content.to_s, **text_box_options(rect, **options)).to_s
+  end
+
+  # True when content prints whole in rect at no less than its minimum font
+  # size. Measures without drawing.
+  def text_fits?(pdf, rect, content, **options)
+    return true if blank_value?(content)
+
+    Prawn::Text::Box.new(content.to_s, document: pdf, **text_box_options(rect, **options)).render(dry_run: true).to_s.empty?
+  end
+
+  def text_box_options(rect, size: 9, align: :left, valign: :center, leading: 0, min_font_size: nil)
+    left, bottom, right, top = normalize_rect(rect)
+    {
       at: [ left + 1.5, top - 1 ],
       width: [ (right - left) - 3, 1 ].max,
       height: [ top - bottom, 1 ].max,
@@ -92,7 +104,7 @@ class OfficialPdfOverlay
       leading: leading,
       overflow: :shrink_to_fit,
       min_font_size: min_font_size || [ size - 2, 5 ].max
-    )
+    }
   end
 
   def draw_checkbox(pdf, rect, checked)

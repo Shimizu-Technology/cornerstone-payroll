@@ -572,64 +572,18 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
-        # GET /api/v1/admin/reports/w2_gu_official_copies
-        # Official IRS W-2GU copies for the year's W-2 employees.
-        # Params:
-        #   year [Integer] – tax year (2026 template only)
-        #   copy [String]  – "employee" (Copies B and C, SSN shown as XXX-XX-1234)
-        #                    or "drt" (Copy 1 for Guam DRT, full SSNs)
-        # The copies are a watermarked draft until the year's W-2s are marked
-        # ready, and again whenever that sign-off no longer matches the inputs.
-        # Every download is audited before the file is sent.
-        def w2_gu_official_copies
-          response.headers["Cache-Control"] = "private, no-store"
-          year = parse_tax_year_param
-          return if performed?
+        # GET /api/v1/admin/reports/w2_gu_employee_copies
+        # Official IRS W-2GU Copies B and C for the year's W-2 employees, SSN
+        # shown as XXX-XX-1234. Always a draft in a test or practice workspace.
+        def w2_gu_employee_copies
+          send_w2_gu_official_copies("employee")
+        end
 
-          kind = params[:copy].to_s
-          unless W2GuOfficialCopies::KINDS.include?(kind)
-            return render json: { error: "copy must be employee or drt" }, status: :unprocessable_entity
-          end
-          unless W2GuOfficialCopies.supported_tax_year?(year)
-            return render json: { error: W2GuOfficialCopies.unsupported_message(year) }, status: :unprocessable_entity
-          end
-
-          company = Company.find(current_company_id)
-          # A consistent snapshot of the report, the sign-off and the
-          # employee records; the PDF itself is drawn after the lock.
-          copies, audit = company.with_lock do
-            responsibility = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
-            unless responsibility&.responsible_party == "cornerstone"
-              return render json: {
-                error: "Cornerstone does not file #{year} W-2s for this client, so it has no W-2GU copies to print. Change who files in the #{year} year-end checklist."
-              }, status: :unprocessable_entity
-            end
-
-            report = W2GuAggregator.new(company, year).generate
-            readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
-            fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: report).call
-            final = W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
-            copies = W2GuOfficialCopies.new(company: company, report: report, kind: kind, draft: !final)
-            [ copies, {
-              tax_year: year,
-              document_kind: kind == "drt" ? "w2_gu_copy_1_drt" : "w2_gu_employee_copies_b_c",
-              contains_full_ssn: kind == "drt",
-              status: final ? "final" : "draft",
-              inputs_fingerprint: fingerprint,
-              ready_fingerprint: readiness&.ready_fingerprint,
-              readiness_status: readiness&.review_payload(fingerprint: fingerprint)&.fetch(:status),
-              employee_count: copies.employee_count
-            } ]
-          end
-
-          pdf = copies.generate
-          return unless record_w2_official_copies_access(company, audit)
-
-          send_data pdf, filename: copies.filename, type: "application/pdf", disposition: "attachment"
-        rescue ActiveRecord::RecordNotFound
-          render json: { error: "Company not found" }, status: :not_found
-        rescue ArgumentError, PdfUnicodeFont::UnprintableName, OfficialPdfOverlay::TemplateUnavailableError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+        # GET /api/v1/admin/reports/w2_gu_copy_1_drt
+        # Official IRS W-2GU Copy 1 for Guam DRT, with full SSNs. Blocked in
+        # test and practice workspaces by TestWorkspaceSafetyPolicy.
+        def w2_gu_copy_1_drt
+          send_w2_gu_official_copies("drt")
         end
 
         # GET /api/v1/admin/reports/form_1099_nec
@@ -4712,6 +4666,93 @@ module Api
           ]
         end
 
+        # Params: year [Integer] – tax year (2026 template only).
+        # The copies are a watermarked draft until the year's W-2s are marked
+        # ready, and again whenever that sign-off no longer matches the inputs.
+        # The PDF is drawn after the company lock, so the inputs and sign-off
+        # are read again afterwards: a file whose data changed meanwhile is
+        # never sent. Every download is audited before the file is sent.
+        def send_w2_gu_official_copies(kind)
+          response.headers["Cache-Control"] = "private, no-store"
+          year = parse_tax_year_param
+          return if performed?
+
+          unless W2GuOfficialCopies.supported_tax_year?(year)
+            return render json: { error: W2GuOfficialCopies.unsupported_message(year) }, status: :unprocessable_entity
+          end
+
+          company = Company.find(current_company_id)
+          # A consistent snapshot of the report, the sign-off and the
+          # employee records; the PDF itself is drawn after the lock.
+          copies, audit, snapshot = company.with_lock do
+            snapshot = w2_official_copies_snapshot(company, year)
+            unless snapshot[:cornerstone_files]
+              return render json: {
+                error: "Cornerstone does not file #{year} W-2s for this client, so it has no W-2GU copies to print. Change who files in the #{year} year-end checklist."
+              }, status: :unprocessable_entity
+            end
+
+            readiness = snapshot[:readiness]
+            final = snapshot[:final]
+            copies = W2GuOfficialCopies.new(company: company, report: snapshot[:report], kind: kind, draft: !final, practice: company.test_workspace?)
+            [ copies, {
+              tax_year: year,
+              document_kind: kind == "drt" ? "w2_gu_copy_1_drt" : "w2_gu_employee_copies_b_c",
+              contains_full_ssn: kind == "drt",
+              status: final ? "final" : "draft",
+              inputs_fingerprint: snapshot[:fingerprint],
+              ready_fingerprint: readiness&.ready_fingerprint,
+              readiness_status: readiness&.review_payload(fingerprint: snapshot[:fingerprint])&.fetch(:status),
+              employee_count: copies.employee_count
+            }, snapshot ]
+          end
+
+          pdf = copies.generate
+          # Read uncached: the request's query cache would replay the reads above.
+          recheck = ActiveRecord::Base.uncached { w2_official_copies_snapshot(company.reload, year) }
+          unless w2_official_copies_signature(recheck) == w2_official_copies_signature(snapshot)
+            return render json: {
+              error: "This client's W-2 data changed while the file was being made. Download again."
+            }, status: :conflict
+          end
+          return unless record_w2_official_copies_access(company, audit)
+
+          send_data pdf, filename: copies.filename, type: "application/pdf", disposition: "attachment"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue W2GuOfficialCopies::DoesNotFit => e
+          render json: { error: e.message, problems: e.problems }, status: :unprocessable_entity
+        rescue ArgumentError, PdfUnicodeFont::UnprintableName, OfficialPdfOverlay::TemplateUnavailableError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # The report, sign-off and filing decision one download is drawn from.
+        # final: unwatermarked copies are allowed (never in a test workspace).
+        def w2_official_copies_snapshot(company, year)
+          responsibility = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
+          report = W2GuAggregator.new(company, year).generate if responsibility&.responsible_party == "cornerstone"
+          readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
+          fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: report).call if report
+          {
+            cornerstone_files: report.present?,
+            report: report,
+            readiness: readiness,
+            fingerprint: fingerprint,
+            # Covers what the fingerprint doesn't, such as the employer's
+            # name and address and middle names.
+            input_revision: YearEnd::InputRevision.for(company.id, year)[company.id],
+            final: report.present? && !company.test_workspace? &&
+              W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
+          }
+        end
+
+        # What must not change between the snapshot and the finished file.
+        def w2_official_copies_signature(snapshot)
+          readiness = snapshot[:readiness]
+          snapshot.slice(:cornerstone_files, :fingerprint, :input_revision, :final)
+            .merge(readiness: readiness && [ readiness.status, readiness.ready_fingerprint ])
+        end
+
         # Writes the download's audit entry, or refuses the file when it can't:
         # a W-2GU copy with full SSNs is never sent unrecorded. The metadata
         # names the document and sign-off, never an SSN.
@@ -4720,7 +4761,7 @@ module Api
             user: current_user,
             organization_id: current_user.organization_id,
             company_id: company.id,
-            action: "reports#w2_gu_official_copies",
+            action: "reports##{action_name}",
             record_type: "reports",
             subject_name: "#{audit[:tax_year]} W-2GU #{audit[:contains_full_ssn] ? 'Copy 1 for Guam DRT' : 'employee copies B and C'}",
             metadata: audit.merge(http_method: request.request_method, path: request.path),
