@@ -329,6 +329,30 @@ describe('Year-end checklist', () => {
     expect(await screen.findByText("Saved Ana Cruz's address.")).toBeTruthy();
   });
 
+  it('keeps the address form usable and shows the error when the refresh after a save fails', async () => {
+    const people = step('people', 3, 'Employees and payees', 'action_needed', {
+      issues: [{ code: 'EMPLOYEE_DETAILS_MISSING', message: 'Ana Cruz is missing an address.', employee_id: 11 }],
+      data: { w2_employee_count: 1, contractor_count: 0, contractor_error: null, contractors: [], one_off_payees: [], employees: [
+        { employee_id: 11, name: 'Ana Cruz', kind: 'employee', missing_fields: ['address'], address_line1: null, address_line2: null, city: null, state: null, zip: null, edit_path: '' },
+      ] },
+    });
+    mocks.checklist.mockResolvedValueOnce(checklist(working({ people }))).mockRejectedValue(new Error('The checklist could not be refreshed.'));
+    mocks.employeeUpdate.mockResolvedValue({ data: {} });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add address for Ana Cruz' }));
+    fireEvent.change(screen.getByLabelText('Street address'), { target: { value: '12 Chalan Santo Papa' } });
+    fireEvent.change(screen.getByLabelText('City'), { target: { value: 'Hagatna' } });
+    fireEvent.change(screen.getByLabelText('ZIP'), { target: { value: '96910' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save address' }));
+
+    await waitFor(() => expect(mocks.employeeUpdate).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('The checklist could not be refreshed.')).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Save address' }) as HTMLButtonElement).disabled).toBe(false));
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('asks who a one-off 1099 payee is, links to the checks, and records the answer on this client', async () => {
     const payee = {
       code: 'one_off_payee:non_employee_check:41', payee_key: 'non_employee_check:41', name: 'Synthetic Roofing', total_compensation: 2500, payment_count: 2,
