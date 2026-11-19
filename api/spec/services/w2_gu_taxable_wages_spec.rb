@@ -73,6 +73,23 @@ RSpec.describe W2GuAggregator, "year-end taxable wages" do
     expect(row).to include(box3_social_security_wages: 900, box5_medicare_wages_tips: 900, fica_withheld_on_section_125: false)
   end
 
+  it "reduces Box 1 only for a non-401(k) pre-tax retirement deferral, without a 941-X flag" do
+    item = item_for(gross_pay: 1000, fit_taxable_wages: 900, social_security_taxable_wages: 1000,
+      social_security_taxable_tips: 0, medicare_taxable_wages: 1000)
+    type = company.deduction_types.create!(name: "457(b) Deferred Comp", category: "pre_tax", sub_category: "retirement")
+    item.payroll_item_deductions.create!(deduction_type: type, label: type.name, category: "pre_tax", amount: 100)
+    expect(row).to include(box1_wages_tips_other_comp: 900, box3_social_security_wages: 1000,
+      box5_medicare_wages_tips: 1000, fica_withheld_on_section_125: false)
+  end
+
+  it "treats an unlabeled pre-tax adjustment as FICA-taxable" do
+    item_for(gross_pay: 1000, fit_taxable_wages: 900, social_security_taxable_wages: 1000,
+      social_security_taxable_tips: 0, medicare_taxable_wages: 1000,
+      payroll_adjustments: [ { label: "401(k) catch-up", amount: 100, treatment: "pre_tax_deduction" } ])
+    expect(row).to include(box1_wages_tips_other_comp: 900, box3_social_security_wages: 1000,
+      box5_medicare_wages_tips: 1000, fica_withheld_on_section_125: false)
+  end
+
   it "rejects inconsistent saved FIT wages without changing the paid payroll" do
     item = item_for(gross_pay: 1000, fit_taxable_wages: 700)
     expect(row).to include(box1_wages_tips_other_comp: 1000, inconsistent_fit_taxable_wages: true)

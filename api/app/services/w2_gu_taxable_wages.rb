@@ -2,18 +2,30 @@
 
 # Year-end only: never recalculate a paid paycheck or reuse today's employee setup.
 class W2GuTaxableWages
+  RETIREMENT_401K_GROUPS = [ PayrollReportingGroups::GROUP_401K_PRE_TAX, PayrollReportingGroups::GROUP_401K_AFTER_TAX,
+    PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX ].freeze
+  # Only positively identified cafeteria-plan benefits are FICA-exempt. Other
+  # pre-tax items (457(b), other retirement deferrals, unlabeled adjustments)
+  # reduce Box 1 only.
+  FICA_EXEMPT_TYPE = "Medical Insurance - Taxable" # QuickbooksPayrollReportData's label for the insurance category
+  FICA_EXEMPT_LABEL = /\bsection\s*125\b|\bcafeteria\b|\b(?:health|medical|dental|vision)\b/i
+
+  def self.fica_exempt?(entry)
+    return false if entry.reporting_group.present?
+
+    entry.type == FICA_EXEMPT_TYPE || entry.description.to_s.match?(FICA_EXEMPT_LABEL)
+  end
+
   def self.for_item(item)
     entries = QuickbooksPayrollReportData.new(item.pay_period, for_reporting: true).deduction_contribution_entries_for_item(item)
-    pretax = entries.select { |entry| entry.bucket == "pre_tax" }
+    pretax = entries.select { |entry| entry.bucket == "pre_tax" && !RETIREMENT_401K_GROUPS.include?(entry.reporting_group) }
     retirement = PayrollRetirementTotals.for_item(item, for_reporting: true).fetch(:retirement)
-    benefits = pretax.sum(0.to_d) do |entry|
-      [ PayrollReportingGroups::GROUP_401K_PRE_TAX, PayrollReportingGroups::GROUP_401K_AFTER_TAX,
-        PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX ].include?(entry.reporting_group) ? 0.to_d : entry.employee_amount.to_d
-    end
+    other_pretax = pretax.sum(0.to_d) { |entry| entry.employee_amount.to_d }
+    benefits = pretax.select { |entry| fica_exempt?(entry) }.sum(0.to_d) { |entry| entry.employee_amount.to_d }
 
     # Live gross excludes reimbursements (calculate_net_pay adds them separately).
     # QuickBooks inclusive gross is handled by the historical bridge, not here.
-    fit = (item.gross_pay.to_d - retirement - benefits).round(2)
+    fit = (item.gross_pay.to_d - retirement - other_pretax).round(2)
     medicare = (item.gross_pay.to_d - benefits).round(2)
     tips = (item.cash_tips_reported || item.reported_tips).to_d
     wages = item.gross_pay.to_d - tips

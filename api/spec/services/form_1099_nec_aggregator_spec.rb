@@ -82,13 +82,14 @@ RSpec.describe Form1099NecAggregator, type: :service do
     expect(row[:total_compensation]).to eq(275.00)
   end
   it "includes active one-off checks by payment year, groups repeated payees, and excludes voids and superseded checks" do
-    first = create(:non_employee_check, company: company, check_type: "contractor", payable_to: "Synthetic Vendor", amount: 300)
-    second = create(:non_employee_check, company: company, check_type: "contractor", payable_to: first.payable_to, amount: 297.50)
+    first = create(:non_employee_check, company: company, check_type: "contractor", payable_to: "Synthetic Vendor", amount: 300, printed_at: Time.current)
+    second = create(:non_employee_check, company: company, check_type: "contractor", payable_to: first.payable_to, amount: 297.50, printed_at: Time.current)
+    create(:non_employee_check, company: company, check_type: "contractor", payable_to: first.payable_to, amount: 700)
     create(:non_employee_check, company: company, check_type: "contractor", payable_to: first.payable_to, amount: 900,
       voided: true, voided_at: Time.current, void_reason: "Destroyed")
     create(:non_employee_check, company: company, check_type: "vendor", amount: 2000)
     create(:non_employee_check, company: create(:company), check_type: "contractor", amount: 2000)
-    create(:non_employee_check, company: company, check_type: "contractor", payment_date: Date.new(2025, 12, 31), amount: 2000)
+    create(:non_employee_check, company: company, check_type: "contractor", payment_date: Date.new(2025, 12, 31), amount: 2000, printed_at: Time.current)
     actor = create(:user, company: company)
     CheckSupersessionRolloutApproval.create!(company: company, approved_by: create(:user, company: company, role: "org_admin"),
       reason: "Approved for isolated reconciliation test only", approved_at: Time.current)
@@ -106,13 +107,14 @@ RSpec.describe Form1099NecAggregator, type: :service do
       non_employee_check_ids: [ first.id, second.id ])
     expect(check_row[:compliance_issues]).to include(/no worker\/TIN link/)
     expect(report[:totals]).to include(total_compensation: 2697.50, reportable_compensation: 2100)
+    expect(report.dig(:meta, :caveats).join).to include("1 contractor check(s) dated 2026 are not printed or paid yet")
   end
 
   it "uses the year-specific threshold for one-off check recipients and the linked pay date fallback" do
     create(:information_return_threshold, tax_year: 2025, threshold_amount: 600)
     prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2025, 12, 31))
-    create(:non_employee_check, company: company, check_type: "contractor", pay_period: prior_period, payment_date: nil, amount: 600)
-    create(:non_employee_check, company: company, check_type: "contractor", payment_date: Date.new(2026, 1, 1), amount: 2000)
+    create(:non_employee_check, company: company, check_type: "contractor", pay_period: prior_period, payment_date: nil, amount: 600, printed_at: Time.current)
+    create(:non_employee_check, company: company, check_type: "contractor", payment_date: Date.new(2026, 1, 1), amount: 2000, printed_at: Time.current)
     expect(described_class.new(company, 2025).generate[:reportable_contractors].sole[:total_compensation]).to eq(600)
     expect(described_class.new(company, 2026).generate[:reportable_contractors].sole[:total_compensation]).to eq(2000)
   end
