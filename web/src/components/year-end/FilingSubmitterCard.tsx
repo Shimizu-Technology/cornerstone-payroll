@@ -73,8 +73,10 @@ export function FilingSubmitterCard() {
       </div>
       <p className="text-sm text-neutral-600">Used in every client's W-2 e-file. The BSO User ID is your SSA login ID, not a password.</p>
       {loading && <p role="status">Loading e-file details…</p>}
-      {!loading && missing.length > 0 && <p className="text-sm">Missing: {missing.map((key) => fields[key] ?? key).join(', ')}.</p>}
-      {!loading && problems.length > 0 && <ul className="list-disc pl-5 text-sm">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>}
+      {!loading && (missing.length > 0 || problems.length > 0) && <ul className="list-disc pl-5 text-sm">
+        {missing.map((key) => <li key={key}>Add {fields[key] ?? key}.</li>)}
+        {problems.filter((problem) => !problem.startsWith('Add ')).map((problem) => <li key={problem}>{problem}</li>)}
+      </ul>}
       {open && (
         <form
           className="space-y-3"
@@ -83,10 +85,6 @@ export function FilingSubmitterCard() {
             void save();
           }}
         >
-          <p className="text-sm text-neutral-600">
-            Used for all clients in this practice. The BSO User ID is an
-            identifier. Never enter a password.
-          </p>
           <div className="grid gap-3 sm:grid-cols-2">
             {Object.entries(fields).map(([key, label]) => (
               <Input

@@ -261,9 +261,10 @@ export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
   const employees = step.data.employees ?? [];
   const contractors = step.data.contractors ?? [];
   const oneOffPayees = step.data.one_off_payees ?? [];
+  const efileIssues = step.issues.filter((issue) => issue.code === 'EMPLOYEE_EFILE_INVALID');
   const canEditInline = !checklist.company.test_workspace;
 
-  if (employees.length === 0 && contractors.length === 0 && oneOffPayees.length === 0) {
+  if (employees.length === 0 && contractors.length === 0 && oneOffPayees.length === 0 && efileIssues.length === 0) {
     return (
       <p className="text-sm text-neutral-700">
         {step.data.contractor_error ?? `All ${step.data.w2_employee_count ?? 0} W-2 employees${checklist.files_1099 ? ` and ${step.data.contractor_count ?? 0} 1099 payees` : ''} have what the forms need.`}
@@ -273,6 +274,10 @@ export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
 
   return (
     <div className="space-y-5">
+      {efileIssues.length > 0 && <ul className="space-y-2 text-sm">{efileIssues.map((issue, index) => <li key={`${issue.employee_id}-${index}`}>
+        <p>{issue.message}</p>
+        {issue.employee_id && <Link to={`/companies/${checklist.company.id}/employees/${issue.employee_id}/edit?returnTo=${encodeURIComponent(returnTo)}`}>Edit employee</Link>}
+      </li>)}</ul>}
       <PeopleList title="Employees" people={employees} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
       <PeopleList title="1099 payees" people={contractors} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
       <OneOffPayeeList checklist={checklist} payees={oneOffPayees} onSaved={onSaved} onRefresh={onRefresh} />

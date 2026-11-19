@@ -734,6 +734,28 @@ describe('Year-end checklist', () => {
     expect(screen.queryByText(/Recorded your review/)).toBeNull();
   });
 
+  it('shows employee e-file problems with an edit link even when basic details are complete', async () => {
+    const people = step('people', 3, 'Employees and payees', 'action_needed', {
+      issues: [{ code: 'EMPLOYEE_EFILE_INVALID', employee_id: 12, message: 'Ana Cruz Jr.: valid US/territory state and ZIP required' }],
+      data: { employees: [], contractors: [], one_off_payees: [], w2_employee_count: 4, contractor_count: 0, contractor_error: null },
+    });
+    mocks.checklist.mockResolvedValue(checklist(working({ people })));
+    renderPage();
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    expect(within(region).getByText(/Ana Cruz Jr./)).toBeTruthy();
+    expect(within(region).getByRole('link', { name: 'Edit employee' }).getAttribute('href')).toContain('/companies/7/employees/12/edit');
+    expect(within(region).queryByText(/have what the forms need/)).toBeNull();
+  });
+
+  it('explains who can add a locked EIN', async () => {
+    const steps = working();
+    steps[1] = step('employer', 2, 'Employer details', 'action_needed', { issues: [{ code: 'EMPLOYER_EIN_MISSING', message: 'Add EIN', field: 'ein' }], data: { name: 'Tumon Bakery', ein: null } });
+    mocks.checklist.mockResolvedValue(checklist(steps));
+    mocks.companyGet.mockResolvedValue({ company: { editable_fields: ['phone'] } });
+    renderPage();
+    expect(await screen.findByText(/A manager or admin adds the EIN/)).toBeTruthy();
+  });
+
   it('says the permission check failed, with a retry, instead of sending the user to a manager', async () => {
     const employer = step('employer', 2, 'Employer details', 'action_needed', {
       issues: [{ code: 'EMPLOYER_PHONE_MISSING', message: 'Add the employer phone number for the W-3SS contact.', field: 'phone' }, { code: 'EMPLOYER_EIN_MISSING', message: 'Add the employer EIN.', field: 'ein' }],

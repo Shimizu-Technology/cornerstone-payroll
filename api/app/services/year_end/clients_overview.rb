@@ -4,7 +4,7 @@ module YearEnd
   # The year-end clients list: every live client a staff member can open, with
   # a plain status and the things left to fix, worst first.
   #
-  # W-2 clients run the same format preflight as their detail page.
+  # W-2 clients reuse employee preflight only at the current input revision.
   # Other clients use grouped lookups.
   # Decisions, employer details, employees and 1099 payees are checked the
   # same way the checklist checks them. The numeric checks (reconciliation,
@@ -25,7 +25,7 @@ module YearEnd
       {
         tax_year: year,
         # Undecided clients first: nothing else can start until step 1 is answered.
-        clients: rows.sort_by { |row| [ status_rank(row[:status]), row[:w2] && row[:form_1099] ? 1 : 0, -row[:issue_count], row[:name].downcase ] },
+        clients: rows.sort_by { |row| [ status_rank(row[:status]), row[:w2] && row[:form_1099] ? 1 : 0, -row[:issue_count].to_i, row[:name].downcase ] },
         counts: {
           needs_action: rows.count { |row| row[:status] == "needs_action" },
           check_needed: rows.count { |row| row[:status] == "check_needed" },
@@ -100,25 +100,28 @@ module YearEnd
         if year == 2026
           preflight = Checklist.new(company: company, year: year, user: user)
           issues.concat(preflight.efw2_employer_issues.map { |entry| { code: entry[:code], label: entry[:message] } })
-          issues.concat(preflight.efw2_people_issues.map { |entry| { code: entry[:code], label: entry[:message] } })
+          stored = efile_checks[company.id]
+          efile_current = stored.present? && stored[:revision] == input_revisions[company.id]
+          issues.concat(stored[:issues].map { |entry| { code: entry[:code], label: entry[:message] } }) if efile_current
         end
       end
       readiness = readinesses[company.id]
       marked = files_w2 && readiness&.status == "filing_ready" && readiness.marked_ready_at.present?
       unchanged = ready_checks[company.id].present? && ready_checks[company.id] == input_revisions[company.id]
-      if files_w2 && !marked
+      sign_off_needed = efile_current && !stored[:sign_off_needed].nil? ? stored[:sign_off_needed] : !marked
+      if files_w2 && sign_off_needed
         issues << { code: "W2_NOT_MARKED_READY", label: "Check the numbers and mark W-2s ready" }
       end
       # 1099-only clients are fully checked above; the W-2 sign-off is the
       # only part the list cannot recompute.
-      check_needed = marked && !unchanged
+      check_needed = (marked && !unchanged && !sign_off_needed) || (files_w2 && year == 2026 && !efile_current)
 
-      status = if issues.any?
+      status = if check_needed
+        "check_needed"
+      elsif issues.any?
         "needs_action"
       elsif !files_w2 && !files_1099
         "not_filing"
-      elsif check_needed
-        "check_needed"
       else
         "ready"
       end
@@ -128,14 +131,14 @@ module YearEnd
         name: company.name,
         active: company.active?,
         status: status,
-        issue_count: issues.length,
+        issue_count: check_needed ? nil : issues.length,
         issue_summary: summarize(issues),
         w2: decision_summary(w2),
         form_1099: decision_summary(form_1099),
         w2_employee_count: w2_population.fetch(company.id, Set.new).size,
         employee_details: files_w2 ? { missing_ssn: 0, missing_address: 0 }.merge(employees_missing_details.fetch(company.id, {}).slice(:missing_ssn, :missing_address)) : nil,
         marked_ready_at: marked ? readiness.marked_ready_at.iso8601 : nil,
-        check_reason: status == "check_needed" ? "Something may have changed since the W-2s were marked ready. Open the checklist to re-check." : nil,
+        check_reason: status == "check_needed" ? (marked ? "Something may have changed since the W-2s were marked ready. Open the checklist to re-check." : "Open the checklist to check the current employee details and W-2 numbers.") : nil,
         checklist_path: "/companies/#{company.id}/year-end?year=#{year}"
       }
     end
@@ -171,6 +174,10 @@ module YearEnd
 
     def readinesses
       @readinesses ||= W2FilingReadiness.where(company_id: company_ids, year: year).index_by(&:company_id)
+    end
+
+    def efile_checks
+      @efile_checks ||= EfileCheck.read_many(company_ids, year)
     end
 
     def ready_checks

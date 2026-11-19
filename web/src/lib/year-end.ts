@@ -27,7 +27,7 @@ export interface YearEndClientRow {
   name: string;
   active: boolean;
   status: YearEndClientStatus;
-  issue_count: number;
+  issue_count: number | null;
   issue_summary: Array<{ code: string; label: string; count: number }>;
   w2: YearEndDecisionSummary | null;
   form_1099: YearEndDecisionSummary | null;
@@ -306,7 +306,7 @@ export function reconciliationTargetLink(target: YearEndLookAt, source: YearEndR
   return { to: reportPeriodPath('w2-gu', taxYear), label: 'Open W-2GU report' };
 }
 
-export function clientStatusLabel(row: { status: YearEndClientStatus; issue_count: number }): string {
+export function clientStatusLabel(row: { status: YearEndClientStatus; issue_count: number | null }): string {
   if (row.status === 'ready') return 'Ready';
   if (row.status === 'not_filing') return 'No forms by Cornerstone';
   if (row.status === 'check_needed') return 'Check needed';

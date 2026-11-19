@@ -23,6 +23,23 @@ RSpec.describe "Practice filing profile", type: :request do
     expect(FilingSubmitter.column_names).not_to include("password")
   end
 
+  it "blocks writes in a test workspace" do
+    company.update_columns(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox", migration_source_company_id: create(:company).id, migration_rehearsal_status: "ready", test_workspace_expires_at: 1.day.from_now, migration_rehearsal_created_by_id: user.id)
+    patch "/api/v1/admin/filing_submitter", params: { profile: { name: "Changed" } }
+    expect(response).to have_http_status(:forbidden)
+    expect(FilingSubmitter.where(organization: company.organization)).to be_empty
+  end
+
+  it "recovers when concurrent profile creation reaches the uniqueness validator" do
+    profile = FilingSubmitter.create!(organization: company.organization)
+    allow(FilingSubmitter).to receive(:find_by).and_return(nil, profile)
+    allow(FilingSubmitter).to receive(:create_or_find_by!).and_raise(ActiveRecord::RecordInvalid.new(profile))
+    patch "/api/v1/admin/filing_submitter", params: { profile: { name: "Updated practice" } }
+    expect(response).to have_http_status(:ok)
+    expect(profile.reload.name).to eq("Updated practice")
+    expect(FilingSubmitter.where(organization: company.organization).count).to eq(1)
+  end
+
   it "allows staff to read, but requires organization administration to edit" do
     user.update!(role: "accountant")
     get "/api/v1/admin/filing_submitter"

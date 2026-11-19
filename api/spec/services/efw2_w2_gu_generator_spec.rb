@@ -14,6 +14,37 @@ RSpec.describe Efw2W2GuGenerator do
   let(:report) { { meta: { year: 2026 }, employees: [ row ], totals: row.slice(*described_class::BOXES).merge(box12_code_d_total: 100, box12_code_aa_total: 50, box12_code_tp_total: 30, box12_code_tt_total: 40) } }
   subject(:generator) { described_class.new(company: company, year: 2026, submitter: submitter, report: report) }
 
+  it "preserves Vietnamese and other Latin letters" do
+    { "Nguyễn Văn Trần" => "NGUYEN VAN TRAN", "Huỳnh" => "HUYNH", "Phạm" => "PHAM", "Đặng" => "DANG", "Phở Saigon" => "PHO SAIGON", "Ma’lia" => "MA'LIA", "Ñaña" => "NANA", "Åguon" => "AGUON" }.each do |input, expected|
+      expect(Efw2Formatting.clean(input)).to eq(expected)
+    end
+  end
+
+  it "reports unsupported letters with the employee ID and field" do
+    employee.update_columns(first_name: "李")
+    expect(generator.structured_problems).to include(hash_including(employee_id: employee.id, message: /first name contains letters/))
+  end
+
+  it "leaves tip judgments to warnings and writes only the first two codes" do
+    row[:excess_box14b_tipped_occupation_codes] = true
+    row[:box14b_tipped_occupation_codes] = %w[101 102 103]
+    expect(generator.problems).to be_empty
+    expect(field(generator.generate.split("\r\n"), "RW", 490, 495)).to eq("101102")
+    row[:box14b_tipped_occupation_codes] = %w[101 102 000]
+    expect(field(generator.generate.split("\r\n"), "RW", 490, 495)).to eq("000101")
+    row[:box14b_tipped_occupation_codes] = []
+    expect(generator.problems).to be_empty
+  end
+
+  it "does not treat blank SSNs as duplicates and names actual duplicates" do
+    other = create(:employee, company: company, first_name: employee.first_name, last_name: employee.last_name, ssn_encrypted: employee.ssn_encrypted)
+    report[:employees] << row.merge(employee_id: other.id)
+    expect(generator.structured_problems.select { |problem| problem[:message].include?("duplicate SSN") }.pluck(:employee_id)).to contain_exactly(employee.id, other.id)
+    [ employee, other ].each { |worker| worker.update_columns(ssn_encrypted: nil) }
+    fresh = described_class.new(company: company, year: 2026, submitter: submitter, report: report)
+    expect(fresh.problems.join).not_to include("duplicate SSN")
+  end
+
   # Independent positional reader: one-based inclusive fields, no generator map.
   def field(records, type, first, last)
     records.find { |r| r[0, 2] == type }.byteslice(first - 1, last - first + 1)
@@ -36,7 +67,7 @@ RSpec.describe Efw2W2GuGenerator do
 
   it "returns named box problems without raising or exposing identifiers" do
     row[:box2_federal_income_tax_withheld] = -1
-    expect(generator.problems).to include("José! O'Neil: Box 2 is negative")
+    expect(generator.problems).to include("José! A. O'Neil JR: Box 2 is negative")
     expect(generator.problems.join).not_to include(employee.id.to_s + ":", "123456789")
   end
 

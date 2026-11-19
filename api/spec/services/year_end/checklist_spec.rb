@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe YearEnd::Checklist do
+  before { allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new) }
+
   let(:company) { create(:company, ein: "98-7654321") }
   let(:department) { create(:department, company: company) }
   let(:employee) { create(:employee, company: company, department: department) }
@@ -47,6 +49,31 @@ RSpec.describe YearEnd::Checklist do
     expect(row[:issue_count]).to eq(result[:issue_count])
     expect(row[:status]).to eq(result[:status])
     expect(step(result, "employer")[:issues]).to include(a_hash_including(code: "EMPLOYER_CONTACT_NAME_MISSING"))
+  end
+
+  it "contains an aggregator failure without logging private employee data" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    allow(W2GuAggregator).to receive(:new).and_raise(RuntimeError, "private SSN")
+    W2FilingReadiness.create!(company: company, year: 2026)
+    expect(Rails.logger).to receive(:error).with(/error_class=RuntimeError/)
+    result = checklist
+    expect(step(result, "reconciliation")[:status]).to eq("action_needed")
+    expect(result.to_s).not_to include("private SSN")
+  end
+
+  it "keeps cached e-file issue counts in parity and invalidates them on edits" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    employee.update!(state: "ZZ")
+    result = checklist
+    overview = -> { YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:clients].find { |row| row[:company_id] == company.id } }
+    expect(overview.call[:issue_count]).to eq(result[:issue_count])
+    expect(overview.call[:issue_summary]).to include(hash_including(code: "EMPLOYEE_EFILE_INVALID"))
+    employee.update!(state: "GU")
+    expect(overview.call).to include(status: "check_needed", issue_count: nil)
+    result = checklist
+    expect(overview.call[:issue_count]).to eq(result[:issue_count])
   end
 
   it "requires the filing decision before anything else" do
