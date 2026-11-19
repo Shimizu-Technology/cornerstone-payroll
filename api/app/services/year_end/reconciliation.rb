@@ -10,6 +10,15 @@ module YearEnd
   # hidden in a difference. Each quarter is also compared with its own payroll
   # records, which names the quarter (or the W-2 report) to look at when the
   # totals disagree.
+  #
+  # The Social Security wage base is applied the same way on both sides:
+  # opening balances use the capped YTD bridge allocation the W-2GU uses, and
+  # when an employee at the wage base (or with legacy tipped rows) splits wages
+  # and tips differently on the W-2GU (wages first, for the year) than on the
+  # 941s (paycheck order), the split is explained as long as Box 3 + Box 7
+  # still equals lines 5a + 5b. Each 941's own withholding reconciliation is
+  # carried through: an unexplained employee-tax difference blocks, and a
+  # recorded-liability residual needs a reviewer's acknowledgement.
   class Reconciliation
     TOLERANCE = BigDecimal("0.01")
     QUARTERS = (1..4).freeze
@@ -38,6 +47,7 @@ module YearEnd
         quarters: [],
         opening_balances: { present: false, first_pay_date: nil, last_pay_date: nil },
         lines: [],
+        form_941_reviews: [],
         error: message,
         blockers: [ { code: "RECONCILIATION_UNAVAILABLE", line: nil, message: "The totals could not be compared: #{message}" } ]
       }
@@ -54,10 +64,13 @@ module YearEnd
       record_values = payroll_record_values
       opening = opening_balance_values
       lines = LINES.map { |line| line_payload(line, quarter_values, record_values, opening) }
-      mismatched = lines.reject { |line| line[:status] == "match" }
+      explain_wage_base_split(lines)
+      mismatched = lines.select { |line| line[:status] == "mismatch" }
+      reviews = form_941_reviews
+      unexplained = reviews.select { |review| review[:status] == "unexplained" }
 
       {
-        status: mismatched.empty? ? "match" : "mismatch",
+        status: mismatched.empty? && unexplained.empty? ? "match" : "mismatch",
         tolerance: TOLERANCE.to_f,
         quarters: QUARTERS.map { |quarter| quarter_payload(quarter) },
         opening_balances: {
@@ -66,9 +79,9 @@ module YearEnd
           last_pay_date: opening[:last_pay_date]&.iso8601
         },
         lines: lines,
-        blockers: mismatched.map do |line|
-          { code: "RECONCILIATION_MISMATCH", line: line[:key], message: line[:message] }
-        end
+        form_941_reviews: reviews,
+        blockers: mismatched.map { |line| { code: "RECONCILIATION_MISMATCH", line: line[:key], message: line[:message] } } +
+          unexplained.map { |review| { code: "FORM_941_WITHHOLDING_MISMATCH", line: nil, quarter: review[:quarter], message: review[:message] } }
       }
     rescue ArgumentError => e
       unavailable(e.message)
@@ -84,6 +97,7 @@ module YearEnd
 
     def filed_quarter_values(quarter)
       report = Form941GuAggregator.new(company, year, quarter).generate
+      quarter_withholding[quarter] = report.fetch(:withholding_reconciliation)
       lines = report.fetch(:lines)
       detail = report.fetch(:tax_detail)
       {
@@ -123,12 +137,7 @@ module YearEnd
     end
 
     def native_quarter_rows
-      @native_quarter_rows ||= PayrollItem
-        .joins(:pay_period)
-        .where(company_id: company.id)
-        .financially_reportable.reportable
-        .where.not(employment_type: "contractor")
-        .where(pay_periods: { id: PayPeriod.reportable_committed.where(company_id: company.id, pay_date: year_range).select(:id) })
+      @native_quarter_rows ||= W2PayrollItems.scope(company.id, year)
         .group(Arel.sql("EXTRACT(QUARTER FROM pay_periods.pay_date)"))
         .select(
           Arel.sql("EXTRACT(QUARTER FROM pay_periods.pay_date)::integer AS quarter"),
@@ -175,17 +184,132 @@ module YearEnd
       @dated_historical_records ||= locked_history? ? historical_source.records(range: year_range) : []
     end
 
+    # Opening summaries per employee, as the W-2GU counts them. An employee
+    # whose only imported history is opening summaries takes the YTD bridge
+    # amounts outright, since that is exactly what the W-2GU adds. Otherwise
+    # the ledger amounts are capped at the wage base the way the bridge caps
+    # them (tips first, then wages) and never above the employee's bridge.
     def opening_balance_values
       dated_keys = dated_historical_records.to_set(&:key)
+      dated_employee_ids = dated_historical_records.to_set(&:employee_id)
       records = all_historical_records.reject { |record| dated_keys.include?(record.key) }
       totals = Hash.new(0.to_d)
-      records.each { |record| historical_record_values(record).each { |key, value| totals[key] += value } }
+      records.group_by(&:employee_id).each do |employee_id, employee_records|
+        bridge = bridge_values[employee_id]
+        values = if bridge && !dated_employee_ids.include?(employee_id)
+          bridge
+        else
+          capped_social_security(sum_values(employee_records), bridge)
+        end
+        values.each { |key, value| totals[key] += value }
+      end
       {
         present: records.any?,
         first_pay_date: records.map(&:period_start).compact.min,
         last_pay_date: records.map(&:pay_date).compact.max,
         totals: totals
       }
+    end
+
+    def sum_values(records)
+      records.each_with_object(Hash.new(0.to_d)) do |record, values|
+        historical_record_values(record).each { |key, value| values[key] += value }
+      end
+    end
+
+    def capped_social_security(values, bridge)
+      wages = values["social_security_wages"]
+      tips = values["social_security_tips"]
+      limit = [ ss_wage_base, bridge && (bridge["social_security_wages"] + bridge["social_security_tips"]) ].compact.min
+      return values if wages.negative? || tips.negative? || wages + tips <= limit
+
+      room = [ limit, 0.to_d ].max
+      capped_tips = [ tips, room ].min
+      values.merge("social_security_wages" => room - capped_tips, "social_security_tips" => capped_tips)
+    end
+
+    # Each employee's YTD bridge amounts, summed over locked imports.
+    def bridge_values
+      @bridge_values ||= (locked_history? ? historical_source.annual_balances(year) : []).group_by(&:employee_id).transform_values do |balances|
+        {
+          "social_security_wages" => balances.sum(0.to_d) { |balance| balance.social_security_taxable_wages.to_d },
+          "social_security_tips" => balances.sum(0.to_d) { |balance| balance.social_security_taxable_tips.to_d },
+          "medicare_wages" => balances.sum(0.to_d) { |balance| balance.medicare_taxable_wages.to_d },
+          "social_security_tax" => balances.sum(0.to_d) { |balance| balance.social_security_tax.to_d },
+          "medicare_tax" => balances.sum(0.to_d) { |balance| balance.medicare_tax.to_d },
+          "guam_income_tax" => balances.sum(0.to_d) { |balance| balance.federal_income_tax.to_d + balance.additional_withholding.to_d }
+        }
+      end
+    end
+
+    def ss_wage_base
+      @ss_wage_base ||= AnnualTaxConfig.for_year(year)&.ss_wage_base&.to_d || W2GuAggregator::SS_WAGE_BASE_BY_YEAR.fetch(year).to_d
+    rescue KeyError
+      raise ArgumentError, "SS wage base not configured for #{year}"
+    end
+
+    # The W-2GU applies the wage base to wages first for the whole year; the
+    # 941s apply it paycheck by paycheck. For an employee who reaches the base
+    # with tips (or has legacy tipped rows), the two splits differ while the
+    # Social Security total is the same. That shift is bounded by those
+    # employees' tips.
+    def explain_wage_base_split(lines)
+      wages = lines.find { |line| line[:key] == "social_security_wages" }
+      tips = lines.find { |line| line[:key] == "social_security_tips" }
+      return unless wages[:status] == "mismatch" && tips[:status] == "mismatch"
+
+      shift = decimal(wages[:difference])
+      return if (shift + decimal(tips[:difference])).abs > TOLERANCE || shift.abs > split_allowance + TOLERANCE
+
+      note = "Box 3 and Box 7 split Social Security wages and tips differently from lines 5a and 5b by #{money(shift.abs)}, " \
+             "because the W-2 applies the wage base to wages first. Box 3 + Box 7 equals lines 5a + 5b."
+      [ wages, tips ].each do |line|
+        line.merge!(status: "explained", look_at: [], message: nil, note: note)
+      end
+    end
+
+    def split_allowance
+      base = ss_wage_base - TOLERANCE
+      Array(w2_report[:employees]).sum(0.to_d) do |row|
+        at_base = decimal(row[:box3_social_security_wages]) + decimal(row[:box7_social_security_tips]) >= base
+        at_base || row[:missing_committed_tax_bases] ? decimal(row[:reported_tips_total]).abs : 0.to_d
+      end
+    end
+
+    def quarter_withholding
+      @quarter_withholding ||= {}
+    end
+
+    # Each 941's own check of recorded employee Social Security and Medicare
+    # withholding against the employee share of the quarter's wage bases.
+    def form_941_reviews
+      QUARTERS.filter_map do |quarter|
+        review = quarter_withholding[quarter]
+        next unless review && review[:requires_review]
+
+        employee_difference = decimal(review[:employee_difference])
+        unexplained = review[:line7_suggestion].nil? && employee_difference.nonzero?
+        {
+          quarter: quarter,
+          status: unexplained ? "unexplained" : "residual",
+          employee_difference: employee_difference.to_f,
+          expected_employee_total: decimal(review[:expected_employee_total]).to_f,
+          recorded_employee_total: decimal(review[:recorded_employee_total]).to_f,
+          recorded_liability_residual: decimal(review[:recorded_liability_residual]).to_f,
+          message: form_941_review_message(quarter, unexplained, employee_difference, decimal(review[:recorded_liability_residual]))
+        }
+      end
+    end
+
+    def form_941_review_message(quarter, unexplained, employee_difference, residual)
+      if unexplained
+        direction = employee_difference.negative? ? "less" : "more"
+        "The Q#{quarter} 941: employee Social Security and Medicare withheld is #{money(employee_difference.abs)} #{direction} than " \
+          "the employee share of the quarter's wages. Correct the Q#{quarter} payroll (or file a 941-X) before marking ready."
+      else
+        "The Q#{quarter} 941: recorded tax liability differs from line 6 by #{money(residual)} after the line 7 rounding adjustment. " \
+          "Confirm the employer amounts for Q#{quarter}."
+      end
     end
 
     def quarter_payload(quarter)
@@ -233,7 +357,8 @@ module YearEnd
         difference: difference.to_f,
         status: mismatch ? "mismatch" : "match",
         look_at: look_at,
-        message: mismatch ? mismatch_message(line, difference, look_at) : nil
+        message: mismatch ? mismatch_message(line, difference, look_at) : nil,
+        note: nil
       }
     end
 

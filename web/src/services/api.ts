@@ -3423,14 +3423,14 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_swica_ascii', { year, quarter }),
   updateQuarterlyComplianceTask: (id: number, task: Partial<QuarterlyComplianceTask>) =>
     api.patch<{ task: QuarterlyComplianceTask }>(`/admin/reports/quarterly_compliance_packet_task/${id}`, { task }),
-  payrollFilingRecord: (filingType: PayrollFilingEvidenceType, taxYear: number, quarter?: number) =>
+  payrollFilingRecord: (filingType: PayrollFilingEvidenceType, taxYear: number, quarter?: number, companyId?: number) =>
     api.get<{ filing: PayrollFilingRecord | null }>('/admin/payroll_filing_records', {
       filing_type: filingType,
       tax_year: taxYear,
       ...(quarter ? { quarter } : {}),
-    }),
-  recordPayrollFilingEvent: (formData: FormData) =>
-    api.postForm<{ filing: PayrollFilingRecord }>('/admin/payroll_filing_records/events', formData),
+    }, { companyId }),
+  recordPayrollFilingEvent: (formData: FormData, companyId?: number) =>
+    api.postForm<{ filing: PayrollFilingRecord }>('/admin/payroll_filing_records/events', formData, { companyId }),
   quarterlyCompliancePacketOfficialFormDefaults: (year: number, quarter: number, formType: QuarterlyOfficialFormType) =>
     api.get<{ data: QuarterlyOfficialFormFields }>('/admin/reports/quarterly_compliance_packet_official_form_defaults', { year, quarter, form_type: formType }),
   quarterlyCompliancePacketOfficialFormPreview: (year: number, quarter: number, formType: QuarterlyOfficialFormType, fields: QuarterlyOfficialFormFields) =>
@@ -3463,12 +3463,12 @@ export const reportsApi = {
   w2GuXlsx: (year: number) =>
     api.getBlobWithParams('/admin/reports/w2_gu_xlsx', { year }),
   // CPR-74: W-2 filing operationalization
-  w2GuPreflight: (year: number) =>
-    api.post<W2GuPreflightResponse>('/admin/reports/w2_gu_preflight', { year }),
+  w2GuPreflight: (year: number, companyId?: number) =>
+    api.post<W2GuPreflightResponse>('/admin/reports/w2_gu_preflight', { year }, { companyId }),
   w2GuFilingReadiness: (year: number) =>
     api.get<W2GuFilingReadinessResponse>('/admin/reports/w2_gu_filing_readiness', { year }),
-  w2GuMarkReady: (year: number, notes?: string, preflightFingerprint?: string | null) =>
-    api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes, preflight_fingerprint: preflightFingerprint }),
+  w2GuMarkReady: (year: number, notes?: string, preflightFingerprint?: string | null, companyId?: number) =>
+    api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes, preflight_fingerprint: preflightFingerprint }, { companyId }),
   payrollFilingResponsibilities: (taxYear: number, quarter?: number) =>
     api.get<PayrollFilingResponsibilityResponse>('/admin/payroll_filing_responsibilities', {
       tax_year: taxYear,
@@ -3483,9 +3483,10 @@ export const reportsApi = {
     source_cutoff_date?: string;
     prior_provider_through?: string | null;
     notes?: string;
-  }) => api.put<PayrollFilingResponsibilityUpdateResponse>(
+  }, companyId?: number) => api.put<PayrollFilingResponsibilityUpdateResponse>(
     '/admin/payroll_filing_responsibilities',
     { responsibility },
+    { companyId },
   ),
   // Federal Form 941 worksheet (legacy route name kept for compatibility)
   form941Gu: (year: number, quarter: number) =>
@@ -4239,10 +4240,10 @@ interface AuthApiUser {
 export const yearEndApi = {
   clients: (year: number) =>
     api.get<{ data: import('@/lib/year-end').YearEndClientsOverview }>('/admin/year_end/clients', { year }),
-  checklist: (year: number, companyId?: number) =>
+  checklist: (year: number, companyId: number) =>
     api.get<{ data: import('@/lib/year-end').YearEndChecklist }>('/admin/year_end/checklist', { year }, { companyId }),
-  acknowledge: (input: { tax_year: number; warning_code: string; warning_digest: string; note: string }) =>
-    api.post<{ data: unknown }>('/admin/year_end/acknowledgements', { acknowledgement: input }),
+  acknowledge: (input: { tax_year: number; warning_code: string; warning_digest: string; note: string }, companyId: number) =>
+    api.post<{ data: unknown }>('/admin/year_end/acknowledgements', { acknowledgement: input }, { companyId }),
 };
 
 export const companiesApi = {
@@ -4250,12 +4251,12 @@ export const companiesApi = {
     const query = params?.active !== undefined ? `?active=${params.active}` : '';
     return api.get<CompanyListResponse>(`/companies${query}`);
   },
-  get: (id: number) =>
-    api.get<{ company: CompanyDetail }>(`/admin/companies/${id}`),
+  get: (id: number, companyId?: number) =>
+    api.get<{ company: CompanyDetail }>(`/admin/companies/${id}`, undefined, { companyId }),
   create: (data: CompanyFormData) =>
     api.post<{ company: CompanyDetail }>('/admin/companies', { company: data }),
-  update: (id: number, data: Partial<CompanyFormData>) =>
-    api.put<{ company: CompanyDetail }>(`/admin/companies/${id}`, { company: data }),
+  update: (id: number, data: Partial<CompanyFormData>, companyId?: number) =>
+    api.put<{ company: CompanyDetail }>(`/admin/companies/${id}`, { company: data }, { companyId }),
   migrationRehearsalPreview: (id: number) =>
     api.get<{ migration_rehearsal: MigrationRehearsalPreview }>(`/admin/companies/${id}/migration_rehearsal_preview`),
   createMigrationRehearsal: (id: number, input: { name?: string; historical_import_batch_id?: number; acknowledgement: string }) =>
@@ -4776,8 +4777,8 @@ export const adminClientDocumentsApi = {
     api.getBlobWithParams(`/admin/client_documents/${id}/preview`),
   opened: (id: number): Promise<void> => api.post<void>(`/admin/client_documents/${id}/opened`),
   activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/admin/client_documents/${id}/activity`, { page }),
-  download: (id: number) =>
-    api.getBlobWithParams(`/admin/client_documents/${id}/download`),
+  download: (id: number, companyId?: number) =>
+    api.getBlobWithParams(`/admin/client_documents/${id}/download`, undefined, { companyId }),
   unarchive: (id: number) =>
     api.post<{ data: ClientDocument; message: string }>(`/admin/client_documents/${id}/unarchive`),
   delete: (id: number) =>

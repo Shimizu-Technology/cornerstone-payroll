@@ -88,12 +88,15 @@ export function FilingEvidencePanel({
   quarter,
   preparationReady,
   readinessMessage,
+  companyId,
 }: {
   filingType: PayrollFilingEvidenceType;
   taxYear: number;
   quarter?: number;
   preparationReady: boolean;
   readinessMessage: string;
+  /** Pin every request to this client instead of the app's current one. */
+  companyId?: number;
 }) {
   const formId = useId();
   const [filing, setFiling] = useState<PayrollFilingRecord | null>(null);
@@ -108,12 +111,12 @@ export function FilingEvidencePanel({
     let active = true;
     setLoading(true);
     setError(null);
-    void reportsApi.payrollFilingRecord(filingType, taxYear, quarter)
+    void reportsApi.payrollFilingRecord(filingType, taxYear, quarter, companyId)
       .then((response) => { if (active) setFiling(response.filing); })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : 'Unable to load filing evidence'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [filingType, quarter, setError, taxYear]);
+  }, [companyId, filingType, quarter, setError, taxYear]);
 
   async function submitEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,7 +136,7 @@ export function FilingEvidencePanel({
     setSaving(true);
     setError(null);
     try {
-      const response = await reportsApi.recordPayrollFilingEvent(data);
+      const response = await reportsApi.recordPayrollFilingEvent(data, companyId);
       setFiling(response.filing);
       setEventType(null);
       idempotencyKeyRef.current = null;
@@ -148,7 +151,7 @@ export function FilingEvidencePanel({
   async function downloadEvidence(documentId: number, fallbackName: string) {
     try {
       setError(null);
-      const response = await adminClientDocumentsApi.download(documentId);
+      const response = await adminClientDocumentsApi.download(documentId, companyId);
       const url = URL.createObjectURL(response.blob);
       const link = document.createElement('a');
       link.href = url;

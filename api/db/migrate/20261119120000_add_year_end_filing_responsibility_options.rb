@@ -28,7 +28,19 @@ class AddYearEndFilingResponsibilityOptions < ActiveRecord::Migration[8.1]
                          name: "payroll_filing_responsibilities_prior_provider_check"
   end
 
+  # The old constraints cannot hold 1099 decisions, client or no-filing
+  # parties, or prior-provider dates. Refuse rather than delete them.
   def down
+    blocking = select_value(<<~SQL.squish).to_i
+      SELECT COUNT(*) FROM payroll_filing_responsibilities
+      WHERE filing_type = 'form_1099' OR responsible_party IN ('client', 'no_filing') OR prior_provider_through IS NOT NULL
+    SQL
+    if blocking.positive?
+      raise ActiveRecord::IrreversibleMigration,
+            "#{blocking} payroll filing responsibility row(s) use year-end options (a 1099 decision, a client or no-filing party, " \
+            "or a prior-provider date) that the previous constraints do not allow. Export and remove those rows before rolling back."
+    end
+
     remove_check_constraint :payroll_filing_responsibilities, name: "payroll_filing_responsibilities_prior_provider_check"
     remove_check_constraint :payroll_filing_responsibilities, name: "payroll_filing_responsibilities_party_check"
     remove_check_constraint :payroll_filing_responsibilities, name: "payroll_filing_responsibilities_period_check"

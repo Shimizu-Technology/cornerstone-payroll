@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { YearEndChecklist } from './YearEndChecklist';
 import type { YearEndChecklist as Checklist, YearEndStep } from '@/lib/year-end';
@@ -90,10 +90,16 @@ function working(overrides: { reconciliation?: 'match' | 'mismatch'; warnings?: 
   ];
 }
 
+function OpenOtherClient() {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate('/companies/8/year-end?year=2026')}>Open Agana Auto</button>;
+}
+
 function renderPage() {
   render(
     <FeedbackProvider>
       <MemoryRouter initialEntries={['/companies/7/year-end?year=2026']}>
+        <OpenOtherClient />
         <Routes><Route path="/companies/:companyId/year-end" element={<YearEndChecklist />} /></Routes>
       </MemoryRouter>
     </FeedbackProvider>,
@@ -134,9 +140,36 @@ describe('Year-end checklist', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save who files' }));
 
     await waitFor(() => expect(mocks.updateResponsibility).toHaveBeenCalledTimes(2));
-    expect(mocks.updateResponsibility).toHaveBeenNthCalledWith(1, expect.objectContaining({ filing_types: ['w2_gu'], responsible_party: 'cornerstone', prior_provider_through: '2026-03-31', imported_payroll_inclusion: 'included' }));
-    expect(mocks.updateResponsibility).toHaveBeenNthCalledWith(2, expect.objectContaining({ filing_types: ['form_1099'], responsible_party: 'no_filing' }));
+    expect(mocks.updateResponsibility).toHaveBeenNthCalledWith(1, expect.objectContaining({ filing_types: ['w2_gu'], responsible_party: 'cornerstone', prior_provider_through: '2026-03-31', imported_payroll_inclusion: 'included' }), 7);
+    expect(mocks.updateResponsibility).toHaveBeenNthCalledWith(2, expect.objectContaining({ filing_types: ['form_1099'], responsible_party: 'no_filing' }), 7);
     expect(await screen.findByText('Saved who files.')).toBeTruthy();
+  });
+
+  it('keeps both decisions on the client it started with and stops when the user opens another client mid-save', async () => {
+    mocks.checklist.mockImplementation(async (_year: number, companyId: number) => checklist(undecided, {
+      company: { id: companyId, name: companyId === 8 ? 'Agana Auto' : 'Tumon Bakery', active: true, test_workspace: false },
+    }));
+    let finishFirst: (value: { data: unknown[] }) => void = () => undefined;
+    mocks.updateResponsibility.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('radio', { name: /Cornerstone files, after a prior provider/ }));
+    fireEvent.change(screen.getByLabelText('The prior provider files wages paid through'), { target: { value: '2026-03-31' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save who files' }));
+    await waitFor(() => expect(mocks.updateResponsibility).toHaveBeenCalledTimes(1));
+    expect(mocks.updateResponsibility).toHaveBeenCalledWith(expect.objectContaining({ filing_types: ['w2_gu'] }), 7);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Agana Auto' }));
+    await waitFor(() => expect(mocks.checklist).toHaveBeenCalledWith(2026, 8));
+    finishFirst({ data: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The 1099 choice was never sent, to either client, and no success shows on the new page.
+    expect(mocks.updateResponsibility).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Saved who files.')).toBeNull();
+    expect(mocks.checklist).toHaveBeenLastCalledWith(2026, 8);
+    expect(await screen.findByText('1 thing to fix')).toBeTruthy();
   });
 
   it('takes a record with no forms off the list in one action', async () => {
@@ -146,7 +179,7 @@ describe('Year-end checklist', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'This record files no 2026 forms' }));
 
-    await waitFor(() => expect(mocks.updateResponsibility).toHaveBeenCalledWith(expect.objectContaining({ filing_types: ['w2_gu', 'form_1099'], responsible_party: 'no_filing' })));
+    await waitFor(() => expect(mocks.updateResponsibility).toHaveBeenCalledWith(expect.objectContaining({ filing_types: ['w2_gu', 'form_1099'], responsible_party: 'no_filing' }), 7));
     expect(await screen.findByText('No forms by Cornerstone')).toBeTruthy();
     expect(screen.getByText(/It is off the to-do list; nothing was deleted/)).toBeTruthy();
   });
@@ -209,7 +242,7 @@ describe('Year-end checklist', () => {
     fireEvent.change(within(region).getByLabelText('What did you check and confirm?'), { target: { value: 'Salaried manager; not qualified overtime.' } });
     fireEvent.click(within(region).getByRole('button', { name: 'Mark reviewed' }));
 
-    await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith({ tax_year: 2026, warning_code: 'qualified_overtime_unreviewed', warning_digest: 'abc', note: 'Salaried manager; not qualified overtime.' }));
+    await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith({ tax_year: 2026, warning_code: 'qualified_overtime_unreviewed', warning_digest: 'abc', note: 'Salaried manager; not qualified overtime.' }, 7));
   });
 
   it('runs a fresh preflight, then marks ready on that fingerprint', async () => {
@@ -223,8 +256,8 @@ describe('Year-end checklist', () => {
     fireEvent.change(await screen.findByLabelText('Notes (optional)'), { target: { value: 'Checked' } });
     fireEvent.click(screen.getByRole('button', { name: 'Mark 2026 W-2s ready' }));
 
-    await waitFor(() => expect(mocks.markReady).toHaveBeenCalledWith(2026, 'Checked', 'fp-1'));
-    expect(mocks.preflight).toHaveBeenCalledWith(2026);
+    await waitFor(() => expect(mocks.markReady).toHaveBeenCalledWith(2026, 'Checked', 'fp-1', 7));
+    expect(mocks.preflight).toHaveBeenCalledWith(2026, 7);
     expect(await screen.findByText('Ready')).toBeTruthy();
   });
 

@@ -142,6 +142,20 @@ RSpec.describe YearEnd::Checklist do
     expect(step(checklist, "prior_provider")[:status]).to eq("done")
   end
 
+  it "ignores contractor-only payroll in the prior provider's W-2 period" do
+    contractor = create(:employee, :contractor, company: company, department: department)
+    pay(Date.new(2026, 2, 6), worker: contractor, employment_type: "contractor", social_security_tax: 0, medicare_tax: 0,
+      employer_social_security_tax: 0, employer_medicare_tax: 0, social_security_taxable_wages: nil, social_security_taxable_tips: nil,
+      medicare_taxable_wages: nil, withholding_tax: 0)
+    pay(Date.new(2026, 8, 7))
+    decide(prior_provider_through: Date.new(2026, 3, 31))
+
+    expect(step(checklist, "prior_provider")).to include(status: "done", issues: [])
+
+    pay(Date.new(2026, 3, 6))
+    expect(step(checklist, "prior_provider")[:issues]).to contain_exactly(a_hash_including(code: "PRIOR_PROVIDER_OVERLAP", source: "cornerstone_payroll"))
+  end
+
   it "is ready once every step is done and the W-2s are marked ready on the current numbers" do
     pay(Date.new(2026, 3, 6))
     decide

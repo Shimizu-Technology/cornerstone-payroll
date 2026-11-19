@@ -18,9 +18,10 @@ import {
   type YearEndClientsOverview,
 } from '@/lib/year-end';
 
-function statusVariant(row: YearEndClientRow): 'success' | 'warning' | 'danger' | 'default' {
+function statusVariant(row: YearEndClientRow): 'success' | 'warning' | 'danger' | 'info' | 'default' {
   if (row.status === 'ready') return 'success';
   if (row.status === 'not_filing') return 'default';
+  if (row.status === 'check_needed') return 'info';
   return row.issue_summary.some((item) => item.code === 'FILER_NOT_CHOSEN') ? 'danger' : 'warning';
 }
 
@@ -49,6 +50,9 @@ function IssueChips({ row }: { row: YearEndClientRow }): ReactElement | null {
   if (row.status === 'ready') {
     return <p className="text-sm text-neutral-600">{row.marked_ready_at ? `W-2s marked ready ${formatDate(row.marked_ready_at)}` : 'Nothing left to do'}</p>;
   }
+  if (row.status === 'check_needed') {
+    return <p className="text-sm text-neutral-700">{row.check_reason ?? 'Open the checklist to re-check.'}</p>;
+  }
   if (row.issue_summary.length === 0) return null;
   return (
     <ul className="flex flex-wrap gap-1.5" aria-label={`What is left for ${row.name}`}>
@@ -62,16 +66,17 @@ function IssueChips({ row }: { row: YearEndClientRow }): ReactElement | null {
 }
 
 function OpenLink({ row }: { row: YearEndClientRow }): ReactElement {
-  const primary = row.status === 'needs_action';
+  const primary = row.status === 'needs_action' || row.status === 'check_needed';
+  const verb = row.status === 'check_needed' ? 'Check' : primary ? 'Fix' : 'Open';
   return (
     <Link
       to={row.checklist_path}
-      aria-label={`${primary ? 'Fix' : 'Open'} ${row.name}`}
+      aria-label={`${verb} ${row.name}`}
       className={primary
         ? 'inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 sm:w-auto'
         : 'inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-full border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold text-neutral-800 transition hover:border-primary-300 hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 sm:w-auto'}
     >
-      {primary ? 'Fix' : 'Open'}
+      {verb}
       <ArrowRight className="h-4 w-4" aria-hidden="true" />
     </Link>
   );
@@ -168,7 +173,8 @@ export function YearEnd(): ReactElement {
   }, [load, attempt]);
 
   const rows = overview?.clients ?? [];
-  const toDo = rows.filter((row) => row.status === 'needs_action');
+  // A client that changed after it was marked ready needs a re-check, so it is on the to-do list too.
+  const toDo = rows.filter((row) => row.status === 'needs_action' || row.status === 'check_needed');
   const ready = rows.filter((row) => row.status === 'ready');
   const notFiling = rows.filter((row) => row.status === 'not_filing');
   const hiddenParts = [
@@ -219,7 +225,7 @@ export function YearEnd(): ReactElement {
           <>
             <dl className="grid grid-cols-3 gap-2 sm:max-w-xl sm:gap-3">
               {[
-                { label: 'To fix', value: overview.counts.needs_action, tone: 'text-warning-800' },
+                { label: 'To do', value: overview.counts.needs_action + (overview.counts.check_needed ?? 0), tone: 'text-warning-800' },
                 { label: 'Ready', value: overview.counts.ready, tone: 'text-success-800' },
                 { label: 'Not filed by us', value: overview.counts.not_filing, tone: 'text-neutral-700' },
               ].map((stat) => (
@@ -240,7 +246,7 @@ export function YearEnd(): ReactElement {
               </Card>
             ) : (
               <>
-                <ClientSection title="To do" rows={toDo} description="Open a client to see each item and fix it." />
+                <ClientSection title="To do" rows={toDo} description="Open a client to see each item and fix it, or to re-check one that changed after it was marked ready." />
                 <ClientSection title="Ready" rows={ready} description="W-2s are marked ready on the current numbers." />
                 <ClientSection title="Not filed by Cornerstone" rows={notFiling} description="The client, another provider, or nobody files these forms. Nothing to do here unless that changes." />
               </>

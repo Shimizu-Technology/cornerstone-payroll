@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { employeesApi } from '@/services/api';
 import { employeeEditPath } from '@/lib/routes';
 import type { YearEndChecklist, YearEndPerson, YearEndStep } from '@/lib/year-end';
+import { useStillMounted } from './useStillMounted';
 
 type PeopleStepData = Extract<YearEndStep, { key: 'people' }>;
 const PAGE_SIZE = 20;
@@ -31,6 +32,7 @@ function AddressForm({ person, companyId, onSaved, onCancel }: {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const stillMounted = useStillMounted();
   const field = (key: keyof typeof values, label: string, extra: Partial<Parameters<typeof Input>[0]> = {}) => (
     <Input
       label={label}
@@ -53,8 +55,10 @@ function AddressForm({ person, companyId, onSaved, onCancel }: {
         try {
           const trimmed = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value.trim()]));
           await employeesApi.update(person.employee_id, trimmed, companyId);
+          if (!stillMounted()) return;
           await onSaved(`Saved ${person.name}'s address.`);
         } catch (err) {
+          if (!stillMounted()) return;
           setError(err instanceof Error ? err.message : 'Could not save the address.');
           setSaving(false);
         }

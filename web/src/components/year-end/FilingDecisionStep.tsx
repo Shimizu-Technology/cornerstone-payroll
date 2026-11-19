@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { reportsApi } from '@/services/api';
 import { cn } from '@/lib/utils';
 import type { YearEndChecklist, YearEndParty, YearEndStep } from '@/lib/year-end';
+import { useStillMounted } from './useStillMounted';
 
 type DecisionStep = Extract<YearEndStep, { key: 'filing_decision' }>;
 type W2Choice = YearEndParty | 'cornerstone_after_prior_provider';
@@ -92,6 +93,9 @@ export function FilingDecisionStep({ checklist, step, onSaved }: {
   onSaved: (message: string) => Promise<void>;
 }): ReactElement {
   const year = checklist.tax_year;
+  // Saves always name this checklist's client, never the app's current one.
+  const companyId = checklist.company.id;
+  const stillMounted = useStillMounted();
   const canRecord = checklist.permissions.can_record_decision;
   const [w2, setW2] = useState<W2Choice | null>(() => initialW2Choice(step));
   const [form1099, setForm1099] = useState<YearEndParty | null>(() => initial1099Choice(step));
@@ -112,18 +116,21 @@ export function FilingDecisionStep({ checklist, step, onSaved }: {
     const common = { tax_year: year, imported_payroll_inclusion: 'included' as const, notes: notes.trim() || undefined };
     try {
       if (w2Party === choices.form1099 && !through) {
-        await reportsApi.updatePayrollFilingResponsibility({ ...common, filing_types: ['w2_gu', 'form_1099'], responsible_party: w2Party, prior_provider_through: null });
+        await reportsApi.updatePayrollFilingResponsibility({ ...common, filing_types: ['w2_gu', 'form_1099'], responsible_party: w2Party, prior_provider_through: null }, companyId);
       } else {
-        await reportsApi.updatePayrollFilingResponsibility({ ...common, filing_types: ['w2_gu'], responsible_party: w2Party, prior_provider_through: through });
-        await reportsApi.updatePayrollFilingResponsibility({ ...common, filing_types: ['form_1099'], responsible_party: choices.form1099, prior_provider_through: null });
+        await reportsApi.updatePayrollFilingResponsibility({ ...common, filing_types: ['w2_gu'], responsible_party: w2Party, prior_provider_through: through }, companyId);
+        // The user left this client while the first save was in flight.
+        if (!stillMounted()) return;
+        await reportsApi.updatePayrollFilingResponsibility({ ...common, filing_types: ['form_1099'], responsible_party: choices.form1099, prior_provider_through: null }, companyId);
       }
+      if (!stillMounted()) return;
       await onSaved(choices.w2 === 'no_filing' && choices.form1099 === 'no_filing'
         ? `${checklist.company.name} files no ${year} year-end forms. It is off the to-do list; nothing was deleted.`
         : 'Saved who files.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save who files.');
+      if (stillMounted()) setError(err instanceof Error ? err.message : 'Could not save who files.');
     } finally {
-      setSaving(false);
+      if (stillMounted()) setSaving(false);
     }
   }
 

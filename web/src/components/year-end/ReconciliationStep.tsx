@@ -9,13 +9,18 @@ import type { YearEndReconciliationLine, YearEndStep } from '@/lib/year-end';
 type ReconciliationStepData = Extract<YearEndStep, { key: 'reconciliation' }>;
 
 function LineStatus({ line }: { line: YearEndReconciliationLine }): ReactElement {
-  return line.status === 'match'
-    ? <Badge variant="success">Matches</Badge>
-    : <Badge variant="danger">Off by {formatCurrency(Math.abs(line.difference))}</Badge>;
+  if (line.status === 'match') return <Badge variant="success">Matches</Badge>;
+  if (line.status === 'explained') return <Badge variant="info">Matches in total</Badge>;
+  return <Badge variant="danger">Off by {formatCurrency(Math.abs(line.difference))}</Badge>;
+}
+
+function LineNote({ line }: { line: YearEndReconciliationLine }): ReactElement | null {
+  if (!line.note) return null;
+  return <p className="mt-2 text-sm text-neutral-700">{line.note}</p>;
 }
 
 function LookAt({ line }: { line: YearEndReconciliationLine }): ReactElement | null {
-  if (line.status === 'match' || line.look_at.length === 0) return null;
+  if (line.status !== 'mismatch' || line.look_at.length === 0) return null;
   return (
     <ul className="mt-2 space-y-1 text-sm text-danger-800">
       {line.look_at.map((target) => (
@@ -58,6 +63,7 @@ function MobileLine({ line, openingPresent }: { line: YearEndReconciliationLine;
           ))}
         </dl>
       )}
+      <LineNote line={line} />
       <LookAt line={line} />
     </li>
   );
@@ -69,6 +75,7 @@ export function ReconciliationStep({ step }: { step: ReconciliationStepData }): 
   const opening = data.opening_balances;
   const openingPresent = Boolean(opening?.present);
   const externalQuarters = (data.quarters ?? []).filter((quarter) => quarter.form_941_filed_by === 'external_provider');
+  const withholdingProblems = (data.form_941_reviews ?? []).filter((review) => review.status === 'unexplained');
 
   if (data.status === 'unavailable') {
     return <p className="text-sm text-danger-700">{step.issues[0]?.message ?? data.error}</p>;
@@ -83,6 +90,16 @@ export function ReconciliationStep({ step }: { step: ReconciliationStepData }): 
         <p className="rounded-xl border border-primary-100 bg-primary-50/60 p-3 text-sm text-neutral-800">
           Opening balances cover pay dates {opening?.first_pay_date ? formatDate(opening.first_pay_date) : ''} to {opening?.last_pay_date ? formatDate(opening.last_pay_date) : ''}. They are in the W-2s but not in this app's 941s and W-1s, so they are shown in their own column.
         </p>
+      )}
+      {withholdingProblems.length > 0 && (
+        <ul className="space-y-1.5 rounded-xl border border-danger-200 bg-danger-50/50 p-3 text-sm text-danger-800" aria-label="941 withholding problems">
+          {withholdingProblems.map((review) => (
+            <li key={review.quarter}>
+              {review.message}{' '}
+              <Link to="/reports?report=941-gu" className="inline-flex min-h-11 items-center font-semibold text-primary-700 underline xl:min-h-0">Open Form 941</Link>
+            </li>
+          ))}
+        </ul>
       )}
       {externalQuarters.length > 0 && (
         <p className="text-sm text-neutral-700">
@@ -111,6 +128,7 @@ export function ReconciliationStep({ step }: { step: ReconciliationStepData }): 
                 <TableCell className="min-w-[13rem] whitespace-normal">
                   <p className="font-medium text-neutral-950">{line.label} <span className="text-neutral-500">({line.w2_box})</span></p>
                   <p className="text-xs text-neutral-600">vs {line.source_label}</p>
+                  <LineNote line={line} />
                   <LookAt line={line} />
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{formatCurrency(line.w2_total)}</TableCell>
@@ -121,11 +139,11 @@ export function ReconciliationStep({ step }: { step: ReconciliationStepData }): 
                 ))}
                 {openingPresent && <TableCell className="text-right tabular-nums">{formatCurrency(line.opening_balances)}</TableCell>}
                 <TableCell className="text-right">
-                  <span className={`inline-flex items-center gap-1 font-semibold tabular-nums ${line.status === 'match' ? 'text-success-800' : 'text-danger-700'}`}>
+                  <span className={`inline-flex items-center gap-1 font-semibold tabular-nums ${line.status === 'match' ? 'text-success-800' : line.status === 'explained' ? 'text-neutral-800' : 'text-danger-700'}`}>
                     {line.status === 'match' && <Check className="h-4 w-4" aria-hidden="true" />}
                     {formatCurrency(line.difference)}
                   </span>
-                  <span className="sr-only">{line.status === 'match' ? 'Matches' : 'Does not match'}</span>
+                  <span className="sr-only">{line.status === 'match' ? 'Matches' : line.status === 'explained' ? 'Matches in total with the other Social Security line' : 'Does not match'}</span>
                 </TableCell>
               </TableRow>
             ))}

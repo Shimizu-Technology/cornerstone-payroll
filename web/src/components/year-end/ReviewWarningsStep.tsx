@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { yearEndApi } from '@/services/api';
 import { formatGuamDateTimeShort } from '@/lib/utils';
 import type { YearEndChecklist, YearEndStep, YearEndWarning } from '@/lib/year-end';
+import { useStillMounted } from './useStillMounted';
 
 type WarningsStepData = Extract<YearEndStep, { key: 'review_warnings' }>;
 const SHOWN_EMPLOYEES = 6;
@@ -25,6 +26,7 @@ function AcknowledgeForm({ checklist, warning, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const noteId = `ack-${warning.code}`;
+  const stillMounted = useStillMounted();
 
   return (
     <form
@@ -35,9 +37,11 @@ function AcknowledgeForm({ checklist, warning, onSaved }: {
         setSaving(true);
         setError(null);
         try {
-          await yearEndApi.acknowledge({ tax_year: checklist.tax_year, warning_code: warning.code, warning_digest: warning.digest, note: note.trim() });
+          await yearEndApi.acknowledge({ tax_year: checklist.tax_year, warning_code: warning.code, warning_digest: warning.digest, note: note.trim() }, checklist.company.id);
+          if (!stillMounted()) return;
           await onSaved(`Recorded your review of "${warning.title}".`);
         } catch (err) {
+          if (!stillMounted()) return;
           setError(err instanceof Error ? err.message : 'Could not record the review.');
           setSaving(false);
         }
@@ -68,6 +72,11 @@ function WarningCard({ checklist, warning, onSaved }: {
         <WarningStatus warning={warning} />
       </div>
       <p className="mt-1 text-sm leading-6 text-neutral-700">{warning.explanation}</p>
+      {(warning.details ?? []).length > 0 && (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800">
+          {(warning.details ?? []).map((detail) => <li key={detail}>{detail}</li>)}
+        </ul>
+      )}
       {warning.employees.length > 0 && (
         <div className="mt-2">
           <p className="text-xs font-semibold text-neutral-600">{warning.employees.length} employee{warning.employees.length === 1 ? '' : 's'}</p>
