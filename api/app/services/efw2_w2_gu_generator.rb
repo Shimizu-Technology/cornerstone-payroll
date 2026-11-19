@@ -65,7 +65,7 @@ class Efw2W2GuGenerator
     put(record, line1, 22, clean(object.address_line1))
     put(record, city, 22, clean(object.city))
     put(record, state, 2, clean(object.state))
-    digits = object.zip.to_s.delete("-")
+    digits = object.zip.to_s.strip.delete("-")
     put(record, zip, 5, digits[0, 5])
     put(record, extension, 4, digits[5, 4])
   end
@@ -128,7 +128,9 @@ class Efw2W2GuGenerator
     put(rw, 486, 1, row[:box13_statutory_employee] ? "1" : "0")
     put(rw, 488, 1, row[:box13_retirement_plan] ? "1" : "0")
     put(rw, 489, 1, row[:box13_third_party_sick_pay] ? "1" : "0")
-    Array(row[:box14b_tipped_occupation_codes]).select { Array(row[:box12]).any? { |e| e[:code] == "TP" && cents(e[:amount]).positive? } }.each_with_index { |code, i| put(rw, 490 + i * 3, 3, code) }
+    occupation_codes = Array(row[:box14b_tipped_occupation_codes])
+    occupation_codes = [ "000", *occupation_codes.reject { |code| code == "000" } ] if occupation_codes.include?("000")
+    occupation_codes.first(2).select { Array(row[:box12]).any? { |e| e[:code] == "TP" && cents(e[:amount]).positive? } }.each_with_index { |code, i| put(rw, 490 + i * 3, 3, code) }
     [ rw, ro ]
   end
 
@@ -146,6 +148,10 @@ class Efw2W2GuGenerator
   public
 
   def problems
+    structured_problems.map { |problem| problem[:message] }
+  end
+
+  def structured_problems
     problems = []
     problems << "Only tax year 2026 is supported by this EFW2 layout" unless @year == 2026
     problems << "Add the practice submitter profile" unless @submitter
@@ -153,29 +159,33 @@ class Efw2W2GuGenerator
       problems += @submitter.missing_fields.map { |field| "Submitter #{field} is required" }
       problems += @submitter.errors.full_messages unless @submitter.valid?
       validate_identity(@submitter, "Submitter", problems)
+      validate_text(@submitter, "Submitter", %i[name address_line1 address_line2 city contact_name], problems)
       problems << "Submitter contact email must follow SSA email formatting rules" unless valid_contact_email?(@submitter.contact_email)
       problems << "Submitter contact phone must contain 10 digits" unless @submitter.contact_phone.to_s.gsub(/\D/, "").match?(/\A\d{10}\z/)
     end
-    validate_identity(@company, "Employer", problems)
-    problems << "Employer contact name is required" if clean(@company.filing_contact_name).blank?
-    problems << "Employer contact phone must contain 10 digits" unless @company.phone.to_s.gsub(/\D/, "").match?(/\A\d{10}\z/)
-    problems << "Employer contact email is required and must fit 40 ASCII characters" unless valid_contact_email?(@company.email)
-    problems << "Invalid employer filing codes" unless %w[N F S T Y].include?(@company.kind_of_employer) && %w[R F A M].include?(@company.employment_code)
+    problems.concat(employer_problems(@company))
     problems << "No employee wage records to export" if report[:employees].empty?
     ids = report[:employees].pluck(:employee_id)
     problems << "Duplicate employee rows must be resolved" if ids.uniq.length != ids.length
     if report.dig(:meta, :employee_count) && report[:meta][:employee_count] != ids.length
       problems << "Aggregator employee count mismatch"
     end
-    ssns = @employees.values.map(&:ssn_digits)
-    problems << "Duplicate employee SSNs must be resolved" if ssns.uniq.length != ssns.length
+    problems.map! { |message| { message: message } }
+    ssns = @employees.values.map(&:ssn_digits).compact
+    duplicate_ssns = ssns.tally.select { |_ssn, count| count > 1 }.keys
+    duplicates = @employees.values.group_by(&:ssn_digits).slice(*duplicate_ssns).values
+    duplicates.each do |group|
+      group.each { |employee| problems << { employee_id: employee.id, message: "#{[ employee.full_name, employee.name_suffix ].compact_blank.join(" ")}: duplicate SSN shared with #{group.reject { |other| other.id == employee.id }.map { |other| [ other.full_name, other.name_suffix ].compact_blank.join(" ") }.join(', ')}; correct the employee records" } }
+    end
     report[:employees].each do |row|
       employee = @employees[row[:employee_id]]
       if !employee
-        problems << "An employee wage record is unavailable; refresh the report"
+        problems << { employee_id: row[:employee_id], message: "An employee wage record is unavailable; refresh the report" }
         next
       end
-      label = "#{employee.first_name} #{employee.last_name}".strip
+      start = problems.length
+      label = [ employee.full_name, employee.name_suffix ].compact_blank.join(" ")
+      validate_text(employee, label, %i[first_name middle_name last_name name_suffix address_line1 address_line2 city], problems)
       problems << "#{label}: valid SSN required" unless employee.ssn_digits.to_s.match?(/\A(?!000|666|9)\d{3}(?!00)\d{2}(?!0000)\d{4}\z/)
       problems << "#{label}: first and last name required" if clean(employee.first_name, name: true).blank? || clean(employee.last_name, name: true).blank?
       validate_address(employee, label, problems)
@@ -198,9 +208,8 @@ class Efw2W2GuGenerator
       entries = Array(row[:box12])
       problems << "#{label}: duplicate Box 12 codes" if entries.pluck(:code).uniq.length != entries.length
       codes = Array(row[:box14b_tipped_occupation_codes])
-      problems << "#{label}: cash tips require a Treasury tipped occupation code" if entries.any? { |e| e[:code] == "TP" && cents(e[:amount]).positive? } && codes.empty?
-      problems << "#{label}: more than two Treasury tipped occupations require review" if row[:excess_box14b_tipped_occupation_codes]
-      problems << "#{label}: invalid tipped occupation codes" if codes.length > 2 || codes.any? { |code| !code.to_s.match?(/\A\d{3}\z/) }
+      problems << "#{label}: invalid tipped occupation codes" if codes.any? { |code| !code.to_s.match?(/\A\d{3}\z/) }
+      problems[start..].each_with_index { |message, index| problems[start + index] = { employee_id: employee.id, message: message } }
     end
     problems.uniq
   end

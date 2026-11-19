@@ -47,6 +47,7 @@ module YearEnd
       # the list asking for a re-check.
       revision = InputRevision.for(company.id, year)[company.id]
       steps = build_steps
+      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: steps.any? { |step| step[:key].in?(SIGN_OFF_STEPS) && step[:status] == "action_needed" }) if year == 2026 && files?("w2_gu")
       status = overall_status(steps)
       # Lets the clients list keep showing Ready until any input changes, and
       # stops it showing Ready once a run finds something.
@@ -80,31 +81,34 @@ module YearEnd
     # employee SSN/address, and the 1099 decision and payee details never
     # hold up the W-2s.
     def w2_mark_ready_blockers
-      w2_blockers_from(steps_before_ready)
+      revision = InputRevision.for(company.id, year)[company.id]
+      blockers = w2_blockers_from(steps_before_ready)
+      EfileCheck.record(company.id, year, revision, efw2_people_issues) if year == 2026 && files?("w2_gu")
+      blockers
     end
 
     def efw2_employer_issues
-      efw2_problems.select { |message| message.start_with?("Employer", "Invalid employer") }.reject { |message| (company.ein.blank? && message.include?("EIN")) || (company.phone.blank? && message.include?("phone")) || (company.email.blank? && message.include?("email")) || (company.filing_contact_name.blank? && message.include?("contact name")) || ([ company.address_line1, company.city, company.state, company.zip ].any?(&:blank?) && (message.include?("street") || message.include?("ZIP"))) }.map { |message| issue("EMPLOYER_EFILE_INVALID", message, field: message.include?("EIN") ? "ein" : message.include?("ZIP") || message.include?("street") ? "address" : nil) }
+      return [] unless year == 2026 && files?("w2_gu")
+
+      Efw2Formatting.employer_problems(company).reject { |message| (company.ein.blank? && message.include?("EIN")) || (company.phone.blank? && message.include?("phone")) || (company.email.blank? && message.include?("email")) || (company.filing_contact_name.blank? && message.include?("contact name")) || ([ company.address_line1, company.city, company.state, company.zip ].any?(&:blank?) && (message.include?("street") || message.include?("ZIP"))) }.map { |message| issue("EMPLOYER_EFILE_INVALID", message, field: message.include?("EIN") ? "ein" : message.include?("ZIP") || message.include?("street") ? "address" : nil) }
     end
 
     def efw2_people_issues
-      existing_missing = w2_employees.flat_map do |employee|
-        label = "#{employee.first_name} #{employee.last_name}"
-        messages = []
-        messages << "#{label}: valid SSN required" unless employee.valid_filing_ssn?
-        messages << "#{label}: street and city required" if employee.address_line1.blank? || employee.city.blank?
-        messages << "#{label}: valid US/territory state and ZIP required" if employee.state.blank? || employee.zip.blank?
-        messages
+      missing = w2_employees.to_h { |employee| [ employee.id, person_row(employee, w2: true)&.fetch(:missing_fields, []) || [] ] }
+      efw2_problems.filter_map do |problem|
+        message = problem[:message]
+        next if message.start_with?("Employer", "Invalid employer")
+        fields = missing.fetch(problem[:employee_id], [])
+        next if (fields.include?("ssn") && message.include?("valid SSN required")) || (fields.include?("address") && (message.include?("street and city required") || message.include?("valid US/territory state and ZIP required")))
+
+        issue("EMPLOYEE_EFILE_INVALID", message, employee_id: problem[:employee_id])
       end
-      efw2_problems.reject { |message| message.start_with?("Employer", "Invalid employer") || existing_missing.include?(message) }.map { |message| issue("EMPLOYEE_EFILE_INVALID", message) }
     end
 
     def efw2_problems
-      return [] unless year == 2026 && files?("w2_gu")
+      return [] unless year == 2026 && files?("w2_gu") && w2_report
 
-      return [] unless w2_report
-
-      @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).problems.reject { |message| message.start_with?("Submitter", "Add the practice") }
+      @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).structured_problems.reject { |problem| problem[:message].start_with?("Submitter", "Add the practice") }
     end
 
     private
@@ -363,8 +367,9 @@ module YearEnd
 
       @w2_report = begin
         W2GuAggregator.new(company, year).generate
-      rescue ArgumentError => e
-        @w2_report_error = e.message
+      rescue StandardError => e
+        Rails.logger.error("W-2 checklist failed company_id=#{company.id} tax_year=#{year} error_class=#{e.class.name}")
+        @w2_report_error = "W-2 totals could not be loaded. Open the W-2GU report to check payroll, then reload this checklist."
         nil
       end
     end
@@ -533,7 +538,7 @@ module YearEnd
     def w2_readiness
       @w2_readiness ||= begin
         readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
-        [ readiness, (W2FilingInputsFingerprint.new(company: company, year: year, report: w2_report).call if readiness) ]
+        [ readiness, (W2FilingInputsFingerprint.new(company: company, year: year, report: w2_report).call if readiness && w2_report) ]
       end
     end
 

@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 
 const kinds: Record<string, string> = {
-  N: 'None apply (most private businesses)',
+  N: 'None apply',
   F: 'Federal government',
   S: 'State/local non-501c',
   T: '501c non-government',

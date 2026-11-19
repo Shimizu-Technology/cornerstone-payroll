@@ -60,3 +60,52 @@ After deployment, W-2 clients need an employer filing contact name. Existing W-2
 Both task databases (`cp_test_efw2_r1`, `cp_test_efw2_r1_ui`) were dropped. Owned Rails/Vite processes and the preview tab were closed; lifecycle session `manual-20261120-085348-60758-d117` reports no active owned resources. No runtime handoff. The named branch and checkout remain for the lead. Shared PostgreSQL, Immich, Hermes, Syncthing, Tailscale, Jerry/OpenClaw and LM Studio were left available.
 
 Shared-guidance freshness check could not run: this host lacks `~/.config/shimizu-technology/agent-context.json`. Applicable installed/synced guidance was read directly. No host configuration, shared service or other worker's checkout was changed. No further delegation was used. Final independent review belongs to the lead; no new review is claimed clean here.
+
+## Round 2 — 2026-11-20 (supersedes round-1 list/performance and Box 14b notes)
+
+Implementation worker: Codex on the Mac mini; lead/reviewer: Claude on Leon's MacBook. Worktree `/Users/agent/work/cornerstone-payroll-b`, branch `feature/efw2-w3ss`, starting clean at `0db0473a`. No other checkout or production data was used. This record is the handoff for independent review; do not merge from this worker's result alone.
+
+Acceptance: staff can see each employee e-file problem and open that employee's editor on phone and desktop; the list must not aggregate wages and may show a count only with current employee checks; warnings retain their existing acknowledgement/blocking semantics; names retain their Latin letters; one failed report cannot hide every client's checklist. Request specs cover the mark-ready refusal and profile safety/race paths.
+
+- People issues now carry `employee_id`; labels include middle name and suffix. Missing-detail suppression uses IDs and missing fields, avoiding same-name collisions and blank-name formatting mismatches. Duplicate SSNs exclude nil values and name the affected employees.
+- `Checklist#call` stores employee e-file issues and the sign-off group's state in Rails.cache, with company/year keys, the same InputRevision used by ReadyCheck, and the same expiry. Mark-ready's checklist gate also records its checks. The list reads the cache in one batch, runs employer checks without aggregation, and returns `check_needed` with `issue_count: null` for missing/stale checks. Current entries retain checklist/list count parity, including warning/reconciliation sign-off failures. The cache remains advisory: mark-ready always validates current inputs. An unexpected report failure logs only company ID, year and exception class; the checklist displays a safe recovery message.
+- Unicode normalization decomposes accents before transliteration and explicitly maps non-decomposing Latin letters. Unsupported text becomes a named field problem rather than a silently damaged name or literal `?`. State/ZIP validation trims whitespace; full state names get the two-letter-code instruction.
+- The People duplicate tip-code messages are removed. Per the lead's IRS Box 14b decision, more than two occupations remains an acknowledge-only warning everywhere. EFW2 writes two codes and keeps `000` when present, even when it arrives third. The generator does not add an excess-code preflight finding. PR #502 is separately reverting `EMPLOYEE_TIPPED_OCCUPATION_CODES_EXCESS` to the warning and making the aggregator preserve `000`; this generator safely accepts either its already-selected list or a longer list. Missing occupation codes remain owned by `tipped_occupation_code_missing`.
+- Submitter missing fields appear once with real labels. The repeated explanation is removed. Employer's option is `None apply`, with one helper line. Locked-EIN page assertion is restored.
+
+### Performance evidence
+
+Factory-only local data: 25 clients × 120 employees × 26 biweekly periods, plus one UI employee/payroll item and two leftover empty setup clients: **28 clients, 78,001 payroll items**. Old list source was loaded from `0db0473a` under a separate class name; no checkout changes. Both paths used uncached SQL notifications; query counts exclude schema/transaction events. Measurements ran on the same Mac mini while the full backend gate was also running, so absolute timings are indicative, not a production SLA.
+
+| List implementation | Wall time | SQL queries |
+|---|---:|---:|
+| Old report-per-client list, same fixture | 24.689s | 1,592 |
+| New list, no stored checks (warm run) | 0.134s | 9 |
+| New list, current stored checks (3 runs) | 0.158 / 0.160 / 0.160s | 28 each |
+
+The regression spec expands the same clients from one payroll item to 26 periods × 30 employees, refreshes the current cache, asserts query count does not increase, and forbids constructing W2GuAggregator. It also covers a missing-cache list returning Check needed with no count. The parity spec exercises an actual cached employee e-file issue, an edit that invalidates it, and a refreshed result.
+
+### Browser acceptance (agent executed)
+
+Actual Rails/Vite app, factory-only `cp_test_efw2_r2_ui`, shared preview Chromium/Playwright; desktop 1280px and phone layout 390×844. All three required scenarios passed at both widths. No horizontal overflow observed. Resizing is not physical-phone or Safari certification; WebKit cannot start on this host.
+
+| Scenario | Observed result | Evidence under `docs/evidence/efw2-w3ss/` |
+|---|---|---|
+| People e-file issue and edit link | `Nguyễn Trần JR` state/ZIP issue visible, no all-clear body; link opens the correct Edit Employee page with the checklist return URL. | `people-desktop.png`, `people-phone.png` |
+| Submitter missing field | BSO User ID (8 characters) shown once, with one explanation paragraph. | `submitter-desktop.png`, `submitter-phone.png` |
+| Employer helper | Change opens the real settings form; option `None apply`; helper appears once. | `employer-desktop.png`, `employer-phone.png` |
+
+These images replace only the requested affected-flow evidence. Other images in this directory remain prior-round evidence. No filing submission or external delivery occurred.
+
+### Final round-two gate and cleanup
+
+- Focused command: `cd api && RAILS_ENV=test TEST_DATABASE_URL=postgres://localhost/cp_test_efw2_r2 bundle exec rspec spec/requests/api/v1/admin/wage_filing_files_spec.rb spec/models/filing_submitter_spec.rb spec/requests/api/v1/admin/filing_submitters_spec.rb spec/services/efw2_w2_gu_generator_spec.rb spec/services/year_end/checklist_spec.rb spec/requests/api/v1/admin/year_end_spec.rb` — **88 examples, 0 failures**, 21.38s (`/tmp/r2-focused-final.log`). Includes `000` last among three codes, current-cache parity/invalidation, existing-readiness aggregator failure, profile workspace/race, and actual e-file mark-ready refusal.
+- Final full `RAILS_ENV=test TEST_DATABASE_URL=postgres://localhost/cp_test_efw2_r2 bundle exec rspec` — **7,561 examples, 1 failure, 4 pending**, 8m41s (`/tmp/r2-full-final.log`). Sole failure: known mini environment-isolation case at `spec/services/client_document_converter_process_spec.rb:51`, because child Ruby adds `PKG_CONFIG_PATH`. Unchanged as instructed. Pending cases require an external transaction pooler. An earlier full run was interrupted after restoring the employer W-2/year guard; this completed rerun supersedes it.
+- `cd api && bundle exec rubocop` — **1,923 files, no offenses** (`/tmp/r2-rubocop-verified.log`).
+- `cd web && npm run lint && npx tsc --noEmit && npm test` — lint/TypeScript pass; **206 files, 2,051 tests pass** (`/tmp/r2-web-final.log`). Final page-only check: **23 tests pass** (`/tmp/r2-page2.log`).
+- `IMPECCABLE_NO_TELEMETRY=1 npx impeccable@4.6.0 detect --json` on the three changed UI components — **[] findings** (`/tmp/r2-impeccable.json`).
+- `git diff --check` passes. No new independent review is claimed; lead review and new-head CI remain to be checked after push. PR is held and must not be merged by this worker.
+
+Both database identities were confirmed locally before schema loading. `cp_test_efw2_r2` and `cp_test_efw2_r2_ui` were dropped after use. Owned Vite PID 71301, Rails PID 71414, and preview tab `tab_4e_89c280d8-30cd-43c8-87b2-8d384475a23b` were stopped/closed. Lifecycle session `manual-20261120-093253-70398-5cee` reports **no active owned resources**. No runtime handoff. Preserve this named worktree/branch for the lead; no further delegation was used. Other workers and shared services were left unchanged.
+
+The shared-guidance helper's read-only check failed because `/Users/agent/.config/shimizu-technology/agent-context.json` is absent. Applicable installed/synced guidance was read directly; no host configuration was changed.

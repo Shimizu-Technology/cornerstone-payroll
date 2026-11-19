@@ -34,4 +34,14 @@ RSpec.describe FilingSubmitter do
     employee.name_suffix = "Esquire"
     expect(employee).not_to be_valid
   end
+  it "strips state and ZIP whitespace before validation and explains full state names" do
+    profile = described_class.new(organization: create(:organization), state: " GU ", zip: " 96910 ")
+    profile.valid?
+    expect(profile.errors.full_messages.join).not_to include("state and ZIP")
+    expect(profile.state).to eq("GU")
+    expect(profile.zip).to eq("96910")
+    profile.state = "Guam"
+    profile.valid?
+    expect(profile.errors.full_messages.join).to include("Use the 2-letter code, e.g. GU")
+  end
 end
