@@ -9,6 +9,7 @@ import { Select } from '@/components/ui/select';
 import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
 import { EmployerStep } from '@/components/year-end/EmployerStep';
 import { FilingDecisionStep } from '@/components/year-end/FilingDecisionStep';
+import { W2FilingFileRow } from '@/components/year-end/W2FilingFileRow';
 import { MarkReadyStep } from '@/components/year-end/MarkReadyStep';
 import { PeopleStep } from '@/components/year-end/PeopleStep';
 import { PrintAndFileStep } from '@/components/year-end/PrintAndFileStep';
@@ -196,6 +197,9 @@ export function YearEndChecklist(): ReactElement {
                   >
                     {stepBody(checklist, step, onSaved, onRefresh)}
                   </StepCard>
+                  {step.key === 'mark_ready' && checklist.files_w2 && (
+                    <div className="mt-3"><W2FilingFileRow companyId={checklist.company.id} year={checklist.tax_year} ready={step.status === 'done'} /></div>
+                  )}
                 </li>
               ))}
             </ol>

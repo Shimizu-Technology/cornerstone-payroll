@@ -8,6 +8,7 @@ FactoryBot.define do
     city { "Hagåtña" }
     state { "GU" }
     zip { "96910" }
+    filing_contact_name { "Example Contact" }
     phone { Faker::PhoneNumber.phone_number }
     email { Faker::Internet.email }
     pay_frequency { "biweekly" }

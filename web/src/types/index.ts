@@ -237,6 +237,7 @@ export interface Employee {
   user_id?: number;
   first_name: string;
   middle_name?: string;
+  name_suffix?: string;
   last_name: string;
   job_title?: string;
   email?: string;
@@ -569,6 +570,7 @@ export interface EmployeeFormData {
   w4_election_received?: boolean;
   first_name: string;
   middle_name?: string;
+  name_suffix?: string;
   last_name: string;
   job_title?: string;
   email?: string;

@@ -3,6 +3,9 @@
 require "set"
 
 class Company < ApplicationRecord
+  validates :kind_of_employer, inclusion: { in: %w[N F S T Y] }
+  validates :employment_code, inclusion: { in: %w[R A H M Q F] }
+  validates :establishment_number, length: { maximum: 4 }, format: { with: /\A[ -~]*\z/ }, allow_blank: true
   include TracksRecordCreation
 
   belongs_to :created_by, class_name: "User", optional: true

@@ -147,6 +147,7 @@ Rails.application.routes.draw do
       end
 
       namespace :admin do
+        resource :filing_submitter, only: [ :show, :update ]
         get "client_inbox", to: "client_inbox#index"
         get "client_inbox/counts", to: "client_inbox#counts"
         patch "employees/:id/intake_exception", to: "employees#review_intake_exception"
@@ -609,6 +610,8 @@ Rails.application.routes.draw do
         get "reports/form_941_gu", to: "reports#form_941_gu"
         get "reports/form_941_gu_pdf", to: "reports#form_941_gu_pdf"
         get "reports/form_941_gu_xlsx", to: "reports#form_941_gu_xlsx"
+        get "reports/w2_gu_efw2", to: "reports#w2_gu_efw2"
+        get "reports/w3ss_pdf", to: "reports#w3ss_pdf"
         get "reports/w2_gu", to: "reports#w2_gu"
         post "reports/w2_gu_preflight", to: "reports#w2_gu_preflight"
         get "reports/w2_gu_filing_readiness", to: "reports#w2_gu_filing_readiness"
