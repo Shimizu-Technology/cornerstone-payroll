@@ -15,7 +15,10 @@ export function isStaleReview(err: unknown): boolean {
 export function useStaleReview(digest: string, onRefresh: () => Promise<void>) {
   const [refusedDigest, setRefusedDigest] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
+  // The confirmation belongs to the digest the reviewer saw; a newer digest
+  // needs a new confirmation.
+  const [confirmedDigest, setConfirmedDigest] = useState<string | null>(null);
+  const confirmed = confirmedDigest !== null && confirmedDigest === digest;
   const stillMounted = useStillMounted();
   const refused = refusedDigest !== null;
   const refreshed = refused && digest !== refusedDigest;
@@ -25,11 +28,11 @@ export function useStaleReview(digest: string, onRefresh: () => Promise<void>) {
     refreshed,
     refreshing,
     confirmed,
-    setConfirmed,
+    setConfirmed: (checked: boolean) => setConfirmedDigest(checked ? digest : null),
     /** Submitting is allowed once nothing is pending from a refusal. */
     canSubmit: !refused || (refreshed && confirmed),
-    markRefused: () => { setRefusedDigest(digest); setConfirmed(false); },
-    clear: () => { setRefusedDigest(null); setConfirmed(false); },
+    markRefused: () => { setRefusedDigest(digest); setConfirmedDigest(null); },
+    clear: () => { setRefusedDigest(null); setConfirmedDigest(null); },
     refresh: async () => {
       setRefreshing(true);
       try {

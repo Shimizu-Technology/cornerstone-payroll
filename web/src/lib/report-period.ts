@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 /**
  * A report period passed in the URL (`/reports?report=941-gu&year=2026&quarter=2`),
  * so a link from the year-end checklist opens the year and quarter it names.
@@ -17,4 +19,17 @@ export function reportPeriodPath(report: string, year: number, quarter?: number)
   const params = new URLSearchParams({ report, year: String(year) });
   if (quarter) params.set('quarter', String(quarter));
   return `/reports?${params.toString()}`;
+}
+
+/**
+ * Keeps a panel's period in step with later URL changes (Back, Forward or a new
+ * link) after it mounted. Only a change in the URL value applies; the panel's
+ * own selector still works between URL changes.
+ */
+export function useFollowLinkedPeriod(linked: number | null, apply: (value: number) => void): void {
+  const [seen, setSeen] = useState(linked);
+  if (linked !== seen) {
+    setSeen(linked);
+    if (linked !== null) apply(linked);
+  }
 }

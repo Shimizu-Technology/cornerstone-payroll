@@ -32,7 +32,7 @@ import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
 import { buildPayrollHistoryPackage } from '@/lib/payrollHistoryPackage';
 import { yearEndChecklistPath } from '@/lib/routes';
 import { yearEndTaxYears } from '@/lib/year-end';
-import { linkedReportQuarter, linkedReportYear } from '@/lib/report-period';
+import { linkedReportQuarter, linkedReportYear, useFollowLinkedPeriod } from '@/lib/report-period';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   Employee,
@@ -647,6 +647,7 @@ export function W2GuPanel() {
   );
   const [searchParams] = useSearchParams();
   const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear - 1);
+  useFollowLinkedPeriod(linkedReportYear(searchParams, yearOptions), setYear);
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -2444,6 +2445,8 @@ export function QuarterlyCompliancePacketPanel() {
   const [searchParams] = useSearchParams();
   const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear);
   const [quarter, setQuarter] = useState(() => linkedReportQuarter(searchParams) ?? currentQuarter);
+  useFollowLinkedPeriod(linkedReportYear(searchParams, yearOptions), setYear);
+  useFollowLinkedPeriod(linkedReportQuarter(searchParams), setQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
@@ -3246,6 +3249,8 @@ export function Form941GuPanel() {
   const [searchParams] = useSearchParams();
   const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear);
   const [quarter, setQuarter] = useState(() => linkedReportQuarter(searchParams) ?? currentQuarter);
+  useFollowLinkedPeriod(linkedReportYear(searchParams, yearOptions), setYear);
+  useFollowLinkedPeriod(linkedReportQuarter(searchParams), setQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);

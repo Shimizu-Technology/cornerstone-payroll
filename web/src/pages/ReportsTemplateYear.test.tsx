@@ -2,7 +2,7 @@
 import type { ReactNode } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useNavigate } from 'react-router';
 import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
 import type { ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { Form941GuPanel, QuarterlyCompliancePacketPanel } from './Reports';
@@ -51,6 +51,20 @@ describe('A linked year and quarter', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View Packet' }));
     await screen.findByText(message);
     expect(mocks.packet).toHaveBeenCalledWith(2025, 3);
+  });
+
+  it('follows the URL when it changes after the panel mounted (Back/Forward)', () => {
+    function Nav() {
+      const navigate = useNavigate();
+      return <><button onClick={() => navigate('/reports?report=941-gu&year=2025&quarter=3')}>To Q3</button><button onClick={() => navigate(-1)}>Back</button></>;
+    }
+    render(<MemoryRouter initialEntries={['/reports?report=941-gu&year=2025&quarter=1']}><PdfPreviewProvider><Nav /><Form941GuPanel /></PdfPreviewProvider></MemoryRouter>);
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
+    fireEvent.click(screen.getByRole('button', { name: 'To Q3' }));
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '3');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByLabelText('Quarter')).toHaveProperty('value', '1');
+    expect(screen.getByLabelText('Year')).toHaveProperty('value', '2025');
   });
 
   it('keeps its own default for a period it cannot show', () => {
