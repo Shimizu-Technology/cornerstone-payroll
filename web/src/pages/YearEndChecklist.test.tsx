@@ -220,6 +220,22 @@ describe('Year-end checklist', () => {
     w1.forEach((link) => expect(link.getAttribute('href')).toBe('/reports?report=quarterly-compliance-packet&year=2026&quarter=3'));
   });
 
+  it('says the quarters differ when the year totals agree', async () => {
+    const steps = working({ reconciliation: 'mismatch' });
+    const recon = steps[3] as ActiveYearEndStep<'reconciliation'>;
+    const line = { ...reconciliationLine('mismatch'), w2_total: 4000, quarterly_total: 4000, difference: 0,
+      look_at: [1, 2].map((quarter) => ({ kind: 'quarter' as const, quarter, label: `Q${quarter} 941`, detail: `The Q${quarter} 941 differs.` })) };
+    steps[3] = { ...recon, data: { ...recon.data, lines: [line] } };
+    mocks.checklist.mockResolvedValue(checklist(steps));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Reconcile W-2s/ });
+    expect(within(region).getAllByText('Quarters differ').length).toBeGreaterThan(0);
+    expect(within(region).queryByText('Off by $0.00')).toBeNull();
+    expect(within(region).getAllByRole('link', { name: 'Open the Q1 Form 941' }).length).toBeGreaterThan(0);
+  });
+
   it('shows a wage-base split as matching in total and names a quarter whose 941 withholding is off', async () => {
     const base = working({ reconciliation: 'match' });
     const explained = { ...reconciliationLine('match'), w2_total: 184500, quarterly_total: 179500, difference: 5000, status: 'explained' as const,
