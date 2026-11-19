@@ -121,6 +121,7 @@ RSpec.describe QuarterlyCompliancePacketBuilder do
       expect(report.dig(:form_500, :total_guam_withholding)).to eq(125.0)
       expect(report.dig(:w1, :total_guam_withholding)).to eq(125.0)
       expect(report.dig(:pay_periods, 0, :guam_withholding)).to eq(125.0)
+      expect(described_class.new(company, 2026, 2).w1_total).to be_a(BigDecimal).and eq(BigDecimal("125"))
     end
 
     it "uses locked QuickBooks payroll in quarterly reports without recreating its payments" do

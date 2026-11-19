@@ -28,6 +28,7 @@ class PayrollFilingResponsibility < ApplicationRecord
   validates :company_id, uniqueness: { scope: %i[tax_year quarter filing_type] }
   validate :quarter_matches_filing_type
   validate :prior_provider_through_matches_decision
+  validate :party_matches_filing_type
 
   scope :for_year, ->(year) { where(tax_year: year) }
   scope :for_quarter, ->(quarter) { where(quarter: quarter) }
@@ -70,6 +71,14 @@ class PayrollFilingResponsibility < ApplicationRecord
     elsif quarterly? && !quarter.in?(1..4)
       errors.add(:quarter, "must be 1, 2, 3, or 4 for quarterly filings")
     end
+  end
+
+  # The client files, or no forms, is a year-end answer; quarterly returns
+  # are filed by Cornerstone or another provider.
+  def party_matches_filing_type
+    return unless responsible_party.in?(%w[client no_filing]) && !annual?
+
+    errors.add(:responsible_party, "can be the client or no filing only for W-2GU and 1099 decisions")
   end
 
   def prior_provider_through_matches_decision

@@ -51,6 +51,94 @@ RSpec.describe YearEnd::Checklist do
       .to include("W2_FILER_NOT_CHOSEN")
   end
 
+  describe "with only the W-2 decision recorded" do
+    before do
+      pay(Date.new(2026, 3, 6))
+      PayrollFilingResponsibilityRecorder.new(
+        company: company, actor: accountant, tax_year: 2026, filing_types: [ "w2_gu" ],
+        responsible_party: "cornerstone", imported_payroll_inclusion: "included"
+      ).call
+    end
+
+    it "checks the W-2s on the W-2 decision alone and keeps the 1099 decision open" do
+      result = checklist
+
+      expect(step(result, "filing_decision")[:issues].map { |issue| issue[:code] }).to eq(%w[FORM_1099_FILER_NOT_CHOSEN])
+      expect(result[:steps].drop(1).map { |entry| entry[:status] }).not_to include("waiting")
+      expect(step(result, "reconciliation")[:status]).to eq("done")
+      expect(step(result, "mark_ready").dig(:data, :can_mark_ready)).to be(true)
+      expect(result[:status]).to eq("needs_action")
+      expect(described_class.new(company: company, year: 2026).w2_mark_ready_blockers).to be_empty
+    end
+
+    it "still blocks the W-2s on a real W-2 problem" do
+      company.update_columns(ein: nil)
+
+      expect(described_class.new(company: company.reload, year: 2026).w2_mark_ready_blockers.map { |issue| issue[:code] })
+        .to eq(%w[EMPLOYER_EIN_MISSING])
+    end
+  end
+
+  describe "when the 1099 report cannot be built" do
+    before { pay(Date.new(2026, 3, 6)) }
+
+    it "leaves the 1099 payee check open with what to do, and keeps it out of the W-2 sign-off" do
+      decide(w2: "cornerstone", form_1099: "cornerstone")
+      allow(Form1099NecAggregator).to receive(:new).and_raise(RuntimeError, "boom")
+      expect(Rails.error).to receive(:report).with(an_instance_of(RuntimeError), hash_including(handled: true)).at_least(:once)
+
+      result = checklist
+
+      people = step(result, "people")
+      expect(people[:status]).to eq("action_needed")
+      expect(people[:issues]).to contain_exactly(a_hash_including(
+        code: "PAYEES_UNAVAILABLE", message: "1099 payees could not be loaded. Open the 2026 1099-NEC report to see the problem, then reload this page."
+      ))
+      expect(result[:status]).to eq("needs_action")
+      expect(step(result, "mark_ready").dig(:data, :can_mark_ready)).to be(true)
+      expect(described_class.new(company: company, year: 2026).w2_mark_ready_blockers).to be_empty
+    end
+
+    it "says how to fix a missing 1099 threshold, so a 1099-only client is not ready" do
+      decide(w2: "client", form_1099: "cornerstone")
+
+      result = checklist
+
+      expect(step(result, "people")[:issues]).to contain_exactly(a_hash_including(
+        code: "PAYEES_UNAVAILABLE",
+        message: "1099 payees could not be loaded: No 1099_nec reporting threshold is configured for 2026. Fix the 2026 1099-NEC setup, then reload this page."
+      ))
+      expect(result[:status]).to eq("needs_action")
+    end
+  end
+
+  describe "prior provider overlap uses the pay date" do
+    def imported_paycheck(pay_date, period_start:, period_end:)
+      create_historical_filing_source(
+        company: company, employee: employee, pay_date: pay_date,
+        gross_pay: 2_000, federal_income_tax: 150, social_security_tax: 124, medicare_tax: 29,
+        employer_social_security_tax: 124, employer_medicare_tax: 29,
+        period_start: period_start, period_end: period_end
+      )
+    end
+
+    before { decide(prior_provider_through: Date.new(2026, 3, 31)) }
+
+    it "does not count a paycheck paid after the date whose work period started before it" do
+      imported_paycheck(Date.new(2026, 4, 17), period_start: Date.new(2026, 3, 29), period_end: Date.new(2026, 4, 11))
+
+      expect(step(checklist, "prior_provider")).to include(status: "done", issues: [])
+    end
+
+    it "blocks a paycheck paid on or before the date and names its pay dates" do
+      imported_paycheck(Date.new(2026, 3, 27), period_start: Date.new(2026, 3, 8), period_end: Date.new(2026, 3, 21))
+
+      issue = step(checklist, "prior_provider")[:issues].sole
+      expect(issue).to include(code: "PRIOR_PROVIDER_OVERLAP", source: "imported_payroll")
+      expect(issue[:message]).to start_with("Imported paychecks paid Mar 27, 2026–Mar 27, 2026 are in these W-2 totals")
+    end
+  end
+
   it "takes a record that files no forms off the to-do list without deleting anything" do
     pay(Date.new(2026, 6, 5))
     decide(w2: "no_filing", form_1099: "no_filing")

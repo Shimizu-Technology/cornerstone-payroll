@@ -37,8 +37,8 @@ module YearEnd
     # and employee item once, and the W-2 sign-off group (reconciliation,
     # warnings, overlap, mark ready) as one item until it is done.
     SIGN_OFF_STEPS = %w[reconciliation review_warnings prior_provider mark_ready].freeze
-    # 1099 payee items never hold up the W-2s.
-    PAYEE_ONLY_CODES = %w[PAYEE_DETAILS_MISSING PAYEES_UNAVAILABLE PAYEE_IDENTITY_UNRESOLVED].freeze
+    # The 1099 decision and 1099 payee items never hold up the W-2s.
+    FORM_1099_ONLY_CODES = %w[FORM_1099_FILER_NOT_CHOSEN PAYEE_DETAILS_MISSING PAYEES_UNAVAILABLE PAYEE_IDENTITY_UNRESOLVED].freeze
 
     def call
       started_at = Time.current
@@ -69,7 +69,8 @@ module YearEnd
     end
 
     # Blockers the W-2GU "mark ready" action enforces. Preflight still owns
-    # employee SSN/address, and 1099 payee details never hold up the W-2s.
+    # employee SSN/address, and the 1099 decision and payee details never
+    # hold up the W-2s.
     def w2_mark_ready_blockers
       w2_blockers_from(steps_before_ready)
     end
@@ -87,12 +88,14 @@ module YearEnd
     end
 
     def steps_before_ready
+      # Employer and people checks run as soon as one recorded decision has
+      # Cornerstone filing, so the W-2s never wait on the 1099 decision.
       @steps_before_ready ||= begin
-        decided = decisions_recorded?
+        evaluable = files_any? || decisions_recorded?
         [
           filing_decision_step,
-          decided ? employer_step : waiting_step("employer", "Employer details"),
-          decided ? people_step : waiting_step("people", "Employees and payees"),
+          evaluable ? employer_step : waiting_step("employer", "Employer details"),
+          evaluable ? people_step : waiting_step("people", "Employees and payees"),
           w2_step("reconciliation", "Reconcile W-2s to the 941s and W-1s") { reconciliation_step },
           w2_step("review_warnings", "Review warnings") { review_warnings_step },
           w2_step("prior_provider", "Prior provider overlap") { prior_provider_step }
@@ -104,10 +107,12 @@ module YearEnd
       steps
         .select { |step| step[:key].in?(%w[filing_decision employer reconciliation review_warnings prior_provider]) }
         .flat_map { |step| step[:issues] }
+        .reject { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) }
     end
 
+    # The W-2 checks depend only on the W-2 decision.
     def w2_step(key, title)
-      return waiting_step(key, title) unless decisions_recorded?
+      return waiting_step(key, title) unless responsibilities["w2_gu"]
       return not_needed_step(key, title, "Cornerstone does not file #{year} W-2s for this client.") unless files?("w2_gu")
 
       yield
@@ -236,11 +241,17 @@ module YearEnd
       )
     end
 
+    # A report that cannot be built leaves the 1099 payee check open (a
+    # 1099-only PAYEES_UNAVAILABLE issue), never complete.
     def form_1099_rows
       @form_1099_rows ||= begin
         Array(Form1099NecAggregator.new(company, year).generate[:reportable_contractors])
       rescue ActiveRecord::RecordNotFound, ArgumentError => e
-        @contractor_error = "1099 payees could not be loaded: #{e.message}"
+        @contractor_error = "1099 payees could not be loaded: #{e.message.delete_suffix('.')}. Fix the #{year} 1099-NEC setup, then reload this page."
+        []
+      rescue StandardError => e
+        Rails.error.report(e, handled: true, context: { company_id: company.id, tax_year: year, source: "year_end_checklist" })
+        @contractor_error = "1099 payees could not be loaded. Open the #{year} 1099-NEC report to see the problem, then reload this page."
         []
       end
     end
@@ -382,30 +393,41 @@ module YearEnd
       end
       step(
         "prior_provider", "Prior provider overlap", issues,
-        summary: issues.empty? ? "Nothing in these W-2 totals is dated on or before #{through.strftime('%b %-d, %Y')}." : "These wages would be reported twice, once by the prior provider and once here.",
+        summary: issues.empty? ? "Nothing in these W-2 totals was paid on or before #{through.strftime('%b %-d, %Y')}." : "These wages would be reported twice, once by the prior provider and once here.",
         data: { prior_provider_through: through.iso8601, overlaps: overlaps }
       )
     end
 
+    # W-2 wages count when they are paid. A dated paycheck overlaps when it
+    # was paid on or before the prior provider's last pay date, whatever its
+    # work period. An opening balance sums wages paid from its period start
+    # to its summary date, so it overlaps when any of that span is on or
+    # before the date.
     def prior_provider_overlaps(through)
       overlaps = []
       imported = HistoricalPaycheck
         .joins(:historical_import_batch, :historical_pay_period)
         .where(company_id: company.id, pay_date: year_range, historical_import_batches: { status: "locked" })
         .where.not(employee_id: nil)
-        .where("historical_paychecks.pay_date <= :through OR historical_paychecks.period_start <= :through", through: through)
       opening = imported.where.not(historical_pay_periods: { period_type: "regular" })
+        .where(historical_paychecks: { period_start: ..through })
       dated = imported.where(historical_pay_periods: { period_type: "regular" })
+        .where(historical_paychecks: { pay_date: ..through })
       { "opening_balances" => opening, "imported_payroll" => dated }.each do |source, scope|
         count = scope.count
         next if count.zero?
 
-        first = scope.minimum("historical_paychecks.period_start") || scope.minimum("historical_paychecks.pay_date")
         last = scope.maximum("historical_paychecks.pay_date")
-        label = source == "opening_balances" ? "Opening balances" : "Imported paychecks"
+        message = if source == "opening_balances"
+          first = scope.minimum("historical_paychecks.period_start")
+          "Opening balances covering #{format_date(first)}–#{format_date(last)} are in these W-2 totals"
+        else
+          first = scope.minimum("historical_paychecks.pay_date")
+          "Imported paychecks paid #{format_date(first)}–#{format_date(last)} are in these W-2 totals"
+        end
         overlaps << {
           source: source, count: count, first_date: first&.iso8601, last_date: last&.iso8601,
-          message: "#{label} covering #{format_date(first)}–#{format_date(last)} are in these W-2 totals, but the prior provider files W-2s for wages paid through #{format_date(through)}."
+          message: "#{message}, but the prior provider files W-2s for wages paid through #{format_date(through)}."
         }
       end
 
@@ -425,14 +447,14 @@ module YearEnd
 
     # -- Step 7 ----------------------------------------------------------
 
-    # Earlier steps must be clear before the sign-off; 1099 payee details do
-    # not hold up the W-2s.
+    # Earlier steps must be clear before the sign-off; the 1099 decision and
+    # payee details do not hold up the W-2s.
     def mark_ready_step(earlier_steps)
       readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
       fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: w2_report).call if readiness
       filing = readiness&.review_payload(fingerprint: fingerprint)
       current = readiness&.current?(fingerprint)
-      earlier_blockers = earlier_steps.sum { |step| step[:issues].count { |issue| !issue[:code].in?(PAYEE_ONLY_CODES) } }
+      earlier_blockers = earlier_steps.sum { |step| step[:issues].count { |issue| !issue[:code].in?(FORM_1099_ONLY_CODES) } }
 
       issues = []
       unless current

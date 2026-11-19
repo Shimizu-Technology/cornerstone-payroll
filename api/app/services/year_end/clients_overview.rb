@@ -75,7 +75,9 @@ module YearEnd
       files_w2 = w2&.responsible_party == "cornerstone"
       files_1099 = form_1099&.responsible_party == "cornerstone"
 
-      if w2 && form_1099 && (files_w2 || files_1099)
+      # Like the checklist, a recorded Cornerstone decision starts these checks
+      # without waiting for the other decision.
+      if files_w2 || files_1099
         issues << { code: "EMPLOYER_EIN_MISSING", label: "EIN missing" } if company.ein.blank?
         if [ company.address_line1, company.city, company.state, company.zip ].any?(&:blank?)
           issues << { code: "EMPLOYER_ADDRESS_INCOMPLETE", label: "Employer address incomplete" }

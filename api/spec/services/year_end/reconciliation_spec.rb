@@ -71,6 +71,47 @@ RSpec.describe YearEnd::Reconciliation do
     expect(line(result, "medicare_wages")[:status]).to eq("match")
   end
 
+  describe "quarter differences that cancel over the year" do
+    # A stored wage base without a stored tip base sends the 941 down its
+    # legacy fallback (gross less tips): Q1 reports $200 less than its
+    # records and Q2 $200 more, so the year totals agree.
+    before do
+      pay(Date.new(2026, 2, 6), social_security_taxable_wages: 2_200, social_security_taxable_tips: nil)
+      pay(Date.new(2026, 5, 8), social_security_taxable_wages: 1_800, social_security_taxable_tips: nil)
+    end
+
+    def w2_report(box3:, box7:, employees: [])
+      { employees: employees, totals: {
+        box3_social_security_wages: box3, box7_social_security_tips: box7, box5_medicare_wages_tips: 4_000.0,
+        box4_social_security_tax_withheld: 248.0, box6_medicare_tax_withheld: 58.0, box2_federal_income_tax_withheld: 300.0
+      } }
+    end
+
+    it "still blocks and names each quarter" do
+      result = described_class.new(company: company, year: 2026, w2_report: w2_report(box3: 4_000.0, box7: 0.0)).call
+
+      wages = line(result, "social_security_wages")
+      expect(wages).to include(w2_total: 4_000.0, quarterly_total: 4_000.0, difference: 0.0, status: "mismatch")
+      expect(wages[:look_at].map { |target| target[:label] }).to eq([ "Q1 941", "Q2 941" ])
+      expect(wages[:message]).to eq(
+        "W-2 Box 3 (Social Security wages) matches the 941s in total, but the Q1 941 is $200.00 less than Q1 payroll records " \
+        "and the Q2 941 is $200.00 more than Q2 payroll records. Correct the quarters the wages were reported in. Look at the Q1 941 and Q2 941."
+      )
+      expect(result[:status]).to eq("mismatch")
+      expect(result[:blockers]).to include(a_hash_including(code: "RECONCILIATION_MISMATCH", line: "social_security_wages", message: wages[:message]))
+    end
+
+    it "is not hidden by an explained wage/tip split" do
+      employees = [ { box3_social_security_wages: 3_900.0, box7_social_security_tips: 100.0, missing_committed_tax_bases: true, reported_tips_total: 100.0 } ]
+
+      result = described_class.new(company: company, year: 2026, w2_report: w2_report(box3: 3_900.0, box7: 100.0, employees: employees)).call
+
+      expect(line(result, "social_security_wages")).to include(status: "mismatch", note: nil)
+      expect(line(result, "social_security_tips")[:status]).to eq("mismatch")
+      expect(result[:blockers].map { |blocker| blocker[:line] }).to include("social_security_wages", "social_security_tips")
+    end
+  end
+
   it "names the W-2GU report when every quarter agrees with its payroll records" do
     pay(Date.new(2026, 2, 6))
     w2_report = { totals: {
@@ -152,6 +193,23 @@ RSpec.describe YearEnd::Reconciliation do
       expect(line(result, "social_security_wages")).to include(w2_total: 184_500.0, quarterly_total: 179_500.0, difference: 5_000.0, status: "explained")
       expect(line(result, "social_security_tips")).to include(w2_total: 0.0, quarterly_total: 5_000.0, difference: -5_000.0, status: "explained")
       expect(line(result, "social_security_wages")[:note]).to include("Box 3 + Box 7 equals lines 5a + 5b")
+    end
+
+    it "explains a quarter whose 941 caps a legacy employee at the wage base" do
+      [ Date.new(2026, 2, 6), Date.new(2026, 5, 8) ].each do |pay_date|
+        pay(pay_date, gross_pay: 100_000,
+          social_security_taxable_wages: nil, social_security_taxable_tips: nil, medicare_taxable_wages: nil,
+          social_security_tax: 6_200, employer_social_security_tax: 6_200, medicare_tax: 1_450, employer_medicare_tax: 1_450)
+      end
+      w2 = W2GuAggregator.new(company, 2026).generate
+
+      result = described_class.new(company: company, year: 2026, w2_report: w2).call
+
+      wages = line(result, "social_security_wages")
+      expect(wages).to include(w2_total: 184_500.0, quarterly_total: 184_500.0, difference: 0.0, status: "explained")
+      expect(wages[:quarters][1]).to include(amount: 84_500.0, payroll_records: 100_000.0)
+      expect(wages[:note]).to include("Q2 941 caps legacy paychecks at the Social Security wage base")
+      expect(result[:blockers].map { |blocker| blocker[:line] }).not_to include("social_security_wages", "social_security_tips")
     end
 
     it "still blocks a wage/tip split that is not explained by employees at the wage base" do

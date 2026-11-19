@@ -63,8 +63,11 @@ module YearEnd
       quarter_values = QUARTERS.index_with { |quarter| filed_quarter_values(quarter) }
       record_values = payroll_record_values
       opening = opening_balance_values
-      lines = LINES.map { |line| line_payload(line, quarter_values, record_values, opening) }
+      lines = LINES.map { |line| line_values(line, quarter_values, record_values, opening) }
+      explain_capped_legacy_quarters(lines)
+      lines.each { |line| line[:status] = line[:difference].abs > TOLERANCE || line[:quarter_mismatches].any? ? "mismatch" : "match" }
       explain_wage_base_split(lines)
+      lines.each { |line| describe_line(line) }
       mismatched = lines.select { |line| line[:status] == "mismatch" }
       reviews = form_941_reviews
       unexplained = reviews.select { |review| review[:status] == "unexplained" }
@@ -78,7 +81,7 @@ module YearEnd
           first_pay_date: opening[:first_pay_date]&.iso8601,
           last_pay_date: opening[:last_pay_date]&.iso8601
         },
-        lines: lines,
+        lines: lines.map { |line| line_payload(line) },
         form_941_reviews: reviews,
         blockers: mismatched.map { |line| { code: "RECONCILIATION_MISMATCH", line: line[:key], message: line[:message] } } +
           unexplained.map { |review| { code: "FORM_941_WITHHOLDING_MISMATCH", line: nil, quarter: review[:quarter], message: review[:message] } }
@@ -252,19 +255,46 @@ module YearEnd
     # 941s apply it paycheck by paycheck. For an employee who reaches the base
     # with tips (or has legacy tipped rows), the two splits differ while the
     # Social Security total is the same. That shift is bounded by those
-    # employees' tips.
+    # employees' tips. It is an annual difference only: a quarter whose 941
+    # differs from its own payroll records is never explained by it.
     def explain_wage_base_split(lines)
       wages = lines.find { |line| line[:key] == "social_security_wages" }
       tips = lines.find { |line| line[:key] == "social_security_tips" }
       return unless wages[:status] == "mismatch" && tips[:status] == "mismatch"
+      return if [ wages, tips ].any? { |line| line[:quarter_mismatches].any? }
 
-      shift = decimal(wages[:difference])
-      return if (shift + decimal(tips[:difference])).abs > TOLERANCE || shift.abs > split_allowance + TOLERANCE
+      shift = wages[:difference]
+      return if (shift + tips[:difference]).abs > TOLERANCE || shift.abs > split_allowance + TOLERANCE
 
       note = "Box 3 and Box 7 split Social Security wages and tips differently from lines 5a and 5b by #{money(shift.abs)}, " \
              "because the W-2 applies the wage base to wages first. Box 3 + Box 7 equals lines 5a + 5b."
       [ wages, tips ].each do |line|
-        line.merge!(status: "explained", look_at: [], message: nil, note: note)
+        line.merge!(status: "explained", note: note)
+      end
+    end
+
+    # Legacy paychecks (no stored Social Security bases) are capped at the
+    # wage base paycheck by paycheck on the 941, but their payroll records here
+    # are not capped. A quarter whose 941 is lower than its records by no more
+    # than those employees' wages and tips over the base is explained. A
+    # quarter whose 941 is higher, or lower by more, still blocks.
+    def explain_capped_legacy_quarters(lines)
+      ss_lines = lines.select { |line| line[:key].in?(%w[social_security_wages social_security_tips]) }
+      shortfalls = ss_lines.flat_map { |line| line[:quarter_mismatches] }
+      return if shortfalls.empty? || shortfalls.any? { |quarter| quarter[:difference].positive? }
+      return if shortfalls.sum(0.to_d) { |quarter| quarter[:difference].abs } > legacy_excess_over_base + TOLERANCE
+
+      ss_lines.each do |line|
+        line[:capped_quarters] = line[:quarter_mismatches]
+        line[:quarter_mismatches] = []
+      end
+    end
+
+    def legacy_excess_over_base
+      Array(w2_report[:employees]).sum(0.to_d) do |row|
+        next 0.to_d unless row[:missing_committed_tax_bases]
+
+        [ decimal(row[:box5_medicare_wages_tips]) - decimal(row[:box3_social_security_wages]) - decimal(row[:box7_social_security_tips]), 0.to_d ].max
       end
     end
 
@@ -328,45 +358,69 @@ module YearEnd
         .index_by(&:quarter)
     end
 
-    def line_payload(line, quarter_values, record_values, opening)
+    # One line's amounts, kept as BigDecimal until line_payload. A line
+    # blocks when the W-2 total differs from the quarters and opening balances,
+    # or when any quarter's return differs from that quarter's payroll records,
+    # even if those quarter differences cancel over the year.
+    def line_values(line, quarter_values, record_values, opening)
       key = line[:key]
-      w2_total = decimal(w2_report.dig(:totals, line[:w2_total]))
+      w2_total = decimal(w2_report.dig(:totals, line[:w2_total])).round(2)
       opening_total = opening[:totals][key].round(2)
       quarters = QUARTERS.map do |quarter|
         filed = quarter_values[quarter][key].round(2)
         records = record_values[quarter][key].round(2)
-        { quarter: quarter, amount: filed.to_f, payroll_records: records.to_f, difference: (filed - records).round(2).to_f }
+        { quarter: quarter, amount: filed, payroll_records: records, difference: filed - records }
       end
-      quarterly_total = quarters.sum(0.to_d) { |quarter| decimal(quarter[:amount]) }.round(2)
-      records_total = quarters.sum(0.to_d) { |quarter| decimal(quarter[:payroll_records]) }.round(2)
-      difference = (w2_total - quarterly_total - opening_total).round(2)
-      w2_side_difference = (w2_total - records_total - opening_total).round(2)
-      mismatch = difference.abs > TOLERANCE
-      look_at = mismatch ? look_at_for(quarters, w2_side_difference, line) : []
-
+      quarterly_total = quarters.sum(0.to_d) { |quarter| quarter[:amount] }
+      records_total = quarters.sum(0.to_d) { |quarter| quarter[:payroll_records] }
+      difference = w2_total - quarterly_total - opening_total
+      w2_side_difference = w2_total - records_total - opening_total
       {
         key: key,
         label: line[:label],
         w2_box: line[:w2_box],
         source: line[:source],
         source_label: line[:source_label],
-        w2_total: w2_total.to_f,
+        w2_total: w2_total,
         quarters: quarters,
-        quarterly_total: quarterly_total.to_f,
-        opening_balances: opening_total.to_f,
-        difference: difference.to_f,
-        status: mismatch ? "mismatch" : "match",
-        look_at: look_at,
-        message: mismatch ? mismatch_message(line, difference, look_at) : nil,
+        quarterly_total: quarterly_total,
+        opening_balances: opening_total,
+        difference: difference,
+        w2_side_difference: w2_side_difference,
+        quarter_mismatches: quarters.select { |quarter| quarter[:difference].abs > TOLERANCE },
+        capped_quarters: [],
+        status: nil,
+        look_at: [],
+        message: nil,
         note: nil
       }
     end
 
-    def look_at_for(quarters, w2_side_difference, line)
-      source = line[:source] == "w1" ? "W-1" : "941"
-      targets = quarters.filter_map do |quarter|
-        next unless decimal(quarter[:difference]).abs > TOLERANCE
+    def describe_line(line)
+      if line[:status] == "mismatch"
+        line[:look_at] = look_at_for(line[:quarter_mismatches], line[:w2_side_difference], line)
+        line[:message] = mismatch_message(line, line[:difference], line[:quarter_mismatches], line[:look_at])
+      elsif line[:capped_quarters].any?
+        quarters = line[:capped_quarters].map { |quarter| "Q#{quarter[:quarter]}" }.to_sentence
+        capped = "The #{quarters} 941#{'s' if line[:capped_quarters].length > 1} cap#{'s' if line[:capped_quarters].length == 1} legacy paychecks " \
+                 "at the Social Security wage base, so #{line[:capped_quarters].length > 1 ? 'they are' : 'it is'} lower than the uncapped payroll records."
+        line.merge!(status: "explained", note: [ line[:note], capped ].compact.join(" "))
+      end
+    end
 
+    def line_payload(line)
+      line.except(:quarter_mismatches, :capped_quarters, :w2_side_difference).merge(
+        w2_total: line[:w2_total].to_f,
+        quarters: line[:quarters].map { |quarter| quarter.merge(amount: quarter[:amount].to_f, payroll_records: quarter[:payroll_records].to_f, difference: quarter[:difference].to_f) },
+        quarterly_total: line[:quarterly_total].to_f,
+        opening_balances: line[:opening_balances].to_f,
+        difference: line[:difference].to_f
+      )
+    end
+
+    def look_at_for(quarter_mismatches, w2_side_difference, line)
+      source = line[:source] == "w1" ? "W-1" : "941"
+      targets = quarter_mismatches.map do |quarter|
         {
           kind: "quarter",
           quarter: quarter[:quarter],
@@ -384,11 +438,20 @@ module YearEnd
       targets.presence || [ { kind: "w2_report", label: "W-2GU report and quarterly returns", detail: "Compare the W-2GU employee rows with each quarter's return." } ]
     end
 
-    def mismatch_message(line, difference, look_at)
+    def mismatch_message(line, difference, quarter_mismatches, look_at)
       returns = line[:source] == "w1" ? "W-1s" : "941s"
-      direction = difference.positive? ? "more" : "less"
       places = look_at.map { |target| target[:label] }.to_sentence
-      "W-2 #{line[:w2_box]} (#{line[:label]}) is #{money(difference.abs)} #{direction} than the #{returns} and opening balances. Look at the #{places}."
+      if difference.abs > TOLERANCE
+        direction = difference.positive? ? "more" : "less"
+        return "W-2 #{line[:w2_box]} (#{line[:label]}) is #{money(difference.abs)} #{direction} than the #{returns} and opening balances. Look at the #{places}."
+      end
+
+      source = line[:source] == "w1" ? "W-1" : "941"
+      quarters = quarter_mismatches.map do |quarter|
+        "the Q#{quarter[:quarter]} #{source} is #{money(quarter[:difference].abs)} #{quarter[:difference].positive? ? 'more' : 'less'} than Q#{quarter[:quarter]} payroll records"
+      end
+      "W-2 #{line[:w2_box]} (#{line[:label]}) matches the #{returns} in total, but #{quarters.to_sentence}. " \
+        "Correct the quarter#{'s' if quarter_mismatches.length > 1} the wages were reported in. Look at the #{places}."
     end
 
     def unavailable(message)

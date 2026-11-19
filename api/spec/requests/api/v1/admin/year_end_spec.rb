@@ -320,7 +320,61 @@ RSpec.describe "Year-end checklist", type: :request do
       mark_ready
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["year_end_blockers"].map { |blocker| blocker["code"] }).to include("W2_FILER_NOT_CHOSEN", "FORM_1099_FILER_NOT_CHOSEN")
+      codes = response.parsed_body["year_end_blockers"].map { |blocker| blocker["code"] }
+      expect(codes).to include("W2_FILER_NOT_CHOSEN")
+      expect(codes).not_to include("FORM_1099_FILER_NOT_CHOSEN")
+    end
+
+    context "with the W-2 decision recorded and no 1099 decision" do
+      before do
+        pay(company, Date.new(2026, 3, 6), worker: employee)
+        record_decision(filing_types: %w[w2_gu], party: "cornerstone")
+      end
+
+      it "marks the W-2s ready and keeps the 1099 decision on the checklist" do
+        mark_ready
+
+        expect(response).to have_http_status(:ok), response.body
+        expect(response.parsed_body.dig("filing", "status")).to eq("filing_ready")
+        decision = checklist_step("filing_decision")
+        expect(decision["issues"].map { |issue| issue["code"] }).to eq(%w[FORM_1099_FILER_NOT_CHOSEN])
+        expect(checklist_step("reconciliation")["status"]).to eq("done")
+        expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
+      end
+
+      it "still runs the W-2 checks and blocks on a real W-2 problem" do
+        company.update_columns(phone: nil)
+
+        mark_ready
+
+        expect(response).to have_http_status(:unprocessable_entity), response.body
+        expect(response.parsed_body["year_end_blockers"].map { |blocker| blocker["code"] }).to eq(%w[EMPLOYER_PHONE_MISSING])
+        expect(W2FilingReadiness.find_by!(company: company, year: 2026).status).not_to eq("filing_ready")
+
+        get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+        checklist_count = response.parsed_body.dig("data", "issue_count")
+        get "/api/v1/admin/year_end/clients", params: { year: 2026 }
+        row = response.parsed_body.dig("data", "clients").find { |entry| entry["company_id"] == company.id }
+        expect(row["issue_summary"].map { |issue| issue["code"] }).to contain_exactly("FILER_NOT_CHOSEN", "EMPLOYER_PHONE_MISSING", "W2_NOT_MARKED_READY")
+        expect(row["issue_count"]).to eq(checklist_count).and eq(3)
+      end
+    end
+
+    it "refuses to mark ready when the inputs change while the checklist is checked" do
+      pay(company, Date.new(2026, 3, 6), worker: employee)
+      record_decision(filing_types: %w[w2_gu form_1099], party: "cornerstone")
+      allow_any_instance_of(YearEnd::Checklist).to receive(:w2_mark_ready_blockers).and_wrap_original do |original|
+        blockers = original.call
+        # A paycheck committed outside the company lock mid-check.
+        pay(company, Date.new(2026, 4, 3), worker: employee)
+        blockers
+      end
+
+      mark_ready
+
+      expect(response).to have_http_status(:conflict), response.body
+      expect(response.parsed_body["error"]).to include("changed while the year-end checklist was checked")
+      expect(W2FilingReadiness.find_by!(company: company, year: 2026)).to have_attributes(status: be_present, ready_fingerprint: nil)
     end
 
     it "blocks a Social Security wage mismatch, names the quarter, and allows ready once the payroll is fixed" do
