@@ -4,7 +4,8 @@ class PayrollFilingResponsibilityRecorder
   MAX_ATTEMPTS = 2
 
   def initialize(company:, actor:, tax_year:, filing_types:, responsible_party:,
-                 imported_payroll_inclusion:, quarter: nil, source_cutoff_date: nil, notes: nil)
+                 imported_payroll_inclusion:, quarter: nil, source_cutoff_date: nil,
+                 prior_provider_through: nil, notes: nil)
     @company = company
     @actor = actor
     @tax_year = Integer(tax_year)
@@ -13,6 +14,7 @@ class PayrollFilingResponsibilityRecorder
     @responsible_party = responsible_party.to_s
     @imported_payroll_inclusion = imported_payroll_inclusion.to_s
     @source_cutoff_date = source_cutoff_date
+    @prior_provider_through = prior_provider_through
     @notes = notes
   end
 
@@ -33,7 +35,7 @@ class PayrollFilingResponsibilityRecorder
   private
 
   attr_reader :company, :actor, :tax_year, :quarter, :filing_types, :responsible_party,
-              :imported_payroll_inclusion, :source_cutoff_date, :notes
+              :imported_payroll_inclusion, :source_cutoff_date, :prior_provider_through, :notes
 
   def validate_filing_types!
     raise ArgumentError, "Select at least one filing type" if filing_types.empty?
@@ -41,7 +43,7 @@ class PayrollFilingResponsibilityRecorder
     unknown = filing_types - PayrollFilingResponsibility::FILING_TYPES
     raise ArgumentError, "Unknown filing type: #{unknown.join(', ')}" if unknown.any?
 
-    annual = filing_types & PayrollFilingResponsibility::ANNUAL_FILING_TYPES
+    annual = filing_types & PayrollFilingResponsibility::YEAR_END_FILING_TYPES
     quarterly = filing_types & PayrollFilingResponsibility::QUARTERLY_FILING_TYPES
     raise ArgumentError, "Annual and quarterly filing types must be reviewed separately" if annual.any? && quarterly.any?
     raise ArgumentError, "quarter must be blank for annual filings" if annual.any? && quarter.present?
@@ -70,6 +72,7 @@ class PayrollFilingResponsibilityRecorder
           responsible_party: responsible_party,
           imported_payroll_inclusion: imported_payroll_inclusion,
           source_cutoff_date: source_cutoff_date,
+          prior_provider_through: prior_provider_through,
           reviewed_by: actor,
           reviewed_by_name: actor.name,
           reviewed_by_email: actor.email,
@@ -109,6 +112,7 @@ class PayrollFilingResponsibilityRecorder
       responsible_party: record.responsible_party,
       imported_payroll_inclusion: record.imported_payroll_inclusion,
       source_cutoff_date: record.source_cutoff_date&.iso8601,
+      prior_provider_through: record.prior_provider_through&.iso8601,
       reviewed_by_id: record.reviewed_by_id,
       reviewed_by_name: record.reviewed_by_name,
       reviewed_by_email: record.reviewed_by_email,

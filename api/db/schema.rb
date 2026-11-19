@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_17_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_19_120100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2723,6 +2723,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_190000) do
     t.string "filing_type", null: false
     t.string "imported_payroll_inclusion", null: false
     t.text "notes"
+    t.date "prior_provider_through"
     t.integer "quarter"
     t.string "responsible_party", null: false
     t.datetime "reviewed_at", null: false
@@ -2737,10 +2738,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_190000) do
     t.index [ "company_id", "tax_year", "quarter", "filing_type" ], name: "idx_payroll_filing_responsibilities_quarterly", unique: true, where: "(quarter IS NOT NULL)"
     t.index [ "company_id" ], name: "index_payroll_filing_responsibilities_on_company_id"
     t.index [ "reviewed_by_id" ], name: "index_payroll_filing_responsibilities_on_reviewed_by_id"
-    t.check_constraint "filing_type::text = 'w2_gu'::text AND quarter IS NULL OR (filing_type::text = ANY (ARRAY['form_941'::character varying::text, 'guam_withholding'::character varying::text, 'swica'::character varying::text])) AND quarter >= 1 AND quarter <= 4", name: "payroll_filing_responsibilities_period_check"
-    t.check_constraint "filing_type::text = ANY (ARRAY['form_941'::character varying::text, 'guam_withholding'::character varying::text, 'swica'::character varying::text, 'w2_gu'::character varying::text])", name: "payroll_filing_responsibilities_type_check"
+    t.check_constraint "(filing_type::text = ANY (ARRAY['w2_gu'::character varying::text, 'form_1099'::character varying::text])) AND quarter IS NULL OR (filing_type::text = ANY (ARRAY['form_941'::character varying::text, 'guam_withholding'::character varying::text, 'swica'::character varying::text])) AND quarter >= 1 AND quarter <= 4", name: "payroll_filing_responsibilities_period_check"
+    t.check_constraint "filing_type::text = ANY (ARRAY['form_941'::character varying::text, 'guam_withholding'::character varying::text, 'swica'::character varying::text, 'w2_gu'::character varying::text, 'form_1099'::character varying::text])", name: "payroll_filing_responsibilities_type_check"
     t.check_constraint "imported_payroll_inclusion::text = ANY (ARRAY['included'::character varying::text, 'excluded'::character varying::text])", name: "payroll_filing_responsibilities_inclusion_check"
-    t.check_constraint "responsible_party::text = ANY (ARRAY['external_provider'::character varying::text, 'cornerstone'::character varying::text])", name: "payroll_filing_responsibilities_party_check"
+    t.check_constraint "prior_provider_through IS NULL OR (filing_type::text = ANY (ARRAY['w2_gu'::character varying::text, 'form_1099'::character varying::text])) AND responsible_party::text = 'cornerstone'::text", name: "payroll_filing_responsibilities_prior_provider_check"
+    t.check_constraint "responsible_party::text = ANY (ARRAY['external_provider'::character varying::text, 'cornerstone'::character varying::text, 'client'::character varying::text, 'no_filing'::character varying::text])", name: "payroll_filing_responsibilities_party_check"
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "payroll_filing_responsibilities_year_check"
   end
 
@@ -4519,6 +4521,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_190000) do
     t.index [ "marked_ready_by_id" ], name: "index_w2_filing_readinesses_on_marked_ready_by_id"
   end
 
+  create_table "year_end_acknowledgements", force: :cascade do |t|
+    t.datetime "acknowledged_at", null: false
+    t.string "acknowledged_by_email", null: false
+    t.bigint "acknowledged_by_id"
+    t.string "acknowledged_by_name", null: false
+    t.string "acknowledged_by_role", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.text "note", null: false
+    t.integer "tax_year", null: false
+    t.datetime "updated_at", null: false
+    t.string "warning_code", null: false
+    t.string "warning_digest", null: false
+    t.index [ "acknowledged_by_id" ], name: "index_year_end_acknowledgements_on_acknowledged_by_id"
+    t.index [ "company_id", "tax_year", "warning_code" ], name: "idx_year_end_acknowledgements_unique_warning", unique: true
+    t.index [ "company_id" ], name: "index_year_end_acknowledgements_on_company_id"
+    t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "year_end_acknowledgements_year_check"
+  end
+
   add_foreign_key "payroll_standing_changes", "companies"
   add_foreign_key "payroll_standing_changes", "employee_wage_rates", on_delete: :nullify
   add_foreign_key "payroll_standing_changes", "employees"
@@ -5087,6 +5108,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_17_190000) do
   add_foreign_key "users", "users", column: "invited_by_id", on_delete: :nullify
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
+  add_foreign_key "year_end_acknowledgements", "companies"
+  add_foreign_key "year_end_acknowledgements", "users", column: "acknowledged_by_id", on_delete: :nullify
   add_foreign_key "aire_payroll_entry_acknowledgements", "time_tracking_financial_correction_links", column: "financial_correction_link_id", on_delete: :restrict
   add_foreign_key "payroll_items", "payroll_items", column: "financial_correction_origin_item_id", on_delete: :restrict
   add_foreign_key "time_tracking_financial_correction_links", "payroll_items", column: "predecessor_payroll_item_id", on_delete: :restrict
