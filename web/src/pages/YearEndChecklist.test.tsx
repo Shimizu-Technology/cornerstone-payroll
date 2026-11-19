@@ -76,7 +76,7 @@ function working(overrides: { reconciliation?: 'match' | 'mismatch'; warnings?: 
   return [
     decided,
     step('employer', 2, 'Employer details', 'done', { data: { name: 'Tumon Bakery', ein: '98-7654321', address_line1: '1 Marine Dr', city: 'Tamuning', state: 'GU', zip: '96913', phone: '671-555-0100', email: 'office@example.test' } }),
-    overrides.people ?? step('people', 3, 'Employees and payees', 'done', { data: { employees: [], contractors: [], w2_employee_count: 4, contractor_count: 0, contractor_error: null } }),
+    overrides.people ?? step('people', 3, 'Employees and payees', 'done', { data: { employees: [], contractors: [], one_off_payees: [], w2_employee_count: 4, contractor_count: 0, contractor_error: null } }),
     step('reconciliation', 4, 'Reconcile W-2s to the 941s and W-1s', recon === 'match' ? 'done' : 'action_needed', {
       issues: recon === 'match' ? [] : [{ code: 'RECONCILIATION_MISMATCH', line: 'social_security_wages', message: reconciliationLine('mismatch').message! }],
       data: { status: recon, tolerance: 0.01, quarters: [], opening_balances: { present: false, first_pay_date: null, last_pay_date: null }, lines: [reconciliationLine(recon)] },
@@ -197,10 +197,29 @@ describe('Year-end checklist', () => {
     expect(within(ready).queryByRole('button', { name: /Mark 2026 W-2s ready/ })).toBeNull();
   });
 
+  it('shows a wage-base split as matching in total and names a quarter whose 941 withholding is off', async () => {
+    const base = working({ reconciliation: 'match' });
+    const explained = { ...reconciliationLine('match'), w2_total: 184500, quarterly_total: 179500, difference: 5000, status: 'explained' as const,
+      note: 'Box 3 and Box 7 split Social Security wages and tips differently from lines 5a and 5b by $5,000.00, because the W-2 applies the wage base to wages first. Box 3 + Box 7 equals lines 5a + 5b.' };
+    const recon = step('reconciliation', 4, 'Reconcile W-2s to the 941s and W-1s', 'action_needed', {
+      issues: [{ code: 'FORM_941_WITHHOLDING_MISMATCH', line: null, quarter: 2, message: 'The Q2 941: employee Social Security and Medicare withheld is $124.00 less than the employee share of the quarter\'s wages.' }],
+      data: { status: 'mismatch', tolerance: 0.01, quarters: [], opening_balances: { present: false, first_pay_date: null, last_pay_date: null }, lines: [explained],
+        form_941_reviews: [{ quarter: 2, status: 'unexplained', employee_difference: -124, expected_employee_total: 153, recorded_employee_total: 29, recorded_liability_residual: 0, message: 'The Q2 941: employee Social Security and Medicare withheld is $124.00 less than the employee share of the quarter\'s wages.' }] },
+    });
+    mocks.checklist.mockResolvedValue(checklist(base.map((entry) => (entry.key === 'reconciliation' ? recon : entry))));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Reconcile W-2s/ });
+    expect(within(region).getAllByText('Matches in total').length).toBeGreaterThan(0);
+    expect(within(region).getAllByText(/Box 3 \+ Box 7 equals lines 5a \+ 5b/).length).toBeGreaterThan(0);
+    expect(within(within(region).getByRole('list', { name: '941 withholding problems' })).getByText(/The Q2 941: employee Social Security/)).toBeTruthy();
+  });
+
   it('fixes an address inline and links to the employee when the SSN is missing', async () => {
     const people = step('people', 3, 'Employees and payees', 'action_needed', {
       issues: [{ code: 'EMPLOYEE_DETAILS_MISSING', message: 'Ana Cruz is missing an address.', employee_id: 11 }, { code: 'EMPLOYEE_DETAILS_MISSING', message: 'Ben Reyes is missing an SSN.', employee_id: 12 }],
-      data: { w2_employee_count: 4, contractor_count: 0, contractor_error: null, contractors: [], employees: [
+      data: { w2_employee_count: 4, contractor_count: 0, contractor_error: null, contractors: [], one_off_payees: [], employees: [
         { employee_id: 11, name: 'Ana Cruz', kind: 'employee', missing_fields: ['address'], address_line1: null, address_line2: null, city: null, state: null, zip: null, edit_path: '' },
         { employee_id: 12, name: 'Ben Reyes', kind: 'employee', missing_fields: ['ssn'], address_line1: '1 Main', address_line2: null, city: 'Hagatna', state: 'GU', zip: '96910', edit_path: '' },
       ] },
@@ -220,6 +239,32 @@ describe('Year-end checklist', () => {
 
     await waitFor(() => expect(mocks.employeeUpdate).toHaveBeenCalledWith(11, { address_line1: '12 Chalan Santo Papa', address_line2: '', city: 'Hagatna', state: 'GU', zip: '96910' }, 7));
     expect(await screen.findByText("Saved Ana Cruz's address.")).toBeTruthy();
+  });
+
+  it('asks who a one-off 1099 payee is, links to the checks, and records the answer on this client', async () => {
+    const payee = {
+      code: 'one_off_payee:non_employee_check:41', payee_key: 'non_employee_check:41', name: 'Synthetic Roofing', total_compensation: 2500, payment_count: 2,
+      checks: [{ id: 41, check_number: '9001', payment_date: '2026-05-02', amount: 1500 }, { id: 42, check_number: '9002', payment_date: '2026-06-05', amount: 1000 }],
+      checks_path: '/checks-payments', digest: 'payee-digest', status: 'needs_identity' as const, acknowledgement: null, acknowledgement_stale: false,
+    };
+    const people = step('people', 3, 'Employees and payees', 'action_needed', {
+      issues: [{ code: 'PAYEE_IDENTITY_UNRESOLVED', message: 'Synthetic Roofing was paid $2,500.00 by checks 9001 and 9002 with no contractor record or TIN. Record who this payee is.', warning_code: payee.code }],
+      data: { w2_employee_count: 4, contractor_count: 0, contractor_error: null, employees: [], contractors: [], one_off_payees: [payee] },
+    });
+    mocks.checklist.mockResolvedValueOnce(checklist(working({ people }), { files_1099: true })).mockResolvedValue(checklist(working(), { files_1099: true }));
+    mocks.acknowledge.mockResolvedValue({ data: {} });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    expect(within(region).getByText('Identify this payee')).toBeTruthy();
+    expect(within(region).getByText(/#9001 on May 2, 2026, #9002/)).toBeTruthy();
+    expect(within(region).getByRole('link', { name: 'Open checks for Synthetic Roofing' }).getAttribute('href')).toBe('/checks-payments');
+    fireEvent.change(within(region).getByLabelText('Who is this payee, and where is their W-9 and TIN?'), { target: { value: 'Synthetic Roofing LLC; W-9 in the client folder.' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Record payee' }));
+
+    await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith({ tax_year: 2026, warning_code: payee.code, warning_digest: 'payee-digest', note: 'Synthetic Roofing LLC; W-9 in the client folder.' }, 7));
+    expect(await screen.findByText('Recorded who Synthetic Roofing is.')).toBeTruthy();
   });
 
   it('records a reviewed acknowledgement with a note, and shows a blocker as fix-first', async () => {

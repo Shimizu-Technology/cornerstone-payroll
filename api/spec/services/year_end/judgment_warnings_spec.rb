@@ -71,7 +71,7 @@ RSpec.describe YearEnd::JudgmentWarnings do
     let!(:item) do
       create(:payroll_item, company: company, employee: employee, pay_period: period, gross_pay: 2_000, net_pay: 1_600,
         overtime_hours: 4, qualified_overtime_compensation: nil, withholding_tax: 150, social_security_tax: 124, medicare_tax: 29,
-        social_security_taxable_wages: 2_000, social_security_taxable_tips: 0, medicare_taxable_wages: 2_000)
+        social_security_taxable_wages: 2_000, social_security_taxable_tips: 0, medicare_taxable_wages: 2_000, fit_taxable_wages: 2_000)
     end
 
     def live_warnings(**options)
@@ -89,7 +89,7 @@ RSpec.describe YearEnd::JudgmentWarnings do
       acknowledge("qualified_overtime_unreviewed", live_warnings.fetch("qualified_overtime_unreviewed")[:digest])
       expect(live_warnings.fetch("qualified_overtime_unreviewed")).to include(status: "reviewed")
 
-      item.update_columns(overtime_hours: 40, gross_pay: 3_000, social_security_taxable_wages: 3_000, medicare_taxable_wages: 3_000)
+      item.update_columns(overtime_hours: 40, gross_pay: 3_000, social_security_taxable_wages: 3_000, medicare_taxable_wages: 3_000, fit_taxable_wages: 3_000)
 
       expect(live_warnings.fetch("qualified_overtime_unreviewed")).to include(status: "needs_review", acknowledgement_stale: true)
     end

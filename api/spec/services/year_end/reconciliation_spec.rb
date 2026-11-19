@@ -15,7 +15,8 @@ RSpec.describe YearEnd::Reconciliation do
       gross_pay: 2_000, net_pay: 1_600, withholding_tax: 150,
       social_security_tax: 124, employer_social_security_tax: 124,
       medicare_tax: 29, employer_medicare_tax: 29,
-      social_security_taxable_wages: 2_000, social_security_taxable_tips: 0, medicare_taxable_wages: 2_000
+      social_security_taxable_wages: 2_000, social_security_taxable_tips: 0, medicare_taxable_wages: 2_000,
+      fit_taxable_wages: amounts.fetch(:gross_pay, 2_000)
     }.merge(amounts))
   end
 

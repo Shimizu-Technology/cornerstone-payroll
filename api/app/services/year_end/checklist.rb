@@ -216,6 +216,10 @@ module YearEnd
         issue("PAYEE_DETAILS_MISSING", "#{row[:name]} is missing #{row[:missing_fields].map { |field| field == 'ssn' ? 'a TIN' : 'an address' }.to_sentence}.",
               employee_id: row[:employee_id])
       end
+      payees = files?("form_1099") ? one_off_payees : []
+      issues += payees.reject { |payee| payee[:status] == "identified" }.map do |payee|
+        issue("PAYEE_IDENTITY_UNRESOLVED", one_off_payee_message(payee), warning_code: payee[:code])
+      end
       issues << issue("PAYEES_UNAVAILABLE", @contractor_error) if files?("form_1099") && !contractors_available?
 
       step(
@@ -224,6 +228,7 @@ module YearEnd
         data: {
           employees: employees,
           contractors: contractors,
+          one_off_payees: payees,
           w2_employee_count: files?("w2_gu") ? w2_employees.size : 0,
           contractor_count: files?("form_1099") && contractors_available? ? reportable_contractors.size : 0,
           contractor_error: @contractor_error
@@ -231,15 +236,34 @@ module YearEnd
       )
     end
 
-    def reportable_contractors
-      @reportable_contractors ||= begin
-        report = Form1099NecAggregator.new(company, year).generate
-        ids = Array(report[:reportable_contractors]).map { |row| row[:employee_id] }
-        Employee.where(company_id: company.id, id: ids).order(:last_name, :first_name, :id).to_a
+    def form_1099_rows
+      @form_1099_rows ||= begin
+        Array(Form1099NecAggregator.new(company, year).generate[:reportable_contractors])
       rescue ActiveRecord::RecordNotFound, ArgumentError => e
         @contractor_error = "1099 payees could not be loaded: #{e.message}"
         []
       end
+    end
+
+    def reportable_contractors
+      @reportable_contractors ||= begin
+        ids = form_1099_rows.filter_map { |row| row[:employee_id] }
+        Employee.where(company_id: company.id, id: ids).order(:last_name, :first_name, :id).to_a
+      end
+    end
+
+    # Reportable payees paid only by one-off contractor checks, with no
+    # contractor record to hold a TIN or address.
+    def one_off_payees
+      @one_off_payees ||= OneOffPayees.new(company: company, year: year, rows: form_1099_rows).call
+    end
+
+    def one_off_payee_message(payee)
+      numbers = payee[:checks].filter_map { |check| check[:check_number] }
+      checks = numbers.any? ? "check#{'s' if numbers.length > 1} #{numbers.to_sentence}" : "#{payee[:payment_count]} one-off check#{'s' unless payee[:payment_count] == 1}"
+      prefix = payee[:acknowledgement_stale] ? "The checks changed after #{payee[:name]} was identified. " : ""
+      "#{prefix}#{payee[:name]} was paid #{ActiveSupport::NumberHelper.number_to_currency(payee[:total_compensation])} by #{checks} " \
+        "with no contractor record or TIN. Record who this payee is."
     end
 
     def contractors_available?

@@ -18,7 +18,7 @@ module YearEnd
 
     def call
       PayrollFilingResponsibilityPolicy.authorize_record!(actor: actor, company: company)
-      definition = JudgmentWarnings::DEFINITIONS[warning_code]
+      definition = OneOffPayees.code?(warning_code) ? { kind: "acknowledge", title: "Identify a one-off 1099 payee" } : JudgmentWarnings::DEFINITIONS[warning_code]
       raise ArgumentError, "Unknown warning" unless definition
       raise ArgumentError, "This warning must be fixed, not acknowledged" unless definition[:kind] == "acknowledge"
       raise ArgumentError, "Say what you reviewed" if note.blank?
@@ -63,9 +63,16 @@ module YearEnd
     attr_reader :company, :actor, :tax_year, :warning_code, :warning_digest, :note
 
     def current_digests
+      return one_off_payee_digests if OneOffPayees.code?(warning_code)
+
       w2_report = W2GuAggregator.new(company, tax_year).generate
       reconciliation = Reconciliation.new(company: company, year: tax_year, w2_report: w2_report).call
       JudgmentWarnings.new(company: company, year: tax_year, w2_report: w2_report, reconciliation: reconciliation).digests
+    end
+
+    def one_off_payee_digests
+      rows = Form1099NecAggregator.new(company, tax_year).generate[:reportable_contractors]
+      OneOffPayees.new(company: company, year: tax_year, rows: rows).digests
     end
   end
 end

@@ -16,7 +16,8 @@ RSpec.describe YearEnd::Checklist do
       gross_pay: 2_000, net_pay: 1_600, withholding_tax: 150,
       social_security_tax: 124, employer_social_security_tax: 124,
       medicare_tax: 29, employer_medicare_tax: 29,
-      social_security_taxable_wages: 2_000, social_security_taxable_tips: 0, medicare_taxable_wages: 2_000
+      social_security_taxable_wages: 2_000, social_security_taxable_tips: 0, medicare_taxable_wages: 2_000,
+      fit_taxable_wages: amounts.fetch(:gross_pay, 2_000)
     }.merge(amounts))
   end
 
@@ -154,6 +155,98 @@ RSpec.describe YearEnd::Checklist do
 
     pay(Date.new(2026, 3, 6))
     expect(step(checklist, "prior_provider")[:issues]).to contain_exactly(a_hash_including(code: "PRIOR_PROVIDER_OVERLAP", source: "cornerstone_payroll"))
+  end
+
+  describe "one-off contractor payees" do
+    before { create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000) }
+
+    def contractor_check(amount, number)
+      create(:non_employee_check, company: company, check_type: "contractor", payable_to: "Synthetic Roofing", amount: amount,
+        check_number: number, payment_period_type: "none", tax_year: nil, tax_month: nil, payment_date: Date.new(2026, 5, 2), printed_at: Time.current)
+    end
+
+    def identify(payee, note: "Synthetic Roofing LLC, W-9 on file in the client folder; EIN on the W-9.")
+      YearEnd::AcknowledgementRecorder.new(company: company, actor: accountant, tax_year: 2026,
+        warning_code: payee[:code], warning_digest: payee[:digest], note: note).call
+    end
+
+    it "blocks the 1099s until staff record who the payee is, and again when the checks change" do
+      first = contractor_check(1_500, "9001")
+      second = contractor_check(1_000, "9002")
+      decide(w2: "client", form_1099: "cornerstone")
+
+      people = step(checklist, "people")
+      payee = people.dig(:data, :one_off_payees).sole
+      expect(payee).to include(name: "Synthetic Roofing", total_compensation: 2_500.0, status: "needs_identity", checks_path: "/checks-payments")
+      expect(payee[:checks].map { |check| check[:id] }).to eq([ first.id, second.id ])
+      expect(people[:issues]).to contain_exactly(a_hash_including(
+        code: "PAYEE_IDENTITY_UNRESOLVED", warning_code: payee[:code],
+        message: "Synthetic Roofing was paid $2,500.00 by checks 9001 and 9002 with no contractor record or TIN. Record who this payee is."
+      ))
+      expect(checklist[:status]).to eq("needs_action")
+
+      identify(payee)
+      result = checklist
+      expect(step(result, "people")).to include(status: "done", issues: [])
+      expect(step(result, "people").dig(:data, :one_off_payees, 0)).to include(status: "identified")
+      expect(AuditLog.where(action: "year_end_acknowledgements#recorded", company_id: company.id).count).to eq(1)
+
+      contractor_check(400, "9003")
+      issue = step(checklist, "people")[:issues].sole
+      expect(issue[:message]).to start_with("The checks changed after Synthetic Roofing was identified.")
+    end
+
+    it "refuses an identification made on checks that have since changed" do
+      contractor_check(2_500, "9001")
+      decide(w2: "client", form_1099: "cornerstone")
+      payee = step(checklist, "people").dig(:data, :one_off_payees).sole
+      contractor_check(100, "9002")
+
+      expect { identify(payee) }.to raise_error(YearEnd::AcknowledgementRecorder::StaleWarning)
+    end
+
+    it "does not hold up the W-2s" do
+      contractor_check(2_500, "9001")
+      pay(Date.new(2026, 3, 6))
+      decide(w2: "cornerstone", form_1099: "cornerstone")
+
+      result = checklist
+      expect(step(result, "people")[:issues].map { |issue| issue[:code] }).to eq(%w[PAYEE_IDENTITY_UNRESOLVED])
+      expect(step(result, "mark_ready").dig(:data, :can_mark_ready)).to be(true)
+    end
+  end
+
+  describe "W-2 flags from the year-end wage rebuild" do
+    it "blocks a paycheck that withheld FICA on a Section 125 benefit and asks for review of inconsistent FIT wages" do
+      pay(Date.new(2026, 3, 6))
+      decide
+      report = W2GuAggregator.new(company, 2026).generate
+      report[:employees].first.merge!(fica_withheld_on_section_125: true, inconsistent_fit_taxable_wages: true)
+      allow(W2GuAggregator).to receive(:new).and_return(instance_double(W2GuAggregator, generate: report))
+
+      warnings = step(checklist, "review_warnings")
+      by_code = warnings.dig(:data, :warnings).index_by { |warning| warning[:code] }
+      expect(by_code.fetch("fica_withheld_on_section_125")).to include(kind: "blocker", status: "blocked")
+      expect(by_code.fetch("fica_withheld_on_section_125")[:explanation]).to include("refund the employee", "941-X")
+      expect(by_code.fetch("inconsistent_fit_taxable_wages")).to include(kind: "acknowledge", status: "needs_review")
+      expect(warnings[:issues].map { |issue| [ issue[:code], issue[:warning_code] ] }).to include(
+        [ "JUDGMENT_WARNING_BLOCKING", "fica_withheld_on_section_125" ],
+        [ "JUDGMENT_WARNING_UNREVIEWED", "inconsistent_fit_taxable_wages" ]
+      )
+      expect(described_class.new(company: company, year: 2026).w2_mark_ready_blockers.map { |issue| issue[:warning_code] })
+        .to include("fica_withheld_on_section_125")
+    end
+
+    it "flags FICA withheld on a Section 125 benefit from a real paycheck" do
+      item = pay(Date.new(2026, 3, 6))
+      type = company.deduction_types.create!(name: "Section 125 health", category: "pre_tax", sub_category: "insurance")
+      # The paycheck's stored Medicare base still includes the $100 benefit.
+      item.payroll_item_deductions.create!(deduction_type: type, label: type.name, category: "pre_tax", amount: 100)
+      decide
+
+      codes = step(checklist, "review_warnings").dig(:data, :warnings).map { |warning| warning[:code] }
+      expect(codes).to include("fica_withheld_on_section_125")
+    end
   end
 
   it "is ready once every step is done and the W-2s are marked ready on the current numbers" do

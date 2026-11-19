@@ -256,7 +256,8 @@ module YearEnd
     def payee_issues(company)
       return [ { code: "PAYEES_UNAVAILABLE", label: "1099 payees could not be checked" } ] unless form_1099_threshold
 
-      Array.new(contractors_missing_details[company.id].to_i) { { code: "PAYEE_DETAILS_MISSING", label: "1099 payees missing a TIN or address" } }
+      Array.new(contractors_missing_details[company.id].to_i) { { code: "PAYEE_DETAILS_MISSING", label: "1099 payees missing a TIN or address" } } +
+        Array.new(unidentified_one_off_payees[company.id].to_i) { { code: "PAYEE_IDENTITY_UNRESOLVED", label: "One-off 1099 payees to identify" } }
     end
 
     def form_1099_company_ids
@@ -287,6 +288,34 @@ module YearEnd
           missing_tin = !(employee.valid_filing_ssn? || employee.contractor_ein.present?)
           missing_address = [ employee.address_line1, employee.city, employee.state, employee.zip ].any?(&:blank?)
           counts[employee.company_id] += 1 if missing_tin || missing_address
+        end
+      end
+    end
+
+    # Form1099NecAggregator's one-off contractor payees (printed or paid
+    # contractor checks, grouped by exact payee name) that reach the
+    # threshold and have no current identification on record.
+    def unidentified_one_off_payees
+      @unidentified_one_off_payees ||= begin
+        if form_1099_company_ids.empty? || form_1099_threshold.nil?
+          {}
+        else
+          checks = NonEmployeeCheck.active.where(company_id: form_1099_company_ids, check_type: "contractor")
+            .where(payment_date: year_range).or(NonEmployeeCheck.active.where(company_id: form_1099_company_ids, check_type: "contractor", payment_date: nil))
+            .includes(:pay_period).to_a
+            .select { |check| (check.printed_at.present? || check.paid_at.present?) && year_range.cover?(check.effective_payment_date) }
+          acknowledgements = YearEndAcknowledgement.where(company_id: form_1099_company_ids, tax_year: year)
+            .where("warning_code LIKE ?", "#{OneOffPayees::CODE_PREFIX}%").pluck(:company_id, :warning_code, :warning_digest)
+            .to_h { |company_id, code, digest| [ [ company_id, code ], digest ] }
+          checks.group_by { |check| [ check.company_id, check.payable_to ] }.each_with_object(Hash.new(0)) do |((company_id, name), payments), counts|
+            total = payments.sum(0.to_d, &:amount).round(2)
+            next if total < form_1099_threshold
+
+            ids = payments.map(&:id)
+            code = OneOffPayees.code_for("non_employee_check:#{ids.min}")
+            digest = OneOffPayees.digest_for(code, check_ids: ids, total: total, name: name)
+            counts[company_id] += 1 unless acknowledgements[[ company_id, code ]] == digest
+          end
         end
       end
     end
