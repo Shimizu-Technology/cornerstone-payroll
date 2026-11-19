@@ -30,6 +30,8 @@ RSpec.describe W2GuAggregator, "year-end taxable wages" do
     expect(row).to include(box1_wages_tips_other_comp: 1000, box3_social_security_wages: 900,
       box5_medicare_wages_tips: 1100, box7_social_security_tips: 200, non_taxable_total: 75)
     expect(item.reload.attributes).to eq(snapshot)
+    expect(row).to include(fica_withheld_on_section_125: true)
+    expect(described_class.new(company, 2026).generate[:compliance_issues].join).to include("941-X")
     expect(W2GuWageImpact.new(company, 2026).generate).to eq(
       box1: [ 1100, 1000, -100 ], box3: [ 1000, 900, -100 ], box5: [ 1200, 1100, -100 ])
   end
@@ -62,6 +64,13 @@ RSpec.describe W2GuAggregator, "year-end taxable wages" do
       label: "Section 125 health", category: "pre_tax", amount: -10)
     expect(row).to include(box1_wages_tips_other_comp: 990, box3_social_security_wages: 810,
       box5_medicare_wages_tips: 990, box7_social_security_tips: 180)
+  end
+
+  it "does not flag FICA on benefits when the paycheck already excluded them" do
+    item = item_for(gross_pay: 1000, fit_taxable_wages: 900, social_security_taxable_wages: 900,
+      social_security_taxable_tips: 0, medicare_taxable_wages: 900)
+    health_deduction(item, 100)
+    expect(row).to include(box3_social_security_wages: 900, box5_medicare_wages_tips: 900, fica_withheld_on_section_125: false)
   end
 
   it "rejects inconsistent saved FIT wages without changing the paid payroll" do

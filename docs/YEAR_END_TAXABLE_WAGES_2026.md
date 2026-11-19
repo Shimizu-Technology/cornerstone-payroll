@@ -59,3 +59,9 @@ Agent-executed affected-flow QA on this isolated branch, using synthetic data on
 Browser evidence is local to the retained worktree under `.codex-qa/year-end/{chromium,webkit}-{375,1440}.png`. Browser resizing covers web layout, not physical mobile hardware. No native-device behavior changed. All created browsers/tabs and API/Vite servers were stopped after QA.
 
 Frontend gate: `npm ci` and `DEPLOYMENT_ENV=production VITE_DEPLOYMENT_ENV=production npm run gate` passed (201 files, 2,010 tests, typecheck, lint, production build). Impeccable 4.6.0 advisory scan of `web/src/pages/Reports.tsx` returned `[]`. Full backend suite on ASUS was attempted but SSH to the runner timed out; full-suite execution remains for CI/lead. RuboCop and Brakeman passed with zero security warnings. The exact final affected-spec count is recorded in the PR body and handoff.
+
+## Follow-up: Section 125 and FICA in the paycheck calculation
+
+`PayrollCalculator` feeds unreduced gross into Social Security and Medicare, so a Section 125 benefit would be taxed for FICA on the paycheck even though it is exempt. No live 2026 payroll has a Section 125 deduction (production check, Nov 19: the only live pre-tax deductions are 401(k)), so no paycheck is affected yet. QuickBooks-era opening balances keep their own stored Social Security and Medicare wages, which match what was taxed then.
+
+Until the calculator is fixed, any W-2 for an employee whose paycheck withheld FICA on a Section 125 benefit is flagged (`fica_withheld_on_section_125`, with a compliance issue that tells staff to refund the employee and file a 941-X before filing). Fix the calculator before any client adds a Section 125 deduction.
