@@ -2742,7 +2742,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_19_120100) do
     t.check_constraint "filing_type::text = ANY (ARRAY['form_941'::character varying::text, 'guam_withholding'::character varying::text, 'swica'::character varying::text, 'w2_gu'::character varying::text, 'form_1099'::character varying::text])", name: "payroll_filing_responsibilities_type_check"
     t.check_constraint "imported_payroll_inclusion::text = ANY (ARRAY['included'::character varying::text, 'excluded'::character varying::text])", name: "payroll_filing_responsibilities_inclusion_check"
     t.check_constraint "prior_provider_through IS NULL OR (filing_type::text = ANY (ARRAY['w2_gu'::character varying::text, 'form_1099'::character varying::text])) AND responsible_party::text = 'cornerstone'::text", name: "payroll_filing_responsibilities_prior_provider_check"
-    t.check_constraint "responsible_party::text = ANY (ARRAY['external_provider'::character varying::text, 'cornerstone'::character varying::text, 'client'::character varying::text, 'no_filing'::character varying::text])", name: "payroll_filing_responsibilities_party_check"
+    t.check_constraint "(responsible_party::text = ANY (ARRAY['external_provider'::character varying, 'cornerstone'::character varying]::text[])) OR (responsible_party::text = ANY (ARRAY['client'::character varying, 'no_filing'::character varying]::text[])) AND (filing_type::text = ANY (ARRAY['w2_gu'::character varying, 'form_1099'::character varying]::text[]))", name: "payroll_filing_responsibilities_party_check"
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "payroll_filing_responsibilities_year_check"
   end
 

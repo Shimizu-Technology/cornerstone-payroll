@@ -20,8 +20,13 @@ class AddYearEndFilingResponsibilityOptions < ActiveRecord::Migration[8.1]
                            (filing_type IN ('form_941', 'guam_withholding', 'swica') AND quarter BETWEEN 1 AND 4)
                          SQL
                          name: "payroll_filing_responsibilities_period_check"
+    # The client and no-filing parties are year-end (W-2GU and 1099) answers only.
     add_check_constraint :payroll_filing_responsibilities,
-                         "responsible_party IN ('external_provider', 'cornerstone', 'client', 'no_filing')",
+                         <<~SQL.squish,
+                           responsible_party IN ('external_provider', 'cornerstone')
+                           OR
+                           (responsible_party IN ('client', 'no_filing') AND filing_type IN ('w2_gu', 'form_1099'))
+                         SQL
                          name: "payroll_filing_responsibilities_party_check"
     add_check_constraint :payroll_filing_responsibilities,
                          "prior_provider_through IS NULL OR (filing_type IN ('w2_gu', 'form_1099') AND responsible_party = 'cornerstone')",

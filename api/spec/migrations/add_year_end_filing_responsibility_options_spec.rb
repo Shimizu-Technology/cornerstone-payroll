@@ -28,6 +28,13 @@ RSpec.describe AddYearEndFilingResponsibilityOptions do
     expect { migration.down }.to raise_error(ActiveRecord::IrreversibleMigration)
   end
 
+  it "allows the client and no-filing parties only on year-end rows" do
+    expect { record(filing_type: "form_1099", responsible_party: "client") }.not_to raise_error
+    quarterly = create(:payroll_filing_responsibility, company: company, filing_type: "form_941", quarter: 1)
+
+    expect { quarterly.update_columns(responsible_party: "client") }.to raise_error(ActiveRecord::StatementInvalid, /party_check/)
+  end
+
   it "rolls back and reapplies when only original options are in use" do
     record
 
