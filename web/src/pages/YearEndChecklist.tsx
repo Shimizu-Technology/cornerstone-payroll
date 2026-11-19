@@ -17,14 +17,15 @@ import { IssueList, StepCard } from '@/components/year-end/StepCard';
 import { yearEndApi } from '@/services/api';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { yearEndPath } from '@/lib/routes';
-import { clientStatusLabel, parseYearEndTaxYear, yearEndTaxYears, type YearEndChecklist as Checklist, type YearEndStep } from '@/lib/year-end';
+import { clientStatusLabel, isActiveStep, parseYearEndTaxYear, yearEndTaxYears, type YearEndChecklist as Checklist, type YearEndStep } from '@/lib/year-end';
 
 function stepBody(checklist: Checklist, step: YearEndStep, onSaved: (message: string) => Promise<void>): ReactElement | null {
+  if (!isActiveStep(step)) return null;
   switch (step.key) {
     case 'filing_decision': return <FilingDecisionStep checklist={checklist} step={step} onSaved={onSaved} />;
     case 'employer': return <EmployerStep checklist={checklist} step={step} onSaved={onSaved} />;
     case 'people': return <PeopleStep checklist={checklist} step={step} onSaved={onSaved} />;
-    case 'reconciliation': return <ReconciliationStep step={step} />;
+    case 'reconciliation': return <ReconciliationStep step={step} taxYear={checklist.tax_year} />;
     case 'review_warnings': return <ReviewWarningsStep checklist={checklist} step={step} onSaved={onSaved} />;
     case 'prior_provider':
       return step.issues.length > 0 ? (

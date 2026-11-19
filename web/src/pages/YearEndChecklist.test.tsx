@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { YearEndChecklist } from './YearEndChecklist';
-import type { YearEndChecklist as Checklist, YearEndStep } from '@/lib/year-end';
+import type { ActiveYearEndStep, YearEndChecklist as Checklist, YearEndIssue, YearEndStep } from '@/lib/year-end';
 
 const mocks = vi.hoisted(() => ({
   checklist: vi.fn(), acknowledge: vi.fn(), updateResponsibility: vi.fn(), preflight: vi.fn(), markReady: vi.fn(),
@@ -27,7 +27,9 @@ vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany
 
 const permissions = { can_record_decision: true, can_acknowledge: true, can_mark_ready: true };
 
-function step(key: YearEndStep['key'], number: number, title: string, status: YearEndStep['status'], extra: Partial<YearEndStep> = {}): YearEndStep {
+// A step that ran must carry its full data, typed by key.
+function step<K extends YearEndStep['key']>(key: K, number: number, title: string, status: YearEndStep['status'],
+  extra: { issues?: YearEndIssue[]; data?: ActiveYearEndStep<K>['data'] } = {}): YearEndStep {
   return { key, number, title, status, summary: `${title} summary`, issues: [], data: {}, ...extra } as YearEndStep;
 }
 
@@ -75,7 +77,7 @@ function working(overrides: { reconciliation?: 'match' | 'mismatch'; warnings?: 
   const recon = overrides.reconciliation ?? 'match';
   return [
     decided,
-    step('employer', 2, 'Employer details', 'done', { data: { name: 'Tumon Bakery', ein: '98-7654321', address_line1: '1 Marine Dr', city: 'Tamuning', state: 'GU', zip: '96913', phone: '671-555-0100', email: 'office@example.test' } }),
+    step('employer', 2, 'Employer details', 'done', { data: { name: 'Tumon Bakery', ein: '98-7654321', address_line1: '1 Marine Dr', address_line2: null, city: 'Tamuning', state: 'GU', zip: '96913', phone: '671-555-0100', email: 'office@example.test' } }),
     overrides.people ?? step('people', 3, 'Employees and payees', 'done', { data: { employees: [], contractors: [], one_off_payees: [], w2_employee_count: 4, contractor_count: 0, contractor_error: null } }),
     step('reconciliation', 4, 'Reconcile W-2s to the 941s and W-1s', recon === 'match' ? 'done' : 'action_needed', {
       issues: recon === 'match' ? [] : [{ code: 'RECONCILIATION_MISMATCH', line: 'social_security_wages', message: reconciliationLine('mismatch').message! }],
@@ -197,6 +199,27 @@ describe('Year-end checklist', () => {
     expect(within(ready).queryByRole('button', { name: /Mark 2026 W-2s ready/ })).toBeNull();
   });
 
+  it('links each mismatch to the report for the checklist year and quarter, and W-1 lines to the W-1', async () => {
+    const steps = working({ reconciliation: 'mismatch' });
+    const w1Line = {
+      ...reconciliationLine('mismatch'), key: 'guam_income_tax', label: 'Guam income tax withheld', w2_box: 'Box 2', source: 'w1' as const, source_label: 'W-1 Guam withholding',
+      look_at: [{ kind: 'quarter' as const, quarter: 3, label: 'Q3 W-1', detail: 'The Q3 W-1 shows $100.00, but Q3 payroll records total $150.00.' }],
+    };
+    const recon = steps[3] as ActiveYearEndStep<'reconciliation'>;
+    steps[3] = { ...recon, data: { ...recon.data, lines: [...recon.data.lines, w1Line] } };
+    mocks.checklist.mockResolvedValue(checklist(steps));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Reconcile W-2s/ });
+    const form941 = within(region).getAllByRole('link', { name: 'Open the Q2 Form 941' });
+    expect(form941.length).toBeGreaterThan(0);
+    form941.forEach((link) => expect(link.getAttribute('href')).toBe('/reports?report=941-gu&year=2026&quarter=2'));
+    const w1 = within(region).getAllByRole('link', { name: 'Open the Q3 W-1' });
+    expect(w1.length).toBeGreaterThan(0);
+    w1.forEach((link) => expect(link.getAttribute('href')).toBe('/reports?report=quarterly-compliance-packet&year=2026&quarter=3'));
+  });
+
   it('shows a wage-base split as matching in total and names a quarter whose 941 withholding is off', async () => {
     const base = working({ reconciliation: 'match' });
     const explained = { ...reconciliationLine('match'), w2_total: 184500, quarterly_total: 179500, difference: 5000, status: 'explained' as const,
@@ -288,6 +311,27 @@ describe('Year-end checklist', () => {
     fireEvent.click(within(region).getByRole('button', { name: 'Mark reviewed' }));
 
     await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith({ tax_year: 2026, warning_code: 'qualified_overtime_unreviewed', warning_digest: 'abc', note: 'Salaried manager; not qualified overtime.' }, 7));
+  });
+
+  it('lets the reviewer save again when the reloaded warning still needs review', async () => {
+    const warnings = step('review_warnings', 5, 'Review warnings', 'action_needed', {
+      issues: [{ code: 'JUDGMENT_WARNING_UNREVIEWED', message: 'y', warning_code: 'qualified_overtime_unreviewed' }],
+      data: { warnings: [
+        { code: 'qualified_overtime_unreviewed', kind: 'acknowledge', title: 'Overtime without qualified-overtime amounts', explanation: 'Review the overtime.', status: 'needs_review', digest: 'abc', period: null, employees: [], acknowledgement: null, acknowledgement_stale: false },
+      ] },
+    });
+    mocks.checklist.mockResolvedValue(checklist(working({ warnings })));
+    mocks.acknowledge.mockResolvedValue({ data: {} });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Review warnings/ });
+    fireEvent.change(within(region).getByLabelText('What did you check and confirm?'), { target: { value: 'Checked the timesheets.' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Mark reviewed' }));
+    await waitFor(() => expect(mocks.checklist).toHaveBeenCalledTimes(2));
+
+    await waitFor(() => expect(within(screen.getByRole('region', { name: /Review warnings/ })).getByRole('button', { name: 'Mark reviewed' })).toHaveProperty('disabled', false));
+    expect(within(screen.getByRole('region', { name: /Review warnings/ })).getByLabelText('What did you check and confirm?')).toHaveProperty('disabled', false);
   });
 
   it('runs a fresh preflight, then marks ready on that fingerprint', async () => {

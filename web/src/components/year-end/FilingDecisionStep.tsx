@@ -4,10 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { reportsApi } from '@/services/api';
 import { cn } from '@/lib/utils';
-import type { YearEndChecklist, YearEndParty, YearEndStep } from '@/lib/year-end';
+import type { YearEndChecklist, YearEndParty, ActiveYearEndStep } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
 
-type DecisionStep = Extract<YearEndStep, { key: 'filing_decision' }>;
+type DecisionStep = ActiveYearEndStep<'filing_decision'>;
 type W2Choice = YearEndParty | 'cornerstone_after_prior_provider';
 
 interface Option<T extends string> {

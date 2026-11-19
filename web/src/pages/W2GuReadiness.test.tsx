@@ -51,6 +51,18 @@ describe('W-2 readiness recovery', () => {
     mocks.markReady.mockResolvedValue({ filing: readiness('filing_ready'), filing_gate: gate });
   });
 
+  it('opens the year a link names, and links the checklist only for a year it can show', async () => {
+    const year = new Date().getFullYear();
+    render(<MemoryRouter initialEntries={[`/reports?report=w2-gu&year=${year}`]}><PdfPreviewProvider><W2GuPanel /></PdfPreviewProvider></MemoryRouter>);
+    await waitFor(() => expect(mocks.readiness).toHaveBeenCalledWith(year));
+    expect(screen.getByRole('link', { name: `Open the ${year} year-end checklist` })).toHaveProperty('href', expect.stringContaining(`/companies/42/year-end?year=${year}`));
+    cleanup();
+
+    render(<MemoryRouter initialEntries={[`/reports?report=w2-gu&year=${year + 1}`]}><PdfPreviewProvider><W2GuPanel /></PdfPreviewProvider></MemoryRouter>);
+    await waitFor(() => expect(mocks.readiness).toHaveBeenCalledWith(year + 1));
+    expect(screen.queryByRole('link', { name: /year-end checklist/ })).toBeNull();
+  });
+
   it('keeps previous reviews visible and requires preflight before a new explicit attestation', async () => {
     renderPanel();
     expect(await screen.findByText('Review needed — inputs changed')).toBeTruthy();

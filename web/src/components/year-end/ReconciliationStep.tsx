@@ -4,9 +4,9 @@ import { Check } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import type { YearEndReconciliationLine, YearEndStep } from '@/lib/year-end';
+import { reconciliationTargetLink, type ActiveYearEndStep, type YearEndReconciliationLine } from '@/lib/year-end';
 
-type ReconciliationStepData = Extract<YearEndStep, { key: 'reconciliation' }>;
+type ReconciliationStepData = ActiveYearEndStep<'reconciliation'>;
 
 function LineStatus({ line }: { line: YearEndReconciliationLine }): ReactElement {
   if (line.status === 'match') return <Badge variant="success">Matches</Badge>;
@@ -19,23 +19,26 @@ function LineNote({ line }: { line: YearEndReconciliationLine }): ReactElement |
   return <p className="mt-2 text-sm text-neutral-700">{line.note}</p>;
 }
 
-function LookAt({ line }: { line: YearEndReconciliationLine }): ReactElement | null {
+function LookAt({ line, taxYear }: { line: YearEndReconciliationLine; taxYear: number }): ReactElement | null {
   if (line.status !== 'mismatch' || line.look_at.length === 0) return null;
   return (
     <ul className="mt-2 space-y-1 text-sm text-danger-800">
-      {line.look_at.map((target) => (
-        <li key={target.label}>
-          <span className="font-semibold">{target.label}:</span> {target.detail}{' '}
-          <Link to={target.kind === 'quarter' ? '/reports?report=941-gu' : '/reports?report=w2-gu'} className="inline-flex min-h-11 items-center font-semibold text-primary-700 underline xl:min-h-0">
-            Open {target.kind === 'quarter' ? 'Form 941' : 'W-2GU report'}
-          </Link>
-        </li>
-      ))}
+      {line.look_at.map((target) => {
+        const link = reconciliationTargetLink(target, line.source, taxYear);
+        return (
+          <li key={target.label}>
+            <span className="font-semibold">{target.label}:</span> {target.detail}{' '}
+            <Link to={link.to} className="inline-flex min-h-11 items-center font-semibold text-primary-700 underline xl:min-h-0">
+              {link.label}
+            </Link>
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
-function MobileLine({ line, openingPresent }: { line: YearEndReconciliationLine; openingPresent: boolean }): ReactElement {
+function MobileLine({ line, openingPresent, taxYear }: { line: YearEndReconciliationLine; openingPresent: boolean; taxYear: number }): ReactElement {
   const [open, setOpen] = useState(line.status === 'mismatch');
   const returns = line.source === 'w1' ? 'W-1s' : '941s';
   return (
@@ -64,12 +67,12 @@ function MobileLine({ line, openingPresent }: { line: YearEndReconciliationLine;
         </dl>
       )}
       <LineNote line={line} />
-      <LookAt line={line} />
+      <LookAt line={line} taxYear={taxYear} />
     </li>
   );
 }
 
-export function ReconciliationStep({ step }: { step: ReconciliationStepData }): ReactElement {
+export function ReconciliationStep({ step, taxYear }: { step: ReconciliationStepData; taxYear: number }): ReactElement {
   const data = step.data;
   const lines = data.lines ?? [];
   const opening = data.opening_balances;
@@ -108,7 +111,7 @@ export function ReconciliationStep({ step }: { step: ReconciliationStepData }): 
       )}
 
       <ul className="space-y-3 xl:hidden">
-        {lines.map((line) => <MobileLine key={line.key} line={line} openingPresent={openingPresent} />)}
+        {lines.map((line) => <MobileLine key={line.key} line={line} openingPresent={openingPresent} taxYear={taxYear} />)}
       </ul>
 
       <div className="hidden xl:block">
@@ -129,7 +132,7 @@ export function ReconciliationStep({ step }: { step: ReconciliationStepData }): 
                   <p className="font-medium text-neutral-950">{line.label} <span className="text-neutral-500">({line.w2_box})</span></p>
                   <p className="text-xs text-neutral-600">vs {line.source_label}</p>
                   <LineNote line={line} />
-                  <LookAt line={line} />
+                  <LookAt line={line} taxYear={taxYear} />
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{formatCurrency(line.w2_total)}</TableCell>
                 {line.quarters.map((quarter) => (

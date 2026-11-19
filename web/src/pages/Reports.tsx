@@ -31,7 +31,8 @@ import { FilingResponsibilityPanel } from '@/components/reports/FilingResponsibi
 import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
 import { buildPayrollHistoryPackage } from '@/lib/payrollHistoryPackage';
 import { yearEndChecklistPath } from '@/lib/routes';
-import { FIRST_YEAR_END_TAX_YEAR } from '@/lib/year-end';
+import { yearEndTaxYears } from '@/lib/year-end';
+import { linkedReportQuarter, linkedReportYear } from '@/lib/report-period';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   Employee,
@@ -644,7 +645,8 @@ export function W2GuPanel() {
     { length: selectableMaxYear - earliestSupportedYear + 1 },
     (_, i) => selectableMaxYear - i
   );
-  const [year, setYear] = useState(currentYear - 1);
+  const [searchParams] = useSearchParams();
+  const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear - 1);
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -869,7 +871,7 @@ export function W2GuPanel() {
           <CardDescription>
             Guam Territorial W-2 preparation summary — review before filing with DRT.
           </CardDescription>
-          {activeCompany && year >= FIRST_YEAR_END_TAX_YEAR && (
+          {activeCompany && yearEndTaxYears().includes(year) && (
             <Link to={yearEndChecklistPath(activeCompany.id, year)} className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-primary-700 underline sm:min-h-0">
               Open the {year} year-end checklist
             </Link>
@@ -2439,8 +2441,9 @@ export function QuarterlyCompliancePacketPanel() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
-  const [year, setYear] = useState(currentYear);
-  const [quarter, setQuarter] = useState(currentQuarter);
+  const [searchParams] = useSearchParams();
+  const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear);
+  const [quarter, setQuarter] = useState(() => linkedReportQuarter(searchParams) ?? currentQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
@@ -3240,8 +3243,9 @@ export function Form941GuPanel() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
-  const [year, setYear] = useState(currentYear);
-  const [quarter, setQuarter] = useState(currentQuarter);
+  const [searchParams] = useSearchParams();
+  const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear);
+  const [quarter, setQuarter] = useState(() => linkedReportQuarter(searchParams) ?? currentQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);

@@ -4,10 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, reportsApi } from '@/services/api';
 import { formatGuamDateTimeShort } from '@/lib/utils';
-import type { YearEndChecklist, YearEndIssue, YearEndStep } from '@/lib/year-end';
+import type { YearEndChecklist, YearEndIssue, ActiveYearEndStep } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
 
-type MarkReadyStepData = Extract<YearEndStep, { key: 'mark_ready' }>;
+type MarkReadyStepData = ActiveYearEndStep<'mark_ready'>;
 
 /** Runs a fresh preflight and then the existing fingerprint-bound "mark ready" on those exact inputs. */
 export function MarkReadyStep({ checklist, step, onSaved }: {
