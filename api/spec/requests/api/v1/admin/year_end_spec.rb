@@ -238,6 +238,19 @@ RSpec.describe "Year-end checklist", type: :request do
       end
     end
 
+    it "shows Check needed after retirement-year evidence or an import source file is added" do
+      travel_to(start + 0.hours) { mark_ready }
+      travel_to(start + 1.hours) do
+        expect(list_row["status"]).to eq("ready")
+        before = YearEnd::InputRevision.for(company.id, 2026)[company.id]
+        EmployeeRetirementYearInput.insert_all!([ { company_id: company.id, employee_id: employee.id, tax_year: 2026,
+          prior_year_wage_status: "unknown", reason: "Synthetic evidence", source_reference: "Synthetic source",
+          created_at: Time.current, updated_at: Time.current } ])
+        expect(YearEnd::InputRevision.for(company.id, 2026)[company.id]).not_to eq(before)
+        expect(list_row["status"]).to eq("check_needed")
+      end
+    end
+
     it "stops showing Ready once a checklist run finds a blocker or fails" do
       travel_to(start + 0.hours) { mark_ready }
       travel_to(start + 1.hours) do
@@ -531,6 +544,22 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(response).to have_http_status(:conflict), response.body
       expect(response.parsed_body["error"]).to include("changed while the year-end checklist was checked")
       expect(W2FilingReadiness.find_by!(company: company, year: 2026)).to have_attributes(status: be_present, ready_fingerprint: nil)
+    end
+
+    it "refuses to mark ready when an input outside the W-2 fingerprint changes while the checklist is checked" do
+      item = pay(company, Date.new(2026, 3, 6), worker: employee)
+      record_decision(filing_types: %w[w2_gu form_1099], party: "cornerstone")
+      allow_any_instance_of(YearEnd::Checklist).to receive(:w2_mark_ready_blockers).and_wrap_original do |original|
+        blockers = original.call
+        # Employer tax feeds the 941 review but not the W-2 fingerprint.
+        item.update!(employer_social_security_tax: 0)
+        blockers
+      end
+
+      mark_ready
+
+      expect(response).to have_http_status(:conflict), response.body
+      expect(W2FilingReadiness.find_by!(company: company, year: 2026)).to have_attributes(ready_fingerprint: nil)
     end
 
     it "blocks a Social Security wage mismatch, names the quarter, and allows ready once the payroll is fixed" do
