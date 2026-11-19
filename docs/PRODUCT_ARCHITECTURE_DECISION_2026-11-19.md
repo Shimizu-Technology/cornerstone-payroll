@@ -1,6 +1,6 @@
 # One product, three apps: the architecture decision
 
-**Status:** Decided by Leon on November 19, 2026. The decisions are in §0. The order of work (§6) is still to be planned with Leon, and Dafne's open questions are in §7. No code has changed.
+**Status:** Decided by Leon on November 19, 2026. The decisions are in §0. Leon approved the milestone plan in §6 the same day. Dafne's open questions are in §7. No code has changed.
 **Date:** November 19, 2026.
 **Checked against code:**
 - Payroll `origin/main` `3da73499`
@@ -32,7 +32,7 @@ Where a decision changes a recommendation further down, the decision wins.
 | **Per-client settings** | Built fresh from current main. Old PR #139 was closed. |
 | **Cornerstone Tax** | **Joins in stages.** A shared login and a client list linked to Payroll's companies come during the foundations. Staff time tracking moves with the time module, which makes Cornerstone the first time client. Whether the practice side (returns, documents, tax portal) moves is decided after the platform is proven, probably 2028. |
 | **Dafne's profit report** | **Lives in the platform** (this replaces the T2-in-Tax recommendation in §2). Tax sends hours by client, category, task and period to the platform. The platform adds each person's actual pay and employer taxes from Payroll, plus client fees, so pay data never leaves Payroll. Staff cost comes first. Overhead is a separate add-on column: a monthly amount Cornerstone enters, spread across clients by hours. Unallocated cost is shown and reconciles to payroll totals. Every Tax time entry requires a client, with an "Internal – Cornerstone" choice, plus a category and task. One clock session can be split across clients. All of Payroll's companies go into Tax's client list. |
-| **Release acceptance** | Each release is tested by agents on staging. Then Mark and Benjo run a written acceptance script, Dafne signs off, and one pilot client uses it for a pay period before everyone gets it. |
+| **Release acceptance** | Work goes live one milestone at a time, and each milestone is tested live before the next one goes live (§6). Inside a milestone, pieces merge as they're ready but stay switched off in client settings. Each milestone is tested by agents on staging, deployed to production switched off, run through a written acceptance script by Mark and Benjo, and signed off by Dafne. Then it's switched on for one pilot client for a full pay period, then for everyone. A problem in the pilot is handled by switching it off for that client. |
 | **Employee app pilot** | **MoSa's first.** Emma leads day to day, and Sara and Mo (the owners) are admins too. Admin roles are configurable, with several per client. |
 | **Name employees see** | The employer's name and logo, with a small "powered by" footer. |
 | **Engineering calls** | <ul><li>Module boundaries in the codebase are enforced by automated checks.</li><li>Employee and kiosk traffic gets its own server processes and workers.</li><li>The text-message provider is chosen when notifications are built, by delivery and price to Guam numbers.</li><li>AIRE moves after a side-by-side pay period, with its history checksums kept and the old app read-only for a while.</li></ul> |
@@ -225,22 +225,42 @@ These are mostly the full build plan's R1 foundations. This section makes them a
 
 Any big AIRE feature built before the port gets ported along with it. Anything built after the port starts has to be built twice, so large new AIRE features should wait or be built in the platform.
 
-## 6. Order of work
+## 6. Milestones (approved by Leon, November 19, 2026)
 
-| Step | What | Why here |
-|---|---|---|
-| 0 | Year-end W-2GU and 1099 (full build R0) | Legal deadline: February 1, 2027 |
-| 1 | Cornerstone profitability: required client and "Internal", split sessions, all clients in Tax's list, Tax hours feed into the platform, fees, profitability report in the platform | Dafne wants it. It's small, and every day of untagged time is lost |
-| 2 | Foundations and the §4 safety gate (full build R1) | Every later module needs them |
-| 3 | Employee app: pay, W-2s, profile, documents, policies (R2) | MoSa's first (§0), then KPI and Cornerstone's own staff |
-| 4 | Leave, onboarding and offboarding (R3–R4) | Sellable HR |
-| 5 | Time module, ported from AIRE (R5) | First users are Cornerstone's own staff, since T3 makes Cornerstone the test client, then the next time client |
-| 6 | AIRE moves onto the platform | When the module matches and AIRE agrees |
-| 7 | Benefits, construction, report builder, year-end service (R6–R7) | Larger clients |
+Eight milestones. Each one goes live and is tested live before the next one goes live.
 
-This order is a draft. Leon and Claude plan the final order together after Dafne's answers. The timing estimate stays at nine to twelve months for the full scope.
-- If a new client needs time tracking before step 5, a copy of AIRE's app (option A) is the stopgap. It moves at step 6 with AIRE.
+### How every milestone goes live
+
+Pieces of a milestone merge to `main` as they're ready. New features stay switched off in client settings until the whole milestone is done, so clients never see half-built work. Then:
+
+1. Agents test it on staging.
+2. It's deployed to production, still switched off.
+3. Mark and Benjo work through a written acceptance script.
+4. Dafne signs off.
+5. It's switched on for one pilot client for a full pay period.
+6. It's switched on for everyone.
+
+If something goes wrong in step 5, it's switched off for that client. Nobody else is affected.
+
+### The milestones
+
+| # | Milestone | What's built | Live test | Waits on |
+|---|---|---|---|---|
+| 1 | **Year-end forms** (now to mid-January; legal deadline) | W-2GUs and 1099s from payroll data, the SSA (EFW2) file, employee copies, and a record of what was filed and when it was confirmed. The step-by-step build is §8 of the [year-end research](W2GU_1099_YEAR_END_FILING_RESEARCH_2026-11-17.md): number fixes and 941/W-1 reconciliation first, then official copies, then the EFW2 file, then 1099s, then the filing record. | One or two clients: totals checked against their payroll and 941s, Dafne reviews, then filing with DRT by January 29. ezW2 stays available as the fallback. | Dafne's answers on BSO access, last year's ezW2 file and the GuamTax filing method (§7). These affect only the filing steps; the number fixes and reconciliation can start now. |
+| 2 | **Cost and profit per client for Cornerstone** | Every Tax time entry requires a client (with "Internal – Cornerstone"), one clock session can be split across clients, all Payroll companies join Tax's client list, Tax sends hours to the platform, and the platform adds real pay, employer taxes and fees to show cost and profit by client and task (§0). | Cornerstone staff log a full month; the report's cost matches the payroll totals. | Dafne's answer on how she bills fees. |
+| 3 | **Foundations** (mostly invisible) | The §4 safety gate: one invitation-only login with MFA for staff and client users, row-level security with cross-company tests, client subdomains, pay-rate history, file scanning, audit for employee and system actions, and separate capacity for employee traffic. Outside the code: the lawyer review and the written security plan (WISP) start here. | Cornerstone and the client offices run a normal payroll on it and nothing breaks. | Nothing. |
+| 4 | **Employee app, MoSa's first** | Pay stubs, W-2s, profile and contact changes, bank changes (opt-in, one-time code, Cornerstone approves), documents and policy sign-offs. | MoSa's employees use it for one pay period, with Emma, Sara and Mo as admins. | The lawyer review must be finished before it goes live. |
+| 5 | **Leave and onboarding** | PTO and sick balances and requests, new-hire paperwork (W-4, I-9, policies) and offboarding. | MoSa's, then KPI. | Milestone 4 live. |
+| 6 | **Time module, ported from AIRE** | Clock in and out, kiosk, breaks, schedules, approvals and overtime, inside the platform (§5). | Cornerstone's own staff first, then the next client that needs time tracking. | Milestone 3. |
+| 7 | **AIRE moves onto the platform** | A side-by-side pay period, AIRE's history brought over with checksums, and the old app kept read-only for a while (§5). | The side-by-side pay period matches. | The module matching AIRE, and Leon talking to AIRE. |
+| 8 | **Bigger-client features** | Benefits, construction pay, a report builder and year-end filing as a service. | Per feature. | Earlier milestones. |
+
+The full scope is still about nine to twelve months. Dates for milestones 2 onward are set once Dafne answers §7.
+
+- If a new client needs time tracking before milestone 6, a copy of AIRE's app is the stopgap. It moves at milestone 7 with AIRE.
 - The time module could move ahead of leave and onboarding if a paying time client is waiting and the HR pilot isn't.
+
+**Open for Leon:** milestones 1 and 2 touch different code (year-end is in Payroll; most of the profit work is in Tax). The recommendation is to build milestone 2 while Dafne tests milestone 1. The rule above still holds, because milestone 2 doesn't go live until milestone 1 passes.
 
 ## 7. Questions
 
