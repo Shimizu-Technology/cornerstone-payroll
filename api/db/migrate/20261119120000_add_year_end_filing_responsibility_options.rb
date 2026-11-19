@@ -41,10 +41,15 @@ class AddYearEndFilingResponsibilityOptions < ActiveRecord::Migration[8.1]
   # previous release writes. That release ignores form_1099 rows and the
   # prior-provider date, but it reads a w2_gu decision of "client" or
   # "no_filing" as Cornerstone-responsible (PayrollFilingResponsibilityGate
-  # treats any party other than external_provider that way). Nothing is filed
-  # automatically, but until the year-end release is restored, staff must not
-  # prepare W-2GUs for those companies; list them with
+  # treats any party other than external_provider that way), and it does not
+  # run the year-end checklist at all (reconciliation, prior-provider overlap,
+  # reviews), so it could mark W-2GUs ready that the checklist would block.
+  # Nothing is filed automatically, but while the previous release is live,
+  # pause all 2026-and-later W-2GU and 1099 preparation and mark-ready until
+  # the year-end release is restored. Companies the old release would treat
+  # wrongly:
   #   PayrollFilingResponsibility.where(filing_type: "w2_gu", responsible_party: %w[client no_filing])
+  #     .or(PayrollFilingResponsibility.where.not(prior_provider_through: nil))
   def down
     blocking = select_value(<<~SQL.squish).to_i
       SELECT COUNT(*) FROM payroll_filing_responsibilities
