@@ -166,3 +166,20 @@ export function usePdfPreview() {
   if (!show) throw new Error('PDF preview requires a PdfPreviewProvider');
   return show;
 }
+
+/**
+ * Like usePdfPreview, but a PDF that finishes loading after the calling panel
+ * unmounted (for example after the report period changed) is not shown, so an
+ * old period's PDF can't replace the current preview.
+ */
+export function useMountedPdfPreview(): ReturnType<typeof usePdfPreview> {
+  const show = usePdfPreview();
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  return useCallback((...args: Parameters<typeof show>) => {
+    if (mounted.current) show(...args);
+  }, [show]) as ReturnType<typeof usePdfPreview>;
+}
