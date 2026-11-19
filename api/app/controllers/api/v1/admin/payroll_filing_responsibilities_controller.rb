@@ -35,20 +35,17 @@ module Api
           input = responsibility_params
           tax_year = parse_tax_year!(input[:tax_year])
           quarter = parse_optional_quarter!(input[:quarter])
-          filing_types = normalized_filing_types(input, quarter: quarter)
           source_cutoff_date = parse_optional_date!(input[:source_cutoff_date])
-          prior_provider_through = parse_optional_date!(input[:prior_provider_through], field: "prior_provider_through")
+          decisions = normalized_decisions(input, quarter: quarter)
 
           records = PayrollFilingResponsibilityRecorder.new(
             company: current_company,
             actor: current_user,
             tax_year: tax_year,
             quarter: quarter,
-            filing_types: filing_types,
-            responsible_party: input[:responsible_party],
+            decisions: decisions,
             imported_payroll_inclusion: input[:imported_payroll_inclusion],
             source_cutoff_date: source_cutoff_date,
-            prior_provider_through: prior_provider_through,
             notes: input[:notes]
           ).call
 
@@ -86,7 +83,8 @@ module Api
             :source_cutoff_date,
             :prior_provider_through,
             :notes,
-            filing_types: []
+            filing_types: [],
+            decisions: %i[filing_type responsible_party prior_provider_through]
           )
         end
 
@@ -114,6 +112,30 @@ module Api
           Date.iso8601(value.to_s)
         rescue Date::Error
           raise ArgumentError, "#{field} must use YYYY-MM-DD"
+        end
+
+        # `decisions` records several filing types with different parties in
+        # one transaction (the year-end W-2GU and 1099 answers). Otherwise one
+        # party applies to every listed filing type.
+        def normalized_decisions(input, quarter:)
+          if input.key?(:decisions)
+            entries = Array(input[:decisions])
+            raise ArgumentError, "decisions must list at least one filing type" if entries.empty?
+
+            return entries.map do |entry|
+              {
+                filing_types: Array(entry[:filing_type]),
+                responsible_party: entry[:responsible_party],
+                prior_provider_through: parse_optional_date!(entry[:prior_provider_through], field: "prior_provider_through")
+              }
+            end
+          end
+
+          [ {
+            filing_types: normalized_filing_types(input, quarter: quarter),
+            responsible_party: input[:responsible_party],
+            prior_provider_through: parse_optional_date!(input[:prior_provider_through], field: "prior_provider_through")
+          } ]
         end
 
         def normalized_filing_types(input, quarter:)

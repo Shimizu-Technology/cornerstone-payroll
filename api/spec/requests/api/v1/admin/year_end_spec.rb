@@ -105,21 +105,60 @@ RSpec.describe "Year-end checklist", type: :request do
     end
 
     it "keeps a fixed number of queries as the client list grows" do
+      # Each client in both cohorts files W-2s and 1099s here, with W-2
+      # payroll, a payroll contractor and a one-off payee, so the employee
+      # and 1099 checks all run.
+      decide_everything = lambda do |target|
+        %w[w2_gu form_1099].each do |filing_type|
+          create(:payroll_filing_responsibility, :annual, company: target, filing_type: filing_type, source_cutoff_date: nil)
+        end
+        contractor = create(:employee, :contractor, company: target, department: target.departments.first || create(:department, company: target))
+        pay(target, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 2_500)
+        create(:non_employee_check, company: target, check_type: "contractor", payable_to: "Synthetic Roofing", amount: 2_500,
+          check_number: "9#{target.id}", payment_period_type: "none", tax_year: nil, tax_month: nil, payment_date: Date.new(2026, 5, 2), printed_at: Time.current)
+      end
+      [ company, second ].each(&decide_everything)
+      # A fresh user per request, so the clients added below are visible
+      # (User memoizes its accessible company ids).
+      allow_any_instance_of(Api::V1::Admin::YearEndController).to receive(:current_user) { User.find(admin.id) }
       count_queries = lambda do
         queries = 0
         callback = ->(*, payload) { queries += 1 unless payload[:name].in?(%w[SCHEMA TRANSACTION]) || payload[:sql].start_with?("SAVEPOINT", "RELEASE") }
         ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
           get "/api/v1/admin/year_end/clients", params: { year: 2026 }
         end
+        expect(response).to have_http_status(:ok), response.body
         queries
       end
       baseline = count_queries.call
-      4.times do |index|
+      extras = Array.new(4) do |index|
         extra = create(:company, organization: company.organization, name: "Extra #{index}")
         pay(extra, Date.new(2026, 3, 6), worker: create(:employee, company: extra, department: create(:department, company: extra)))
+        decide_everything.call(extra)
+        extra
       end
 
       expect(count_queries.call).to be <= baseline + 2
+      rows = response.parsed_body.dig("data", "clients").index_by { |row| row["name"] }
+      extras.each do |extra|
+        expect(rows.fetch(extra.name)["issue_summary"].map { |item| item["code"] }).to include("PAYEE_IDENTITY_UNRESOLVED", "W2_NOT_MARKED_READY")
+      end
+    end
+
+    it "keeps an inactive record with a reportable one-off contractor check and nothing else on the list" do
+      create(:non_employee_check, company: dormant, check_type: "contractor", payable_to: "Synthetic Roofing", amount: 2_500,
+        check_number: "9001", payment_period_type: "none", tax_year: nil, tax_month: nil, payment_date: Date.new(2026, 5, 2), printed_at: Time.current)
+      idle = create(:company, organization: company.organization, name: "Idle", active: false)
+      create(:non_employee_check, company: idle, check_type: "contractor", payable_to: "Draft Only", amount: 2_500,
+        check_number: "9002", payment_period_type: "none", tax_year: nil, tax_month: nil, payment_date: Date.new(2026, 5, 2))
+
+      get "/api/v1/admin/year_end/clients", params: { year: 2026 }
+
+      expect(response).to have_http_status(:ok), response.body
+      data = response.parsed_body.fetch("data")
+      expect(data.fetch("clients").map { |row| row["name"] }).to include("Dormant")
+      expect(data.fetch("clients").map { |row| row["name"] }).not_to include("Idle")
+      expect(data.dig("hidden", "inactive_without_payroll")).to eq(1)
     end
   end
 
@@ -259,6 +298,55 @@ RSpec.describe "Year-end checklist", type: :request do
       record_decision(filing_types: %w[form_1099], party: "client", prior_provider_through: "2026-03-31")
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    def record_both(w2:, form_1099:)
+      put "/api/v1/admin/payroll_filing_responsibilities", params: { responsibility: {
+        tax_year: 2026, imported_payroll_inclusion: "included", notes: "Year-end setup",
+        decisions: [ { filing_type: "w2_gu", **w2 }, { filing_type: "form_1099", **form_1099 } ]
+      } }, as: :json
+    end
+
+    def saved_decisions
+      company.payroll_filing_responsibilities.where(tax_year: 2026, quarter: nil).order(:filing_type)
+        .pluck(:filing_type, :responsible_party, :prior_provider_through)
+    end
+
+    it "saves the W-2 and 1099 decisions in one request with one audit entry" do
+      record_both(w2: { responsible_party: "cornerstone", prior_provider_through: "2026-03-31" }, form_1099: { responsible_party: "client" })
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(saved_decisions).to eq([ [ "form_1099", "client", nil ], [ "w2_gu", "cornerstone", Date.new(2026, 3, 31) ] ])
+      audit = AuditLog.where(action: "payroll_filing_responsibilities#recorded", company_id: company.id).sole
+      expect(audit.metadata["filing_types"]).to eq(%w[w2_gu form_1099])
+    end
+
+    it "leaves both decisions unchanged when either one is refused" do
+      record_decision(filing_types: %w[w2_gu form_1099], party: "no_filing")
+      before = saved_decisions
+      audits = AuditLog.where(action: "payroll_filing_responsibilities#recorded").count
+
+      # The 1099 decision is refused after the W-2 decision was written.
+      record_both(w2: { responsible_party: "cornerstone" }, form_1099: { responsible_party: "client", prior_provider_through: "2026-03-31" })
+      expect(response).to have_http_status(:unprocessable_entity), response.body
+      expect(saved_decisions).to eq(before)
+
+      # The W-2 decision is refused (a date outside the tax year).
+      record_both(w2: { responsible_party: "cornerstone", prior_provider_through: "2025-12-31" }, form_1099: { responsible_party: "cornerstone" })
+      expect(response).to have_http_status(:unprocessable_entity), response.body
+      expect(saved_decisions).to eq(before)
+      expect(AuditLog.where(action: "payroll_filing_responsibilities#recorded").count).to eq(audits)
+    end
+
+    context "for a user who cannot record filing decisions" do
+      let(:acting_user) { create(:user, company: company, organization: company.organization, role: "client") }
+
+      it "refuses both" do
+        record_both(w2: { responsible_party: "cornerstone" }, form_1099: { responsible_party: "cornerstone" })
+
+        expect(response).to have_http_status(:forbidden), response.body
+        expect(saved_decisions).to be_empty
+      end
+    end
   end
 
   describe "POST /api/v1/admin/year_end/acknowledgements" do
@@ -304,6 +392,30 @@ RSpec.describe "Year-end checklist", type: :request do
       } }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(YearEndAcknowledgement.count).to eq(0)
+    end
+  end
+
+  describe "a 941 residual review after another paycheck" do
+    it "asks for the review again and refuses the old digest with 409" do
+      pay(company, Date.new(2026, 5, 8), worker: employee, employer_social_security_tax: 124.03)
+      record_decision(filing_types: %w[w2_gu form_1099], party: "cornerstone")
+      residual = -> { checklist_step("review_warnings").dig("data", "warnings").find { |warning| warning["code"] == "form_941_liability_residual" } }
+      seen = residual.call
+      post "/api/v1/admin/year_end/acknowledgements", params: { acknowledgement: {
+        tax_year: 2026, warning_code: "form_941_liability_residual", warning_digest: seen["digest"], note: "Employer rounding on one paycheck."
+      } }
+      expect(response).to have_http_status(:created), response.body
+      expect(residual.call["status"]).to eq("reviewed")
+
+      # Same $0.03 residual and no employee difference; the quarter's taxes double.
+      pay(company, Date.new(2026, 6, 5), worker: employee)
+
+      expect(residual.call).to include("status" => "needs_review", "acknowledgement_stale" => true)
+      post "/api/v1/admin/year_end/acknowledgements", params: { acknowledgement: {
+        tax_year: 2026, warning_code: "form_941_liability_residual", warning_digest: seen["digest"], note: "Employer rounding on one paycheck."
+      } }
+      expect(response).to have_http_status(:conflict), response.body
+      expect(response.parsed_body["error"]).to include("changed")
     end
   end
 

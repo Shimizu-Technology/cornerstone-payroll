@@ -293,6 +293,48 @@ RSpec.describe YearEnd::Checklist do
       expect { identify(payee) }.to raise_error(YearEnd::AcknowledgementRecorder::StaleWarning)
     end
 
+    it "asks again, and refuses the old identification, when two checks are edited by offsetting amounts" do
+      first = contractor_check(1_500, "9001")
+      second = contractor_check(1_000, "9002")
+      decide(w2: "client", form_1099: "cornerstone")
+      seen = step(checklist, "people").dig(:data, :one_off_payees).sole
+      identify(seen)
+      expect(step(checklist, "people").dig(:data, :one_off_payees, 0)).to include(status: "identified")
+
+      # Same checks, same $2,500.00 total, different amounts on each.
+      first.update_columns(amount: 1_200)
+      second.update_columns(amount: 1_300)
+
+      payee = step(checklist, "people").dig(:data, :one_off_payees).sole
+      expect(payee).to include(total_compensation: 2_500.0, status: "needs_identity", acknowledgement_stale: true)
+      expect(payee[:checks].map { |check| check[:amount] }).to eq([ 1_200.0, 1_300.0 ])
+      expect(payee[:digest]).not_to eq(seen[:digest])
+      expect { identify(seen) }.to raise_error(YearEnd::AcknowledgementRecorder::StaleWarning)
+      expect(YearEnd::ClientsOverview.new(user: accountant, year: 2026).send(:unidentified_one_off_payees)[company.id]).to eq(1)
+    end
+
+    it "counts one-off payees in step 1 so the 1099 answer is not defaulted to no 1099s" do
+      contractor_check(2_500, "9001")
+
+      data = step(checklist, "filing_decision")[:data]
+
+      expect(data).to include(contractor_count: 0, one_off_payee_count: 1)
+    end
+
+    it "does not cite the W-3SS for a 1099-only client" do
+      company.update_columns(phone: nil, email: nil)
+      contractor_check(2_500, "9001")
+      decide(w2: "client", form_1099: "cornerstone")
+
+      employer = step(checklist, "employer")
+
+      expect(employer[:issues].map { |issue| issue[:message] }).to eq([
+        "Add the employer phone number. It prints in the payer box on each 1099.",
+        "Add the employer email for the Form 1096 contact."
+      ])
+      expect(employer[:summary]).to eq("These print on every 1099.")
+    end
+
     it "does not hold up the W-2s" do
       contractor_check(2_500, "9001")
       pay(Date.new(2026, 3, 6))

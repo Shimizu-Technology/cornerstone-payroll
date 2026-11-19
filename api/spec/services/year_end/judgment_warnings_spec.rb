@@ -138,4 +138,17 @@ RSpec.describe YearEnd::JudgmentWarnings do
 
     expect(warning).to include(kind: "acknowledge", status: "needs_review", details: [ a_string_including("Q2 941") ])
   end
+
+  it "binds a 941 residual review to the quarter's expected and recorded tax, not only the residual" do
+    review = { quarter: 2, status: "residual", recorded_liability_residual: 0.03, employee_difference: 0.0,
+               expected_employee_total: 153.0, recorded_employee_total: 153.0, recorded_employer_total: 153.03,
+               recorded_total_liability: 306.03, line6_total_taxes: 306.0, message: "The Q2 941." }
+    digest = ->(changes) { warnings([], reconciliation: { form_941_reviews: [ review.merge(changes) ] }).fetch("form_941_liability_residual")[:digest] }
+
+    # Another ordinary paycheck in the quarter: same residual, larger totals.
+    added_paycheck = { expected_employee_total: 306.0, recorded_employee_total: 306.0, recorded_employer_total: 306.03,
+                       recorded_total_liability: 612.03, line6_total_taxes: 612.0 }
+
+    expect(digest.call(added_paycheck)).not_to eq(digest.call({}))
+  end
 end
