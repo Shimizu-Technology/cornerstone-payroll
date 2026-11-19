@@ -4669,9 +4669,11 @@ module Api
         # Params: year [Integer] – tax year (2026 template only).
         # The copies are a watermarked draft until the year's W-2s are marked
         # ready, and again whenever that sign-off no longer matches the inputs.
-        # The PDF is drawn after the company lock, so the inputs and sign-off
-        # are read again afterwards: a file whose data changed meanwhile is
-        # never sent. Every download is audited before the file is sent.
+        # The PDF is drawn outside the company lock. The lock is then taken
+        # again, the lock mark-ready and preflight hold to change the
+        # sign-off, and the inputs and sign-off are read again and the
+        # download audited under it: a file whose data or sign-off changed
+        # meanwhile is never sent, and none can change before it is recorded.
         def send_w2_gu_official_copies(kind)
           response.headers["Cache-Control"] = "private, no-store"
           year = parse_tax_year_param
@@ -4708,14 +4710,21 @@ module Api
           end
 
           pdf = copies.generate
-          # Read uncached: the request's query cache would replay the reads above.
-          recheck = ActiveRecord::Base.uncached { w2_official_copies_snapshot(company.reload, year) }
-          unless w2_official_copies_signature(recheck) == w2_official_copies_signature(snapshot)
+          outcome = company.with_lock do
+            # Read uncached: the request's query cache would replay the reads above.
+            recheck = ActiveRecord::Base.uncached { w2_official_copies_snapshot(company, year) }
+            if w2_official_copies_signature(recheck) != w2_official_copies_signature(snapshot)
+              :changed
+            elsif record_w2_official_copies_access(company, audit)
+              :recorded
+            end
+          end
+          if outcome == :changed
             return render json: {
               error: "This client's W-2 data changed while the file was being made. Download again."
             }, status: :conflict
           end
-          return unless record_w2_official_copies_access(company, audit)
+          return unless outcome == :recorded
 
           send_data pdf, filename: copies.filename, type: "application/pdf", disposition: "attachment"
         rescue ActiveRecord::RecordNotFound
@@ -4731,8 +4740,11 @@ module Api
         def w2_official_copies_snapshot(company, year)
           responsibility = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
           report = W2GuAggregator.new(company, year).generate if responsibility&.responsible_party == "cornerstone"
-          readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
           fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: report).call if report
+          # Read after the fingerprint, so a sign-off change while it was
+          # computed is seen. The callers hold the company lock, which
+          # mark-ready and preflight take to change the sign-off.
+          readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
           {
             cornerstone_files: report.present?,
             report: report,
@@ -4755,8 +4767,18 @@ module Api
 
         # Writes the download's audit entry, or refuses the file when it can't:
         # a W-2GU copy with full SSNs is never sent unrecorded. The metadata
-        # names the document and sign-off, never an SSN.
+        # names the document and sign-off, never an SSN. The savepoint keeps a
+        # failed write from aborting the caller's lock transaction.
         def record_w2_official_copies_access(company, audit)
+          AuditLog.transaction(requires_new: true) { write_w2_official_copies_audit!(company, audit) }
+          true
+        rescue StandardError => e
+          Rails.error.report(e, handled: true, context: { company_id: company.id, tax_year: audit[:tax_year], source: "w2_gu_official_copies" })
+          render json: { error: "The download could not be recorded in the activity log, so the file was not sent. Try again." }, status: :service_unavailable
+          false
+        end
+
+        def write_w2_official_copies_audit!(company, audit)
           AuditLog.record!(
             user: current_user,
             organization_id: current_user.organization_id,
@@ -4770,11 +4792,6 @@ module Api
             request_id: request.request_id,
             event_category: "document_access"
           )
-          true
-        rescue StandardError => e
-          Rails.error.report(e, handled: true, context: { company_id: company.id, tax_year: audit[:tax_year], source: "w2_gu_official_copies" })
-          render json: { error: "The download could not be recorded in the activity log, so the file was not sent. Try again." }, status: :service_unavailable
-          false
         end
 
         def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:, fingerprint: nil)

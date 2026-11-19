@@ -242,9 +242,6 @@ class W2GuOfficialCopies < OfficialPdfOverlay
 
         problems << "#{employee.full_name}: #{options[:problem]}."
       end
-      if person[:row][:excess_box14b_tipped_occupation_codes]
-        problems << "#{employee.full_name}: more than two tipped occupation codes, but Box 14b holds two — end the extra codes on the employee's profile."
-      end
       box12 = Array(person[:row][:box12]).length
       if box12 > BOX12.length
         problems << "#{employee.full_name}: #{box12} Box 12 entries, but one W-2 holds #{BOX12.length}. " \
@@ -298,7 +295,8 @@ class W2GuOfficialCopies < OfficialPdfOverlay
       draw_amount(pdf, at.(amount_rect), entry[:amount])
     end
     draw_checkbox(pdf, at.(FIELDS[:box13_retirement_plan], 0), row[:box13_retirement_plan])
-    Array(row[:box14b_tipped_occupation_codes]).each_with_index do |code, index|
+    # The aggregator picks the two codes the IRS allows (keeping "000").
+    Array(row[:box14b_tipped_occupation_codes]).first(FIELDS[:box14b].length).each_with_index do |code, index|
       draw_text_box(pdf, at.(FIELDS[:box14b][index]), code, size: 9, align: :center)
     end
   end

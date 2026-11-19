@@ -215,17 +215,6 @@ module YearEnd
       @w2_employees ||= W2GuFilingPopulation.employees(company: company, year: year).to_a
     end
 
-    # W-2 employees with more tipped occupation codes than Box 14b holds.
-    def excess_occupation_code_rows
-      return [] unless files?("w2_gu") && year >= 2026
-
-      ActiveRecord::Associations::Preloader.new(records: w2_employees, associations: :employee_tipped_occupations).call
-      w2_employees.filter_map do |employee|
-        codes = W2GuAggregator.tipped_occupation_codes(employee, year)
-        { employee_id: employee.id, employee_name: employee.full_name, codes: codes } if codes.length > 2
-      end
-    end
-
     def contractor_payee_ids
       @contractor_payee_ids ||= PayrollItem
         .joins(:pay_period)
@@ -250,11 +239,6 @@ module YearEnd
       contractors = files?("form_1099") ? reportable_contractors.filter_map { |employee| person_row(employee, w2: false) } : []
       issues = employees.map do |row|
         issue("EMPLOYEE_DETAILS_MISSING", "#{row[:name]} is missing #{row[:missing_fields].map { |field| field == 'ssn' ? 'an SSN' : 'an address' }.to_sentence}.",
-              employee_id: row[:employee_id])
-      end
-      issues += excess_occupation_code_rows.map do |row|
-        issue("TIPPED_OCCUPATION_CODES_EXCESS",
-              W2GuPreflightValidator::TOO_MANY_OCCUPATION_CODES.call(row[:employee_name], row[:codes], year),
               employee_id: row[:employee_id])
       end
       issues += contractors.map do |row|

@@ -209,7 +209,7 @@ RSpec.describe W2GuAggregator do
       )
     end
 
-    it "flags tipped employees whose occupation codes exceed the Box 14b export capacity" do
+    it "prints two codes when tips came from more than two occupations, as the IRS allows, and asks staff to confirm them" do
       pay_period = create(:pay_period, :committed,
         company: company,
         start_date: Date.new(2026, 3, 1),
@@ -235,9 +235,24 @@ RSpec.describe W2GuAggregator do
       report = described_class.new(company, 2026).generate
 
       expect(report[:employees].sole[:box14b_tipped_occupation_codes]).to eq(%w[101 202])
+      expect(report[:employees].sole[:excess_box14b_tipped_occupation_codes]).to be(true)
       expect(report[:compliance_issues]).to include(
-        "1 employee(s) have more than two tipped occupation codes; review Box 14b before filing"
+        "1 employee(s) received tips in more than two occupations; Box 14b shows two codes, as the IRS allows. Confirm them before filing"
       )
+    end
+
+    it "keeps the nonqualifying code 000 in Box 14b even when it was added last" do
+      pay_period = create(:pay_period, :committed, company: company,
+        start_date: Date.new(2026, 3, 1), end_date: Date.new(2026, 3, 14), pay_date: Date.new(2026, 3, 18))
+      %w[303 202].each { |code| create(:employee_tipped_occupation, employee: employee, occupation_code: code, effective_from: Date.new(2026, 1, 1)) }
+      create(:employee_tipped_occupation, employee: employee, occupation_code: "000", effective_from: Date.new(2026, 6, 1))
+      create(:payroll_item, pay_period: pay_period, employee: employee, gross_pay: 500.0, reported_tips: 100.0, cash_tips_reported: 100.0,
+        social_security_taxable_wages: 400.0, social_security_taxable_tips: 100.0, medicare_taxable_wages: 500.0, qualified_overtime_compensation: 0.0)
+
+      codes = described_class.new(company, 2026).generate[:employees].sole[:box14b_tipped_occupation_codes]
+
+      expect(codes.length).to eq(2)
+      expect(codes).to include("000")
     end
 
     it "uses the filing-year AnnualTaxConfig wage base before the compatibility constant" do
@@ -384,6 +399,25 @@ RSpec.describe W2GuAggregator do
           quickbooks_bridge_balance_count: 1
         }
       )
+    end
+  end
+
+  describe ".box14b_codes" do
+    it "keeps 000 among three codes when it comes last" do
+      expect(described_class.box14b_codes(%w[101 202 000])).to eq(%w[000 101])
+    end
+
+    it "keeps any two of three codes without 000" do
+      expect(described_class.box14b_codes(%w[101 202 303])).to eq(%w[101 202])
+    end
+
+    it "keeps exactly two codes as they are, with or without 000" do
+      expect(described_class.box14b_codes(%w[101 202])).to eq(%w[101 202])
+      expect(described_class.box14b_codes(%w[202 000])).to eq(%w[202 000])
+    end
+
+    it "keeps 000 among four codes" do
+      expect(described_class.box14b_codes(%w[404 303 000 101])).to eq(%w[000 404])
     end
   end
 end

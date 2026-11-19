@@ -466,20 +466,36 @@ RSpec.describe YearEnd::Checklist do
       expect(copy_1).to include(draft: true, available: false, unavailable_reason: "Not available in a practice copy — it contains full SSNs.")
     end
 
-    it "blocks the W-2s while an employee has more tipped occupation codes than Box 14b holds" do
+    # IRS General Instructions for Forms W-2 and W-3 (2026), Box 14b: with
+    # tips from more than two occupations, any two codes go on the W-2. It is
+    # a judgment call to acknowledge, not a blocker. The request spec checks
+    # the clients list agrees.
+    it "asks staff to confirm the two Box 14b codes for tips from more than two occupations instead of blocking" do
       pay(Date.new(2026, 3, 6))
       decide
       %w[101 202 303].each { |code| create(:employee_tipped_occupation, employee: employee, occupation_code: code, effective_from: Date.new(2026, 1, 1)) }
 
       result = checklist
-      issue = step(result, "people")[:issues].find { |entry| entry[:code] == "TIPPED_OCCUPATION_CODES_EXCESS" }
-      expect(issue).to include(employee_id: employee.id)
-      expect(issue[:message]).to eq("#{employee.full_name} has 3 tipped occupation codes for 2026 (101, 202, 303), but W-2 Box 14b holds two. " \
-        "End the extra codes on the employee's profile so the W-2 lists the right ones.")
-      # Preflight blocks the sign-off itself (see the validator spec); here the step holds it back.
-      expect(result[:status]).to eq("needs_action")
+      expect(step(result, "people")).to include(status: "done", issues: [])
+      warning = step(result, "review_warnings").dig(:data, :warnings).find { |entry| entry[:code] == "box14b_more_than_two_codes" }
+      expect(warning).to include(kind: "acknowledge", status: "needs_review",
+        explanation: "Tips were received in more than two occupations. The W-2 shows two codes, as the IRS allows, and always includes 000 when any tips came from a nonqualifying occupation. Confirm these are right.")
       expect(step(result, "mark_ready").dig(:data, :can_mark_ready)).to be(false)
-      expect(step(result, "review_warnings").dig(:data, :warnings).map { |warning| warning[:code] }).not_to include("box14b_more_than_two_codes")
+      expect(result).to include(status: "needs_action", issue_count: 1)
+
+      YearEnd::AcknowledgementRecorder.new(
+        company: company, actor: accountant, tax_year: 2026, warning_code: "box14b_more_than_two_codes",
+        warning_digest: warning[:digest], note: "Tips came from three occupations; 101 and 202 are right."
+      ).call
+      result = checklist
+      expect(step(result, "mark_ready").dig(:data, :can_mark_ready)).to be(true)
+      expect(result).to include(status: "needs_action", issue_count: 1)
+
+      fingerprint = W2FilingInputsFingerprint.new(company: company, year: 2026).call
+      W2FilingReadiness.create!(company: company, year: 2026, status: "filing_ready", preflight_fingerprint: fingerprint,
+        ready_fingerprint: fingerprint, marked_ready_at: Time.current, marked_ready_by: accountant)
+
+      expect(checklist).to include(status: "ready", issue_count: 0)
     end
 
     it "explains why copies are unavailable when there are no W-2 employees" do
