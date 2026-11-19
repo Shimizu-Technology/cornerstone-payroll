@@ -13,7 +13,7 @@ function row(overrides: Partial<YearEndClientRow>): YearEndClientRow {
   return {
     company_id: 1, name: 'Tumon Bakery', active: true, status: 'needs_action', issue_count: 1,
     issue_summary: [{ code: 'FILER_NOT_CHOSEN', label: 'Choose who files', count: 1 }],
-    w2: null, form_1099: null, w2_employee_count: 4, employee_details: null, marked_ready_at: null,
+    w2: null, form_1099: null, w2_employee_count: 4, employee_details: null, marked_ready_at: null, check_reason: null,
     ...overrides,
     checklist_path: overrides.checklist_path ?? `/companies/${overrides.company_id ?? 1}/year-end?year=2026`,
   };
@@ -25,6 +25,7 @@ function overview(clients: YearEndClientRow[], hidden = { test_workspaces: 0, in
       tax_year: 2026, clients, hidden,
       counts: {
         needs_action: clients.filter((client) => client.status === 'needs_action').length,
+        check_needed: clients.filter((client) => client.status === 'check_needed').length,
         ready: clients.filter((client) => client.status === 'ready').length,
         not_filing: clients.filter((client) => client.status === 'not_filing').length,
       },
@@ -70,6 +71,21 @@ describe('Year-end clients list', () => {
     expect(within(notFiling).getAllByText('Inactive record').length).toBeGreaterThan(0);
     expect(screen.getByText('Hidden: 2 test workspaces and 1 inactive record with no 2026 payroll.')).toBeTruthy();
     expect(mocks.clients).toHaveBeenCalledWith(2026);
+  });
+
+  it('puts a client that changed after it was marked ready on the to-do list as Check needed, not Ready', async () => {
+    mocks.clients.mockResolvedValue(overview([
+      row({ company_id: 5, name: 'Yigo Market', status: 'check_needed', issue_count: 0, issue_summary: [], marked_ready_at: '2026-11-18T01:00:00Z',
+        check_reason: 'Something changed since the W-2s were marked ready. Open the checklist to re-check.' }),
+    ]));
+
+    renderPage();
+
+    const toDo = await screen.findByRole('region', { name: /To do/ });
+    expect(within(toDo).getAllByText('Check needed').length).toBeGreaterThan(0);
+    expect(within(toDo).getAllByText(/Something changed since the W-2s were marked ready/).length).toBeGreaterThan(0);
+    expect(within(toDo).getAllByRole('link', { name: 'Check Yigo Market' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('region', { name: /^Ready/ })).toBeNull();
   });
 
   it('shows a plain empty state', async () => {

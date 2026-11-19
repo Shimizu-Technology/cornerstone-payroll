@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ApiError, reportsApi } from '@/services/api';
 import { formatGuamDateTimeShort } from '@/lib/utils';
 import type { YearEndChecklist, YearEndIssue, YearEndStep } from '@/lib/year-end';
+import { useStillMounted } from './useStillMounted';
 
 type MarkReadyStepData = Extract<YearEndStep, { key: 'mark_ready' }>;
 
@@ -15,6 +16,8 @@ export function MarkReadyStep({ checklist, step, onSaved }: {
   onSaved: (message: string) => Promise<void>;
 }): ReactElement {
   const year = checklist.tax_year;
+  const companyId = checklist.company.id;
+  const stillMounted = useStillMounted();
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,22 +45,25 @@ export function MarkReadyStep({ checklist, step, onSaved }: {
     setError(null);
     setDetails([]);
     try {
-      const preflight = await reportsApi.w2GuPreflight(year);
+      const preflight = await reportsApi.w2GuPreflight(year, companyId);
+      if (!stillMounted()) return;
       if (preflight.preflight.blocking_count > 0) {
         setError('The W-2 check found problems. Fix them, then try again.');
         setDetails(preflight.preflight.findings.filter((finding) => finding.severity === 'blocking').map((finding) => finding.message));
         return;
       }
-      await reportsApi.w2GuMarkReady(year, notes.trim() || undefined, preflight.filing.preflight_fingerprint);
+      await reportsApi.w2GuMarkReady(year, notes.trim() || undefined, preflight.filing.preflight_fingerprint, companyId);
+      if (!stillMounted()) return;
       await onSaved(`Marked the ${year} W-2s ready.`);
     } catch (err) {
+      if (!stillMounted()) return;
       setError(err instanceof Error ? err.message : 'Could not mark the W-2s ready.');
       if (err instanceof ApiError && err.data && typeof err.data === 'object') {
         const blockers = (err.data as { year_end_blockers?: YearEndIssue[] }).year_end_blockers;
         if (blockers) setDetails(blockers.map((blocker) => blocker.message));
       }
     } finally {
-      setSaving(false);
+      if (stillMounted()) setSaving(false);
     }
   }
 

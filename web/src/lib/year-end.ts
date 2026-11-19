@@ -1,7 +1,7 @@
 export const FIRST_YEAR_END_TAX_YEAR = 2026;
 
 export type YearEndParty = 'cornerstone' | 'client' | 'external_provider' | 'no_filing';
-export type YearEndClientStatus = 'needs_action' | 'ready' | 'not_filing';
+export type YearEndClientStatus = 'needs_action' | 'check_needed' | 'ready' | 'not_filing';
 export type YearEndStepStatus = 'done' | 'action_needed' | 'waiting' | 'not_needed';
 export type YearEndStepKey =
   | 'filing_decision'
@@ -30,6 +30,8 @@ export interface YearEndClientRow {
   w2_employee_count: number;
   employee_details: { missing_ssn: number; missing_address: number } | null;
   marked_ready_at: string | null;
+  /** Why a client that was marked ready needs another look. */
+  check_reason: string | null;
   checklist_path: string;
 }
 
@@ -48,6 +50,7 @@ export interface YearEndIssue {
   line?: string | null;
   warning_code?: string;
   source?: string;
+  quarter?: number | null;
 }
 
 export interface YearEndDecision {
@@ -92,9 +95,21 @@ export interface YearEndReconciliationLine {
   quarterly_total: number;
   opening_balances: number;
   difference: number;
-  status: 'match' | 'mismatch';
+  /** "explained": the wage base splits wages and tips differently, but Box 3 + Box 7 still equals lines 5a + 5b. */
+  status: 'match' | 'mismatch' | 'explained';
   look_at: Array<{ kind: 'quarter' | 'w2_report'; quarter?: number; label: string; detail: string }>;
   message: string | null;
+  note?: string | null;
+}
+
+export interface YearEndForm941Review {
+  quarter: number;
+  status: 'unexplained' | 'residual';
+  employee_difference: number;
+  expected_employee_total: number;
+  recorded_employee_total: number;
+  recorded_liability_residual: number;
+  message: string;
 }
 
 export interface YearEndReconciliation {
@@ -103,6 +118,7 @@ export interface YearEndReconciliation {
   quarters: Array<{ quarter: number; label: string; record_count: number; form_941_filed_by: YearEndParty | null }>;
   opening_balances: { present: boolean; first_pay_date: string | null; last_pay_date: string | null };
   lines: YearEndReconciliationLine[];
+  form_941_reviews?: YearEndForm941Review[];
   error?: string;
 }
 
@@ -114,6 +130,8 @@ export interface YearEndWarning {
   status: 'blocked' | 'needs_review' | 'reviewed';
   digest: string;
   period: [string | null, string | null] | null;
+  /** Per-quarter specifics, for warnings that are not about employees. */
+  details?: string[];
   employees: Array<{ employee_id: number; name: string | null; edit_path: string }>;
   acknowledgement: {
     note: string;
@@ -216,5 +234,6 @@ export function parseYearEndTaxYear(value: string | null, today = new Date()): n
 export function clientStatusLabel(row: { status: YearEndClientStatus; issue_count: number }): string {
   if (row.status === 'ready') return 'Ready';
   if (row.status === 'not_filing') return 'No forms by Cornerstone';
+  if (row.status === 'check_needed') return 'Check needed';
   return `${row.issue_count} ${row.issue_count === 1 ? 'thing' : 'things'} to fix`;
 }

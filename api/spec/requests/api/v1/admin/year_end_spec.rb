@@ -9,6 +9,7 @@ RSpec.describe "Year-end checklist", type: :request do
   let!(:admin) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:acting_user) { admin }
   let(:acting_company) { company }
+  let!(:threshold_2026) { create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000) }
 
   before do
     [
@@ -87,7 +88,7 @@ RSpec.describe "Year-end checklist", type: :request do
       get "/api/v1/admin/year_end/clients", params: { year: 2026 }
 
       rows = response.parsed_body.dig("data", "clients").index_by { |row| row["name"] }
-      expect(rows.fetch("Agana Auto")).to include("status" => "needs_action", "issue_count" => 3)
+      expect(rows.fetch("Agana Auto")).to include("status" => "needs_action", "issue_count" => 3), rows.fetch("Agana Auto")["issue_summary"].inspect
       expect(rows.fetch("Agana Auto")["issue_summary"].map { |item| item["code"] }).to eq(%w[EMPLOYER_EIN_MISSING EMPLOYEE_DETAILS_MISSING W2_NOT_MARKED_READY])
       expect(rows.fetch("Agana Auto")["employee_details"]).to eq("missing_ssn" => 0, "missing_address" => 1)
       expect(rows.fetch("Tumon Bakery")).to include("status" => "needs_action", "issue_count" => 1)
@@ -118,6 +119,78 @@ RSpec.describe "Year-end checklist", type: :request do
       end
 
       expect(count_queries.call).to be <= baseline + 2
+    end
+  end
+
+  describe "the clients list status agrees with the checklist" do
+    include ActiveSupport::Testing::TimeHelpers
+
+    let(:start) { 1.hour.from_now.change(usec: 0) }
+    def list_row
+      get "/api/v1/admin/year_end/clients", params: { year: 2026 }
+      expect(response).to have_http_status(:ok), response.body
+      response.parsed_body.dig("data", "clients").find { |row| row["company_id"] == company.id }
+    end
+
+    def mark_ready
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2026 }
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2026, notes: "Year-end review" }
+      expect(response).to have_http_status(:ok), response.body
+    end
+
+    before do
+      pay(company, Date.new(2026, 3, 6), worker: employee)
+      record_decision(filing_types: %w[w2_gu], party: "cornerstone")
+      record_decision(filing_types: %w[form_1099], party: "no_filing")
+    end
+
+    it "shows Check needed, not Ready, after an employee address changes once the W-2s are marked ready" do
+      travel_to(start + 0.hours) { mark_ready }
+      travel_to(start + 1.hours) do
+        expect(list_row).to include("status" => "ready", "check_reason" => nil)
+
+        employee.update!(address_line1: "200 New Street")
+
+        expect(list_row).to include("status" => "check_needed", "check_reason" => a_string_including("changed since the W-2s were marked ready"))
+        get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+        expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
+        expect(list_row["status"]).to eq("check_needed")
+      end
+      travel_to(start + 2.hours) do
+        mark_ready
+        expect(list_row["status"]).to eq("ready")
+      end
+    end
+
+    it "returns to Ready once the full checklist re-checks an unrelated change" do
+      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
+      travel_to(start + 0.hours) { mark_ready }
+      travel_to(start + 1.hours) do
+        employee.touch
+        expect(list_row["status"]).to eq("check_needed")
+      end
+      travel_to(start + 2.hours) do
+        get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+        expect(response.parsed_body.dig("data", "status")).to eq("ready")
+        expect(list_row["status"]).to eq("ready")
+      end
+    end
+
+    it "does not call a 1099-only client Ready while a reportable contractor has no TIN" do
+      record_decision(filing_types: %w[w2_gu], party: "client")
+      record_decision(filing_types: %w[form_1099], party: "cornerstone")
+      contractor = create(:employee, :contractor, company: company, department: department)
+      contractor.update_columns(ssn_encrypted: nil, contractor_ein: nil)
+      pay(company, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 2_500)
+
+      row = list_row
+      expect(row).to include("status" => "needs_action")
+      expect(row["issue_summary"].map { |item| item["code"] }).to eq(%w[PAYEE_DETAILS_MISSING])
+      get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+      expect(response.parsed_body.dig("data", "issue_count")).to eq(row["issue_count"])
+
+      contractor.update_columns(ssn_encrypted: "900-70-4321")
+      expect(list_row["status"]).to eq("ready")
     end
   end
 
@@ -250,7 +323,7 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(response).to have_http_status(:ok), response.body
       expect(response.parsed_body.dig("filing", "status")).to eq("filing_ready")
       get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
-      expect(response.parsed_body.dig("data", "status")).to eq("ready")
+      expect(response.parsed_body.dig("data", "status")).to eq("ready"), response.parsed_body.dig("data", "steps").flat_map { |s| s["issues"] }.inspect
     end
 
     it "blocks ready when imported history overlaps the prior provider's period" do

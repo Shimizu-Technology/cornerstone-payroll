@@ -63,4 +63,79 @@ RSpec.describe YearEnd::JudgmentWarnings do
 
     expect(service.digests.fetch("qualified_overtime_unreviewed")).to eq(service.call.first[:digest])
   end
+
+  describe "evidence bound to saved paycheck amounts" do
+    let(:department) { create(:department, company: company) }
+    let(:employee) { create(:employee, company: company, department: department) }
+    let(:period) { create(:pay_period, :committed, company: company, start_date: Date.new(2026, 3, 16), end_date: Date.new(2026, 3, 31), pay_date: Date.new(2026, 4, 3)) }
+    let!(:item) do
+      create(:payroll_item, company: company, employee: employee, pay_period: period, gross_pay: 2_000, net_pay: 1_600,
+        overtime_hours: 4, qualified_overtime_compensation: nil, withholding_tax: 150, social_security_tax: 124, medicare_tax: 29,
+        social_security_taxable_wages: 2_000, social_security_taxable_tips: 0, medicare_taxable_wages: 2_000)
+    end
+
+    def live_warnings(**options)
+      described_class.new(company: company, year: 2026, w2_report: W2GuAggregator.new(company, 2026).generate, **options).call
+        .index_by { |warning| warning[:code] }
+    end
+
+    def acknowledge(code, digest)
+      YearEndAcknowledgement.create!(company: company, tax_year: 2026, warning_code: code, warning_digest: digest,
+        note: "Reviewed", acknowledged_by: reviewer, acknowledged_by_name: reviewer.name,
+        acknowledged_by_email: reviewer.email, acknowledged_by_role: reviewer.role, acknowledged_at: Time.current)
+    end
+
+    it "needs a new overtime review when the reviewed hours and gross change" do
+      acknowledge("qualified_overtime_unreviewed", live_warnings.fetch("qualified_overtime_unreviewed")[:digest])
+      expect(live_warnings.fetch("qualified_overtime_unreviewed")).to include(status: "reviewed")
+
+      item.update_columns(overtime_hours: 40, gross_pay: 3_000, social_security_taxable_wages: 3_000, medicare_taxable_wages: 3_000)
+
+      expect(live_warnings.fetch("qualified_overtime_unreviewed")).to include(status: "needs_review", acknowledgement_stale: true)
+    end
+
+    it "needs a new overtime review when only the hours change" do
+      acknowledge("qualified_overtime_unreviewed", live_warnings.fetch("qualified_overtime_unreviewed")[:digest])
+
+      item.update_columns(overtime_hours: 40)
+
+      expect(live_warnings.fetch("qualified_overtime_unreviewed")).to include(status: "needs_review", acknowledgement_stale: true)
+    end
+
+    it "needs a new legacy-base review when an amount changes without changing the item count" do
+      item.update_columns(social_security_taxable_tips: nil, overtime_hours: 0)
+      acknowledge("legacy_tax_bases", live_warnings.fetch("legacy_tax_bases")[:digest])
+      expect(live_warnings.fetch("legacy_tax_bases")).to include(status: "reviewed")
+
+      item.update_columns(withholding_tax: 175)
+
+      expect(live_warnings.fetch("legacy_tax_bases")).to include(status: "needs_review", acknowledgement_stale: true)
+    end
+
+    it "needs a new employer-benefit review when a flagged paycheck's benefit amount or classification changes" do
+      definition = create(:payroll_field_definition, :employer_contribution, company: company)
+      entry = create(:payroll_item_field_entry, payroll_item: item, payroll_field_definition: definition, amount: 50)
+      report = W2GuAggregator.new(company, 2026).generate
+      report[:review_warnings] = [ { code: PayrollReportComponentReview::CODE, payroll_item_id: item.id, employee_id: employee.id } ]
+      digest = -> { described_class.new(company: company, year: 2026, w2_report: report).digests.fetch(PayrollReportComponentReview::CODE) }
+      reviewed = digest.call
+
+      entry.update_columns(amount: 75)
+      changed_amount = digest.call
+      entry.update_columns(reporting_group: "health_insurance")
+
+      expect(changed_amount).not_to eq(reviewed)
+      expect(digest.call).not_to eq(changed_amount)
+    end
+  end
+
+  it "asks for a review of a 941 recorded-liability residual and names the quarter" do
+    reconciliation = { form_941_reviews: [
+      { quarter: 2, status: "residual", recorded_liability_residual: 0.03, employee_difference: 0.0, message: "The Q2 941: recorded tax liability differs from line 6 by $0.03." }
+    ] }
+
+    warning = warnings([], reconciliation: reconciliation).fetch("form_941_liability_residual")
+
+    expect(warning).to include(kind: "acknowledge", status: "needs_review", details: [ a_string_including("Q2 941") ])
+  end
 end

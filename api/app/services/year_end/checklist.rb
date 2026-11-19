@@ -37,9 +37,15 @@ module YearEnd
     # and employee item once, and the W-2 sign-off group (reconciliation,
     # warnings, overlap, mark ready) as one item until it is done.
     SIGN_OFF_STEPS = %w[reconciliation review_warnings prior_provider mark_ready].freeze
+    # 1099 payee items never hold up the W-2s.
+    PAYEE_ONLY_CODES = %w[PAYEE_DETAILS_MISSING PAYEES_UNAVAILABLE PAYEE_IDENTITY_UNRESOLVED].freeze
 
     def call
+      started_at = Time.current
       steps = build_steps
+      status = overall_status(steps)
+      # Lets the clients list keep showing Ready until any input changes.
+      ReadyCheck.record(company.id, year, started_at) if status == "ready"
       issue_count = steps.reject { |step| step[:key].in?(SIGN_OFF_STEPS) }.sum { |step| step[:issues].length } +
         (steps.any? { |step| step[:key].in?(SIGN_OFF_STEPS) && step[:status] == "action_needed" } ? 1 : 0)
       next_step = steps.find { |step| step[:status] == "action_needed" }
@@ -52,7 +58,7 @@ module YearEnd
           test_workspace: company.test_workspace?
         },
         tax_year: year,
-        status: overall_status(steps),
+        status: status,
         issue_count: issue_count,
         next_step: next_step&.fetch(:key),
         files_w2: files?("w2_gu"),
@@ -210,6 +216,7 @@ module YearEnd
         issue("PAYEE_DETAILS_MISSING", "#{row[:name]} is missing #{row[:missing_fields].map { |field| field == 'ssn' ? 'a TIN' : 'an address' }.to_sentence}.",
               employee_id: row[:employee_id])
       end
+      issues << issue("PAYEES_UNAVAILABLE", @contractor_error) if files?("form_1099") && !contractors_available?
 
       step(
         "people", "Employees and payees", issues,
@@ -283,7 +290,7 @@ module YearEnd
 
     def reconciliation_step
       issues = reconciliation[:blockers].map do |blocker|
-        issue(blocker[:code], blocker[:message], line: blocker[:line])
+        issue(blocker[:code], blocker[:message], line: blocker[:line], quarter: blocker[:quarter])
       end
       summary = case reconciliation[:status]
       when "match" then "W-2 totals match the 941s and W-1s#{reconciliation.dig(:opening_balances, :present) ? ' after opening balances' : ''}."
@@ -378,7 +385,10 @@ module YearEnd
         }
       end
 
-      native = PayPeriod.reportable_committed.where(company_id: company.id, pay_date: Date.new(year, 1, 1)..through)
+      # Only payroll that counts in these W-2 totals can overlap: contractor-only
+      # or non-reportable pay runs are not W-2 wages.
+      native = PayPeriod.where(id: W2PayrollItems.scope(company.id, year)
+        .where(pay_periods: { pay_date: Date.new(year, 1, 1)..through }).select("payroll_items.pay_period_id"))
       if native.exists?
         overlaps << {
           source: "cornerstone_payroll", count: native.count,
@@ -398,7 +408,7 @@ module YearEnd
       fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: w2_report).call if readiness
       filing = readiness&.review_payload(fingerprint: fingerprint)
       current = readiness&.current?(fingerprint)
-      earlier_blockers = earlier_steps.sum { |step| step[:issues].count { |issue| issue[:code] != "PAYEE_DETAILS_MISSING" } }
+      earlier_blockers = earlier_steps.sum { |step| step[:issues].count { |issue| !issue[:code].in?(PAYEE_ONLY_CODES) } }
 
       issues = []
       unless current

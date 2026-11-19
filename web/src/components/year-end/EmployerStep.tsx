@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { companiesApi } from '@/services/api';
 import { IssueList } from '@/components/year-end/StepCard';
 import type { YearEndChecklist, YearEndStep } from '@/lib/year-end';
+import { useStillMounted } from './useStillMounted';
 
 type EmployerStepData = Extract<YearEndStep, { key: 'employer' }>;
 type Field = 'ein' | 'address_line1' | 'address_line2' | 'city' | 'state' | 'zip' | 'phone' | 'email';
@@ -46,11 +47,12 @@ export function EmployerStep({ checklist, step, onSaved }: {
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const stillMounted = useStillMounted();
 
   useEffect(() => {
     if (fields.length === 0) return;
     let active = true;
-    void companiesApi.get(checklist.company.id)
+    void companiesApi.get(checklist.company.id, checklist.company.id)
       .then((response) => { if (active) setEditable(response.company.editable_fields ?? []); })
       .catch(() => { if (active) setEditable([]); });
     return () => { active = false; };
@@ -75,12 +77,13 @@ export function EmployerStep({ checklist, step, onSaved }: {
     setError(null);
     try {
       const changes = Object.fromEntries(editableFields.map((field) => [field, values[field].trim()]));
-      await companiesApi.update(checklist.company.id, changes);
+      await companiesApi.update(checklist.company.id, changes, checklist.company.id);
+      if (!stillMounted()) return;
       await onSaved('Saved the employer details.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save the employer details.');
+      if (stillMounted()) setError(err instanceof Error ? err.message : 'Could not save the employer details.');
     } finally {
-      setSaving(false);
+      if (stillMounted()) setSaving(false);
     }
   }
 

@@ -81,8 +81,15 @@ export function YearEndChecklist(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const { notify } = useFeedback();
   const requestId = useRef(0);
+  // The client and year this page shows now. A load or save started for an
+  // earlier one is dropped instead of replacing this page's checklist.
+  const scope = `${companyId}:${year}`;
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
 
   const load = useCallback(async () => {
+    const loadScope = `${companyId}:${year}`;
+    if (loadScope !== currentScope.current) return;
     const id = ++requestId.current;
     setLoading(true);
     setError(null);
@@ -102,9 +109,10 @@ export function YearEndChecklist(): ReactElement {
   }, [load]);
 
   const onSaved = useCallback(async (message: string) => {
+    if (`${companyId}:${year}` !== currentScope.current) return;
     notify({ tone: 'success', message });
     await load();
-  }, [load, notify]);
+  }, [companyId, load, notify, year]);
 
   return (
     <div>
@@ -156,7 +164,7 @@ export function YearEndChecklist(): ReactElement {
             <StatusPanel checklist={checklist} />
             <ol className="space-y-3" aria-busy={loading || undefined}>
               {checklist.steps.map((step) => (
-                <li key={`${step.key}-${step.status}`}>
+                <li key={`${checklist.company.id}-${step.key}-${step.status}`}>
                   <StepCard step={step} isNext={checklist.next_step === step.key}>
                     {stepBody(checklist, step, onSaved)}
                   </StepCard>
@@ -175,6 +183,7 @@ export function YearEndChecklist(): ReactElement {
                     <FilingEvidencePanel
                       filingType="w2_gu_w3_ss"
                       taxYear={checklist.tax_year}
+                      companyId={checklist.company.id}
                       preparationReady={checklist.steps.some((step) => step.key === 'mark_ready' && step.status === 'done')}
                       readinessMessage="Mark the W-2s ready above before recording delivery to SSA or DRT."
                     />
@@ -183,6 +192,7 @@ export function YearEndChecklist(): ReactElement {
                     <FilingEvidencePanel
                       filingType="form_1099_nec"
                       taxYear={checklist.tax_year}
+                      companyId={checklist.company.id}
                       preparationReady={checklist.status === 'ready'}
                       readinessMessage="Finish the checklist above before recording the 1099 filing."
                     />
