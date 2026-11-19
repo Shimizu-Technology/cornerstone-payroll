@@ -32,7 +32,7 @@ import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
 import { buildPayrollHistoryPackage } from '@/lib/payrollHistoryPackage';
 import { yearEndChecklistPath } from '@/lib/routes';
 import { yearEndTaxYears } from '@/lib/year-end';
-import { linkedReportQuarter, linkedReportYear, useFollowLinkedPeriod } from '@/lib/report-period';
+import { linkedReportQuarter, linkedReportYear, PeriodKeyed } from '@/lib/report-period';
 import type { AnnualPayrollSummaryReport, AnnualPayrollSummaryRow, EmployeePayHistoryReport, PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   Employee,
@@ -647,7 +647,6 @@ export function W2GuPanel() {
   );
   const [searchParams] = useSearchParams();
   const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear - 1);
-  useFollowLinkedPeriod(linkedReportYear(searchParams, yearOptions), setYear);
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -2445,8 +2444,6 @@ export function QuarterlyCompliancePacketPanel() {
   const [searchParams] = useSearchParams();
   const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear);
   const [quarter, setQuarter] = useState(() => linkedReportQuarter(searchParams) ?? currentQuarter);
-  useFollowLinkedPeriod(linkedReportYear(searchParams, yearOptions), setYear);
-  useFollowLinkedPeriod(linkedReportQuarter(searchParams), setQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
@@ -3249,8 +3246,6 @@ export function Form941GuPanel() {
   const [searchParams] = useSearchParams();
   const [year, setYear] = useState(() => linkedReportYear(searchParams, yearOptions) ?? currentYear);
   const [quarter, setQuarter] = useState(() => linkedReportQuarter(searchParams) ?? currentQuarter);
-  useFollowLinkedPeriod(linkedReportYear(searchParams, yearOptions), setYear);
-  useFollowLinkedPeriod(linkedReportQuarter(searchParams), setQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
@@ -4277,13 +4272,13 @@ function ReportsContent() {
     if (activeReport === 'checks-payments-register') return <ChecksPaymentsRegisterPanel />;
     if (activeReport === 'employee-pay-history') return <EmployeePayHistoryPanel />;
     if (activeReport === 'tax-withholding-summary') return <TaxSummaryPanel />;
-    if (activeReport === 'quarterly-compliance-packet') return <QuarterlyCompliancePacketPanel />;
+    if (activeReport === 'quarterly-compliance-packet') return <PeriodKeyed><QuarterlyCompliancePacketPanel /></PeriodKeyed>;
     if (activeReport === 'ytd-summary') return <YtdSummaryPanel />;
     if (activeReport === 'annual-payroll-summary') return <AnnualPayrollSummaryPanel />;
     if (activeReport === 'employer-liability') return <EmployerLiabilityPanel />;
-    if (activeReport === 'w2-gu') return <W2GuPanel />;
+    if (activeReport === 'w2-gu') return <PeriodKeyed><W2GuPanel /></PeriodKeyed>;
     if (activeReport === '1099-nec') return <Form1099NecPanel />;
-    if (activeReport === '941-gu') return <Form941GuPanel />;
+    if (activeReport === '941-gu') return <PeriodKeyed><Form941GuPanel /></PeriodKeyed>;
     if (activeReport && !PANELS_WITH_UI.includes(activeReport)) {
       return (
         <Card>

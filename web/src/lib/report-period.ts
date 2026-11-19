@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { createElement, Fragment, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router';
 
 /**
  * A report period passed in the URL (`/reports?report=941-gu&year=2026&quarter=2`),
@@ -22,14 +23,14 @@ export function reportPeriodPath(report: string, year: number, quarter?: number)
 }
 
 /**
- * Keeps a panel's period in step with later URL changes (Back, Forward or a new
- * link) after it mounted. Only a change in the URL value applies; the panel's
- * own selector still works between URL changes.
+ * Remounts a period panel whenever the URL's year or quarter changes (Back,
+ * Forward or a new link). The panel then reads both values from the URL again,
+ * drops every report it had loaded for the old period, and late responses for
+ * the old period land on the unmounted panel. Choosing a period in the panel's
+ * own selector doesn't change the URL, so it doesn't remount.
  */
-export function useFollowLinkedPeriod(linked: number | null, apply: (value: number) => void): void {
-  const [seen, setSeen] = useState(linked);
-  if (linked !== seen) {
-    setSeen(linked);
-    if (linked !== null) apply(linked);
-  }
+export function PeriodKeyed({ children }: { children: ReactNode }) {
+  const [searchParams] = useSearchParams();
+  const periodKey = `${searchParams.get('year') ?? ''}:${searchParams.get('quarter') ?? ''}`;
+  return createElement(Fragment, { key: periodKey }, children);
 }
