@@ -1992,7 +1992,7 @@ module Api
 
             AuditLog.record!(user: current_user, company_id: company.id, action: pdf ? "form1096#download" : "pub1220#download",
               record_type: "Company", record_id: company.id,
-              metadata: { year: year, mode: params[:mode], sha256: Digest::SHA256.hexdigest(content) })
+              metadata: { year: year, mode: params[:mode] }.merge(FilingFileDigest.audit_metadata(content)))
             send_data content, filename: "#{company.name.parameterize}-#{year}-#{final ? 'FINAL' : 'DRAFT'}-#{pdf ? '1096-totals.pdf' : '1099-PUB1220.txt'}",
               type: pdf ? "application/pdf" : "text/plain; charset=us-ascii", disposition: "attachment"
           end
@@ -2029,7 +2029,7 @@ module Api
 
             AuditLog.record!(user: current_user, company_id: company.id, action: pdf ? "w3ss#download" : "efw2#download",
               record_type: "Company", record_id: company.id,
-              metadata: { year: year, mode: params[:mode], readiness_fingerprint: fingerprint, sha256: Digest::SHA256.hexdigest(content) })
+              metadata: { year: year, mode: params[:mode], readiness_fingerprint: fingerprint }.merge(FilingFileDigest.audit_metadata(content)))
             send_data content, filename: "#{company.name.parameterize}-#{year}-#{final ? 'FINAL' : 'DRAFT'}-#{pdf ? 'W3SS.pdf' : 'EFW2.txt'}",
               type: pdf ? "application/pdf" : "text/plain; charset=us-ascii", disposition: "attachment"
           end
@@ -4841,7 +4841,7 @@ module Api
             recheck = ActiveRecord::Base.uncached { w2_official_copies_snapshot(company, year) }
             if w2_official_copies_signature(recheck) != w2_official_copies_signature(snapshot)
               :changed
-            elsif record_w2_official_copies_access(company, audit)
+            elsif record_w2_official_copies_access(company, audit.merge(FilingFileDigest.audit_metadata(pdf)))
               :recorded
             end
           end
@@ -4970,7 +4970,7 @@ module Api
             recheck = ActiveRecord::Base.uncached { Form1099NecFilingState.call(company: company, year: year) }
             if recheck.signature != state.signature
               :changed
-            elsif record_official_copies_access(company, audit, subject: "#{year} 1099-NEC #{kind == 'payer' ? 'payer record' : 'recipient copies B'}", source: "form_1099_nec_official_copies")
+            elsif record_official_copies_access(company, audit.merge(FilingFileDigest.audit_metadata(pdf)), subject: "#{year} 1099-NEC #{kind == 'payer' ? 'payer record' : 'recipient copies B'}", source: "form_1099_nec_official_copies")
               :recorded
             end
           end

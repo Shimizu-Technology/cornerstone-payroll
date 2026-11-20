@@ -801,6 +801,9 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       expect(log).to have_attributes(user_id: admin.id, company_id: company.id, event_category: "document_access", record_type: "reports")
       expect(log.metadata).to include("tax_year" => 2026, "document_kind" => "form_1099_nec_payer_record", "contains_full_tin" => true,
         "status" => "final", "inputs_fingerprint" => readiness.ready_fingerprint, "ready_fingerprint" => readiness.ready_fingerprint, "payee_count" => 1)
+      expect(log.metadata).to include("file_digest" => FilingFileDigest.call(response.body), "digest_alg" => "hmac-sha256-v1")
+      expect(log.metadata).not_to have_key("sha256")
+      expect(log.metadata.values.map(&:to_s)).not_to include(Digest::SHA256.hexdigest(response.body))
       expect(log.to_json).not_to include("7890")
     end
 
