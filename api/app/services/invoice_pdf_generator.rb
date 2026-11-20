@@ -22,7 +22,7 @@ class InvoicePdfGenerator
   end
 
   def filename
-    number = invoice_data["invoice_number"].to_s.parameterize.presence || "invoice"
+    number = display_number.to_s.parameterize.presence || "invoice"
     "invoice-#{number}.pdf"
   end
 
@@ -44,6 +44,11 @@ class InvoicePdfGenerator
 
   def invoice_data
     snapshot.fetch("invoice", {})
+  end
+
+  def display_number
+    number = invoice_data["invoice_number"].to_s
+    number.blank? || number.start_with?("DRAFT-") ? "Draft" : number
   end
 
   def billing
@@ -105,7 +110,7 @@ class InvoicePdfGenerator
       pdf.text "INVOICE", size: 9, style: :bold, character_spacing: 1.8
       pdf.move_down 8
       pdf.fill_color NAVY
-      pdf.text invoice_data["invoice_number"].presence || "Draft", size: 20, style: :bold
+      pdf.text display_number, size: 20, style: :bold
     end
     pdf.bounding_box([ pdf.bounds.width - 188, top - 17 ], width: 164, height: 54) do
       pdf.fill_color MUTED
@@ -159,8 +164,11 @@ class InvoicePdfGenerator
 
   def line_items(pdf)
     include_service_date = line_item_rows.any? { |item| item["service_date"].present? }
+    include_item_name = line_item_rows.any? { |item| item["item_name"].present? }
     rows = [
       [
+        (include_item_name ? { content: "#", font_style: :bold } : nil),
+        (include_item_name ? { content: "Product or service", font_style: :bold } : nil),
         { content: "Description", font_style: :bold },
         (include_service_date ? { content: "Date", font_style: :bold } : nil),
         { content: "Qty", font_style: :bold, align: :right },
@@ -169,9 +177,11 @@ class InvoicePdfGenerator
       ].compact
     ]
 
-    line_item_rows.each do |item|
+    line_item_rows.each_with_index do |item, index|
       rows << [
-        [ item["description"].to_s, ("Pass-through reimbursement" if item["line_kind"] == "reimbursement") ].compact.join("\n"),
+        (include_item_name ? (index + 1).to_s : nil),
+        (include_item_name ? item["item_name"].to_s : nil),
+        item["description"].to_s,
         (include_service_date ? format_date(item["service_date"]) : nil),
         format_decimal(item["quantity"]),
         money(item["rate"]),
@@ -192,19 +202,20 @@ class InvoicePdfGenerator
       row(0).text_color = "FFFFFF"
       row(0).borders = []
       (1...rows.length).each { |index| row(index).background_color = PANEL if index.even? }
-      columns(0).width = table_width - date_width - quantity_width - rate_width - amount_width
-      if include_service_date
-        columns(1).width = date_width
-        columns(2).width = quantity_width
-        columns(3).width = rate_width
-        columns(4).width = amount_width
-        columns(2..4).align = :right
-      else
-        columns(1).width = quantity_width
-        columns(2).width = rate_width
-        columns(3).width = amount_width
-        columns(1..3).align = :right
+      offset = include_item_name ? 2 : 0
+      if include_item_name
+        columns(0).width = 24
+        columns(1).width = 106
+        cells.padding = [ 9, 5 ]
+        cells.size = 8
       end
+      columns(offset).width = table_width - date_width - quantity_width - rate_width - amount_width - (include_item_name ? 130 : 0)
+      columns(offset + 1).width = date_width if include_service_date
+      numeric_start = offset + (include_service_date ? 2 : 1)
+      columns(numeric_start).width = quantity_width
+      columns(numeric_start + 1).width = rate_width
+      columns(numeric_start + 2).width = amount_width
+      columns(numeric_start..numeric_start + 2).align = :right
     end
   end
 

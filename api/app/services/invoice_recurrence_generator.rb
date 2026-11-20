@@ -31,6 +31,11 @@ class InvoiceRecurrenceGenerator
       invoice = Invoice.find_by(invoice_recurrence_id: recurrence.id, recurrence_on: date)
       unless invoice
         original = source.snapshot.fetch("invoice")
+        continuing = source.invoice_billing_profile.numbering_style == "continuing"
+        terms = continuing ? source.invoice_recipient.payment_terms.presence || original["payment_terms"] : original["payment_terms"]
+        terms_days = terms.to_s.match(/\ANet\s+(\d+)\z/i)&.captures&.first
+        due_days = continuing && terms_days ? terms_days.to_i : continuing && terms.to_s.casecmp?("Due on receipt") ? 0 : recurrence.due_after_days
+        period_end = recurrence.occurrence_date(recurrence.occurrence_index + 1) - 1
         invoice = Invoice.new(
           organization: recurrence.organization,
           finance_book: recurrence.finance_book,
@@ -40,13 +45,14 @@ class InvoiceRecurrenceGenerator
           invoice_recurrence: recurrence,
           recurrence_on: date,
           invoice_date: date,
-          due_date: date + recurrence.due_after_days,
-          service_period_start: recurrence.interval_unit == "month" ? date.beginning_of_month : date,
-          service_period_end: recurrence.interval_unit == "month" ? date.end_of_month : recurrence.occurrence_date(recurrence.occurrence_index + 1) - 1,
+          due_date: date + due_days,
+          due_date_manual: !continuing,
+          service_period_start: date,
+          service_period_end: period_end,
           currency: original["currency"],
           customer_reference: original["customer_reference"],
           notes: original["notes"],
-          payment_terms: source.invoice_recipient.payment_terms.presence || original["payment_terms"],
+          payment_terms: terms,
           email_subject: original["email_subject"],
           email_body: original["email_body"],
           discount_type: original["discount_type"] || "none",
@@ -54,24 +60,34 @@ class InvoiceRecurrenceGenerator
           created_by: recurrence.created_by,
           updated_by: recurrence.created_by
         )
+        first_fee = true
         source.snapshot.fetch("line_items").each_with_index do |line, position|
+          fee = line.fetch("line_kind", "service_fee") == "service_fee"
+          rate = continuing && fee && first_fee ? source.invoice_recipient.default_rate || line.fetch("rate") : line.fetch("rate")
+          first_fee = false if fee
+          reimbursement = continuing && !fee
+          description = line.fetch("description")
+          if continuing
+            description = if line["description_template"].present?
+              line["description_template"].gsub("{month}", date.strftime("%B %Y"))
+            else
+              description.gsub(source.service_period_start&.strftime("%B %Y").to_s.presence || "{month}", date.strftime("%B %Y")).gsub("{month}", date.strftime("%B %Y"))
+            end
+          end
           invoice.line_items.build(
+            item_name: line["item_name"].to_s,
+            description_template: line["description_template"],
+            reimbursement_review_required: reimbursement,
             line_kind: line.fetch("line_kind", "service_fee"),
-            description: line.fetch("description").gsub(source.service_period_start&.strftime("%B %Y").to_s.presence || "{month}", date.strftime("%B %Y")).gsub("{month}", date.strftime("%B %Y")),
+            description: description,
             quantity: line.fetch("quantity"),
-            rate: source.invoice_billing_profile.numbering_style == "continuing" && line.fetch("line_kind", "service_fee") == "service_fee" ? (source.invoice_recipient.default_rate || line.fetch("rate")) : line.fetch("rate"),
+            rate: reimbursement ? 0 : rate,
             position: position
           )
         end
         invoice.save!
         InvoiceEvent.record!(invoice: invoice, event_type: "recurring_draft_created", actor: recurrence.created_by,
                              metadata: { recurrence_id: recurrence.id, occurrence_on: date.iso8601 })
-      end
-      if source.invoice_billing_profile.numbering_style == "continuing" && invoice.draft?
-        terms = invoice.payment_terms.to_s
-        days = terms.match(/\ANet\s+(\d+)\z/i)&.captures&.first
-        due_days = days ? days.to_i : terms.casecmp?("Due on receipt") ? 0 : recurrence.due_after_days
-        invoice.update!(due_date: date + due_days)
       end
       recurrence.advance!
       invoice

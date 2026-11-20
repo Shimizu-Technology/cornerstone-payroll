@@ -63,7 +63,7 @@ module Api
             raise ArgumentError, "Issued invoice financial content is immutable" unless @invoice.draft?
 
             @invoice.assign_attributes(invoice_attributes)
-            @invoice.company = optional_source_company if params.dig(:invoice, :company_id).present?
+            @invoice.company = optional_source_company if params[:invoice].key?(:company_id)
             @invoice.updated_by = current_user
             assign_line_items!(@invoice)
             @invoice.save!
@@ -144,7 +144,7 @@ module Api
           when "voided"
             @invoice.void!(actor: current_user, reason: params[:reason])
           when "uncollectible"
-            @invoice.mark_uncollectible!(actor: current_user, reason: params[:reason].presence || "Marked uncollectible by operator")
+            @invoice.mark_uncollectible!(actor: current_user, reason: params[:reason])
           when "archived"
             @invoice.archive!(actor: current_user)
           when "restored"
@@ -282,10 +282,12 @@ module Api
             :invoice_number,
             :invoice_date,
             :due_date,
+            :due_date_manual,
             :currency,
             :customer_reference,
             :service_period_start,
             :service_period_end,
+            :service_period_manual,
             :notes,
             :payment_terms,
             :email_subject,
@@ -329,7 +331,7 @@ module Api
           Array(params.dig(:invoice, :line_items)).map do |item|
             item_hash = item.respond_to?(:to_unsafe_h) ? item.to_unsafe_h : item
             ActionController::Parameters.new(item_hash).permit(
-              :id, :line_kind, :description, :quantity, :rate, :service_date, :position, :_destroy
+              :id, :line_kind, :item_name, :description_template, :description, :quantity, :rate, :service_date, :position, :_destroy
             )
           end
         end
@@ -350,9 +352,11 @@ module Api
             item ||= invoice.line_items.build
             item.assign_attributes(
               line_kind: attrs[:line_kind].presence || "service_fee",
+              item_name: attrs[:item_name].to_s,
+              description_template: attrs[:description_template],
               description: attrs[:description],
               quantity: attrs[:quantity].presence || 0,
-              rate: attrs[:rate].presence || 0,
+              rate: attrs[:rate].presence,
               service_date: attrs[:service_date].presence,
               position: attrs[:position].presence || index
             )

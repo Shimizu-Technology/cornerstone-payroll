@@ -40,6 +40,54 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     storage.delete(@uploaded_logo_key) if @uploaded_logo_key
   end
 
+  it "saves service catalogs and continuing numbering through the profile API" do
+    patch "/api/v1/admin/invoice_billing_profiles/#{profile.id}", params: { invoice_billing_profile: {
+      numbering_style: "continuing", next_invoice_number: 7055,
+      service_catalog: [ { name: "Accounting Consulting", description_template: "Accounting Services – {month}", line_kind: "service_fee" } ]
+    } }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(profile.reload).to have_attributes(numbering_style: "continuing", next_invoice_number: 7055)
+    expect(profile.service_catalog.first.fetch("name")).to eq("Accounting Consulting")
+  end
+
+  it "creates, edits, unallocates and issues a continuing-number draft with customer defaults" do
+    profile.update!(numbering_style: "continuing", next_invoice_number: 7055)
+    recipient.update!(default_rate: 3000, payment_terms: "Net 15")
+    post "/api/v1/admin/invoices", params: { invoice: {
+      invoice_billing_profile_id: profile.id, invoice_recipient_id: recipient.id,
+      company_id: sibling_company.id, invoice_date: "2026-11-02",
+      line_items: [ { item_name: "Accounting Consulting", description: "Accounting Services – November 2026", quantity: 1 } ]
+    } }, as: :json
+    expect(response).to have_http_status(:created), response.body
+    invoice = Invoice.find(response.parsed_body.dig("invoice", "id"))
+    draft_number = invoice.invoice_number
+    expect(draft_number).to start_with("DRAFT-")
+    expect(invoice).to have_attributes(payment_terms: "Net 15", due_date: Date.new(2026, 11, 17), total_amount: 3000.to_d)
+    patch "/api/v1/admin/invoices/#{invoice.id}", params: { invoice: { invoice_number: nil, company_id: nil, invoice_date: "2026-12-02" } }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(invoice.reload).to have_attributes(invoice_number: draft_number, company_id: nil, due_date: Date.new(2026, 12, 17))
+    patch "/api/v1/admin/invoices/#{invoice.id}", params: { invoice: { due_date: "2026-12-25" } }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    patch "/api/v1/admin/invoices/#{invoice.id}", params: { invoice: { payment_terms: "Net 30" } }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(invoice.reload.due_date).to eq(Date.new(2026, 12, 25))
+    post "/api/v1/admin/invoices/#{invoice.id}/issue"
+    expect(response).to have_http_status(:ok), response.body
+    expect(invoice.reload).to have_attributes(status: "open", invoice_number: "7055")
+    expect(invoice.snapshot.fetch("line_items").first.fetch("item_name")).to eq("Accounting Consulting")
+  end
+
+  it "requires separate operator reasons for void and uncollectible actions" do
+    invoice = create_draft
+    invoice.issue!(actor: admin_user)
+    patch "/api/v1/admin/invoices/#{invoice.id}/update_status", params: { status: "uncollectible", reason: " " }
+    expect(response).to have_http_status(:unprocessable_entity), response.body
+    expect(invoice.reload.status).to eq("open")
+    patch "/api/v1/admin/invoices/#{invoice.id}/update_status", params: { status: "uncollectible", reason: "Customer closed" }
+    expect(response).to have_http_status(:ok), response.body
+    expect(invoice.events.last.metadata.fetch("reason")).to eq("Customer closed")
+  end
+
   it "includes past-due partial balances in the overdue filter and summary" do
     invoice = create(:invoice, :with_line_item, company: company, invoice_recipient: recipient, invoice_billing_profile: profile,
                       due_date: Date.new(2026, 5, 3))
