@@ -261,7 +261,7 @@ module Api
           Invoice
             .where(finance_book_id: current_finance_book.id)
             .includes(
-              :invoice_recipient, :invoice_billing_profile, :line_items, :created_by, :updated_by,
+              :invoice_recipient, :invoice_billing_profile, :company, :line_items, :created_by, :updated_by,
               :artifacts, :events, :deliveries,
               payments: [ :recorded_by, :reversed_by ],
               credit_notes: [ :issued_by, :voided_by ]
