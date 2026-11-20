@@ -40,6 +40,16 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     storage.delete(@uploaded_logo_key) if @uploaded_logo_key
   end
 
+  it "includes past-due partial balances in the overdue filter and summary" do
+    invoice = create(:invoice, :with_line_item, company: company, invoice_recipient: recipient, invoice_billing_profile: profile,
+                      due_date: Date.new(2026, 5, 3))
+    invoice.issue!(actor: admin_user)
+    InvoicePaymentService.record!(invoice: invoice, actor: admin_user, amount: 10, received_on: PayrollBusinessClock.today,
+                                                                                 payment_method: "check", currency: "USD")
+    get "/api/v1/admin/invoices", params: { status: "overdue" }
+    expect(response.parsed_body.fetch("invoices").map { |row| row["id"] }).to include(invoice.id)
+  end
+
   it "stores an optional sender logo within the organization and freezes its reference on issue" do
     logo_bytes = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lQoAAAAASUVORK5CYII=")
     tempfile = Tempfile.new([ "invoice-logo", ".png" ])

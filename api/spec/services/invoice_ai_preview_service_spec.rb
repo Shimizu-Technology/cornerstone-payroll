@@ -3,7 +3,11 @@
 require "rails_helper"
 
 RSpec.describe InvoiceAiPreviewService do
+  include ActiveSupport::Testing::TimeHelpers
+
+  after { travel_back }
   it "returns a deterministic fallback preview when no AI key is configured" do
+    travel_to Time.utc(2026, 11, 20, 15)
     company = create(:company)
     user = create(:user, company: company)
     recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology", payment_terms: "Due on receipt")
@@ -19,6 +23,8 @@ RSpec.describe InvoiceAiPreviewService do
       message: "Invoice Shimizu Technology $1,000 for accounting service"
     ).call
 
+    expect(preview["invoice_date"]).to eq("2026-11-21")
+    travel_back
     expect(preview["status"]).to eq("preview")
     expect(preview["invoice_recipient_id"]).to eq(recipient.id)
     expect(preview["line_items"].first).to include(

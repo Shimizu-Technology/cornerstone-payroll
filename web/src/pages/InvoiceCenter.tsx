@@ -1,3 +1,4 @@
+import { invoiceBusinessDate, customerDefaults, invoiceIsOverdue } from '@/lib/invoice-defaults';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -38,7 +39,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
+import { invoiceLineAmount, invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 import { invoiceSendState, type SendState } from '@/lib/invoice-send-state';
 import {
   invoiceBillingProfilesApi,
@@ -103,10 +104,7 @@ interface ImportForm {
   delivery_channel: string;
 }
 
-const dateOnly = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-};
+const dateOnly = invoiceBusinessDate;
 const newLine = (): DraftLine => ({ localId: crypto.randomUUID(), description: '', quantity: 1, rate: 0, position: 0 });
 const emptyDraft = (): DraftForm => ({
   invoice_billing_profile_id: '',
@@ -357,6 +355,7 @@ export function InvoiceCenter() {
     const matchesStatus = statusFilter === 'all'
       || (statusFilter === 'active' && !invoice.archived && !['voided', 'uncollectible'].includes(invoice.status))
       || (statusFilter === 'archived' && invoice.archived)
+      || (statusFilter === 'overdue' && invoiceIsOverdue(invoice))
       || invoice.status === statusFilter;
     const needle = search.trim().toLowerCase();
     const matchesSearch = !needle || [invoice.invoice_number, invoice.recipient_name, invoice.billing_profile_name, invoice.customer_reference]
@@ -483,7 +482,7 @@ export function InvoiceCenter() {
     const lines = submittedDraftLines;
     if (!lines.length) throw new Error('Add at least one invoice line');
     const discountValue = draft.discount_type === 'none' ? 0 : Number(draft.discount_value);
-    const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.rate), 0);
+    const subtotal = lines.reduce((sum, line) => sum + invoiceLineAmount(Number(line.quantity), Number(line.rate)), 0);
     if (draft.discount_type !== 'none' && draft.discount_value.trim() === '') throw new Error('Enter a discount');
     if (!Number.isFinite(discountValue) || discountValue < 0) throw new Error('Enter a valid discount');
     if (draft.discount_type === 'percent' && discountValue > 100) throw new Error('Percentage discount cannot exceed 100%');
@@ -672,9 +671,10 @@ export function InvoiceCenter() {
 
   const changeLifecycle = async (status: 'voided' | 'uncollectible' | 'archived' | 'restored') => {
     if (!selected) return;
-    if (status === 'voided' && !window.confirm('Void this invoice? This keeps the invoice and history but removes it from receivables.')) return;
+    const reason = status === 'voided' ? window.prompt('Why are you voiding this invoice?')?.trim() : undefined;
+    if (status === 'voided' && !reason) return;
     await run(async () => {
-      const response = await invoicesApi.updateStatus(selected.id, status);
+      const response = await invoicesApi.updateStatus(selected.id, status, reason);
       applyInvoice(response.invoice);
     }, status === 'archived' ? 'Invoice archived.' : status === 'restored' ? 'Invoice restored.' : `Invoice marked ${status}.`);
   };
@@ -770,7 +770,7 @@ export function InvoiceCenter() {
       ? user?.organization_name || `Organization #${invoiceOrganizationId}`
       : otherOrganization?.id === invoiceOrganizationId ? otherOrganization.name : `Organization #${invoiceOrganizationId}`);
 
-  const invoiceSubtotal = submittedDraftLines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.rate || 0), 0);
+  const invoiceSubtotal = submittedDraftLines.reduce((sum, line) => sum + invoiceLineAmount(Number(line.quantity || 0), Number(line.rate || 0)), 0);
   const discountInput = Number(draft.discount_value || 0);
   const invoiceDiscount = draft.discount_type === 'none' || !Number.isFinite(discountInput)
     ? 0
@@ -921,7 +921,7 @@ export function InvoiceCenter() {
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm font-medium">From<select value={draft.invoice_billing_profile_id} onChange={(e) => setDraft({ ...draft, invoice_billing_profile_id: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose billing profile</option>{activeProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-              <label className="text-sm font-medium">Bill to<select value={draft.invoice_recipient_id} onChange={(e) => setDraft({ ...draft, invoice_recipient_id: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose customer</option>{recipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.name}</option>)}</select></label>
+              <label className="text-sm font-medium">Bill to<select value={draft.invoice_recipient_id} onChange={(e) => { const customer = recipients.find((r) => String(r.id) === e.target.value); setDraft(customerDefaults({ ...draft, invoice_recipient_id: e.target.value }, customer)); }} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose customer</option>{recipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.name}</option>)}</select></label>
               <label className="text-sm font-medium">Invoice number <span className="font-normal text-neutral-400">(automatic if blank)</span><Input className="mt-1" value={draft.invoice_number} onChange={(e) => setDraft({ ...draft, invoice_number: e.target.value })} placeholder="ST-2026-0001" /></label>
               <label className="text-sm font-medium">Customer reference<Input className="mt-1" value={draft.customer_reference} onChange={(e) => setDraft({ ...draft, customer_reference: e.target.value })} placeholder="PO number or project" /></label>
               <label className="text-sm font-medium">Invoice date<Input className="mt-1" type="date" value={draft.invoice_date} onChange={(e) => setDraft({ ...draft, invoice_date: e.target.value })} /></label>

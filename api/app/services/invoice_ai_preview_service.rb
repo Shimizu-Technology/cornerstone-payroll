@@ -122,7 +122,7 @@ class InvoiceAiPreviewService
     <<~PROMPT
       Company: #{company.name}
       Staff user: #{user.name}
-      Today: #{Date.current.iso8601}
+      Today: #{PayrollBusinessClock.today.iso8601}
 
       Active invoice-from billing profiles:
       #{billing_profile_context}
@@ -218,7 +218,7 @@ class InvoiceAiPreviewService
       "invoice_recipient_id" => recipient&.id,
       "invoice_recipient_name" => recipient_name,
       "new_recipient" => new_recipient,
-      "invoice_date" => normalize_date(raw["invoice_date"]) || Date.current.iso8601,
+      "invoice_date" => normalize_date(raw["invoice_date"]) || PayrollBusinessClock.today.iso8601,
       "service_period_start" => normalize_date(raw["service_period_start"]),
       "service_period_end" => normalize_date(raw["service_period_end"]),
       "payment_terms" => raw["payment_terms"].presence,
@@ -247,7 +247,7 @@ class InvoiceAiPreviewService
       "invoice_recipient_id" => recipient&.id,
       "invoice_recipient_name" => recipient&.name,
       "new_recipient" => nil,
-      "invoice_date" => Date.current.iso8601,
+      "invoice_date" => PayrollBusinessClock.today.iso8601,
       "service_period_start" => nil,
       "service_period_end" => nil,
       "payment_terms" => nil,
@@ -279,7 +279,7 @@ class InvoiceAiPreviewService
       "invoice_recipient_id" => nil,
       "invoice_recipient_name" => nil,
       "new_recipient" => nil,
-      "invoice_date" => Date.current.iso8601,
+      "invoice_date" => PayrollBusinessClock.today.iso8601,
       "service_period_start" => nil,
       "service_period_end" => nil,
       "payment_terms" => nil,
