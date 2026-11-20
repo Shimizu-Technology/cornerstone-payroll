@@ -127,8 +127,9 @@ RSpec.describe PayPeriodCorrectionService do
         expect(posting.reload.reversal_posting).to be_present
       end
 
-      it "does not enqueue tax sync when the CST ingest integration is not configured" do
-        allow(PayrollTaxSyncJob).to receive(:perform_later)
+      it "leaves the retired tax sync columns untouched" do
+        retired = %w[tax_sync_status tax_sync_attempts tax_sync_last_error tax_synced_at tax_sync_idempotency_key]
+        before = committed_period.reload.attributes.slice(*retired)
 
         PayPeriodCorrectionService.void!(
           pay_period: committed_period,
@@ -136,24 +137,7 @@ RSpec.describe PayPeriodCorrectionService do
           reason: "Data entry error"
         )
 
-        expect(committed_period.reload.tax_sync_status).to be_nil
-        expect(PayrollTaxSyncJob).not_to have_received(:perform_later)
-      end
-
-      it "registers tax sync enqueue on transaction commit when CST ingest is configured" do
-        allow(ENV).to receive(:[]).and_call_original
-        allow(ENV).to receive(:[]).with("CST_INGEST_URL").and_return("https://tax.example.test/ingest")
-        allow(PayrollTaxSyncJob).to receive(:perform_later)
-        allow(ActiveRecord).to receive(:after_all_transactions_commit).and_yield
-
-        PayPeriodCorrectionService.void!(
-          pay_period: committed_period,
-          actor: actor,
-          reason: "Data entry error"
-        )
-
-        expect(ActiveRecord).to have_received(:after_all_transactions_commit)
-        expect(PayrollTaxSyncJob).to have_received(:perform_later).with(committed_period.id)
+        expect(committed_period.reload.attributes.slice(*retired)).to eq(before)
       end
 
       it "captures financial snapshot on the audit event" do

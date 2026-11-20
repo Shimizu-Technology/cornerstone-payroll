@@ -22,8 +22,8 @@ import { useCompany } from '@/contexts/CompanyContext';
 
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
-import type { AddBackResult, ExpectedEntries, PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
-import { preservesWorksheetJobHours, type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, unavailableSavedWageRateLabels, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, taxSyncStatusConfig, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
+import type { AddBackResult, ExpectedEntries, PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
+import { preservesWorksheetJobHours, type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, unavailableSavedWageRateLabels, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
 
 export type AddBackSource = 'expected_entries' | 'roster';
 export interface AddBackNoticeState { source: AddBackSource; result: AddBackResult; hoursEntered: boolean }
@@ -103,7 +103,6 @@ export function usePayRunController({
     setClientApprovalEvidence('');
   }, [payPeriod?.payroll_review?.id]);
   const [adoptingConfirmedWorkweek, setAdoptingConfirmedWorkweek] = useState(false);
-  const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [payrollIntakeImportOpen, setPayrollIntakeImportOpen] = useState(false);
   const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
@@ -985,20 +984,6 @@ export function usePayRunController({
     }
   };
 
-  const handleRetryTaxSync = async () => {
-    if (!payPeriod) return;
-    try {
-      setRetryingSyncTax(true);
-      setError(null);
-      const response = await payPeriodsApi.retryTaxSync(payPeriod.id);
-      setPayPeriod(response.pay_period);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to retry tax sync');
-    } finally {
-      setRetryingSyncTax(false);
-    }
-  };
-
   const openPayDateCorrection = () => {
     if (!payPeriod) return;
     setPayDateCorrectionDate(payPeriod.pay_date);
@@ -1171,10 +1156,6 @@ export function usePayRunController({
   const directDepositCount = payableItems.filter((item) => item.effective_payment_delivery_method === 'direct_deposit').length;
   const statusConfig = payPeriodStatusConfig[payPeriod.status];
 
-  const syncStatus = payPeriod.tax_sync_status as TaxSyncStatus | null | undefined;
-  const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
-  const MAX_SYNC_ATTEMPTS = 5;
-  const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
   const canEditPayPeriod = !isCommitted && !isVoided && !savedImportReloadRequired;
   const canImportMosa = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('mosa_revel');
   const canImportSpikeIntake = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
@@ -1554,12 +1535,6 @@ export function usePayRunController({
         : lifecycleActor(lifecycle.committed?.actor_name),
       tone: isCommitted ? 'success' as const : 'default' as const,
     },
-    ...(syncStatus || payPeriod.tax_synced_at ? [{
-      label: 'Tax sync',
-      timestamp: lifecycle.tax_synced?.timestamp || payPeriod.tax_synced_at,
-      actor: syncConfig?.label || 'Not started',
-      tone: syncConfig?.variant || 'default' as const,
-    }] : []),
   ].sort((left, right) => {
     if (left.timestamp && right.timestamp) {
       return new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime();
@@ -1626,7 +1601,7 @@ export function usePayRunController({
     feedback: { calculationFailures, calculationNotice, calendarRefreshError, companyId, currentPath, employees, error, errorFeedbackAttempt, payPeriod, payrollItems, processing, reloadSavedSourceImport, savedImportReloadRequired, timeTrackingImportOpen, worksheetRefreshWarning },
     blockers: { adoptingConfirmedWorkweek, canImportMosa, canImportSpikeIntake, clientApprovalLoading, handleAdoptConfirmedWorkweek, hasPendingCalculationChanges, openClientApproval, payPeriod, setImportModalOpen, setPayrollIntakeImportOpen },
     source: { sourceCoverageProcessing: processing, onReviewSourceCoverage: isDraft || isCalculated ? () => { if (!processing) void handleRunPayroll(); } : undefined, aireSourceRefreshToken, companyId, currentAireRecord, hoursMap, invalidateAireSource, loadPayPeriod, payPeriod, setTimeTrackingAutoPreview, setTimeTrackingImportOpen },
-    metadata: { MAX_SYNC_ATTEMPTS, canRetrySyncTax, formatCorrectionPayDate, handleRetryTaxSync, isApproved, isCalculated, isCommitted, isCorrection, isVoided, payDateCorrections, payPeriod, processedBy, retryingSyncTax, statusConfig, syncConfig, syncStatus },
+    metadata: { formatCorrectionPayDate, isApproved, isCalculated, isCommitted, isCorrection, isVoided, payDateCorrections, payPeriod, processedBy, statusConfig },
     refreshDialog: { error, handleRefreshSetup, processing, refreshBaseSalary, refreshRecurring, refreshSetupOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, sourceCoverageOpen },
     loans: { additionalEmployeeIds, canEditPayPeriod, employees, isCalculated, isDraft, namedLoanDrafts, namedLoanOptions, payPeriod, payrollItems, setNamedLoanDrafts, standaloneLoanConflicts },
     comparison: { comparison, comparisonError, comparisonFlagTone, comparisonHiddenRows, comparisonHighlights, comparisonLoading, comparisonRows, comparisonTotalRows, isApproved, isCalculated, isCommitted, loadComparison, payPeriod, payrollItems },

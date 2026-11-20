@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_20_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_20_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2610,11 +2610,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_150000) do
     t.date "start_date", null: false
     t.string "status", default: "draft"
     t.bigint "superseded_by_id"
-    t.integer "tax_sync_attempts", default: 0, null: false
-    t.string "tax_sync_idempotency_key"
-    t.text "tax_sync_last_error"
-    t.string "tax_sync_status", default: "pending"
-    t.datetime "tax_synced_at"
+    t.integer "tax_sync_attempts", default: 0, null: false, comment: "Retired: Cornerstone Tax payroll push was removed; not read or written."
+    t.string "tax_sync_idempotency_key", comment: "Retired: Cornerstone Tax payroll push was removed; not read or written."
+    t.text "tax_sync_last_error", comment: "Retired: Cornerstone Tax payroll push was removed; not read or written."
+    t.string "tax_sync_status", comment: "Retired: Cornerstone Tax payroll push was removed; not read or written."
+    t.datetime "tax_synced_at", comment: "Retired: Cornerstone Tax payroll push was removed; not read or written."
     t.string "test_workspace_role"
     t.bigint "test_workspace_source_pay_period_id"
     t.datetime "unapproved_at"

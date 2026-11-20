@@ -190,19 +190,6 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     expect(loan.loan_transactions.payments.count).to eq(1)
   end
 
-  it "keeps the earned rows in the void tax payload and uses a separate idempotency key" do
-    commit_original
-    original_key = period.tax_sync_idempotency_key
-    allow(PayrollTaxSyncService).to receive(:configured?).and_return(true)
-    allow(PayrollTaxSyncJob).to receive(:perform_later)
-    PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Reverse unissued payroll")
-    payload = PayrollTaxSyncPayloadBuilder.new(period.reload).build
-    expect(payload.dig(:pay_period, :correction_status)).to eq("voided")
-    expect(payload.dig(:totals, :gross_pay)).to eq(1620.8)
-    expect(payload[:line_items].size).to eq(1)
-    expect(period.tax_sync_idempotency_key).not_to eq(original_key)
-  end
-
   it "skips previously voided checks while still reversing every earned payroll row" do
     commit_original
     item.void!(user: actor, reason: "Destroyed the original check")

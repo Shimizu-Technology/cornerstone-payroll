@@ -56,10 +56,7 @@ class PayPeriodPayDateCorrectionService
         action: "correcting its pay date"
       )
 
-      locked.update!(
-        pay_date: new_pay_date,
-        **locked.tax_sync_refresh_attributes
-      )
+      locked.update!(pay_date: new_pay_date)
 
       PayrollLiabilityPostingService.restate_for_pay_date!(
         pay_period: locked,
@@ -88,12 +85,6 @@ class PayPeriodPayDateCorrectionService
         non_employee_checks_updated: non_employee_checks_updated,
         noop: false
       )
-
-      if PayrollTaxSyncService.configured?
-        ActiveRecord.after_all_transactions_commit do
-          PayrollTaxSyncJob.perform_later(locked.id)
-        end
-      end
     end
 
     result

@@ -71,10 +71,6 @@ RSpec.describe ReversePaycheckService, "shared liability payments" do
     }
   end
 
-  def tax_payload
-    PayrollTaxSyncPayloadBuilder.new(period.reload).build
-  end
-
   # Staging dry run on item 289: capturing the legacy period for this reversal
   # posted 74 historical entries and showed $2,641.10 of already-paid May taxes
   # as outstanding in the Liability Center.
@@ -85,7 +81,6 @@ RSpec.describe ReversePaycheckService, "shared liability payments" do
     taxed_before = taxed_item.reload.attributes
     intern_ytd_before = intern.ytd_totals_for(2024).reload.attributes.slice("gross_pay", "net_pay")
     company_before = company_ytd.attributes.slice("gross_pay", "net_pay", "withholding_tax")
-    payload_before = tax_payload
     expect(period.payroll_liability_postings).to be_empty
     expect(PayrollLiabilityReconciliationService.new(pay_period: period).call[:status]).to eq("legacy_unposted")
 
@@ -113,15 +108,6 @@ RSpec.describe ReversePaycheckService, "shared liability payments" do
     center = PayrollLiabilityCenterService.new(company: company, pay_period_id: period.id).call
     expect(center[:obligations]).to be_empty
     expect(PayrollLiabilityCenterService.new(company: company).call[:obligations]).to be_empty
-
-    # The tax snapshot lists the reversal and drops only the contractor's
-    # wages; every tax amount is unchanged.
-    payload = tax_payload
-    expect(payload[:pay_period][:reversed_payroll_item_ids]).to eq([ intern_item.id ])
-    expect(payload[:line_items].map { |row| row[:payroll_item_id] }).to eq([ taxed_item.id ])
-    expect(payload[:totals][:gross_pay]).to eq(payload_before[:totals][:gross_pay] - 175)
-    tax_keys = %i[withholding_tax social_security_tax medicare_tax employer_social_security_tax employer_medicare_tax total_tax_liability]
-    expect(payload[:totals].slice(*tax_keys)).to eq(payload_before[:totals].slice(*tax_keys))
   end
 
   it "keeps a later liability capture free of the reversed zero-liability paycheck" do

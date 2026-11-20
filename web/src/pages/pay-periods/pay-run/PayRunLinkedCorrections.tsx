@@ -45,11 +45,6 @@ export function PayRunLinkedCorrections({
                       >
                         Supplemental period · pay date {sp.pay_date}
                       </Link>
-                      {sp.tax_sync_status && (
-                        <span className="text-xs text-neutral-600">
-                          {sp.tax_sync_status === 'synced' ? 'tax-synced' : `tax-sync ${sp.tax_sync_status}`}
-                        </span>
-                      )}
                     </div>
                     {sp.payroll_items.map(it => (
                       <div key={it.id} className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-0.5 text-xs text-neutral-700 sm:grid-cols-2">
