@@ -749,7 +749,7 @@ describe('Year-end checklist', () => {
 
   it('explains who can add a locked EIN', async () => {
     const steps = working();
-    steps[1] = step('employer', 2, 'Employer details', 'action_needed', { issues: [{ code: 'EMPLOYER_EIN_MISSING', message: 'Add EIN', field: 'ein' }], data: { name: 'Tumon Bakery', ein: null } });
+    steps[1] = step('employer', 2, 'Employer details', 'action_needed', { issues: [{ code: 'EMPLOYER_EIN_MISSING', message: 'Add EIN', field: 'ein' }], data: { name: 'Tumon Bakery', ein: null, address_line1: '1 Marine Dr', address_line2: null, city: 'Tamuning', state: 'GU', zip: '96913', phone: '671-555-0100', email: 'office@example.test' } });
     mocks.checklist.mockResolvedValue(checklist(steps));
     mocks.companyGet.mockResolvedValue({ company: { editable_fields: ['phone'] } });
     renderPage();

@@ -56,13 +56,16 @@ function IssueChips({ row }: { row: YearEndClientRow }): ReactElement | null {
   }
   if (row.issue_summary.length === 0) return null;
   return (
-    <ul className="flex flex-wrap gap-1.5" aria-label={`What is left for ${row.name}`}>
-      {row.issue_summary.map((item) => (
-        <li key={item.code}>
-          <Badge variant="outline" wrap>{issueChipLabel(item)}</Badge>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-2">
+      <ul className="flex flex-wrap gap-1.5" aria-label={`What is left for ${row.name}`}>
+        {row.issue_summary.map((item) => (
+          <li key={item.code}>
+            <Badge variant="outline" wrap>{issueChipLabel(item)}</Badge>
+          </li>
+        ))}
+      </ul>
+      {row.efile_check_pending && <p className="text-sm text-neutral-700">More may show after the employee e-file check.</p>}
+    </div>
   );
 }
 
@@ -194,15 +197,20 @@ export function YearEnd(): ReactElement {
         contextValue={String(year)}
         mobileSticky={false}
         actions={(
-          <div className="w-32">
-            <Select
-              label="Tax year"
-              value={String(year)}
-              onChange={(event) => setSearchParams({ year: event.target.value })}
-              className="min-h-11"
-            >
-              {yearEndTaxYears().map((option) => <option key={option} value={option}>{option}</option>)}
-            </Select>
+          <div className="flex items-end gap-2">
+            <Button variant="outline" disabled={loading} onClick={() => setAttempt((value) => value + 1)}>
+              <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Refresh
+            </Button>
+            <div className="w-32">
+              <Select
+                label="Tax year"
+                value={String(year)}
+                onChange={(event) => setSearchParams({ year: event.target.value })}
+                className="min-h-11"
+              >
+                {yearEndTaxYears().map((option) => <option key={option} value={option}>{option}</option>)}
+              </Select>
+            </div>
           </div>
         )}
       />

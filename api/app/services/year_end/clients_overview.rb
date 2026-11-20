@@ -13,7 +13,8 @@ module YearEnd
   # when the W-2s are marked ready and the last successful check (mark ready
   # or a ready checklist) was made at the current input revision, which
   # changes on any create, update or delete the checklist reads. Anything
-  # else shows "Check needed" rather than a status the list cannot prove.
+  # else shows known issues first, or "Check needed" when none are known.
+  # Missing employee checks are queued without aggregating on the request.
   class ClientsOverview
     def initialize(user:, year:)
       @user = user
@@ -102,6 +103,7 @@ module YearEnd
           issues.concat(preflight.efw2_employer_issues.map { |entry| { code: entry[:code], label: entry[:message] } })
           stored = efile_checks[company.id]
           efile_current = stored.present? && stored[:revision] == input_revisions[company.id]
+          EfileCheck.enqueue(company.id, year, input_revisions[company.id]) unless efile_current
           issues.concat(stored[:issues].map { |entry| { code: entry[:code], label: entry[:message] } }) if efile_current
         end
       end
@@ -116,10 +118,10 @@ module YearEnd
       # only part the list cannot recompute.
       check_needed = (marked && !unchanged && !sign_off_needed) || (files_w2 && year == 2026 && !efile_current)
 
-      status = if check_needed
-        "check_needed"
-      elsif issues.any?
+      status = if issues.any?
         "needs_action"
+      elsif check_needed
+        "check_needed"
       elsif !files_w2 && !files_1099
         "not_filing"
       else
@@ -131,7 +133,8 @@ module YearEnd
         name: company.name,
         active: company.active?,
         status: status,
-        issue_count: check_needed ? nil : issues.length,
+        issue_count: status == "check_needed" ? nil : issues.length,
+        efile_check_pending: !!(files_w2 && year == 2026 && !efile_current),
         issue_summary: summarize(issues),
         w2: decision_summary(w2),
         form_1099: decision_summary(form_1099),

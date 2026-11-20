@@ -139,7 +139,7 @@ RSpec.describe "Year-end checklist", type: :request do
       Rails.cache.delete(YearEnd::EfileCheck.key(company.id, 2026))
       measure.call
       row = response.parsed_body.dig("data", "clients").find { |entry| entry["company_id"] == company.id }
-      expect(row).to include("status" => "check_needed", "issue_count" => nil)
+      expect(row).to include("status" => "needs_action", "efile_check_pending" => true)
     end
 
     it "keeps an inactive record with a reportable one-off contractor check and nothing else on the list" do
@@ -184,6 +184,21 @@ RSpec.describe "Year-end checklist", type: :request do
       record_decision(filing_types: %w[form_1099], party: "no_filing")
     end
 
+    it "keeps known issues visible while a stale check is queued only once" do
+      mark_ready
+      company.update!(ein: nil)
+      row = nil
+      expect {
+        2.times { row = list_row }
+      }.to have_enqueued_job(YearEndEfileCheckJob).exactly(:once)
+      expect(row).to include("status" => "needs_action", "issue_count" => 1, "efile_check_pending" => true)
+      expect(row["issue_summary"]).to include(a_hash_including("code" => "EMPLOYER_EIN_MISSING"))
+      YearEndEfileCheckJob.perform_now(company.id, 2026, YearEnd::InputRevision.for(company.id, 2026)[company.id])
+      get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+      result = response.parsed_body.fetch("data")
+      expect(list_row).to include("status" => result["status"], "issue_count" => result["issue_count"], "efile_check_pending" => false)
+    end
+
     it "shows Check needed, not Ready, after an employee address changes once the W-2s are marked ready" do
       travel_to(start + 0.hours) { mark_ready }
       travel_to(start + 1.hours) do
@@ -191,7 +206,7 @@ RSpec.describe "Year-end checklist", type: :request do
 
         employee.update!(address_line1: "200 New Street")
 
-        expect(list_row).to include("status" => "check_needed", "check_reason" => a_string_including("changed since the W-2s were marked ready"))
+        expect(list_row).to include("status" => "check_needed", "issue_count" => nil, "efile_check_pending" => true, "check_reason" => a_string_including("changed since the W-2s were marked ready"))
         get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
         expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
         checklist_count = response.parsed_body.dig("data", "issue_count")

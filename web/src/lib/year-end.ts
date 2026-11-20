@@ -28,6 +28,7 @@ export interface YearEndClientRow {
   active: boolean;
   status: YearEndClientStatus;
   issue_count: number | null;
+  efile_check_pending?: boolean;
   issue_summary: Array<{ code: string; label: string; count: number }>;
   w2: YearEndDecisionSummary | null;
   form_1099: YearEndDecisionSummary | null;
