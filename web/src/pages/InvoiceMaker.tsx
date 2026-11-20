@@ -4,6 +4,7 @@ import { invoiceBusinessDate } from '@/lib/invoice-defaults';
 import { INVOICE_THEMES } from '@/lib/invoiceStyle';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
+import { PdfTextWarning } from '@/components/finance/PdfTextWarning';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Loader2, Mail, MessageSquare, Palette, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
@@ -26,6 +27,7 @@ import {
   type Invoice,
   type InvoiceBillingProfile,
   type InvoiceBillingProfilePayload,
+  type InvoicePdfTextIssue,
   type InvoiceDiscountType,
   type InvoiceLineItem,
   type InvoicePayload,
@@ -293,6 +295,7 @@ export function InvoiceMaker() {
   const [showRecipientForm, setShowRecipientForm] = useState(false);
   const [showBillingProfileForm, setShowBillingProfileForm] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [pdfTextIssues, setPdfTextIssues] = useState<InvoicePdfTextIssue[]>([]);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [chatError, setChatError, chatErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -494,6 +497,7 @@ export function InvoiceMaker() {
       payment_terms: defaultProfile?.default_payment_terms || '',
     };
     setInvoiceForm(nextForm);
+    setPdfTextIssues([]);
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
     setError(null);
     setSuccess(null);
@@ -551,6 +555,7 @@ export function InvoiceMaker() {
       })),
     };
     setInvoiceForm(nextForm);
+    setPdfTextIssues(invoice.pdf_unprintable_text || []);
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
   };
 
@@ -719,6 +724,7 @@ export function InvoiceMaker() {
         ? await invoicesApi.update(invoiceForm.id, payload, markDraft)
         : await invoicesApi.create(payload);
       savedInvoiceSignatureRef.current = invoicePayloadSignature(payload);
+      setPdfTextIssues(response.invoice.pdf_unprintable_text || []);
       if (reloadAfterSave) {
         await loadData();
         await loadInvoice(response.invoice.id);
@@ -1934,6 +1940,7 @@ export function InvoiceMaker() {
                 </div>
               )}
 
+              <PdfTextWarning issues={invoiceForm.status === 'draft' || !invoiceForm.status ? pdfTextIssues : []} />
               <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={financeReadOnly || saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceCannotSaveDraft}>
                   <Save className="mr-1.5 h-4 w-4" />
@@ -2396,6 +2403,7 @@ export function InvoiceMaker() {
                 Close
               </Button>
             </div>
+            {pdfTextIssues.length > 0 && <div className="border-b p-3"><PdfTextWarning issues={pdfTextIssues} /></div>}
             <iframe title="Invoice preview" src={previewUrl} className="h-full w-full" />
           </div>
         </div>

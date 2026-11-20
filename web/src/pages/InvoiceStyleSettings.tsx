@@ -4,6 +4,7 @@ import { ArrowLeft, Download, ImagePlus, Trash2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { PdfDocumentView } from '@/components/documents/PdfPreview';
+import { UnsavedPayrollChangesGuard } from '@/components/routing/UnsavedPayrollChangesGuard';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
 import { useCompany } from '@/contexts/CompanyContext';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
@@ -25,6 +26,7 @@ import {
 
 const MAX_LOGO_BYTES = 1_048_576;
 const PREVIEW_DELAY_MS = 450;
+export const UNSAVED_STYLE_MESSAGE = 'You have unsaved invoice style changes. Leave without saving?';
 const fieldClass = 'min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 text-base text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300';
 
 function styleFromProfile(profile: InvoiceBillingProfile): StyleSettings {
@@ -235,6 +237,8 @@ export function InvoiceStyleSettings() {
 
   return (
     <div>
+      {/* Links, Back and reload all ask before unsaved style changes are discarded. */}
+      <UnsavedPayrollChangesGuard dirty={dirty && !saving} message={UNSAVED_STYLE_MESSAGE} />
       <Header
         title="Invoice style"
         mobileSticky={false}

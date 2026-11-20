@@ -5148,7 +5148,13 @@ export interface InvoiceLineItem {
   updated_at?: string;
 }
 
+export interface InvoicePdfTextIssue {
+  field: string;
+  characters: string[];
+}
+
 export interface Invoice {
+  pdf_unprintable_text?: InvoicePdfTextIssue[];
   due_date_manual?: boolean;
   service_period_manual?: boolean;
   company_name?: string | null;

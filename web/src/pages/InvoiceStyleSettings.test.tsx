@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { InvoiceStyleSettings } from './InvoiceStyleSettings';
+import { InvoiceStyleSettings, UNSAVED_STYLE_MESSAGE } from './InvoiceStyleSettings';
 
 const state = vi.hoisted(() => ({
   readOnly: false,
@@ -163,5 +163,79 @@ describe('InvoiceStyleSettings', () => {
     expect((screen.getByRole('button', { name: 'Save style' }) as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => expect(state.api.samplePdf).toHaveBeenLastCalledWith(7, expect.objectContaining({ invoice_theme: 'modern' }), expect.anything()));
     expect(state.api.updateStyle).not.toHaveBeenCalled();
+  });
+});
+
+describe('InvoiceStyleSettings unsaved-changes guard', () => {
+  beforeEach(() => {
+    state.readOnly = false;
+    Object.values(state.api).forEach((mock) => mock.mockReset());
+    state.api.get.mockResolvedValue({ invoice_billing_profile: profile });
+    state.api.samplePdf.mockResolvedValue({ blob: new Blob(['%PDF'], { type: 'application/pdf' }), filename: 'sample.pdf' });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function renderWithRouter() {
+    const router = createMemoryRouter([
+      { path: '/tools/invoices/assistant', element: <p>Billing profiles page</p> },
+      { path: '/tools/invoices/billing-profiles/:profileId/style', element: <InvoiceStyleSettings /> },
+    ], { initialEntries: ['/tools/invoices/assistant', '/tools/invoices/billing-profiles/7/style'], initialIndex: 1 });
+    render(<RouterProvider router={router} />);
+    return router;
+  }
+
+  it('leaves without asking when nothing is unsaved', async () => {
+    const confirm = vi.spyOn(window, 'confirm');
+    const user = userEvent.setup();
+    renderWithRouter();
+    await user.click(await screen.findByRole('link', { name: /Billing profiles/ }));
+
+    expect(await screen.findByText('Billing profiles page')).toBeTruthy();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('stays on the page with the edits when leaving is cancelled', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const user = userEvent.setup();
+    const router = renderWithRouter();
+    await user.click(await screen.findByRole('button', { name: /^Banner/ }));
+
+    await user.click(screen.getByRole('link', { name: /Billing profiles/ }));
+    expect(confirm).toHaveBeenCalledWith(UNSAVED_STYLE_MESSAGE);
+    expect(screen.queryByText('Billing profiles page')).toBeNull();
+    expect(screen.getByRole('button', { name: /^Banner/ }).getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => { await router.navigate(-1); });
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('Billing profiles page')).toBeNull();
+  });
+
+  it('discards the edits and leaves when confirmed', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    renderWithRouter();
+    await user.click(await screen.findByRole('button', { name: /^Banner/ }));
+
+    await user.click(screen.getByRole('link', { name: /Billing profiles/ }));
+    expect(confirm).toHaveBeenCalledWith(UNSAVED_STYLE_MESSAGE);
+    expect(await screen.findByText('Billing profiles page')).toBeTruthy();
+    expect(state.api.updateStyle).not.toHaveBeenCalled();
+  });
+
+  it('asks the browser to confirm a reload or close only while edits are unsaved', async () => {
+    const user = userEvent.setup();
+    renderWithRouter();
+    await screen.findByRole('button', { name: /^Banner/ });
+    const clean = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: /^Banner/ }));
+    const dirty = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(dirty);
+    expect(dirty.defaultPrevented).toBe(true);
   });
 });
