@@ -131,8 +131,20 @@ RSpec.describe Form1099NecOfficialCopies do
         lift.(fields[:recipient_city]) => "Sinajana",
         lift.(fields[:recipient_state]) => "GU",
         lift.(fields[:recipient_zip]) => "96910",
-        lift.(fields[:box1a]) => "2350.75"
+        lift.(fields[:box1a]) => "2350.75",
+        lift.(fields[:account_number], 0) => Form1099Pub1220Generator.account_number(aguon)
       })
+      # No withholding: Box 4 stays blank.
+      expect(text_in_box(page, lift.(fields[:box4]))).to eq("")
+    end
+
+    it "prints withholding in Box 4 and the e-file's account number, at any amount" do
+      report[:reportable_contractors] = [ row(aguon, 500, withheld: 50) ]
+      page = render(kind: "recipient", draft: false).pages.first
+
+      expect(Form1099Pub1220Generator.account_number(aguon)).to eq("C#{aguon.id.to_s.rjust(6, '0')}")
+      expect_boxes(page, { lift.(fields[:box1a]) => "500.00", lift.(fields[:box4]) => "50.00",
+                           lift.(fields[:account_number], 0) => "C#{aguon.id.to_s.rjust(6, '0')}" })
     end
 
     it "puts the full TIN in the recipient's TIN box on the payer record" do
@@ -173,12 +185,6 @@ RSpec.describe Form1099NecOfficialCopies do
       page = PDF::Reader.new(StringIO.new(generate)).pages[4]
       rect = described_class::FIELDS[:recipient_street]
       expect(text_in_box(page, [ rect[0], rect[1], rect[2], rect[3] + described_class::TEXT_LIFT ])).to eq("100 Chalan Santo Papa, Building 4, Unit 12")
-    end
-
-    it "refuses a contractor with income tax withheld rather than leave Box 4 blank" do
-      rows = report.merge(reportable_contractors: [ row(aguon, 2_500, withheld: 125) ])
-
-      expect { generate(rows: rows) }.to raise_error(described_class::DoesNotFit, /Jose Aguon: \$125.00 of income tax was withheld/)
     end
 
     it "refuses a name the form can't print instead of printing boxes" do

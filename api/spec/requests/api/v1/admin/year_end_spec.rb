@@ -497,18 +497,40 @@ RSpec.describe "Year-end checklist", type: :request do
     it "does not call a 1099-only client Ready while a below-threshold contractor with withholding has no TIN" do
       record_decision(filing_types: %w[w2_gu], party: "client")
       record_decision(filing_types: %w[form_1099], party: "cornerstone")
-      contractor = create(:employee, :contractor, company: company, department: department)
+      contractor = create(:employee, :contractor, company: company, department: department, w9_on_file: true)
       contractor.update_columns(ssn_encrypted: nil, contractor_ein: nil)
       pay(company, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 500, net_pay: 450, withholding_tax: 50)
 
       row = list_row
       expect(row).to include("status" => "needs_action")
-      expect(row["issue_summary"].map { |item| item["code"] }).to eq(%w[PAYEE_DETAILS_MISSING])
+      expect(row["issue_summary"].map { |item| item["code"] }).to eq(%w[PAYEE_DETAILS_MISSING FORM_1099_NOT_MARKED_READY])
       get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
       expect(response.parsed_body.dig("data", "issue_count")).to eq(row["issue_count"])
 
       contractor.update_columns(ssn_encrypted: "900-70-4321")
+      # Withholding makes the 1099 due at any amount, so it needs the sign-off.
+      expect(list_row).to include("status" => "needs_action", "issue_count" => 1)
+      mark_1099s_ready
       expect(list_row["status"]).to eq("ready")
+    end
+
+    it "agrees with the checklist on a $500 payee with $50 withheld and no W-9 on file" do
+      record_decision(filing_types: %w[w2_gu], party: "client")
+      record_decision(filing_types: %w[form_1099], party: "cornerstone")
+      contractor = create(:employee, :contractor, company: company, department: department, ssn_encrypted: "900-70-4321",
+        address_line1: "7 Route 8", city: "Maite", state: "GU", zip: "96910", w9_on_file: false)
+      pay(company, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 500, net_pay: 450, withholding_tax: 50)
+
+      expect(expect_parity["issue_summary"]).to eq([
+        { "code" => "PAYEE_W9_MISSING", "label" => "W-9 not on file", "count" => 1 },
+        { "code" => "FORM_1099_NOT_MARKED_READY", "label" => "Mark 1099s ready", "count" => 1 }
+      ])
+      expect(checklist_step("people")["issues"].map { |issue| issue["code"] }).to eq(%w[PAYEE_W9_MISSING])
+
+      contractor.update!(w9_on_file: true)
+      expect(expect_parity["issue_summary"].map { |item| item["code"] }).to eq(%w[FORM_1099_NOT_MARKED_READY])
+      mark_1099s_ready
+      expect(expect_parity["status"]).to eq("ready")
     end
 
     it "keeps a 1099 client off Ready until a one-off contractor payee is identified through the endpoint" do

@@ -11,6 +11,13 @@ class Form1099Pub1220Generator
     end
   end
 
+  # The payer's account number for a payee (B 21-40), also printed on the
+  # official copies so paper and e-file match: "C" and the contractor's
+  # record id, stable across years and corrections.
+  def self.account_number(employee)
+    "C#{employee.id.to_s.rjust(6, '0')}"
+  end
+
   TCC_PROBLEM = "Add the transmitter control code (TCC) from DRT to download the final 1099 e-file. Drafts work without it."
   attr_reader :report
 
@@ -126,6 +133,10 @@ class Form1099Pub1220Generator
 
   # Exhibit 1: use the first surname, retaining leading surname particles.
   def name_control(person)
+    self.class.name_control(person)
+  end
+
+  def self.name_control(person)
     words = person.last_name.to_s.split("-").first.to_s.split
     particle = words.join(" ").match(/\A(?:de la|de las|de los|del|de|san|santa|st)\s+/i)
     surname = particle ? words.take(particle[0].split.length + 1).join(" ") : words.first.to_s
@@ -137,8 +148,13 @@ class Form1099Pub1220Generator
   # and line 1 must end with a whole word (B 288-327). A single word longer
   # than 40 characters is left whole, so preflight refuses it by name.
   def payee_names(person, row)
-    primary = row[:tin_type] == "EIN" ? person.business_name.presence || person.full_name : "#{person.last_name} #{person.first_name} #{person.middle_name}".strip
-    secondary = row[:tin_type] == "SSN" ? person.business_name.to_s : ""
+    self.class.payee_name_lines(person, row[:tin_type])
+  end
+
+  # Public so Form1099InputsFingerprint binds the exact name lines printed.
+  def self.payee_name_lines(person, tin_type)
+    primary = tin_type == "EIN" ? person.business_name.presence || person.full_name : "#{person.last_name} #{person.first_name} #{person.middle_name}".strip
+    secondary = tin_type == "SSN" ? person.business_name.to_s : ""
     names = [ primary, secondary ].map { |v| Efw2Formatting.clean(v).delete(".'").gsub(/[^A-Z0-9 &-]/, "") }
     if names[0].length > 40 && names[1].blank?
       split_at = names[0][0, 41].rindex(" ")
@@ -232,7 +248,7 @@ class Form1099Pub1220Generator
       put(r, 11, 1, ein ? "1" : "2")
       put(r, 12, 9, ein ? tin(person.contractor_ein) : person.ssn_digits)
       # Stable issuer account number lets corrections match the original payee.
-      put(r, 21, 20, "C#{person.id.to_s.rjust(6, '0')}")
+      put(r, 21, 20, self.class.account_number(person))
       (0...18).each { |i| number(r, 55 + i * 12, 12, 0) }
       number(r, 55, 12, cents(row.fetch(:total_compensation)))
       number(r, 91, 12, cents(row.fetch(:federal_withheld)))

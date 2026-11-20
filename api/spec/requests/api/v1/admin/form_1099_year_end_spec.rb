@@ -540,6 +540,75 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
     end
   end
 
+  describe "the e-file and 1096 share the 1099 sign-off" do
+    before do
+      pay_contractor(cruz, 2_500)
+      decide
+      FilingSubmitter.create!(organization: company.organization, ein: "66-7654321", name: "Practice", address_line1: "1 Main", city: "Hagatna",
+        state: "GU", zip: "96910", contact_name: "Dafne", contact_phone: "6715551234", contact_email: "filing@example.com", bso_user_id: "ABCDEFGH", tcc: "ABCDE")
+    end
+
+    def efile(mode, kind: "form_1099_pub1220")
+      get "/api/v1/admin/reports/#{kind}", params: { year: 2026, mode: mode }
+    end
+
+    it "is 409 before mark ready, downloadable after it, and 409 again once an input changes" do
+      efile("final")
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["error"]).to eq("Mark the 1099s ready first")
+      efile("final", kind: "form_1096_totals")
+      expect(response).to have_http_status(:conflict)
+      documents = step("print_and_file").dig("data", "documents").index_by { |document| document["key"] }
+      expect(documents.values_at("form_1099_pub1220", "form_1096_totals")).to all(include("draft" => true))
+
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
+      efile("final")
+      expect(response).to have_http_status(:ok), response.body
+      payee = response.body.lines.find { |line| line.start_with?("B") }
+      # The same account number the official copies print.
+      expect(payee[20, 20].strip).to eq(Form1099Pub1220Generator.account_number(cruz))
+      expect(payee[54, 12].to_i).to eq(250_000)
+      efile("final", kind: "form_1096_totals")
+      expect(response).to have_http_status(:ok), response.body
+      documents = step("print_and_file").dig("data", "documents").index_by { |document| document["key"] }
+      expect(documents.values_at("form_1099_recipient_copies", "form_1099_payer_record", "form_1099_pub1220", "form_1096_totals"))
+        .to all(include("draft" => false))
+      expect(documents["form_1099_pub1220"].dig("download", "params", "mode")).to eq("final")
+
+      cruz.update!(business_name: "Cruz Consulting")
+      efile("final")
+      expect(response).to have_http_status(:conflict)
+      efile("draft")
+      expect(response).to have_http_status(:ok), response.body
+    end
+
+    it "expires the sign-off when withholding, the account number or the name lines change" do
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
+      current = -> { Form1099Readiness.final?(company: company.reload, year: 2026) }
+      expect(current.call).to be(true)
+
+      changes = [
+        -> { cruz.payroll_items.first.update_columns(withholding_tax: 25) },
+        -> { cruz.update_columns(business_name: "Cruz Consulting") },
+        -> { cruz.update_columns(contractor_type: "business", contractor_ein: "66-1111111", ssn_encrypted: nil) }
+      ]
+      changes.each do |change|
+        change.call
+        expect(current.call).to be(false)
+        mark_ready
+        expect(response).to have_http_status(:ok), response.body
+        expect(current.call).to be(true)
+      end
+      # The account number is the contractor record's own id, which the
+      # fingerprint binds: the same payee re-pointed to another record expires it.
+      fingerprint = Form1099InputsFingerprint.new(company: company, year: 2026).call
+      allow(Form1099Pub1220Generator).to receive(:account_number).and_return("C999999")
+      expect(Form1099InputsFingerprint.new(company: company, year: 2026).call).not_to eq(fingerprint)
+    end
+  end
+
   describe "official copies" do
     before do
       pay_contractor(cruz, 2_500)
@@ -571,7 +640,7 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       expect(pdf_text).to include("DRAFT — the 2026 1099s are not marked ready")
       expect(copy_logs.map { |log| log.metadata["status"] }).to eq(%w[final draft])
       documents = step("print_and_file").dig("data", "documents")
-      expect(documents.map { |document| document["key"] }).to eq(%w[form_1099_recipient_copies form_1099_payer_record])
+      expect(documents.map { |document| document["key"] }).to eq(%w[form_1099_recipient_copies form_1099_payer_record form_1099_pub1220 form_1096_totals])
       expect(documents).to all(include("draft" => true, "available" => true))
     end
 
