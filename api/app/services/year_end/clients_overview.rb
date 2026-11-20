@@ -151,7 +151,7 @@ module YearEnd
         filing_progress: FilingProgress.new(company: company, year: year,
           decisions: decisions.values.select { |decision| decision.responsible_party == "cornerstone" }.map(&:filing_type),
           records: filing_records.fetch(company.id, []), downloads: filing_downloads.fetch(company.id, {}),
-          form_1099_due: !files_1099 || form_1099_may_be_due?(company)).call,
+          form_1099_due: !files_1099 || form_1099_filing_may_be_due?(company)).call,
         checklist_path: "/companies/#{company.id}/year-end?year=#{year}"
       }
     end
@@ -299,6 +299,32 @@ module YearEnd
       form_1099_payees.fetch(company.id, {})[:reportable].to_i.positive? || unidentified_one_off_payees[company.id].to_i.positive?
     end
 
+    # The checklist's no-1099 rule for filing progress: also due while a
+    # smaller one-off payee linked to the largest contractor short of the
+    # threshold would reach it. That case never holds up the sign-off.
+    def form_1099_filing_may_be_due?(company)
+      return true if form_1099_may_be_due?(company)
+
+      top = largest_unreported_contractor[company.id]
+      smaller = largest_smaller_one_off[company.id]
+      !top.nil? && !smaller.nil? && (top + smaller).round(2) >= form_1099_threshold
+    end
+
+    def largest_unreported_contractor
+      form_1099_payees
+      @largest_unreported_contractor || {}
+    end
+
+    # The largest unlinked one-off payee short of the threshold, per client.
+    def largest_smaller_one_off
+      @largest_smaller_one_off ||= OneOffPayees.issued_check_groups([], year, checks: issued_contractor_checks)
+        .reject { |key, _payments| reportable_one_off_groups.key?(key) }
+        .each_with_object({}) do |((company_id, _name), payments), result|
+          total = payments.sum(0.to_d) { |check| check.amount.to_d }
+          result[company_id] = [ result[company_id], total ].compact.max
+        end
+    end
+
     # A ready mark is checked against the live inputs only when there is one;
     # that is the only per-client 1099 work the list does.
     def form_1099_signed_off?(company)
@@ -329,22 +355,30 @@ module YearEnd
       @form_1099_payees ||= begin
         totals = Hash.new(0.to_d)
         withholding = Hash.new(0.to_d)
+        companies = {}
         unless form_1099_company_ids.empty? || form_1099_threshold.nil?
           PayrollItem.joins(:pay_period)
             .where(company_id: form_1099_company_ids, employment_type: "contractor")
             .financially_reportable
             .where(pay_periods: { id: PayPeriod.reportable_committed.where(company_id: form_1099_company_ids, pay_date: year_range).select(:id) })
-            .group(:employee_id)
-            .pluck(:employee_id, Arel.sql("SUM(gross_pay)"), Arel.sql("SUM(COALESCE(withholding_tax, 0))"))
-            .each do |employee_id, gross, withheld|
+            .group(:company_id, :employee_id)
+            .pluck(:company_id, :employee_id, Arel.sql("SUM(gross_pay)"), Arel.sql("SUM(COALESCE(withholding_tax, 0))"))
+            .each do |company_id, employee_id, gross, withheld|
+              companies[employee_id] = company_id
               totals[employee_id] += gross.to_d
               withholding[employee_id] += withheld.to_d
             end
           OneOffPayees.linked_totals(issued_contractor_checks.select { |check| check.company_id.in?(form_1099_company_ids) })
-            .each { |(_company_id, employee_id), total| totals[employee_id] += total }
+            .each do |(company_id, employee_id), total|
+              companies[employee_id] = company_id
+              totals[employee_id] += total
+            end
         end
         # The aggregator's rule: the threshold after linked checks, or any withholding.
         reportable_ids = totals.keys.select { |id| totals[id].round(2) >= form_1099_threshold || !withholding[id].zero? }
+        # The checklist's "could reach the threshold" base, per client.
+        @largest_unreported_contractor = (totals.keys - reportable_ids).group_by { |id| companies[id] }
+          .transform_values { |ids| ids.map { |id| totals[id] }.max }
         Employee.where(company_id: form_1099_company_ids, id: reportable_ids).group_by(&:company_id).transform_values do |employees|
           {
             reportable: employees.length,
