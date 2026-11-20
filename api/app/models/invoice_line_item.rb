@@ -14,6 +14,8 @@ class InvoiceLineItem < ApplicationRecord
   validates :amount, numericality: { greater_than_or_equal_to: 0 }
   validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
 
+  validate :supported_precision
+
   private
 
   def prevent_issued_invoice_change
@@ -30,7 +32,19 @@ class InvoiceLineItem < ApplicationRecord
     self.position = 0 if position.nil?
   end
 
+  def supported_precision
+    %i[quantity rate].each do |field|
+      raw = public_send("#{field}_before_type_cast")
+      next if raw.nil?
+
+      value = BigDecimal(raw.to_s)
+      errors.add(field, "cannot have more than two decimal places") unless value.finite? && value == value.round(2)
+    rescue ArgumentError, TypeError
+      errors.add(field, "must be a valid number")
+    end
+  end
+
   def calculate_amount
-    self.amount = BigDecimal(quantity.to_s) * BigDecimal(rate.to_s)
+    self.amount = (BigDecimal(quantity.to_s) * BigDecimal(rate.to_s)).round(2, :half_up)
   end
 end

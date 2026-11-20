@@ -1,3 +1,4 @@
+import { invoiceBusinessDate } from '@/lib/invoice-defaults';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -32,7 +33,7 @@ import {
 } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 import { FinanceBookSelector } from '@/contexts/FinanceBookContext';
-import { invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
+import { invoiceSubtotal as sumInvoiceLines, invoiceLineAmount, invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 
 type DraftLineItem = InvoiceLineItem & {
   local_id: string;
@@ -108,12 +109,7 @@ interface BillingProfileFormState {
   is_default: boolean;
 }
 
-const padDatePart = (value: number) => String(value).padStart(2, '0');
-
-const today = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${padDatePart(now.getMonth() + 1)}-${padDatePart(now.getDate())}`;
-};
+const today = invoiceBusinessDate;
 
 const emptyInvoiceForm = (): InvoiceFormState => ({
   invoice_billing_profile_id: '',
@@ -196,7 +192,7 @@ function currency(value?: number | null) {
 function previewTotal(preview?: InvoiceAiPreview | Record<string, never> | null) {
   const lineItems = (preview as InvoiceAiPreview | null | undefined)?.line_items || [];
   return lineItems.reduce(
-    (sum, item) => sum + Number(item.quantity || 0) * Number(item.rate || 0),
+    (sum, item) => sum + invoiceLineAmount(Number(item.quantity || 0), Number(item.rate || 0)),
     0
   );
 }
@@ -392,7 +388,7 @@ export function InvoiceMaker() {
   );
 
   const invoiceSubtotal = useMemo(
-    () => activeLineItems.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.rate || 0), 0),
+    () => sumInvoiceLines(activeLineItems),
     [activeLineItems]
   );
   const discountInput = Number(invoiceForm.discount_value || 0);
@@ -599,7 +595,7 @@ export function InvoiceMaker() {
         description: item.description,
         quantity: Number(item.quantity || 0),
         rate: Number(item.rate || 0),
-        amount: Number(item.quantity || 0) * Number(item.rate || 0),
+        amount: invoiceLineAmount(Number(item.quantity || 0), Number(item.rate || 0)),
         service_date: item.service_date || '',
         position: index,
       })),
@@ -1809,7 +1805,7 @@ export function InvoiceMaker() {
                           </label>
                         </div>
                         <p className="mt-2 text-right text-sm font-medium text-neutral-700">
-                          {currency(Number(item.quantity || 0) * Number(item.rate || 0))}
+                          {currency(invoiceLineAmount(Number(item.quantity || 0), Number(item.rate || 0)))}
                         </p>
                       </div>
                     ))}
@@ -2205,7 +2201,7 @@ export function InvoiceMaker() {
                               </p>
                             </div>
                             <span className="shrink-0 text-sm font-semibold text-neutral-900">
-                              {currency(Number(item.quantity || 0) * Number(item.rate || 0))}
+                              {currency(invoiceLineAmount(Number(item.quantity || 0), Number(item.rate || 0)))}
                             </span>
                           </div>
                         </div>
