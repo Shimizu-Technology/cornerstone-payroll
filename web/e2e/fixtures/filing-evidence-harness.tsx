@@ -5,10 +5,14 @@ import { reportsApi, type PayrollFilingRecord } from '@/services/api';
 // Browser-only fictional transport. Request specs separately verify persistence.
 export function mountFilingEvidenceHarness() {
   const records: Record<string, PayrollFilingRecord> = {};
-  reportsApi.payrollFilingRecord = async (_type, _year, _quarter, _company, agency) => ({
-    filing: records[agency!] || null,
-    downloads: [{ id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana Example', sha256: 'b'.repeat(64) }],
-  });
+  const reads: Record<string, number> = {};
+  reportsApi.payrollFilingRecord = async (_type, _year, _quarter, _company, agency) => {
+    reads[agency!] = (reads[agency!] || 0) + 1;
+    return {
+      filing: records[agency!] || null,
+      downloads: [{ id: reads[agency!] > 1 ? 94 : 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana Example', sha256: 'b'.repeat(64), current: true }, { id: 90, created_at: '2026-11-19T01:00:00Z', actor_name: 'Dana Example', sha256: 'c'.repeat(64), current: false }],
+    };
+  };
   reportsApi.recordPayrollFilingEvent = async (data) => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     const agency = String(data.get('agency'));
@@ -27,7 +31,7 @@ export function mountFilingEvidenceHarness() {
         occurred_at: String(data.get('occurred_at')), reference_number: String(data.get('reference_number')),
         preparer_name: String(data.get('preparer_name')), signer_name: null, signer_title: null, notes: String(data.get('notes')),
         source_fingerprint: 'a'.repeat(64), recorded_by: 'Dana Example', evidence_document: null,
-        download_audit_id: type === 'submitted' || type === 'resubmitted' ? 91 : null,
+        download_audit_id: type === 'submitted' || type === 'resubmitted' ? Number(data.get('download_audit_id')) : null,
         file_sha256: type === 'submitted' || type === 'resubmitted' ? 'b'.repeat(64) : null,
       }],
     } as PayrollFilingRecord;

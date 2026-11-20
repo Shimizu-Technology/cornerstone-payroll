@@ -52,3 +52,32 @@ The unchanged converter environment spec reproduces its failure in isolation: th
 PR: https://github.com/Shimizu-Technology/cornerstone-payroll/pull/505. Implementation commit `36a2e75ee818158139ab4b3bab1be6bd5b43f873`; the final follow-up includes the explicit stale-file error wording and this verification record. The PR head is authoritative. Base remains `50e5325b`; #504 had not merged at the final fetch.
 
 The next owner is the lead Claude session. Review the agency identity migration and retained legacy history, integrate/retest with #504, resolve or acknowledge the machine-specific converter test gate, and obtain the planned independent Claude review. CodeRabbit is **rate-limited**, not reviewed, despite its success-labelled check. Do not infer review approval from that label. No merge or production deployment was performed by this worker. Preserve this branch/checkout until the lead completes review and integration.
+
+## Review fix round 1 — Part 1 (2026-11-20)
+
+Worker: Codex Sol on the Mac mini, `/Users/agent/work/cornerstone-payroll-b`, branch `feature/year-end-filing-record`. Started from clean local/origin head `9c55fdad3de5888da6b7593f0654422dc00baa2f`. Scope is Part 1 only; do not merge. Part 2 requires the lead's explicit go-ahead after #504 merges. The independent Claude review accepted the core design; these fixes still need review on the new head.
+
+- **m1:** Rollback counts only split W-2 records and bound/receipt-free events. A migrated 1099 DRT identity can return to the old schema; migration coverage includes both old W-2 and 1099 rows.
+- **m2:** Before 2026, the Reports evidence panel keeps the receipt-required path, no agency selector and no final-file selector. W-2 requests normalize to the preserved legacy identity; 1099s retain their single identity. Rejected/needs-correction records can resubmit with receipts without file binding. Prior-year 1099 readiness uses the original payee checks without the new final sign-off. Request and service regressions cover retrieval, receipt enforcement and resubmission.
+- **m3:** Filing progress has a separate rescue to an empty array. Its warning contains company ID and tax year only. A regression verifies that a progress exception does not clear the ready stamp or change the preparation payload.
+- **m4:** Annual acceptance says “Agency acceptance recorded.” Receipt text and the form header explicitly say optional for 2026+; older and quarterly receipts remain required.
+- **m5:** Download JSON includes `current`. A controlled picker selects the newest current file after load/refresh, labels stale files “out of date,” explains how to obtain a missing final e-file, and keeps Refresh outside the label.
+- **m6:** Legacy W-2 history appears in the SSA panel only, once across the two agency panels. Older-year history remains the primary editable record.
+- **Nits:** Removed the glued stale-readiness suffix; wrong-kind downloads name the expected W-2/1099 e-file. Filing and print deadlines share the weekend rule (2031 tax year is due February 2, 2032); the panel also rolls weekends. The reminder says “need filing attention.” Overview download retrieval uses `DISTINCT ON (company_id, action)` with deterministic newest-first ordering within each group.
+
+Agent-executed QA uses factories/request specs and fictional Chromium transport; no production data or portal calls. The browser suite passes the independent SSA/DRT lifecycle, acceptance without claiming proof, rejection/resubmission, optional receipt controls, stale-file labels and refresh re-selection at 390×1000 and 1440×1000. It checks no horizontal overflow. Request/service specs verify persisted outcomes separately. These screenshots prove the fictional recording interface, not agency delivery or a connected full-app run. Native phone/Safari/WebKit coverage is not run on this host.
+
+Screenshots: `docs/evidence/filing-record/r1-select-390.png`, `r1-select-1440.png`, and refreshed `lifecycle-390.png`, `lifecycle-1440.png`. The Impeccable advisory scan returns `[]`.
+
+Final Part 1 verification:
+
+- `cd api && RAILS_ENV=test TEST_DATABASE_URL=postgres://localhost:5432/cp_test_filing_record_r1 bundle exec rspec` — **7,715 examples: 7,710 passed, 1 failed, 4 pending**, 9m58s. The sole failure is unchanged `spec/services/client_document_converter_process_spec.rb:51`: expected PATH/HOME/TMPDIR/LANG, observed additional `PKG_CONFIG_PATH`. It matches the previously documented portable-Ruby environment failure. The full backend gate therefore remains failed; it is not a clean gate or merge approval.
+- Final focused run of `annual_filing_submissions_spec.rb`, `payroll_filing_evidence_recorder_spec.rb`, `year_end/checklist_spec.rb`, `separate_annual_filing_agencies_spec.rb` and the filing-record request spec — **82 examples, 0 failures**. This final run strengthens the prior-year 1099 case: the actual old readiness method runs with a fictional report and raises if it attempts the 2026+ final sign-off.
+- `cd api && bundle exec rubocop` — **1,943 files, no offenses**, including final test refinements.
+- `cd web && npm run lint && npx tsc --noEmit -p tsconfig.app.json && npx tsc -b` — passed.
+- `cd web && npm test -- --maxWorkers=2` — final rerun **2,089 tests, 209 files passed**. Focused panel run: **9 passed**.
+- `cd web && E2E_BASE_URL=http://127.0.0.1:4185 npx playwright test e2e/public-filing-evidence.spec.ts --project=public --workers=1` — **2 passed**, including stale selection/refresh at both widths.
+
+Cleanup: both owned Vite server runs were stopped by exact claimed PID; Playwright contexts closed at suite exit. Lifecycle session `manual-20261120-154818-45725-c9aa` reports no active owned resources. The dedicated `cp_test_filing_record_r1` database was verified as local localhost:5432/agent before schema load and dropped after the final run. Borrowed/protected Postgres remains running. No test processes remain from this task. The branch and checkout remain for the lead; there is no runtime-resource handoff.
+
+Next: review this Part 1 push, then wait for the lead's explicit #504-merged go-ahead. Part 2 must reconcile the single 1099 readiness definition, keyed file digests, dynamic step numbering and schema, rebase onto main, rerun all gates and UI acceptance, and push with `--force-with-lease`. Do not merge from this worker. No Part 2 edits or production actions were performed in this round.

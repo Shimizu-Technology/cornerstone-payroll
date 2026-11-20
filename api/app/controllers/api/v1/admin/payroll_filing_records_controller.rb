@@ -12,16 +12,17 @@ module Api
 
           record = PayrollFilingRecord.includes(events: [ :recorded_by, :evidence_document ]).find_by(identity)
           downloads = AnnualFilingDownloads.new(company: current_company, year: identity[:tax_year], filing_type: identity[:filing_type])
+          fingerprint = downloads.fingerprint if identity[:quarter].nil? && identity[:tax_year] >= YearEnd::Checklist::FIRST_TAX_YEAR
           legacy = identity[:filing_type] == "w2_gu_w3_ss" && identity[:agency] != "legacy" ? PayrollFilingRecord.find_by(identity.merge(agency: "legacy")) : nil
           render json: { filing: record ? serialize_record(record) : nil,
             legacy_filing: legacy ? serialize_record(legacy) : nil,
-            downloads: downloads.logs.map { |log| { id: log.id, created_at: log.created_at.iso8601, actor_name: log.actor_name, sha256: log.metadata["sha256"] } } }
+            downloads: downloads.logs.map { |log| { id: log.id, created_at: log.created_at.iso8601, actor_name: log.actor_name, sha256: log.metadata["sha256"], current: log.metadata["readiness_fingerprint"] == fingerprint } } }
         end
 
         def create_event
           identity = filing_identity
           return if performed?
-          return render json: { error: "Choose the agency receipt or response file" }, status: :unprocessable_entity unless params[:file].present? || identity[:quarter].nil?
+          return render json: { error: "Choose the agency receipt or response file" }, status: :unprocessable_entity unless params[:file].present? || (identity[:quarter].nil? && identity[:tax_year] >= YearEnd::Checklist::FIRST_TAX_YEAR)
           return render json: { error: "Idempotency key is required" }, status: :unprocessable_entity if params[:idempotency_key].blank?
 
           existing_event = PayrollFilingEvent.includes(:evidence_document).find_by(
@@ -122,7 +123,7 @@ module Api
           end
 
           { company_id: current_company_id, filing_type: filing_type, tax_year: tax_year, quarter: quarter,
-            agency: annual ? (filing_type == "form_1099_nec" ? "drt" : params[:agency].presence || "legacy") : "" }
+            agency: annual ? (filing_type == "form_1099_nec" ? "drt" : tax_year < YearEnd::Checklist::FIRST_TAX_YEAR ? "legacy" : params[:agency].presence || "legacy") : "" }
         end
 
         def event_params

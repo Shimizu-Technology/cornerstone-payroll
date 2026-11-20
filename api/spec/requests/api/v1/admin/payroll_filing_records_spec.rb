@@ -42,6 +42,33 @@ RSpec.describe "Payroll filing records", type: :request do
     expect(response.parsed_body.dig("filing", "source_changed")).to be(true)
   end
 
+  it "lists current and stale final downloads" do
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
+    [ "a", "c" ].each do |fingerprint|
+      AuditLog.record!(user: admin, company_id: company.id, action: "efw2#download", record_type: "Company",
+        metadata: { year: 2026, mode: "final", sha256: "b" * 64, readiness_fingerprint: fingerprint * 64 })
+    end
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("downloads").map { |file| file["current"] }).to eq([ false, true ])
+  end
+
+  it "loads and advances prior-year legacy evidence without agency or final-file binding" do
+    old = PayrollFilingRecord.create!(company: company, filing_type: "w2_gu_w3_ss", tax_year: 2025,
+      status: "rejected", submitted_at: 1.year.ago, confirmation_number: "OLD", source_fingerprint: "a" * 64)
+    allow_any_instance_of(PayrollFilingEvidenceRecorder).to receive(:validate_w2_readiness!)
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w2_gu_w3_ss", tax_year: 2025, agency: "ssa" }
+    expect(response.parsed_body.dig("filing", "id")).to eq(old.id)
+    params = { filing_type: "w2_gu_w3_ss", tax_year: 2025, event_type: "resubmitted",
+      reference_number: "RETRY", preparer_name: "Dana", idempotency_key: SecureRandom.uuid }
+    post "/api/v1/admin/payroll_filing_records/events", params: params
+    expect(response).to have_http_status(:unprocessable_entity)
+    post "/api/v1/admin/payroll_filing_records/events", params: params.merge(file: upload)
+    expect(response).to have_http_status(:created), response.body
+    expect(response.parsed_body.dig("filing", "id")).to eq(old.id)
+    expect(old.reload.status).to eq("submitted")
+  end
+
   it "keeps filing-review capability required for recording" do
     allow(StaffRolePolicy).to receive(:allowed?).and_call_original
     allow(StaffRolePolicy).to receive(:allowed?).with(admin, :manage_filing_review, company: anything).and_return(false)

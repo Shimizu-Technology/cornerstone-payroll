@@ -65,6 +65,48 @@ describe('FilingEvidencePanel', () => {
     vi.stubGlobal('crypto', { randomUUID: () => 'filing-event-key-1' });
   });
 
+  it('uses the receipt path for prior years without an agency selector or final file', async () => {
+    apiMocks.payrollFilingRecord.mockResolvedValue({ filing: null });
+    render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2025} preparationReady readinessMessage="Ready" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record submission' }));
+    expect(screen.queryByLabelText('Agency')).toBeNull();
+    expect(screen.queryByLabelText('Final file uploaded')).toBeNull();
+    expect((screen.getByLabelText('Receipt or agency response') as HTMLInputElement).required).toBe(true);
+  });
+
+  it('refreshes to the newest current file and labels stale downloads', async () => {
+    const file = { created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', sha256: 'b'.repeat(64) };
+    apiMocks.payrollFilingRecord.mockResolvedValueOnce({ filing: null, downloads: [{ ...file, id: 93, current: false }, { ...file, id: 91, current: true }] })
+      .mockResolvedValue({ filing: null, downloads: [{ ...file, id: 94, current: true }] });
+    render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} agency="ssa" preparationReady readinessMessage="Ready" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record submission' }));
+    expect((screen.getByLabelText('Final file uploaded') as HTMLSelectElement).value).toBe('91');
+    expect(screen.getByRole('option', { name: /out of date/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh files' }));
+    await waitFor(() => expect((screen.getByLabelText('Final file uploaded') as HTMLSelectElement).value).toBe('94'));
+  });
+
+  it('explains how to get a final file and makes receipts optional for current years', async () => {
+    apiMocks.payrollFilingRecord.mockResolvedValue({ filing: null, downloads: [] });
+    render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} agency="ssa" preparationReady readinessMessage="Ready" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record submission' }));
+    expect(screen.getByText(/Download the final W-2 e-file in Print and file first/)).toBeTruthy();
+    expect((screen.getByLabelText('Receipt or agency response (optional)') as HTMLInputElement).required).toBe(false);
+  });
+
+  it('shows earlier W-2 history once across the two agency panels', async () => {
+    apiMocks.payrollFilingRecord.mockResolvedValue({ filing: null, legacy_filing: { ...submitted, filing_type: 'w2_gu_w3_ss', quarter: null } });
+    render(<>{['ssa', 'drt'].map((agency) => <FilingEvidencePanel key={agency} filingType="w2_gu_w3_ss" taxYear={2026} agency={agency} preparationReady readinessMessage="Ready" />)}</>);
+    await waitFor(() => expect(screen.getAllByText('Earlier W-2 history — agency not recorded')).toHaveLength(1));
+  });
+
+  it('does not claim retained proof for receipt-free annual acceptance', async () => {
+    apiMocks.payrollFilingRecord.mockResolvedValue({ filing: { ...submitted, status: 'accepted', filing_type: 'w2_gu_w3_ss', quarter: null, events: [] } });
+    render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} agency="ssa" preparationReady readinessMessage="Ready" />);
+    expect(await screen.findByText('Agency acceptance recorded.')).toBeTruthy();
+    expect(screen.queryByText(/retained proof/)).toBeNull();
+  });
+
   it('keeps submission disabled until the preparation workflow is ready', async () => {
     apiMocks.payrollFilingRecord.mockResolvedValue({ filing: null });
 
@@ -156,14 +198,14 @@ describe('FilingEvidencePanel', () => {
 
   it('preselects the latest final download and records the selected agency without a receipt', async () => {
     apiMocks.payrollFilingRecord.mockResolvedValue({ filing: null, downloads: [
-      { id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', sha256: 'b'.repeat(64) },
-      { id: 90, created_at: '2026-11-19T01:00:00Z', actor_name: 'Dana', sha256: 'a'.repeat(64) },
+      { id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', sha256: 'b'.repeat(64), current: true },
+      { id: 90, created_at: '2026-11-19T01:00:00Z', actor_name: 'Dana', sha256: 'a'.repeat(64), current: false },
     ] });
     apiMocks.recordPayrollFilingEvent.mockResolvedValue({ filing: { ...submitted, filing_type: 'w2_gu_w3_ss', agency: 'ssa' } });
     render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} companyId={3} agency="ssa" preparationReady readinessMessage="Ready" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Record submission' }));
     expect((screen.getByLabelText('Final file uploaded') as HTMLSelectElement).value).toBe('91');
-    expect(screen.getByLabelText('Receipt or agency response').hasAttribute('required')).toBe(false);
+    expect(screen.getByLabelText('Receipt or agency response (optional)').hasAttribute('required')).toBe(false);
     fireEvent.change(screen.getByLabelText('Agency reference number'), { target: { value: 'WFID-1' } });
     fireEvent.change(screen.getByLabelText('Prepared / recorded by'), { target: { value: 'Dana' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Save evidence' }).closest('form')!);

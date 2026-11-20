@@ -20,7 +20,7 @@ class SeparateAnnualFilingAgencies < ActiveRecord::Migration[8.0]
   end
 
   def down
-    count = select_value("SELECT COUNT(*) FROM payroll_filing_records WHERE agency IN ('ssa', 'drt')").to_i
+    count = select_value("SELECT COUNT(*) FROM payroll_filing_records WHERE filing_type = 'w2_gu_w3_ss' AND agency IN ('ssa', 'drt')").to_i
     bound = select_value("SELECT COUNT(*) FROM payroll_filing_events WHERE download_audit_id IS NOT NULL OR evidence_document_id IS NULL").to_i
     if count.positive? || bound.positive?
       raise ActiveRecord::IrreversibleMigration, "#{count} agency filing record(s) and #{bound} file-bound/receipt-free event(s) require this schema. Roll back the application only; preserve filing history."
