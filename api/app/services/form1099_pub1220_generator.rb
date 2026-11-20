@@ -1,0 +1,208 @@
+# frozen_string_literal: true
+
+# IRS Pub 1220, tax year 2025, Rev. 5-2026, Part C. DRT's 2026 version
+# remains to be confirmed. All positions are one-based. CR/LF occupies 749-750.
+class Form1099Pub1220Generator
+  class InvalidFile < ArgumentError
+    attr_reader :problems
+    def initialize(problems)
+      @problems = problems
+      super(problems.join("; "))
+    end
+  end
+
+  TCC_PROBLEM = "Add the transmitter control code (TCC) DRT gave Cornerstone, or confirm with DRT that none is needed"
+  attr_reader :report
+
+  def initialize(company:, year:, submitter:, draft:, report: nil)
+    @company, @year, @submitter, @draft = company, year.to_i, submitter, draft
+    @report = report || Form1099NecAggregator.new(company, year).generate
+    @rows = @report.fetch(:reportable_contractors)
+    @people = company.employees.where(id: @rows.pluck(:employee_id)).index_by(&:id)
+  end
+
+  def generate
+    found = problems
+    raise InvalidFile, found if found.any?
+
+    records = [ transmitter, payer, *@rows.map { |row| payee(row) }, totals, ending ]
+    records.each_with_index { |r, i| number(r, 500, 8, i + 1) }
+    self_check!(records)
+    records.join
+  end
+
+  def problems
+    found = []
+    found << "Only tax year 2026 is supported" unless @year == 2026
+    found << "No reportable 1099 payees" if @rows.empty?
+    found << TCC_PROBLEM if !@draft && @submitter&.tcc.blank?
+    found << "Add the practice submitter profile" unless @submitter
+    [ [ @company, "Payer" ], [ @submitter, "Transmitter" ] ].each do |object, label|
+      next unless object
+
+      found << "#{label}: valid EIN required" unless tin(object.ein).match?(/\A\d{9}\z/) && tin(object.ein).chars.uniq.length > 1
+      identity_problems(object, label, found)
+    end
+    if @submitter
+      found << "Transmitter: contact name required" if @submitter.contact_name.blank?
+      found << "Transmitter: contact phone must contain 10 digits" unless tin(@submitter.contact_phone).match?(/\A\d{10}\z/)
+      found << "Transmitter: invalid TCC" if @submitter.tcc.present? && !@submitter.tcc.match?(/\A[A-Za-z0-9]{5}\z/)
+    end
+    @rows.each do |row|
+      person = @people[row[:employee_id]]
+      label = row[:name]
+      if !person
+        found << "#{label}: missing TIN and address; identify this payee before exporting"
+        next
+      end
+      id = row[:tin_type] == "EIN" ? tin(person.contractor_ein) : person.ssn_digits.to_s
+      found << "#{label}: valid #{row[:tin_type]} required" unless id.match?(/\A\d{9}\z/) && id.chars.uniq.length > 1
+      found << "#{label}: valid SSN required" if row[:tin_type] == "SSN" && !person.valid_filing_ssn?
+      found << "#{label}: unknown TIN type" unless row[:tin_type].in?(%w[SSN EIN])
+      identity_problems(person, label, found)
+    end
+    ids = @rows.map { |row| row[:employee_id] }.compact
+    found << "Duplicate payee rows" unless ids.uniq.length == ids.length
+    found
+  end
+
+  # Public so corruption tests can independently exercise the return barrier.
+  def self_check!(records)
+    found = []
+    found << "Records must be exactly 750 ASCII bytes with CR/LF in 749-750" unless records.all? { |r| r.bytesize == 750 && r.ascii_only? && r.end_with?("\r\n") }
+    found << "Record order/count mismatch" unless records.map { |r| r[0] } == [ "T", "A", *Array.new(@rows.length, "B"), "C", "F" ]
+    raise InvalidFile, found if found.any?
+
+    found << "Payment fields must contain digits" unless records.select { |r| r.start_with?("B") }.all? { |r| r[54, 216].match?(/\A\d{216}\z/) }
+    found << "Record sequence mismatch" unless records.each_with_index.all? { |r, i| r[499, 8] == (i + 1).to_s.rjust(8, "0") }
+    bs = records.select { |r| r.start_with?("B") }
+    c, f = records[-2], records[-1]
+    found << "Payee counts mismatch" unless [ records.first[295, 8], c[1, 8], f[49, 8] ].all? { |v| v == bs.length.to_s.rjust(8, "0") }
+    found << "Payer count mismatch" unless f[1, 8] == "00000001"
+    (0...18).each do |i|
+      actual = c[15 + i * 18, 18]
+      sum = bs.sum { |r| r[54 + i * 12, 12].to_i }
+      found << "C amount total mismatch for code #{i + 1}" unless actual == sum.to_s.rjust(18, "0")
+    end
+    found << "Aggregator Box 1 total mismatch" unless c[15, 18].to_i == cents(report.fetch(:totals).fetch(:reportable_compensation))
+    found << "Aggregator Box 4 total mismatch" unless c[69, 18].to_i == cents(report.fetch(:totals).fetch(:reportable_federal_withheld))
+    raise InvalidFile, found if found.any?
+
+    true
+  end
+
+  private
+
+  def identity_problems(object, label, found)
+    found << "#{label}: name required" if object.respond_to?(:name) ? object.name.blank? : object.full_name.blank?
+    found << "#{label}: complete address required" if [ object.address_line1, object.city, object.state, object.zip ].any?(&:blank?)
+    found << "#{label}: unsupported state/territory or ZIP" unless object.state.to_s.upcase.in?(Efw2Formatting::STATES) && object.zip.to_s.match?(/\A\d{5}(-?\d{4})?\z/)
+  end
+
+  def clean(value)
+    text = Efw2Formatting.transliterated(value)
+    raise InvalidFile, [ "Text contains unsupported characters; edit the payer, transmitter or payee details" ] if text.include?("?") || text.match?(/[^\x00-\x7F]/)
+
+    Efw2Formatting.clean(value).delete(".'")
+  end
+
+  def tin(value)
+    value.to_s.gsub(/\D/, "")
+  end
+
+  def cents(value)
+    (value.to_d * 100).round.to_i
+  end
+
+  def record(type)
+    (type + " " * 747 + "\r\n")
+  end
+
+  def put(r, position, width, value)
+    text = value.to_s
+    raise InvalidFile, [ "Field at #{position} exceeds #{width} characters or contains unsupported text" ] if text.bytesize > width || !text.ascii_only? || text.match?(/[\r\n]/)
+
+    r[position - 1, width] = text.ljust(width)
+  end
+
+  def number(r, p, w, n)
+    raise InvalidFile, [ "Invalid amount/count at #{p}" ] unless n.between?(0, 10**w - 1)
+
+    put(r, p, w, n.to_s.rjust(w, "0"))
+  end
+
+  def address(r, object, street, city, state, zip)
+    put(r, street, 40, clean([ object.address_line1, object.address_line2 ].compact_blank.join(" ")))
+    put(r, city, 40, clean(object.city))
+    put(r, state, 2, clean(object.state))
+    put(r, zip, 9, tin(object.zip))
+  end
+
+  def transmitter
+    s = @submitter
+    record("T").tap do |r|
+      put(r, 2, 4, @year)
+      put(r, 7, 9, tin(s.ein))
+      put(r, 16, 5, s.tcc.present? ? s.tcc.upcase : "TEST0")
+      put(r, 28, 1, @draft ? "T" : "")
+      put(r, 30, 40, clean(s.name))
+      put(r, 110, 40, clean(s.name))
+      address(r, s, 190, 230, 270, 272)
+      number(r, 296, 8, @rows.length)
+      put(r, 304, 40, clean(s.contact_name))
+      put(r, 344, 15, tin(s.contact_phone))
+      put(r, 359, 50, s.contact_email)
+      put(r, 518, 1, "I")
+    end
+  end
+
+  def payer
+    record("A").tap do |r|
+      put(r, 2, 4, @year)
+      put(r, 12, 9, tin(@company.ein))
+      put(r, 26, 2, "NE")
+      put(r, 28, 18, "14")
+      put(r, 53, 40, clean(@company.name))
+      put(r, 133, 1, "0")
+      address(r, @company, 134, 174, 214, 216)
+      put(r, 225, 15, tin(@company.phone))
+    end
+  end
+
+  def payee(row)
+    person = @people.fetch(row[:employee_id])
+    ein = row[:tin_type] == "EIN"
+    name = ein ? person.business_name.presence || person.full_name : "#{person.last_name} #{person.first_name} #{person.middle_name}".strip
+    record("B").tap do |r|
+      put(r, 2, 4, @year)
+      # Business name controls have entity-specific rules: blanks are expressly allowed.
+      put(r, 7, 4, ein ? "" : clean(person.last_name).gsub(/[^A-Z0-9]/, "")[0, 4])
+      put(r, 11, 1, ein ? "1" : "2")
+      put(r, 12, 9, ein ? tin(person.contractor_ein) : person.ssn_digits)
+      (0...18).each { |i| number(r, 55 + i * 12, 12, 0) }
+      number(r, 55, 12, cents(row.fetch(:total_compensation)))
+      number(r, 91, 12, cents(row.fetch(:federal_withheld)))
+      put(r, 288, 40, clean(name).gsub(/[^A-Z0-9 &-]/, ""))
+      address(r, person, 368, 448, 488, 490)
+      number(r, 723, 12, 0)
+      number(r, 735, 12, 0)
+    end
+  end
+
+  def totals
+    record("C").tap do |r|
+      number(r, 2, 8, @rows.length)
+      (0...18).each { |i| number(r, 16 + i * 18, 18, 0) }
+      number(r, 16, 18, @rows.sum { |row| cents(row.fetch(:total_compensation)) })
+      number(r, 70, 18, @rows.sum { |row| cents(row.fetch(:federal_withheld)) })
+    end
+  end
+
+  def ending
+    record("F").tap do |r|
+      number(r, 2, 8, 1)
+      number(r, 10, 21, 0)
+      number(r, 50, 8, @rows.length)
+    end
+  end
+end

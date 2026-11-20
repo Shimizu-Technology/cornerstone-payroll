@@ -14,6 +14,7 @@ const fields: Record<string, string> = {
   contact_name: 'Contact name',
   contact_phone: 'Contact phone',
   contact_email: 'Contact email',
+  tcc: 'Transmitter control code (TCC, 5 characters, optional)',
   bso_user_id: 'BSO User ID (8 characters)',
 };
 export function FilingSubmitterCard() {
@@ -97,7 +98,8 @@ export function FilingSubmitterCard() {
           {open ? 'Close' : 'View submitter profile'}
         </Button>
       </div>
-      <p className="text-sm text-neutral-600">Used in every client's W-2 e-file. The BSO User ID is your SSA login ID, not a password.</p>
+      <p className="text-sm text-neutral-600">Used in every client's W-2 and 1099 e-files. The BSO User ID is your SSA login ID, not a password.</p>
+      {!loading && !restricted && !loadFailed && !profile.tcc && <p className="text-sm text-neutral-600">Add the transmitter control code (TCC) DRT gave Cornerstone, or confirm with DRT that none is needed</p>}
       {loading && <p role="status">Loading e-file details…</p>}
       {!loading && restricted && <p className="text-sm text-neutral-600">Ask an admin to complete Cornerstone's e-file details.</p>}
       {!loading && !restricted && !loadFailed && !exists && <p className="text-sm text-neutral-600">Not set up yet — add Cornerstone's e-file details</p>}

@@ -185,6 +185,8 @@ class StaffRolePolicy
     "api/v1/admin/reports#w2_gu_mark_ready" => :manage_client_administration,
     # Full SSNs: the same access as the W-2 sign-off.
     "api/v1/admin/reports#w2_gu_copy_1_drt" => :manage_client_administration,
+    "api/v1/admin/reports#form_1099_pub1220" => :manage_client_administration,
+    "api/v1/admin/reports#form_1096_totals" => :manage_client_administration,
     "api/v1/admin/reports#w2_gu_efw2" => :manage_client_administration,
     "api/v1/admin/employees#review_intake_exception" => :manage_client_configuration,
     "api/v1/admin/employees#terminate" => :manage_client_configuration,

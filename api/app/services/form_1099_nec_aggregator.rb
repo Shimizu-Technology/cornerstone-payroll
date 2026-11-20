@@ -57,6 +57,7 @@ class Form1099NecAggregator
       totals: {
         total_compensation: rows.sum(0.to_d) { |r| r[:total_compensation].to_d }.round(2).to_f,
         reportable_compensation: reportable.sum(0.to_d) { |r| r[:total_compensation].to_d }.round(2).to_f,
+        reportable_federal_withheld: reportable.sum(0.to_d) { |r| r[:federal_withheld].to_d }.round(2).to_f,
         total_federal_withheld: rows.sum(0.to_d) { |r| r[:federal_withheld].to_d }.round(2).to_f
       }
     }

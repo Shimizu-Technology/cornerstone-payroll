@@ -611,6 +611,8 @@ Rails.application.routes.draw do
         get "reports/form_941_gu_pdf", to: "reports#form_941_gu_pdf"
         get "reports/form_941_gu_xlsx", to: "reports#form_941_gu_xlsx"
         get "reports/w2_gu_efw2", to: "reports#w2_gu_efw2"
+        get "reports/form_1099_pub1220", to: "reports#form_1099_pub1220"
+        get "reports/form_1096_totals", to: "reports#form_1096_totals"
         get "reports/w3ss_pdf", to: "reports#w3ss_pdf"
         get "reports/w2_gu", to: "reports#w2_gu"
         post "reports/w2_gu_preflight", to: "reports#w2_gu_preflight"
