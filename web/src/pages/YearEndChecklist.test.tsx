@@ -122,6 +122,30 @@ function OpenOtherClient() {
   return <button type="button" onClick={() => navigate('/companies/8/year-end?year=2026')}>Open Agana Auto</button>;
 }
 
+/**
+ * The hook state of every function component from this element up, as
+ * text, so a test can show a value was never kept in React state.
+ */
+function componentState(element: Element): string {
+  type Hook = { memoizedState: unknown; next: Hook | null };
+  type Fiber = { type: unknown; memoizedState: unknown; return: Fiber | null };
+  const key = Object.keys(element).find((name) => name.startsWith('__reactFiber$'));
+  let fiber = key ? (element as unknown as Record<string, Fiber>)[key] : null;
+  const seen: string[] = [];
+  const skipNodes = (_name: string, value: unknown) => (value instanceof Node ? undefined : value);
+  while (fiber) {
+    if (typeof fiber.type === 'function') {
+      let hook = fiber.memoizedState as Hook | null;
+      while (hook && typeof hook === 'object' && 'next' in hook) {
+        try { seen.push(JSON.stringify(hook.memoizedState, skipNodes) ?? ''); } catch { /* circular: not a plain value */ }
+        hook = hook.next;
+      }
+    }
+    fiber = fiber.return;
+  }
+  return seen.join('\n');
+}
+
 function renderPage() {
   render(
     <FeedbackProvider>
@@ -919,6 +943,89 @@ describe('Year-end checklist: 1099 payees and sign-off', () => {
     expect(await screen.findByText('Added Island Roofing LLC as a contractor and linked the checks.')).toBeTruthy();
   });
 
+  it('keeps the SSN out of React state and still sends it on a retry', async () => {
+    const people = step('people', 3, 'Employees and payees', 'action_needed', {
+      issues: openPeople.issues, data: peopleData({ one_off_payees: [payee], link_candidates: [] }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, waitingReady));
+    mocks.addContractor.mockRejectedValueOnce(new ApiError('The 1099 service is busy. Try again.', 503))
+      .mockResolvedValue({ data: { employee: { id: 30, name: 'Ana Cruz', created: true }, check_ids: [41, 42] } });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    fireEvent.click(within(region).getByRole('radio', { name: /Add as a new contractor/ }));
+    const ssn = within(region).getByLabelText('SSN') as HTMLInputElement;
+    fireEvent.change(ssn, { target: { value: '345-67-7890' } });
+    fireEvent.change(within(region).getByLabelText('Street address'), { target: { value: '7 Route 8' } });
+    fireEvent.change(within(region).getByLabelText('City'), { target: { value: 'Maite' } });
+    fireEvent.change(within(region).getByLabelText('ZIP'), { target: { value: '96910' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Add contractor and link checks' }));
+
+    expect(await within(region).findByRole('alert')).toHaveProperty('textContent', 'The 1099 service is busy. Try again.');
+    const sent = { tax_year: 2026, code: payee.code, digest: 'payee-digest', contractor: expect.objectContaining({ contractor_type: 'individual', tin: '345-67-7890', city: 'Maite' }) };
+    expect(mocks.addContractor).toHaveBeenLastCalledWith(sent, 7);
+    // The SSN lives only in the input: React renders no value for it, and no
+    // component state above it holds the digits (the city typed next to it does).
+    expect(ssn.value).toBe('345-67-7890');
+    expect(ssn.getAttribute('value')).toBeNull();
+    const state = componentState(ssn);
+    expect(state).toContain('Maite');
+    expect(state).not.toContain('345-67-7890');
+    expect(state).not.toContain('345677890');
+
+    fireEvent.click(within(region).getByRole('button', { name: 'Add contractor and link checks' }));
+    expect(await screen.findByText('Added Ana Cruz as a contractor and linked the checks.')).toBeTruthy();
+    expect(mocks.addContractor).toHaveBeenCalledTimes(2);
+    expect(mocks.addContractor).toHaveBeenLastCalledWith(sent, 7);
+  });
+
+  it('refreshes the checklist after a link that finishes once the reviewer has closed the form', async () => {
+    const small = { ...payee, code: 'one_off_payee:non_employee_check:51', payee_key: 'non_employee_check:51', total_compensation: 1000, payment_count: 1,
+      checks: [{ id: 51, check_number: '9101', payment_date: '2026-06-05', amount: 1000 }], digest: 'small-digest', status: 'below_threshold' as const, could_reach_threshold: true };
+    const people = step('people', 3, 'Employees and payees', 'done', {
+      data: peopleData({ smaller_one_off_payees: [small], link_candidates: candidates }),
+    });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'done', {
+      data: readyData({ can_mark_ready: false, payees: [], payee_count: 0, total_compensation: 0, smaller_one_off_count: 1, smaller_could_reach_count: 1 }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, ready));
+    let finishLink: (value: unknown) => void = () => {};
+    mocks.linkPayee.mockReturnValue(new Promise((resolve) => { finishLink = resolve; }));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    fireEvent.click(within(region).getByRole('button', { name: /Show Employees and payees/ }));
+    fireEvent.click(await within(region).findByRole('button', { name: "Link Ana Cruz's checks to a contractor" }));
+    fireEvent.click(within(region).getByRole('button', { name: 'Link checks' }));
+    await waitFor(() => expect(mocks.linkPayee).toHaveBeenCalled());
+    const loads = mocks.checklist.mock.calls.length;
+    // The reviewer closes the form while the link is saving.
+    fireEvent.click(within(region).getByRole('button', { name: 'Cancel' }));
+    expect(within(region).queryByRole('button', { name: 'Link checks' })).toBeNull();
+
+    finishLink({ data: { employee: { id: 21, name: 'Ana Cruz', created: false }, check_ids: [51] } });
+
+    expect(await screen.findByText("Linked Ana Cruz's checks to Ana Cruz.")).toBeTruthy();
+    await waitFor(() => expect(mocks.checklist.mock.calls.length).toBeGreaterThan(loads));
+  });
+
+  it('keeps 1099 filing evidence closed in a year with no 1099s, saying why', async () => {
+    const people = step('people', 3, 'Employees and payees', 'done', { data: peopleData() });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'done', {
+      data: readyData({ can_mark_ready: false, payees: [], payee_count: 0, total_compensation: 0, no_1099_due_count: 1 }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, ready));
+
+    renderPage();
+
+    expect(await screen.findByText('No 1099s to file for 2026')).toBeTruthy();
+    expect(screen.queryByText('Mark the 1099s ready above before recording the 1099 filing.')).toBeNull();
+    const submit = await screen.findByRole('button', { name: 'Record submission' });
+    expect(submit).toHaveProperty('disabled', true);
+  });
+
   it('links a smaller one-off check to a contractor the client already pays, without it blocking anything', async () => {
     const small = { ...payee, code: 'one_off_payee:non_employee_check:51', payee_key: 'non_employee_check:51', total_compensation: 1000, payment_count: 1,
       checks: [{ id: 51, check_number: '9101', payment_date: '2026-06-05', amount: 1000 }], digest: 'small-digest', status: 'below_threshold' as const, could_reach_threshold: true };
@@ -993,7 +1100,8 @@ describe('Year-end checklist: 1099 payees and sign-off', () => {
     expect(mocks.unlinkPayee).not.toHaveBeenCalled();
     fireEvent.click(within(region).getByRole('button', { name: 'Yes, undo the link' }));
 
-    await waitFor(() => expect(mocks.unlinkPayee).toHaveBeenCalledWith({ tax_year: 2026, check_ids: [41, 42] }, 7));
+    // Names the contractor shown, so a stale undo can't clear a newer link to someone else.
+    await waitFor(() => expect(mocks.unlinkPayee).toHaveBeenCalledWith({ tax_year: 2026, employee_id: 21, check_ids: [41, 42] }, 7));
     expect(await screen.findByText('Unlinked the checks from Ana Cruz.')).toBeTruthy();
   });
 

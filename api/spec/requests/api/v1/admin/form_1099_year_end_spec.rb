@@ -21,7 +21,8 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
     allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
     [
       Api::V1::Admin::YearEndController, Api::V1::Admin::ReportsController,
-      Api::V1::Admin::PayrollFilingResponsibilitiesController, Api::V1::Admin::PayrollFilingRecordsController
+      Api::V1::Admin::PayrollFilingResponsibilitiesController, Api::V1::Admin::PayrollFilingRecordsController,
+      Api::V1::Admin::NonEmployeeChecksController
     ].each do |controller|
       allow_any_instance_of(controller).to receive(:current_user) { acting_user }
       allow_any_instance_of(controller).to receive(:current_company_id) { company.id }
@@ -66,6 +67,10 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
 
   def link(payee, employee)
     post "/api/v1/admin/year_end/one_off_payees/link", params: { payee: { tax_year: 2026, code: payee["code"], digest: payee["digest"], employee_id: employee.id } }
+  end
+
+  def unlink(check_ids, employee)
+    post "/api/v1/admin/year_end/one_off_payees/unlink", params: { payee: { tax_year: 2026, employee_id: employee.id, check_ids: check_ids } }
   end
 
   def mark_ready(fingerprint = step("form_1099_ready").dig("data", "inputs_fingerprint"), notes: "Checked against the W-9s")
@@ -166,13 +171,66 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       link(one_off_payee, cruz)
       ids = step("people").dig("data", "linked_checks", 0, "checks").map { |check| check["id"] }
 
-      post "/api/v1/admin/year_end/one_off_payees/unlink", params: { payee: { tax_year: 2026, check_ids: ids } }
+      unlink(ids, cruz)
 
       expect(response).to have_http_status(:ok), response.body
       expect(one_off_payee).to include("name" => "Ana Cruz", "status" => "needs_identity")
       expect(AuditLog.find_by!(action: "year_end_one_off_payees#unlinked").metadata["checks"].map { |check| check["previous_employee_id"] }).to eq([ cruz.id, cruz.id ])
-      post "/api/v1/admin/year_end/one_off_payees/unlink", params: { payee: { tax_year: 2026, check_ids: ids } }
+      unlink(ids, cruz)
       expect(response).to have_http_status(:conflict)
+    end
+
+    it "unlinks a linked check when its payee is renamed, so it is resolved again" do
+      link(one_off_payee, cruz)
+      first, second = NonEmployeeCheck.order(:id).to_a
+
+      patch "/api/v1/admin/non_employee_checks/#{first.id}", params: { non_employee_check: { payable_to: "Island Supply" }, reason: "Wrong payee" }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(first.reload.payee_employee_id).to be_nil
+      expect(second.reload.payee_employee_id).to eq(cruz.id)
+      expect(step("people").dig("data", "one_off_payees")).to be_empty
+      expect(step("people").dig("data", "smaller_one_off_payees").map { |payee| payee["name"] }).to eq([ "Island Supply" ])
+      edit = first.edits.select { |entry| entry.changed_fields == [ "payee_employee_id" ] }.max_by(&:id)
+      expect(edit).to have_attributes(before: { "payee_employee_id" => cruz.id }, after: { "payee_employee_id" => nil }, edited_by_id: admin.id,
+        reason: "Payee changed from Ana Cruz to Island Supply, so the check is no longer linked to Ana Cruz for the 1099-NEC")
+      expect(first.edits.map(&:changed_fields)).to include([ "payable_to" ])
+      log = AuditLog.where(action: "year_end_one_off_payees#unlinked").sole
+      expect(log).to have_attributes(user_id: admin.id, company_id: company.id, record_id: first.id)
+      expect(log.metadata).to include("reason" => "payee_renamed")
+      expect(log.metadata["checks"].sole).to include("previous_employee_id" => cruz.id, "previous_payable_to" => "Ana Cruz", "payable_to" => "Island Supply")
+
+      # Any save path, not only the editor; an unchanged name keeps the link.
+      second.update!(memo: "June work")
+      expect(second.reload.payee_employee_id).to eq(cruz.id)
+      second.update!(payable_to: "A. Cruz")
+      expect(second.reload.payee_employee_id).to be_nil
+      expect(AuditLog.where(action: "year_end_one_off_payees#unlinked").count).to eq(2)
+    end
+
+    it "refuses a stale undo after the checks were relinked to another contractor" do
+      santos = create(:employee, :contractor, company: company, department: department, first_name: "Ben", last_name: "Santos",
+        ssn_encrypted: "456-78-9012", address_line1: "9 Route 4", city: "Sinajana", state: "GU", zip: "96910", w9_on_file: true)
+      link(one_off_payee, cruz)
+      ids = step("people").dig("data", "linked_checks", 0, "checks").map { |check| check["id"] }
+      unlink(ids, cruz)
+      expect(response).to have_http_status(:ok), response.body
+      link(one_off_payee, santos)
+      expect(response).to have_http_status(:ok), response.body
+      edits = NonEmployeeCheckEdit.count
+
+      # A second tab still shows "linked to Ana Cruz" and sends the undo again.
+      unlink(ids, cruz)
+
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["error"]).to include("no longer linked to that contractor")
+      expect(NonEmployeeCheck.where(id: ids).pluck(:payee_employee_id)).to eq([ santos.id, santos.id ])
+      expect(NonEmployeeCheckEdit.count).to eq(edits)
+      expect(AuditLog.where(action: "year_end_one_off_payees#unlinked").count).to eq(1)
+
+      post "/api/v1/admin/year_end/one_off_payees/unlink", params: { payee: { tax_year: 2026, check_ids: ids } }
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(NonEmployeeCheck.where(id: ids).pluck(:payee_employee_id)).to eq([ santos.id, santos.id ])
     end
 
     it "lets an accountant resolve payees but not someone without access to the client" do
@@ -273,8 +331,24 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       expect(step("form_1099_ready", data).dig("data", "no_1099_due_count")).to eq(1)
       expect(step("form_1099_ready", data)["summary"]).to include("no 1099s to mark ready")
       expect(data["status"]).to eq("ready")
+      # Nothing to file: Print and file says so and offers no e-file or 1096.
+      print_and_file = step("print_and_file", data)
+      expect(print_and_file["summary"]).to eq("No 1099 filings are needed for 2026: no payee gets a 1099.")
+      expect(print_and_file.dig("data", "no_1099_filings")).to be(true)
+      documents = print_and_file.dig("data", "documents").index_by { |document| document["key"] }
+      expect(documents.values_at("form_1099_pub1220", "form_1096_totals"))
+        .to all(include("available" => false, "unavailable_reason" => "No 1099 filings are needed for 2026: no payee gets a 1099."))
+      expect(documents["form_1099_recipient_copies"]).to include("available" => false)
       download("recipient")
       expect(response).to have_http_status(:unprocessable_content)
+    end
+
+    it "keeps the draft guidance while a one-off payee is undecided" do
+      print_and_file = step("print_and_file")
+      expect(print_and_file["summary"]).to start_with("Drafts until the 1099s are marked ready")
+      expect(print_and_file.dig("data", "no_1099_filings")).to be(false)
+      documents = print_and_file.dig("data", "documents").index_by { |document| document["key"] }
+      expect(documents["form_1099_pub1220"]).to include("available" => false, "unavailable_reason" => a_string_including("Resolve the one-off payees"))
     end
   end
 
@@ -344,7 +418,26 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       mark_ready
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(response.parsed_body["problems"]).to eq([ "Ana Cruz: the street address is too long to fit the recipient's address box — shorten it on the contractor's record." ])
+      expect(response.parsed_body["problems"]).to eq([
+        "Ana Cruz: the street address is too long to fit the recipient's address box — shorten it on the contractor's record.",
+        "Ana Cruz: the address is longer than 40 characters — shorten it on the profile."
+      ])
+    end
+
+    it "refuses an address the copies fit but the e-file can't, so every signed-off client can e-file" do
+      cruz.update!(address_line1: "123 North Marine Corps Drive", address_line2: "Building 7 Unit 215")
+      expect(Form1099NecOfficialCopies.new(company: company, report: Form1099NecAggregator.new(company, 2026).generate, kind: "payer", draft: true).problems).to be_empty
+
+      mark_ready
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["error"]).to include("wouldn't print or e-file")
+      expect(response.parsed_body["problems"]).to eq([ "Ana Cruz: the address is longer than 40 characters — shorten it on the profile." ])
+      expect(Form1099FilingReadiness.count).to eq(0)
+
+      cruz.update!(address_line1: "123 N Marine Corps Dr", address_line2: "Bldg 7 Unit 215")
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
     end
 
     it "refuses when the inputs change while they are checked" do
@@ -509,6 +602,22 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       expect(smaller_payee).to include("name" => "Island Ice", "could_reach_threshold" => true)
       expect(step("form_1099_ready").dig("data", "smaller_could_reach_count")).to eq(1)
     end
+
+    it "doesn't flag a smaller payee that would only add to a contractor already getting a 1099 for withholding" do
+      pay_contractor(cruz, 500).update_columns(withholding_tax: 50)
+      contractor_check(1_600, "9001", payable_to: "Island Ice")
+      decide
+
+      # $500 with $50 withheld is already reportable; $2,100 linked would only add to that 1099.
+      expect(report_rows.sole).to include(employee_id: cruz.id, requires_filing: true, filing_reason: "tax withheld")
+      expect(smaller_payee).to include("name" => "Island Ice", "could_reach_threshold" => false)
+      expect(step("form_1099_ready").dig("data", "smaller_could_reach_count")).to eq(0)
+
+      # The same amounts with nothing withheld: linking would make a 1099 due.
+      cruz.payroll_items.sole.update_columns(withholding_tax: 0)
+      expect(smaller_payee).to include("name" => "Island Ice", "could_reach_threshold" => true)
+      expect(step("form_1099_ready").dig("data", "smaller_could_reach_count")).to eq(1)
+    end
   end
 
   describe "a payee's W-9" do
@@ -582,6 +691,43 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       expect(response).to have_http_status(:conflict)
       efile("draft")
       expect(response).to have_http_status(:ok), response.body
+    end
+
+    it "builds the e-file and 1096 from the payees signed off, leaving out a payee decided no 1099 due" do
+      contractor_check(3_100, "9001", payable_to: "Guam Power Authority")
+      payee = one_off_payee
+      post "/api/v1/admin/year_end/acknowledgements", params: { acknowledgement: {
+        tax_year: 2026, warning_code: payee["code"], warning_digest: payee["digest"], note: "Utility bill, not services. No 1099."
+      } }
+      expect(response).to have_http_status(:created), response.body
+      # Still in the aggregator's reportable list, with no TIN or address.
+      expect(report_rows.map { |row| row[:name] }).to contain_exactly("Ana Cruz", "Guam Power Authority")
+      expect(step("form_1099_ready").dig("data", "payees").map { |row| row["name"] }).to eq([ "Ana Cruz" ])
+
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
+      efile("final")
+
+      expect(response).to have_http_status(:ok), response.body
+      records = response.body.lines
+      expect(records.map { |record| record[0] }).to eq(%w[T A B C F])
+      expect(records[2][20, 20].strip).to eq(Form1099Pub1220Generator.account_number(cruz))
+      expect(records[3][1, 8].to_i).to eq(1)
+      expect(records[3][15, 18].to_i).to eq(250_000)
+      expect(records[4][49, 8].to_i).to eq(1)
+      expect(response.body).not_to include("GUAM POWER")
+
+      efile("final", kind: "form_1096_totals")
+      expect(response).to have_http_status(:ok), response.body
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      expect(text).to include("Total forms: 1", "Box 1 nonemployee compensation: $2,500.00")
+    end
+
+    it "names an undecided one-off payee instead of leaving it out of a draft e-file" do
+      contractor_check(3_100, "9001", payable_to: "Guam Power Authority")
+      efile("draft")
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["problems"]).to include(a_string_starting_with("Guam Power Authority: missing TIN and address; link this one-off payee"))
     end
 
     it "expires the sign-off when withholding, the account number or the name lines change" do
@@ -694,9 +840,22 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
     it "rechecks and writes the audit entry under the company lock that mark ready and payee resolution take" do
       mark_ready
       company_locks = []
-      depths = []
+      lock_blocks = 0
+      held = []
+      audits = []
+      # Track which company lock block is open, so the audit is shown to run
+      # inside the second one (not merely inside some transaction).
+      allow_any_instance_of(Company).to receive(:with_lock).and_wrap_original do |original, *args, &block|
+        lock_blocks += 1
+        held.push(lock_blocks)
+        begin
+          original.call(*args, &block)
+        ensure
+          held.pop
+        end
+      end
       allow(AuditLog).to receive(:record!).and_wrap_original do |original, **kwargs|
-        depths << ActiveRecord::Base.connection.open_transactions
+        audits << { held: held.dup, locks_taken: company_locks.length }
         original.call(**kwargs)
       end
       lock_sql = ->(*, payload) { company_locks << payload[:sql] if payload[:sql].match?(/FROM "companies".*FOR UPDATE/m) }
@@ -704,9 +863,10 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       ActiveSupport::Notifications.subscribed(lock_sql, "sql.active_record") { download("payer") }
 
       expect(response).to have_http_status(:ok), response.body
+      expect(lock_blocks).to eq(2)
       expect(company_locks.length).to eq(2)
-      expect(depths.length).to eq(1)
-      expect(depths.first).to be >= 2
+      expect(held).to be_empty
+      expect(audits).to eq([ { held: [ 2 ], locks_taken: 2 } ])
     end
 
     it "needs client-management access for the full-TIN payer record" do
@@ -721,6 +881,32 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       allow_any_instance_of(Api::V1::Admin::YearEndController).to receive(:current_user).and_return(accountant)
       payer = step("print_and_file").dig("data", "documents").find { |document| document["key"] == "form_1099_payer_record" }
       expect(payer).to include("available" => false, "unavailable_reason" => "Needs client-management access (contains full TINs).", "contains_full_tin" => true)
+    end
+
+    it "sends no payer record when client-management access is revoked while it is drawn" do
+      accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+      assignment = create(:company_assignment, user: accountant, company: company, client_management: true, granted_by: admin)
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(accountant)
+      revoke = false
+      allow_any_instance_of(Form1099NecOfficialCopies).to receive(:generate).and_wrap_original do |original, *args|
+        original.call(*args).tap { assignment.update_columns(client_management: false) if revoke }
+      end
+
+      download("payer")
+      expect(response).to have_http_status(:ok), response.body
+      assignment.update_columns(client_management: true)
+      logs = copy_logs.count
+
+      revoke = true
+      download("payer")
+      expect(response).to have_http_status(:forbidden)
+      expect(response.media_type).to eq("application/json")
+      expect(copy_logs.count).to eq(logs)
+
+      # Recipient copies have the 1099 report's access and are unaffected.
+      assignment.update_columns(client_management: true)
+      download("recipient")
+      expect(response).to have_http_status(:ok), response.body
     end
 
     it "refuses the payer record in a practice copy and keeps recipient copies drafts" do

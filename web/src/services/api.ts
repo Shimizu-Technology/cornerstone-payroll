@@ -4287,8 +4287,8 @@ export const yearEndApi = {
   /** Adds a contractor record from the payee's W-9 and links the checks to it. */
   createOneOffPayeeContractor: (input: { tax_year: number; code: string; digest: string; contractor: OneOffPayeeContractorInput }, companyId: number) =>
     api.post<{ data: OneOffPayeeResolution }>('/admin/year_end/one_off_payees/contractor', { payee: input }, { companyId }),
-  /** Undoes a link; the checks become a one-off payee again. */
-  unlinkOneOffPayee: (input: { tax_year: number; check_ids: number[] }, companyId: number) =>
+  /** Undoes a link; the checks become a one-off payee again. employee_id is the contractor shown as linked. */
+  unlinkOneOffPayee: (input: { tax_year: number; employee_id: number; check_ids: number[] }, companyId: number) =>
     api.post<{ data: OneOffPayeeResolution }>('/admin/year_end/one_off_payees/unlink', { payee: input }, { companyId }),
   /** The 1099 sign-off, bound to the inputs the reviewer saw. */
   markForm1099Ready: (input: { tax_year: number; inputs_fingerprint: string; notes?: string }, companyId: number) =>

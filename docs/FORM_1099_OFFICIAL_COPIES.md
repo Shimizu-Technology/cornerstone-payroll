@@ -14,7 +14,9 @@ A one-off contractor check (Checks & Payments, type "contractor") has a payee na
 | **Add as a new contractor** | Staff enter the W-9: a person (SSN) or a business (EIN, business name and a contact name), and the address. The app creates a contractor record and links the checks to it. The record is **inactive**, so it never joins a payroll run; it exists to hold the TIN and address. Its hire date is the first check's date and its pay rate is 0. |
 | **No 1099 is due** | The existing audited acknowledgement, now meaning "this payee gets no 1099" (for example a corporation, or goods rather than services). The payee is left off the copies and the sign-off. |
 
-Every link, new contractor and undo is written to the audit log (`year_end_one_off_payees#linked`, `#contractor_created`, `#unlinked`) with the checks, the amounts and the TIN's type and last four digits only, and each linked check gets an edit-history row. A link made by mistake is undone from the "One-off checks linked to contractors" list, and the checks return to the one-off list.
+Every link, new contractor and undo is written to the audit log (`year_end_one_off_payees#linked`, `#contractor_created`, `#unlinked`) with the checks, the amounts and the TIN's type and last four digits only, and each linked check gets an edit-history row. A link made by mistake is undone from the "One-off checks linked to contractors" list, and the checks return to the one-off list. The undo names the contractor the reviewer saw; if any of the checks is no longer linked to that contractor (undone already, or relinked to someone else from another tab), it is refused with 409 and nothing changes.
+
+**Renaming a linked check.** Changing who a linked check is payable to (in Checks & Payments, or any other save) removes the link in the same save: the check goes back to the one-off payees to decide again. The check gets an edit-history row naming the old and new payee, and the audit log an `#unlinked` entry with the reason `payee_renamed`.
 
 **Design choices and reasons**
 
@@ -44,9 +46,9 @@ The People step's 1099 items link straight to their fix: each unresolved payee's
 
 A new checklist step, **Mark 1099s ready**, sits after Employees and payees. It appears only when Cornerstone files the client's 1099s, and the W-2 steps below it move down one number.
 
-- **What it binds.** `Form1099InputsFingerprint` hashes the payer's name, EIN, address, phone and email; each payee's full TIN, name and address, and whether their W-9 is on file; each Box 1a amount and Box 4 withholding and why the payee is reportable (threshold or withholding); the account number, TIN type, name lines and name control the e-file prints; which one-off checks are linked to whom, with their amounts; every unlinked one-off payee, below the threshold too, with its checks and amounts, and the "no 1099 due" decisions; the threshold; and the filing decision. Any change makes the sign-off stale and the step asks for it again.
+- **What it binds.** `Form1099InputsFingerprint` (rule v4) hashes the payer's name, EIN, address, phone and email; each payee's full TIN, name and address, and whether their W-9 is on file; each Box 1a amount and Box 4 withholding and why the payee is reportable (threshold or withholding); the account number, TIN type, name lines and name control the e-file prints; which one-off checks are linked to whom, with their amounts; every unlinked one-off payee, below the threshold too, with its checks and amounts, and the "no 1099 due" decisions; the threshold; and the filing decision. Any change makes the sign-off stale and the step asks for it again. The fingerprint is sent to the browser next to each TIN's last four digits, so the TIN goes in as a keyed digest (`TaxIdDigest`: HMAC-SHA256 with a key derived from `secret_key_base` under its own salt, the same across restarts). A reader of the checklist can't test candidate TINs against it, and a changed TIN still changes it. The W-2 fingerprint (`W2FilingInputsFingerprint`, rule v2) treats the SSN the same way.
 - **What the reviewer sees.** Each 1099 to be issued (name, TIN type and last four, Box 1a, and how many one-off checks it includes), the total, and how many payees are marked no 1099 due. The request carries the fingerprint of that view; if the inputs changed since, it is refused with 409 and a "Refresh checklist" button.
-- **Blocks.** The 1099 decision, the employer details a 1099 prints (EIN, address, phone, and email for the 1096), and every 1099 payee item. Mark ready also refuses copies that would not print (an overlong or unprintable name or address).
+- **Blocks.** The 1099 decision, the employer details a 1099 prints (EIN, address, phone, and email for the 1096), and every 1099 payee item. Mark ready also refuses copies that would not print (an overlong or unprintable name or address), and anything the e-file would refuse about the payer or a payee (`Form1099Pub1220Generator#client_problems`), for example a street and suite that fit the form's two boxes but are over 40 characters joined with a space, as the e-file writes them. Every signed-off client can then make its final e-file.
 - **Access.** `manage_client_administration`, the same as the W-2 sign-off. Blocked in test and practice workspaces.
 - **Concurrency.** Under the company lock, which payee resolution and the 1099 downloads also take, with an uncached fingerprint recheck before saving. A change that skips the lock while the checks run returns 409 and saves nothing.
 - **Audit.** `year_end#form_1099_mark_ready` with the fingerprint, the previous one, the payee count and the total. Each sign-off is appended to `attestation_history`.
@@ -54,11 +56,15 @@ A new checklist step, **Mark 1099s ready**, sits after Employees and payees. It 
 
 **Status semantics.** The 1099 items (`FORM_1099_ONLY_CODES`, now including `PAYEE_W9_MISSING`, `PAYEE_DUPLICATE_TIN` and `FORM_1099_NOT_MARKED_READY`) never hold up the W-2 sign-off, and nothing W-2-only (the contact name, EFW2 format items, reconciliation, warnings, overlap, the W-2 sign-off) holds up the 1099 sign-off. The client is Ready only when both are done.
 
-The sign-off is needed while some payee gets a 1099 or a one-off payee at or above the threshold is still unresolved. With neither, the step is done and says there are no 1099s (and how many smaller payees could reach the threshold with a contractor, if any).
+The sign-off is needed while some payee gets a 1099 or a one-off payee at or above the threshold is still unresolved. With neither, the step is done and says there are no 1099s (and how many smaller payees could reach the threshold with a contractor, if any). The "could reach" flag compares a smaller payee only with contractors who don't already get a 1099: a contractor paid $500 with $50 withheld already does, so a $1,600 check to link would only add to that form.
+
+**One set of payee rows.** `Form1099NecFilingState.payee_rows` (contractor records, with their linked checks) is what the sign-off covers, and the e-file and 1096 are built from the same rows, so their record counts and control totals match it. A one-off payee decided "no 1099 due" stays in the aggregator's report but is left out of every 1099 output. One still undecided is named as a problem rather than left out silently.
+
+**No 1099s.** When Cornerstone files the 1099s but no payee gets one and none could (no undecided one-off payee, no smaller payee flagged), Print and file says "No 1099 filings are needed for {year}: no payee gets a 1099." and the copies, e-file and 1096 rows are unavailable with that reason.
 
 **Clients list.** The list adds "Mark 1099s ready" with the same rule, so status and issue count match the checklist. It computes the live fingerprint only for clients that have a sign-off on record. A checklist run whose only open items are 1099 items still records the W-2 ready check, because the list checks 1099 items live.
 
-**Filing evidence.** From 2026, recording a 1099-NEC submission requires the 1099s to be final on the current inputs.
+**Filing evidence.** From 2026, recording a 1099-NEC submission requires the 1099s to be final on the current inputs. In a year with no 1099 payee there is nothing to file: the checklist's filing-evidence panel keeps its 1099 actions closed with "No 1099s to file for {year}", and the recorder refuses with the same message.
 
 ## 3. Official copies
 
@@ -88,7 +94,7 @@ The page map, confirmed in the file: 1 notice, 2 Copy A (red; never produced), 3
 
 - **Draft or final.** A DRAFT watermark on every page and `_DRAFT` in the filename until the 1099s are marked ready on the current fingerprint, and again whenever it goes stale.
 - **Filing responsibility.** No copies unless Cornerstone files the client's 1099s.
-- **Access.** The payer record needs `manage_client_administration`; recipient copies have the 1099 report's access.
+- **Access.** The payer record needs `manage_client_administration`, checked again under the company lock after the PDF is drawn (as the e-file and 1096 do), so access revoked meanwhile sends nothing. Recipient copies have the 1099 report's access.
 - **Test and practice workspaces.** The payer record is blocked there; recipient copies are always drafts marked "a practice copy".
 - **Audit.** Each download is written to the audit log (`document_access`) before the file is sent, with the document, draft or final, the fingerprints and the payee count, never a TIN. If the entry can't be written, no file is sent (503).
 - **Caching.** Responses are `Cache-Control: private, no-store`.

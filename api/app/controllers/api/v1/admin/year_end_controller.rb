@@ -64,10 +64,11 @@ module Api
         end
 
         # POST /api/v1/admin/year_end/one_off_payees/unlink
-        # Undoes a link; the checks become a one-off payee again.
+        # Undoes a link; the checks become a one-off payee again. employee_id
+        # is the contractor the reviewer saw the checks linked to.
         def unlink_one_off_payee
-          input = params.require(:payee).permit(:tax_year, check_ids: [])
-          resolve_payee(input) { |resolver| resolver.unlink!(check_ids: input[:check_ids]) }
+          input = params.require(:payee).permit(:tax_year, :employee_id, check_ids: [])
+          resolve_payee(input) { |resolver| resolver.unlink!(check_ids: input[:check_ids], employee_id: input[:employee_id]) }
         end
 
         # POST /api/v1/admin/year_end/form_1099_mark_ready

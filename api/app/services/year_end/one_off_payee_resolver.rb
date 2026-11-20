@@ -59,13 +59,21 @@ module YearEnd
     end
 
     # Undoes links made by mistake. The checks become a one-off payee again.
-    def unlink!(check_ids:)
+    # employee_id is the contractor the reviewer saw them linked to: if any
+    # check is no longer linked to that contractor (unlinked, or relinked to
+    # someone else since), nothing is cleared.
+    def unlink!(check_ids:, employee_id:)
       within_lock do
         ids = Array(check_ids).map { |id| Integer(id, exception: false) }
         raise Refused, "Choose the checks to unlink." if ids.empty? || ids.any?(&:nil?)
 
-        checks = NonEmployeeCheck.lock.where(company_id: company.id, id: ids).where.not(payee_employee_id: nil).order(:id).to_a
-        raise StalePayee, "These checks are no longer linked. Reload the checklist." unless checks.length == ids.uniq.length
+        expected = Integer(employee_id.to_s, exception: false)
+        raise Refused, "Choose the contractor the checks are linked to." unless expected
+
+        checks = NonEmployeeCheck.lock.where(company_id: company.id, id: ids).order(:id).to_a
+        unless checks.length == ids.uniq.length && checks.all? { |check| check.payee_employee_id == expected }
+          raise StalePayee, "These checks are no longer linked to that contractor. Reload the checklist."
+        end
 
         previous = checks.to_h { |check| [ check.id, check.payee_employee_id ] }
         employees = company.employees.where(id: previous.values).index_by(&:id)

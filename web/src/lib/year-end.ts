@@ -333,7 +333,12 @@ export type YearEndStep =
   | StepBase<'review_warnings', { warnings: YearEndWarning[] }>
   | StepBase<'prior_provider', { prior_provider_through: string | null; overlaps: YearEndOverlap[] }>
   | StepBase<'mark_ready', { filing: YearEndReadiness | null; can_mark_ready: boolean; remaining_before_ready: number }>
-  | StepBase<'print_and_file', { final: boolean; documents: YearEndDocument[] }>;
+  | StepBase<'print_and_file', {
+    final: boolean;
+    /** Cornerstone files the 1099s, but no payee gets one or could: nothing to file. */
+    no_1099_filings?: boolean;
+    documents: YearEndDocument[];
+  }>;
 
 /** A step that ran, narrowed by key: its data is complete. */
 export type ActiveYearEndStep<K extends YearEndStepKey> = Extract<YearEndStep, { key: K; status: ActiveStepStatus }>;

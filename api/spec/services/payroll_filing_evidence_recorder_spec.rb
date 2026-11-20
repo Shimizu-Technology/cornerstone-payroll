@@ -95,6 +95,13 @@ RSpec.describe PayrollFilingEvidenceRecorder do
       mark_ready
       expect(record_event(event_type: "submitted", filing_type: "form_1099_nec").payroll_filing_record.filing_type).to eq("form_1099_nec")
     end
+
+    it "refuses evidence in a year with no 1099s, with the checklist's message" do
+      contractor.payroll_items.sole.update_columns(gross_pay: 1_500)
+
+      expect { record_event(event_type: "submitted", filing_type: "form_1099_nec") }.to raise_error(described_class::Error, "No 1099s to file for 2026")
+      expect(PayrollFilingRecord.where(company: company)).to be_empty
+    end
   end
 
   it "accepts evidence for current revalidated W-2 inputs" do

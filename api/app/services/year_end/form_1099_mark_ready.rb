@@ -7,8 +7,9 @@ module YearEnd
   #
   # Refused when Cornerstone doesn't file the client's 1099s, when a 1099
   # item in the checklist is open (W-2 items never hold it up), when no payee
-  # gets a 1099, when a copy wouldn't print, or when the inputs differ from
-  # the fingerprint the reviewer saw or change while they are checked.
+  # gets a 1099, when a copy wouldn't print or the e-file would refuse a
+  # payer or payee record, or when the inputs differ from the fingerprint
+  # the reviewer saw or change while they are checked.
   class Form1099MarkReady
     class Refused < StandardError
       attr_reader :status, :details
@@ -43,8 +44,13 @@ module YearEnd
         raise Refused.new("The 1099 payees, amounts or payer details changed since this page loaded. Review them again, then mark ready.", status: :conflict)
       end
       if Form1099NecOfficialCopies.supported_tax_year?(tax_year)
+        # The copies and the e-file both have to come out of what is signed
+        # off: the e-file's own payer and payee checks (for example its
+        # 40-character limit on the street and suite joined with a space).
         problems = Form1099NecOfficialCopies.new(company: company, report: state.report, kind: "payer", draft: true).problems
-        raise Refused.new("These 1099s wouldn't print. Fix each item, then mark them ready.", details: { problems: problems }) if problems.any?
+        problems += Form1099Pub1220Generator.new(company: company, year: tax_year, submitter: nil, draft: true, report: state.report).client_problems
+        problems.uniq!
+        raise Refused.new("These 1099s wouldn't print or e-file. Fix each item, then mark them ready.", details: { problems: problems }) if problems.any?
       end
 
       # The stored fingerprint must describe what was just checked. A write

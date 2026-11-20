@@ -48,12 +48,32 @@ RSpec.describe "W-9 request log filtering", type: :request do
     expect(log).not_to include(tin, tin.delete("-"), "12-3456789", "123456789")
   end
 
+  it "filters a TIN sent in the query string from the request-start log line" do
+    output = StringIO.new
+    capture = ActiveSupport::Logger.new(output).tap { |logger| logger.level = :debug }
+    Rails.logger.broadcast_to(capture)
+    begin
+      post "/api/v1/admin/year_end/one_off_payees/contractor?payee[contractor][tin]=345677890&payee%5Bcontractor%5D%5Btin%5D=345677891" \
+           "&payee%5bcontractor%5d%5bcontractor_ein%5d=123456789&contractor_ein=987654321&settings=visible",
+        params: { payee: { tax_year: 2026, code: "one_off_payee:non_employee_check:999999", digest: "stale" } }
+    ensure
+      Rails.logger.stop_broadcasting_to(capture)
+    end
+
+    started = output.string.lines.find { |line| line.include?("Started POST") }
+    expect(started).to be_present, output.string
+    expect(started).to include("settings=visible", "[FILTERED]")
+    expect(started).not_to include("345677890", "345677891", "123456789", "987654321")
+  end
+
   it "filters the TIN whatever its format, and leaves similar names alone" do
     filter = ActiveSupport::ParameterFilter.new(Rails.application.config.filter_parameters)
 
-    filtered = filter.filter("payee" => { "contractor" => { "tin" => "345677890", "TIN" => "345677890" } }, "settings" => { "x" => 1 }, "routine" => "a")
+    filtered = filter.filter("payee" => { "contractor" => { "tin" => "345677890", "TIN" => "345677890" } }, "settings" => { "x" => 1 }, "routine" => "a",
+      "payee[contractor][tin]" => "345677890", "payee%5Bcontractor%5D%5BTIN%5D" => "345677890", "x[contractor_ein]" => "123456789", "x[tinted]" => "a")
 
     expect(filtered.dig("payee", "contractor")).to eq("tin" => "[FILTERED]", "TIN" => "[FILTERED]")
-    expect(filtered).to include("settings" => { "x" => 1 }, "routine" => "a")
+    expect(filtered).to include("settings" => { "x" => 1 }, "routine" => "a", "x[tinted]" => "a",
+      "payee[contractor][tin]" => "[FILTERED]", "payee%5Bcontractor%5D%5BTIN%5D" => "[FILTERED]", "x[contractor_ein]" => "[FILTERED]")
   end
 end

@@ -4,8 +4,8 @@ require "digest"
 
 # Hashes everything that prints on a client's 1099-NECs and their e-file for
 # one year, so a "1099s ready" sign-off expires the moment any of it changes:
-# the payer's name, EIN, address, phone and email; each payee's full TIN,
-# name and address, whether their W-9 is on file, and the account number,
+# the payer's name, EIN, address, phone and email; each payee's full TIN
+# (as a keyed digest, TaxIdDigest), name and address, whether their W-9 is on file, and the account number,
 # name lines and name control the e-file prints; the amounts and withholding;
 # which one-off checks are linked to which contractor; every unlinked one-off
 # contractor check (below the threshold too); and which one-off payees were
@@ -14,7 +14,7 @@ require "digest"
 # Activity timestamps are left out, so reloading a report or reprinting a
 # check doesn't expire it.
 class Form1099InputsFingerprint
-  RULE_VERSION = "form-1099-nec-inputs-v3"
+  RULE_VERSION = "form-1099-nec-inputs-v4"
   IDENTITY_FIELDS = %w[id first_name middle_name last_name name_suffix business_name contractor_type employment_type
                        address_line1 address_line2 city state zip w9_on_file].freeze
 
@@ -52,7 +52,9 @@ class Form1099InputsFingerprint
           non_employee_check_ids: Array(row[:non_employee_check_ids]).sort,
           filing_reason: row[:filing_reason],
           # The full TIN matters even when its last four digits are unchanged.
-          identity: employee&.attributes&.slice(*IDENTITY_FIELDS)&.merge("tin" => employee.form_1099_tin),
+          # It goes in keyed (TaxIdDigest): this fingerprint reaches the browser
+          # next to the last four digits, so an unkeyed hash could be reversed.
+          identity: employee&.attributes&.slice(*IDENTITY_FIELDS)&.merge("tin" => tin_component(employee.form_1099_tin)),
           # What the e-file and the copies print for this payee beyond the
           # amounts: the account number, the TIN type and the B-record name
           # lines and name control (individual or business).
@@ -77,6 +79,10 @@ class Form1099InputsFingerprint
   private
 
   attr_reader :company, :year
+
+  def tin_component(tin)
+    tin && { "type" => tin[:type], "digest" => TaxIdDigest.call(tin[:digits]) }
+  end
 
   def money(value)
     return nil if value.nil?

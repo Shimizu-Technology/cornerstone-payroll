@@ -4962,6 +4962,10 @@ module Api
 
           pdf = copies.generate
           outcome = company.with_lock do
+            # The payer record carries full TINs: confirm the reviewer still
+            # holds client-management access after the (slow) drawing, as the
+            # e-file and 1096 downloads do. Recipient copies keep the report's access.
+            revalidate_current_company_write_access!(company: company, capability: :manage_client_administration) if kind == "payer"
             # Read uncached: the request's query cache would replay the reads above.
             recheck = ActiveRecord::Base.uncached { Form1099NecFilingState.call(company: company, year: year) }
             if recheck.signature != state.signature
