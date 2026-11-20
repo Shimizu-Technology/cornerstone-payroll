@@ -77,6 +77,9 @@ interface DraftLine extends InvoiceLineItem {
 interface DraftForm {
   invoice_billing_profile_id: string;
   invoice_recipient_id: string;
+  company_id: string;
+  service_period_start: string;
+  service_period_end: string;
   invoice_number: string;
   invoice_date: string;
   due_date: string;
@@ -107,10 +110,13 @@ interface ImportForm {
 }
 
 const dateOnly = invoiceBusinessDate;
+const serviceMonth = (date: string) => ({ service_period_start: `${date.slice(0, 7)}-01`, service_period_end: new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0)).toISOString().slice(0, 10) });
 const newLine = (): DraftLine => ({ localId: crypto.randomUUID(), customerDefaultRate: true, description: '', quantity: 1, rate: 0, position: 0 });
 const emptyDraft = (): DraftForm => ({
   invoice_billing_profile_id: '',
   invoice_recipient_id: '',
+  company_id: '',
+  ...serviceMonth(dateOnly()),
   invoice_number: '',
   invoice_date: dateOnly(),
   due_date: '',
@@ -138,6 +144,8 @@ const emptyImport = (): ImportForm => ({
   delivered_at: '',
   delivery_channel: 'email',
 });
+
+const displayNumber = (number: string) => number.startsWith('DRAFT-') ? 'Draft · number assigned at issue' : number;
 
 const statusStyles: Record<InvoiceStatus, string> = {
   draft: 'bg-neutral-100 text-neutral-700',
@@ -240,7 +248,7 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: {
 export function InvoiceCenter() {
   const { user } = useAuth();
   const { activeBook } = useFinanceBook();
-  const { activeCompany, activeOrganizationId, activeOrganizationName } = useCompany();
+  const { activeCompany, activeOrganizationId, activeOrganizationName, companies } = useCompany();
   const financeReadOnly = isTestWorkspaceCompany(activeCompany);
   const invoiceOrganizationId = activeOrganizationId || user?.organization_id;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -456,7 +464,10 @@ export function InvoiceCenter() {
     setDraft({
       invoice_billing_profile_id: String(selected.invoice_billing_profile_id),
       invoice_recipient_id: String(selected.invoice_recipient_id),
-      invoice_number: selected.invoice_number,
+      company_id: String(selected.company_id || ''),
+      service_period_start: selected.service_period_start || serviceMonth(selected.invoice_date).service_period_start,
+      service_period_end: selected.service_period_end || serviceMonth(selected.invoice_date).service_period_end,
+      invoice_number: selected.invoice_number.startsWith('DRAFT-') ? '' : selected.invoice_number,
       invoice_date: selected.invoice_date,
       due_date: selected.due_date || '',
       customer_reference: selected.customer_reference || '',
@@ -484,6 +495,7 @@ export function InvoiceCenter() {
     if (!draft.invoice_recipient_id) throw new Error('Choose a customer');
     const lines = submittedDraftLines;
     if (!lines.length) throw new Error('Add at least one invoice line');
+    if (!draft.service_period_start || !draft.service_period_end || draft.service_period_end < draft.service_period_start) throw new Error('Enter a valid service period');
     const discountValue = draft.discount_type === 'none' ? 0 : Number(draft.discount_value);
     const subtotal = sumInvoiceLines(lines);
     if (draft.discount_type !== 'none' && draft.discount_value.trim() === '') throw new Error('Enter a discount');
@@ -491,6 +503,9 @@ export function InvoiceCenter() {
     if (draft.discount_type === 'percent' && discountValue > 100) throw new Error('Percentage discount cannot exceed 100%');
     if (draft.discount_type === 'amount' && discountValue > subtotal) throw new Error('Fixed discount cannot exceed the subtotal');
     const payload = {
+      company_id: draft.company_id ? Number(draft.company_id) : null,
+      service_period_start: draft.service_period_start,
+      service_period_end: draft.service_period_end,
       invoice_recipient_id: Number(draft.invoice_recipient_id),
       invoice_billing_profile_id: Number(draft.invoice_billing_profile_id),
       invoice_number: draft.invoice_number.trim() || null,
@@ -836,6 +851,7 @@ export function InvoiceCenter() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
+          { label: 'Billed service fees', value: money(summary?.totals.billed_service_fees), detail: 'Excludes pass-throughs; net of discounts', icon: ReceiptText, tone: 'text-green-700 bg-green-50' },
           { label: 'Outstanding', value: money(summary?.totals.outstanding), detail: `${summary?.totals.open_count || 0} open invoices`, icon: WalletCards, tone: 'text-blue-700 bg-blue-50' },
           { label: 'Overdue', value: money(summary?.totals.overdue), detail: `${summary?.totals.overdue_count || 0} need attention`, icon: CalendarClock, tone: 'text-amber-700 bg-amber-50' },
           { label: 'Payments recorded', value: money(summary?.totals.paid), detail: 'All non-reversed payments', icon: CircleDollarSign, tone: 'text-green-700 bg-green-50' },
@@ -895,7 +911,7 @@ export function InvoiceCenter() {
               <div className="divide-y divide-neutral-100">
                 {filteredInvoices.map((invoice) => (
                   <button key={invoice.id} type="button" onClick={() => openDetails(invoice.id)} className="grid w-full gap-3 px-4 py-4 text-left transition-colors hover:bg-neutral-50 sm:grid-cols-[minmax(0,1fr)_130px_130px_28px] sm:items-center">
-                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-neutral-950">{invoice.invoice_number}</span><Badge className={statusStyles[invoice.status]}>{statusLabel(invoice.status)}</Badge>{(invoice.base_status === 'open' && invoice.balance_due > 0 || invoiceSendState(invoice, sendSchedules) !== 'not_sent') && <Badge className={sendStateStyle[invoiceSendState(invoice, sendSchedules)]}>{sendStateLabel[invoiceSendState(invoice, sendSchedules)]}</Badge>}{invoice.origin === 'imported' && <Badge className="bg-sky-50 text-sky-700">Imported</Badge>}{invoice.archived && <Badge className="bg-neutral-200 text-neutral-700">Archived</Badge>}</div><p className="mt-1 truncate text-sm text-neutral-600">{invoice.recipient_name}</p><p className="mt-0.5 text-xs text-neutral-400">From {invoice.billing_profile_name || 'Invoice business'} · Invoice {formatDate(invoice.invoice_date)} · Due {formatDate(invoice.due_date)}</p></div>
+                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-neutral-950">{displayNumber(invoice.invoice_number)}</span><Badge className={statusStyles[invoice.status]}>{statusLabel(invoice.status)}</Badge>{(invoice.base_status === 'open' && invoice.balance_due > 0 || invoiceSendState(invoice, sendSchedules) !== 'not_sent') && <Badge className={sendStateStyle[invoiceSendState(invoice, sendSchedules)]}>{sendStateLabel[invoiceSendState(invoice, sendSchedules)]}</Badge>}{invoice.origin === 'imported' && <Badge className="bg-sky-50 text-sky-700">Imported</Badge>}{invoice.archived && <Badge className="bg-neutral-200 text-neutral-700">Archived</Badge>}</div><p className="mt-1 truncate text-sm text-neutral-600">{invoice.recipient_name}</p><p className="mt-0.5 text-xs text-neutral-400">From {invoice.billing_profile_name || 'Invoice business'} · Invoice {formatDate(invoice.invoice_date)} · Due {formatDate(invoice.due_date)}</p></div>
                     <div><p className="text-xs uppercase tracking-wide text-neutral-400">Balance</p><p className={`font-semibold ${invoice.status === 'overdue' ? 'text-amber-700' : 'text-neutral-900'}`}>{money(invoice.balance_due, invoice.currency)}</p></div>
                     <div><p className="text-xs uppercase tracking-wide text-neutral-400">Invoice total</p><p className="font-medium text-neutral-700">{money(invoice.total_amount, invoice.currency)}</p></div>
                     <Eye className="h-4 w-4 text-neutral-400" />
@@ -924,17 +940,23 @@ export function InvoiceCenter() {
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm font-medium">From<select value={draft.invoice_billing_profile_id} onChange={(e) => setDraft({ ...draft, invoice_billing_profile_id: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose billing profile</option>{activeProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-              <label className="text-sm font-medium">Bill to<select value={draft.invoice_recipient_id} onChange={(e) => { const customer = recipients.find((r) => String(r.id) === e.target.value); setDraft(customerDefaults({ ...draft, invoice_recipient_id: e.target.value }, customer)); }} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose customer</option>{recipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.name}</option>)}</select></label>
+              <label className="text-sm font-medium">Bill to<select value={draft.invoice_recipient_id} onChange={(e) => { const customer = recipients.find((r) => String(r.id) === e.target.value); setDraft(customerDefaults({ ...draft, invoice_recipient_id: e.target.value, company_id: draft.company_id || String(customer?.company_id || '') }, customer)); }} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose customer</option>{recipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.name}</option>)}</select></label>
+              <label className="text-sm font-medium">Payroll client (optional)<select className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value={draft.company_id} onChange={(e) => setDraft({ ...draft, company_id: e.target.value })}><option value="">Unallocated</option>{companies.filter((c) => c.organization_id === invoiceOrganizationId && !isTestWorkspaceCompany(c)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+              <label className="text-sm font-medium">Service month<Input className="mt-1" type="month" value={draft.service_period_start.slice(0, 7)} onChange={(e) => { if (e.target.value) setDraft({ ...draft, ...serviceMonth(`${e.target.value}-01`) }); }} /></label>
+              <label className="text-sm font-medium">Service period start<Input className="mt-1" type="date" value={draft.service_period_start} onChange={(e) => setDraft({ ...draft, service_period_start: e.target.value })} /></label>
+              <label className="text-sm font-medium">Service period end<Input className="mt-1" type="date" value={draft.service_period_end} onChange={(e) => setDraft({ ...draft, service_period_end: e.target.value })} /></label>
               <label className="text-sm font-medium">Invoice number <span className="font-normal text-neutral-400">(automatic if blank)</span><Input className="mt-1" value={draft.invoice_number} onChange={(e) => setDraft({ ...draft, invoice_number: e.target.value })} placeholder="ST-2026-0001" /></label>
               <label className="text-sm font-medium">Customer reference<Input className="mt-1" value={draft.customer_reference} onChange={(e) => setDraft({ ...draft, customer_reference: e.target.value })} placeholder="PO number or project" /></label>
-              <label className="text-sm font-medium">Invoice date<Input className="mt-1" type="date" value={draft.invoice_date} onChange={(e) => setDraft({ ...draft, invoice_date: e.target.value })} /></label>
+              <label className="text-sm font-medium">Invoice date<Input className="mt-1" type="date" value={draft.invoice_date} onChange={(e) => setDraft({ ...draft, invoice_date: e.target.value, ...(e.target.value ? serviceMonth(e.target.value) : {}) })} /></label>
               <label className="text-sm font-medium">Due date<Input className="mt-1" type="date" value={draft.due_date} onChange={(e) => setDraft({ ...draft, due_date: e.target.value })} /></label>
             </div>
+            <label className="block text-sm font-medium">Saved service<select className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value="" onChange={(e) => { const service = profiles.find((p) => String(p.id) === draft.invoice_billing_profile_id)?.service_catalog?.[Number(e.target.value)]; if (!service) return; const customer = recipients.find((r) => String(r.id) === draft.invoice_recipient_id); const line = { ...newLine(), line_kind: service.line_kind, description: `${service.name} — ${service.description_template.replaceAll('{month}', new Date(`${draft.service_period_start}T12:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'Pacific/Guam' }))}`, rate: service.line_kind === 'service_fee' ? customer?.default_rate || 0 : 0 }; setDraft({ ...draft, line_items: [...draft.line_items.filter((l) => l.description.trim()), line] }); }}><option value="">Choose a saved service</option>{profiles.find((p) => String(p.id) === draft.invoice_billing_profile_id)?.service_catalog?.map((service, index) => <option key={index} value={index}>{service.name}</option>)}</select></label>
             <div><div className="mb-2 flex items-center justify-between"><h3 className="text-sm font-semibold">Line items</h3><Button type="button" size="sm" variant="outline" onClick={() => setDraft({ ...draft, line_items: [...draft.line_items, { ...newLine(), position: draft.line_items.length }] })}><Plus className="mr-1 h-3.5 w-3.5" />Add line</Button></div><div className="space-y-2">
               {draft.line_items.map((line, index) => <div key={line.localId} className="grid gap-2 rounded-xl border border-neutral-200 p-3 sm:grid-cols-[minmax(0,1fr)_90px_120px_36px]">
-                <Input value={line.description} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, description: e.target.value } : item) })} placeholder="Description" aria-label={`Line ${index + 1} description`} />
-                <Input type="number" min="0" step="0.01" value={line.quantity} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, quantity: Number(e.target.value) } : item) })} aria-label="Quantity" />
-                <Input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, rate: Number(e.target.value), customerDefaultRate: false } : item) })} aria-label="Rate" />
+                <label className="text-xs text-neutral-600">Line kind<select aria-label={`Line ${index + 1} kind`} className="mb-2 h-10 w-full rounded-md border border-neutral-300 bg-white px-2" value={line.line_kind || 'service_fee'} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, line_kind: e.target.value as 'service_fee' | 'reimbursement' } : item) })}><option value="service_fee">Service fee</option><option value="reimbursement">Reimbursement (pass-through)</option></select>
+                <Input value={line.description} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, description: e.target.value } : item) })} placeholder="Description" aria-label={`Line ${index + 1} description`} /></label>
+                <label className="text-xs text-neutral-600">Quantity<Input className="mt-1" type="number" min="0" step="0.01" value={line.quantity} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, quantity: Number(e.target.value) } : item) })} aria-label="Quantity" /></label>
+                <label className="text-xs text-neutral-600">Rate (USD)<Input className="mt-1" type="number" min="0" step="0.01" value={line.rate} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, rate: Number(e.target.value), customerDefaultRate: false } : item) })} aria-label="Rate" /></label>
                 <button type="button" onClick={() => setDraft({ ...draft, line_items: draft.line_items.filter((item) => item.localId !== line.localId) })} className="rounded-md text-neutral-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove line ${index + 1}`}><X className="mx-auto h-4 w-4" /></button>
               </div>)}
             </div></div>
@@ -999,7 +1021,7 @@ export function InvoiceCenter() {
         </div>
       </ModalShell>}
 
-      {modal === 'details' && selected && <ModalShell title={`${selected.invoice_number} · ${selected.recipient_name || 'Customer'}`} subtitle={`${selected.origin === 'imported' ? 'Imported invoice' : 'Native invoice'} · ${statusLabel(selected.status)}`} onClose={() => { setModal(null); setDetailAction(null); }} wide>
+      {modal === 'details' && selected && <ModalShell title={`${displayNumber(selected.invoice_number)} · ${selected.recipient_name || 'Customer'}`} subtitle={`${selected.origin === 'imported' ? 'Imported invoice' : 'Native invoice'} · ${statusLabel(selected.status)}`} onClose={() => { setModal(null); setDetailAction(null); }} wide>
         <div className={`space-y-6 transition-opacity duration-200 ${busy ? 'opacity-70' : 'opacity-100'}`}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[['Invoice total', money(selected.total_amount, selected.currency)], ['Paid', money(selected.amount_paid, selected.currency)], ['Credits', money(selected.credit_total, selected.currency)], ['Balance due', money(selected.balance_due, selected.currency)]].map(([label, value]) => <div key={label} className="rounded-xl border border-neutral-200 p-4"><p className="text-xs font-medium uppercase tracking-wide text-neutral-400">{label}</p><p className="mt-2 text-xl font-semibold">{value}</p></div>)}
@@ -1011,7 +1033,7 @@ export function InvoiceCenter() {
             {selected.status === 'draft' ? <><Button variant="outline" disabled={financeReadOnly} onClick={editSelectedDraft}>Edit draft</Button><Button onClick={issueSelected} disabled={busy || financeReadOnly}><CheckCircle2 className="mr-1.5 h-4 w-4" />Issue invoice</Button></> : <Button variant="outline" onClick={downloadSelected} disabled={!selected.has_artifact || busy}><Download className="mr-1.5 h-4 w-4" />Download original</Button>}
             {selected.origin === 'native' && selected.base_status === 'open' && <Button variant="outline" onClick={() => setDetailAction('recurrence')} disabled={busy || financeReadOnly}><CalendarClock className="mr-1.5 h-4 w-4" />Make recurring</Button>}
             {selected.base_status === 'open' && selected.artifacts?.some((artifact) => artifact.content_type === 'application/pdf' && ['issued_pdf', 'imported_original', 'legacy_snapshot'].includes(artifact.kind)) && <><Button onClick={openSendNow} disabled={busy || financeReadOnly}><Send className="mr-1.5 h-4 w-4" />Send now</Button><Button variant="outline" onClick={() => openScheduleEmail()} disabled={busy || financeReadOnly}><CalendarClock className="mr-1.5 h-4 w-4" />Schedule email</Button></>}
-            {!['draft', 'voided'].includes(selected.status) && <Button variant="outline" disabled={financeReadOnly} onClick={() => setDetailAction('delivery')}><MailCheck className="mr-1.5 h-4 w-4" />Record delivery</Button>}
+            {!['draft', 'voided'].includes(selected.status) && <Button variant="outline" disabled={financeReadOnly} onClick={() => setDetailAction('delivery')}><MailCheck className="mr-1.5 h-4 w-4" />Mark as sent (by my own email)</Button>}
             {!['draft', 'voided', 'uncollectible'].includes(selected.status) && <><Button variant="outline" onClick={() => setDetailAction('payment')} disabled={financeReadOnly || selected.balance_due <= 0}><CircleDollarSign className="mr-1.5 h-4 w-4" />Record payment</Button><Button variant="outline" onClick={() => setDetailAction('credit')} disabled={financeReadOnly || selected.balance_due <= 0}><FileText className="mr-1.5 h-4 w-4" />Issue credit</Button></>}
             {selected.archived ? <Button variant="outline" disabled={financeReadOnly} onClick={() => changeLifecycle('restored')}><RotateCcw className="mr-1.5 h-4 w-4" />Restore</Button> : <Button variant="outline" disabled={financeReadOnly} onClick={() => changeLifecycle('archived')}><Archive className="mr-1.5 h-4 w-4" />Archive</Button>}
             {selected.status === 'open' || selected.status === 'overdue' || selected.status === 'partially_paid' ? <Button variant="outline" disabled={financeReadOnly} onClick={() => changeLifecycle('uncollectible')}>Mark uncollectible</Button> : null}
@@ -1039,13 +1061,13 @@ export function InvoiceCenter() {
               </div>
               <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || financeReadOnly}>{editingSendScheduleId ? 'Save changes' : sendMode === 'now' ? 'Confirm and send' : 'Schedule email'}</Button><Button type="button" variant="ghost" onClick={() => { setDetailAction(null); setEditingSendScheduleId(null); }}>Cancel</Button></div>
             </form>}
-            {detailAction === 'delivery' && <form onSubmit={submitDelivery} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"><label className="text-sm font-medium">Channel<select name="channel" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="email">Email</option><option value="mail">Mail</option><option value="hand_delivery">Hand delivery</option><option value="portal">Portal</option><option value="other">Other</option></select></label><label className="text-sm font-medium">Recipient<Input name="recipient" defaultValue={selected.invoice_recipient?.email || ''} className="mt-1" /></label><label className="text-sm font-medium">Delivered at<Input name="delivered_at" type="datetime-local" className="mt-1" /></label><label className="text-sm font-medium">Reference<Input name="provider_reference" className="mt-1" /></label><label className="text-sm font-medium">Notes<Input name="notes" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy || financeReadOnly}>Record delivery</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
+            {detailAction === 'delivery' && <form onSubmit={submitDelivery} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"><label className="text-sm font-medium">Channel<select name="channel" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="email">Email</option><option value="mail">Mail</option><option value="hand_delivery">Hand delivery</option><option value="portal">Portal</option><option value="other">Other</option></select></label><label className="text-sm font-medium">Recipient<Input name="recipient" defaultValue={selected.invoice_recipient?.email || ''} className="mt-1" /></label><label className="text-sm font-medium">Delivered at<Input name="delivered_at" type="datetime-local" className="mt-1" /></label><label className="text-sm font-medium">Reference<Input name="provider_reference" className="mt-1" /></label><label className="text-sm font-medium">Notes<Input name="notes" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy || financeReadOnly}>Mark as sent (by my own email)</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
             {detailAction === 'credit' && <form onSubmit={submitCredit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><label className="text-sm font-medium">Amount<Input required name="amount" type="number" min="0.01" max={selected.balance_due} step="0.01" className="mt-1" /></label><label className="text-sm font-medium">Issue date<Input required name="issue_date" type="date" defaultValue={dateOnly()} className="mt-1" /></label><label className="text-sm font-medium">Reason<Input required name="reason" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy || financeReadOnly}>Issue credit</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
           </div>}
 
           <div className="grid gap-6 lg:grid-cols-2">
-            <div className="space-y-4"><div className="rounded-xl border border-neutral-200 p-4"><h3 className="font-semibold">Invoice details</h3><dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm"><div><dt className="text-neutral-400">From</dt><dd className="font-medium">{selected.billing_profile_name}</dd></div><div><dt className="text-neutral-400">Customer</dt><dd className="font-medium">{selected.recipient_name}</dd></div><div><dt className="text-neutral-400">Invoice date</dt><dd>{formatDate(selected.invoice_date)}</dd></div><div><dt className="text-neutral-400">Due date</dt><dd>{formatDate(selected.due_date)}</dd></div><div><dt className="text-neutral-400">Reference</dt><dd>{selected.customer_reference || '—'}</dd></div><div><dt className="text-neutral-400">Source</dt><dd className="capitalize">{selected.origin}</dd></div></dl></div>
-              {!!selected.line_items?.length && <div className="rounded-xl border border-neutral-200 p-4"><h3 className="font-semibold">Line items</h3><div className="mt-3 divide-y divide-neutral-100">{selected.line_items.map((line) => <div key={line.id || line.description} className="flex justify-between gap-4 py-2 text-sm"><div><p className="font-medium">{line.description}</p><p className="text-neutral-400">{line.quantity} × {money(line.rate, selected.currency)}</p></div><span className="font-semibold">{money(line.amount, selected.currency)}</span></div>)}</div></div>}
+            <div className="space-y-4"><div className="rounded-xl border border-neutral-200 p-4"><h3 className="font-semibold">Invoice details</h3><dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm"><div><dt className="text-neutral-400">From</dt><dd className="font-medium">{selected.billing_profile_name}</dd></div><div><dt className="text-neutral-400">Customer</dt><dd className="font-medium">{selected.recipient_name}</dd></div><div><dt className="text-neutral-400">Invoice date</dt><dd>{formatDate(selected.invoice_date)}</dd></div><div><dt className="text-neutral-400">Due date</dt><dd>{formatDate(selected.due_date)}</dd></div><div><dt className="text-neutral-400">Reference</dt><dd>{selected.customer_reference || '—'}</dd></div><div><dt className="text-neutral-400">Payroll client</dt><dd>{selected.company_name || 'Unallocated'}</dd></div><div><dt className="text-neutral-400">Service period</dt><dd>{formatDate(selected.service_period_start)} – {formatDate(selected.service_period_end)}</dd></div><div><dt className="text-neutral-400">Source</dt><dd className="capitalize">{selected.origin}</dd></div></dl></div>
+              {!!selected.line_items?.length && <div className="rounded-xl border border-neutral-200 p-4"><h3 className="font-semibold">Line items</h3><div className="mt-3 divide-y divide-neutral-100">{selected.line_items.map((line) => <div key={line.id || line.description} className="flex justify-between gap-4 py-2 text-sm"><div><p className="font-medium">{line.description}{line.line_kind === 'reimbursement' && ' · Pass-through reimbursement'}</p><p className="text-neutral-400">{line.quantity} × {money(line.rate, selected.currency)}</p></div><span className="font-semibold">{money(line.amount, selected.currency)}</span></div>)}</div></div>}
             </div>
             <div className="space-y-4">
               <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Payments and credits</h3><span className="text-xs text-neutral-400">Newest activity first</span></div><div className="mt-3 space-y-2">
@@ -1086,7 +1108,7 @@ export function InvoiceCenter() {
                   </form> : <button type="button" className="mt-2 text-xs font-medium text-primary-700 underline-offset-2 hover:underline" disabled={financeReadOnly} onClick={() => setCorrectingDeliveryId(delivery.id)}>Correct time</button>)}
                 </div>)}{!deliveryHistory.length && <p className="py-3 text-sm text-neutral-500">No delivery has been recorded.</p>}</div>
               </div>
-              <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Audit timeline</h3><span className="text-xs text-neutral-400">Recorded order</span></div><div className="mt-3 space-y-3">{auditTimeline.map((event) => { const effectiveDiffers = Math.abs(new Date(event.created_at).getTime() - new Date(event.occurred_at).getTime()) > 60_000; return <div key={event.id} className="flex gap-3 text-sm"><span className="mt-1.5 h-2 w-2 shrink-0 bg-primary-500" /><div><p className="font-medium capitalize">{event.event_type.replaceAll('_', ' ')}</p><p className="text-xs text-neutral-400">Recorded {formatDateTime(event.created_at)}{event.actor_name ? ` · ${event.actor_name}` : ''}</p>{effectiveDiffers && <p className="text-xs text-neutral-400">Effective {formatDateTime(event.occurred_at)}</p>}{event.event_type === 'delivery_corrected' && <p className="text-xs text-neutral-500">Changed from {formatDateTime(String(event.metadata.original_delivered_at))} to {formatDateTime(String(event.metadata.corrected_delivered_at))}. Reason: {String(event.metadata.reason)}</p>}</div></div>; })}</div></div>
+              <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Audit timeline</h3><span className="text-xs text-neutral-400">Recorded order</span></div><div className="mt-3 space-y-3">{auditTimeline.map((event) => { const effectiveDiffers = Math.abs(new Date(event.created_at).getTime() - new Date(event.occurred_at).getTime()) > 60_000; return <div key={event.id} className="flex gap-3 text-sm"><span className="mt-1.5 h-2 w-2 shrink-0 bg-primary-500" /><div><p className="font-medium capitalize">{event.event_type.replaceAll('_', ' ')}</p><p className="text-xs text-neutral-400">Recorded {formatDateTime(event.created_at)}{event.actor_name ? ` · ${event.actor_name}` : ''}</p>{effectiveDiffers && <p className="text-xs text-neutral-400">Effective {formatDateTime(event.occurred_at)}</p>}{event.event_type === 'voided' && event.metadata.reason != null && <p className="text-xs text-neutral-500">Reason: {String(event.metadata.reason)}</p>}{event.event_type === 'delivery_corrected' && <p className="text-xs text-neutral-500">Changed from {formatDateTime(String(event.metadata.original_delivered_at))} to {formatDateTime(String(event.metadata.corrected_delivered_at))}. Reason: {String(event.metadata.reason)}</p>}</div></div>; })}</div></div>
             </div>
           </div>
         </div>

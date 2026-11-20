@@ -171,7 +171,7 @@ class InvoicePdfGenerator
 
     line_item_rows.each do |item|
       rows << [
-        item["description"].to_s,
+        [ item["description"].to_s, ("Pass-through reimbursement" if item["line_kind"] == "reimbursement") ].compact.join("\n"),
         (include_service_date ? format_date(item["service_date"]) : nil),
         format_decimal(item["quantity"]),
         money(item["rate"]),

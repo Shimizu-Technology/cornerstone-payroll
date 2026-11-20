@@ -34,6 +34,7 @@ class Invoice < ApplicationRecord
   before_validation :default_organization_from_company
   before_validation :default_billing_profile
   before_validation :assign_invoice_number, on: :create
+  before_validation :default_due_date
   before_validation :sync_total_amount
   include FinanceBookOwned
 
@@ -183,6 +184,7 @@ class Invoice < ApplicationRecord
     with_lock do
       raise_invalid_transition!("Only draft invoices can be issued") unless draft?
 
+      prepare_number_for_issue!
       save!
       snapshot_payload = snapshot.presence || issued_snapshot(actor: actor, issued_at: issued_at)
       update!(
@@ -194,6 +196,21 @@ class Invoice < ApplicationRecord
         snapshot_version: SNAPSHOT_VERSION
       )
     end
+  end
+
+  def prepare_number_for_issue!
+    return unless draft? && invoice_number.to_s.start_with?("DRAFT-")
+
+    update!(invoice_number: InvoiceNumberAllocator.call(billing_profile: invoice_billing_profile, invoice_date: invoice_date))
+  end
+
+  # Billed fees, net of the invoice-level discount, exclude pass-through reimbursements.
+  # This is not cash revenue or a historical general ledger.
+  def service_fee_amount
+    return BigDecimal("0") if draft? || voided? || subtotal_amount.zero?
+
+    fees = line_items.select { |line| line.line_kind == "service_fee" }.sum(BigDecimal("0"), &:amount)
+    (fees * total_amount / subtotal_amount).round(2, :half_up)
   end
 
   def mark_generated!(actor:, snapshot: nil)
@@ -318,10 +335,23 @@ class Invoice < ApplicationRecord
     return if invoice_number.present?
     return unless invoice_billing_profile&.persisted? && invoice_date.present?
 
+    if invoice_billing_profile.numbering_style == "continuing" && draft?
+      self.invoice_number = "DRAFT-#{SecureRandom.uuid}"
+      return
+    end
+
     self.invoice_number = InvoiceNumberAllocator.call(
       billing_profile: invoice_billing_profile,
       invoice_date: invoice_date
     )
+  end
+
+  def default_due_date
+    return unless draft? && due_date.blank? && invoice_date.present?
+
+    days = payment_terms.to_s.match(/\ANet\s+(\d+)\z/i)&.captures&.first
+    self.due_date = invoice_date + days.to_i if days
+    self.due_date = invoice_date if payment_terms.to_s.casecmp?("Due on receipt")
   end
 
   def sync_total_amount
@@ -415,7 +445,7 @@ class Invoice < ApplicationRecord
     return unless status_was.in?(%w[open voided uncollectible])
 
     protected_changes = changes.keys & %w[
-      invoice_billing_profile_id invoice_recipient_id invoice_number invoice_date due_date currency
+      company_id invoice_billing_profile_id invoice_recipient_id invoice_number invoice_date due_date currency
       customer_reference service_period_start service_period_end total_amount payment_terms snapshot origin
       discount_type discount_value
     ]
@@ -459,6 +489,7 @@ class Invoice < ApplicationRecord
       "recipient" => recipient_snapshot,
       "line_items" => line_items.reject(&:marked_for_destruction?).sort_by { |item| [ item.position.to_i, item.id.to_i ] }.map do |item|
         {
+          "line_kind" => item.line_kind,
           "description" => item.description,
           "quantity" => item.quantity.to_s,
           "rate" => item.rate.to_s,

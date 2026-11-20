@@ -17,6 +17,7 @@ class InvoiceReceivablesSummary
     {
       as_of: as_of,
       totals: {
+        billed_service_fees: money(rows.sum(&:service_fee_amount)),
         outstanding: money(open_rows.sum(&:balance_due)),
         overdue: money(open_rows.select { |invoice| overdue?(invoice) }.sum(&:balance_due)),
         paid: money(rows.sum(&:amount_paid)),

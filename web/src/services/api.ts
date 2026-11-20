@@ -5045,7 +5045,12 @@ export type InvoiceOrigin = 'native' | 'imported';
 export type InvoiceDiscountType = 'none' | 'percent' | 'amount';
 export type InvoiceTemplateType = 'standard' | 'hourly' | 'project' | 'tuition';
 
+export interface InvoiceService { name: string; description_template: string; line_kind: 'service_fee' | 'reimbursement'; }
+
 export interface InvoiceBillingProfile {
+  numbering_style?: 'yearly' | 'continuing';
+  next_invoice_number?: number;
+  service_catalog?: InvoiceService[];
   id: number;
   organization_id: number;
   name: string;
@@ -5086,6 +5091,7 @@ export interface InvoiceRecipient {
 }
 
 export interface InvoiceLineItem {
+  line_kind?: 'service_fee' | 'reimbursement';
   id?: number;
   description: string;
   quantity: number;
@@ -5098,6 +5104,8 @@ export interface InvoiceLineItem {
 }
 
 export interface Invoice {
+  company_name?: string | null;
+  service_fee_amount?: number;
   id: number;
   organization_id: number;
   company_id?: number | null;
@@ -5155,6 +5163,7 @@ export interface Invoice {
 }
 
 export interface InvoiceRecipientPayload {
+  company_id?: number | null;
   name: string;
   email?: string | null;
   address?: string | null;
@@ -5288,6 +5297,7 @@ export interface InvoiceSendSchedule {
 export interface InvoiceReceivablesSummary {
   as_of: string;
   totals: {
+    billed_service_fees?: number;
     outstanding: number;
     overdue: number;
     paid: number;
@@ -5313,6 +5323,9 @@ export interface InvoiceReceivablesSummary {
 }
 
 export interface InvoiceBillingProfilePayload {
+  numbering_style?: 'yearly' | 'continuing';
+  next_invoice_number?: number;
+  service_catalog?: InvoiceService[];
   name: string;
   legal_name?: string | null;
   website?: string | null;

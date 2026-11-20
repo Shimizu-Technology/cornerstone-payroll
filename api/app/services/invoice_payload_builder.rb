@@ -18,6 +18,8 @@ class InvoicePayloadBuilder
       organization_id: invoice.organization_id,
       finance_book_id: invoice.finance_book_id,
       company_id: invoice.company_id,
+      company_name: invoice.company&.name,
+      service_fee_amount: money(invoice.service_fee_amount),
       invoice_recipient_id: invoice.invoice_recipient_id,
       invoice_billing_profile_id: invoice.invoice_billing_profile_id,
       invoice_recurrence_id: invoice.invoice_recurrence_id,
@@ -137,6 +139,7 @@ class InvoicePayloadBuilder
   def line_item_payload(item)
     {
       id: item.id,
+      line_kind: item.line_kind,
       description: item.description,
       quantity: item.quantity.to_f,
       rate: item.rate.to_f,

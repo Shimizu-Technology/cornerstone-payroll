@@ -25,6 +25,7 @@ class InvoiceArtifactStorageService
         raise ActiveRecord::RecordInvalid, locked_invoice
       end
 
+      locked_invoice.prepare_number_for_issue!
       locked_invoice.save!
       snapshot = locked_invoice.issued_snapshot(actor: actor)
       pdf_bytes = InvoicePdfGenerator.new(locked_invoice, snapshot: snapshot).generate

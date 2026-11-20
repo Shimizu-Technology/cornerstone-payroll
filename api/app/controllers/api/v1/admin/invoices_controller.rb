@@ -329,7 +329,7 @@ module Api
           Array(params.dig(:invoice, :line_items)).map do |item|
             item_hash = item.respond_to?(:to_unsafe_h) ? item.to_unsafe_h : item
             ActionController::Parameters.new(item_hash).permit(
-              :id, :description, :quantity, :rate, :service_date, :position, :_destroy
+              :id, :line_kind, :description, :quantity, :rate, :service_date, :position, :_destroy
             )
           end
         end
@@ -349,6 +349,7 @@ module Api
             item = attrs[:id].present? ? existing_by_id[attrs[:id].to_s] : nil
             item ||= invoice.line_items.build
             item.assign_attributes(
+              line_kind: attrs[:line_kind].presence || "service_fee",
               description: attrs[:description],
               quantity: attrs[:quantity].presence || 0,
               rate: attrs[:rate].presence || 0,

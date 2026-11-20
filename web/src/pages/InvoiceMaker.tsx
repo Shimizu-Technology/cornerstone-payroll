@@ -80,6 +80,7 @@ interface InvoiceFormState {
 }
 
 interface RecipientFormState {
+  company_id: string;
   id?: number;
   name: string;
   email: string;
@@ -93,6 +94,9 @@ interface RecipientFormState {
 }
 
 interface BillingProfileFormState {
+  numbering_style: 'yearly' | 'continuing';
+  next_invoice_number: number;
+  service_catalog: import('@/services/api').InvoiceService[];
   id?: number;
   name: string;
   legal_name: string;
@@ -133,6 +137,7 @@ const emptyRecipientForm = (): RecipientFormState => ({
   name: '',
   email: '',
   address: '',
+  company_id: '',
   default_rate: '',
   invoice_prefix: '',
   payment_terms: '',
@@ -151,6 +156,9 @@ const emptyBillingProfileForm = (): BillingProfileFormState => ({
   payment_instructions: '',
   default_payment_terms: '',
   invoice_prefix: 'INV',
+  numbering_style: 'yearly',
+  next_invoice_number: 1,
+  service_catalog: [],
   remit_to: '',
   footer_note: '',
   active: true,
@@ -257,7 +265,7 @@ function invoicePayloadSignature(payload: InvoicePayload) {
 
 export function InvoiceMaker() {
   const location = useLocation();
-  const { activeCompanyId, activeCompany, activeOrganizationId } = useCompany();
+  const { activeCompanyId, activeCompany, activeOrganizationId, companies } = useCompany();
   const financeScopeId = activeOrganizationId ?? activeCompanyId;
   const financeReadOnly = isTestWorkspaceCompany(activeCompany);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -1163,6 +1171,7 @@ export function InvoiceMaker() {
   };
 
   const buildRecipientPayload = (): InvoiceRecipientPayload => ({
+    company_id: recipientForm.company_id ? Number(recipientForm.company_id) : null,
     name: recipientForm.name.trim(),
     email: recipientForm.email.trim() || null,
     address: recipientForm.address.trim() || null,
@@ -1175,6 +1184,9 @@ export function InvoiceMaker() {
   });
 
   const buildBillingProfilePayload = (): InvoiceBillingProfilePayload => ({
+    numbering_style: billingProfileForm.numbering_style,
+    next_invoice_number: billingProfileForm.next_invoice_number,
+    service_catalog: billingProfileForm.service_catalog,
     name: billingProfileForm.name.trim(),
     legal_name: billingProfileForm.legal_name.trim() || null,
     website: billingProfileForm.website.trim() || null,
@@ -1193,6 +1205,9 @@ export function InvoiceMaker() {
   const editBillingProfile = (profile: InvoiceBillingProfile) => {
     setBillingLogoFile(null);
     setBillingProfileForm({
+      numbering_style: profile.numbering_style || 'yearly',
+      next_invoice_number: profile.next_invoice_number || 1,
+      service_catalog: profile.service_catalog || [],
       id: profile.id,
       name: profile.name,
       legal_name: profile.legal_name || '',
@@ -1261,6 +1276,7 @@ export function InvoiceMaker() {
   const editRecipient = (recipient: InvoiceRecipient) => {
     setRecipientForm({
       id: recipient.id,
+      company_id: String(recipient.company_id || ''),
       name: recipient.name,
       email: recipient.email || '',
       address: recipient.address || '',
@@ -1397,6 +1413,7 @@ export function InvoiceMaker() {
 
         {showRecipientForm && (
           <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+            <label className="text-sm">Payroll client (optional)<select aria-label="Customer payroll client" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value={recipientForm.company_id} onChange={(e) => setRecipientForm({ ...recipientForm, company_id: e.target.value })}><option value="">Unallocated</option>{companies.filter((c) => c.organization_id === activeOrganizationId && !isTestWorkspaceCompany(c)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             <Input value={recipientForm.name} onChange={(event) => setRecipientForm((current) => ({ ...current, name: event.target.value }))} placeholder="Recipient name" />
             <Input value={recipientForm.email} onChange={(event) => setRecipientForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
             <Textarea value={recipientForm.address} onChange={(event) => setRecipientForm((current) => ({ ...current, address: event.target.value }))} placeholder="Address" rows={2} />
@@ -1475,6 +1492,9 @@ export function InvoiceMaker() {
             <Textarea value={billingProfileForm.address} onChange={(event) => setBillingProfileForm((current) => ({ ...current, address: event.target.value }))} placeholder="Remittance address" rows={2} />
             <Textarea value={billingProfileForm.payment_instructions} onChange={(event) => setBillingProfileForm((current) => ({ ...current, payment_instructions: event.target.value }))} placeholder="Payment instructions" rows={2} />
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="text-sm">Number format<select aria-label="Number format" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value={billingProfileForm.numbering_style} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, numbering_style: e.target.value as 'yearly' | 'continuing' })}><option value="yearly">Prefix and year (existing)</option><option value="continuing">Plain continuing sequence</option></select></label>
+              {billingProfileForm.numbering_style === 'continuing' && <label className="text-sm">Next invoice number<Input aria-label="Next invoice number" type="number" min="1" step="1" value={billingProfileForm.next_invoice_number} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, next_invoice_number: Number(e.target.value) })} /></label>}
+              <div className="space-y-2 sm:col-span-2"><p className="text-sm font-medium">Saved services · use {'{month}'} for the service month</p>{billingProfileForm.service_catalog.map((service, index) => <div key={index} className="grid gap-2 sm:grid-cols-3"><Input aria-label={`Service ${index + 1} name`} value={service.name} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, name: e.target.value } : entry) })} /><Input aria-label={`Service ${index + 1} template`} value={service.description_template} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, description_template: e.target.value } : entry) })} /><select aria-label={`Service ${index + 1} kind`} value={service.line_kind} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, line_kind: e.target.value as 'service_fee' | 'reimbursement' } : entry) })}><option value="service_fee">Service fee</option><option value="reimbursement">Reimbursement</option></select><Button type="button" variant="outline" onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.filter((_, i) => i !== index) })}>Remove service</Button></div>)}<Button type="button" variant="outline" onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: [...billingProfileForm.service_catalog, { name: 'Accounting Consulting', description_template: 'Accounting Services – {month}', line_kind: 'service_fee' }] })}>Add saved service</Button></div>
               <Input value={billingProfileForm.invoice_prefix} onChange={(event) => setBillingProfileForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Invoice prefix" />
               <Input value={billingProfileForm.remit_to} onChange={(event) => setBillingProfileForm((current) => ({ ...current, remit_to: event.target.value }))} placeholder="Checks payable to" />
             </div>

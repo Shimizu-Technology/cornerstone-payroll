@@ -41,12 +41,12 @@ class InvoiceRecurrenceGenerator
           recurrence_on: date,
           invoice_date: date,
           due_date: date + recurrence.due_after_days,
-          service_period_start: date,
-          service_period_end: recurrence.occurrence_date(recurrence.occurrence_index + 1) - 1,
+          service_period_start: recurrence.interval_unit == "month" ? date.beginning_of_month : date,
+          service_period_end: recurrence.interval_unit == "month" ? date.end_of_month : recurrence.occurrence_date(recurrence.occurrence_index + 1) - 1,
           currency: original["currency"],
           customer_reference: original["customer_reference"],
           notes: original["notes"],
-          payment_terms: original["payment_terms"],
+          payment_terms: source.invoice_recipient.payment_terms.presence || original["payment_terms"],
           email_subject: original["email_subject"],
           email_body: original["email_body"],
           discount_type: original["discount_type"] || "none",
@@ -56,15 +56,22 @@ class InvoiceRecurrenceGenerator
         )
         source.snapshot.fetch("line_items").each_with_index do |line, position|
           invoice.line_items.build(
-            description: line.fetch("description"),
+            line_kind: line.fetch("line_kind", "service_fee"),
+            description: line.fetch("description").gsub(source.service_period_start&.strftime("%B %Y").to_s.presence || "{month}", date.strftime("%B %Y")).gsub("{month}", date.strftime("%B %Y")),
             quantity: line.fetch("quantity"),
-            rate: line.fetch("rate"),
+            rate: source.invoice_billing_profile.numbering_style == "continuing" && line.fetch("line_kind", "service_fee") == "service_fee" ? (source.invoice_recipient.default_rate || line.fetch("rate")) : line.fetch("rate"),
             position: position
           )
         end
         invoice.save!
         InvoiceEvent.record!(invoice: invoice, event_type: "recurring_draft_created", actor: recurrence.created_by,
                              metadata: { recurrence_id: recurrence.id, occurrence_on: date.iso8601 })
+      end
+      if source.invoice_billing_profile.numbering_style == "continuing" && invoice.draft?
+        terms = invoice.payment_terms.to_s
+        days = terms.match(/\ANet\s+(\d+)\z/i)&.captures&.first
+        due_days = days ? days.to_i : terms.casecmp?("Due on receipt") ? 0 : recurrence.due_after_days
+        invoice.update!(due_date: date + due_days)
       end
       recurrence.advance!
       invoice
