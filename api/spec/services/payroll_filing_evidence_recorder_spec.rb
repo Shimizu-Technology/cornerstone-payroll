@@ -65,6 +65,45 @@ RSpec.describe PayrollFilingEvidenceRecorder do
     expect(readiness.reload.status).to eq("filing_ready")
   end
 
+  describe "2026 1099-NEC submissions" do
+    let!(:contractor) do
+      create(:employee, :contractor, company: company, department: department, ssn_encrypted: "345-67-7890",
+        address_line1: "7 Route 8", city: "Maite", state: "GU", zip: "96910")
+    end
+
+    before do
+      create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000)
+      period = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 5, 1), end_date: Date.new(2026, 5, 14), pay_date: Date.new(2026, 5, 18))
+      create(:payroll_item, company: company, employee: contractor, pay_period: period, employment_type: "contractor", gross_pay: 2_500, withholding_tax: 0)
+      create(:payroll_filing_responsibility, :annual, company: company, filing_type: "form_1099", responsible_party: "cornerstone", source_cutoff_date: nil)
+    end
+
+    def mark_ready
+      fingerprint = Form1099InputsFingerprint.new(company: company.reload, year: 2026).call
+      Form1099FilingReadiness.find_or_initialize_by(company: company, tax_year: 2026)
+        .update!(ready_fingerprint: fingerprint, marked_ready_at: Time.current, marked_ready_by: actor, marked_ready_by_name: actor.name)
+    end
+
+    it "needs the 1099s marked ready on the current inputs" do
+      expect { record_event(event_type: "submitted", filing_type: "form_1099_nec") }.to raise_error(described_class::Error, /Mark the 2026 1099s ready/)
+
+      mark_ready
+      contractor.update_columns(zip: "96911")
+      expect { record_event(event_type: "submitted", filing_type: "form_1099_nec") }.to raise_error(described_class::Error, /changed after they were marked ready/)
+      expect(PayrollFilingRecord.where(company: company)).to be_empty
+
+      mark_ready
+      expect(record_event(event_type: "submitted", filing_type: "form_1099_nec").payroll_filing_record.filing_type).to eq("form_1099_nec")
+    end
+
+    it "refuses evidence in a year with no 1099s, with the checklist's message" do
+      contractor.payroll_items.sole.update_columns(gross_pay: 1_500)
+
+      expect { record_event(event_type: "submitted", filing_type: "form_1099_nec") }.to raise_error(described_class::Error, "No 1099s to file for 2026")
+      expect(PayrollFilingRecord.where(company: company)).to be_empty
+    end
+  end
+
   it "accepts evidence for current revalidated W-2 inputs" do
     ready_w2_workflow
     event = record_event(event_type: "submitted", filing_type: "w2_gu_w3_ss")

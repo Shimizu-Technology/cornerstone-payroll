@@ -81,11 +81,28 @@ RSpec.describe "1099 filing files", type: :request do
     expect(response.headers["Content-Disposition"]).to include("DRAFT")
     log = AuditLog.find_by!(action: "pub1220#download")
     expect(log.user_id).to eq(user.id)
-    expect(log.metadata["sha256"]).to eq(Digest::SHA256.hexdigest(response.body))
+    expect(log.metadata).to include("file_digest" => FilingFileDigest.call(response.body), "digest_alg" => "hmac-sha256-v1")
+    expect(log.metadata).not_to have_key("sha256")
+    expect(log.metadata.to_json).not_to include(Digest::SHA256.hexdigest(response.body))
+    expect(FilingFileDigest.matches?(response.body, log)).to be(true)
     expect(log.metadata.to_json).not_to include("123456789")
   end
 
-  it "fails closed until E1 readiness is wired and emits a non-test final when ready" do
+  it "keeps the TIN out of reach of someone who rebuilds the file from the audit row" do
+    get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "draft" }
+    expect(response).to have_http_status(:ok)
+    log = AuditLog.find_by!(action: "pub1220#download")
+    rebuilt = Form1099Pub1220Generator.new(company: company, year: 2026, submitter: FilingSubmitter.find_by!(organization_id: company.organization_id), draft: true).generate
+    expect(rebuilt).to eq(response.body)
+    expect(log.metadata.values.map(&:to_s)).not_to include(Digest::SHA256.hexdigest(rebuilt))
+    guess = rebuilt.sub("123456789", "123456788")
+    expect(guess).not_to eq(rebuilt)
+    expect(log.metadata.values.map(&:to_s)).not_to include(Digest::SHA256.hexdigest(guess))
+    expect(FilingFileDigest.matches?(rebuilt, log)).to be(true)
+    expect(FilingFileDigest.matches?(guess, log)).to be(false)
+  end
+
+  it "refuses a final until the 1099s are marked ready, and emits a non-test final when they are" do
     get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "final" }
     expect(response).to have_http_status(:conflict)
     expect(response.parsed_body["error"]).to eq("Mark the 1099s ready first")
@@ -155,7 +172,9 @@ RSpec.describe "1099 filing files", type: :request do
     reader = PDF::Reader.new(StringIO.new(response.body))
     expect(reader.pages.length).to eq(1)
     expect(reader.pages.first.text).to include("For your records", "2026", "3,000.00", "25.00")
-    expect(AuditLog.find_by!(action: "form1096#download").metadata["sha256"]).to eq(Digest::SHA256.hexdigest(response.body))
+    metadata = AuditLog.find_by!(action: "form1096#download").metadata
+    expect(metadata).to include("file_digest" => FilingFileDigest.call(response.body), "digest_alg" => "hmac-sha256-v1")
+    expect(metadata).not_to have_key("sha256")
   end
 
   it "uses the reports authorization for client users" do

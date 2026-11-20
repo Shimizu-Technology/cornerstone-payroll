@@ -9,10 +9,14 @@ import type { ActiveYearEndStep, YearEndChecklist as Checklist, YearEndIssue, Ye
 
 const mocks = vi.hoisted(() => ({
   checklist: vi.fn(), acknowledge: vi.fn(), downloadDocument: vi.fn(), updateResponsibility: vi.fn(), preflight: vi.fn(), markReady: vi.fn(),
+  linkPayee: vi.fn(), addContractor: vi.fn(), unlinkPayee: vi.fn(), mark1099Ready: vi.fn(),
   companyGet: vi.fn(), companyUpdate: vi.fn(), employeeUpdate: vi.fn(),
 }));
 vi.mock('@/services/api', () => ({
-  yearEndApi: { checklist: mocks.checklist, acknowledge: mocks.acknowledge, downloadDocument: mocks.downloadDocument },
+  yearEndApi: {
+    checklist: mocks.checklist, acknowledge: mocks.acknowledge, downloadDocument: mocks.downloadDocument,
+    linkOneOffPayee: mocks.linkPayee, createOneOffPayeeContractor: mocks.addContractor, unlinkOneOffPayee: mocks.unlinkPayee, markForm1099Ready: mocks.mark1099Ready,
+  },
   reportsApi: {
     updatePayrollFilingResponsibility: mocks.updateResponsibility, w2GuPreflight: mocks.preflight, w2GuMarkReady: mocks.markReady,
     payrollFilingRecord: vi.fn(async () => ({ filing: null })),
@@ -116,6 +120,30 @@ function working(overrides: { reconciliation?: 'match' | 'mismatch'; warnings?: 
 function OpenOtherClient() {
   const navigate = useNavigate();
   return <button type="button" onClick={() => navigate('/companies/8/year-end?year=2026')}>Open Agana Auto</button>;
+}
+
+/**
+ * The hook state of every function component from this element up, as
+ * text, so a test can show a value was never kept in React state.
+ */
+function componentState(element: Element): string {
+  type Hook = { memoizedState: unknown; next: Hook | null };
+  type Fiber = { type: unknown; memoizedState: unknown; return: Fiber | null };
+  const key = Object.keys(element).find((name) => name.startsWith('__reactFiber$'));
+  let fiber = key ? (element as unknown as Record<string, Fiber>)[key] : null;
+  const seen: string[] = [];
+  const skipNodes = (_name: string, value: unknown) => (value instanceof Node ? undefined : value);
+  while (fiber) {
+    if (typeof fiber.type === 'function') {
+      let hook = fiber.memoizedState as Hook | null;
+      while (hook && typeof hook === 'object' && 'next' in hook) {
+        try { seen.push(JSON.stringify(hook.memoizedState, skipNodes) ?? ''); } catch { /* circular: not a plain value */ }
+        hook = hook.next;
+      }
+    }
+    fiber = fiber.return;
+  }
+  return seen.join('\n');
 }
 
 function renderPage() {
@@ -371,7 +399,7 @@ describe('Year-end checklist', () => {
     expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('asks who a one-off 1099 payee is, links to the checks, and records the answer on this client', async () => {
+  it('records that a one-off 1099 payee gets no 1099, with the reason, on this client', async () => {
     const payee = {
       code: 'one_off_payee:non_employee_check:41', payee_key: 'non_employee_check:41', name: 'Synthetic Roofing', total_compensation: 2500, payment_count: 2,
       checks: [{ id: 41, check_number: '9001', payment_date: '2026-05-02', amount: 1500 }, { id: 42, check_number: '9002', payment_date: '2026-06-05', amount: 1000 }],
@@ -387,14 +415,15 @@ describe('Year-end checklist', () => {
     renderPage();
 
     const region = await screen.findByRole('region', { name: /Employees and payees/ });
-    expect(within(region).getByText('Identify this payee')).toBeTruthy();
+    expect(within(region).getByText('Needs a decision')).toBeTruthy();
     expect(within(region).getByText(/#9001 on May 2, 2026 \(\$1,500\.00\), #9002 on Jun 5, 2026 \(\$1,000\.00\)/)).toBeTruthy();
     expect(within(region).getByRole('link', { name: 'Open checks for Synthetic Roofing' }).getAttribute('href')).toBe('/checks-payments');
-    fireEvent.change(within(region).getByLabelText('Who is this payee, and where is their W-9 and TIN?'), { target: { value: 'Synthetic Roofing LLC; W-9 in the client folder.' } });
-    fireEvent.click(within(region).getByRole('button', { name: 'Record payee' }));
+    fireEvent.click(within(region).getByRole('radio', { name: /No 1099 is due/ }));
+    fireEvent.change(within(region).getByLabelText('Why is no 1099 due?'), { target: { value: 'Synthetic Roofing Inc. is a corporation.' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Record: no 1099 due' }));
 
-    await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith({ tax_year: 2026, warning_code: payee.code, warning_digest: 'payee-digest', note: 'Synthetic Roofing LLC; W-9 in the client folder.' }, 7));
-    expect(await screen.findByText('Recorded who Synthetic Roofing is.')).toBeTruthy();
+    await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith({ tax_year: 2026, warning_code: payee.code, warning_digest: 'payee-digest', note: 'Synthetic Roofing Inc. is a corporation.' }, 7));
+    expect(await screen.findByText('Recorded that Synthetic Roofing gets no 1099.')).toBeTruthy();
   });
 
   it('records a reviewed acknowledgement with a note, and shows a blocker as fix-first', async () => {
@@ -695,14 +724,15 @@ describe('Year-end checklist', () => {
     renderPage();
 
     const region = await screen.findByRole('region', { name: /Employees and payees/ });
-    fireEvent.change(within(region).getByLabelText('Who is this payee, and where is their W-9 and TIN?'), { target: { value: 'Synthetic Roofing LLC.' } });
-    fireEvent.click(within(region).getByRole('button', { name: 'Record payee' }));
+    fireEvent.click(within(region).getByRole('radio', { name: /No 1099 is due/ }));
+    fireEvent.change(within(region).getByLabelText('Why is no 1099 due?'), { target: { value: 'Synthetic Roofing LLC.' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Record: no 1099 due' }));
     fireEvent.click(await within(region).findByRole('button', { name: 'Refresh checklist' }));
 
     expect(await within(screen.getByRole('region', { name: /Employees and payees/ })).findByLabelText('I reviewed the updated checks')).toBeTruthy();
     expect(screen.getByText(/\(\$1,200\.00\), #9002 on Jun 5, 2026 \(\$1,300\.00\)/)).toBeTruthy();
-    expect(screen.getByLabelText('Who is this payee, and where is their W-9 and TIN?')).toHaveProperty('value', 'Synthetic Roofing LLC.');
-    expect(screen.getByRole('button', { name: 'Record payee' })).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('Why is no 1099 due?')).toHaveProperty('value', 'Synthetic Roofing LLC.');
+    expect(screen.getByRole('button', { name: 'Record: no 1099 due' })).toHaveProperty('disabled', true);
     expect(mocks.acknowledge).toHaveBeenCalledTimes(1);
   });
 
@@ -794,5 +824,352 @@ describe('Year-end checklist', () => {
     expect(within(alert).getByText('Choose a tax year from 2026 to 2027')).toBeTruthy();
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('1 thing to fix')).toBeTruthy();
+  });
+});
+
+describe('Year-end checklist: 1099 payees and sign-off', () => {
+  afterEach(cleanup);
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T12:00:00+10:00'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const decided1099 = step('filing_decision', 1, 'Who files 2026 forms', 'done', {
+    data: { w2_employee_count: 0, contractor_count: 1, one_off_payee_count: 1, has_imported_history: false,
+      w2: { id: 1, filing_type: 'w2_gu', responsible_party: 'client', prior_provider_through: null, notes: null, label: 'The client files', reviewed_at: null, reviewed_by: { id: 1, name: 'Dafne', email: 'd@example.test', role: 'admin' } },
+      form_1099: { id: 2, filing_type: 'form_1099', responsible_party: 'cornerstone', prior_provider_through: null, notes: null, label: 'Cornerstone files', reviewed_at: null, reviewed_by: { id: 1, name: 'Dafne', email: 'd@example.test', role: 'admin' } } },
+  });
+  const payee = {
+    code: 'one_off_payee:non_employee_check:41', payee_key: 'non_employee_check:41', name: 'Ana Cruz', total_compensation: 2500, payment_count: 2,
+    checks: [{ id: 41, check_number: '9001', payment_date: '2026-05-02', amount: 1500 }, { id: 42, check_number: '9002', payment_date: '2026-06-05', amount: 1000 }],
+    checks_path: '/checks-payments', digest: 'payee-digest', status: 'needs_identity' as const, acknowledgement: null, acknowledgement_stale: false,
+  };
+  const candidates = [
+    { employee_id: 21, name: 'Ana Cruz', business_name: null, status: 'active', tin_type: 'SSN' as const, tin_last4: '7890', has_address: true, name_matches: true },
+    { employee_id: 22, name: 'Ben Reyes', business_name: 'Reyes Electric', status: 'inactive', tin_type: null, tin_last4: null, has_address: false, name_matches: false },
+  ];
+  type PeopleData = ActiveYearEndStep<'people'>['data'];
+  const peopleData = (extra: Partial<PeopleData> = {}): PeopleData => ({
+    employees: [], contractors: [], one_off_payees: [], w2_employee_count: 0, contractor_count: 1, contractor_error: null, ...extra,
+  });
+  type ReadyData = ActiveYearEndStep<'form_1099_ready'>['data'];
+  const readyData = (extra: Partial<ReadyData> = {}): ReadyData => ({
+    readiness: null, inputs_fingerprint: 'fp-1', can_mark_ready: true, unavailable_reason: null, blockers: [], remaining_before_ready: 0,
+    filing_threshold: 2000, payee_count: 1, total_compensation: 4000, no_1099_due_count: 0,
+    payees: [
+      { employee_id: 21, name: 'Ana Cruz', tin_type: 'SSN', tin_last4: '7890', total_compensation: 4000, federal_withheld: 0, filing_reason: 'filing threshold reached', linked_check_count: 2, edit_path: '/companies/7/employees/21/edit' },
+      { employee_id: 23, name: 'Dee Santos', tin_type: 'SSN', tin_last4: '1111', total_compensation: 500, federal_withheld: 50, filing_reason: 'tax withheld', linked_check_count: 0, edit_path: '/companies/7/employees/23/edit' },
+    ],
+    ...extra,
+  });
+
+  function steps(people: YearEndStep, ready: YearEndStep): YearEndStep[] {
+    return [
+      decided1099,
+      step('employer', 2, 'Employer details', 'done', { data: employerData }),
+      people,
+      ready,
+      step('reconciliation', 5, 'Reconcile W-2s to the 941s and W-1s', 'not_needed'),
+      step('review_warnings', 6, 'Review warnings', 'not_needed'),
+      step('prior_provider', 7, 'Prior provider overlap', 'not_needed'),
+      step('mark_ready', 8, 'Mark W-2s ready', 'not_needed'),
+    ];
+  }
+  const openPeople = step('people', 3, 'Employees and payees', 'action_needed', {
+    issues: [{ code: 'PAYEE_IDENTITY_UNRESOLVED', message: 'Ana Cruz was paid $2,500.00 by checks 9001 and 9002.', payee_key: payee.payee_key, warning_code: payee.code }],
+    data: peopleData({ one_off_payees: [payee], link_candidates: candidates }),
+  });
+  const waitingReady = step('form_1099_ready', 4, 'Mark 1099s ready', 'action_needed', {
+    issues: [{ code: 'FORM_1099_NOT_MARKED_READY', message: 'Mark the 2026 1099s ready once the steps above are done.' }],
+    data: readyData({ can_mark_ready: false, remaining_before_ready: 2, payees: [], payee_count: 0, total_compensation: 0, blockers: [
+      { code: 'PAYEE_IDENTITY_UNRESOLVED', message: 'Ana Cruz was paid $2,500.00 by checks 9001 and 9002.', payee_key: payee.payee_key },
+      { code: 'PAYEE_DETAILS_MISSING', message: 'Ben Reyes is missing an address.', employee_id: 22 },
+    ] }),
+  });
+  const load = (people: YearEndStep, ready: YearEndStep) => checklist(steps(people, ready), { files_w2: false, files_1099: true });
+
+  it('links a one-off payee to the contractor with the same name, so one 1099 carries both', async () => {
+    mocks.checklist.mockResolvedValueOnce(load(openPeople, waitingReady)).mockResolvedValue(load(openPeople, waitingReady));
+    mocks.linkPayee.mockResolvedValue({ data: { employee: { id: 21, name: 'Ana Cruz', created: false }, check_ids: [41, 42] } });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    expect(within(region).getByRole('radio', { name: /Link to a contractor/ })).toHaveProperty('checked', true);
+    expect(within(region).getByLabelText('Contractor')).toHaveProperty('value', '21');
+    expect(within(region).getByText(/\$2,500\.00 goes on Ana Cruz’s 1099 with their payroll pay\./)).toBeTruthy();
+    fireEvent.click(within(region).getByRole('button', { name: 'Link checks' }));
+
+    await waitFor(() => expect(mocks.linkPayee).toHaveBeenCalledWith({ tax_year: 2026, code: payee.code, digest: 'payee-digest', employee_id: 21 }, 7));
+    expect(await screen.findByText("Linked Ana Cruz's checks to Ana Cruz.")).toBeTruthy();
+  });
+
+  it('adds a business payee from its W-9 and shows the server’s reason when it is refused', async () => {
+    const people = step('people', 3, 'Employees and payees', 'action_needed', {
+      issues: openPeople.issues, data: peopleData({ one_off_payees: [{ ...payee, name: 'Island Roofing' }], link_candidates: [] }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, waitingReady));
+    mocks.addContractor.mockRejectedValueOnce(new ApiError('Pedro Reyes already has this TIN. Link the checks to Pedro Reyes instead, so they get one 1099.', 422))
+      .mockResolvedValue({ data: { employee: { id: 30, name: 'Pedro Reyes', created: true }, check_ids: [41, 42] } });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    fireEvent.click(within(region).getByRole('radio', { name: /Add as a new contractor/ }));
+    fireEvent.click(within(region).getByRole('radio', { name: 'A business (EIN)' }));
+    expect(within(region).getByLabelText('Business name')).toHaveProperty('value', 'Island Roofing');
+    fireEvent.change(within(region).getByLabelText('Business name'), { target: { value: 'Island Roofing LLC' } });
+    fireEvent.change(within(region).getByLabelText('EIN'), { target: { value: '66-1234567' } });
+    fireEvent.change(within(region).getByLabelText('Contact first name'), { target: { value: 'Pedro' } });
+    fireEvent.change(within(region).getByLabelText('Contact last name'), { target: { value: 'Reyes' } });
+    fireEvent.change(within(region).getByLabelText('Street address'), { target: { value: 'PO Box 8800' } });
+    fireEvent.change(within(region).getByLabelText('City'), { target: { value: 'Tamuning' } });
+    fireEvent.change(within(region).getByLabelText('ZIP'), { target: { value: '96931' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Add contractor and link checks' }));
+
+    expect(await within(region).findByRole('alert')).toHaveProperty('textContent', 'Pedro Reyes already has this TIN. Link the checks to Pedro Reyes instead, so they get one 1099.');
+    expect(mocks.addContractor).toHaveBeenCalledWith({
+      tax_year: 2026, code: payee.code, digest: 'payee-digest',
+      contractor: {
+        contractor_type: 'business', first_name: 'Pedro', middle_name: '', last_name: 'Reyes', business_name: 'Island Roofing LLC', tin: '66-1234567',
+        address_line1: 'PO Box 8800', address_line2: '', city: 'Tamuning', state: 'GU', zip: '96931', w9_on_file: true,
+      },
+    }, 7);
+    // The form keeps what was typed, so the reviewer can switch to linking or fix the TIN.
+    expect(within(region).getByLabelText('EIN')).toHaveProperty('value', '66-1234567');
+    fireEvent.click(within(region).getByRole('button', { name: 'Add contractor and link checks' }));
+    expect(await screen.findByText('Added Island Roofing LLC as a contractor and linked the checks.')).toBeTruthy();
+  });
+
+  it('keeps the SSN out of React state and still sends it on a retry', async () => {
+    const people = step('people', 3, 'Employees and payees', 'action_needed', {
+      issues: openPeople.issues, data: peopleData({ one_off_payees: [payee], link_candidates: [] }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, waitingReady));
+    mocks.addContractor.mockRejectedValueOnce(new ApiError('The 1099 service is busy. Try again.', 503))
+      .mockResolvedValue({ data: { employee: { id: 30, name: 'Ana Cruz', created: true }, check_ids: [41, 42] } });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    fireEvent.click(within(region).getByRole('radio', { name: /Add as a new contractor/ }));
+    const ssn = within(region).getByLabelText('SSN') as HTMLInputElement;
+    fireEvent.change(ssn, { target: { value: '345-67-7890' } });
+    fireEvent.change(within(region).getByLabelText('Street address'), { target: { value: '7 Route 8' } });
+    fireEvent.change(within(region).getByLabelText('City'), { target: { value: 'Maite' } });
+    fireEvent.change(within(region).getByLabelText('ZIP'), { target: { value: '96910' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Add contractor and link checks' }));
+
+    expect(await within(region).findByRole('alert')).toHaveProperty('textContent', 'The 1099 service is busy. Try again.');
+    const sent = { tax_year: 2026, code: payee.code, digest: 'payee-digest', contractor: expect.objectContaining({ contractor_type: 'individual', tin: '345-67-7890', city: 'Maite' }) };
+    expect(mocks.addContractor).toHaveBeenLastCalledWith(sent, 7);
+    // The SSN lives only in the input: React renders no value for it, and no
+    // component state above it holds the digits (the city typed next to it does).
+    expect(ssn.value).toBe('345-67-7890');
+    expect(ssn.getAttribute('value')).toBeNull();
+    const state = componentState(ssn);
+    expect(state).toContain('Maite');
+    expect(state).not.toContain('345-67-7890');
+    expect(state).not.toContain('345677890');
+
+    fireEvent.click(within(region).getByRole('button', { name: 'Add contractor and link checks' }));
+    expect(await screen.findByText('Added Ana Cruz as a contractor and linked the checks.')).toBeTruthy();
+    expect(mocks.addContractor).toHaveBeenCalledTimes(2);
+    expect(mocks.addContractor).toHaveBeenLastCalledWith(sent, 7);
+  });
+
+  it('refreshes the checklist after a link that finishes once the reviewer has closed the form', async () => {
+    const small = { ...payee, code: 'one_off_payee:non_employee_check:51', payee_key: 'non_employee_check:51', total_compensation: 1000, payment_count: 1,
+      checks: [{ id: 51, check_number: '9101', payment_date: '2026-06-05', amount: 1000 }], digest: 'small-digest', status: 'below_threshold' as const, could_reach_threshold: true };
+    const people = step('people', 3, 'Employees and payees', 'done', {
+      data: peopleData({ smaller_one_off_payees: [small], link_candidates: candidates }),
+    });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'done', {
+      data: readyData({ can_mark_ready: false, payees: [], payee_count: 0, total_compensation: 0, smaller_one_off_count: 1, smaller_could_reach_count: 1 }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, ready));
+    let finishLink: (value: unknown) => void = () => {};
+    mocks.linkPayee.mockReturnValue(new Promise((resolve) => { finishLink = resolve; }));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    fireEvent.click(within(region).getByRole('button', { name: /Show Employees and payees/ }));
+    fireEvent.click(await within(region).findByRole('button', { name: "Link Ana Cruz's checks to a contractor" }));
+    fireEvent.click(within(region).getByRole('button', { name: 'Link checks' }));
+    await waitFor(() => expect(mocks.linkPayee).toHaveBeenCalled());
+    const loads = mocks.checklist.mock.calls.length;
+    // The reviewer closes the form while the link is saving.
+    fireEvent.click(within(region).getByRole('button', { name: 'Cancel' }));
+    expect(within(region).queryByRole('button', { name: 'Link checks' })).toBeNull();
+
+    finishLink({ data: { employee: { id: 21, name: 'Ana Cruz', created: false }, check_ids: [51] } });
+
+    expect(await screen.findByText("Linked Ana Cruz's checks to Ana Cruz.")).toBeTruthy();
+    await waitFor(() => expect(mocks.checklist.mock.calls.length).toBeGreaterThan(loads));
+  });
+
+  it('keeps 1099 filing evidence closed in a year with no 1099s, saying why', async () => {
+    const people = step('people', 3, 'Employees and payees', 'done', { data: peopleData() });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'done', {
+      data: readyData({ can_mark_ready: false, payees: [], payee_count: 0, total_compensation: 0, no_1099_due_count: 1 }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, ready));
+
+    renderPage();
+
+    expect(await screen.findByText('No 1099s to file for 2026')).toBeTruthy();
+    expect(screen.queryByText('Mark the 1099s ready above before recording the 1099 filing.')).toBeNull();
+    const submit = await screen.findByRole('button', { name: 'Record submission' });
+    expect(submit).toHaveProperty('disabled', true);
+  });
+
+  it('links a smaller one-off check to a contractor the client already pays, without it blocking anything', async () => {
+    const small = { ...payee, code: 'one_off_payee:non_employee_check:51', payee_key: 'non_employee_check:51', total_compensation: 1000, payment_count: 1,
+      checks: [{ id: 51, check_number: '9101', payment_date: '2026-06-05', amount: 1000 }], digest: 'small-digest', status: 'below_threshold' as const, could_reach_threshold: true };
+    const ice = { ...small, code: 'one_off_payee:non_employee_check:52', payee_key: 'non_employee_check:52', name: 'Island Ice', total_compensation: 300,
+      checks: [{ id: 52, check_number: '9102', payment_date: '2026-07-05', amount: 300 }], digest: 'ice-digest', could_reach_threshold: false };
+    const people = step('people', 3, 'Employees and payees', 'done', {
+      data: peopleData({ smaller_one_off_payees: [small, ice], link_candidates: candidates.map((candidate) => ({ ...candidate, year_total: candidate.employee_id === 21 ? 1500 : 0 })) }),
+    });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'done', {
+      data: readyData({ can_mark_ready: false, payees: [], payee_count: 0, total_compensation: 0, smaller_one_off_count: 1, smaller_could_reach_count: 1 }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, ready));
+    mocks.linkPayee.mockResolvedValue({ data: { employee: { id: 21, name: 'Ana Cruz', created: false }, check_ids: [51] } });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    fireEvent.click(within(region).getByRole('button', { name: /Show Employees and payees/ }));
+    expect(await within(region).findByText(/Smaller one-off checks \(link them if they’re to a contractor you already pay\) \(2\)/)).toBeTruthy();
+    expect(within(region).getAllByText('Could reach the 1099 threshold with a contractor')).toHaveLength(1);
+    // The name suggestion is per payee: Island Ice matches no contractor.
+    expect(within(region).getAllByText(/Same name as contractor/)).toHaveLength(1);
+    fireEvent.click(within(region).getByRole('button', { name: "Link Island Ice's checks to a contractor" }));
+    expect(within(region).getByLabelText('Contractor')).toHaveProperty('value', '');
+    fireEvent.click(within(region).getByRole('button', { name: 'Cancel' }));
+    expect(within(region).queryByRole('radio', { name: /No 1099 is due/ })).toBeNull();
+    fireEvent.click(within(region).getByRole('button', { name: "Link Ana Cruz's checks to a contractor" }));
+    expect(within(region).getByLabelText('Contractor')).toHaveProperty('value', '21');
+    expect(within(region).getByText(/With the \$1,500\.00 already paid this year, that's \$2,500\.00\./)).toBeTruthy();
+    fireEvent.click(within(region).getByRole('button', { name: 'Link checks' }));
+
+    await waitFor(() => expect(mocks.linkPayee).toHaveBeenCalledWith({ tax_year: 2026, code: small.code, digest: 'small-digest', employee_id: 21 }, 7));
+    expect(await screen.findByText("Linked Ana Cruz's checks to Ana Cruz.")).toBeTruthy();
+  });
+
+  it('shows a payee whose W-9 is not on file, linking to the contractor from the people step and the sign-off', async () => {
+    const w9Issue = { code: 'PAYEE_W9_MISSING', message: "Ana Cruz's W-9 is not on file. Open the contractor and tick W-9 on file once you have it.", employee_id: 21 };
+    const people = step('people', 3, 'Employees and payees', 'action_needed', {
+      issues: [w9Issue], data: peopleData({ w9_missing: [{ employee_id: 21, name: 'Ana Cruz', edit_path: '/companies/7/employees/21/edit' }] }),
+    });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'action_needed', {
+      issues: waitingReady.issues, data: readyData({ can_mark_ready: false, remaining_before_ready: 1, blockers: [w9Issue] }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, ready));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    expect(within(region).getByText('W-9 not on file (1)')).toBeTruthy();
+    expect(within(region).getByRole('link', { name: 'Open Ana Cruz' }).getAttribute('href')).toContain('/companies/7/employees/21/edit');
+    const signOff = screen.getByRole('region', { name: /Mark 1099s ready/ });
+    expect(within(signOff).getByText(w9Issue.message)).toBeTruthy();
+    expect(within(signOff).getByRole('link', { name: 'Open the contractor' }).getAttribute('href')).toContain('/companies/7/employees/21/edit');
+    expect(within(signOff).queryByRole('button', { name: /Mark 2026 1099s ready/ })).toBeNull();
+  });
+
+  it('undoes a link only after the reviewer confirms', async () => {
+    const people = step('people', 3, 'Employees and payees', 'done', {
+      data: peopleData({ linked_checks: [{ employee_id: 21, name: 'Ana Cruz', total: 2500, checks: [
+        { id: 41, check_number: '9001', payable_to: 'A. Cruz', payment_date: '2026-05-02', amount: 1500 },
+        { id: 42, check_number: '9002', payable_to: 'A. Cruz', payment_date: '2026-06-05', amount: 1000 },
+      ] }] }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, step('form_1099_ready', 4, 'Mark 1099s ready', 'action_needed', { issues: waitingReady.issues, data: readyData() })));
+    mocks.unlinkPayee.mockResolvedValue({ data: { employee: null, check_ids: [41, 42] } });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    fireEvent.click(within(region).getByRole('button', { name: /Show Employees and payees/ }));
+    fireEvent.click(await within(region).findByRole('button', { name: 'Undo link to Ana Cruz' }));
+    expect(mocks.unlinkPayee).not.toHaveBeenCalled();
+    fireEvent.click(within(region).getByRole('button', { name: 'Yes, undo the link' }));
+
+    // Names the contractor shown, so a stale undo can't clear a newer link to someone else.
+    await waitFor(() => expect(mocks.unlinkPayee).toHaveBeenCalledWith({ tax_year: 2026, employee_id: 21, check_ids: [41, 42] }, 7));
+    expect(await screen.findByText('Unlinked the checks from Ana Cruz.')).toBeTruthy();
+  });
+
+  it('lists what still blocks the 1099 sign-off, each with a link to its fix', async () => {
+    mocks.checklist.mockResolvedValue(load(openPeople, waitingReady));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Mark 1099s ready/ });
+    expect(within(region).getByText('Finish these 2 items first:')).toBeTruthy();
+    expect(within(region).getByRole('link', { name: 'Go to this payee' }).getAttribute('href')).toBe('#payee-non_employee_check-41');
+    expect(within(region).getByRole('link', { name: 'Go to this contractor' }).getAttribute('href')).toBe('#contractor-22');
+    expect(within(region).queryByRole('button', { name: /Mark 2026 1099s ready/ })).toBeNull();
+    // The links land on the payee's row.
+    expect(document.getElementById('payee-non_employee_check-41')).toBeTruthy();
+  });
+
+  it('marks the 1099s ready on the numbers shown, and offers a refresh when they changed', async () => {
+    const people = step('people', 3, 'Employees and payees', 'done', { data: peopleData() });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'action_needed', {
+      issues: [{ code: 'FORM_1099_NOT_MARKED_READY', message: 'Mark the 2026 1099s ready once the steps above are done.' }], data: readyData(),
+    });
+    const done = step('form_1099_ready', 4, 'Mark 1099s ready', 'done', {
+      data: readyData({ readiness: { tax_year: 2026, status: 'filing_ready', stale: false, marked_ready_at: '2026-11-19T02:00:00Z', marked_ready_by: 'Dafne', notes: 'Checked the W-9s', payee_count: 1, total_compensation: 4000 } }),
+    });
+    mocks.checklist.mockResolvedValueOnce(load(people, ready)).mockResolvedValueOnce(load(people, ready)).mockResolvedValue(load(people, done));
+    mocks.mark1099Ready
+      .mockRejectedValueOnce(new ApiError('Conflict', 409, undefined, { error: 'The 1099 payees, amounts or payer details changed since this page loaded. Review them again, then mark ready.' }))
+      .mockResolvedValue({ data: {} });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Mark 1099s ready/ });
+    const list = within(region).getByRole('list', { name: '1099s to be issued' });
+    expect(within(list).getByText('Ana Cruz')).toBeTruthy();
+    expect(within(list).getByText('SSN ending 7890 · includes 2 one-off checks')).toBeTruthy();
+    expect(within(list).getByText('$4,000.00')).toBeTruthy();
+    expect(within(list).getByText('Box 4 $50.00')).toBeTruthy();
+    expect(within(list).getByText('Under $2,000.00; gets a 1099 because tax was withheld.')).toBeTruthy();
+    fireEvent.change(within(region).getByLabelText('Notes (optional)'), { target: { value: 'Checked the W-9s' } });
+    fireEvent.click(within(region).getByRole('button', { name: 'Mark 2026 1099s ready' }));
+
+    const alert = await within(region).findByRole('alert');
+    expect(alert.textContent).toContain('changed since this page loaded');
+    expect(mocks.mark1099Ready).toHaveBeenCalledWith({ tax_year: 2026, inputs_fingerprint: 'fp-1', notes: 'Checked the W-9s' }, 7);
+    fireEvent.click(within(alert).getByRole('button', { name: 'Refresh checklist' }));
+    await waitFor(() => expect(mocks.checklist).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(within(screen.getByRole('region', { name: /Mark 1099s ready/ })).getByRole('button', { name: 'Mark 2026 1099s ready' }));
+    expect(await screen.findByText('Marked the 2026 1099s ready.')).toBeTruthy();
+    // A finished step folds to one line; opening it shows the sign-off.
+    const doneRegion = await screen.findByRole('region', { name: /Mark 1099s ready/ });
+    await waitFor(() => expect(within(doneRegion).getByText('Done')).toBeTruthy());
+    fireEvent.click(within(doneRegion).getByRole('button', { name: /Show Mark 1099s ready/ }));
+    expect(within(doneRegion).getByText(/Marked ready .* by Dafne: “Checked the W-9s”/)).toBeTruthy();
+  });
+
+  it('tells someone without client-management access who marks the 1099s ready', async () => {
+    const people = step('people', 3, 'Employees and payees', 'done', { data: peopleData() });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'action_needed', {
+      issues: waitingReady.issues, data: readyData({ unavailable_reason: 'A manager or admin marks the 1099s ready.' }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, ready));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Mark 1099s ready/ });
+    expect(within(region).getByText('A manager or admin marks the 1099s ready.')).toBeTruthy();
+    expect(within(region).queryByRole('button', { name: /Mark 2026 1099s ready/ })).toBeNull();
   });
 });

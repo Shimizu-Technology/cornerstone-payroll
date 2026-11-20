@@ -4252,6 +4252,28 @@ interface AuthApiUser {
   company_capabilities?: Record<string, string[]>;
 }
 
+export interface OneOffPayeeResolution {
+  employee: { id: number; name: string; created: boolean } | null;
+  check_ids: number[];
+}
+
+/** A contractor record made from a one-off payee's W-9. */
+export interface OneOffPayeeContractorInput {
+  contractor_type: 'individual' | 'business';
+  first_name: string;
+  middle_name?: string;
+  last_name: string;
+  business_name?: string;
+  /** The SSN (individual) or EIN (business), digits with or without dashes. */
+  tin: string;
+  address_line1: string;
+  address_line2?: string;
+  city: string;
+  state: string;
+  zip: string;
+  w9_on_file: boolean;
+}
+
 export const yearEndApi = {
   clients: (year: number) =>
     api.get<{ data: import('@/lib/year-end').YearEndClientsOverview }>('/admin/year_end/clients', { year }),
@@ -4259,6 +4281,18 @@ export const yearEndApi = {
     api.get<{ data: import('@/lib/year-end').YearEndChecklist }>('/admin/year_end/checklist', { year }, { companyId }),
   acknowledge: (input: { tax_year: number; warning_code: string; warning_digest: string; note: string }, companyId: number) =>
     api.post<{ data: unknown }>('/admin/year_end/acknowledgements', { acknowledgement: input }, { companyId }),
+  /** Links a one-off 1099 payee's checks to an existing contractor. */
+  linkOneOffPayee: (input: { tax_year: number; code: string; digest: string; employee_id: number }, companyId: number) =>
+    api.post<{ data: OneOffPayeeResolution }>('/admin/year_end/one_off_payees/link', { payee: input }, { companyId }),
+  /** Adds a contractor record from the payee's W-9 and links the checks to it. */
+  createOneOffPayeeContractor: (input: { tax_year: number; code: string; digest: string; contractor: OneOffPayeeContractorInput }, companyId: number) =>
+    api.post<{ data: OneOffPayeeResolution }>('/admin/year_end/one_off_payees/contractor', { payee: input }, { companyId }),
+  /** Undoes a link; the checks become a one-off payee again. employee_id is the contractor shown as linked. */
+  unlinkOneOffPayee: (input: { tax_year: number; employee_id: number; check_ids: number[] }, companyId: number) =>
+    api.post<{ data: OneOffPayeeResolution }>('/admin/year_end/one_off_payees/unlink', { payee: input }, { companyId }),
+  /** The 1099 sign-off, bound to the inputs the reviewer saw. */
+  markForm1099Ready: (input: { tax_year: number; inputs_fingerprint: string; notes?: string }, companyId: number) =>
+    api.post<{ data: import('@/lib/year-end').YearEnd1099Readiness }>('/admin/year_end/form_1099_mark_ready', { form_1099: input }, { companyId }),
   /** A "Print and file" document; the checklist names its admin endpoint and params. */
   downloadDocument: (download: { path: string; params: Record<string, string | number> }, companyId: number) => {
     if (!download.path.startsWith('/admin/')) return Promise.reject(new Error('This document has no download.'));

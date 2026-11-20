@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_20_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_20_140100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1508,6 +1508,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_130000) do
     t.index [ "updated_by_id" ], name: "index_form500_filings_on_updated_by_id"
   end
 
+  create_table "form_1099_filing_readinesses", force: :cascade do |t|
+    t.jsonb "attestation_history", default: [], null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "marked_ready_at"
+    t.bigint "marked_ready_by_id"
+    t.string "marked_ready_by_name"
+    t.text "notes"
+    t.integer "payee_count", default: 0, null: false
+    t.string "ready_fingerprint"
+    t.integer "tax_year", null: false
+    t.decimal "total_compensation", precision: 14, scale: 2, default: "0.0", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "tax_year" ], name: "idx_form_1099_filing_readinesses_unique_year", unique: true
+    t.index [ "marked_ready_by_id" ], name: "index_form_1099_filing_readinesses_on_marked_ready_by_id"
+    t.check_constraint "(ready_fingerprint IS NULL) = (marked_ready_at IS NULL)", name: "form_1099_filing_readinesses_mark_check"
+    t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "form_1099_filing_readinesses_year_check"
+  end
+
   create_table "general_transmittal_artifacts", force: :cascade do |t|
     t.bigint "byte_size", null: false
     t.bigint "company_id", null: false
@@ -2424,6 +2443,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_130000) do
     t.bigint "paid_by_id"
     t.bigint "pay_period_id"
     t.string "payable_to", null: false
+    t.bigint "payee_employee_id"
     t.date "payment_date"
     t.string "payment_method", default: "check", null: false
     t.string "payment_period_type", default: "none", null: false
@@ -2442,6 +2462,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_130000) do
     t.index [ "auto_generated_type" ], name: "index_non_employee_checks_on_auto_generated_type", where: "(auto_generated_type IS NOT NULL)"
     t.index [ "check_type" ], name: "index_non_employee_checks_on_check_type"
     t.index [ "company_id", "check_number" ], name: "idx_ne_checks_on_company_check_num", unique: true, where: "(check_number IS NOT NULL)"
+    t.index [ "company_id", "payee_employee_id" ], name: "idx_ne_checks_on_company_payee_employee", where: "(payee_employee_id IS NOT NULL)"
     t.index [ "company_id", "payment_date" ], name: "idx_ne_checks_on_company_payment_date"
     t.index [ "company_id", "payment_period_type", "tax_year", "tax_month" ], name: "idx_ne_checks_on_company_month"
     t.index [ "company_id", "payment_period_type", "tax_year", "tax_quarter" ], name: "idx_ne_checks_on_company_quarter"
@@ -4564,6 +4585,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_130000) do
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "year_end_acknowledgements_year_check"
   end
 
+  add_foreign_key "form_1099_filing_readinesses", "companies"
+  add_foreign_key "form_1099_filing_readinesses", "users", column: "marked_ready_by_id", on_delete: :nullify
+  add_foreign_key "non_employee_checks", "employees", column: [ "payee_employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_ne_checks_payee_employee_same_company"
   add_foreign_key "payroll_standing_changes", "companies"
   add_foreign_key "payroll_standing_changes", "employee_wage_rates", on_delete: :nullify
   add_foreign_key "payroll_standing_changes", "employees"

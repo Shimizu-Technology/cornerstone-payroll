@@ -255,11 +255,33 @@ module YearEnd
 
     # -- 1099 payees: the same population and checks as the checklist ------
 
+    # The 1099 sign-off is needed while some payee gets a 1099 and the ready
+    # mark does not match the current inputs: the checklist's rule.
     def payee_issues(company)
-      return [ { code: "PAYEES_UNAVAILABLE", label: "1099 payees could not be checked" } ] unless form_1099_threshold
+      sign_off = { code: "FORM_1099_NOT_MARKED_READY", label: "Mark 1099s ready" }
+      return [ { code: "PAYEES_UNAVAILABLE", label: "1099 payees could not be checked" }, sign_off ] unless form_1099_threshold
 
-      Array.new(contractors_missing_details[company.id].to_i) { { code: "PAYEE_DETAILS_MISSING", label: "1099 payees missing a TIN or address" } } +
-        Array.new(unidentified_one_off_payees[company.id].to_i) { { code: "PAYEE_IDENTITY_UNRESOLVED", label: "One-off 1099 payees to identify" } }
+      details = form_1099_payees.fetch(company.id, {})
+      issues = Array.new(details[:missing].to_i) { { code: "PAYEE_DETAILS_MISSING", label: "1099 payees missing a TIN or address" } } +
+        Array.new(details[:w9_missing].to_i) { { code: "PAYEE_W9_MISSING", label: "W-9 not on file" } } +
+        Array.new(details[:duplicate_tins].to_i) { { code: "PAYEE_DUPLICATE_TIN", label: "1099 payees sharing one TIN" } } +
+        Array.new(unidentified_one_off_payees[company.id].to_i) { { code: "PAYEE_IDENTITY_UNRESOLVED", label: "One-off 1099 payees to resolve" } }
+      # A one-off payee not yet resolved may still become a 1099.
+      may_be_due = details[:reportable].to_i.positive? || unidentified_one_off_payees[company.id].to_i.positive?
+      issues << sign_off if may_be_due && !form_1099_signed_off?(company)
+      issues
+    end
+
+    # A ready mark is checked against the live inputs only when there is one;
+    # that is the only per-client 1099 work the list does.
+    def form_1099_signed_off?(company)
+      return false unless form_1099_readinesses[company.id]&.marked?
+
+      Form1099NecFilingState.call(company: company, year: year).current?
+    end
+
+    def form_1099_readinesses
+      @form_1099_readinesses ||= Form1099FilingReadiness.where(company_id: form_1099_company_ids, tax_year: year).index_by(&:company_id)
     end
 
     def form_1099_company_ids
@@ -272,35 +294,53 @@ module YearEnd
       @form_1099_threshold = InformationReturnThreshold.find_by(form_type: "1099_nec", tax_year: year)&.threshold_amount&.to_d
     end
 
-    # Form1099NecAggregator's reportable payroll contractors, for every
-    # 1099 client at once.
-    def contractors_missing_details
-      @contractors_missing_details ||= begin
-        totals = if form_1099_company_ids.empty? || form_1099_threshold.nil?
-          {}
-        else
+    # Form1099NecAggregator's reportable contractors (payroll plus linked
+    # one-off checks), for every 1099 client at once: how many there are, how
+    # many lack a TIN or address, how many have no W-9 on file, and how many
+    # groups share one TIN.
+    def form_1099_payees
+      @form_1099_payees ||= begin
+        totals = Hash.new(0.to_d)
+        withholding = Hash.new(0.to_d)
+        unless form_1099_company_ids.empty? || form_1099_threshold.nil?
           PayrollItem.joins(:pay_period)
             .where(company_id: form_1099_company_ids, employment_type: "contractor")
             .financially_reportable
             .where(pay_periods: { id: PayPeriod.reportable_committed.where(company_id: form_1099_company_ids, pay_date: year_range).select(:id) })
             .group(:employee_id)
             .pluck(:employee_id, Arel.sql("SUM(gross_pay)"), Arel.sql("SUM(COALESCE(withholding_tax, 0))"))
+            .each do |employee_id, gross, withheld|
+              totals[employee_id] += gross.to_d
+              withholding[employee_id] += withheld.to_d
+            end
+          OneOffPayees.linked_totals(issued_contractor_checks.select { |check| check.company_id.in?(form_1099_company_ids) })
+            .each { |(_company_id, employee_id), total| totals[employee_id] += total }
         end
-        reportable_ids = totals.filter_map { |id, gross, withheld| id if gross.to_d >= form_1099_threshold || !withheld.to_d.zero? }
-        Employee.where(id: reportable_ids).each_with_object(Hash.new(0)) do |employee, counts|
-          missing_tin = !(employee.valid_filing_ssn? || employee.contractor_ein.present?)
-          missing_address = [ employee.address_line1, employee.city, employee.state, employee.zip ].any?(&:blank?)
-          counts[employee.company_id] += 1 if missing_tin || missing_address
+        # The aggregator's rule: the threshold after linked checks, or any withholding.
+        reportable_ids = totals.keys.select { |id| totals[id].round(2) >= form_1099_threshold || !withholding[id].zero? }
+        Employee.where(company_id: form_1099_company_ids, id: reportable_ids).group_by(&:company_id).transform_values do |employees|
+          {
+            reportable: employees.length,
+            missing: employees.count { |employee| employee.form_1099_tin.nil? || [ employee.address_line1, employee.city, employee.state, employee.zip ].any?(&:blank?) },
+            w9_missing: employees.count { |employee| !employee.w9_on_file? },
+            duplicate_tins: Form1099NecAggregator.duplicate_tin_groups(employees).length
+          }
         end
       end
     end
 
-    # Form1099NecAggregator's one-off contractor payees (printed or paid
-    # contractor checks, grouped by exact payee name) that reach the
-    # threshold, for every candidate company whatever its decision. One query.
+    # Printed or paid contractor checks of every candidate company, linked or
+    # not, in one query.
+    def issued_contractor_checks
+      @issued_contractor_checks ||= OneOffPayees.issued_checks(accessible_companies.reject(&:test_workspace?).map(&:id), year)
+    end
+
+    # Form1099NecAggregator's unlinked one-off contractor payees (printed or
+    # paid contractor checks, grouped by exact payee name) that reach the
+    # threshold, for every candidate company whatever its decision.
     def reportable_one_off_groups
       @reportable_one_off_groups ||= OneOffPayees.reportable_groups(
-        OneOffPayees.issued_check_groups(accessible_companies.reject(&:test_workspace?).map(&:id), year), form_1099_threshold
+        OneOffPayees.issued_check_groups([], year, checks: issued_contractor_checks), form_1099_threshold
       )
     end
 

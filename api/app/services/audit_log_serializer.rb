@@ -23,7 +23,8 @@ class AuditLogSerializer
       organization_name: log.organization&.name,
       company_id: log.company_id,
       company_name: log.company&.name,
-      metadata: log.metadata,
+      # A year-end filing download never shows an unkeyed file hash (FilingFileDigest).
+      metadata: FilingFileDigest.redact_audit_metadata(log.action, log.metadata),
       ip_address: log.ip_address,
       user_agent: log.user_agent,
       request_id: log.request_id,

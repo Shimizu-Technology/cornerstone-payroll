@@ -181,7 +181,7 @@ module Api
                   log.company&.name,
                   log.ip_address,
                   log.request_id,
-                  log.metadata.to_json
+                  FilingFileDigest.redact_audit_metadata(log.action, log.metadata).to_json
                 ].map { |value| csv_safe(value) })
               end
 
