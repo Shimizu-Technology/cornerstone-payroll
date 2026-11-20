@@ -29,10 +29,13 @@ module YearEnd
       Integer(year) >= FIRST_TAX_YEAR
     end
 
-    def initialize(company:, year:, user: nil)
+    # `responsibilities` lets the clients list pass its grouped decisions
+    # (filing type => record) instead of loading them again per client.
+    def initialize(company:, year:, user: nil, responsibilities: nil)
       @company = company
       @year = Integer(year)
       @user = user
+      @responsibilities = responsibilities
     end
 
     # The clients list counts the same "things to fix": each decision, employer
@@ -46,13 +49,15 @@ module YearEnd
       # Taken before the steps run, so a change made while they run leaves
       # the list asking for a re-check.
       revision = InputRevision.for(company.id, year)[company.id]
+      readiness = EfileCheck.current_readiness_stamp(company.id, year)
       steps = build_steps
+      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(steps), readiness: readiness) if year == 2026 && files?("w2_gu")
       status = overall_status(steps)
       # Lets the clients list keep showing Ready until any input changes, and
       # stops it showing Ready once a run finds something.
       status == "ready" ? ReadyCheck.record(company.id, year, revision) : ReadyCheck.clear(company.id, year)
       issue_count = steps.reject { |step| step[:key].in?(SIGN_OFF_STEPS) }.sum { |step| step[:issues].length } +
-        (steps.any? { |step| step[:key].in?(SIGN_OFF_STEPS) && step[:status] == "action_needed" } ? 1 : 0)
+        (sign_off_needed?(steps) ? 1 : 0)
       next_step = steps.find { |step| step[:status] == "action_needed" }
 
       {
@@ -76,11 +81,62 @@ module YearEnd
       raise
     end
 
-    # Blockers the W-2GU "mark ready" action enforces. Preflight still owns
-    # employee SSN/address, and the 1099 decision and payee details never
-    # hold up the W-2s.
+    # Blockers the W-2GU "mark ready" action enforces, including the people
+    # step's e-file problems. The 1099 decision and payee details never hold
+    # up the W-2s.
     def w2_mark_ready_blockers
-      w2_blockers_from(steps_before_ready)
+      revision = InputRevision.for(company.id, year)[company.id]
+      readiness = EfileCheck.current_readiness_stamp(company.id, year)
+      blockers = w2_blockers_from(steps_before_ready)
+      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(build_steps), readiness: readiness) if year == 2026 && files?("w2_gu")
+      blockers
+    end
+
+    # The W-2 sign-off group (reconciliation, warnings, overlap, mark ready)
+    # still has something to do. Both e-file cache writers use this one rule.
+    def sign_off_needed?(steps)
+      steps.any? { |step| step[:key].in?(SIGN_OFF_STEPS) && step[:status] == "action_needed" }
+    end
+
+    def efw2_employer_issues
+      return [] unless year == 2026 && files?("w2_gu")
+
+      Efw2Formatting.employer_problems(company, structured: true).reject do |problem|
+        case problem[:code]
+        when :ein_invalid then company.ein.blank?
+        when :phone_invalid then company.phone.blank?
+        when :email_invalid then company.email.blank?
+        when :contact_name_missing then company.filing_contact_name.blank?
+        when :address_missing, :address_invalid
+          [ company.address_line1, company.city, company.state, company.zip ].any?(&:blank?)
+        else false
+        end
+      end.map do |problem|
+        field = if problem[:code] == :ein_invalid
+          "ein"
+        elsif problem[:code].in?(%i[address_missing address_invalid state_invalid])
+          "address"
+        end
+        issue("EMPLOYER_EFILE_INVALID", problem[:message], field: field)
+      end
+    end
+
+    def efw2_people_issues
+      missing = w2_employees.to_h { |employee| [ employee.id, person_row(employee, w2: true)&.fetch(:missing_fields, []) || [] ] }
+      efw2_problems.filter_map do |problem|
+        message = problem[:message]
+        next unless problem[:scope] == :employee
+        fields = missing.fetch(problem[:employee_id], [])
+        next if (fields.include?("ssn") && problem[:code] == :ssn_invalid) || (fields.include?("address") && problem[:code].in?(%i[address_missing address_invalid]))
+
+        issue("EMPLOYEE_EFILE_INVALID", message, employee_id: problem[:employee_id])
+      end
+    end
+
+    def efw2_problems
+      return [] unless year == 2026 && files?("w2_gu") && w2_report
+
+      @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).structured_problems.reject { |problem| problem[:scope] == :submitter }
     end
 
     private
@@ -113,7 +169,7 @@ module YearEnd
 
     def w2_blockers_from(steps)
       steps
-        .select { |step| step[:key].in?(%w[filing_decision employer reconciliation review_warnings prior_provider]) }
+        .select { |step| step[:key].in?(%w[filing_decision employer people reconciliation review_warnings prior_provider]) }
         .flat_map { |step| step[:issues] }
         .reject { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) }
     end
@@ -191,6 +247,10 @@ module YearEnd
       if company.email.blank?
         issues << issue("EMPLOYER_EMAIL_MISSING", files?("w2_gu") ? "Add the employer email for the W-3SS contact." : "Add the employer email for the Form 1096 contact.", field: "email")
       end
+      if files?("w2_gu") && company.filing_contact_name.blank?
+        issues << issue("EMPLOYER_CONTACT_NAME_MISSING", "Add the employer filing contact name.", field: "filing_contact_name")
+      end
+      issues += efw2_employer_issues
       forms = [ ("W-2" if files?("w2_gu")), ("1099" if files?("form_1099")) ].compact.join(" and ")
 
       step(
@@ -200,7 +260,8 @@ module YearEnd
           name: company.name, ein: company.ein,
           address_line1: company.address_line1, address_line2: company.address_line2,
           city: company.city, state: company.state, zip: company.zip,
-          phone: company.phone, email: company.email
+          phone: company.phone, email: company.email,
+          filing_contact_name: company.filing_contact_name, kind_of_employer: company.kind_of_employer, employment_code: company.employment_code, establishment_number: company.establishment_number
         }
       )
     end
@@ -245,6 +306,7 @@ module YearEnd
         issue("PAYEE_DETAILS_MISSING", "#{row[:name]} is missing #{row[:missing_fields].map { |field| field == 'ssn' ? 'a TIN' : 'an address' }.to_sentence}.",
               employee_id: row[:employee_id])
       end
+      issues += efw2_people_issues
       payees = files?("form_1099") ? one_off_payees : []
       issues += payees.reject { |payee| payee[:status] == "identified" }.map do |payee|
         issue("PAYEE_IDENTITY_UNRESOLVED", one_off_payee_message(payee), warning_code: payee[:code])
@@ -333,8 +395,9 @@ module YearEnd
 
       @w2_report = begin
         W2GuAggregator.new(company, year).generate
-      rescue ArgumentError => e
-        @w2_report_error = e.message
+      rescue StandardError => e
+        Rails.logger.error("W-2 checklist failed company_id=#{company.id} tax_year=#{year} error_class=#{e.class.name}")
+        @w2_report_error = "W-2 totals could not be loaded. Open the W-2GU report to check payroll, then reload this checklist."
         nil
       end
     end
@@ -503,7 +566,7 @@ module YearEnd
     def w2_readiness
       @w2_readiness ||= begin
         readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
-        [ readiness, (W2FilingInputsFingerprint.new(company: company, year: year, report: w2_report).call if readiness) ]
+        [ readiness, (W2FilingInputsFingerprint.new(company: company, year: year, report: w2_report).call if readiness && w2_report) ]
       end
     end
 
@@ -524,7 +587,7 @@ module YearEnd
       summary = if practice
         "This is a practice copy, so every document is a draft. Review them, but don't hand them out or file them."
       elsif final
-        "The #{year} W-2s are marked ready. Print each document below."
+        "The #{year} W-2s are marked ready. Download each document below."
       else
         "Drafts until the W-2s are marked ready in step 7. Review them, but don't hand them out yet."
       end
@@ -562,11 +625,40 @@ module YearEnd
         }
       ].map do |document|
         drt = document[:key] == "w2_drt_copy_1"
-        # Test and practice workspaces never produce full SSNs.
         reason = unavailable || (drt_unavailable_reason if drt)
         document.merge(
           format: "pdf", draft: !final, available: reason.nil?, unavailable_reason: reason,
           download: { path: "/admin/reports/#{drt ? 'w2_gu_copy_1_drt' : 'w2_gu_employee_copies'}", params: { year: year } }
+        )
+      end + wage_filing_documents(final, unavailable)
+    end
+
+    def wage_filing_documents(final, unavailable)
+      confirmation = "Test file only — review it, but don't upload it as your filing."
+      [
+        {
+          key: "w2_efile", title: "W-2 e-file (SSA and GuamTax)", format: "txt",
+          description: "One wage file to upload to SSA (BSO) and GuamTax after the W-2s are marked ready.",
+          detail: "Check a draft in AccuWage first. Each download is recorded in the activity log.",
+          contains_full_ssn: true, draft_confirmation: confirmation, path: "/admin/reports/w2_gu_efw2"
+        },
+        {
+          key: "w3ss_totals", title: "W-3SS totals (for your records)", format: "pdf",
+          description: "Keep this totals sheet with your filing records; it is not an agency filing.",
+          detail: "The employer totals come from the same W-2 wages as the e-file.",
+          contains_full_ssn: false, path: "/admin/reports/w3ss_pdf"
+        }
+      ].map do |document|
+        restriction = if document[:contains_full_ssn]
+          drt_unavailable_reason
+        elsif company.test_workspace?
+          "Not available in a practice copy."
+        end
+        reason = unavailable || restriction
+        document.except(:path).merge(
+          draft: !final, draft_confirmation: final ? nil : document[:draft_confirmation],
+          available: reason.nil?, unavailable_reason: reason,
+          download: { path: document[:path], params: { year: year, mode: final ? "final" : "draft" } }
         )
       end
     end

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { AlertCircle, ArrowRight, CheckCircle2, ClipboardList, RefreshCw } from 'lucide-react';
+import { FilingSubmitterCard } from '@/components/year-end/FilingSubmitterCard';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -55,13 +56,16 @@ function IssueChips({ row }: { row: YearEndClientRow }): ReactElement | null {
   }
   if (row.issue_summary.length === 0) return null;
   return (
-    <ul className="flex flex-wrap gap-1.5" aria-label={`What is left for ${row.name}`}>
-      {row.issue_summary.map((item) => (
-        <li key={item.code}>
-          <Badge variant="outline" wrap>{issueChipLabel(item)}</Badge>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-2">
+      <ul className="flex flex-wrap gap-1.5" aria-label={`What is left for ${row.name}`}>
+        {row.issue_summary.map((item) => (
+          <li key={item.code}>
+            <Badge variant="outline" wrap>{issueChipLabel(item)}</Badge>
+          </li>
+        ))}
+      </ul>
+      {row.efile_check_pending && <p className="text-sm text-neutral-700">More may show after the employee e-file check.</p>}
+    </div>
   );
 }
 
@@ -193,20 +197,26 @@ export function YearEnd(): ReactElement {
         contextValue={String(year)}
         mobileSticky={false}
         actions={(
-          <div className="w-32">
-            <Select
-              label="Tax year"
-              value={String(year)}
-              onChange={(event) => setSearchParams({ year: event.target.value })}
-              className="min-h-11"
-            >
-              {yearEndTaxYears().map((option) => <option key={option} value={option}>{option}</option>)}
-            </Select>
+          <div className="flex items-end gap-2">
+            <Button variant="outline" disabled={loading} onClick={() => setAttempt((value) => value + 1)}>
+              <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Refresh
+            </Button>
+            <div className="w-32">
+              <Select
+                label="Tax year"
+                value={String(year)}
+                onChange={(event) => setSearchParams({ year: event.target.value })}
+                className="min-h-11"
+              >
+                {yearEndTaxYears().map((option) => <option key={option} value={option}>{option}</option>)}
+              </Select>
+            </div>
           </div>
         )}
       />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+        <FilingSubmitterCard />
         {error && (
           <Card role="alert" className="border-danger-200 bg-danger-50/40 p-4 sm:p-5">
             <p className="flex gap-2 font-semibold text-danger-800"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />The year-end list could not be loaded.</p>

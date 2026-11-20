@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_19_120100) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_20_080000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -560,6 +560,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_19_120100) do
   end
 
   create_table "companies", force: :cascade do |t|
+    t.string "establishment_number"
+    t.string "employment_code", default: "R", null: false
+    t.string "kind_of_employer", default: "N", null: false
+    t.string "filing_contact_name"
     t.boolean "active", default: true
     t.bigint "active_printer_profile_id"
     t.string "address_line1"
@@ -1230,6 +1234,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_19_120100) do
   end
 
   create_table "employees", force: :cascade do |t|
+    t.string "name_suffix"
     t.decimal "additional_withholding", precision: 10, scale: 2, default: "0.0"
     t.string "address_line1"
     t.string "address_line2"
@@ -1402,6 +1407,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_19_120100) do
     t.datetime "updated_at", null: false
     t.index [ "annual_tax_config_id", "filing_status" ], name: "idx_filing_status_configs_unique", unique: true
     t.index [ "annual_tax_config_id" ], name: "index_filing_status_configs_on_annual_tax_config_id"
+  end
+
+  create_table "filing_submitters", force: :cascade do |t|
+    t.bigint "organization_id", null: false
+    t.string "ein"
+    t.string "name"
+    t.string "address_line1"
+    t.string "address_line2"
+    t.string "city"
+    t.string "state"
+    t.string "zip"
+    t.string "contact_name"
+    t.string "contact_phone"
+    t.string "contact_email"
+    t.string "bso_user_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["organization_id"], name: "index_filing_submitters_on_organization_id", unique: true
   end
 
   create_table "finance_api_requests", force: :cascade do |t|
@@ -4698,6 +4721,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_19_120100) do
   add_foreign_key "expenses", "users", column: "created_by_id"
   add_foreign_key "expenses", "users", column: "updated_by_id"
   add_foreign_key "filing_status_configs", "annual_tax_configs"
+  add_foreign_key "filing_submitters", "organizations"
   add_foreign_key "finance_api_requests", "finance_api_tokens"
   add_foreign_key "finance_api_requests", "finance_api_tokens", column: [ "finance_api_token_id", "finance_book_id" ], primary_key: [ "id", "finance_book_id" ], name: "fk_finance_api_requests_token_book"
   add_foreign_key "finance_api_requests", "finance_books"

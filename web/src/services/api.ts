@@ -3361,6 +3361,11 @@ export interface PayrollFinalRecord {
   completion: { status: 'attention_required' | 'in_progress' | 'complete'; blockers: string[]; open_items: string[] };
 }
 
+export const filingSubmitterApi = {
+  get: () => api.get<{ exists: boolean; profile: Record<string, string | null>; missing_fields: string[]; problems?: string[]; can_edit: boolean }>('/admin/filing_submitter'),
+  update: (profile: Record<string, string | null>) => api.patch('/admin/filing_submitter', { profile }),
+};
+
 export const reportsApi = {
   dashboard: () =>
     api.get<DashboardResponse>('/admin/reports/dashboard'),

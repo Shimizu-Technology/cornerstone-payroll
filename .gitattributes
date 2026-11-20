@@ -1,1 +1,4 @@
 *.pdf binary
+
+# Fixed-width SSA golden records intentionally end in padding spaces.
+api/spec/fixtures/efw2_2026_golden.txt whitespace=-blank-at-eol

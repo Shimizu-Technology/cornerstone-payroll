@@ -36,6 +36,7 @@ class W2FilingInputsFingerprint
       rule_version: RULE_VERSION,
       ss_wage_base: AnnualTaxConfig.for_year(year)&.ss_wage_base || W2GuAggregator::SS_WAGE_BASE_BY_YEAR[year],
       report: report,
+      filing_settings: company.attributes.slice("filing_contact_name", "phone", "email", "kind_of_employer", "employment_code", "establishment_number"),
       locked_history: company.historical_import_batches.joins(:historical_paychecks)
         .where(status: "locked", historical_paychecks: { pay_date: year_range }).distinct.order(:id).map do |batch|
           {
@@ -46,7 +47,7 @@ class W2FilingInputsFingerprint
         end,
       identities: Employee.where(company_id: company.id, id: ids).order(:id).map do |employee|
         # Full SSN matters even when its displayed last four digits are unchanged.
-        employee.attributes.slice("id", "first_name", "last_name", "address_line1", "address_line2", "city", "state", "zip")
+        employee.attributes.slice("id", "first_name", "middle_name", "last_name", "name_suffix", "address_line1", "address_line2", "city", "state", "zip")
           .merge("ssn" => employee.ssn_digits)
       end,
       items: PayrollItem.joins(:pay_period).includes(:pay_period).where(company_id: company.id)

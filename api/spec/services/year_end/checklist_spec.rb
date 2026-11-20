@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe YearEnd::Checklist do
+  before { allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new) }
+
   let(:company) { create(:company, ein: "98-7654321") }
   let(:department) { create(:department, company: company) }
   let(:employee) { create(:employee, company: company, department: department) }
@@ -38,6 +40,54 @@ RSpec.describe YearEnd::Checklist do
     result[:steps].find { |entry| entry[:key] == key }
   end
 
+  it "keeps the clients list and checklist in parity with a NULL filing contact" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    company.update_columns(filing_contact_name: nil)
+    result = checklist
+    row = YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:clients].find { |entry| entry[:company_id] == company.id }
+    expect(row[:issue_count]).to eq(result[:issue_count])
+    expect(row[:status]).to eq(result[:status])
+    expect(step(result, "employer")[:issues]).to include(a_hash_including(code: "EMPLOYER_CONTACT_NAME_MISSING"))
+  end
+
+  it "contains an aggregator failure without logging private employee data" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    allow(W2GuAggregator).to receive(:new).and_raise(RuntimeError, "private SSN")
+    W2FilingReadiness.create!(company: company, year: 2026)
+    expect(Rails.logger).to receive(:error).with(/error_class=RuntimeError/)
+    result = checklist
+    expect(step(result, "reconciliation")[:status]).to eq("action_needed")
+    expect(result.to_s).not_to include("private SSN")
+  end
+
+  it "keeps cached e-file issue counts in parity and invalidates them on edits" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    employee.update!(state: "ZZ")
+    result = checklist
+    overview = -> { YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:clients].find { |row| row[:company_id] == company.id } }
+    expect(overview.call[:issue_count]).to eq(result[:issue_count])
+    expect(overview.call[:issue_summary]).to include(hash_including(code: "EMPLOYEE_EFILE_INVALID"))
+    employee.update!(state: "GU")
+    expect(overview.call).to include(status: "needs_action", efile_check_pending: true)
+    result = checklist
+    expect(overview.call[:issue_count]).to eq(result[:issue_count])
+  end
+
+  it "keeps employee e-file issues for people named Employer Jones and Submitter Jones" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    %w[Employer Submitter].each do |first_name|
+      employee.update!(first_name: first_name, last_name: "Jones", state: "ZZ")
+      result = checklist
+      expect(step(result, "people")[:issues]).to include(hash_including(code: "EMPLOYEE_EFILE_INVALID", employee_id: employee.id, message: /#{first_name}.*Jones/))
+      row = YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:clients].find { |entry| entry[:company_id] == company.id }
+      expect(row).to include(status: result[:status], issue_count: result[:issue_count])
+    end
+  end
+
   it "requires the filing decision before anything else" do
     pay(Date.new(2026, 3, 6))
 
@@ -69,6 +119,30 @@ RSpec.describe YearEnd::Checklist do
       expect(step(result, "mark_ready").dig(:data, :can_mark_ready)).to be(true)
       expect(result[:status]).to eq("needs_action")
       expect(described_class.new(company: company, year: 2026).w2_mark_ready_blockers).to be_empty
+    end
+
+    it "stores the same sign-off flag whether the checklist or a mark-ready attempt writes the e-file check" do
+      allow_any_instance_of(described_class).to receive(:reconciliation_step).and_wrap_original do |original, *args|
+        original.call(*args).merge(status: "action_needed")
+      end
+      described_class.new(company: company, year: 2026).w2_mark_ready_blockers
+      after_attempt = Rails.cache.read(YearEnd::EfileCheck.key(company.id, 2026))
+      checklist
+      after_checklist = Rails.cache.read(YearEnd::EfileCheck.key(company.id, 2026))
+
+      expect(after_attempt[:sign_off_needed]).to be(true)
+      expect(after_attempt[:sign_off_needed]).to eq(after_checklist[:sign_off_needed])
+    end
+
+    it "stamps the cached sign-off flag with the ready mark it was computed against" do
+      described_class.new(company: company, year: 2026).w2_mark_ready_blockers
+      expect(Rails.cache.read(YearEnd::EfileCheck.key(company.id, 2026))[:readiness]).to be_nil
+
+      readiness = W2FilingReadiness.create!(company: company, year: 2026, status: "filing_ready", marked_ready_at: Time.current,
+        ready_fingerprint: "a" * 64, marked_ready_by: accountant)
+      checklist
+
+      expect(Rails.cache.read(YearEnd::EfileCheck.key(company.id, 2026))[:readiness]).to eq(YearEnd::EfileCheck.readiness_stamp(readiness))
     end
 
     it "still blocks the W-2s on a real W-2 problem" do
@@ -163,7 +237,7 @@ RSpec.describe YearEnd::Checklist do
 
     expect(step(result, "employer")[:issues].map { |issue| issue[:code] }).to eq(%w[EMPLOYER_EIN_MISSING EMPLOYER_PHONE_MISSING])
     people = step(result, "people")
-    expect(people[:issues]).to contain_exactly(a_hash_including(code: "EMPLOYEE_DETAILS_MISSING", employee_id: worker.id))
+    expect(people[:issues]).to include(a_hash_including(code: "EMPLOYEE_DETAILS_MISSING", employee_id: worker.id))
     expect(people.dig(:data, :employees, 0)).to include(employee_id: worker.id, missing_fields: %w[ssn address])
     expect(people.to_json).not_to include("ssn_encrypted")
 
@@ -173,7 +247,7 @@ RSpec.describe YearEnd::Checklist do
     expect(step(result, "employer")[:status]).to eq("done")
     expect(step(result, "people").dig(:data, :employees, 0, :missing_fields)).to eq(%w[ssn])
 
-    worker.update_columns(ssn_encrypted: "900-70-1234")
+    worker.update_columns(ssn_encrypted: "123-70-1234")
     expect(step(checklist, "people")[:status]).to eq("done")
   end
 
@@ -417,16 +491,21 @@ RSpec.describe YearEnd::Checklist do
       expect(print_step).to include(status: "available", number: 8, title: "Print and file", issues: [])
       expect(print_step.dig(:data, :final)).to be(false)
       documents = print_step.dig(:data, :documents)
-      expect(documents.map { |document| document[:key] }).to eq(%w[w2_employee_copies w2_drt_copy_1])
+      expect(documents.map { |document| document[:key] }).to eq(%w[w2_employee_copies w2_drt_copy_1 w2_efile w3ss_totals])
       expect(documents.first).to include(
         title: "Employee copies (B and C)", description: "Print and give to each employee by Feb 1, 2027.",
         contains_full_ssn: false, draft: true, available: true, unavailable_reason: nil,
         download: { path: "/admin/reports/w2_gu_employee_copies", params: { year: 2026 } }
       )
       # An accountant without client management can't download full SSNs.
-      expect(documents.last).to include(title: "Copy 1 for Guam DRT", description: "Your record; not mailed when you e-file.",
+      expect(documents[1]).to include(title: "Copy 1 for Guam DRT", description: "Your record; not mailed when you e-file.",
         contains_full_ssn: true, draft: true, available: false, unavailable_reason: "Needs client-management access (contains full SSNs).",
         download: { path: "/admin/reports/w2_gu_copy_1_drt", params: { year: 2026 } })
+      expect(documents[2]).to include(format: "txt", contains_full_ssn: true, available: false,
+        draft_confirmation: a_string_including("Test file only"),
+        download: { path: "/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" } })
+      expect(documents[3]).to include(title: "W-3SS totals (for your records)", available: true, draft_confirmation: nil,
+        download: { path: "/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" } })
       expect(result).to include(status: "needs_action", next_step: "mark_ready", issue_count: 1)
 
       fingerprint = W2FilingInputsFingerprint.new(company: company, year: 2026).call
@@ -436,7 +515,9 @@ RSpec.describe YearEnd::Checklist do
       result = checklist
       expect(result).to include(status: "ready", issue_count: 0, next_step: nil)
       expect(step(result, "print_and_file").dig(:data, :final)).to be(true)
-      expect(step(result, "print_and_file").dig(:data, :documents).map { |document| document[:draft] }).to eq([ false, false ])
+      expect(step(result, "print_and_file").dig(:data, :documents)[2]).to include(draft_confirmation: nil,
+        download: { path: "/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "final" } })
+      expect(step(result, "print_and_file").dig(:data, :documents).map { |document| document[:draft] }).to eq([ false, false, false, false ])
     end
 
     it "offers Copy 1 to staff who may sign off the W-2s" do
@@ -445,7 +526,8 @@ RSpec.describe YearEnd::Checklist do
       manager = create(:user, company: company, organization: company.organization, role: "manager")
 
       documents = step(described_class.new(company: company.reload, year: 2026, user: manager).call, "print_and_file").dig(:data, :documents)
-      expect(documents.last).to include(available: true, unavailable_reason: nil)
+      expect(documents[1]).to include(available: true, unavailable_reason: nil)
+      expect(documents[2]).to include(available: true, unavailable_reason: nil)
     end
 
     it "keeps a practice copy's documents drafts and withholds Copy 1" do
@@ -461,9 +543,11 @@ RSpec.describe YearEnd::Checklist do
       print_step = step(described_class.new(company: company.reload, year: 2026, user: admin).call, "print_and_file")
       expect(print_step[:summary]).to start_with("This is a practice copy")
       expect(print_step.dig(:data, :final)).to be(false)
-      employee_copies, copy_1 = print_step.dig(:data, :documents)
+      employee_copies, copy_1, efile, totals = print_step.dig(:data, :documents)
       expect(employee_copies).to include(draft: true, available: true)
       expect(copy_1).to include(draft: true, available: false, unavailable_reason: "Not available in a practice copy — it contains full SSNs.")
+      expect(efile).to include(draft: true, available: false, unavailable_reason: "Not available in a practice copy — it contains full SSNs.")
+      expect(totals).to include(draft: true, available: false, unavailable_reason: "Not available in a practice copy.")
     end
 
     # IRS General Instructions for Forms W-2 and W-3 (2026), Box 14b: with

@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 # 1. TypeScript check
 echo "📘 TypeScript type checking..."
-npx tsc --noEmit
+npm run typecheck
 echo "✅ TypeScript: OK"
 echo ""
 
