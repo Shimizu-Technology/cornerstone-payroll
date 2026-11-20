@@ -18,7 +18,14 @@ module Api
           invoices = invoices.where(archived: ActiveModel::Type::Boolean.new.cast(params[:archived])) if params.key?(:archived)
 
           rows = invoices.map { |invoice| InvoicePayloadBuilder.call(invoice) }
-          rows.select! { |row| row[:status] == params[:status] } if params[:status].present?
+          if params[:status] == "overdue"
+            rows.select! do |row|
+              row[:base_status] == "open" && row[:balance_due].positive? &&
+                row[:due_date].present? && row[:due_date] < PayrollBusinessClock.today
+            end
+          elsif params[:status].present?
+            rows.select! { |row| row[:status] == params[:status] }
+          end
 
           render json: { invoices: rows }
         end
@@ -135,7 +142,7 @@ module Api
           when "open", "generated"
             InvoiceArtifactStorageService.new.issue_native!(invoice: @invoice, actor: current_user)
           when "voided"
-            @invoice.void!(actor: current_user, reason: params[:reason].presence || "Voided by operator")
+            @invoice.void!(actor: current_user, reason: params[:reason])
           when "uncollectible"
             @invoice.mark_uncollectible!(actor: current_user, reason: params[:reason].presence || "Marked uncollectible by operator")
           when "archived"
