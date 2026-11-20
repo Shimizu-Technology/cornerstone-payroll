@@ -80,8 +80,28 @@ RSpec.describe "Wage filing files", type: :request do
     expect(response.headers["Content-Disposition"]).to include("DRAFT")
     log = AuditLog.find_by!(action: "efw2#download")
     expect(log.user_id).to eq(user.id)
-    expect(log.metadata["sha256"]).to eq(Digest::SHA256.hexdigest(response.body))
+    expect(log.metadata).to include("file_digest" => FilingFileDigest.call(response.body), "digest_alg" => "hmac-sha256-v1")
+    expect(log.metadata).not_to have_key("sha256")
+    expect(log.metadata.to_json).not_to include(Digest::SHA256.hexdigest(response.body))
+    expect(FilingFileDigest.matches?(response.body, log)).to be(true)
     expect(log.metadata.to_json).not_to include("123456789")
+  end
+
+  it "keeps the SSN out of reach of someone who rebuilds the file from the audit row" do
+    get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }
+    expect(response).to have_http_status(:ok)
+    log = AuditLog.find_by!(action: "efw2#download")
+    # The file is deterministic: anyone with the visible data could rebuild it.
+    rebuilt = Efw2W2GuGenerator.new(company: company, year: 2026, submitter: FilingSubmitter.find_by!(organization_id: company.organization_id), report: report).generate
+    expect(rebuilt).to eq(response.body)
+    # An offline guess hashed without the server key matches nothing in the row.
+    expect(log.metadata.values.map(&:to_s)).not_to include(Digest::SHA256.hexdigest(rebuilt))
+    guess = rebuilt.sub("123456789", "123456788")
+    expect(guess).not_to eq(rebuilt)
+    expect(log.metadata.values.map(&:to_s)).not_to include(Digest::SHA256.hexdigest(guess))
+    # Only the server, holding the key, can tie the bytes to the download.
+    expect(FilingFileDigest.matches?(rebuilt, log)).to be(true)
+    expect(FilingFileDigest.matches?(guess, log)).to be(false)
   end
 
   it "requires a current readiness fingerprint for final files" do
@@ -112,7 +132,9 @@ RSpec.describe "Wage filing files", type: :request do
     reader = PDF::Reader.new(StringIO.new(response.body))
     expect(reader.pages.length).to eq(1)
     expect(reader.pages.first.text).to include("For your records", "2026", "100.00", "150.00")
-    expect(AuditLog.find_by!(action: "w3ss#download").metadata["sha256"]).to eq(Digest::SHA256.hexdigest(response.body))
+    metadata = AuditLog.find_by!(action: "w3ss#download").metadata
+    expect(metadata).to include("file_digest" => FilingFileDigest.call(response.body), "digest_alg" => "hmac-sha256-v1")
+    expect(metadata).not_to have_key("sha256")
   end
 
   it "uses the reports authorization for client users" do

@@ -110,6 +110,9 @@ RSpec.describe "W-2GU official copies", type: :request do
         "inputs_fingerprint" => readiness.ready_fingerprint, "ready_fingerprint" => readiness.ready_fingerprint,
         "readiness_status" => "filing_ready", "employee_count" => 1
       )
+      expect(log.metadata).to include("file_digest" => FilingFileDigest.call(response.body), "digest_alg" => "hmac-sha256-v1")
+      expect(log.metadata).not_to have_key("sha256")
+      expect(log.metadata.values.map(&:to_s)).not_to include(Digest::SHA256.hexdigest(response.body))
       expect(log.to_json).not_to include("6789")
       # The request's own generic audit entry is not written as well.
       expect(AuditLog.where(action: "reports#w2_gu_copy_1_drt").count).to eq(1)
