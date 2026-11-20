@@ -45,8 +45,8 @@ module YearEnd
       },
       "box14b_more_than_two_codes" => {
         kind: "acknowledge",
-        title: "More than two tipped occupation codes",
-        explanation: "Box 14b holds two codes. The W-2 will show the first two codes in order. Confirm that is right for these employees."
+        title: "Tips received in more than two occupations",
+        explanation: "Tips were received in more than two occupations. The W-2 shows two codes, as the IRS allows, and always includes 000 when any tips came from a nonqualifying occupation. Confirm these are right."
       },
       "legacy_tax_bases" => {
         kind: "acknowledge",

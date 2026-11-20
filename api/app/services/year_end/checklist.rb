@@ -10,12 +10,14 @@ module YearEnd
   #   5. judgment warnings: fixed, or acknowledged in the audit log
   #   6. prior-provider overlap
   #   7. mark W-2GUs ready (the existing fingerprint-bound attestation)
+  #   8. print and file: the documents to print, keep or send. Not a sign-off;
+  #      it never changes the status, issue count or next step.
   #
   # Every step reports what is wrong and the one action that fixes it. The same
   # blockers gate the W-2GU "mark ready" endpoint from FIRST_TAX_YEAR onward.
   class Checklist
     FIRST_TAX_YEAR = 2026
-    STEP_KEYS = %w[filing_decision employer people reconciliation review_warnings prior_provider mark_ready].freeze
+    STEP_KEYS = %w[filing_decision employer people reconciliation review_warnings prior_provider mark_ready print_and_file].freeze
     PARTY_LABELS = {
       "cornerstone" => "Cornerstone files",
       "client" => "The client files",
@@ -67,7 +69,7 @@ module YearEnd
         files_w2: files?("w2_gu"),
         files_1099: files?("form_1099"),
         permissions: permissions,
-        steps: steps
+        steps: steps + [ print_and_file_step ]
       }
     rescue StandardError
       ReadyCheck.clear(company.id, year)
@@ -472,8 +474,7 @@ module YearEnd
     # Earlier steps must be clear before the sign-off; the 1099 decision and
     # payee details do not hold up the W-2s.
     def mark_ready_step(earlier_steps)
-      readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
-      fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: w2_report).call if readiness
+      readiness, fingerprint = w2_readiness
       filing = readiness&.review_payload(fingerprint: fingerprint)
       current = readiness&.current?(fingerprint)
       earlier_blockers = earlier_steps.sum { |step| step[:issues].count { |issue| !issue[:code].in?(FORM_1099_ONLY_CODES) } }
@@ -499,6 +500,94 @@ module YearEnd
       )
     end
 
+    def w2_readiness
+      @w2_readiness ||= begin
+        readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
+        [ readiness, (W2FilingInputsFingerprint.new(company: company, year: year, report: w2_report).call if readiness) ]
+      end
+    end
+
+    # -- Step 8 ----------------------------------------------------------
+
+    # A list of documents, each with a one-line explanation and a download.
+    # Status "available" sits outside the checklist's done/needs-action
+    # counting, which ignores this step entirely.
+    def print_and_file_step
+      key = "print_and_file"
+      title = "Print and file"
+      return waiting_step(key, title) unless responsibilities["w2_gu"]
+      return not_needed_step(key, title, "Cornerstone does not file #{year} W-2s for this client.") unless files?("w2_gu")
+
+      readiness, fingerprint = w2_readiness
+      practice = company.test_workspace?
+      final = !practice && W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
+      summary = if practice
+        "This is a practice copy, so every document is a draft. Review them, but don't hand them out or file them."
+      elsif final
+        "The #{year} W-2s are marked ready. Print each document below."
+      else
+        "Drafts until the W-2s are marked ready in step 7. Review them, but don't hand them out yet."
+      end
+      {
+        key: key, number: STEP_KEYS.index(key) + 1, title: title, status: "available",
+        summary: summary,
+        issues: [],
+        data: { final: final, documents: w2_copy_documents(final) }
+      }
+    end
+
+    def w2_copy_documents(final)
+      unavailable = if !W2GuOfficialCopies.supported_tax_year?(year)
+        W2GuOfficialCopies.unsupported_message(year)
+      elsif w2_report.nil?
+        "The W-2 totals could not be loaded: #{@w2_report_error.to_s.delete_suffix('.')}."
+      elsif Array(w2_report[:employees]).empty?
+        "No employees have #{year} W-2 wages."
+      end
+      count = Array(w2_report&.dig(:employees)).length
+      employees = "#{count} employee#{'s' unless count == 1}"
+      [
+        {
+          key: "w2_employee_copies", title: "Employee copies (B and C)",
+          description: "Print and give to each employee by #{format_date(w2_employee_due_date)}.",
+          detail: "#{employees}, one sheet each, by last name: Copy B on top, Copy C below, IRS instructions on the back. " \
+                  "Print double-sided, flipping on the long edge. SSNs show only the last four digits.",
+          contains_full_ssn: false
+        },
+        {
+          key: "w2_drt_copy_1", title: "Copy 1 for Guam DRT",
+          description: "Your record; not mailed when you e-file.",
+          detail: "#{employees}, two to a page. Each download is recorded in the activity log.",
+          contains_full_ssn: true
+        }
+      ].map do |document|
+        drt = document[:key] == "w2_drt_copy_1"
+        # Test and practice workspaces never produce full SSNs.
+        reason = unavailable || (drt_unavailable_reason if drt)
+        document.merge(
+          format: "pdf", draft: !final, available: reason.nil?, unavailable_reason: reason,
+          download: { path: "/admin/reports/#{drt ? 'w2_gu_copy_1_drt' : 'w2_gu_employee_copies'}", params: { year: year } }
+        )
+      end
+    end
+
+    # Copy 1 carries full SSNs: never in a test or practice workspace, and
+    # only for staff who may sign off the W-2s.
+    def drt_unavailable_reason
+      if company.test_workspace?
+        "Not available in a practice copy — it contains full SSNs."
+      elsif !permissions[:can_mark_ready]
+        "Needs client-management access (contains full SSNs)."
+      end
+    end
+
+    # January 31 of the next year, or the next business day after a weekend.
+    def w2_employee_due_date
+      date = Date.new(year + 1, 1, 31)
+      date += 1 until date.on_weekday?
+      date
+    end
+
     # -- Helpers ---------------------------------------------------------
 
     def overall_status(steps)
@@ -509,13 +598,15 @@ module YearEnd
     end
 
     def permissions
-      can_review = user.present? && user.payroll_access_allowed? && user.can_access_company?(company.id) &&
-        StaffRolePolicy.allowed?(user, :manage_filing_review)
-      {
-        can_record_decision: can_review,
-        can_acknowledge: can_review,
-        can_mark_ready: user.present? && StaffRolePolicy.allowed?(user, :manage_client_administration, company: company)
-      }
+      @permissions ||= begin
+        can_review = user.present? && user.payroll_access_allowed? && user.can_access_company?(company.id) &&
+          StaffRolePolicy.allowed?(user, :manage_filing_review)
+        {
+          can_record_decision: can_review,
+          can_acknowledge: can_review,
+          can_mark_ready: user.present? && StaffRolePolicy.allowed?(user, :manage_client_administration, company: company)
+        }
+      end
     end
 
     def step(key, title, issues, summary:, data:)

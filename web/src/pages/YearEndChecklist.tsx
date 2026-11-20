@@ -11,6 +11,7 @@ import { EmployerStep } from '@/components/year-end/EmployerStep';
 import { FilingDecisionStep } from '@/components/year-end/FilingDecisionStep';
 import { MarkReadyStep } from '@/components/year-end/MarkReadyStep';
 import { PeopleStep } from '@/components/year-end/PeopleStep';
+import { PrintAndFileStep } from '@/components/year-end/PrintAndFileStep';
 import { ReconciliationStep } from '@/components/year-end/ReconciliationStep';
 import { ReviewWarningsStep } from '@/components/year-end/ReviewWarningsStep';
 import { IssueList, StepCard } from '@/components/year-end/StepCard';
@@ -37,8 +38,16 @@ function stepBody(checklist: Checklist, step: YearEndStep, onSaved: (message: st
         </div>
       ) : null;
     case 'mark_ready': return <MarkReadyStep checklist={checklist} step={step} onSaved={onSaved} />;
+    case 'print_and_file': return <PrintAndFileStep checklist={checklist} step={step} />;
     default: return null;
   }
+}
+
+// Final copies open the step, including when marking ready on this page
+// makes them final; drafts stay folded under the work still to do. The step
+// stays mounted while folded so a download in progress still saves.
+function finalDocumentsReady(step: YearEndStep): boolean {
+  return step.key === 'print_and_file' && step.status === 'available' && step.data.final;
 }
 
 function StatusPanel({ checklist }: { checklist: Checklist }): ReactElement {
@@ -77,7 +86,12 @@ export function YearEndChecklist(): ReactElement {
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const [searchParams, setSearchParams] = useSearchParams();
   const year = parseYearEndTaxYear(searchParams.get('year'));
-  const [checklist, setChecklist] = useState<Checklist | null>(null);
+  const [loaded, setChecklist] = useState<Checklist | null>(null);
+  // Only the route's client and year are ever shown. A checklist still held
+  // from the previous client or year unmounts its steps in the same render
+  // as the switch, so a download or save they started can't land here, even
+  // if React batches the clear below with the next load.
+  const checklist = loaded && loaded.company.id === companyId && loaded.tax_year === year ? loaded : null;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { notify } = useFeedback();
@@ -172,8 +186,14 @@ export function YearEndChecklist(): ReactElement {
             <StatusPanel checklist={checklist} />
             <ol className="space-y-3" aria-busy={loading || undefined}>
               {checklist.steps.map((step) => (
-                <li key={`${checklist.company.id}-${step.key}-${step.status}`}>
-                  <StepCard step={step} isNext={checklist.next_step === step.key}>
+                // Scoped by client and year: a new client or year always remounts each step.
+                <li key={`${checklist.company.id}:${checklist.tax_year}-${step.key}-${step.status}`}>
+                  <StepCard
+                    step={step}
+                    isNext={checklist.next_step === step.key}
+                    defaultOpen={finalDocumentsReady(step)}
+                    keepMounted={step.key === 'print_and_file'}
+                  >
                     {stepBody(checklist, step, onSaved, onRefresh)}
                   </StepCard>
                 </li>

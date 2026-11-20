@@ -22,6 +22,8 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 
 - [Incomplete employee entry](EMPLOYEE_INCOMPLETE_INTAKE.md) — scoped temporary intake, persistent profile gaps, payroll review and document permissions.
 
+- [Official W-2GU copies](W2GU_OFFICIAL_COPIES.md) — employee Copies B and C, DRT Copy 1, draft/final gating, SSN controls and the print layout.
+
 - [Retirement limits and evidence](RETIREMENT_LIMITS_AND_EVIDENCE.md) — supported 401(k) rules, annual evidence, staff workflow, administrator-review boundaries and rollout verification.
 
 - [Product strategy and platform boundaries](PRODUCT_STRATEGY_AND_PLATFORM_BOUNDARIES_2026-08-23.md) — product position, module ownership, packaging, and accounting decision boundary.

@@ -11,4 +11,15 @@ RSpec.describe TestWorkspaceSafetyPolicy do
       end
     end
   end
+
+  it "blocks W-2GU Copy 1, which has full SSNs, but not the employee copies" do
+    expect(described_class.blocked?(controller_path: "api/v1/admin/reports", action_name: "w2_gu_copy_1_drt", request_method: "GET")).to be(true)
+    expect(described_class.blocked?(controller_path: "api/v1/admin/reports", action_name: "w2_gu_employee_copies", request_method: "GET")).to be(false)
+  end
+
+  it "gives W-2GU Copy 1 the W-2 sign-off's capability" do
+    expect(StaffRolePolicy.capability_for(controller_path: "api/v1/admin/reports", action_name: "w2_gu_copy_1_drt"))
+      .to eq(StaffRolePolicy.capability_for(controller_path: "api/v1/admin/reports", action_name: "w2_gu_mark_ready"))
+    expect(StaffRolePolicy.capability_for(controller_path: "api/v1/admin/reports", action_name: "w2_gu_employee_copies")).to be_nil
+  end
 end
