@@ -144,6 +144,8 @@ RSpec.describe "Year-end checklist", type: :request do
 
     it "keeps the query count flat as W-2 clients are added" do
       count_queries = lambda do
+        # The stubbed user memoizes its company list; clear it so every request sees the clients added since.
+        acting_user.instance_variable_set(:@accessible_company_ids, nil)
         count = 0
         callback = ->(*, payload) { count += 1 unless payload[:name].in?(%w[SCHEMA TRANSACTION]) }
         ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
@@ -163,6 +165,8 @@ RSpec.describe "Year-end checklist", type: :request do
       4.times { |index| add_w2_client.call("Client #{index + 2}") }
 
       expect(count_queries.call).to be <= baseline
+      names = response.parsed_body.dig("data", "clients").map { |row| row["name"] }
+      expect(names).to include("Client 1", "Client 2", "Client 3", "Client 4", "Client 5")
     end
 
     it "keeps an inactive record with a reportable one-off contractor check and nothing else on the list" do
