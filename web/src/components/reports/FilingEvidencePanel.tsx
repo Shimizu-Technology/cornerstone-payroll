@@ -106,11 +106,14 @@ type FilingEvidencePanelProps = {
 
 export function FilingEvidencePanel(props: FilingEvidencePanelProps) {
   const [agency, setAgency] = useState('ssa');
+  // Remount on a new filing scope so a save still in flight for the old one
+  // can't land in the new one.
+  const scopeKey = [props.companyId ?? 'current', props.filingType, props.taxYear, props.quarter ?? '', props.agency ?? ''].join(':');
   if (!props.quarter && props.taxYear >= 2026 && !props.agency) return <div>
     {props.filingType === 'w2_gu_w3_ss' && <label className="text-sm">Agency<select className="ml-2 min-h-11 rounded border px-2" value={agency} onChange={(event) => setAgency(event.target.value)}><option value="ssa">Social Security (BSO)</option><option value="drt">Guam DRT (GuamTax)</option></select></label>}
-    <FilingEvidencePanelContent key={agency} {...props} agency={props.filingType === 'form_1099_nec' ? 'drt' : agency} />
+    <FilingEvidencePanelContent key={`${scopeKey}:${agency}`} {...props} agency={props.filingType === 'form_1099_nec' ? 'drt' : agency} />
   </div>;
-  return <FilingEvidencePanelContent {...props} />;
+  return <FilingEvidencePanelContent key={scopeKey} {...props} />;
 }
 
 function FilingEvidencePanelContent({

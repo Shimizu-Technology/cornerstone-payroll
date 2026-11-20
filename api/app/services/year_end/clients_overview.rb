@@ -150,7 +150,8 @@ module YearEnd
         check_reason: status == "check_needed" ? (marked ? "Something may have changed since the W-2s were marked ready. Open the checklist to re-check." : "Open the checklist to check the current employee details and W-2 numbers.") : nil,
         filing_progress: FilingProgress.new(company: company, year: year,
           decisions: decisions.values.select { |decision| decision.responsible_party == "cornerstone" }.map(&:filing_type),
-          records: filing_records.fetch(company.id, []), downloads: filing_downloads.fetch(company.id, {})).call,
+          records: filing_records.fetch(company.id, []), downloads: filing_downloads.fetch(company.id, {}),
+          form_1099_due: !files_1099 || form_1099_may_be_due?(company)).call,
         checklist_path: "/companies/#{company.id}/year-end?year=#{year}"
       }
     end
@@ -286,10 +287,16 @@ module YearEnd
         Array.new(details[:w9_missing].to_i) { { code: "PAYEE_W9_MISSING", label: "W-9 not on file" } } +
         Array.new(details[:duplicate_tins].to_i) { { code: "PAYEE_DUPLICATE_TIN", label: "1099 payees sharing one TIN" } } +
         Array.new(unidentified_one_off_payees[company.id].to_i) { { code: "PAYEE_IDENTITY_UNRESOLVED", label: "One-off 1099 payees to resolve" } }
-      # A one-off payee not yet resolved may still become a 1099.
-      may_be_due = details[:reportable].to_i.positive? || unidentified_one_off_payees[company.id].to_i.positive?
-      issues << sign_off if may_be_due && !form_1099_signed_off?(company)
+      issues << sign_off if form_1099_may_be_due?(company) && !form_1099_signed_off?(company)
       issues
+    end
+
+    # Some payee gets a 1099, or a one-off payee not yet resolved may still
+    # become one. Payees that can't be checked count as due.
+    def form_1099_may_be_due?(company)
+      return true unless form_1099_threshold
+
+      form_1099_payees.fetch(company.id, {})[:reportable].to_i.positive? || unidentified_one_off_payees[company.id].to_i.positive?
     end
 
     # A ready mark is checked against the live inputs only when there is one;
