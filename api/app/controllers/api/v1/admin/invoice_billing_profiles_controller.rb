@@ -6,7 +6,7 @@ module Api
       class InvoiceBillingProfilesController < BaseController
         before_action :require_admin!
 
-        before_action :set_profile, only: [ :show, :update, :destroy, :upload_logo, :remove_logo ]
+        before_action :set_profile, only: [ :show, :update, :destroy, :upload_logo, :remove_logo, :sample_pdf ]
 
         def index
           profiles = current_finance_book.invoice_billing_profiles.ordered
@@ -65,6 +65,30 @@ module Api
           render json: { invoice_billing_profile: profile_payload(@profile.reload) }
         end
 
+        # Renders a made-up invoice in this profile's style. Unsaved style
+        # fields and an unsaved logo may be sent to preview a change; nothing
+        # is stored. Read-only, so it is allowed wherever the profile can be
+        # viewed.
+        def sample_pdf
+          @profile.assign_attributes(style_preview_attributes) if params[:invoice_billing_profile].present?
+          @profile.validate
+          style_errors = @profile.errors.select { |error| STYLE_PREVIEW_FIELDS.include?(error.attribute.to_s) }
+          if style_errors.any?
+            render json: { errors: style_errors.map(&:full_message) }, status: :unprocessable_entity
+            return
+          end
+
+          generator = InvoicePdfGenerator.new(nil, snapshot: InvoicePdf::Sample.snapshot(@profile), logo: preview_logo)
+          disposition = params[:disposition] == "attachment" ? "attachment" : "inline"
+          send_data generator.generate, filename: "invoice-style-sample-#{@profile.invoice_theme}.pdf",
+                                        type: "application/pdf", disposition: disposition
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue R2StorageService::DownloadError, Prawn::Errors::CannotFit => e
+          Rails.logger.warn("Invoice style sample failed: #{e.class}: #{e.message}")
+          render json: { error: "Unable to render the sample invoice" }, status: :unprocessable_entity
+        end
+
         private
 
         def set_profile
@@ -89,10 +113,34 @@ module Api
             :next_invoice_number,
             :remit_to,
             :footer_note,
+            :invoice_theme,
+            :accent_color,
+            :logo_size,
+            :show_service_period,
+            :show_item_column,
+            :show_how_to_pay,
             :active,
             :is_default,
             service_catalog: [ :name, :description_template, :line_kind ]
           )
+        end
+
+        STYLE_PREVIEW_FIELDS = %w[
+          invoice_theme accent_color logo_size show_service_period show_item_column show_how_to_pay
+          footer_note payment_instructions
+        ].freeze
+
+        def style_preview_attributes
+          params.require(:invoice_billing_profile).permit(*STYLE_PREVIEW_FIELDS)
+        end
+
+        # A chosen-but-unsaved logo, the monogram when removal is pending, or
+        # the saved logo.
+        def preview_logo
+          return InvoiceLogoStorageService.new.validated_bytes(params[:logo]).first if params[:logo].present?
+          return InvoicePdfGenerator::NO_LOGO if ActiveModel::Type::Boolean.new.cast(params[:remove_logo])
+
+          nil
         end
 
         def render_record_not_unique
@@ -117,6 +165,13 @@ module Api
             service_catalog: profile.service_catalog,
             remit_to: profile.remit_to,
             footer_note: profile.footer_note,
+            invoice_theme: profile.invoice_theme,
+            accent_color: profile.accent_color,
+            effective_accent_color: profile.invoice_style.accent_hex,
+            logo_size: profile.logo_size,
+            show_service_period: profile.show_service_period,
+            show_item_column: profile.show_item_column,
+            show_how_to_pay: profile.show_how_to_pay,
             has_logo: profile.logo_storage_key.present?,
             logo_content_type: profile.logo_content_type,
             logo_byte_size: profile.logo_byte_size,

@@ -6,8 +6,6 @@ require "marcel"
 class InvoiceArtifactStorageService
   MAX_FILE_SIZE = 15.megabytes
   IMPORT_CONTENT_TYPES = %w[application/pdf image/jpeg image/png image/webp].freeze
-  RENDERER_VERSION = "prawn-v2"
-  TEMPLATE_VERSION = "standard-v3"
 
   def initialize(storage: R2StorageService.new)
     @storage = storage
@@ -29,7 +27,8 @@ class InvoiceArtifactStorageService
       locked_invoice.prepare_number_for_issue!
       locked_invoice.save!
       snapshot = locked_invoice.issued_snapshot(actor: actor)
-      pdf_bytes = InvoicePdfGenerator.new(locked_invoice, snapshot: snapshot).generate
+      generator = InvoicePdfGenerator.new(locked_invoice, snapshot: snapshot)
+      pdf_bytes = generator.generate
 
       store_and_issue!(
         invoice: locked_invoice,
@@ -39,8 +38,8 @@ class InvoiceArtifactStorageService
         content_type: "application/pdf",
         kind: "issued_pdf",
         snapshot: snapshot,
-        renderer_version: RENDERER_VERSION,
-        template_version: TEMPLATE_VERSION
+        renderer_version: generator.renderer_version,
+        template_version: generator.template_version
       )
     end
   end

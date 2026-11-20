@@ -12,6 +12,11 @@ class InvoiceBillingProfile < ApplicationRecord
   include FinanceBookOwned
 
   validates :numbering_style, inclusion: { in: %w[yearly continuing] }
+  validates :invoice_theme, inclusion: { in: InvoicePdf::Style::THEMES, message: "must be Classic, Modern, Professional or Banner" }
+  validates :logo_size, inclusion: { in: InvoicePdf::Style::LOGO_SIZES, message: "must be small, medium or large" }
+  validates :accent_color, format: { with: InvoicePdf::Style::HEX_COLOR, message: "must be a hex color like #1F4E79" },
+                           allow_nil: true
+  validates :show_service_period, :show_item_column, :show_how_to_pay, inclusion: { in: [ true, false ] }
   validates :next_invoice_number, numericality: { only_integer: true, greater_than: 0 }
   validate :valid_service_catalog
 
@@ -63,6 +68,12 @@ class InvoiceBillingProfile < ApplicationRecord
     end
   end
 
+  # The look new invoices from this sender get. Issued invoices keep the
+  # style recorded in their snapshot.
+  def invoice_style
+    InvoicePdf::Style.from_profile(self)
+  end
+
   def self.company_address(company)
     return nil unless company
 
@@ -107,6 +118,9 @@ class InvoiceBillingProfile < ApplicationRecord
     self.invoice_prefix = invoice_prefix.to_s.strip.presence
     self.remit_to = remit_to.to_s.strip.presence
     self.footer_note = footer_note.to_s.strip.presence
+    self.accent_color = InvoicePdf::Style.normalize_hex(accent_color)
+    self.invoice_theme = invoice_theme.to_s.strip.downcase.presence || InvoicePdf::Style::DEFAULT_THEME
+    self.logo_size = logo_size.to_s.strip.downcase.presence || InvoicePdf::Style::DEFAULT_LOGO_SIZE
     self.active = true if active.nil?
     self.is_default = false unless active?
   end
