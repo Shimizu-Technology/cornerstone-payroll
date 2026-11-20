@@ -1,6 +1,6 @@
 # 1099 payees, "Mark 1099s ready" and official 1099-NEC copies
 
-Status: implemented on branch `feature/1099-copies` (milestone 1, E1). Not yet checked on paper with a real printer. The Pub 1220 e-file and Form 1096 are a separate change (E2).
+Status: implemented on branch `feature/1099-copies` (milestone 1, E1), rebased on the Pub 1220 e-file and 1096 (E2, PR #503). Not yet checked on paper with a real printer.
 
 Each client that pays a contractor $2,000 or more in 2026 gives that contractor a 1099-NEC by February 1, 2027, and files the 1099-NECs with Guam DRT. This change adds what the 1099s were missing in the year-end checklist: a way to give one-off payees a TIN and address, a sign-off bound to what prints, and the official copies.
 
@@ -44,13 +44,13 @@ The People step's 1099 items link straight to their fix: each unresolved payee's
 
 A new checklist step, **Mark 1099s ready**, sits after Employees and payees. It appears only when Cornerstone files the client's 1099s, and the W-2 steps below it move down one number.
 
-- **What it binds.** `Form1099InputsFingerprint` hashes the payer's name, EIN, address, phone and email; each payee's full TIN, name and address, and whether their W-9 is on file; each Box 1a amount and withholding; which one-off checks are linked to whom, with their amounts; every unlinked one-off payee, below the threshold too, with its checks and amounts, and the "no 1099 due" decisions; the threshold; and the filing decision. Any change makes the sign-off stale and the step asks for it again.
+- **What it binds.** `Form1099InputsFingerprint` hashes the payer's name, EIN, address, phone and email; each payee's full TIN, name and address, and whether their W-9 is on file; each Box 1a amount and Box 4 withholding and why the payee is reportable (threshold or withholding); the account number, TIN type, name lines and name control the e-file prints; which one-off checks are linked to whom, with their amounts; every unlinked one-off payee, below the threshold too, with its checks and amounts, and the "no 1099 due" decisions; the threshold; and the filing decision. Any change makes the sign-off stale and the step asks for it again.
 - **What the reviewer sees.** Each 1099 to be issued (name, TIN type and last four, Box 1a, and how many one-off checks it includes), the total, and how many payees are marked no 1099 due. The request carries the fingerprint of that view; if the inputs changed since, it is refused with 409 and a "Refresh checklist" button.
-- **Blocks.** The 1099 decision, the employer details a 1099 prints (EIN, address, phone, and email for the 1096), and every 1099 payee item. Mark ready also refuses copies that would not print (an overlong name or address, or income tax recorded as withheld from contractor pay).
+- **Blocks.** The 1099 decision, the employer details a 1099 prints (EIN, address, phone, and email for the 1096), and every 1099 payee item. Mark ready also refuses copies that would not print (an overlong or unprintable name or address).
 - **Access.** `manage_client_administration`, the same as the W-2 sign-off. Blocked in test and practice workspaces.
 - **Concurrency.** Under the company lock, which payee resolution and the 1099 downloads also take, with an uncached fingerprint recheck before saving. A change that skips the lock while the checks run returns 409 and saves nothing.
 - **Audit.** `year_end#form_1099_mark_ready` with the fingerprint, the previous one, the payee count and the total. Each sign-off is appended to `attestation_history`.
-- **One rule for "final".** `Form1099FilingReadiness.final?(company:, year:, readiness:, fingerprint:)`: the sign-off matches these exact inputs, Cornerstone files the client's 1099s, and the client is not a test or practice workspace. `Form1099NecFilingState.call(company:, year:)` reads the report, fingerprint, sign-off and decision together and returns `final`; the copies, the checklist and filing evidence use it, and E2's final e-file should too.
+- **One rule for "final".** `Form1099FilingReadiness.final?(company:, year:, readiness:, fingerprint:)`: the sign-off matches these exact inputs, Cornerstone files the client's 1099s, and the client is not a test or practice workspace. `Form1099NecFilingState.call(company:, year:)` reads the report, fingerprint, sign-off and decision together and returns `final`. The copies, the checklist, filing evidence and E2's seam `Form1099Readiness.final?(company:, year:)` (read uncached, for the final e-file and the final 1096) all use it, so every final 1099 output shares one sign-off.
 
 **Status semantics.** The 1099 items (`FORM_1099_ONLY_CODES`, now including `PAYEE_W9_MISSING`, `PAYEE_DUPLICATE_TIN` and `FORM_1099_NOT_MARKED_READY`) never hold up the W-2 sign-off, and nothing W-2-only (the contact name, EFW2 format items, reconciliation, warnings, overlap, the W-2 sign-off) holds up the 1099 sign-off. The client is Ready only when both are done.
 
@@ -80,8 +80,9 @@ The page map, confirmed in the file: 1 notice, 2 Copy A (red; never produced), 3
 - **Payer block:** name, street and room or suite (a suite that won't fit its narrow box joins the street line), city, phone, state, ZIP and EIN.
 - **Recipient block:** an individual's full name, with any business (DBA) name on the second line; a business contractor's business name; address as for the payer.
 - **Box 1a:** nonemployee compensation, which is contractor payroll plus linked one-off checks.
-- **Left blank:** the account number; boxes 1b–1d, 2 and 3, which the app does not track for contractors; and boxes 5–7, because Guam has no separate state boxes.
-- **Box 4:** stays blank. Contractor payroll uses the `contractor_no_withholding` engine and the app does not track backup withholding, so a contractor with withholding recorded is refused by name instead of printed with a blank Box 4.
+- **Box 4:** federal income tax withheld from contractor pay, printed when there is any. A contractor with withholding is reported at any amount (the aggregator's `filing_reason` is "tax withheld"), matching the e-file.
+- **Account number:** `Form1099Pub1220Generator.account_number`, a `C` and the contractor record's id (`C000123`), the same value the e-file writes in B 21–40, so paper and e-file match.
+- **Left blank:** boxes 1b–1d, 2 and 3, which the app does not track for contractors; and boxes 5–7, because Guam has no separate state boxes.
 
 **Gating**, as for the W-2GU copies:
 
@@ -110,6 +111,10 @@ The page map, confirmed in the file: 1 notice, 2 Copy A (red; never produced), 3
 ![Smaller one-off checks and a missing W-9, phone](form-1099-official-copies/phone-smaller-checks.png)
 ![Linking a smaller check, with the combined total, phone](form-1099-official-copies/phone-link-smaller-check.png)
 ![A missing W-9 holding up Mark 1099s ready, desktop](form-1099-official-copies/desktop-w9-blocker.png)
+![Copy B with Box 4 withholding and the e-file's account number](form-1099-official-copies/recipient-copy-b-box4-account.png)
+![Print and file with the copies, e-file and 1096 as drafts, phone](form-1099-official-copies/phone-print-and-file-integrated-draft.png)
+![Print and file after Mark 1099s ready, desktop](form-1099-official-copies/desktop-print-and-file-integrated-final.png)
+![Print and file after Mark 1099s ready, phone](form-1099-official-copies/phone-print-and-file-integrated-final.png)
 ![Print and file, final, desktop](form-1099-official-copies/desktop-print-and-file-final.png)
 ![Print and file, final, phone](form-1099-official-copies/phone-print-and-file-final.png)
 
@@ -121,7 +126,7 @@ The page map, confirmed in the file: 1 notice, 2 Copy A (red; never produced), 3
 
 ## Limits
 
-- Tax year 2026 only. The account number is blank; E2's e-file should leave it blank too, so the paper and electronic returns match.
+- Tax year 2026 only.
 - Boxes 1b–1d (cash tips, TTOC, overtime) are not tracked for contractors.
 - A one-off payee is linked one check at a time; a later check to the same name must be linked again.
 - The clients list computes the live 1099 fingerprint for each client with a 1099 sign-off on record (one 1099-NEC report per such client).

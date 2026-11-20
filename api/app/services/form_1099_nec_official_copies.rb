@@ -21,12 +21,14 @@
 #              copy for the tax department, which in Guam is DRT itself.
 #
 # Box 1a comes from Form1099NecAggregator: payroll plus one-off checks linked
-# to the contractor. Boxes 1b-1d, 2, 3 and 5-7 stay blank: the app does not
-# track tips, overtime, direct sales or golden parachutes for contractors,
-# and Guam has no separate state boxes. Box 4 stays blank (no backup
-# withholding); a contractor with withholding recorded is refused instead of
-# printed. The account number stays blank. Nothing prints partly: a value
-# that won't fit at the smallest font size refuses the whole download.
+# to the contractor. Box 4 is the income tax withheld from contractor pay,
+# printed when there is any; a contractor with withholding gets a 1099 at
+# any amount. The account number is the one the Pub 1220 e-file writes
+# (Form1099Pub1220Generator.account_number), so paper and e-file match.
+# Boxes 1b-1d, 2, 3 and 5-7 stay blank: the app does not track tips,
+# overtime, direct sales or golden parachutes for contractors, and Guam has
+# no separate state boxes. Nothing prints partly: a value that won't fit at
+# the smallest font size refuses the whole download.
 class Form1099NecOfficialCopies < OfficialPdfOverlay
   # One line per value to fix, naming the payee and the box.
   class DoesNotFit < ArgumentError
@@ -69,7 +71,9 @@ class Form1099NecOfficialCopies < OfficialPdfOverlay
     recipient_city: [ 52.4, 528.0, 294.2, 540.0 ],
     recipient_state: [ 52.4, 504.0, 171.8, 516.0 ],
     recipient_zip: [ 209.8, 504.0, 294.2, 516.0 ],
-    box1a: [ 309.6, 648.0, 494.8, 660.0 ]
+    account_number: [ 52.4, 432.0, 294.2, 456.0 ],
+    box1a: [ 309.6, 648.0, 494.8, 660.0 ],
+    box4: [ 309.6, 468.0, 494.8, 480.0 ]
   }.freeze
   # Below the form's footer line, for the sorting line.
   MARGIN_NOTE = [ 50.4, 392.0, 576.0, 414.0 ].freeze
@@ -161,10 +165,6 @@ class Form1099NecOfficialCopies < OfficialPdfOverlay
       found << "#{name}: the name is too long to fit the recipient's name box — shorten it on the contractor's record." unless text_fits?(pdf, FIELDS[:recipient_name], recipient_name_lines(employee).join("\n"), **BLOCK)
       found << "#{name}: the street address is too long to fit the recipient's address box — shorten it on the contractor's record." unless address_parts(pdf, employee, :recipient_street, :recipient_apt)
       found << "#{name}: the city is too long to fit the recipient's city box — shorten it on the contractor's record." unless text_fits?(pdf, FIELDS[:recipient_city], employee.city, **LINE)
-      if payee[:row][:federal_withheld].to_d.nonzero?
-        found << "#{name}: #{ActiveSupport::NumberHelper.number_to_currency(payee[:row][:federal_withheld])} of income tax was withheld from contractor pay. " \
-                 "These copies leave Box 4 blank, so check that payroll before printing."
-      end
     end
     found
   end
@@ -290,8 +290,15 @@ class Form1099NecOfficialCopies < OfficialPdfOverlay
     draw_text_box(pdf, at.(FIELDS[:recipient_state]), employee.state, **LINE)
     draw_text_box(pdf, at.(FIELDS[:recipient_zip]), employee.zip, **LINE)
 
+    draw_text_box(pdf, at.(FIELDS[:account_number], 0), Form1099Pub1220Generator.account_number(employee), size: 10)
+
     left, bottom, right, top = at.(FIELDS[:box1a])
     draw_text_box(pdf, [ left, bottom, right - 2, top ], money_string(payee[:row][:total_compensation]), size: 10, align: :right)
+    withheld = payee[:row][:federal_withheld].to_d
+    return if withheld.zero?
+
+    left, bottom, right, top = at.(FIELDS[:box4])
+    draw_text_box(pdf, [ left, bottom, right - 2, top ], money_string(withheld), size: 10, align: :right)
   end
 
   # The street and unit boxes. A unit that won't fit its narrow box joins the

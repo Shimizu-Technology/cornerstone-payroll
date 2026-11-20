@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
-# E1 integration seam: replace this fail-closed adapter with fingerprint-bound
-# 1099 readiness once E1 lands. Never infer 1099 readiness from W-2 readiness.
+# The rule the final 1099 e-file and 1096 use: the client's "1099s ready"
+# sign-off matches the current inputs (Form1099NecFilingState, which the
+# official copies and the checklist read too), so all final 1099 output
+# shares one sign-off. Read uncached: callers recheck it after generating a
+# file in the same request, and the query cache would replay the first read.
 class Form1099Readiness
   def self.final?(company:, year:)
-    false
+    ActiveRecord::Base.uncached { Form1099NecFilingState.call(company: company, year: year).final }
   end
 end

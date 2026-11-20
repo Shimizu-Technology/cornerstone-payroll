@@ -85,7 +85,7 @@ RSpec.describe "1099 filing files", type: :request do
     expect(log.metadata.to_json).not_to include("123456789")
   end
 
-  it "fails closed until E1 readiness is wired and emits a non-test final when ready" do
+  it "refuses a final until the 1099s are marked ready, and emits a non-test final when they are" do
     get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "final" }
     expect(response).to have_http_status(:conflict)
     expect(response.parsed_body["error"]).to eq("Mark the 1099s ready first")
