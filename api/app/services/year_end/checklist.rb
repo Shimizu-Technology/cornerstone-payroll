@@ -29,10 +29,13 @@ module YearEnd
       Integer(year) >= FIRST_TAX_YEAR
     end
 
-    def initialize(company:, year:, user: nil)
+    # `responsibilities` lets the clients list pass its grouped decisions
+    # (filing type => record) instead of loading them again per client.
+    def initialize(company:, year:, user: nil, responsibilities: nil)
       @company = company
       @year = Integer(year)
       @user = user
+      @responsibilities = responsibilities
     end
 
     # The clients list counts the same "things to fix": each decision, employer
@@ -46,14 +49,15 @@ module YearEnd
       # Taken before the steps run, so a change made while they run leaves
       # the list asking for a re-check.
       revision = InputRevision.for(company.id, year)[company.id]
+      readiness = EfileCheck.current_readiness_stamp(company.id, year)
       steps = build_steps
-      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: steps.any? { |step| step[:key].in?(SIGN_OFF_STEPS) && step[:status] == "action_needed" }) if year == 2026 && files?("w2_gu")
+      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(steps), readiness: readiness) if year == 2026 && files?("w2_gu")
       status = overall_status(steps)
       # Lets the clients list keep showing Ready until any input changes, and
       # stops it showing Ready once a run finds something.
       status == "ready" ? ReadyCheck.record(company.id, year, revision) : ReadyCheck.clear(company.id, year)
       issue_count = steps.reject { |step| step[:key].in?(SIGN_OFF_STEPS) }.sum { |step| step[:issues].length } +
-        (steps.any? { |step| step[:key].in?(SIGN_OFF_STEPS) && step[:status] == "action_needed" } ? 1 : 0)
+        (sign_off_needed?(steps) ? 1 : 0)
       next_step = steps.find { |step| step[:status] == "action_needed" }
 
       {
@@ -82,9 +86,16 @@ module YearEnd
     # up the W-2s.
     def w2_mark_ready_blockers
       revision = InputRevision.for(company.id, year)[company.id]
+      readiness = EfileCheck.current_readiness_stamp(company.id, year)
       blockers = w2_blockers_from(steps_before_ready)
-      EfileCheck.record(company.id, year, revision, efw2_people_issues) if year == 2026 && files?("w2_gu")
+      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(build_steps), readiness: readiness) if year == 2026 && files?("w2_gu")
       blockers
+    end
+
+    # The W-2 sign-off group (reconciliation, warnings, overlap, mark ready)
+    # still has something to do. Both e-file cache writers use this one rule.
+    def sign_off_needed?(steps)
+      steps.any? { |step| step[:key].in?(SIGN_OFF_STEPS) && step[:status] == "action_needed" }
     end
 
     def efw2_employer_issues

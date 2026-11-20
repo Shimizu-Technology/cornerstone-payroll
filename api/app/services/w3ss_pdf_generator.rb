@@ -30,7 +30,8 @@ class W3ssPdfGenerator < OfficialPdfOverlay
       draw_text_box(pdf, [ left, 648 - row * 24, left + 148, 660 - row * 24 ], money_string(totals.fetch(box)), align: :right)
     end
     draw_text_box(pdf, [ 426, 528, 574, 540 ], money_string(totals[:box12_code_d_total].to_d + totals[:box12_code_aa_total].to_d), align: :right)
-    draw_checkbox(pdf, [ { "R" => 124, "M" => 160, "A" => 196, "F" => 232, "H" => 160, "Q" => 196 }.fetch(c.employment_code), c.employment_code.in?(%w[H Q]) ? 674 : 698, 250, 710 ], true)
+    # Kind of Payer, top row only: household (H) and MQGE (Q) are not supported yet.
+    draw_checkbox(pdf, [ { "R" => 124, "M" => 160, "A" => 196, "F" => 232 }.fetch(c.employment_code), 698, 250, 710 ], true)
     draw_checkbox(pdf, [ { "N" => 369, "T" => 420, "S" => 369, "Y" => 420, "F" => 478 }.fetch(c.kind_of_employer), c.kind_of_employer.in?(%w[N T]) ? 698 : 674, 500, 710 ], true)
     draw_text_box(pdf, [ 36, 432, 264, 444 ], c.filing_contact_name)
     draw_text_box(pdf, [ 268, 432, 420, 444 ], c.phone)

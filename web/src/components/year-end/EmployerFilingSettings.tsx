@@ -39,7 +39,14 @@ export function EmployerFilingSettings({
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  // One lookup at a time, and none while the form is open, so a late
+  // response can never replace something the user already typed.
+  const [loading, setLoading] = useState(false);
+  const loadingRef = useRef(false);
   async function edit() {
+    if (loadingRef.current || open) return;
+    loadingRef.current = true;
+    setLoading(true);
     setError('');
     try {
       const r = await companiesApi.get(companyId, companyId);
@@ -62,6 +69,9 @@ export function EmployerFilingSettings({
       setOpen(true);
     } catch {
       setError('Could not load filing settings.');
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
     }
   }
   async function save() {
@@ -97,8 +107,8 @@ export function EmployerFilingSettings({
     <div className="mt-4 space-y-3 border-t border-neutral-200 pt-3">
       <p className="text-sm">
         Kind of employer: {kinds[kind]}{' '}
-        <Button variant="ghost" size="sm" disabled={saving} onClick={() => void edit()}>
-          Change
+        <Button variant="ghost" size="sm" disabled={saving || loading || open} onClick={() => void edit()}>
+          {loading ? 'Loading…' : 'Change'}
         </Button>
       </p>
       {open && (

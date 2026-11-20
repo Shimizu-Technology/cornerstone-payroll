@@ -801,7 +801,10 @@ module Api
               }, status: :conflict
             end
             if filing.current?(fingerprint)
-              YearEnd::ReadyCheck.record(company.id, year, year_end_revision) if year_end_revision
+              if year_end_revision
+                YearEnd::ReadyCheck.record(company.id, year, year_end_revision)
+                YearEnd::EfileCheck.signed_off(company.id, year, year_end_revision, filing)
+              end
               return render json: { filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate }
             end
 
@@ -815,7 +818,10 @@ module Api
               "marked_ready_by_id" => filing.marked_ready_by_id, "notes" => filing.notes
             } ]
             filing.save!
-            YearEnd::ReadyCheck.record(company.id, year, year_end_revision) if year_end_revision
+            if year_end_revision
+              YearEnd::ReadyCheck.record(company.id, year, year_end_revision)
+              YearEnd::EfileCheck.signed_off(company.id, year, year_end_revision, filing)
+            end
             render json: {
               filing: filing_readiness_payload(filing, fingerprint: fingerprint),
               revalidation: revalidation_payload(fresh_preflight), filing_gate: filing_gate
