@@ -585,7 +585,7 @@ module YearEnd
       practice = company.test_workspace?
       final = !practice && W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
       summary = if !files?("w2_gu")
-        "Review the 1099 drafts below. Final downloads require the 1099s to be marked ready."
+        practice ? "1099 filing downloads are unavailable in a practice copy." : "Review the 1099 drafts below. Final downloads require the 1099s to be marked ready."
       elsif practice
         "This is a practice copy, so every document is a draft. Review them, but don't hand them out or file them."
       elsif final
@@ -614,8 +614,8 @@ module YearEnd
           key: path, title: title, format: format, draft: !final,
           description: format == "txt" ? "Upload to GuamTax after the 1099s are marked ready." : "For your records — not for filing.",
           detail: "Totals use reportable payees only. Each download is recorded in the activity log.",
-          contains_full_ssn: format == "txt", available: reason.nil?, unavailable_reason: reason,
-          draft_confirmation: !final && format == "txt" ? "Test file only — GuamTax treats it as a test, but don't upload it as your filing" : nil,
+          contains_full_ssn: format == "txt", available: reason.nil?, unavailable_reason: format == "pdf" ? reason&.gsub(" (contains full SSNs)", "")&.gsub(" — it contains full SSNs", "") : reason,
+          draft_confirmation: !final && format == "txt" ? "Test file only — review it, but don't upload it as your filing." : nil,
           download: { path: "/admin/reports/#{path}", params: { year: year, mode: final ? "final" : "draft" } }
         }
       end

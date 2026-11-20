@@ -19,10 +19,16 @@ class Form1096TotalsPdfGenerator
       pdf.move_down 16
       pdf.text "Tax year: 2026 | Form: 1099-NEC"
       pdf.text "Total forms: #{totals[1, 8].to_i}"
-      pdf.text "Box 1 nonemployee compensation: $#{format('%.2f', totals[15, 18].to_i / 100.0)}"
-      pdf.text "Box 4 federal income tax withheld: $#{format('%.2f', totals[69, 18].to_i / 100.0)}"
+      pdf.text "Box 1 nonemployee compensation: $#{money(totals[15, 18].to_i)}"
+      pdf.text "Box 4 federal income tax withheld: $#{money(totals[69, 18].to_i)}"
       pdf.move_down 16
       pdf.text "These totals match the GuamTax e-file. Keep this sheet with your records."
     end.render
+  end
+  private
+
+  def money(cents)
+    dollars, remainder = cents.divmod(100)
+    "#{dollars.to_s.reverse.scan(/.{1,3}/).join(',').reverse}.#{remainder.to_s.rjust(2, '0')}"
   end
 end

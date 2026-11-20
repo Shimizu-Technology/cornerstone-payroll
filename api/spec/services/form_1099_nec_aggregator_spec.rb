@@ -118,4 +118,17 @@ RSpec.describe Form1099NecAggregator, type: :service do
     expect(described_class.new(company, 2025).generate[:reportable_contractors].sole[:total_compensation]).to eq(600)
     expect(described_class.new(company, 2026).generate[:reportable_contractors].sole[:total_compensation]).to eq(2000)
   end
+  [ 0, 12.34 ].each do |withheld|
+    it "reports $1,500 only when tax was withheld (#{withheld}) and serializes decimal totals" do
+      create(:payroll_item, company: company, employee: contractor, pay_period: pay_period,
+        employment_type: "contractor", gross_pay: 1500, net_pay: 1500 - withheld, withholding_tax: withheld)
+      report = described_class.new(company, 2026).generate
+      expect(report[:meta][:reportable_count]).to eq(withheld.zero? ? 0 : 1)
+      expect(report[:all_contractors].sole[:requires_filing]).to eq(!withheld.zero?)
+      expect(report[:all_contractors].sole[:filing_reason]).to eq("tax withheld") unless withheld.zero?
+      total = report[:totals][:reportable_federal_withheld]
+      expect(total).to be_a(BigDecimal)
+      expect(JSON.parse(report.to_json).dig("totals", "reportable_federal_withheld").to_d).to eq(withheld.to_d)
+    end
+  end
 end

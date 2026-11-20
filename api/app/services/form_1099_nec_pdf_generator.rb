@@ -76,7 +76,7 @@ class Form1099NecPdfGenerator
 
     data = [
       [ "Total Contractors", meta[:contractor_count].to_s ],
-      [ "Reportable (>= $#{format('%.2f', meta[:filing_threshold].to_f)})", meta[:reportable_count].to_s ],
+      [ "Reportable (>= $#{format('%.2f', meta[:filing_threshold].to_f)} or tax withheld)", meta[:reportable_count].to_s ],
       [ "Total Compensation", fmt(totals[:total_compensation]) ],
       [ "Reportable Compensation", fmt(totals[:reportable_compensation]) ],
       [ "Federal Tax Withheld", fmt(totals[:total_federal_withheld]) ]
@@ -99,12 +99,13 @@ class Form1099NecPdfGenerator
     contractors = report[:reportable_contractors] || []
     return if contractors.empty?
 
-    pdf.text "Reportable Contractors", size: 12, style: :bold
+    pdf.text "Reportable Contractors (threshold reached or tax withheld)", size: 12, style: :bold
     pdf.move_down 4
 
     header = [ "Name / Business", "TIN (last 4)", "Type", "Payments", "Box 1 (Compensation)", "Box 4 (Withheld)", "W-9" ]
     rows = contractors.map do |c|
       name_display = c[:business_name].present? ? "#{c[:name]}\n#{c[:business_name]}" : c[:name]
+      name_display += "\nReportable: tax withheld" if c[:filing_reason] == "tax withheld"
       [
         name_display,
         "***#{c[:tin_last_four] || '????'}",

@@ -19,13 +19,13 @@ All positions below are one-based and inclusive. Unused fields remain spaces exc
 | All | 1 record type; 500–507 ascending eight-digit sequence, starting at 1; 749–750 CR/LF |
 | T | 2–5 year; 6 prior-year indicator blank; 7–15 transmitter EIN; 16–20 TCC; 28 test indicator (`T` draft, blank final); 29 foreign indicator blank; 30–69 transmitter name; 110–149 company name; 190–229 mailing address; 230–269 city; 270–271 state/territory; 272–280 ZIP; 296–303 B count; 304–343 contact; 344–358 phone; 359–408 email; 518 vendor indicator `I` (hired in-house programmer), vendor fields blank |
 | A | 2–5 year; 6 CF/SF blank; 12–20 payer EIN; 21–24 name control blank (expressly allowed); 26–27 return type `NE`; 28–45 amount codes `14`; 52 foreign indicator blank; 53–92 payer name; 133 transfer agent `0`; 134–173 street; 174–213 city; 214–215 state; 216–224 ZIP; 225–239 phone |
-| B | 2–5 year; 6 correction blank; 7–10 individual surname name control (business control blank when indeterminate); 11 TIN type `1` EIN / `2` SSN; 12–20 full TIN; 55–270 eighteen 12-digit amount fields, all zero-filled except 55–66 Box 1 and 91–102 Box 4; 287 foreign indicator blank; 288–327 first payee name; 368–407 street; 448–487 city; 488–489 state; 490–498 ZIP; 544 second TIN notice blank; 547 direct sales blank; 723–734 state withholding zero; 735–746 local withholding zero; 747–748 CF/SF blank |
+| B | 2–5 year; 6 correction blank; 7–10 individual surname name control (business control blank when indeterminate); 11 TIN type `1` EIN / `2` SSN; 12–20 full TIN; 21–40 stable `C`-prefixed employee ID for matching corrections; 55–270 eighteen 12-digit amount fields, all zero-filled except 55–66 Box 1 and 91–102 Box 4; 287 foreign indicator blank; 288–327 first payee name; 328–367 second payee name (SSN business name or unused-line continuation); 368–407 street; 448–487 city; 488–489 state; 490–498 ZIP; 544 second TIN notice blank; 547 direct sales blank; 723–734 state withholding zero; 735–746 local withholding zero; 747–748 CF/SF blank |
 | C | 2–9 B count; 16–339 eighteen 18-digit control totals; 16–33 Box 1 total; 70–87 Box 4 total; unused totals zero |
 | F | 2–9 A count `00000001`; 10–30 zeros; 50–57 B count |
 
 Domestic US/territory addresses, including GU, are supported. Foreign addresses, corrections, direct sales and second-TIN-notice workflows are outside this milestone. Name/address overflow is refused instead of truncating. SSNs use the app's filing-validity rule; business name controls remain blank because entity-specific rules cannot safely be inferred from a display name.
 
-TCC is optional in settings and excluded from the SSA missing-fields list. T-record name/address punctuation is removed, with contact email case preserved as the spec permits. Drafts use the unmistakable `TEST0` placeholder when absent, because Pub 1220 requires the field, and set T28 to `T`. Finals refuse an absent TCC with the specified DRT question. An answer that no TCC is needed still requires a future explicit implementation decision; no bypass exists here.
+TCC is optional in settings and excluded from the SSA missing-fields list. T-record name/address punctuation is removed, with contact email case preserved as the spec permits. Drafts use the unmistakable `TEST0` placeholder when absent, because Pub 1220 requires the field, and set T28 to `T`. Finals require a TCC. The message directs staff to add the TCC from DRT and explains that drafts work without it. The test indicator's treatment by GuamTax remains unconfirmed.
 
 ## E1 integration seam
 
@@ -42,8 +42,9 @@ Deploy requires the additive `filing_submitters.tcc` migration and API/web relea
 ## Operator questions
 
 1. Which Pub 1220 edition does GuamTax validate for payment year 2026?
-2. Does DRT issue/require a TCC, and what should the transmitter send if no TCC is required?
+2. What are DRT's TCC issuance instructions? Final downloads currently require a TCC.
 3. Must Guam payers file off-island payees with DRT?
+4. Should Cornerstone record a sole proprietor using an EIN as an individual or business?
 
 Do not treat local tests as DRT acceptance. A GuamTax test upload and Cornerstone review remain external acceptance work.
 
@@ -68,3 +69,5 @@ Next: review the final PR head, integrate E1's identity/readiness contract, rete
 - `bundle exec rubocop`: passed; exact final count in the PR.
 - First `bundle exec rspec`: 7,648 examples, 2 failures, 4 pending. The TCC migration-sequence failure was fixed and retested. The other failure is `client_document_converter_process_spec.rb:51`: this host's RubyGems startup adds `PKG_CONFIG_PATH` inside a clean child environment. The same behavior reproduces with `env -i ... ruby -rjson -e 'puts ENV.keys.to_json'` outside Rails; `--disable-gems` removes it. No converter implementation or isolation assertion was weakened. Final full rerun: **7,654 examples, 1 failure, 4 pending** (10m54s). The only failure is the converter environment test above. The final T-record punctuation cleanup was then covered by the 58-example affected run; the full run predates that small formatting-only fix.
 - Four transaction-pooler scenarios require external pooler URLs and are pending on this host.
+
+Review round 1 changes and current verification are recorded in [pub1220-review-round1.md](qa/pub1220-review-round1.md); that ledger supersedes earlier gate/screenshot status above.

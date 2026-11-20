@@ -99,7 +99,7 @@ export function FilingSubmitterCard() {
         </Button>
       </div>
       <p className="text-sm text-neutral-600">Used in every client's W-2 and 1099 e-files. The BSO User ID is your SSA login ID, not a password.</p>
-      {!loading && !restricted && !loadFailed && !profile.tcc && <p className="text-sm text-neutral-600">Add the transmitter control code (TCC) DRT gave Cornerstone, or confirm with DRT that none is needed</p>}
+      {!loading && !restricted && !loadFailed && !profile.tcc?.trim() && <p className="text-sm text-neutral-600">Add the transmitter control code (TCC) from DRT to download the final 1099 e-file. Drafts work without it.</p>}
       {loading && <p role="status">Loading e-file details…</p>}
       {!loading && restricted && <p className="text-sm text-neutral-600">Ask an admin to complete Cornerstone's e-file details.</p>}
       {!loading && !restricted && !loadFailed && !exists && <p className="text-sm text-neutral-600">Not set up yet — add Cornerstone's e-file details</p>}
@@ -119,7 +119,7 @@ export function FilingSubmitterCard() {
         >
           <div className="grid gap-3 sm:grid-cols-2">
             {Object.entries(fields).map(([key, label]) => (
-              <Input
+              key === 'tcc' && !canEdit ? <p key={key} className="text-sm">{label}: {profile[key]?.trim() || 'Not set'}.</p> : <Input
                 key={key}
                 label={label}
                 value={profile[key] ?? ''}
