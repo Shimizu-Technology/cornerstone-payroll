@@ -4,7 +4,7 @@ import { formatCurrency } from '@/lib/utils';
 
 import { capturedSourceContext, capturedSourceHoursLocked } from '@/lib/captured-source-worksheet';
 
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, PayrollAdjustmentTreatment, PayRunPurpose } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, PayrollAdjustmentTreatment, PayRunPurpose } from '@/types';
 
 export const payrollHoursInputLabel = (employee: Employee, kind: 'Regular' | 'Overtime', rate?: PayrollItemWageRateHours) => (
   [`${kind} hours for ${employee.first_name} ${employee.last_name}`, rate?.label, rate && capturedSourceContext(rate)]
@@ -316,13 +316,6 @@ export function hoursRecordsEqual(left: Record<string, HoursEntry>, right: Recor
     });
   });
 }
-
-export const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' }> = {
-  pending: { label: 'Tax Sync Pending', variant: 'default' },
-  syncing: { label: 'Tax Syncing...', variant: 'info' },
-  synced: { label: 'Tax Synced', variant: 'success' },
-  failed: { label: 'Tax Sync Failed', variant: 'danger' },
-};
 
 export interface PayPeriodDetailProps {
   active?: boolean;

@@ -130,9 +130,7 @@ class PayPeriodLifecycleService
       PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
       assign_check_numbers!(committed_items)
       create_fit_tax_deposit_check!(committed_items) if pay_period.company.auto_create_fit_check?
-      tax_sync_enabled = pay_period.prepare_tax_sync_if_configured!
       record_correction_commit! if pay_period.correction_run?
-      enqueue_tax_sync_after_commit if tax_sync_enabled
       recorded_acknowledgements = record_aire_processing_acknowledgements
       acknowledgement_ids[:batch].concat(recorded_acknowledgements[:batch])
       acknowledgement_ids[:entries].concat(recorded_acknowledgements[:entries])
@@ -437,12 +435,5 @@ class PayPeriodLifecycleService
       pay_period: pay_period,
       actor: actor
     )
-  end
-
-  def enqueue_tax_sync_after_commit
-    pay_period_id = pay_period.id
-    ActiveRecord.after_all_transactions_commit do
-      PayrollTaxSyncJob.perform_later(pay_period_id)
-    end
   end
 end

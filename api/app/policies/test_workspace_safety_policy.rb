@@ -9,7 +9,7 @@ class TestWorkspaceSafetyPolicy
       create update destroy activate verify replace_withholding update_filing_status update_brackets
     ],
     "api/v1/admin/pay_periods" => %w[
-      commit void reopen_unpaid create_correction_run correct_pay_date generate_fit_check retry_tax_sync corrective_paychecks
+      commit void reopen_unpaid create_correction_run correct_pay_date generate_fit_check corrective_paychecks
     ],
     "api/v1/admin/time_tracking_imports" => %w[correction_confirm correction_delivery_retry],
     "api/v1/admin/check_numbers" => %w[update],

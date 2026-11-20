@@ -38,12 +38,6 @@ RSpec.describe "staging transport boundaries" do
     expect { PayrollIntake::AiExtractor.new(source_type: "test", adapter: nil).call }.to raise_error(StagingOutboundPolicy::Blocked, /AI/)
   end
 
-  it "blocks tax ingest even if a destination was copied" do
-    ENV["CST_INGEST_URL"] = "https://tax.example.test/ingest"
-    expect(PayrollTaxSyncService.configured?).to eq(false)
-    expect { PayrollTaxSyncService.new(nil).sync! }.to raise_error(StagingOutboundPolicy::Blocked, /disabled in staging/)
-  end
-
   it "blocks Clerk invitations and revocations for non-testers" do
     expect { ClerkInvitationService.new.create_invitation(email: "employee@example.test") }.to raise_error(StagingOutboundPolicy::Blocked)
     expect { ClerkInvitationService.new.revoke_invitation("copied-invitation") }.to raise_error(StagingOutboundPolicy::Blocked)

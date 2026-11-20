@@ -4,8 +4,13 @@ class PayPeriod < ApplicationRecord
   include TracksRecordCreation
 
   belongs_to :created_by, class_name: "User", optional: true
-  TAX_SYNC_STATUSES = %w[pending syncing synced failed].freeze
-  MAX_SYNC_ATTEMPTS = 5
+
+  # Retired: tax_sync_status, tax_sync_attempts, tax_sync_last_error,
+  # tax_synced_at and tax_sync_idempotency_key belonged to the removed push of
+  # committed payroll to Cornerstone Tax (PayrollTaxSyncService). Nothing reads
+  # or writes them now. They stay in the table, still mapped, because evidence
+  # checksums hash full PayPeriod attributes; drop them in a dedicated
+  # migration that accounts for that.
 
   # CPR-71: correction lifecycle
   CORRECTION_STATUSES = %w[voided correction].freeze
@@ -121,7 +126,6 @@ class PayPeriod < ApplicationRecord
   validates :end_date, presence: true
   validates :pay_date, presence: true
   validates :status, inclusion: { in: %w[draft calculated approved committed retired_history] }
-  validates :tax_sync_status, inclusion: { in: TAX_SYNC_STATUSES }, allow_nil: true
   validates :correction_status,
             inclusion: { in: CORRECTION_STATUSES },
             allow_nil: true
@@ -335,7 +339,6 @@ class PayPeriod < ApplicationRecord
     company.test_workspace? ? base.where(status: %w[calculated approved]) : base.committed
   end
   scope :for_year, ->(year) { where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)) }
-  scope :tax_sync_pending_or_failed, -> { where(tax_sync_status: %w[pending failed]) }
   # Dates are required for normal records; NULLS LAST is intentionally kept in
   # both directions so any legacy/malformed rows never displace real pay periods
   # at the top of operator-facing lists.
@@ -622,74 +625,6 @@ class PayPeriod < ApplicationRecord
     return if intake_stale_session.pay_period_id == id && intake_stale_session.company_id == company_id
 
     errors.add(:intake_stale_session, "must belong to this pay period and company")
-  end
-
-  # Tax sync lifecycle
-  def generate_idempotency_key!
-    self.tax_sync_idempotency_key ||= "cpr-#{id}-#{committed_at&.to_i || Time.current.to_i}"
-  end
-
-  def tax_sync_reset_attributes(reference_time: Time.current)
-    {
-      tax_sync_status: "pending",
-      tax_sync_attempts: 0,
-      tax_sync_last_error: nil,
-      tax_synced_at: nil,
-      tax_sync_idempotency_key: "cpr-#{id}-#{reference_time.to_i}"
-    }
-  end
-
-  def tax_sync_disabled_attributes
-    {
-      tax_sync_status: nil,
-      tax_sync_attempts: 0,
-      tax_sync_last_error: nil,
-      tax_synced_at: nil,
-      tax_sync_idempotency_key: nil
-    }
-  end
-
-  def tax_sync_refresh_attributes(reference_time: Time.current)
-    PayrollTaxSyncService.configured? ? tax_sync_reset_attributes(reference_time: reference_time) : tax_sync_disabled_attributes
-  end
-
-  def prepare_tax_sync!
-    update!(tax_sync_reset_attributes)
-  end
-
-  def prepare_tax_sync_if_configured!
-    update!(tax_sync_refresh_attributes)
-    PayrollTaxSyncService.configured?
-  end
-
-  def mark_syncing!
-    update!(
-      tax_sync_status: "syncing",
-      tax_sync_attempts: tax_sync_attempts + 1
-    )
-  end
-
-  def mark_synced!
-    update!(
-      tax_sync_status: "synced",
-      tax_synced_at: Time.current,
-      tax_sync_last_error: nil
-    )
-  end
-
-  def mark_sync_failed!(error_message)
-    update!(
-      tax_sync_status: "failed",
-      tax_sync_last_error: error_message.to_s.truncate(1000)
-    )
-  end
-
-  def can_retry_sync?
-    committed? && tax_sync_status.in?(%w[failed pending])
-  end
-
-  def max_attempts_reached?
-    tax_sync_attempts >= MAX_SYNC_ATTEMPTS
   end
 
   private

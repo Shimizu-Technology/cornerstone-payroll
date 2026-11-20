@@ -834,10 +834,6 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   end
 
   describe "PATCH /api/v1/admin/pay_periods/:id/correct_pay_date" do
-    before do
-      allow(PayrollTaxSyncJob).to receive(:perform_later)
-    end
-
     it "corrects a committed pay date and related date-bearing records without changing dollars" do
       old_pay_date = Date.new(2026, 4, 15)
       new_pay_date = Date.new(2026, 4, 30)
@@ -908,10 +904,10 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         }
 
       expect(response).to have_http_status(:ok)
+      # Retired tax sync columns on older rows are left as they were.
       expect(pay_period.reload).to have_attributes(
         pay_date: new_pay_date,
-        tax_sync_status: nil,
-        tax_synced_at: nil
+        tax_sync_status: "synced"
       )
       expect(payroll_item.reload).to have_attributes(
         check_date: new_pay_date,
@@ -942,7 +938,6 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         "reason" => "Pay date was entered with the wrong date",
         "corrected_by_name" => admin_user.name
       )
-      expect(PayrollTaxSyncJob).not_to have_received(:perform_later)
     end
 
     it "does not mask a successful correction when audit logging fails" do
@@ -2536,30 +2531,13 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(company.reload.next_check_number).to eq(1002)
     end
 
-    it "does not enqueue tax sync when the CST ingest integration is not configured" do
-      allow(PayrollTaxSyncJob).to receive(:perform_later)
-
+    it "commits without the retired tax sync fields" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
 
       expect(response).to have_http_status(:ok)
       expect(pay_period.reload.tax_sync_status).to be_nil
-      expect(response.parsed_body.dig("pay_period", "tax_sync_status")).to be_nil
+      expect(response.parsed_body["pay_period"].keys.grep(/tax_sync/)).to be_empty
       expect(response.parsed_body.dig("pay_period", "lifecycle")).not_to have_key("tax_synced")
-      expect(PayrollTaxSyncJob).not_to have_received(:perform_later)
-    end
-
-    it "registers tax sync enqueue on transaction commit when CST ingest is configured" do
-      allow(ENV).to receive(:[]).and_call_original
-      allow(ENV).to receive(:[]).with("CST_INGEST_URL").and_return("https://tax.example.test/ingest")
-      allow(PayrollTaxSyncJob).to receive(:perform_later)
-      allow(ActiveRecord).to receive(:after_all_transactions_commit).and_yield
-
-      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
-
-      expect(response).to have_http_status(:ok)
-      expect(pay_period.reload.tax_sync_status).to eq("pending")
-      expect(ActiveRecord).to have_received(:after_all_transactions_commit)
-      expect(PayrollTaxSyncJob).to have_received(:perform_later).with(pay_period.id)
     end
 
     it "cannot commit when no payroll items exist" do
@@ -2571,28 +2549,12 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(JSON.parse(response.body)["error"]).to include("no payroll items")
     end
 
-    it "returns not configured instead of failing when retrying disabled tax sync" do
-      pay_period.update!(
-        status: "committed",
-        committed_at: Time.current,
-        tax_sync_status: "failed",
-        tax_sync_attempts: 1,
-        tax_sync_last_error: "CST_INGEST_URL is not configured",
-        tax_sync_idempotency_key: "cpr-stale-sync"
-      )
-      allow(PayrollTaxSyncJob).to receive(:perform_later)
+    it "no longer offers a tax sync retry" do
+      pay_period.update!(status: "committed", committed_at: Time.current)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/retry_tax_sync"
 
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to eq("Tax sync is not configured")
-      expect(pay_period.reload).to have_attributes(
-        tax_sync_status: nil,
-        tax_sync_attempts: 0,
-        tax_sync_last_error: nil,
-        tax_sync_idempotency_key: nil
-      )
-      expect(PayrollTaxSyncJob).not_to have_received(:perform_later)
+      expect(response).to have_http_status(:not_found)
     end
 
     it "returns 422 when correction-commit audit validation fails" do
