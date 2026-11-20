@@ -15,6 +15,7 @@ module InvoicePdf
       HAIRLINE = "E7E5E4"
       PANEL = "F5F5F4"
       MARK_SIZES = { "small" => px(28), "medium" => px(36), "large" => px(48) }.freeze
+      MIN_NAME_WIDTH = px(180)
 
       private
 
@@ -74,14 +75,24 @@ module InvoicePdf
         right_width = number_width + prefix_width
         name_x = mark_width + px(12)
         name_top = top - ((row_height - name_height) / 2)
-        font_box(data.sender_name, x: name_x, top: name_top - (px(17) * 0.25), width: pdf.bounds.width - name_x - right_width - px(16),
+        # A long invoice number moves to its own line so the name keeps room.
+        stacked = pdf.bounds.width - name_x - right_width - px(16) < MIN_NAME_WIDTH
+        name_width = pdf.bounds.width - name_x - (stacked ? 0 : right_width + px(16))
+        font_box(data.sender_name, x: name_x, top: name_top - (px(17) * 0.25), width: name_width,
                                    size: px(17), family: HEADING, style: :semibold, color: TEXT)
+        pdf.move_cursor_to(top - row_height)
+        return draw_stacked_number(number) if stacked
+
         meta_top = top - ((row_height - (px(15) * 1.5)) / 2) - (px(15) * 0.25)
         font_box(number, x: pdf.bounds.width - number_width, top: meta_top, width: number_width, size: px(15),
                          family: HEADING, style: :semibold, color: TEXT, align: :right)
         font_box("Invoice", x: pdf.bounds.width - right_width, top: meta_top, width: prefix_width, size: px(15),
                             family: HEADING, color: SECONDARY)
-        pdf.move_cursor_to(top - row_height)
+      end
+
+      def draw_stacked_number(number)
+        pdf.move_down(px(12))
+        text("Invoice #{number}", size: px(15), family: HEADING, style: :semibold, color: TEXT)
       end
 
       def draw_amount_due
@@ -101,7 +112,7 @@ module InvoicePdf
         pdf.move_down(px(22))
         gap = px(28)
         width = (pdf.bounds.width - (gap * 2)) / 3
-        columns_row([
+        fitting_columns([
           column(0, width) { billed_to },
           column(width + gap, width) { from },
           column((width + gap) * 2, width) { details }
@@ -153,7 +164,7 @@ module InvoicePdf
                                    spacing: px(1))
       end
 
-      def draw_row(line, _index)
+      def draw_row(line, index)
         rule_at_cursor(HAIRLINE)
         pdf.move_down(px(16))
         columns_row(columns.map do |col, x|
@@ -161,7 +172,7 @@ module InvoicePdf
             if col.key == :service
               service_cell(line)
             else
-              text(line_value(line, col.key), align: col.align || :left, style: col.key == :amount ? :medium : :normal)
+              text(line_value(line, col.key, index), align: col.align || :left, style: col.key == :amount ? :medium : :normal)
             end
           end
         end)
@@ -170,7 +181,7 @@ module InvoicePdf
 
       # The item name sits over its description.
       def service_cell(line)
-        name = item_column? ? line["item_name"].presence : nil
+        name = item_column? && !line["continued"] ? line["item_name"].presence : nil
         return text(line["description"].to_s) unless name
 
         text(name, style: :semibold)
@@ -209,24 +220,14 @@ module InvoicePdf
         note = data.footer_note
         return unless instructions || note
 
-        pad_y = px(18)
-        pad_x = px(20)
-        width = pdf.bounds.width - (pad_x * 2)
         content = lambda do
-          pdf.bounding_box([ pad_x, pdf.cursor ], width: width) do
-            stack([
-              (instructions ? -> { label("HOW TO PAY") } : nil),
-              (instructions ? -> { text(instructions) } : nil),
-              (note ? -> { text(note, color: SECONDARY) } : nil)
-            ], gap: px(6))
-          end
+          stack([
+            (instructions ? -> { label("HOW TO PAY") } : nil),
+            (instructions ? -> { text(instructions) } : nil),
+            (note ? -> { text(note, color: SECONDARY) } : nil)
+          ], gap: px(6))
         end
-        height = measure { content.call } + (pad_y * 2)
-        top = pdf.cursor
-        fill_box(0, top, pdf.bounds.width, height, PANEL, radius: px(10))
-        pdf.move_down(pad_y)
-        content.call
-        pdf.move_cursor_to(top - height)
+        panel(fill: PANEL, radius: px(10), pad_x: px(20), pad_y: px(18), fallback: content, &content)
       end
     end
   end

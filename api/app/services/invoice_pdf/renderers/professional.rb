@@ -12,6 +12,7 @@ module InvoicePdf
       SECONDARY = "57534E"
       HAIRLINE = "D6D3D1"
       MARK_SIZES = { "small" => px(40), "medium" => px(52), "large" => px(68) }.freeze
+      TITLE_ROOM = px(180)
 
       private
 
@@ -88,8 +89,11 @@ module InvoicePdf
 
       def draw_title_row
         rows = meta_rows
-        value_width = rows.map { |_l, value, value_style| text_width(value, size: px(13), style: value_style) }.max.to_f + 2
         label_width = rows.map { |row_label, _v, _s| text_width(row_label, size: px(13)) }.max.to_f + 2
+        # The grid stays beside the title; long values wrap inside it.
+        max_value_width = pdf.bounds.width - TITLE_ROOM - label_width - px(20)
+        value_width = [ rows.map { |_l, value, value_style| text_width(value, size: px(13), style: value_style) }.max.to_f + 2,
+                        max_value_width ].min
         grid_width = label_width + px(20) + value_width
         grid_x = pdf.bounds.width - grid_width
         top = pdf.cursor
@@ -104,12 +108,21 @@ module InvoicePdf
         end
         grid_height = measure { grid.call }
         title_height = px(28) * 1.3
+        return draw_title_with_listed_details(rows) if grid_height > pdf.bounds.height * 0.4
+
         height = [ grid_height, title_height ].max
         pdf.move_cursor_to(top - (height - grid_height))
         grid.call
         pdf.move_cursor_to(top - (height - title_height))
         text("Invoice", size: px(28), family: SERIF, color: style.accent_text, height: 1.3)
         pdf.move_cursor_to(top - height)
+      end
+
+      # Details too long for a grid beside the title are listed below it.
+      def draw_title_with_listed_details(rows)
+        text("Invoice", size: px(28), family: SERIF, color: style.accent_text, height: 1.3)
+        pdf.move_down(px(8))
+        rows.each { |row_label, value, _style| text("#{row_label}: #{value}", size: px(13)) }
       end
 
       def draw_parties
@@ -126,7 +139,7 @@ module InvoicePdf
             ], gap: px(2))
           end
         end
-        columns_row(entries)
+        fitting_columns(entries)
       end
 
       def prepared_for
@@ -157,8 +170,8 @@ module InvoicePdf
         rule_at_cursor(TEXT)
       end
 
-      def draw_row(line, _index)
-        draw_cells(line, columns, padding: px(12), cell_styles: { item: { style: :semibold } })
+      def draw_row(line, index)
+        draw_cells(line, columns, index: index, padding: px(12), cell_styles: { item: { style: :semibold } })
         rule_at_cursor(HAIRLINE)
       end
 

@@ -196,15 +196,125 @@ RSpec.describe "Invoice PDF themes" do
       end
     end
 
+    # Footer runs are picked out by their text, so any body text that moves
+    # into the footer band is still compared against it.
     it "keeps body text clear of the page-number footer" do
       pdf = reader(render(snapshot_for("classic")))
       pdf.pages.each do |page|
-        footer = page.runs.select { |run| run.text.start_with?("Page ") }
-        body = page.runs.reject { |run| run.y < 45 }
+        footer_text = ->(run) { run.text.match?(/\APage \d+ of \d+\z/) || run.text.include?("Questions about this invoice") || run.text == "Draft preview" }
+        footer = page.runs.select(&footer_text)
+        body = page.runs.reject(&footer_text)
 
-        expect(footer).to be_present
+        expect(footer.map(&:text)).to include(match(/\APage \d+ of \d+\z/))
         expect(body.map(&:y).min).to be > footer.map(&:y).max + 8
       end
+    end
+  end
+
+  describe "oversized content" do
+    let(:address) { (1..100).map { |i| "Line #{i}, Building #{i * 7}, Hagåtña, GU 96910" }.join("\n") }
+
+    def runs_of(bytes)
+      reader(bytes).pages.flat_map(&:runs)
+    end
+
+    it "renders a 100-line sender and recipient address in every theme without losing a line" do
+      profile.update!(address: address)
+      invoice.invoice_recipient.update!(address: address)
+      InvoicePdf::Style::THEMES.each do |theme|
+        text = text_of(render(snapshot_for(theme)))
+
+        expect(text).to show("Line 100, Building 700", "$4,234.56", invoice.invoice_recipient.name), theme
+        expect(text.scan(compact("Line 100, Building 700")).size).to be >= 2, theme
+      end
+    end
+
+    it "renders 100 lines of payment instructions in every theme" do
+      profile.update!(payment_instructions: (1..100).map { |i| "Payment step #{i}: wire to account #{i}." }.join("\n"))
+      InvoicePdf::Style::THEMES.each do |theme|
+        expect(text_of(render(snapshot_for(theme)))).to show("Payment step 1:", "Payment step 100:"), theme
+      end
+    end
+
+    it "splits a row taller than a page, repeating the header and printing the amounts once" do
+      invoice.line_items.first.update!(description: (1..120).map { |i| "Detail line #{i} of the year-end package." }.join("\n"))
+      invoice.save!
+      InvoicePdf::Style::THEMES.each do |theme|
+        pdf = reader(render(snapshot_for(theme)))
+        pages = pdf.pages.map { |page| compact(page.text) }
+        header = { "classic" => "DESCRIPTION", "modern" => "SERVICE", "professional" => "Description",
+                   "banner" => "DESCRIPTION" }.fetch(theme)
+        split_pages = pages.select { |page| page.include?("Detailline") }
+
+        expect(split_pages.size).to be > 1, theme
+        expect(split_pages).to all(include(header))
+        expect(pages.join.scan("$3,000.00").size).to eq(2), theme
+        expect(pages.join).to include(compact("Detail line 120 of the year-end package.")), theme
+      end
+    end
+
+    it "numbers identical lines by their position" do
+      line = invoice.line_items.first
+      invoice.line_items.create!(item_name: line.item_name, description: line.description, quantity: 1, rate: 3000, position: 0)
+      invoice.line_items.second.update!(position: 0)
+      invoice.save!
+
+      numbers = runs_of(render(snapshot_for("classic"))).map(&:text)
+      expect(numbers).to include("1", "2", "3")
+    end
+
+    it "keeps the draft marker on every page beside a very long sender name" do
+      profile.update!(legal_name: "Marianas Bay Certified Public Accountants and Business Advisors " * 3)
+      invoice.update!(invoice_number: "DRAFT-#{SecureRandom.uuid}")
+      23.times { |index| invoice.line_items.create!(description: "Bookkeeping #{index}", quantity: 1, rate: 10, position: index + 2) }
+      invoice.save!
+      InvoicePdf::Style::THEMES.each do |theme|
+        pages = reader(render(snapshot_for(theme))).pages.map { |page| compact(page.text) }
+        expect(pages).to all(include("Draftpreview")), theme
+      end
+    end
+
+    it "fits a long invoice number beside or below the name, and above the Banner card" do
+      invoice.update!(invoice_number: "W" * 80)
+      wide = png(600, 150)
+      InvoicePdf::Style::THEMES.each do |theme|
+        bytes = render(snapshot_for(theme, logo_size: "large"), logo: wide)
+        expect(text_of(bytes)).to show("Marianas Bay CPA", "W" * 20), theme
+        runs = reader(bytes).pages.first.runs
+        expect(runs.map(&:x).min).to be >= 0, theme
+        expect(runs.map { |run| run.x + run.width }.max).to be <= InvoicePdf::Renderers::Base::PAGE_WIDTH, theme
+      end
+
+      runs = reader(render(snapshot_for("banner"))).pages.first.runs
+      number_bottom = runs.select { |run| run.text.start_with?("WWW") }.map(&:y).min
+      card_top = runs.select { |run| run.text.match?(/ISSUED|DATED|AMOUNT DUE/) }.map(&:y).max
+      expect(number_bottom).to be > card_top + 20
+    end
+
+    it "keeps a long customer reference on the Professional page" do
+      invoice.update!(customer_reference: "PO-#{'W' * 100}")
+      runs = reader(render(snapshot_for("professional"))).pages.first.runs
+
+      expect(runs.map(&:x).min).to be >= 0
+      expect(runs.map { |run| run.x + run.width }.max).to be <= InvoicePdf::Renderers::Base::PAGE_WIDTH
+      expect(runs.find { |run| compact(run.text) == "Invoicenumber" }.x).to be > 0
+    end
+
+    it "frames the Banner rows on their own page when the totals move to the next one" do
+      invoice.update!(notes: (1..40).map { |i| "Note line #{i} about this engagement." }.join("\n"))
+      25.times { |index| invoice.line_items.create!(description: "Bookkeeping #{index}", quantity: 1, rate: 10, position: index + 2) }
+      invoice.save!
+      framed_pages = []
+      allow_any_instance_of(InvoicePdf::Renderers::Banner).to receive(:frame_segment).and_wrap_original do |method|
+        framed_pages << method.receiver.send(:pdf).page_number
+        method.call
+      end
+
+      pages = reader(render(snapshot_for("banner"))).pages.map { |page| compact(page.text) }
+      row_pages = pages.each_index.select { |index| pages[index].include?("Bookkeeping") }.map { |index| index + 1 }
+
+      expect(framed_pages).to include(*row_pages)
+      expect(pages.index { |page| page.include?("Totaldue") } + 1).to be > row_pages.max
     end
   end
 end

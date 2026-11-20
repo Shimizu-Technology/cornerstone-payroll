@@ -12,17 +12,18 @@ module InvoicePdf
       month = today.beginning_of_month
       lines = sample_lines(profile, month)
       total = lines.sum { |line| BigDecimal(line["amount"]) }
+      terms = profile.default_payment_terms.presence || "Net 15"
       {
         "version" => Invoice::SNAPSHOT_VERSION,
         "invoice" => {
           "invoice_number" => sample_number(profile, today),
           "invoice_date" => today.iso8601,
-          "due_date" => (today + 15).iso8601,
+          "due_date" => due_date(terms, today)&.iso8601,
           "currency" => "USD",
           "service_period_start" => month.iso8601,
           "service_period_end" => month.end_of_month.iso8601,
           "status" => "sample",
-          "payment_terms" => profile.default_payment_terms.presence || "Net 15",
+          "payment_terms" => terms,
           "total_amount" => total.to_s("F"),
           "subtotal_amount" => total.to_s("F"),
           "discount_type" => "none",
@@ -40,6 +41,15 @@ module InvoicePdf
         "line_items" => lines,
         "style" => profile.invoice_style.to_snapshot
       }
+    end
+
+    # Same rule as Invoice#default_due_date: "Net N" and "Due on receipt"
+    # set a date; other terms leave it blank rather than contradict them.
+    def due_date(terms, today)
+      days = terms.to_s.match(/\ANet\s+(\d+)\z/i)&.captures&.first
+      return today + days.to_i if days
+
+      today if terms.to_s.casecmp?("Due on receipt")
     end
 
     def sample_number(profile, today)

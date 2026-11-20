@@ -17,6 +17,8 @@ module InvoicePdf
       SIDE = px(60)
       INSET = px(16)
       TILE_SIZES = { "small" => px(40), "medium" => px(48), "large" => px(60) }.freeze
+      MAX_TITLE_WIDTH = px(200)
+      MAX_BAND_TEXT = px(120)
 
       private
 
@@ -52,6 +54,7 @@ module InvoicePdf
         band_bottom = draw_band
         card_bottom = draw_card(band_bottom + px(52))
         pdf.move_cursor_to(card_bottom - pdf.bounds.absolute_bottom - px(30))
+        draw_sender_address_in_body if @address_in_body
         draw_parties
         pdf.move_down(px(28))
       end
@@ -69,10 +72,21 @@ module InvoicePdf
         end
         number = data.display_number
         number = "##{number}" if number.match?(/\A\d/)
-        title_height = (px(13) * 1.5) + (px(28) * 1.25)
+        # The number wraps at its real width; a very long one shrinks to fit
+        # a capped box instead of running into the summary card.
+        title_width = [ [ text_width(number, size: px(28), style: :extrabold), text_width("INVOICE", size: px(13), style: :semibold, spacing: px(2)) ].max + 2,
+                        MAX_TITLE_WIDTH ].min
+        number_height = [ measure { pdf.bounding_box([ 0, pdf.cursor ], width: title_width) { band_number(number, on) } },
+                          MAX_BAND_TEXT ].min
+        title_height = (px(13) * 1.5) + number_height
         name_x = SIDE + tile_width + px(14)
-        name_width = PAGE_WIDTH - SIDE - name_x - px(160)
+        name_width = PAGE_WIDTH - SIDE - name_x - title_width - px(16)
         name_block = measure { pdf.bounding_box([ 0, pdf.cursor ], width: name_width) { band_identity_text(on) } }
+        # An address too long for the band is printed in the body instead.
+        @address_in_body = name_block > MAX_BAND_TEXT
+        if @address_in_body
+          name_block = [ measure { pdf.bounding_box([ 0, pdf.cursor ], width: name_width) { band_name(on) } }, MAX_BAND_TEXT ].min
+        end
         content_height = [ size, title_height, name_block ].max
         band_height = px(44) + content_height + px(84)
 
@@ -85,22 +99,43 @@ module InvoicePdf
           else
             monogram(SIDE, tile_top, size, font_size: size * 18 / 48, color: style.accent_text, font_style: :extrabold)
           end
-          pdf.bounding_box([ name_x, top - ((content_height - name_block) / 2) ], width: name_width) do
-            band_identity_text(on)
+          name_top = top - ((content_height - name_block) / 2)
+          if @address_in_body
+            font_box(data.sender_name, x: name_x, top: name_top, width: name_width, height: name_block, size: px(19),
+                                       style: :bold, color: on)
+          else
+            pdf.bounding_box([ name_x, name_top ], width: name_width) { band_identity_text(on) }
           end
-          right_x = PAGE_WIDTH - SIDE - px(200)
-          pdf.bounding_box([ right_x, top - ((content_height - title_height) / 2) ], width: px(200)) do
+          right_x = PAGE_WIDTH - SIDE - title_width
+          title_top = top - ((content_height - title_height) / 2)
+          pdf.bounding_box([ right_x, title_top ], width: title_width) do
             pdf.transparent(0.9) do
               text("INVOICE", size: px(13), style: :semibold, color: on, align: :right, spacing: px(2), height: 1.5)
             end
-            text(number, size: px(28), style: :extrabold, color: on, align: :right, height: 1.25)
           end
+          font_box(number, x: right_x, top: title_top - (px(13) * 1.5), width: title_width, height: number_height,
+                           size: px(28), style: :extrabold, color: on, align: :right)
         end
         PAGE_HEIGHT - band_height
       end
 
-      def band_identity_text(color)
+      def band_number(number, color)
+        text(number, size: px(28), style: :extrabold, color: color, align: :right, height: 1.25)
+      end
+
+      def band_name(color)
         text(data.sender_name, size: px(19), style: :bold, color: color, height: 1.4)
+      end
+
+      def draw_sender_address_in_body
+        label("FROM")
+        pdf.move_down(px(2))
+        text(data.sender_address_lines.join("\n"), color: SECONDARY)
+        pdf.move_down(px(21))
+      end
+
+      def band_identity_text(color)
+        band_name(color)
         address = data.sender_address_lines.join(" · ")
         return if address.blank?
 
@@ -152,7 +187,7 @@ module InvoicePdf
       def draw_parties
         gap = px(24)
         width = (pdf.bounds.width - gap) / 2
-        columns_row([
+        fitting_columns([
           column(0, width) do
             stack([
               -> { label("BILL TO") },
@@ -204,6 +239,11 @@ module InvoicePdf
         frame_segment
       end
 
+      # The totals are moving to a new page: frame the last rows where they are.
+      def totals_moving_to_new_page
+        frame_segment unless measuring?
+      end
+
       def frame_segment
         stroke_box(0, @segment_top, pdf.bounds.width, @segment_top - pdf.cursor, BORDER, radius: px(10))
       end
@@ -218,9 +258,9 @@ module InvoicePdf
         header.call
       end
 
-      def draw_row(line, _index)
+      def draw_row(line, index)
         rule_at_cursor(BORDER)
-        draw_cells(line, columns, padding: px(14), cell_styles: {
+        draw_cells(line, columns, index: index, padding: px(14), cell_styles: {
           item: { style: :bold },
           description: { color: SECONDARY },
           amount: { style: :semibold }
