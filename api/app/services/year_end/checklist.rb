@@ -629,7 +629,7 @@ module YearEnd
           key: "w2_efile", title: "W-2 e-file (SSA and GuamTax)", format: "txt",
           description: "One wage file to upload to SSA (BSO) and GuamTax after the W-2s are marked ready.",
           detail: "Check a draft in AccuWage first. Each download is recorded in the activity log.",
-          contains_full_ssn: true, path: "/admin/reports/w2_gu_efw2"
+          contains_full_ssn: true, draft_confirmation: confirmation, path: "/admin/reports/w2_gu_efw2"
         },
         {
           key: "w3ss_totals", title: "W-3SS totals (for your records)", format: "pdf",
@@ -645,7 +645,7 @@ module YearEnd
         end
         reason = unavailable || restriction
         document.except(:path).merge(
-          draft: !final, draft_confirmation: final ? nil : confirmation,
+          draft: !final, draft_confirmation: final ? nil : document[:draft_confirmation],
           available: reason.nil?, unavailable_reason: reason,
           download: { path: document[:path], params: { year: year, mode: final ? "final" : "draft" } }
         )

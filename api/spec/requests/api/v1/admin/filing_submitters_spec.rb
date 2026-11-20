@@ -13,6 +13,8 @@ RSpec.describe "Practice filing profile", type: :request do
   it "returns an incomplete profile and saves identifiers without accepting passwords" do
     get "/api/v1/admin/filing_submitter"
     expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to include("exists" => false, "can_edit" => true)
+    expect(FilingSubmitter.where(organization: company.organization)).to be_empty
     expect(response.parsed_body["missing_fields"]).to include("bso_user_id")
     patch "/api/v1/admin/filing_submitter", params: { profile: { bso_user_id: "ABCDEFGH", password: "never-store-this" } }
     expect(response).to have_http_status(:ok)
@@ -41,10 +43,14 @@ RSpec.describe "Practice filing profile", type: :request do
   end
 
   it "allows staff to read, but requires organization administration to edit" do
+    profile = FilingSubmitter.create!(organization: company.organization, name: "Practice")
     user.update!(role: "accountant")
     get "/api/v1/admin/filing_submitter"
     expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to include("exists" => true, "can_edit" => false)
+    expect(response.parsed_body["profile"]["name"]).to eq("Practice")
     patch "/api/v1/admin/filing_submitter", params: { profile: { name: "Changed" } }
     expect(response).to have_http_status(:forbidden)
+    expect(profile.reload.name).to eq("Practice")
   end
 end

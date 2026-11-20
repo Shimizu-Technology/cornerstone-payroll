@@ -3362,7 +3362,7 @@ export interface PayrollFinalRecord {
 }
 
 export const filingSubmitterApi = {
-  get: () => api.get<{ profile: Record<string, string | null>; missing_fields: string[]; problems?: string[]; can_edit: boolean }>('/admin/filing_submitter'),
+  get: () => api.get<{ exists: boolean; profile: Record<string, string | null>; missing_fields: string[]; problems?: string[]; can_edit: boolean }>('/admin/filing_submitter'),
   update: (profile: Record<string, string | null>) => api.patch('/admin/filing_submitter', { profile }),
 };
 

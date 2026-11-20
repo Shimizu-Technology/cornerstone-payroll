@@ -70,11 +70,11 @@ describe('PrintAndFileStep', () => {
     expect(within(drt).getByText(/Full SSNs\. Keep the file and the printout somewhere secure\./)).toBeTruthy();
   });
 
-  it('requires confirmation for each draft filing document and sends its scoped path and mode', async () => {
+  it('requires opt-in confirmation only for the draft e-file and sends its scoped path and mode', async () => {
     const confirmation = "Test file only — do not upload as your filing.";
     const efile = document('w2_efile', { title: 'W-2 e-file (SSA and GuamTax)', format: 'txt', contains_full_ssn: true,
       draft_confirmation: confirmation, download: { path: '/admin/reports/w2_gu_efw2', params: { year: 2026, mode: 'draft' } } });
-    const totals = document('w3ss_totals', { title: 'W-3SS totals (for your records)', draft_confirmation: confirmation,
+    const totals = document('w3ss_totals', { title: 'W-3SS totals (for your records)',
       download: { path: '/admin/reports/w3ss_pdf', params: { year: 2026, mode: 'draft' } } });
     mocks.downloadDocument.mockResolvedValue({ blob: new Blob(['file']), filename: 'draft.txt' });
     render(<PrintAndFileStep checklist={checklist} step={step(false, [document('w2_employee_copies'), document('w2_drt_copy_1'), efile, totals])} />);
@@ -87,7 +87,10 @@ describe('PrintAndFileStep', () => {
     fireEvent.click(within(filing).getByRole('checkbox'));
     fireEvent.click(button);
     await waitFor(() => expect(mocks.downloadDocument).toHaveBeenCalledWith(efile.download, 7));
-    expect(within(row(totals.title)).getByRole('button', { name: 'Download draft' }).hasAttribute('disabled')).toBe(true);
+    expect(within(row(totals.title)).queryByRole('checkbox')).toBeNull();
+    expect(within(row(totals.title)).getByRole('button', { name: 'Download draft' }).hasAttribute('disabled')).toBe(false);
+    fireEvent.click(within(row(totals.title)).getByRole('button', { name: 'Download draft' }));
+    await waitFor(() => expect(mocks.downloadDocument).toHaveBeenCalledWith(totals.download, 7));
   });
 
   it('downloads final e-files without a draft confirmation and reports server rejections', async () => {
@@ -206,4 +209,11 @@ describe('PrintAndFileStep', () => {
     expect(screen.getByRole('button', { name: 'Download draft' }).hasAttribute('disabled')).toBe(true);
     expect(screen.queryByText('Draft')).toBeNull();
   });
+});
+
+
+it('does not require confirmation for a future draft document without opt-in', () => {
+  render(<PrintAndFileStep checklist={checklist} step={step(false, [document('form_1099', { title: '1099 records' })])} />);
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Download draft' }).hasAttribute('disabled')).toBe(false);
 });

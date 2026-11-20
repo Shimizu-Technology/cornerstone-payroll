@@ -108,3 +108,40 @@ it('releases submitter pending state after failure and clears obsolete errors on
   fireEvent.click(screen.getByRole('button', { name: 'Save submitter profile' }));
   await screen.findByText('Submitter profile saved.');
 });
+
+it('shows completeness read-only for non-admin staff', async () => {
+  mocks.submitterGet.mockResolvedValue({ ...submitter, exists: true, can_edit: false });
+  render(<FilingSubmitterCard />);
+  await screen.findByText('E-file details complete.');
+  fireEvent.click(screen.getByRole('button', { name: 'View submitter profile' }));
+  expect(screen.getByLabelText('Practice name').hasAttribute('disabled')).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Save submitter profile' })).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('shows a missing profile as setup, with editable fields for admins', async () => {
+  mocks.submitterGet.mockResolvedValue({ ...submitter, exists: false, profile: {}, missing_fields: ['ein'] });
+  render(<FilingSubmitterCard />);
+  await screen.findByText("Not set up yet — add Cornerstone's e-file details");
+  fireEvent.click(screen.getByRole('button', { name: 'View submitter profile' }));
+  expect(screen.getByLabelText('Practice name').hasAttribute('disabled')).toBe(false);
+  expect(screen.getByRole('button', { name: 'Save submitter profile' })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('treats denied access as an expected permission state', async () => {
+  mocks.submitterGet.mockRejectedValue({ status: 403 });
+  render(<FilingSubmitterCard />);
+  await screen.findByText("Ask an admin to complete Cornerstone's e-file details.");
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+});
+
+it('shows a retry only for a real load failure and recovers', async () => {
+  mocks.submitterGet.mockRejectedValueOnce(new Error('offline'));
+  render(<FilingSubmitterCard />);
+  expect((await screen.findByRole('alert')).textContent).toContain('Could not load');
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  await screen.findByText('E-file details complete.');
+  expect(screen.queryByRole('alert')).toBeNull();
+});
