@@ -24,6 +24,7 @@ class InvoiceArtifactStorageService
       end
 
       locked_invoice.validate_reimbursement_review!
+      refuse_unprintable_text!(locked_invoice)
       locked_invoice.prepare_number_for_issue!
       locked_invoice.save!
       snapshot = locked_invoice.issued_snapshot(actor: actor)
@@ -54,7 +55,9 @@ class InvoiceArtifactStorageService
       filename: filename,
       content_type: content_type,
       kind: "imported_original",
-      snapshot: invoice.issued_snapshot(actor: actor, issued_at: issued_at),
+      # The uploaded original is the evidence, not a render, so no PDF style
+      # is recorded for it.
+      snapshot: invoice.issued_snapshot(actor: actor, issued_at: issued_at).except("style"),
       issued_at: issued_at,
       renderer_version: nil,
       template_version: nil
@@ -75,6 +78,16 @@ class InvoiceArtifactStorageService
   private
 
   attr_reader :storage
+
+  # Checked before a number is allocated: an issued PDF must never contain
+  # characters that print as empty boxes.
+  def refuse_unprintable_text!(invoice)
+    problems = InvoicePdf::GlyphCheck.problems(invoice.draft_snapshot)
+    return if problems.empty?
+
+    invoice.errors.add(:base, InvoicePdf::GlyphCheck.message(problems))
+    raise ActiveRecord::RecordInvalid, invoice
+  end
 
   def validate_import!(file)
     raise ArgumentError, "Invoice file is required" unless file
