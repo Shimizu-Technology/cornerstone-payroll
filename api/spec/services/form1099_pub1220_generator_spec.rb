@@ -117,8 +117,12 @@ RSpec.describe Form1099Pub1220Generator do
   it "uses the second name line for an SSN business and continuation of a long name" do
     person.update_columns(business_name: "Jane Services")
     expect(generator.generate[1787, 80]).to eq("DOE JANE".ljust(40) + "JANE SERVICES".ljust(40))
+  end
+
+  it "refuses, by name, a payee name whose first word cannot end line 1 at a whole word" do
     person.update_columns(last_name: "A" * 45, business_name: nil)
-    expect(described_class.new(company: company, year: 2026, submitter: submitter, draft: true, report: report).generate[1787, 80]).to eq("A" * 40 + ("A" * 5 + " JANE").ljust(40))
+    expect { described_class.new(company: company, year: 2026, submitter: submitter, draft: true, report: report).generate }
+      .to raise_error(described_class::InvalidFile, /payee name line 1 is longer than 40 characters/)
   end
 
   it "matches a two-payee literal golden with SSN, EIN, withholding and counts" do

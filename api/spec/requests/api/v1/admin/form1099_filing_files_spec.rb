@@ -129,6 +129,18 @@ RSpec.describe "1099 filing files", type: :request do
     expect(response.parsed_body["error"]).to include("Prior provider")
   end
 
+  it "refuses a file when a gate blocker appears during generation" do
+    calls = 0
+    allow_any_instance_of(PayrollFilingResponsibilityGate).to receive(:payload).and_wrap_original do |original|
+      calls += 1
+      calls == 1 ? original.call : { blockers: [ "A history batch was locked after the decision" ] }
+    end
+    expect(AuditLog).not_to receive(:record!)
+    get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "draft" }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("blockers changed during generation")
+  end
+
   it "refuses a final without a TCC even when readiness passes" do
     allow(Form1099Readiness).to receive(:final?).and_return(true)
     FilingSubmitter.find_by!(organization: company.organization).update!(tcc: nil)

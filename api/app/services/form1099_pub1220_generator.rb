@@ -133,14 +133,16 @@ class Form1099Pub1220Generator
   end
 
   # SSN: individual first, business second. EIN: business first. A long
-  # primary name may continue onto line 2 only when it is otherwise unused.
+  # primary name may continue onto line 2 only when it is otherwise unused,
+  # and line 1 must end with a whole word (B 288-327). A single word longer
+  # than 40 characters is left whole, so preflight refuses it by name.
   def payee_names(person, row)
     primary = row[:tin_type] == "EIN" ? person.business_name.presence || person.full_name : "#{person.last_name} #{person.first_name} #{person.middle_name}".strip
     secondary = row[:tin_type] == "SSN" ? person.business_name.to_s : ""
     names = [ primary, secondary ].map { |v| Efw2Formatting.clean(v).delete(".'").gsub(/[^A-Z0-9 &-]/, "") }
     if names[0].length > 40 && names[1].blank?
-      split_at = names[0][0, 41].rindex(" ") || 40
-      names = [ names[0][0, split_at], names[0][split_at..].lstrip ]
+      split_at = names[0][0, 41].rindex(" ")
+      names = [ names[0][0, split_at], names[0][split_at..].lstrip ] if split_at
     end
     names
   end

@@ -6,7 +6,7 @@ Implementation worker on the Mac mini; `/Users/agent/work/cornerstone-payroll-b`
 
 - The client list sums gross and `COALESCE(withholding_tax, 0)` by employee in one batched query, with the aggregator's committed/reportable scope. Nonzero withholding makes a below-threshold contractor reportable. Request coverage checks a $500 contractor with $50 withheld and no TIN, then restores a TIN and verifies Ready.
 - Individual name controls retain leading `de la`, `de las`, `de los`, `del`, `de`, `san`, `santa`, and `st` plus the following word. All requested surname examples and the additional particle variants are parameterized.
-- First payee name lines end at the last space through position 40. Continuation starts without a space. Only a single word longer than 40 is hard-cut. Both word-boundary and long-word cases verify the exact two output fields.
+- First payee name lines end at the last space through position 40. Continuation starts without a space. A single word longer than 40 is not cut (Pub 1220 requires line 1 to end with a full word); preflight refuses it with a named problem. Round 3 replaced the earlier hard-cut fallback after CodeRabbit review.
 - When threshold and withholding both apply, the threshold reason wins. Existing UI and PDF consumers both use their ordinary Reportable display; below-threshold withholding retains its explicit explanation.
 - Payer/transmitter names without any usable letter or number fail with a named problem before records are written.
 - XLSX retains BigDecimal values in the shared exporter. 1099 compensation/withholding detail and monetary totals receive money styles. XML tests verify numeric values and styles, alongside formula-injection coverage.

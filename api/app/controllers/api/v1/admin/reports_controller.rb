@@ -1971,6 +1971,9 @@ module Api
             revalidate_current_company_write_access!(company: company, capability: :manage_client_administration)
             current_decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "form_1099")
             raise ArgumentError, "Filing responsibility changed during generation" unless current_decision&.responsible_party == "cornerstone"
+            # A locked history batch can add a gate blocker without the company lock.
+            current_gate = PayrollFilingResponsibilityGate.new(company: company, tax_year: year, filing_type: "form_1099").payload
+            raise ArgumentError, "Filing blockers changed during generation; refresh and try again" if current_gate[:blockers].any?
             raise ArgumentError, "Filing readiness changed during generation" if final && !Form1099Readiness.final?(company: company, year: year)
 
             AuditLog.record!(user: current_user, company_id: company.id, action: pdf ? "form1096#download" : "pub1220#download",
