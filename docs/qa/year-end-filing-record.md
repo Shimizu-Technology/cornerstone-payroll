@@ -38,8 +38,17 @@ The connected browser fixture uses factory payroll/sign-off data and a synthetic
 
 ## Verification
 
-Final command results are recorded in the PR. Initial full Vitest run had one employee-documents pagination timeout (2,083 passed, 1 failed); rerunning the entire suite with two workers passed all 2,084 tests. Impeccable advisory scan returned no findings. No repository hooks or tooling were installed by that scan.
+Final backend rerun: `RAILS_ENV=test TEST_DATABASE_URL=postgres://localhost:5432/cp_test_filing_record bundle exec rspec` — **7,704 examples, 1 failure, 4 pending** (7,699 passed), in 13m15s. The sole failure is the unchanged converter-environment assertion described below. All task-related full-suite failures from the first run were fixed. The final one-line stale-file wording and added deadline reminder case are covered by the final affected-spec run: **127 examples, 0 failures**. This includes requests, agency lifecycle/file binding, migrations, models, checklist/list parity, query scaling and response-deadline checks.
 
-QA browser tab, Vite server and Rails server were stopped; the UI database was dropped. The test database is dropped after the backend gate completes. Shared Postgres remains available. Branch and checkout remain for Claude and CodeRabbit review; do not merge from this worker.
+`bundle exec rubocop` — **1,943 files, no offenses**. Frontend lint, both requested TypeScript commands, and the complete Vitest suite passed: **2,084 tests, 209 files** with two workers. The repeatable Chromium suite passed **2 tests**, one at each width. Initial full Vitest run had one employee-documents pagination timeout (2,083 passed, 1 failed); rerunning the entire suite with two workers passed all 2,084 tests. Impeccable advisory scan returned no findings. No repository hooks or tooling were installed by that scan.
+
+QA browser tab, Vite server and Rails server were stopped; the UI database was dropped. Both `cp_test_filing_record` and `cp_test_filing_record_ui` were dropped after verification; a local catalog query confirmed neither remains. Lifecycle session `manual-20261120-140631-21092-6bb3` reports no active owned resources. Shared Postgres remains available. Branch and checkout remain for Claude and CodeRabbit review; do not merge from this worker.
 
 The unchanged converter environment spec reproduces its failure in isolation: this Mac mini's portable Ruby `rbconfig.rb` (lines 426–432) adds `PKG_CONFIG_PATH` at Ruby startup. The application converter passes the four intended variables with `unsetenv_others: true`; the expected-key assertion then sees Ruby's added variable. No converter code, test or Ruby installation was changed here. A slow-drip response-deadline test also failed under the first full-suite load and passed in the focused rerun.
+
+
+## Review handoff
+
+PR: https://github.com/Shimizu-Technology/cornerstone-payroll/pull/505. Implementation commit `36a2e75ee818158139ab4b3bab1be6bd5b43f873`; the final follow-up includes the explicit stale-file error wording and this verification record. The PR head is authoritative. Base remains `50e5325b`; #504 had not merged at the final fetch.
+
+The next owner is the lead Claude session. Review the agency identity migration and retained legacy history, integrate/retest with #504, resolve or acknowledge the machine-specific converter test gate, and obtain the planned independent Claude review. CodeRabbit is **rate-limited**, not reviewed, despite its success-labelled check. Do not infer review approval from that label. No merge or production deployment was performed by this worker. Preserve this branch/checkout until the lead completes review and integration.
