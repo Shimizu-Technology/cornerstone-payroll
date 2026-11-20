@@ -153,6 +153,10 @@ class Form1099Pub1220Generator
       put(r, 344, 15, tin(s.contact_phone))
       put(r, 359, 50, s.contact_email)
       put(r, 518, 1, "I")
+      # Part C section 1 forbids punctuation in transmitter names/addresses.
+      [ 30, 110, 190, 230, 304 ].each do |position|
+        put(r, position, 40, r[position - 1, 40].gsub(/[^A-Z0-9 ]/, "").strip)
+      end
     end
   end
 

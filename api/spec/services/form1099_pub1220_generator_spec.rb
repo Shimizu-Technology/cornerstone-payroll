@@ -14,6 +14,15 @@ RSpec.describe Form1099Pub1220Generator do
     expect(generator.generate.b).to eq(File.binread(Rails.root.join("spec/fixtures/pub1220_2026_golden.txt")))
   end
 
+  it "removes transmitter punctuation while preserving email case" do
+    submitter.name = "Practice, Inc."
+    submitter.address_line1 = "1 Main #2"
+    t = generator.generate[0, 750]
+    expect(t[29, 40].strip).to eq("PRACTICE INC")
+    expect(t[189, 40].strip).to eq("1 MAIN 2")
+    expect(t[358, 50].strip).to eq("filing@example.com")
+  end
+
   it "allows a missing TCC only in test files" do
     submitter.tcc = nil
     expect(generator.generate[15, 5]).to eq("TEST0")
