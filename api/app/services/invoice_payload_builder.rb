@@ -87,6 +87,8 @@ class InvoicePayloadBuilder
       email_body: invoice.email_body,
       source_metadata: invoice.source_metadata,
       invoice_billing_profile: billing_profile_payload(invoice.invoice_billing_profile),
+      # Characters a draft's PDF would print as boxes; issuing is refused until fixed.
+      pdf_unprintable_text: invoice.draft? ? InvoicePdf::GlyphCheck.problems(invoice.draft_snapshot) : [],
       invoice_recipient: recipient_payload(invoice.invoice_recipient),
       line_items: invoice.line_items.map { |item| line_item_payload(item) },
       artifacts: invoice.artifacts.order(:created_at, :id).map { |artifact| artifact_payload(artifact) },

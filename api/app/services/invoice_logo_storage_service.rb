@@ -15,6 +15,26 @@ class InvoiceLogoStorageService
   end
 
   def upload!(profile:, file:)
+    bytes, content_type = validated_bytes(file)
+
+    extension = content_type == "image/png" ? ".png" : ".jpg"
+    key = StagingStoragePolicy.new_key("invoice-brand/organization-#{profile.organization_id}/profile-#{profile.id}/#{SecureRandom.uuid}#{extension}")
+    @storage.upload(key, StringIO.new(bytes), content_type: content_type)
+    profile.update!(logo_storage_key: key, logo_content_type: content_type,
+                    logo_sha256: Digest::SHA256.hexdigest(bytes), logo_byte_size: bytes.bytesize)
+    profile
+  rescue StandardError
+    begin
+      @storage.delete(key) if key.present?
+    rescue StandardError => cleanup_error
+      Rails.logger.warn("Invoice logo cleanup failed: #{cleanup_error.class}: #{cleanup_error.message}")
+    end
+    raise
+  end
+
+  # Checks an uploaded logo without storing it; returns [bytes, content_type].
+  # The style preview uses this to show a logo before the profile is saved.
+  def validated_bytes(file)
     raise ArgumentError, "Choose a PNG or JPEG logo" unless file
     raise ArgumentError, "Logo must be 1 MB or smaller" if file.size.to_i > MAX_BYTES
 
@@ -35,19 +55,7 @@ class InvoiceLogoStorageService
       raise ArgumentError, "Logo image could not be rendered"
     end
 
-    extension = content_type == "image/png" ? ".png" : ".jpg"
-    key = StagingStoragePolicy.new_key("invoice-brand/organization-#{profile.organization_id}/profile-#{profile.id}/#{SecureRandom.uuid}#{extension}")
-    @storage.upload(key, StringIO.new(bytes), content_type: content_type)
-    profile.update!(logo_storage_key: key, logo_content_type: content_type,
-                    logo_sha256: Digest::SHA256.hexdigest(bytes), logo_byte_size: bytes.bytesize)
-    profile
-  rescue StandardError
-    begin
-      @storage.delete(key) if key.present?
-    rescue StandardError => cleanup_error
-      Rails.logger.warn("Invoice logo cleanup failed: #{cleanup_error.class}: #{cleanup_error.message}")
-    end
-    raise
+    [ bytes, content_type ]
   end
 
   def remove!(profile:)

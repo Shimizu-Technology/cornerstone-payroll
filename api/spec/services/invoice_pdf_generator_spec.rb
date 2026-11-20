@@ -13,8 +13,11 @@ RSpec.describe InvoicePdfGenerator do
     )
   end
 
+  # These examples describe the pre-theme layout. It now renders only
+  # snapshots that record no style (invoices issued before themes existed).
   def reader_for(invoice)
-    PDF::Reader.new(StringIO.new(described_class.new(invoice.reload).generate))
+    snapshot = invoice.reload.draft_snapshot.except("style")
+    PDF::Reader.new(StringIO.new(described_class.new(invoice, snapshot: snapshot).generate))
   end
 
   it "generates a readable PDF with the core invoice content" do

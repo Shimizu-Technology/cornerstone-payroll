@@ -289,6 +289,27 @@ class ApiClient {
     return response.json() as Promise<T>;
   }
 
+  // POST multipart form data returning a Blob (for previews built from an unsaved upload)
+  async postFormBlob(endpoint: string, formData: FormData): Promise<BlobDownload> {
+    const initiatingCompanyId = this.activeCompanyId;
+    const token = await this.resolveAuthToken();
+    const headers: Record<string, string> = this.financeHeaders(endpoint);
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
+
+    const response = await fetchWithFeedback(this.buildUrl(endpoint), { method: 'POST', headers, body: formData });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(apiErrorMessage(errorData, response.status), response.status, errorData.details, errorData);
+    }
+
+    return {
+      blob: await response.blob(),
+      filename: parseContentDispositionFilename(response.headers.get('Content-Disposition')),
+    };
+  }
+
   // CPR-66: GET raw Blob (for authenticated PDF download)
   async getBlob(endpoint: string, params?: Record<string, string | number | boolean | undefined>): Promise<Blob> {
     const initiatingCompanyId = this.activeCompanyId;
@@ -5047,7 +5068,28 @@ export type InvoiceTemplateType = 'standard' | 'hourly' | 'project' | 'tuition';
 
 export interface InvoiceService { name: string; description_template: string; line_kind: 'service_fee' | 'reimbursement'; }
 
+export type InvoiceTheme = 'classic' | 'modern' | 'professional' | 'banner';
+export type InvoiceLogoSize = 'small' | 'medium' | 'large';
+
+export interface InvoiceStyleSettings {
+  invoice_theme: InvoiceTheme;
+  accent_color: string | null;
+  logo_size: InvoiceLogoSize;
+  show_service_period: boolean;
+  show_item_column: boolean;
+  show_how_to_pay: boolean;
+  footer_note: string | null;
+  payment_instructions: string | null;
+}
+
 export interface InvoiceBillingProfile {
+  invoice_theme?: InvoiceTheme;
+  accent_color?: string | null;
+  effective_accent_color?: string;
+  logo_size?: InvoiceLogoSize;
+  show_service_period?: boolean;
+  show_item_column?: boolean;
+  show_how_to_pay?: boolean;
   numbering_style?: 'yearly' | 'continuing';
   next_invoice_number?: number;
   service_catalog?: InvoiceService[];
@@ -5106,7 +5148,13 @@ export interface InvoiceLineItem {
   updated_at?: string;
 }
 
+export interface InvoicePdfTextIssue {
+  field: string;
+  characters: string[];
+}
+
 export interface Invoice {
+  pdf_unprintable_text?: InvoicePdfTextIssue[];
   due_date_manual?: boolean;
   service_period_manual?: boolean;
   company_name?: string | null;
@@ -5329,7 +5377,7 @@ export interface InvoiceReceivablesSummary {
   }>;
 }
 
-export interface InvoiceBillingProfilePayload {
+export interface InvoiceBillingProfilePayload extends Partial<Omit<InvoiceStyleSettings, 'footer_note' | 'payment_instructions'>> {
   numbering_style?: 'yearly' | 'continuing';
   next_invoice_number?: number;
   service_catalog?: InvoiceService[];
@@ -5460,6 +5508,17 @@ export const invoiceBillingProfilesApi = {
   },
   removeLogo: (id: number) =>
     api.delete<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}/logo`),
+  updateStyle: (id: number, style: InvoiceStyleSettings) =>
+    api.patch<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}`, { invoice_billing_profile: style }),
+  // Renders a made-up invoice in the given (possibly unsaved) style. Nothing is stored.
+  samplePdf: (id: number, style: InvoiceStyleSettings, options: { logo?: File | null; removeLogo?: boolean; download?: boolean } = {}) => {
+    const form = new FormData();
+    Object.entries(style).forEach(([key, value]) => form.append(`invoice_billing_profile[${key}]`, value === null ? '' : String(value)));
+    if (options.logo) form.append('logo', options.logo);
+    if (options.removeLogo) form.append('remove_logo', 'true');
+    if (options.download) form.append('disposition', 'attachment');
+    return api.postFormBlob(`/admin/invoice_billing_profiles/${id}/sample_pdf`, form);
+  },
   delete: (id: number) =>
     api.delete<{ message: string; invoice_billing_profile?: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}`),
 };
