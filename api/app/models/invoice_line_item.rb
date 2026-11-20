@@ -48,5 +48,6 @@ class InvoiceLineItem < ApplicationRecord
 
   def calculate_amount
     self.amount = (BigDecimal(quantity.to_s) * BigDecimal(rate.to_s)).round(2, :half_up)
+    self.reimbursement_review_required = line_kind == "reimbursement" && amount.zero?
   end
 end

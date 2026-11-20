@@ -85,7 +85,21 @@ class InvoiceRecurrenceGenerator
             position: position
           )
         end
+        copied_discount = invoice.discount_value
+        fee_subtotal = invoice.line_items.select { |line| line.line_kind == "service_fee" }.sum(BigDecimal("0")) do |line|
+          (line.quantity * line.rate).round(2, :half_up)
+        end
+        capped_discount = invoice.discount_type == "amount" && copied_discount > fee_subtotal
+        if capped_discount
+          invoice.discount_value = fee_subtotal
+          invoice.notes = [ invoice.notes.presence,
+                            "Review recurring discount: fixed discount capped from #{copied_discount.to_s('F')} to #{fee_subtotal.to_s('F')} #{invoice.currency} to match the regenerated service fees." ].compact.join("\n\n")
+        end
         invoice.save!
+        if capped_discount
+          InvoiceEvent.record!(invoice: invoice, event_type: "recurring_discount_capped", actor: recurrence.created_by,
+                               metadata: { original_discount: copied_discount.to_s("F"), capped_discount: fee_subtotal.to_s("F"), currency: invoice.currency })
+        end
         InvoiceEvent.record!(invoice: invoice, event_type: "recurring_draft_created", actor: recurrence.created_by,
                              metadata: { recurrence_id: recurrence.id, occurrence_on: date.iso8601 })
       end

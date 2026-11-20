@@ -6,6 +6,8 @@ require "prawn/table"
 class InvoicePdfGenerator
   include ActionView::Helpers::NumberHelper
 
+  ITEM_NUMBER_WIDTH = 24
+  ITEM_NAME_WIDTH = 106
   PAGE_MARGIN = 48
   PAGE_BOTTOM_MARGIN = 68
   INK = "111827"
@@ -204,12 +206,12 @@ class InvoicePdfGenerator
       (1...rows.length).each { |index| row(index).background_color = PANEL if index.even? }
       offset = include_item_name ? 2 : 0
       if include_item_name
-        columns(0).width = 24
-        columns(1).width = 106
+        columns(0).width = ITEM_NUMBER_WIDTH
+        columns(1).width = ITEM_NAME_WIDTH
         cells.padding = [ 9, 5 ]
         cells.size = 8
       end
-      columns(offset).width = table_width - date_width - quantity_width - rate_width - amount_width - (include_item_name ? 130 : 0)
+      columns(offset).width = table_width - date_width - quantity_width - rate_width - amount_width - (include_item_name ? ITEM_NUMBER_WIDTH + ITEM_NAME_WIDTH : 0)
       columns(offset + 1).width = date_width if include_service_date
       numeric_start = offset + (include_service_date ? 2 : 1)
       columns(numeric_start).width = quantity_width

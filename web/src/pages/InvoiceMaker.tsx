@@ -1,3 +1,4 @@
+import { invoicePreviewLines, newManualInvoiceLine } from '@/lib/invoice-maker-lines';
 import { invoiceDraftDueDate } from '@/lib/invoice-defaults';
 import { invoiceBusinessDate } from '@/lib/invoice-defaults';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
@@ -610,15 +611,8 @@ export function InvoiceMaker() {
       paid_at: null,
       voided_at: null,
       archived_at: null,
-      line_items: (preview.line_items || []).map((item, index) => ({
-        local_id: `ai-${Date.now()}-${index}`,
-        description: item.description,
-        quantity: Number(item.quantity || 0),
-        rate: Number(item.rate || 0),
-        amount: invoiceLineAmount(Number(item.quantity || 0), Number(item.rate || 0)),
-        service_date: item.service_date || '',
-        position: index,
-      })),
+      line_items: invoicePreviewLines(preview.line_items || [], recipients.find((recipient) => String(recipient.id) === recipientId)?.default_rate ?? preview.new_recipient?.default_rate ?? 0)
+        .map((item, index) => ({ ...item, local_id: `ai-${Date.now()}-${index}` })),
     };
     setInvoiceForm(nextForm);
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(emptyInvoiceForm()));
@@ -676,12 +670,7 @@ export function InvoiceMaker() {
         ...current.line_items,
         {
           local_id: `line-${Date.now()}`,
-          description: '',
-          quantity: 1,
-          rate: defaultRate,
-          amount: defaultRate,
-          service_date: '',
-          position: current.line_items.length,
+          ...newManualInvoiceLine(current.line_items, defaultRate),
         },
       ],
     }));
