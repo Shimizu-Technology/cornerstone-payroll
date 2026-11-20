@@ -300,6 +300,19 @@ RSpec.describe "Invoice PDF themes" do
       expect(runs.find { |run| compact(run.text) == "Invoicenumber" }.x).to be > 0
     end
 
+    it "keeps the Professional title and its details together below a tall letterhead" do
+      checked = (100..260).step(4).map do |count|
+        profile.update!(address: (1..count).map { |i| "Suite #{i}, Building #{i * 7}, Hagåtña, GU 96910" }.join("\n"))
+        pages = reader(render(snapshot_for("professional"))).pages
+        title_page = pages.index { |page| page.runs.any? { |run| run.text == "Invoice" } }
+        details_page = pages.index { |page| page.runs.any? { |run| compact(run.text) == "Invoicenumber" } }
+
+        expect(title_page).to eq(details_page), "#{count} address lines"
+        title_page
+      end
+      expect(checked.uniq).to include(0, 1)
+    end
+
     it "frames the Banner rows on their own page when the totals move to the next one" do
       invoice.update!(notes: (1..40).map { |i| "Note line #{i} about this engagement." }.join("\n"))
       25.times { |index| invoice.line_items.create!(description: "Bookkeeping #{index}", quantity: 1, rate: 10, position: index + 2) }

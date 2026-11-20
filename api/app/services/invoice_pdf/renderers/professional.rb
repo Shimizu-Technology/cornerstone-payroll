@@ -111,6 +111,11 @@ module InvoicePdf
         return draw_title_with_listed_details(rows) if grid_height > pdf.bounds.height * 0.4
 
         height = [ grid_height, title_height ].max
+        # A tall letterhead can leave too little room; keep title and grid together.
+        if height > pdf.cursor
+          pdf.start_new_page
+          top = pdf.cursor
+        end
         pdf.move_cursor_to(top - (height - grid_height))
         grid.call
         pdf.move_cursor_to(top - (height - title_height))
