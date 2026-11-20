@@ -121,6 +121,30 @@ RSpec.describe YearEnd::Checklist do
       expect(described_class.new(company: company, year: 2026).w2_mark_ready_blockers).to be_empty
     end
 
+    it "stores the same sign-off flag whether the checklist or a mark-ready attempt writes the e-file check" do
+      allow_any_instance_of(described_class).to receive(:reconciliation_step).and_wrap_original do |original, *args|
+        original.call(*args).merge(status: "action_needed")
+      end
+      described_class.new(company: company, year: 2026).w2_mark_ready_blockers
+      after_attempt = Rails.cache.read(YearEnd::EfileCheck.key(company.id, 2026))
+      checklist
+      after_checklist = Rails.cache.read(YearEnd::EfileCheck.key(company.id, 2026))
+
+      expect(after_attempt[:sign_off_needed]).to be(true)
+      expect(after_attempt[:sign_off_needed]).to eq(after_checklist[:sign_off_needed])
+    end
+
+    it "stamps the cached sign-off flag with the ready mark it was computed against" do
+      described_class.new(company: company, year: 2026).w2_mark_ready_blockers
+      expect(Rails.cache.read(YearEnd::EfileCheck.key(company.id, 2026))[:readiness]).to be_nil
+
+      readiness = W2FilingReadiness.create!(company: company, year: 2026, status: "filing_ready", marked_ready_at: Time.current,
+        ready_fingerprint: "a" * 64, marked_ready_by: accountant)
+      checklist
+
+      expect(Rails.cache.read(YearEnd::EfileCheck.key(company.id, 2026))[:readiness]).to eq(YearEnd::EfileCheck.readiness_stamp(readiness))
+    end
+
     it "still blocks the W-2s on a real W-2 problem" do
       company.update_columns(ein: nil)
 

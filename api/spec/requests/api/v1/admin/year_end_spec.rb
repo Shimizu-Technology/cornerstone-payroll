@@ -142,6 +142,29 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(row).to include("status" => "needs_action", "efile_check_pending" => true)
     end
 
+    it "keeps the query count flat as W-2 clients are added" do
+      count_queries = lambda do
+        count = 0
+        callback = ->(*, payload) { count += 1 unless payload[:name].in?(%w[SCHEMA TRANSACTION]) }
+        ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+          get "/api/v1/admin/year_end/clients", params: { year: 2026 }
+        end
+        expect(response).to have_http_status(:ok)
+        count
+      end
+      add_w2_client = lambda do |name|
+        client = create(:company, organization: company.organization, name: name, ein: nil)
+        worker = create(:employee, company: client, department: create(:department, company: client))
+        pay(client, Date.new(2026, 3, 6), worker: worker)
+        create(:payroll_filing_responsibility, :annual, company: client, filing_type: "w2_gu", source_cutoff_date: nil)
+      end
+      add_w2_client.call("Client 1")
+      baseline = count_queries.call
+      4.times { |index| add_w2_client.call("Client #{index + 2}") }
+
+      expect(count_queries.call).to be <= baseline
+    end
+
     it "keeps an inactive record with a reportable one-off contractor check and nothing else on the list" do
       create(:non_employee_check, company: dormant, check_type: "contractor", payable_to: "Synthetic Roofing", amount: 2_500,
         check_number: "9001", payment_period_type: "none", tax_year: nil, tax_month: nil, payment_date: Date.new(2026, 5, 2), printed_at: Time.current)

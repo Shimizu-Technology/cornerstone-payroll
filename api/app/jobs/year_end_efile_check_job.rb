@@ -7,7 +7,8 @@ class YearEndEfileCheckJob < ApplicationJob
   def perform(company_id, year, revision)
     return unless year == 2026
     return unless YearEnd::InputRevision.for(company_id, year)[company_id] == revision
-    return if YearEnd::EfileCheck.read_many([ company_id ], year).dig(company_id, :revision) == revision
+    stored = YearEnd::EfileCheck.read_many([ company_id ], year)[company_id]
+    return if stored && stored[:revision] == revision && stored[:readiness] == YearEnd::EfileCheck.current_readiness_stamp(company_id, year)
 
     company = Company.find_by(id: company_id)
     YearEnd::Checklist.new(company: company, year: year).call if company && !company.test_workspace?

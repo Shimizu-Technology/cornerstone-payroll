@@ -99,11 +99,14 @@ module YearEnd
       if files_w2
         issues << { code: "EMPLOYER_CONTACT_NAME_MISSING", label: "Add the employer filing contact name" } if company.filing_contact_name.blank?
         if year == 2026
-          preflight = Checklist.new(company: company, year: year, user: user)
+          preflight = Checklist.new(company: company, year: year, user: user, responsibilities: decisions)
           issues.concat(preflight.efw2_employer_issues.map { |entry| { code: entry[:code], label: entry[:message] } })
           stored = efile_checks[company.id]
           efile_current = stored.present? && stored[:revision] == input_revisions[company.id]
-          EfileCheck.enqueue(company.id, year, input_revisions[company.id]) unless efile_current
+          # The sign-off flag also depends on the ready mark, which the input
+          # revision does not cover.
+          sign_off_current = efile_current && stored[:readiness] == EfileCheck.readiness_stamp(readinesses[company.id])
+          EfileCheck.enqueue(company.id, year, input_revisions[company.id]) unless sign_off_current
           issues.concat(stored[:issues].map { |entry| { code: entry[:code], label: entry[:message] } }) if efile_current
         end
       end
@@ -111,13 +114,14 @@ module YearEnd
       marked = files_w2 && readiness&.status == "filing_ready" && readiness.marked_ready_at.present?
       unchanged = ready_checks[company.id].present? && ready_checks[company.id] == input_revisions[company.id]
       # The live ready mark wins: a cached check can add a sign-off, never remove one.
-      sign_off_needed = !marked || (efile_current && stored[:sign_off_needed] == true)
+      sign_off_needed = !marked || (sign_off_current && stored[:sign_off_needed] == true)
       if files_w2 && sign_off_needed
         issues << { code: "W2_NOT_MARKED_READY", label: "Check the numbers and mark W-2s ready" }
       end
       # 1099-only clients are fully checked above; the W-2 sign-off is the
       # only part the list cannot recompute.
-      check_needed = (marked && !unchanged && !sign_off_needed) || (files_w2 && year == 2026 && !efile_current)
+      sign_off_unknown = files_w2 && year == 2026 && !sign_off_current
+      check_needed = (marked && (!unchanged || sign_off_unknown) && !sign_off_needed) || (files_w2 && year == 2026 && !efile_current)
 
       status = if issues.any?
         "needs_action"
