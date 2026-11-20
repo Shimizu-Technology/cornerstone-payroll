@@ -1018,14 +1018,6 @@ class IssueCorrectivePaycheckService
     # index on auto_generated_type guarantees no duplicates within the
     # supplemental period.
     create_supplemental_fit_check!(supplemental) if supplemental.company.auto_create_fit_check?
-
-    # Tax sync — the supplemental gets its own idempotency key and is
-    # pushed independently only when the external CST ingest integration is configured.
-    if supplemental.prepare_tax_sync_if_configured!
-      ActiveRecord.after_all_transactions_commit do
-        PayrollTaxSyncJob.perform_later(supplemental.id)
-      end
-    end
   end
 
   def create_supplemental_fit_check!(supplemental)

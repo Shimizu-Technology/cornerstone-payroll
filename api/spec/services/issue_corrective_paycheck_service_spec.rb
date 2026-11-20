@@ -778,35 +778,6 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(PayPeriod.reportable_committed.where(id: supplemental.id)).to exist
     end
 
-    it "does not enqueue PayrollTaxSyncJob for the supplemental period when CST ingest is not configured" do
-      expect {
-        described_class.issue!(
-          original_pay_period: original_period,
-          employee:            employee,
-          corrected_inputs:    { hours_worked: 80 },
-          pay_date:            Date.new(2024, 1, 26),
-          reason:              "+20h",
-          actor:               actor
-        )
-      }.not_to have_enqueued_job(PayrollTaxSyncJob)
-    end
-
-    it "enqueues PayrollTaxSyncJob for the supplemental period when CST ingest is configured" do
-      allow(ENV).to receive(:[]).and_call_original
-      allow(ENV).to receive(:[]).with("CST_INGEST_URL").and_return("https://tax.example.test/ingest")
-
-      expect {
-        described_class.issue!(
-          original_pay_period: original_period,
-          employee:            employee,
-          corrected_inputs:    { hours_worked: 80 },
-          pay_date:            Date.new(2024, 1, 26),
-          reason:              "+20h",
-          actor:               actor
-        )
-      }.to have_enqueued_job(PayrollTaxSyncJob)
-    end
-
     it "auto-generates a FIT NonEmployeeCheck when the company opted in and there is positive FIT delta" do
       company.update!(auto_create_fit_check: true)
 
