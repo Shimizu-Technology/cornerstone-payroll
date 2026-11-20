@@ -52,6 +52,7 @@ const TimecardOcrTool = lazy(() => import('@/pages/TimecardOcrTool').then((modul
 const GeneralTransmittals = lazy(() => import('@/pages/GeneralTransmittals').then((module) => ({ default: module.GeneralTransmittals })));
 const InvoiceMaker = lazy(() => import('@/pages/InvoiceMaker').then((module) => ({ default: module.InvoiceMaker })));
 const InvoiceCenter = lazy(() => import('@/pages/InvoiceCenter').then((module) => ({ default: module.InvoiceCenter })));
+const InvoiceStyleSettings = lazy(() => import('@/pages/InvoiceStyleSettings').then((module) => ({ default: module.InvoiceStyleSettings })));
 const ExpenseLedger = lazy(() => import('@/pages/ExpenseLedger').then((module) => ({ default: module.ExpenseLedger })));
 const FinanceOverview = lazy(() => import('@/pages/FinanceOverview').then((module) => ({ default: module.FinanceOverview })));
 const FinanceAgentAccess = lazy(() => import('@/pages/FinanceAgentAccess').then((module) => ({ default: module.FinanceAgentAccess })));
@@ -389,6 +390,7 @@ function AppRoutes() {
         <Route path="tools/finance/agent-access" element={<AdminOnlyRoute><FinanceBookGate><FinanceAgentAccess /></FinanceBookGate></AdminOnlyRoute>} />
         <Route path="tools/expenses" element={<AdminOnlyRoute><FinanceBookGate><ExpenseLedger /></FinanceBookGate></AdminOnlyRoute>} />
         <Route path="tools/invoices/assistant" element={<AdminOnlyRoute><FinanceBookGate><InvoiceMaker /></FinanceBookGate></AdminOnlyRoute>} />
+        <Route path="tools/invoices/billing-profiles/:profileId/style" element={<AdminOnlyRoute><FinanceBookGate><InvoiceStyleSettings /></FinanceBookGate></AdminOnlyRoute>} />
         <Route path="settings/users" element={<AdminOnlyRoute><Users /></AdminOnlyRoute>} />
         <Route path="settings/organizations" element={<SuperAdminOnlyRoute><Organizations /></SuperAdminOnlyRoute>} />
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />

@@ -45,7 +45,7 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/invoice_send_schedules" => %w[index],
     "api/v1/admin/invoice_recurrences" => %w[index],
     "api/v1/admin/invoice_recipients" => %w[index show],
-    "api/v1/admin/invoice_billing_profiles" => %w[index show],
+    "api/v1/admin/invoice_billing_profiles" => %w[index show sample_pdf],
     "api/v1/admin/expense_vendors" => %w[index]
   }.freeze
 

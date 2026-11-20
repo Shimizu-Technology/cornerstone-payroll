@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_20_200000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_21_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2060,6 +2060,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_200000) do
     t.string "numbering_style", default: "yearly", null: false
     t.integer "next_invoice_number", default: 1, null: false
     t.jsonb "service_catalog", default: [], null: false
+    t.string "invoice_theme", default: "classic", null: false
+    t.string "accent_color"
+    t.string "logo_size", default: "medium", null: false
+    t.boolean "show_service_period", default: true, null: false
+    t.boolean "show_item_column", default: true, null: false
+    t.boolean "show_how_to_pay", default: true, null: false
     t.index [ "finance_book_id", "is_default" ], name: "index_invoice_billing_profiles_one_default_per_book", unique: true, where: "(is_default = true)"
     t.index [ "finance_book_id", "name" ], name: "index_invoice_billing_profiles_on_finance_book_id_and_name", unique: true
     t.index [ "finance_book_id" ], name: "index_invoice_billing_profiles_on_finance_book_id"
@@ -2067,6 +2073,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_200000) do
     t.index [ "logo_storage_key" ], name: "index_invoice_billing_profiles_on_logo_storage_key", unique: true
     t.index [ "organization_id" ], name: "index_invoice_billing_profiles_on_organization_id"
     t.check_constraint "(numbering_style::text = ANY (ARRAY['yearly'::character varying, 'continuing'::character varying]::text[])) AND next_invoice_number > 0", name: "invoice_numbering_valid"
+    t.check_constraint "accent_color IS NULL OR accent_color::text ~ '^#[0-9A-F]{6}$'::text", name: "invoice_billing_profile_accent_color_valid"
+    t.check_constraint "invoice_theme::text = ANY (ARRAY['classic'::character varying, 'modern'::character varying, 'professional'::character varying, 'banner'::character varying]::text[])", name: "invoice_billing_profile_theme_valid"
+    t.check_constraint "logo_size::text = ANY (ARRAY['small'::character varying, 'medium'::character varying, 'large'::character varying]::text[])", name: "invoice_billing_profile_logo_size_valid"
   end
 
   create_table "invoice_chat_messages", force: :cascade do |t|
