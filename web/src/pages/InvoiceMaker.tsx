@@ -5,7 +5,7 @@ import { INVOICE_THEMES } from '@/lib/invoiceStyle';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Loader2, Mail, MessageSquare, Palette, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -282,6 +282,7 @@ export function InvoiceMaker() {
   const [invoiceForm, setInvoiceForm] = useState<InvoiceFormState>(emptyInvoiceForm);
   const [billingProfileForm, setBillingProfileForm] = useState<BillingProfileFormState>(emptyBillingProfileForm);
   const [billingLogoFile, setBillingLogoFile] = useState<File | null>(null);
+  const billingProfileFormBaseline = useRef('');
   const [recipientForm, setRecipientForm] = useState<RecipientFormState>(emptyRecipientForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1207,7 +1208,7 @@ export function InvoiceMaker() {
 
   const editBillingProfile = (profile: InvoiceBillingProfile) => {
     setBillingLogoFile(null);
-    setBillingProfileForm({
+    const nextForm: BillingProfileFormState = {
       numbering_style: profile.numbering_style || 'yearly',
       next_invoice_number: profile.next_invoice_number || 1,
       service_catalog: profile.service_catalog || [],
@@ -1225,8 +1226,20 @@ export function InvoiceMaker() {
       footer_note: profile.footer_note || '',
       active: profile.active,
       is_default: profile.is_default,
-    });
+    };
+    billingProfileFormBaseline.current = JSON.stringify(nextForm);
+    setBillingProfileForm(nextForm);
     setShowBillingProfileForm(true);
+  };
+
+  const hasUnsavedBillingProfileChanges = () => (
+    showBillingProfileForm && (JSON.stringify(billingProfileForm) !== billingProfileFormBaseline.current || Boolean(billingLogoFile))
+  );
+
+  // Leaving for the style page drops unsaved invoice and profile edits, so ask first.
+  const confirmLeaveForStyle = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (!hasUnsavedInvoiceChanges() && !hasUnsavedBillingProfileChanges()) return;
+    if (!window.confirm('Leave without saving? Unsaved invoice or billing profile changes will be lost.')) event.preventDefault();
   };
 
   const saveBillingProfile = async () => {
@@ -1511,7 +1524,7 @@ export function InvoiceMaker() {
                     {themeLabel(billingProfiles.find((profile) => profile.id === billingProfileForm.id)?.invoice_theme)} theme. Choose a theme, brand color, logo size and what each invoice shows.
                   </p>
                 </div>
-                <Link to={`/tools/invoices/billing-profiles/${billingProfileForm.id}/style`} className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:border-primary-300 hover:bg-primary-50/60">
+                <Link to={`/tools/invoices/billing-profiles/${billingProfileForm.id}/style`} onClick={confirmLeaveForStyle} className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:border-primary-300 hover:bg-primary-50/60">
                   <Palette className="mr-1.5 h-4 w-4" aria-hidden="true" />Edit invoice style
                 </Link>
               </div>

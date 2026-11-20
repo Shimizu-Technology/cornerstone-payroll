@@ -132,27 +132,73 @@ module InvoicePdf
       def draw_lines
         rows = data.lines
         heights = rows.each_with_index.map { |line, index| measure { draw_row(line, index) } }
-        tail = measure { draw_closing } + footer_block_height
+        tail = measure { draw_closing } + footer_clearance
         header_height = measure { draw_table_header }
+        row_space = pdf.bounds.height - header_height
 
-        start_table_on_fresh_page_if_needed(header_height + heights.first.to_f)
+        start_table_on_fresh_page_if_needed(header_height + [ heights.first.to_f, row_space ].min)
         table_segment_started
         draw_table_header
         rows.each_with_index do |line, index|
+          if heights[index] > row_space
+            draw_split_row(line, index)
+            next
+          end
+
           needed = heights[index]
           if rows.size - index <= KEEP_WITH_TOTALS
             together = heights[index..].sum + tail
-            needed = together if together <= pdf.bounds.height - header_height
+            needed = together if together <= row_space
           end
-          if needed > pdf.cursor
-            close_table_segment(final: false)
-            pdf.start_new_page
-            table_segment_started
-            draw_table_header
-          end
+          continue_table_on_new_page if needed > pdf.cursor
           draw_row(line, index)
         end
         close_table_segment(final: true)
+      end
+
+      def continue_table_on_new_page
+        close_table_segment(final: false)
+        pdf.start_new_page
+        table_segment_started
+        draw_table_header
+      end
+
+      # A row taller than a page is drawn in parts so every cell stays inside
+      # the table: the first part carries the item, quantity, rate and amount,
+      # and later parts continue the description under a repeated header.
+      def draw_split_row(line, index)
+        words = line["description"].to_s.split(/(?<=\s)/)
+        first = true
+        loop do
+          count = words_that_fit(line, index, words, first)
+          if count.zero?
+            continue_table_on_new_page
+            count = [ words_that_fit(line, index, words, first), 1 ].max
+          end
+          draw_row(row_part(line, words.first(count).join, first), index)
+          words = words.drop(count)
+          break if words.empty?
+
+          first = false
+          continue_table_on_new_page
+        end
+      end
+
+      # The largest number of leading words whose row still fits the page.
+      def words_that_fit(line, index, words, first)
+        low = 0
+        high = words.size
+        while low < high
+          middle = (low + high + 1) / 2
+          height = measure { draw_row(row_part(line, words.first(middle).join, first), index) }
+          height <= pdf.cursor ? low = middle : high = middle - 1
+        end
+        low
+      end
+
+      def row_part(line, description, first)
+        part = line.merge("description" => description.rstrip)
+        first ? part : part.merge("continued" => true)
       end
 
       def start_table_on_fresh_page_if_needed(height)
@@ -161,7 +207,10 @@ module InvoicePdf
 
       def draw_closing_with_footer
         closing = measure { draw_closing }
-        pdf.start_new_page if closing > pdf.cursor && closing <= pdf.bounds.height
+        if closing > pdf.cursor && closing <= pdf.bounds.height
+          totals_moving_to_new_page
+          pdf.start_new_page
+        end
         draw_closing
         footer = footer_block_height
         return if footer.zero?
@@ -171,8 +220,16 @@ module InvoicePdf
         draw_footer_block
       end
 
+      # Called before the totals start a page of their own.
+      def totals_moving_to_new_page; end
+
       def footer_block_height
         @footer_block_height ||= measure { draw_footer_block }
+      end
+
+      # The footer block plus the gap draw_closing_with_footer requires above it.
+      def footer_clearance
+        footer_block_height.zero? ? 0 : footer_block_height + px(16)
       end
 
       # Draws the block on an off-screen copy of the document and returns its
@@ -228,19 +285,22 @@ module InvoicePdf
         margins[2] - px(14)
       end
 
+      # The draft or sample marker has its own box, so a long sender line can
+      # shrink or truncate without ever hiding it.
       def draw_page_footer(number, total)
         left = margins[3]
         width = PAGE_WIDTH - margins[1] - left
         top = footer_baseline_top
-        center = [ footer_line, data.preview_marker ].compact.join("  ·  ").presence
-        if center
-          font_box(center, x: left + 70, top: top, width: width - 140, size: px(11), color: muted, align: :center,
-                           style: data.preview_marker && !footer_line ? :semibold : :normal)
+        size = px(11)
+        marker = data.preview_marker
+        marker_width = marker ? text_width(marker, size: size, style: :semibold) + 4 : 0
+        page_label = total > 1 ? "Page #{number} of #{total}" : nil
+        side = [ marker_width, page_label ? 70 : 0, 70 ].max + 8
+        font_box(marker, x: left, top: top, width: marker_width, size: size, color: ink, style: :semibold) if marker
+        if footer_line && width - (side * 2) > 40
+          font_box(footer_line, x: left + side, top: top, width: width - (side * 2), size: size, color: muted, align: :center)
         end
-        return unless total > 1
-
-        font_box("Page #{number} of #{total}", x: left + width - 70, top: top, width: 70, size: px(11), color: muted,
-                                               align: :right)
+        font_box(page_label, x: left + width - 70, top: top, width: 70, size: size, color: muted, align: :right) if page_label
       end
 
       # ---- Text primitives ---------------------------------------------------
@@ -298,6 +358,39 @@ module InvoicePdf
 
       def column(x, width, &block)
         [ x, width, block ]
+      end
+
+      # Side-by-side columns when they fit on this page or a fresh one;
+      # content taller than a page is stacked instead, so it flows across
+      # pages at full width rather than splitting columns between pages.
+      def fitting_columns(entries, gap: px(16))
+        height = measure { columns_row(entries) }
+        return stack_columns(entries, gap) if height > pdf.bounds.height
+
+        pdf.start_new_page if height > pdf.cursor
+        columns_row(entries)
+      end
+
+      def stack_columns(entries, gap)
+        entries.each_with_index do |(_x, _width, block), index|
+          pdf.move_down(gap) if index.positive?
+          block.call
+        end
+      end
+
+      # A shaded box around content that fits a page. Content taller than a
+      # page is drawn by the fallback without the box, so it can flow.
+      def panel(fill:, radius:, pad_x:, pad_y:, fallback:, &content)
+        inner = -> { pdf.bounding_box([ pad_x, pdf.cursor ], width: pdf.bounds.width - (pad_x * 2)) { content.call } }
+        height = measure { inner.call } + (pad_y * 2)
+        return fallback.call if height > pdf.bounds.height
+
+        pdf.start_new_page if height > pdf.cursor
+        top = pdf.y
+        fill_box(0, pdf.cursor, pdf.bounds.width, height, fill, radius: radius)
+        pdf.move_down(pad_y)
+        inner.call
+        pdf.y = top - height
       end
 
       # Vertical stack with a CSS-style gap between the items that print.
@@ -426,9 +519,12 @@ module InvoicePdf
         cols.map { |col| col.width ? col : col.dup.tap { |copy| copy.width = flexible } }
       end
 
-      def line_value(line, key)
+      # Continuation parts of a split row repeat only the description.
+      def line_value(line, key, index)
+        return "" if line["continued"] && key != :description
+
         case key
-        when :number then (data.lines.index(line).to_i + 1).to_s
+        when :number then (index + 1).to_s
         when :item then line["item_name"].to_s
         when :description then line["description"].to_s
         when :date then data.line_date(line).to_s
@@ -440,11 +536,11 @@ module InvoicePdf
 
       # Draws one row of cells at the cursor; returns nothing, moves the cursor
       # below the row. cell_styles maps a column key to text options.
-      def draw_cells(line, layout, padding:, cell_styles: {}, default: {})
+      def draw_cells(line, layout, index:, padding:, cell_styles: {}, default: {})
         pdf.move_down(padding)
         entries = layout.map do |col, x|
           options = default.merge(cell_styles.fetch(col.key, {}))
-          content = options.delete(:content) || ->(row) { line_value(row, col.key) }
+          content = options.delete(:content) || ->(row) { line_value(row, col.key, index) }
           column(x, col.width) { text(content.call(line), align: col.align || :left, **options) }
         end
         columns_row(entries)

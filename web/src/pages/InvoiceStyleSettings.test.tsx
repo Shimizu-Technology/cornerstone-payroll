@@ -104,6 +104,56 @@ describe('InvoiceStyleSettings', () => {
     await waitFor(() => expect(state.api.uploadLogo).toHaveBeenCalledWith(7, logo));
   });
 
+  it('discards a new logo without removing the saved one', async () => {
+    const user = userEvent.setup();
+    URL.createObjectURL = vi.fn(() => 'blob:logo');
+    URL.revokeObjectURL = vi.fn();
+    state.api.get.mockResolvedValue({ invoice_billing_profile: { ...profile, has_logo: true } });
+    state.api.updateStyle.mockResolvedValue({ invoice_billing_profile: { ...profile, has_logo: true } });
+    const { container } = renderPage();
+    await screen.findByRole('button', { name: /Remove logo/ });
+
+    await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement, new File(['png'], 'logo.png', { type: 'image/png' }));
+    await user.click(screen.getByRole('button', { name: /Discard new logo/ }));
+    expect(screen.getByRole('button', { name: /Remove logo/ })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /^Modern/ }));
+    await user.click(screen.getByRole('button', { name: 'Save style' }));
+
+    await waitFor(() => expect(state.api.updateStyle).toHaveBeenCalled());
+    expect(state.api.removeLogo).not.toHaveBeenCalled();
+    expect(state.api.uploadLogo).not.toHaveBeenCalled();
+  });
+
+  it('removes the saved logo only after Remove logo, and can undo it', async () => {
+    const user = userEvent.setup();
+    state.api.get.mockResolvedValue({ invoice_billing_profile: { ...profile, has_logo: true } });
+    state.api.updateStyle.mockResolvedValue({ invoice_billing_profile: { ...profile, has_logo: true } });
+    state.api.removeLogo.mockResolvedValue({ invoice_billing_profile: { ...profile, has_logo: false } });
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /Remove logo/ }));
+    await user.click(screen.getByRole('button', { name: 'Keep current logo' }));
+    expect(screen.getByRole('button', { name: /Remove logo/ })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Remove logo/ }));
+    await user.click(screen.getByRole('button', { name: 'Save style' }));
+    await waitFor(() => expect(state.api.removeLogo).toHaveBeenCalledWith(7));
+  });
+
+  it('locks the settings while a save is in flight so no edit is lost', async () => {
+    const user = userEvent.setup();
+    let finishSave!: (value: unknown) => void;
+    state.api.updateStyle.mockImplementation(() => new Promise((resolve) => { finishSave = resolve; }));
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /^Modern/ }));
+    await user.click(screen.getByRole('button', { name: 'Save style' }));
+
+    expect(screen.getByRole('button', { name: /^Banner/ }).matches(':disabled')).toBe(true);
+    expect(screen.getByRole('textbox', { name: 'Custom hex' }).matches(':disabled')).toBe(true);
+    finishSave({ invoice_billing_profile: { ...profile, invoice_theme: 'modern' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Banner/ }).matches(':disabled')).toBe(false));
+    expect(screen.getByRole('button', { name: /^Modern/ }).getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('lets a read-only workspace preview but not save', async () => {
     state.readOnly = true;
     const user = userEvent.setup();

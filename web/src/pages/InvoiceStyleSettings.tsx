@@ -178,10 +178,16 @@ export function InvoiceStyleSettings() {
     setPendingLogo(file);
   };
 
-  const clearLogo = () => {
+  // Discarding a chosen file keeps the saved logo; only "Remove logo"
+  // marks the saved one for removal.
+  const discardPendingLogo = () => {
     setNotice(null);
     setPendingLogo(null);
-    setRemoveLogo(Boolean(profile.has_logo));
+  };
+
+  const removeSavedLogo = () => {
+    setNotice(null);
+    setRemoveLogo(true);
   };
 
   const save = async () => {
@@ -257,7 +263,8 @@ export function InvoiceStyleSettings() {
         {notice && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">{notice}</p>}
 
         <div className="flex flex-wrap items-start gap-5">
-          <div className="flex min-w-0 flex-[1_1_380px] flex-col gap-4">
+          {/* Edits are locked while a save is in flight so none are lost when the saved style returns. */}
+          <fieldset disabled={saving} aria-busy={saving || undefined} className="m-0 flex min-w-0 flex-[1_1_380px] flex-col gap-4 border-0 p-0 disabled:opacity-80">
             <section aria-labelledby="theme-heading" className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4 sm:p-5">
               <h2 id="theme-heading" className="text-base font-semibold text-neutral-900">Theme</h2>
               <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2">
@@ -367,10 +374,18 @@ export function InvoiceStyleSettings() {
                         onChange={(event) => { chooseLogo(event.target.files?.[0] || null); event.target.value = ''; }}
                       />
                     </label>
-                    {(showsSavedLogo || pendingLogo) && (
-                      <Button variant="outline" onClick={clearLogo} disabled={financeReadOnly}>
-                        <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />{pendingLogo ? 'Discard new logo' : 'Remove logo'}
+                    {pendingLogo && (
+                      <Button variant="outline" onClick={discardPendingLogo} disabled={financeReadOnly}>
+                        <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Discard new logo
                       </Button>
+                    )}
+                    {showsSavedLogo && (
+                      <Button variant="outline" onClick={removeSavedLogo} disabled={financeReadOnly}>
+                        <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Remove logo
+                      </Button>
+                    )}
+                    {removeLogo && !pendingLogo && (
+                      <Button variant="outline" onClick={() => setRemoveLogo(false)}>Keep current logo</Button>
                     )}
                   </div>
                   <p className="text-sm text-neutral-600">
@@ -433,7 +448,7 @@ export function InvoiceStyleSettings() {
                 />
               </label>
             </section>
-          </div>
+          </fieldset>
 
           <div id="invoice-preview" className="flex min-w-0 scroll-mt-4 flex-[1_1_420px] flex-col gap-2.5 lg:sticky lg:top-40">
             <div className="flex items-center justify-between gap-3">

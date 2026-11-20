@@ -15,6 +15,7 @@ module InvoicePdf
       RULE = "D1D5DB"
       HAIRLINE = "E5E7EB"
       MARK_SIZES = { "small" => px(44), "medium" => px(56), "large" => px(72) }.freeze
+      DETAILS_LIMIT = px(260)
 
       private
 
@@ -55,12 +56,12 @@ module InvoicePdf
           details_x = mark_width + px(16)
           details_top = top
         end
-        pdf.bounding_box([ details_x, details_top ], width: pdf.bounds.width - details_x - meta_width - px(24)) do
-          stack([
-            -> { text(data.sender_name, size: px(18), style: :bold, color: STRONG, height: 1.3) },
-            *data.sender_address_lines.map { |line| -> { text(line, color: SECONDARY) } },
-            (data.sender_contact.any? ? -> { text(data.sender_contact.join(" · "), color: SECONDARY) } : nil)
-          ], gap: px(2))
+        details_width = pdf.bounds.width - details_x - meta_width - px(24)
+        # An unusually long address moves below the header row, where it can
+        # flow onto another page instead of overrunning the header.
+        inline = measure { pdf.bounding_box([ 0, pdf.cursor ], width: details_width) { sender_details } } <= DETAILS_LIMIT
+        pdf.bounding_box([ details_x, details_top ], width: details_width) do
+          inline ? sender_details : sender_name_line
         end
         left_bottom = [ pdf.cursor, top - mark_height ].min
 
@@ -71,8 +72,24 @@ module InvoicePdf
           meta_grid
         end
         pdf.move_cursor_to([ left_bottom, pdf.cursor ].min)
+        unless inline
+          pdf.move_down(px(12))
+          sender_details(name: false)
+        end
         pdf.move_down(px(28))
         draw_parties
+      end
+
+      def sender_name_line
+        text(data.sender_name, size: px(18), style: :bold, color: STRONG, height: 1.3)
+      end
+
+      def sender_details(name: true)
+        stack([
+          (name ? -> { sender_name_line } : nil),
+          *data.sender_address_lines.map { |line| -> { text(line, color: SECONDARY) } },
+          (data.sender_contact.any? ? -> { text(data.sender_contact.join(" · "), color: SECONDARY) } : nil)
+        ], gap: px(2))
       end
 
       def meta_rows
@@ -123,17 +140,10 @@ module InvoicePdf
         gap = px(24)
         col_width = (pdf.bounds.width - (pad_x * 2) - gap) / 2
         service = style.show_service_period && data.service_period?
-        content = lambda do
-          entries = [ column(pad_x, col_width) { bill_to } ]
-          entries << column(pad_x + col_width + gap, col_width) { service_period } if service
-          columns_row(entries)
-        end
-        height = measure { content.call } + (pad_y * 2)
-        top = pdf.cursor
-        fill_box(0, top, pdf.bounds.width, height, PANEL, radius: px(6))
-        pdf.move_down(pad_y)
-        content.call
-        pdf.move_cursor_to(top - height)
+        entries = [ column(0, col_width) { bill_to } ]
+        entries << column(col_width + gap, col_width) { service_period } if service
+        panel(fill: PANEL, radius: px(6), pad_x: pad_x, pad_y: pad_y,
+              fallback: -> { stack_columns(entries, px(16)) }) { columns_row(entries) }
         pdf.move_down(px(28))
       end
 
@@ -182,8 +192,8 @@ module InvoicePdf
         rule_at_cursor(RULE)
       end
 
-      def draw_row(line, _index)
-        draw_cells(line, columns, padding: px(12), cell_styles: {
+      def draw_row(line, index)
+        draw_cells(line, columns, index: index, padding: px(12), cell_styles: {
           number: { color: LABEL },
           item: { style: :semibold }
         })
@@ -246,7 +256,7 @@ module InvoicePdf
         pdf.move_down(px(18))
         gap = px(24)
         col_width = (pdf.bounds.width - gap) / 2
-        columns_row(sections.each_with_index.map do |(heading, body), index|
+        fitting_columns(sections.each_with_index.map do |(heading, body), index|
           column(index * (col_width + gap), col_width) do
             label(heading)
             pdf.move_down(px(4))
