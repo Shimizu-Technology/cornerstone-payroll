@@ -13,7 +13,7 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
   let!(:threshold_2026) { create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000) }
   let!(:cruz) do
     create(:employee, :contractor, company: company, department: department, first_name: "Ana", last_name: "Cruz",
-      ssn_encrypted: "345-67-7890", address_line1: "7 Route 8", city: "Maite", state: "GU", zip: "96910")
+      ssn_encrypted: "345-67-7890", address_line1: "7 Route 8", city: "Maite", state: "GU", zip: "96910", w9_on_file: true)
   end
   let(:acting_user) { admin }
 
@@ -226,7 +226,7 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
 
     it "refuses a TIN another contractor of the client already has, so one payee never gets two 1099s" do
       create(:employee, :business_contractor, company: company, department: department, first_name: "Pedro", last_name: "Reyes",
-        business_name: "Island Roofing", contractor_ein: "661234567")
+        business_name: "Island Roofing", contractor_ein: "661234567", w9_on_file: true)
 
       expect { add(one_off_payee, **business) }.not_to change(Employee, :count)
 
@@ -413,6 +413,130 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body["error"]).to include("unavailable in a test workspace")
       expect(step("form_1099_ready").dig("data", "unavailable_reason")).to eq("Not available in a practice copy.")
+    end
+  end
+
+  describe "smaller one-off checks" do
+    def smaller_payee(data = checklist)
+      step("people", data).dig("data", "smaller_one_off_payees").sole
+    end
+
+    def ready_state
+      Form1099NecFilingState.call(company: company.reload, year: 2026)
+    end
+
+    it "lets a check below the threshold join a contractor whose pay is also below it, so the 1099 is issued" do
+      pay_contractor(cruz, 1_500)
+      contractor_check(1_000, "9001")
+      decide
+
+      data = checklist
+      people = step("people", data)
+      # Neither reaches $2,000 alone: nothing blocks, but the check is listed to link.
+      expect(people.dig("data", "one_off_payees")).to be_empty
+      expect(people["issues"].map { |issue| issue["code"] }).not_to include("PAYEE_IDENTITY_UNRESOLVED")
+      payee = smaller_payee(data)
+      expect(payee).to include("name" => "Ana Cruz", "total_compensation" => 1_000.0, "status" => "below_threshold", "could_reach_threshold" => true)
+      expect(people.dig("data", "link_candidates").sole).to include("employee_id" => cruz.id, "name_matches" => true, "year_total" => 1_500.0)
+      expect(step("form_1099_ready", data)).to include("status" => "done")
+      expect(step("form_1099_ready", data)["summary"]).to include("1 smaller one-off payee could reach it")
+      expect(step("form_1099_ready", data).dig("data", "smaller_could_reach_count")).to eq(1)
+
+      link(payee, cruz)
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(report_rows.sole).to include(employee_id: cruz.id, total_compensation: 2_500.0)
+      data = checklist
+      expect(step("people", data).dig("data", "smaller_one_off_payees")).to be_empty
+      expect(step("form_1099_ready", data)).to include("status" => "action_needed")
+      expect(step("form_1099_ready", data).dig("data", "payees").sole).to include("employee_id" => cruz.id, "total_compensation" => 2_500.0)
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
+      expect(ready_state.final).to be(true)
+    end
+
+    it "makes a signed-off 1099 stale when a smaller unlinked check arrives, until it is linked or re-approved" do
+      pay_contractor(cruz, 3_000)
+      decide
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
+      expect(ready_state.final).to be(true)
+
+      contractor_check(1_000, "9001")
+
+      expect(ready_state.final).to be(false)
+      data = checklist
+      expect(step("form_1099_ready", data)).to include("status" => "action_needed")
+      expect(step("form_1099_ready", data).dig("data", "readiness", "stale")).to be(true)
+      # Listed to link; not flagged, since it would only add to a 1099 already due.
+      expect(smaller_payee(data)).to include("name" => "Ana Cruz", "could_reach_threshold" => false)
+
+      link(smaller_payee, cruz)
+      expect(response).to have_http_status(:ok), response.body
+      expect(report_rows.sole).to include(employee_id: cruz.id, total_compensation: 4_000.0)
+      expect(ready_state.final).to be(false)
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
+      expect(Form1099FilingReadiness.sole.total_compensation).to eq(4_000)
+      expect(ready_state.final).to be(true)
+
+      # A smaller check to someone else also expires the sign-off; staff who
+      # leave it unlinked mark ready again on the same amounts.
+      contractor_check(200, "9002", payable_to: "Island Ice")
+      expect(ready_state.final).to be(false)
+      data = checklist
+      expect(smaller_payee(data)).to include("name" => "Island Ice", "could_reach_threshold" => false)
+      expect(step("people", data)["issues"]).to be_empty
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
+      expect(ready_state.final).to be(true)
+      # Changing that check's amount expires it again.
+      NonEmployeeCheck.find_by!(check_number: "9002").update_columns(amount: 250)
+      expect(ready_state.final).to be(false)
+    end
+
+    it "flags only the smaller payees that could make a contractor under the threshold reach it" do
+      pay_contractor(cruz, 500)
+      contractor_check(400, "9001", payable_to: "Island Ice")
+      decide
+
+      expect(smaller_payee).to include("name" => "Island Ice", "could_reach_threshold" => false)
+      expect(step("form_1099_ready").dig("data", "smaller_could_reach_count")).to eq(0)
+
+      reyes = create(:employee, :contractor, company: company, department: department, first_name: "Ben", last_name: "Reyes", w9_on_file: true)
+      pay_contractor(reyes, 1_700)
+      expect(smaller_payee).to include("name" => "Island Ice", "could_reach_threshold" => true)
+      expect(step("form_1099_ready").dig("data", "smaller_could_reach_count")).to eq(1)
+    end
+  end
+
+  describe "a payee's W-9" do
+    before do
+      pay_contractor(cruz, 2_500)
+      decide
+      cruz.update!(w9_on_file: false)
+    end
+
+    it "blocks the 1099 sign-off until the W-9 is on file, never the W-2s, and expires it when unticked" do
+      data = checklist
+      issue = step("people", data)["issues"].find { |entry| entry["code"] == "PAYEE_W9_MISSING" }
+      expect(issue).to include("employee_id" => cruz.id, "message" => a_string_including("W-9 is not on file"))
+      expect(step("people", data).dig("data", "w9_missing").sole).to include("employee_id" => cruz.id, "edit_path" => "/companies/#{company.id}/employees/#{cruz.id}/edit")
+      expect(step("form_1099_ready", data).dig("data", "blockers")).to contain_exactly(a_hash_including("code" => "PAYEE_W9_MISSING"))
+      expect(YearEnd::Checklist.new(company: company, year: 2026).w2_mark_ready_blockers.map { |entry| entry[:code] }).not_to include("PAYEE_W9_MISSING")
+
+      mark_ready
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["year_end_blockers"]).to contain_exactly(a_hash_including("code" => "PAYEE_W9_MISSING", "employee_id" => cruz.id))
+
+      cruz.update!(w9_on_file: true)
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
+      expect(Form1099NecFilingState.call(company: company.reload, year: 2026).final).to be(true)
+
+      cruz.update!(w9_on_file: false)
+      expect(Form1099NecFilingState.call(company: company.reload, year: 2026).final).to be(false)
+      expect(step("form_1099_ready")).to include("status" => "action_needed")
     end
   end
 

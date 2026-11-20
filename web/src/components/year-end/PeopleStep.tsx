@@ -8,7 +8,7 @@ import { employeesApi } from '@/services/api';
 import { employeeEditPath } from '@/lib/routes';
 import { personAnchor, type YearEndChecklist, type YearEndPerson, type ActiveYearEndStep } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
-import { LinkedChecksList, OneOffPayeeList } from './OneOffPayees';
+import { LinkedChecksList, OneOffPayeeList, SmallerOneOffPayeeList } from './OneOffPayees';
 
 type PeopleStepData = ActiveYearEndStep<'people'>;
 const PAGE_SIZE = 20;
@@ -158,15 +158,19 @@ export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
   const oneOffPayees = step.data.one_off_payees ?? [];
   const duplicates = step.data.duplicate_tins ?? [];
   const linked = step.data.linked_checks ?? [];
+  const smaller = step.data.smaller_one_off_payees ?? [];
+  const w9Missing = step.data.w9_missing ?? [];
+  const candidates = step.data.link_candidates ?? [];
   const efileIssues = step.issues.filter((issue) => issue.code === 'EMPLOYEE_EFILE_INVALID');
   const canEditInline = !checklist.company.test_workspace;
 
-  if (employees.length === 0 && contractors.length === 0 && oneOffPayees.length === 0 && efileIssues.length === 0 && duplicates.length === 0) {
+  if (employees.length === 0 && contractors.length === 0 && oneOffPayees.length === 0 && efileIssues.length === 0 && duplicates.length === 0 && w9Missing.length === 0) {
     return (
       <div className="space-y-5">
         <p className="text-sm text-neutral-700">
           {step.data.contractor_error ?? `All ${step.data.w2_employee_count ?? 0} W-2 employees${checklist.files_1099 ? ` and ${step.data.contractor_count ?? 0} 1099 payees` : ''} have what the forms need.`}
         </p>
+        <SmallerOneOffPayeeList checklist={checklist} payees={smaller} candidates={candidates} onSaved={onSaved} onRefresh={onRefresh} />
         <LinkedChecksList checklist={checklist} groups={linked} onSaved={onSaved} />
       </div>
     );
@@ -180,6 +184,29 @@ export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
       </li>)}</ul>}
       <PeopleList title="Employees" people={employees} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
       <PeopleList title="1099 payees" people={contractors} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
+      {w9Missing.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-neutral-900">W-9 not on file ({w9Missing.length})</h3>
+          <p className="text-sm text-neutral-600">Get each payee&rsquo;s W-9, then open the contractor and tick W-9 on file.</p>
+          <ul className="divide-y divide-neutral-200">
+            {w9Missing.map((person) => (
+              <li key={person.employee_id} id={`w9-${person.employee_id}`} className="flex scroll-mt-28 flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="font-medium text-neutral-950 [overflow-wrap:anywhere]">{person.name}</p>
+                  <Badge variant="warning" className="mt-1">W-9 not on file</Badge>
+                </div>
+                <Link
+                  to={employeeEditPath(checklist.company.id, person.employee_id, { returnTo })}
+                  aria-label={`Open ${person.name}`}
+                  className="inline-flex min-h-11 items-center justify-center gap-1 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:border-primary-300 hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 sm:min-h-9 sm:shrink-0"
+                >
+                  Open contractor<ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {duplicates.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-neutral-900">1099 payees sharing one TIN ({duplicates.length})</h3>
@@ -202,7 +229,8 @@ export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
           </ul>
         </div>
       )}
-      <OneOffPayeeList checklist={checklist} payees={oneOffPayees} candidates={step.data.link_candidates ?? []} onSaved={onSaved} onRefresh={onRefresh} />
+      <OneOffPayeeList checklist={checklist} payees={oneOffPayees} candidates={candidates} onSaved={onSaved} onRefresh={onRefresh} />
+      <SmallerOneOffPayeeList checklist={checklist} payees={smaller} candidates={candidates} onSaved={onSaved} onRefresh={onRefresh} />
       <LinkedChecksList checklist={checklist} groups={linked} onSaved={onSaved} />
       {step.data.contractor_error && <p className="text-sm text-danger-700">{step.data.contractor_error}</p>}
     </div>

@@ -50,8 +50,8 @@ module YearEnd
     SIGN_OFF_STEPS = %w[reconciliation review_warnings prior_provider mark_ready].freeze
     # The 1099 decision, 1099 payee items and the 1099 sign-off never hold up
     # the W-2s.
-    FORM_1099_ONLY_CODES = %w[FORM_1099_FILER_NOT_CHOSEN PAYEE_DETAILS_MISSING PAYEES_UNAVAILABLE PAYEE_IDENTITY_UNRESOLVED
-                              PAYEE_DUPLICATE_TIN FORM_1099_NOT_MARKED_READY].freeze
+    FORM_1099_ONLY_CODES = %w[FORM_1099_FILER_NOT_CHOSEN PAYEE_DETAILS_MISSING PAYEE_W9_MISSING PAYEES_UNAVAILABLE
+                              PAYEE_IDENTITY_UNRESOLVED PAYEE_DUPLICATE_TIN FORM_1099_NOT_MARKED_READY].freeze
     # Employer items only the W-2 filing needs; they never hold up the 1099s.
     W2_ONLY_EMPLOYER_CODES = %w[EMPLOYER_CONTACT_NAME_MISSING EMPLOYER_EFILE_INVALID].freeze
 
@@ -377,8 +377,16 @@ module YearEnd
         issue("PAYEE_DETAILS_MISSING", "#{row[:name]} is missing #{row[:missing_fields].map { |field| field == 'ssn' ? 'a TIN' : 'an address' }.to_sentence}.",
               employee_id: row[:employee_id])
       end
+      # Each reportable payee's W-9 must be on file before the 1099s are
+      # marked ready: staff tick "W-9 on file" on the contractor's record.
+      w9_missing = files?("form_1099") ? reportable_contractors.reject(&:w9_on_file?) : []
+      issues += w9_missing.map do |employee|
+        issue("PAYEE_W9_MISSING", "#{employee.full_name}'s W-9 is not on file. Open the contractor and tick W-9 on file once you have it.",
+              employee_id: employee.id)
+      end
       issues += efw2_people_issues
       payees = files?("form_1099") ? one_off_payees : []
+      smaller = files?("form_1099") ? smaller_one_off_payees : []
       issues += payees.reject { |payee| payee[:status] == "identified" }.map do |payee|
         issue("PAYEE_IDENTITY_UNRESOLVED", one_off_payee_message(payee), warning_code: payee[:code], payee_key: payee[:payee_key])
       end
@@ -396,8 +404,12 @@ module YearEnd
           employees: employees,
           contractors: contractors,
           one_off_payees: payees,
+          smaller_one_off_payees: smaller,
+          w9_missing: w9_missing.map do |employee|
+            { employee_id: employee.id, name: employee.full_name, edit_path: "/companies/#{company.id}/employees/#{employee.id}/edit" }
+          end,
           duplicate_tins: duplicates.map { |group| group.map { |employee| { employee_id: employee.id, name: employee.full_name } } },
-          link_candidates: files?("form_1099") ? link_candidates(payees) : [],
+          link_candidates: files?("form_1099") ? link_candidates(payees + smaller) : [],
           linked_checks: files?("form_1099") ? linked_check_groups : [],
           w2_employee_count: files?("w2_gu") ? w2_employees.size : 0,
           contractor_count: files?("form_1099") && contractors_available? ? reportable_contractors.size : 0,
@@ -422,6 +434,12 @@ module YearEnd
       end
     end
 
+    # Every row of this checklist's 1099-NEC report, below the threshold too.
+    def form_1099_all_rows
+      form_1099_rows
+      Array(@form_1099_report&.dig(:all_contractors))
+    end
+
     def reportable_contractors
       @reportable_contractors ||= begin
         ids = form_1099_rows.filter_map { |row| row[:employee_id] }
@@ -435,6 +453,28 @@ module YearEnd
       @one_off_payees ||= OneOffPayees.new(company: company, year: year, rows: form_1099_rows).call
     end
 
+    # Unlinked one-off payees below the threshold. They never block a
+    # sign-off by themselves, but a check to a contractor the client already
+    # pays belongs on that contractor's 1099, so they are listed to link.
+    # could_reach_threshold: linked to a contractor still under the
+    # threshold (the one with the largest year total), the combined total
+    # would reach it, so a 1099 would be due that otherwise isn't. A check
+    # that would only add to an existing 1099 is listed but not flagged.
+    def smaller_one_off_payees
+      @smaller_one_off_payees ||= begin
+        rows = form_1099_all_rows.reject { |row| row[:requires_filing] }
+        threshold = @form_1099_report&.dig(:meta, :filing_threshold)&.to_d
+        top = form_1099_all_rows.select { |row| row[:employee_id] }.map { |row| row[:total_compensation].to_d }
+          .select { |total| threshold.nil? || total < threshold }.max
+        OneOffPayees.new(company: company, year: year, rows: rows).call.map do |payee|
+          payee.except(:status, :acknowledgement, :acknowledgement_stale).merge(
+            status: "below_threshold",
+            could_reach_threshold: !top.nil? && !threshold.nil? && (top + payee[:total_compensation].to_d).round(2) >= threshold
+          )
+        end
+      end
+    end
+
     # Contractor records a one-off payee can be linked to. A record whose name
     # matches the payee's exactly is flagged so the screen can suggest it;
     # nothing is ever linked by name automatically.
@@ -442,6 +482,7 @@ module YearEnd
       return [] if payees.all? { |payee| payee[:status] == "identified" }
 
       names = payees.to_set { |payee| payee[:name].to_s.strip.downcase }
+      totals = form_1099_all_rows.select { |row| row[:employee_id] }.to_h { |row| [ row[:employee_id], row[:total_compensation].to_d.round(2).to_f ] }
       company.employees.contractor.order(:last_name, :first_name, :id).map do |employee|
         tin = employee.form_1099_tin
         {
@@ -449,6 +490,9 @@ module YearEnd
           name: employee.full_name,
           business_name: employee.business_name,
           status: employee.status,
+          # Payroll pay plus linked checks this year, so the screen can show
+          # what the 1099 would total with the payee's checks.
+          year_total: totals.fetch(employee.id, 0.0),
           tin_type: tin&.dig(:type),
           tin_last4: tin&.dig(:digits)&.last(4),
           has_address: [ employee.address_line1, employee.city, employee.state, employee.zip ].all?(&:present?),
@@ -533,10 +577,14 @@ module YearEnd
       elsif may_be_due && !state.current?
         issues << issue("FORM_1099_NOT_MARKED_READY", readiness&.marked? ? "Payees, amounts or payer details changed after the #{year} 1099s were marked ready. Mark them ready again." : "Mark the #{year} 1099s ready once the steps above are done.")
       end
+      # Smaller unlinked one-off payees never hold up the sign-off; the ones
+      # that could reach the threshold with a contractor are pointed out.
+      could_reach = state.report.nil? ? 0 : smaller_one_off_payees.count { |payee| payee[:could_reach_threshold] }
+      smaller_note = could_reach.zero? ? "" : " #{could_reach} smaller one-off payee#{could_reach == 1 ? '' : 's'} could reach it with a contractor's pay; link any that went to a contractor in the employees and payees step."
       summary = if state.report.nil?
         "Fix the 1099 payee list in the employees and payees step first."
       elsif !may_be_due
-        "No payee reached #{ActiveSupport::NumberHelper.number_to_currency(threshold, precision: 0)} in #{year}, so there are no 1099s to mark ready."
+        "No payee reached #{ActiveSupport::NumberHelper.number_to_currency(threshold, precision: 0)} in #{year}, so there are no 1099s to mark ready.#{smaller_note}"
       elsif state.current?
         "Marked ready#{readiness.marked_ready_at ? " on #{format_date(readiness.marked_ready_at.in_time_zone('Pacific/Guam'))}" : ''}#{readiness.marked_ready_by_name.present? ? " by #{readiness.marked_ready_by_name}" : ''}."
       else
@@ -562,6 +610,8 @@ module YearEnd
           payee_count: rows.length,
           total_compensation: rows.sum(0.to_d) { |row| row[:total_compensation].to_d }.round(2).to_f,
           no_1099_due_count: one_off_payees.count { |payee| payee[:status] == "identified" },
+          smaller_one_off_count: state.report.nil? ? 0 : smaller_one_off_payees.length,
+          smaller_could_reach_count: could_reach,
           payees: form_1099_payee_summaries(rows)
         }
       )

@@ -23,13 +23,28 @@ Every link, new contractor and undo is written to the audit log (`year_end_one_o
 - *One 1099 per payee.* Linked checks fold into the contractor's row in `Form1099NecAggregator`, so a payee paid by payroll and by check gets one form. Adding a contractor whose TIN another contractor of the client already has is refused ("…already has this TIN. Link the checks to … instead"). Two existing records that share a TIN raise a new 1099-only item, `PAYEE_DUPLICATE_TIN`, that blocks the sign-off.
 - *Older acknowledgements ask again.* Before this change an acknowledgement only said who the payee was. Its meaning is now "no 1099 due", so the one-off digest carries a marker and acknowledgements recorded before it show "Resolve again".
 
+### Smaller one-off checks
+
+The threshold applies to each payee's total **after** linking, so a check below it can still belong on a 1099. The rule:
+
+1. An unlinked one-off payee at or above the threshold must be resolved (link, add as a contractor, or no 1099 due). It blocks the 1099 sign-off until it is.
+2. An unlinked one-off payee below the threshold never blocks anything by itself. It is listed under **Smaller one-off checks (link them if they're to a contractor you already pay)**, with a "Link to a contractor" button. (The API accepts a link or a new contractor for any unlinked payee, whatever its amount; "No 1099 is due" is offered only at or above the threshold, where a decision is needed.)
+3. A smaller payee is flagged **Could reach the 1099 threshold with a contractor** when its total plus the year total (payroll plus linked checks) of a contractor still under the threshold reaches it: linking would make a 1099 due that otherwise isn't. A check that would only add to a contractor's existing 1099 is listed but not flagged. The Mark 1099s ready step names how many are flagged, without blocking.
+4. Every unlinked one-off contractor check of the year, below the threshold too, is part of the 1099 fingerprint. A new, changed, linked or unlinked check therefore makes an existing sign-off stale, and staff decide again (link it, or mark ready again with it unlinked).
+
+Example: $1,500 of contractor payroll to Ana Cruz and a $1,000 one-off check to "Ana Cruz". Neither reaches $2,000, so nothing blocks; the check is listed and flagged. Linking it gives Ana one 1099 for $2,500, and the sign-off is then needed. Example 2: a signed-off $3,000 contractor later gets a $1,000 unlinked check. The sign-off goes stale at once; linking the check puts $4,000 on the 1099 for the next sign-off.
+
+### W-9 on file
+
+Every payee who gets a 1099 needs a W-9 on file. A reportable contractor whose record does not have "W-9 on file" ticked raises `PAYEE_W9_MISSING` ("W-9 not on file") in the People step, with a link to the contractor's record where staff tick it. It blocks Mark 1099s ready, never the W-2 sign-off, and the clients list counts it the same way. Whether the W-9 is on file is part of the fingerprint, so unticking it after the sign-off makes the sign-off stale. Filing evidence for 2026 relies on the sign-off and has no W-9 check of its own.
+
 The People step's 1099 items link straight to their fix: each unresolved payee's issue carries its `payee_key`, and the sign-off step lists every open item with a link to the payee's row or the contractor's record.
 
 ## 2. Mark 1099s ready
 
 A new checklist step, **Mark 1099s ready**, sits after Employees and payees. It appears only when Cornerstone files the client's 1099s, and the W-2 steps below it move down one number.
 
-- **What it binds.** `Form1099InputsFingerprint` hashes the payer's name, EIN, address, phone and email; each payee's full TIN, name and address; each Box 1a amount and withholding; which one-off checks are linked to whom, with their amounts; the unlinked one-off payees and their "no 1099 due" decisions; the threshold; and the filing decision. Any change makes the sign-off stale and the step asks for it again.
+- **What it binds.** `Form1099InputsFingerprint` hashes the payer's name, EIN, address, phone and email; each payee's full TIN, name and address, and whether their W-9 is on file; each Box 1a amount and withholding; which one-off checks are linked to whom, with their amounts; every unlinked one-off payee, below the threshold too, with its checks and amounts, and the "no 1099 due" decisions; the threshold; and the filing decision. Any change makes the sign-off stale and the step asks for it again.
 - **What the reviewer sees.** Each 1099 to be issued (name, TIN type and last four, Box 1a, and how many one-off checks it includes), the total, and how many payees are marked no 1099 due. The request carries the fingerprint of that view; if the inputs changed since, it is refused with 409 and a "Refresh checklist" button.
 - **Blocks.** The 1099 decision, the employer details a 1099 prints (EIN, address, phone, and email for the 1096), and every 1099 payee item. Mark ready also refuses copies that would not print (an overlong name or address, or income tax recorded as withheld from contractor pay).
 - **Access.** `manage_client_administration`, the same as the W-2 sign-off. Blocked in test and practice workspaces.
@@ -37,9 +52,9 @@ A new checklist step, **Mark 1099s ready**, sits after Employees and payees. It 
 - **Audit.** `year_end#form_1099_mark_ready` with the fingerprint, the previous one, the payee count and the total. Each sign-off is appended to `attestation_history`.
 - **One rule for "final".** `Form1099FilingReadiness.final?(company:, year:, readiness:, fingerprint:)`: the sign-off matches these exact inputs, Cornerstone files the client's 1099s, and the client is not a test or practice workspace. `Form1099NecFilingState.call(company:, year:)` reads the report, fingerprint, sign-off and decision together and returns `final`; the copies, the checklist and filing evidence use it, and E2's final e-file should too.
 
-**Status semantics.** The 1099 items (`FORM_1099_ONLY_CODES`, now including `PAYEE_DUPLICATE_TIN` and `FORM_1099_NOT_MARKED_READY`) never hold up the W-2 sign-off, and nothing W-2-only (the contact name, EFW2 format items, reconciliation, warnings, overlap, the W-2 sign-off) holds up the 1099 sign-off. The client is Ready only when both are done.
+**Status semantics.** The 1099 items (`FORM_1099_ONLY_CODES`, now including `PAYEE_W9_MISSING`, `PAYEE_DUPLICATE_TIN` and `FORM_1099_NOT_MARKED_READY`) never hold up the W-2 sign-off, and nothing W-2-only (the contact name, EFW2 format items, reconciliation, warnings, overlap, the W-2 sign-off) holds up the 1099 sign-off. The client is Ready only when both are done.
 
-The sign-off is needed while some payee gets a 1099 or a one-off payee is still unresolved. With neither, the step is done and says there are no 1099s.
+The sign-off is needed while some payee gets a 1099 or a one-off payee at or above the threshold is still unresolved. With neither, the step is done and says there are no 1099s (and how many smaller payees could reach the threshold with a contractor, if any).
 
 **Clients list.** The list adds "Mark 1099s ready" with the same rule, so status and issue count match the checklist. It computes the live fingerprint only for clients that have a sign-off on record. A checklist run whose only open items are 1099 items still records the W-2 ready check, because the list checks 1099 items live.
 
@@ -92,6 +107,9 @@ The page map, confirmed in the file: 1 notice, 2 Copy A (red; never produced), 3
 ![Choosing what happens to a one-off payee, phone](form-1099-official-copies/phone-link-form.png)
 ![Adding a contractor from a W-9, with a refused EIN](form-1099-official-copies/desktop-add-contractor-error.png)
 ![Mark 1099s ready](form-1099-official-copies/desktop-1099-ready-before.png)
+![Smaller one-off checks and a missing W-9, phone](form-1099-official-copies/phone-smaller-checks.png)
+![Linking a smaller check, with the combined total, phone](form-1099-official-copies/phone-link-smaller-check.png)
+![A missing W-9 holding up Mark 1099s ready, desktop](form-1099-official-copies/desktop-w9-blocker.png)
 ![Print and file, final, desktop](form-1099-official-copies/desktop-print-and-file-final.png)
 ![Print and file, final, phone](form-1099-official-copies/phone-print-and-file-final.png)
 

@@ -4,14 +4,16 @@ require "digest"
 
 # Hashes everything that prints on a client's 1099-NECs for one year, so a
 # "1099s ready" sign-off expires the moment any of it changes: the payer's
-# name, EIN, address and phone, each payee's full TIN, name and address, the
-# amounts, which one-off checks are linked to which contractor, and which
+# name, EIN, address and phone, each payee's full TIN, name and address and
+# whether their W-9 is on file, the
+# amounts, which one-off checks are linked to which contractor, every
+# unlinked one-off contractor check (below the threshold too), and which
 # one-off payees were recorded as owing no 1099. Activity timestamps are left
 # out, so reloading a report or reprinting a check doesn't expire it.
 class Form1099InputsFingerprint
-  RULE_VERSION = "form-1099-nec-inputs-v1"
+  RULE_VERSION = "form-1099-nec-inputs-v2"
   IDENTITY_FIELDS = %w[id first_name middle_name last_name name_suffix business_name contractor_type employment_type
-                       address_line1 address_line2 city state zip].freeze
+                       address_line1 address_line2 city state zip w9_on_file].freeze
 
   # report: the unmodified Form1099NecAggregator output, when the caller
   # already built it.
@@ -23,11 +25,12 @@ class Form1099InputsFingerprint
 
   def call
     report = (@report || Form1099NecAggregator.new(company, year).generate).deep_symbolize_keys
-    rows = Array(report[:reportable_contractors])
-    payee_rows = rows.select { |row| row[:employee_id] }.sort_by { |row| row[:employee_id] }
-    one_off_rows = rows.reject { |row| row[:employee_id] }.sort_by { |row| row[:payee_key].to_s }
+    payee_rows = Array(report[:reportable_contractors]).select { |row| row[:employee_id] }.sort_by { |row| row[:employee_id] }
+    # Every unlinked one-off payee, below the threshold too: a new or changed
+    # check to anyone may belong on a 1099, so it expires the sign-off.
+    one_off_rows = Array(report[:all_contractors]).select { |row| row[:employee_id].nil? }.sort_by { |row| row[:payee_key].to_s }
     employees = Employee.where(company_id: company.id, id: payee_rows.map { |row| row[:employee_id] }).index_by(&:id)
-    check_ids = rows.flat_map { |row| Array(row[:non_employee_check_ids]) }
+    check_ids = (payee_rows + one_off_rows).flat_map { |row| Array(row[:non_employee_check_ids]) }
     checks = NonEmployeeCheck.where(company_id: company.id, id: check_ids).order(:id).pluck(:id, :amount, :payee_employee_id)
     codes = one_off_rows.map { |row| YearEnd::OneOffPayees.code_for(row[:payee_key]) }
 

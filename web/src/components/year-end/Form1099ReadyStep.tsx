@@ -146,6 +146,12 @@ export function Form1099ReadyStep({ checklist, step, onSaved, onRefresh }: {
         </div>
       )}
       <PayeeList step={step} />
+      {(step.data.smaller_could_reach_count ?? 0) > 0 && (
+        <p className="text-sm text-warning-800">
+          {step.data.smaller_could_reach_count} smaller one-off payee{step.data.smaller_could_reach_count === 1 ? '' : 's'} could reach the 1099 threshold with a contractor&rsquo;s pay.
+          {' '}<a href="#step-people" className="font-semibold text-primary-700 underline">Link any that went to a contractor</a> before you mark the 1099s ready.
+        </p>
+      )}
       {step.data.can_mark_ready && step.data.unavailable_reason && <p className="text-sm text-neutral-700">{step.data.unavailable_reason}</p>}
       {step.data.can_mark_ready && !step.data.unavailable_reason && (
         <>

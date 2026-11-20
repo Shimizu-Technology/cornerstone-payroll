@@ -916,6 +916,62 @@ describe('Year-end checklist: 1099 payees and sign-off', () => {
     expect(await screen.findByText('Added Island Roofing LLC as a contractor and linked the checks.')).toBeTruthy();
   });
 
+  it('links a smaller one-off check to a contractor the client already pays, without it blocking anything', async () => {
+    const small = { ...payee, code: 'one_off_payee:non_employee_check:51', payee_key: 'non_employee_check:51', total_compensation: 1000, payment_count: 1,
+      checks: [{ id: 51, check_number: '9101', payment_date: '2026-06-05', amount: 1000 }], digest: 'small-digest', status: 'below_threshold' as const, could_reach_threshold: true };
+    const ice = { ...small, code: 'one_off_payee:non_employee_check:52', payee_key: 'non_employee_check:52', name: 'Island Ice', total_compensation: 300,
+      checks: [{ id: 52, check_number: '9102', payment_date: '2026-07-05', amount: 300 }], digest: 'ice-digest', could_reach_threshold: false };
+    const people = step('people', 3, 'Employees and payees', 'done', {
+      data: peopleData({ smaller_one_off_payees: [small, ice], link_candidates: candidates.map((candidate) => ({ ...candidate, year_total: candidate.employee_id === 21 ? 1500 : 0 })) }),
+    });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'done', {
+      data: readyData({ can_mark_ready: false, payees: [], payee_count: 0, total_compensation: 0, smaller_one_off_count: 1, smaller_could_reach_count: 1 }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, ready));
+    mocks.linkPayee.mockResolvedValue({ data: { employee: { id: 21, name: 'Ana Cruz', created: false }, check_ids: [51] } });
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    fireEvent.click(within(region).getByRole('button', { name: /Show Employees and payees/ }));
+    expect(await within(region).findByText(/Smaller one-off checks \(link them if they’re to a contractor you already pay\) \(2\)/)).toBeTruthy();
+    expect(within(region).getAllByText('Could reach the 1099 threshold with a contractor')).toHaveLength(1);
+    // The name suggestion is per payee: Island Ice matches no contractor.
+    expect(within(region).getAllByText(/Same name as contractor/)).toHaveLength(1);
+    fireEvent.click(within(region).getByRole('button', { name: "Link Island Ice's checks to a contractor" }));
+    expect(within(region).getByLabelText('Contractor')).toHaveProperty('value', '');
+    fireEvent.click(within(region).getByRole('button', { name: 'Cancel' }));
+    expect(within(region).queryByRole('radio', { name: /No 1099 is due/ })).toBeNull();
+    fireEvent.click(within(region).getByRole('button', { name: "Link Ana Cruz's checks to a contractor" }));
+    expect(within(region).getByLabelText('Contractor')).toHaveProperty('value', '21');
+    expect(within(region).getByText(/With the \$1,500\.00 already paid this year, that's \$2,500\.00\./)).toBeTruthy();
+    fireEvent.click(within(region).getByRole('button', { name: 'Link checks' }));
+
+    await waitFor(() => expect(mocks.linkPayee).toHaveBeenCalledWith({ tax_year: 2026, code: small.code, digest: 'small-digest', employee_id: 21 }, 7));
+    expect(await screen.findByText("Linked Ana Cruz's checks to Ana Cruz.")).toBeTruthy();
+  });
+
+  it('shows a payee whose W-9 is not on file, linking to the contractor from the people step and the sign-off', async () => {
+    const w9Issue = { code: 'PAYEE_W9_MISSING', message: "Ana Cruz's W-9 is not on file. Open the contractor and tick W-9 on file once you have it.", employee_id: 21 };
+    const people = step('people', 3, 'Employees and payees', 'action_needed', {
+      issues: [w9Issue], data: peopleData({ w9_missing: [{ employee_id: 21, name: 'Ana Cruz', edit_path: '/companies/7/employees/21/edit' }] }),
+    });
+    const ready = step('form_1099_ready', 4, 'Mark 1099s ready', 'action_needed', {
+      issues: waitingReady.issues, data: readyData({ can_mark_ready: false, remaining_before_ready: 1, blockers: [w9Issue] }),
+    });
+    mocks.checklist.mockResolvedValue(load(people, ready));
+
+    renderPage();
+
+    const region = await screen.findByRole('region', { name: /Employees and payees/ });
+    expect(within(region).getByText('W-9 not on file (1)')).toBeTruthy();
+    expect(within(region).getByRole('link', { name: 'Open Ana Cruz' }).getAttribute('href')).toContain('/companies/7/employees/21/edit');
+    const signOff = screen.getByRole('region', { name: /Mark 1099s ready/ });
+    expect(within(signOff).getByText(w9Issue.message)).toBeTruthy();
+    expect(within(signOff).getByRole('link', { name: 'Open the contractor' }).getAttribute('href')).toContain('/companies/7/employees/21/edit');
+    expect(within(signOff).queryByRole('button', { name: /Mark 2026 1099s ready/ })).toBeNull();
+  });
+
   it('undoes a link only after the reviewer confirms', async () => {
     const people = step('people', 3, 'Employees and payees', 'done', {
       data: peopleData({ linked_checks: [{ employee_id: 21, name: 'Ana Cruz', total: 2500, checks: [
