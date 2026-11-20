@@ -420,6 +420,23 @@ RSpec.describe YearEnd::Checklist do
       expect(overview.call[:filing_reminder_count]).to eq(1)
     end
 
+    it "keeps the 1099 filing due while a smaller one-off payee could reach the threshold with a contractor's pay" do
+      contractor = create(:employee, :contractor, company: company, department: department)
+      pay(Date.new(2026, 3, 6), worker: contractor, employment_type: "contractor", gross_pay: 1_500, withholding_tax: 0,
+        social_security_tax: 0, medicare_tax: 0, employer_social_security_tax: 0, employer_medicare_tax: 0)
+      contractor_check(400, "9001")
+      decide(w2: "client", form_1099: "cornerstone")
+      allow(Date).to receive(:current).and_return(Date.new(2027, 1, 10))
+      expect(checklist[:filing_progress]).to eq([])
+      expect(YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:filing_reminder_count]).to eq(0)
+
+      contractor_check(200, "9002")
+      expect(checklist[:filing_progress].map { |filing| filing[:filing_type] }).to eq(%w[form_1099_nec])
+      overview = YearEnd::ClientsOverview.new(user: accountant, year: 2026).call
+      expect(overview[:clients].sole[:filing_progress].map { |filing| filing[:filing_type] }).to eq(%w[form_1099_nec])
+      expect(overview[:filing_reminder_count]).to eq(1)
+    end
+
     it "refuses an identification made on checks that have since changed" do
       contractor_check(2_500, "9001")
       decide(w2: "client", form_1099: "cornerstone")
