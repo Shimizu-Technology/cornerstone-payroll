@@ -1,6 +1,6 @@
 # Year-end filing record — implementation and acceptance
 
-2026-11-20; branch `feature/year-end-filing-record`, based on main `50e5325b`.
+2026-11-20; branch `feature/year-end-filing-record`, rebased on main `4533b7e3` after #504 merged. Earlier sections below retain the dated verification history; the Part 2 record describes the current integration.
 
 Cornerstone staff prepare year-end files for Guam payroll clients, then upload them outside the app. The W-2 EFW2 file requires two independently confirmed submissions (SSA BSO and GuamTax); Pub 1220 requires GuamTax only. The research goal is generation, review, external upload and retained acceptance evidence (`W2GU_1099_YEAR_END_FILING_RESEARCH_2026-11-17.md`, §8 step 5). This change records staff-reported portal activity; it does not upload files or imply agency acceptance from a download.
 
@@ -8,15 +8,15 @@ Cornerstone staff prepare year-end files for Guam payroll clients, then upload t
 
 Annual identity now includes `agency`. Quarterly identities remain unchanged. Existing W-2 records, including prior years, become `legacy` (agency not recorded), retaining IDs, receipts, events and references. They remain readable in the agency panels and do not count as either agency's acceptance. Existing 1099 records become DRT records.
 
-The migration does not rewrite append-only events. It adds a nullable download-audit foreign key and SHA256 to events and allows an optional receipt for annual events. Quarterly receipts remain required by the recorder and model. Rollback refuses with explicit counts when agency records or file-bound/receipt-free events would lose information. Preserve the schema when rolling back application code. Use a compatible rollback release that can read receipt-free annual events and preserve the separate W-2 agencies. Older serializers fail when reading events without receipts; stopping annual writes alone is insufficient. If a compatible release is unavailable, disable annual reads and annual writes until compatibility is restored.
+The migration does not rewrite append-only events. It adds a nullable download-audit foreign key and keyed `file_digest` to events and allows an optional receipt for annual events. Quarterly receipts remain required by the recorder and model. Rollback refuses with explicit counts when agency records or file-bound/receipt-free events would lose information. Preserve the schema when rolling back application code. Use a compatible rollback release that can read receipt-free annual events and preserve the separate W-2 agencies. Older serializers fail when reading events without receipts; stopping annual writes alone is insufficient. If a compatible release is unavailable, disable annual reads and annual writes until compatibility is restored.
 
-Only final EFW2 and Pub 1220 download audit entries qualify as portal-upload files. PDF copies and transmittals do not. Submitted/resubmitted events retain the selected audit ID and SHA256. Selection is company/year/action/mode scoped and checked against the current filing-input fingerprint. Historical Pub 1220 audits lacking a fingerprint require a fresh download. Source changes after filing warn without blocking outcomes.
+Only final EFW2 and Pub 1220 download audit entries qualify as portal-upload files. PDF copies and transmittals do not. Submitted/resubmitted events retain the selected audit ID and keyed HMAC-SHA256 `file_digest`. Only `digest_alg: "hmac-sha256-v1"` downloads qualify; old unkeyed hashes require a fresh download. Neither the event schema nor the filing API exposes an unkeyed filing-file hash. Selection is company/year/action/mode scoped and checked against the current filing-input fingerprint. Historical Pub 1220 audits lacking a fingerprint require a fresh download. Source changes after filing warn without blocking outcomes.
 
 Preparation readiness, `SIGN_OFF_STEPS`, `ReadyCheck`, `EfileCheck`, counts and next-step selection are unchanged. Filing progress is a separate payload and the “File and confirm” card follows the preparation steps. The clients list batches filing records/download lookups. A deadline-period reminder counts clients with an unfiled or correction/retry-required agency submission.
 
 The existing `manage_filing_review` capability remains required. Test workspaces are blocked. Each recorded event produces a domain audit, atomically with the event.
 
-Requires the API migration and web build; a production frontend build is expected. No production access or deployment performed. PR #504 supplies the real 1099 sign-off. Before #504, final 1099 recording remains disabled; the integration detects its `Form1099FilingReadiness` / `Form1099InputsFingerprint` classes when available. Reconcile the reports-controller audit metadata line when integrating #504.
+Requires the API migration and web build; a production frontend build is expected. No production access or deployment performed. PR #504 is merged. The recorder uses its `Form1099NecFilingState` readiness block, including the current sign-off and no-payee checks. `AnnualFilingDownloads.form1099_fingerprint` calls `Form1099InputsFingerprint` directly; there is no aggregator fallback or second final-readiness definition.
 
 ## Agent-executed acceptance
 
@@ -91,3 +91,44 @@ Starting head: `e7991d731b393bbdd1e5911b7700de6dd23038e2`. Addressed the three l
 - `4639130964`: W-2 checklist composition renders one panel without an agency prop before 2026 and retains the two separate agency panels from 2026. Parameterized composition tests verify 2025 and 2026. The test supplies the year independently of route normalization, which still clamps earlier route years to 2026; route behavior is unchanged.
 
 Verification on this follow-up: focused `npx vitest run src/components/reports/FilingEvidencePanel.test.tsx src/pages/YearEndChecklist.test.tsx --maxWorkers=2` — **43 passed**. `npm run lint`, `npx tsc --noEmit -p tsconfig.app.json`, and `npx tsc -b` — passed. Full `npm test -- --maxWorkers=2` — **2,092 tests passed across 209 files**. Impeccable advisory scan — `[]`. No browser or backend suite rerun for this focused web/docs follow-up; the prior backend gate limitation remains documented above. No servers, browser tabs or databases were started; lifecycle status reports no active owned resources.
+
+
+## Part 2 integration after #504 (2026-11-20)
+
+The lead authorized Part 2 after #504 merged as `4533b7e3fbe76bce6592fffb40cfa244cdac6e98`. Rebased the clean branch from `5f086f3727b10864ebeb464ff9b93c61a2d1b9c8` onto that main commit. Resolved reports-controller, recorder, checklist, schema and checklist-test conflicts. The rebased history retains both Part 1 fix rounds.
+
+Implementation:
+
+- Kept #504's `validate_1099_readiness!` block, using `Form1099NecFilingState`; removed the alternate `AnnualFilingDownloads.form1099_final?`. Prior years still use the old receipt/report path. The actual 2026 readiness specs verify refusal before sign-off, after inputs change, and for an empty payee year with “No 1099s to file for 2026.”
+- Kept #504's dynamically numbered preparation steps and appended print step. Filing progress still uses its separate rescue. The final UI card now uses `checklist.steps.length + 1`. The mixed W-2/1099 fixture has nine preparation steps and shows “10. File and confirm.”
+- Renamed the new, unmerged migration's event column to `file_digest`, updated the schema, model, recorder, audit metadata, API types/serialization and UI references. New submissions bind the audit ID plus its keyed digest; qualifying logs require a 64-hex `file_digest` and `FilingFileDigest::ALGORITHM`. Both overview and picker lookups use the keyed metadata. No unkeyed final-file digest is stored or returned by these paths. Existing receipt-idempotency comparisons remain internal computations.
+- Preserved #504's `FilingFileDigest.audit_metadata` on download generation. Pub 1220 download metadata also retains the direct current-input fingerprint for stale-file checks. Request specs assert keyed fields and the absence of `sha256`/`file_sha256` in filing payloads and event audits. Service specs refuse legacy unkeyed audits and unknown digest algorithms, verify byte matching with `FilingFileDigest.matches?`, and verify a keyed digest differs from an unkeyed hash of the same fixture bytes.
+
+Agent-executed acceptance: a separate local test database `cp_test_filing_record_p2_ui`, real Rails API on 4319, Vite on 4185, shared Chromium browser at 390×1000 and 1440×1000. All source data is from factories: one fictional W-2 worker, one fictional contractor, committed payroll, filing decisions, submitter settings and readiness records. Fixture preflight reports zero W-2 blockers and a current 1099 sign-off. Both final W-2 and Pub 1220 downloads returned HTTP 200 from the real endpoints; their audits carry `hmac-sha256-v1` and no `sha256`.
+
+| Required affected flow | Result | Evidence |
+| --- | --- | --- |
+| Record separate SSA and DRT W-2 submissions without receipts | Passed at 390px | Two independent persisted records; same keyed W-2 download binding |
+| Accept SSA; reject and resubmit DRT | Passed at 390px and desktop | Separate saved statuses and append-only histories |
+| Record and accept 1099 DRT; correct, resubmit and accept on desktop | Passed | Real current sign-off and Pub 1220 keyed binding; five persisted events |
+| Reload saved histories | Passed | Fresh API reads and reloaded panels retain outcomes |
+| Full checklist composition and dynamic final-step number | Passed at both widths | Actual checklist route shows “10. File and confirm,” SSA/DRT and 1099 evidence |
+| Layout and optional receipt form | Passed at both widths | No horizontal overflow; optional receipt controls remain usable |
+| Invalid/stale download refusal; no-payee and stale sign-off refusal | Passed in request/service specs | Focused suite covers server outcomes; no real portal calls |
+
+Final local SQL state before cleanup: SSA W-2 accepted (5 events, 2 file-bound), DRT W-2 submitted (5 events, 3 file-bound), 1099 DRT accepted (5 events, 2 file-bound). Every bound event's `file_digest` equals its referenced download metadata. API responses contain no unkeyed hash fields. Screenshot artifacts: `p2-checklist-390.png`, `p2-checklist-1440.png` (actual checklist route); `p2-connected-390.png`, `p2-connected-1440.png` (real API recording panels); `p2-form-390.png` (submission form), under `docs/evidence/filing-record/`.
+
+These tests record staff-reported outcomes; they do not deliver to agency portals or prove agency acceptance. Safari, WebKit and native-phone behavior were not run on this host. Fixture readiness was seeded, so the connected check verifies downloads, recording and persistence rather than the complete preparation/sign-off journey. The separate full automated suites cover preparation behavior. The fixture intentionally retains preparation warnings; recording agency outcomes does not make preparation ready.
+
+Final Part 2 verification:
+
+- `cd api && RAILS_ENV=test TEST_DATABASE_URL=postgres://localhost:5432/cp_test_filing_record_r1 bundle exec rspec` — **7,801 examples: 7,795 passed, 2 failed, 4 pending**, 10m49s. Failures: the unchanged converter environment assertion at `client_document_converter_process_spec.rb:51` sees Ruby's extra `PKG_CONFIG_PATH`; the unchanged slow-drip deadline test at `time_tracking/response_deadline_spec.rb:23` consumed zero chunks under full-suite load.
+- Isolated rerun of `spec/services/time_tracking/response_deadline_spec.rb` and `spec/services/client_document_converter_process_spec.rb` — **8 examples: 7 passed, 1 failed**. All four deadline cases passed; only the converter `PKG_CONFIG_PATH` assertion reproduces. Neither unrelated file was changed. The full backend gate remains failed and must not be described as clean.
+- Focused recorder, annual submission, checklist, migration, filing-record request, Pub 1220 and W-2 download specs — **112 examples, 0 failures**.
+- `cd api && bundle exec rubocop` — **1,959 files, no offenses**.
+- Focused panel/checklist Vitest — **55 passed**. `npm run lint`, `npx tsc --noEmit -p tsconfig.app.json`, `npx tsc -b` — passed. Full `npm test -- --maxWorkers=2` — **2,105 tests passed across 209 files**.
+- Impeccable advisory scan — `[]`. Connected shared-browser acceptance is recorded above; no synthetic portal requests were made.
+
+Cleanup: the task's shared browser tab was closed and released. Exact owned server PIDs 53719 (Vite) and 54037 (Rails) were terminated; lifecycle session `manual-20261120-163947-53143-afa6` reports no active owned resources. Both `cp_test_filing_record_p2_ui` and `cp_test_filing_record_r1` were dropped after their respective checks, and catalog absence was verified. Borrowed/protected Postgres remains available. No tests are running and no runtime resources are handed off. The branch and checkout remain for the lead's review; do not merge from this worker.
+
+The Part 2 push supersedes the earlier dependency/hold notes: #504 is integrated, including keyed digest metadata and its current 1099 readiness rule. Independent Claude review accepted the original core design, and the three Part 1 CodeRabbit threads were replied to and resolved before the rebase. Those reviews do not establish review of this rebased integration; CI and final-head review remain to be checked by the lead. No merge, production data access or deployment was performed.

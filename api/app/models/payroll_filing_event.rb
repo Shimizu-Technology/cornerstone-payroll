@@ -16,7 +16,7 @@ class PayrollFilingEvent < ApplicationRecord
   validates :idempotency_key, uniqueness: { scope: :company_id }
   validates :source_fingerprint, format: { with: /\A[0-9a-f]{64}\z/ }
   validates :evidence_document, presence: true, if: -> { payroll_filing_record && (!payroll_filing_record.annual? || payroll_filing_record.tax_year < YearEnd::Checklist::FIRST_TAX_YEAR) }
-  validates :file_sha256, format: { with: /\A[0-9a-f]{64}\z/ }, allow_nil: true
+  validates :file_digest, format: { with: /\A[0-9a-f]{64}\z/ }, allow_nil: true
   validate :tenant_consistency
   validate :occurred_at_is_not_in_the_future
 

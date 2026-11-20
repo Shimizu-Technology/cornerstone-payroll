@@ -15,7 +15,7 @@ class SeparateAnnualFilingAgencies < ActiveRecord::Migration[8.0]
       "(filing_type = 'form_1099_nec' AND agency = 'drt') OR (quarter IS NOT NULL AND agency = '')",
       name: "payroll_filing_records_agency"
     add_reference :payroll_filing_events, :download_audit, foreign_key: { to_table: :audit_logs }
-    add_column :payroll_filing_events, :file_sha256, :string
+    add_column :payroll_filing_events, :file_digest, :string
     change_column_null :payroll_filing_events, :evidence_document_id, true
   end
 
@@ -26,7 +26,7 @@ class SeparateAnnualFilingAgencies < ActiveRecord::Migration[8.0]
       raise ActiveRecord::IrreversibleMigration, "#{count} agency filing record(s) and #{bound} file-bound/receipt-free event(s) require this schema. Roll back the application only; preserve filing history."
     end
     change_column_null :payroll_filing_events, :evidence_document_id, false
-    remove_column :payroll_filing_events, :file_sha256
+    remove_column :payroll_filing_events, :file_digest
     remove_reference :payroll_filing_events, :download_audit, foreign_key: { to_table: :audit_logs }
     remove_check_constraint :payroll_filing_records, name: "payroll_filing_records_agency"
     remove_index :payroll_filing_records, name: "idx_payroll_filings_annual_identity"

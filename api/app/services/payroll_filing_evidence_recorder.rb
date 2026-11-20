@@ -42,7 +42,7 @@ class PayrollFilingEvidenceRecorder
         source_fingerprint: source.fingerprint,
         source_snapshot: source.snapshot,
         download_audit: download,
-        file_sha256: download&.metadata&.fetch("sha256", nil),
+        file_digest: download&.metadata&.fetch("file_digest", nil),
         idempotency_key: attributes[:idempotency_key].presence || SecureRandom.uuid
       )
 
@@ -114,7 +114,7 @@ class PayrollFilingEvidenceRecorder
       raise Error, "That download is not the #{label} e-file"
     end
     log = downloads.logs.find_by(id: attributes[:download_audit_id])
-    raise Error, "Choose a final file downloaded for this client and year. Download the final e-file first." unless log && log.metadata["sha256"].to_s.match?(/\A[0-9a-f]{64}\z/)
+    raise Error, "Choose a final file downloaded for this client and year. Download the final e-file first." unless log && log.metadata["file_digest"].to_s.match?(/\A[0-9a-f]{64}\z/)
     unless log.metadata["readiness_fingerprint"] == downloads.fingerprint
       raise Error, "This file is out of date. Download the final file again"
     end

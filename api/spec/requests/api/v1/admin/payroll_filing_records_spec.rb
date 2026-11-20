@@ -25,7 +25,7 @@ RSpec.describe "Payroll filing records", type: :request do
     allow_any_instance_of(PayrollFilingEvidenceRecorder).to receive(:validate_w2_readiness!)
     allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
     download = AuditLog.record!(user: admin, company_id: company.id, action: "efw2#download", record_type: "Company",
-      metadata: { year: 2026, mode: "final", sha256: "b" * 64, readiness_fingerprint: "a" * 64 })
+      metadata: { year: 2026, mode: "final", file_digest: FilingFileDigest.call("final filing bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: "a" * 64 })
     %w[ssa drt].each do |agency|
       post "/api/v1/admin/payroll_filing_records/events", params: {
         filing_type: "w2_gu_w3_ss", agency: agency, tax_year: 2026, event_type: "submitted",
@@ -33,7 +33,9 @@ RSpec.describe "Payroll filing records", type: :request do
       }
       expect(response).to have_http_status(:created), response.body
       expect(response.parsed_body.dig("filing", "agency")).to eq(agency)
-      expect(response.parsed_body.dig("filing", "events", 0, "file_sha256")).to eq("b" * 64)
+      expect(response.parsed_body.dig("filing", "events", 0, "file_digest")).to eq(FilingFileDigest.call("final filing bytes"))
+      expect(response.parsed_body.dig("filing", "events", 0).keys).not_to include("sha256", "file_sha256")
+      expect(AuditLog.where(action: "payroll_filing_records#submitted").last.metadata.keys).not_to include("sha256", "file_sha256")
       expect(AuditLog.where(action: "payroll_filing_records#submitted").last.metadata).to include("agency" => agency, "download_audit_id" => download.id)
     end
     expect(PayrollFilingRecord.where(company: company).count).to eq(2)
@@ -46,11 +48,15 @@ RSpec.describe "Payroll filing records", type: :request do
     allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
     [ "a", "c" ].each do |fingerprint|
       AuditLog.record!(user: admin, company_id: company.id, action: "efw2#download", record_type: "Company",
-        metadata: { year: 2026, mode: "final", sha256: "b" * 64, readiness_fingerprint: fingerprint * 64 })
+        metadata: { year: 2026, mode: "final", file_digest: FilingFileDigest.call("final filing bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: fingerprint * 64 })
     end
     get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.fetch("downloads").map { |file| file["current"] }).to eq([ false, true ])
+    response.parsed_body.fetch("downloads").each do |file|
+      expect(file["file_digest"]).to eq(FilingFileDigest.call("final filing bytes"))
+      expect(file.keys).not_to include("sha256", "file_sha256")
+    end
   end
 
   it "loads and advances prior-year legacy evidence without agency or final-file binding" do

@@ -266,7 +266,7 @@ function FilingEvidencePanelContent({
             <label className="block text-xs font-semibold">Final file uploaded
               <select name="download_audit_id" required value={downloadId} onChange={(event) => setDownloadId(event.target.value)} className="mt-1 min-h-11 w-full rounded-md border px-2 text-sm">
                 <option value="">Choose a final file</option>
-                {downloads.map((file) => <option key={file.id} value={file.id}>{formatGuamDateTime(file.created_at)} · {file.actor_name} · {file.sha256.slice(0, 12)}{file.current ? '' : ' · out of date'}</option>)}
+                {downloads.map((file) => <option key={file.id} value={file.id}>{formatGuamDateTime(file.created_at)} · {file.actor_name} · {file.file_digest.slice(0, 12)}{file.current ? '' : ' · out of date'}</option>)}
               </select>
             </label>
             {downloads.length === 0 && <p className="mt-2 text-xs">Download the final {filingType === 'w2_gu_w3_ss' ? 'W-2' : '1099'} e-file in Print and file first.</p>}
@@ -335,7 +335,7 @@ function FilingEvidencePanelContent({
                 <p className="mt-0.5 text-neutral-500">{formatGuamDateTime(entry.occurred_at)} by {entry.recorded_by}</p>
                 {entry.notes && <p className="mt-1 max-w-2xl text-neutral-600">{entry.notes}</p>}
               </div>
-              {entry.file_sha256 && <p>Uploaded file SHA256: {entry.file_sha256.slice(0, 12)}</p>}
+              {entry.file_digest && <p>Uploaded file reference: {entry.file_digest.slice(0, 12)}</p>}
               {entry.evidence_document && <Button type="button" size="sm" variant="ghost" onClick={() => void downloadEvidence(entry.evidence_document!.id, entry.evidence_document!.file_name)}>
                 Download proof
               </Button>}

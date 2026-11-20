@@ -16,7 +16,7 @@ module Api
           legacy = identity[:filing_type] == "w2_gu_w3_ss" && identity[:agency] != "legacy" ? PayrollFilingRecord.find_by(identity.merge(agency: "legacy")) : nil
           render json: { filing: record ? serialize_record(record) : nil,
             legacy_filing: legacy ? serialize_record(legacy) : nil,
-            downloads: downloads.logs.map { |log| { id: log.id, created_at: log.created_at.iso8601, actor_name: log.actor_name, sha256: log.metadata["sha256"], current: log.metadata["readiness_fingerprint"] == fingerprint } } }
+            downloads: downloads.logs.map { |log| { id: log.id, created_at: log.created_at.iso8601, actor_name: log.actor_name, file_digest: log.metadata["file_digest"], current: log.metadata["readiness_fingerprint"] == fingerprint } } }
         end
 
         def create_event
@@ -57,7 +57,7 @@ module Api
                 evidence_document_id: document&.id,
                 agency: recorded_event.payroll_filing_record.agency,
                 download_audit_id: recorded_event.download_audit_id,
-                file_sha256: recorded_event.file_sha256,
+                file_digest: recorded_event.file_digest,
                 source_fingerprint: recorded_event.source_fingerprint
               },
               ip_address: request.remote_ip,
@@ -279,7 +279,7 @@ module Api
             source_fingerprint: event.source_fingerprint,
             recorded_by: event.recorded_by.name,
             download_audit_id: event.download_audit_id,
-            file_sha256: event.file_sha256,
+            file_digest: event.file_digest,
             evidence_document: event.evidence_document && {
               id: event.evidence_document.id,
               file_name: event.evidence_document.file_name,

@@ -81,7 +81,7 @@ describe('FilingEvidencePanel', () => {
     }] };
     let resolveRefresh!: (response: { filing: PayrollFilingRecord }) => void;
     const refresh = new Promise<{ filing: PayrollFilingRecord }>((resolve) => { resolveRefresh = resolve; });
-    apiMocks.payrollFilingRecord.mockResolvedValueOnce({ filing: rejected, downloads: [{ id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', sha256: 'b'.repeat(64), current: true }] }).mockReturnValueOnce(refresh);
+    apiMocks.payrollFilingRecord.mockResolvedValueOnce({ filing: rejected, downloads: [{ id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', file_digest: 'b'.repeat(64), current: true }] }).mockReturnValueOnce(refresh);
     apiMocks.recordPayrollFilingEvent.mockResolvedValue({ filing: saved });
     render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} agency="ssa" preparationReady readinessMessage="Ready" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Record resubmission' }));
@@ -98,7 +98,7 @@ describe('FilingEvidencePanel', () => {
   });
 
   it('refreshes to the newest current file and labels stale downloads', async () => {
-    const file = { created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', sha256: 'b'.repeat(64) };
+    const file = { created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', file_digest: 'b'.repeat(64) };
     apiMocks.payrollFilingRecord.mockResolvedValueOnce({ filing: null, downloads: [{ ...file, id: 93, current: false }, { ...file, id: 91, current: true }] })
       .mockResolvedValue({ filing: null, downloads: [{ ...file, id: 94, current: true }] });
     render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} agency="ssa" preparationReady readinessMessage="Ready" />);
@@ -221,8 +221,8 @@ describe('FilingEvidencePanel', () => {
 
   it('preselects the latest final download and records the selected agency without a receipt', async () => {
     apiMocks.payrollFilingRecord.mockResolvedValue({ filing: null, downloads: [
-      { id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', sha256: 'b'.repeat(64), current: true },
-      { id: 90, created_at: '2026-11-19T01:00:00Z', actor_name: 'Dana', sha256: 'a'.repeat(64), current: false },
+      { id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', file_digest: 'b'.repeat(64), current: true },
+      { id: 90, created_at: '2026-11-19T01:00:00Z', actor_name: 'Dana', file_digest: 'a'.repeat(64), current: false },
     ] });
     apiMocks.recordPayrollFilingEvent.mockResolvedValue({ filing: { ...submitted, filing_type: 'w2_gu_w3_ss', agency: 'ssa' } });
     render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} companyId={3} agency="ssa" preparationReady readinessMessage="Ready" />);
