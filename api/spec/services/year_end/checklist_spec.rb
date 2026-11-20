@@ -480,7 +480,7 @@ RSpec.describe YearEnd::Checklist do
       expect(documents[2]).to include(format: "txt", contains_full_ssn: true, available: false,
         draft_confirmation: a_string_including("Test file only"),
         download: { path: "/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" } })
-      expect(documents[3]).to include(title: "W-3SS totals (for your records)", available: true,
+      expect(documents[3]).to include(title: "W-3SS totals (for your records)", available: true, draft_confirmation: nil,
         download: { path: "/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" } })
       expect(result).to include(status: "needs_action", next_step: "mark_ready", issue_count: 1)
 
