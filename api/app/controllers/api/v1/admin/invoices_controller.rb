@@ -160,6 +160,8 @@ module Api
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         rescue R2StorageService::UploadError, R2StorageService::DownloadError, Prawn::Errors::CannotFit
           render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
         end
@@ -186,6 +188,8 @@ module Api
           send_artifact(artifact, disposition: "attachment")
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         rescue R2StorageService::UploadError, R2StorageService::DownloadError, Prawn::Errors::CannotFit => e
           Rails.logger.warn("Invoice PDF generation failed: #{e.class}: #{e.message}")
           render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
