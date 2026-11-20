@@ -332,7 +332,7 @@ RSpec.describe YearEnd::Checklist do
         warning_code: payee[:code], warning_digest: payee[:digest], note: note).call
     end
 
-    it "blocks the 1099s until staff record who the payee is, and again when the checks change" do
+    it "blocks the 1099s until staff record why no 1099 is due, and again when the checks change" do
       first = contractor_check(1_500, "9001")
       second = contractor_check(1_000, "9002")
       decide(w2: "client", form_1099: "cornerstone")
@@ -342,8 +342,9 @@ RSpec.describe YearEnd::Checklist do
       expect(payee).to include(name: "Synthetic Roofing", total_compensation: 2_500.0, status: "needs_identity", checks_path: "/checks-payments")
       expect(payee[:checks].map { |check| check[:id] }).to eq([ first.id, second.id ])
       expect(people[:issues]).to contain_exactly(a_hash_including(
-        code: "PAYEE_IDENTITY_UNRESOLVED", warning_code: payee[:code],
-        message: "Synthetic Roofing was paid $2,500.00 by checks 9001 and 9002 with no contractor record or TIN. Record who this payee is."
+        code: "PAYEE_IDENTITY_UNRESOLVED", warning_code: payee[:code], payee_key: payee[:payee_key],
+        message: "Synthetic Roofing was paid $2,500.00 by checks 9001 and 9002 with no contractor record or TIN. " \
+                 "Link the checks to a contractor, or record why no 1099 is due."
       ))
       expect(checklist[:status]).to eq("needs_action")
 
@@ -355,7 +356,7 @@ RSpec.describe YearEnd::Checklist do
 
       contractor_check(400, "9003")
       issue = step(checklist, "people")[:issues].sole
-      expect(issue[:message]).to start_with("The checks changed after Synthetic Roofing was identified.")
+      expect(issue[:message]).to start_with("Synthetic Roofing needs to be resolved again: the checks changed")
     end
 
     it "refuses an identification made on checks that have since changed" do

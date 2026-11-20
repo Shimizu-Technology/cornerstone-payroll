@@ -8,11 +8,21 @@
 # contractors. Reporting thresholds are selected by payment year from the
 # versioned InformationReturnThreshold table.
 #
-# Box 1: Nonemployee compensation (total gross payments)
+# Box 1: Nonemployee compensation (total gross payments, plus any one-off
+#        contractor checks linked to the contractor from the year-end checklist)
 # Box 4: Federal income tax withheld (typically $0 unless backup withholding)
 #
 class Form1099NecAggregator
   attr_reader :company, :year, :threshold_rule
+
+  # Reportable contractor records that share one TIN, each group sorted by
+  # name. Each would get its own 1099, which sends two to one payee.
+  def self.duplicate_tin_groups(employees)
+    employees.filter_map { |employee| [ employee.form_1099_tin, employee ] if employee.form_1099_tin }
+      .group_by(&:first).values.select { |group| group.length > 1 }
+      .map { |group| group.map(&:last).sort_by { |employee| [ employee.last_name.to_s.downcase, employee.first_name.to_s.downcase, employee.id ] } }
+      .sort_by { |group| group.first.id }
+  end
 
   def initialize(company, year)
     @company = company
@@ -40,7 +50,7 @@ class Form1099NecAggregator
           "This report is a preparation summary and should be reviewed before filing.",
           "The configured #{year} filing threshold is $#{filing_threshold.to_f}.",
           "Verify TIN/SSN for each contractor before filing.",
-          "One-off contractor checks are grouped by exact payee name. They have no worker/TIN link; reconcile identity with payroll contractors before filing.",
+          "One-off contractor checks linked to a contractor record count toward that contractor. Unlinked ones are grouped by exact payee name and have no TIN; resolve them in the year-end checklist before filing.",
           *unissued_contractor_check_note,
           "Box 1 = Total gross payments to contractor during the tax year.",
           "Box 4 = Federal income tax withheld (typically $0 for contractors without backup withholding)."
@@ -71,8 +81,13 @@ class Form1099NecAggregator
 
   def contractors
     @contractors ||= Employee
-      .where(company_id: company.id, id: aggregated_items.keys)
-      .order(:last_name, :first_name)
+      .where(company_id: company.id, id: (aggregated_items.keys + linked_checks.keys).uniq)
+      .order(:last_name, :first_name, :id)
+  end
+
+  # Issued one-off checks staff linked to a contractor record, by contractor.
+  def linked_checks
+    @linked_checks ||= issued_contractor_checks.select(&:payee_employee_id).group_by(&:payee_employee_id)
   end
 
   def aggregated_items
@@ -117,8 +132,13 @@ class Form1099NecAggregator
   end
 
   # Only checks that were printed or paid count; an unissued draft is not a payment.
+  def issued_contractor_checks
+    @issued_contractor_checks ||= year_contractor_checks.select { |check| check.printed_at.present? || check.paid_at.present? }
+  end
+
+  # Issued checks not linked to a contractor record.
   def standalone_contractor_checks
-    @standalone_contractor_checks ||= year_contractor_checks.select { |check| check.printed_at.present? || check.paid_at.present? }
+    @standalone_contractor_checks ||= issued_contractor_checks.reject(&:payee_employee_id)
   end
 
   def year_contractor_checks
@@ -127,17 +147,19 @@ class Form1099NecAggregator
   end
 
   def unissued_contractor_check_note
-    unissued = year_contractor_checks.length - standalone_contractor_checks.length
+    unissued = year_contractor_checks.length - issued_contractor_checks.length
     unissued.positive? ? [ "#{unissued} contractor check(s) dated #{year} are not printed or paid yet and are not counted." ] : []
   end
 
   def contractor_row(contractor)
     sums = aggregated_items[contractor.id]
-    total_comp = sums&.total_gross.to_f
+    checks = Array(linked_checks[contractor.id]).sort_by(&:id)
+    total_comp = (sums&.total_gross.to_d + checks.sum(0.to_d) { |check| check.amount.to_d }).round(2).to_f
     withheld = sums&.total_withheld.to_d
 
     compliance_issues = []
-    compliance_issues << "Missing SSN/TIN" unless contractor.valid_filing_ssn? || contractor.contractor_ein.present?
+    tin = contractor.form_1099_tin
+    compliance_issues << "Missing SSN/TIN" unless tin
     compliance_issues << "Missing address" if contractor.address_line1.blank?
     compliance_issues << "W-9 not on file" unless contractor.w9_on_file?
     compliance_issues << "Below filing threshold ($#{filing_threshold.to_f})" if total_comp < filing_threshold && withheld.zero?
@@ -147,16 +169,14 @@ class Form1099NecAggregator
       name: contractor.full_name,
       business_name: contractor.business_name,
       contractor_type: contractor.contractor_type,
-      tin_type: contractor.contractor_type == "business" && contractor.contractor_ein.present? ? "EIN" : "SSN",
-      tin_last_four: if contractor.contractor_type == "business" && contractor.contractor_ein.present?
-                       contractor.contractor_ein.last(4)
-                     else
-                       contractor.ssn_last_four
-                     end,
+      tin_type: tin ? tin[:type] : (contractor.business_contractor? ? "EIN" : "SSN"),
+      tin_last_four: tin&.dig(:digits)&.last(4),
       address: contractor.full_address,
       total_compensation: total_comp.round(2),
       federal_withheld: withheld.round(2),
-      payment_count: sums&.payment_count.to_i,
+      payment_count: sums&.payment_count.to_i + checks.length,
+      payroll_payment_count: sums&.payment_count.to_i,
+      non_employee_check_ids: checks.map(&:id),
       requires_filing: total_comp >= filing_threshold || !withheld.zero?,
       filing_reason: total_comp >= filing_threshold ? "filing threshold reached" : ("tax withheld" unless withheld.zero?),
       w9_on_file: contractor.w9_on_file?,

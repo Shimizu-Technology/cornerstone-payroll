@@ -116,6 +116,9 @@ class Employee < ApplicationRecord
   has_many :historical_paychecks, dependent: :restrict_with_error
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
   has_many :employee_configuration_review_resolutions, dependent: :restrict_with_error
+  # One-off contractor checks linked to this contractor for its 1099-NEC.
+  has_many :linked_non_employee_checks, class_name: "NonEmployeeCheck", foreign_key: :payee_employee_id,
+           inverse_of: :payee_employee, dependent: :restrict_with_error
 
   attr_accessor :intake_original_employee, :require_initial_w4_effective_on
   validate :valid_supplied_intake_dates
@@ -401,6 +404,18 @@ class Employee < ApplicationRecord
 
   def supported_w4_form_version?
     w4_form_version.to_i >= MIN_SUPPORTED_W4_FORM_VERSION
+  end
+
+  # The TIN a 1099-NEC prints, as { type: "SSN" | "EIN", digits: "123456789" },
+  # or nil when there is no valid one: a business contractor's EIN, otherwise
+  # the SSN, otherwise an EIN (a sole proprietor may give either).
+  def form_1099_tin
+    ein = contractor_ein.to_s.gsub(/\D/, "")
+    return { type: "EIN", digits: ein } if business_contractor? && ein.length == 9
+    return { type: "SSN", digits: ssn_digits } if valid_filing_ssn?
+    return { type: "EIN", digits: ein } if ein.length == 9
+
+    nil
   end
 
   # TIN for 1099-NEC: EIN for business entities, SSN for individuals

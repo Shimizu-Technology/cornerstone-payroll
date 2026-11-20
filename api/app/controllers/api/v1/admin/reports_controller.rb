@@ -602,6 +602,20 @@ module Api
           send_w2_gu_official_copies("drt")
         end
 
+        # GET /api/v1/admin/reports/form_1099_nec_recipient_copies
+        # Official IRS 1099-NEC Copy B for each contractor, TIN shown as its
+        # last four digits. Always a draft in a test or practice workspace.
+        def form_1099_nec_recipient_copies
+          send_form_1099_official_copies("recipient")
+        end
+
+        # GET /api/v1/admin/reports/form_1099_nec_payer_record
+        # The payer's record on the IRS Copy 1 page, with full TINs. Blocked in
+        # test and practice workspaces by TestWorkspaceSafetyPolicy.
+        def form_1099_nec_payer_record
+          send_form_1099_official_copies("payer")
+        end
+
         # GET /api/v1/admin/reports/form_1099_nec
         # Annual 1099-NEC summary for contractor filing preparation.
         def form_1099_nec
@@ -4904,6 +4918,98 @@ module Api
             request_id: request.request_id,
             event_category: "document_access"
           )
+        end
+
+        # The 1099-NEC copies, gated like the W-2GU copies: a watermarked
+        # draft until the 1099s are marked ready on these exact inputs
+        # (Form1099FilingReadiness.final?), only when Cornerstone files the
+        # client's 1099s. The PDF is drawn outside the company lock; the lock
+        # is then taken again (the lock mark ready and payee resolution hold),
+        # the state is read again uncached, and the download is audited under
+        # it. A file whose data or sign-off changed meanwhile is never sent.
+        def send_form_1099_official_copies(kind)
+          response.headers["Cache-Control"] = "private, no-store"
+          year = parse_tax_year_param
+          return if performed?
+
+          unless Form1099NecOfficialCopies.supported_tax_year?(year)
+            return render json: { error: Form1099NecOfficialCopies.unsupported_message(year) }, status: :unprocessable_entity
+          end
+
+          company = Company.find(current_company_id)
+          copies, audit, state = company.with_lock do
+            state = Form1099NecFilingState.call(company: company, year: year)
+            unless state.cornerstone_files
+              return render json: {
+                error: "Cornerstone does not file #{year} 1099s for this client, so it has no 1099-NEC copies to print. Change who files in the #{year} year-end checklist."
+              }, status: :unprocessable_entity
+            end
+            unless state.report
+              return render json: { error: "The #{year} 1099 payees could not be loaded: #{state.report_error.to_s.delete_suffix('.')}." }, status: :unprocessable_entity
+            end
+
+            copies = Form1099NecOfficialCopies.new(company: company, report: state.report, kind: kind, draft: !state.final, practice: company.test_workspace?)
+            [ copies, {
+              tax_year: year,
+              document_kind: kind == "payer" ? "form_1099_nec_payer_record" : "form_1099_nec_recipient_copies_b",
+              contains_full_tin: kind == "payer",
+              status: state.final ? "final" : "draft",
+              inputs_fingerprint: state.fingerprint,
+              ready_fingerprint: state.readiness&.ready_fingerprint,
+              payee_count: copies.payee_count
+            }, state ]
+          end
+
+          pdf = copies.generate
+          outcome = company.with_lock do
+            # Read uncached: the request's query cache would replay the reads above.
+            recheck = ActiveRecord::Base.uncached { Form1099NecFilingState.call(company: company, year: year) }
+            if recheck.signature != state.signature
+              :changed
+            elsif record_official_copies_access(company, audit, subject: "#{year} 1099-NEC #{kind == 'payer' ? 'payer record' : 'recipient copies B'}", source: "form_1099_nec_official_copies")
+              :recorded
+            end
+          end
+          if outcome == :changed
+            return render json: {
+              error: "This client's 1099 data changed while the file was being made. Download again."
+            }, status: :conflict
+          end
+          return unless outcome == :recorded
+
+          send_data pdf, filename: copies.filename, type: "application/pdf", disposition: "attachment"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue Form1099NecOfficialCopies::DoesNotFit => e
+          render json: { error: e.message, problems: e.problems }, status: :unprocessable_entity
+        rescue ArgumentError, PdfUnicodeFont::UnprintableName, OfficialPdfOverlay::TemplateUnavailableError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # Writes an official-copy download's audit entry, or refuses the file
+        # when it can't. The savepoint keeps a failed write from aborting the
+        # caller's lock transaction. No TIN or SSN goes in the metadata.
+        def record_official_copies_access(company, audit, subject:, source:)
+          AuditLog.transaction(requires_new: true) do
+            AuditLog.record!(
+              user: current_user,
+              organization_id: current_user.organization_id,
+              company_id: company.id,
+              action: "reports##{action_name}",
+              record_type: "reports",
+              subject_name: subject,
+              metadata: audit.merge(http_method: request.request_method, path: request.path),
+              ip_address: request.remote_ip,
+              user_agent: request.user_agent,
+              request_id: request.request_id,
+              event_category: "document_access"
+            )
+          end
+          true
+        rescue StandardError => e
+          Rails.error.report(e, handled: true, context: { company_id: company.id, tax_year: audit[:tax_year], source: source })
+          render json: { error: "The download could not be recorded in the activity log, so the file was not sent. Try again." }, status: :service_unavailable
+          false
         end
 
         def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:, fingerprint: nil)

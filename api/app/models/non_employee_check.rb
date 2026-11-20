@@ -19,6 +19,9 @@ class NonEmployeeCheck < ApplicationRecord
   belongs_to :company
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :paid_by, class_name: "User", optional: true
+  # The contractor record a one-off contractor check paid, set from the
+  # year-end checklist, so the amount joins that contractor's single 1099.
+  belongs_to :payee_employee, class_name: "Employee", optional: true, inverse_of: :linked_non_employee_checks
   # Use :delete_all (not :destroy) because NonEmployeeCheckEdit#readonly? is
   # true once persisted (audit records are immutable). :destroy would call
   # `destroy` on each edit which raises ActiveRecord::ReadOnlyRecord. The DB
@@ -56,6 +59,7 @@ class NonEmployeeCheck < ApplicationRecord
   validate :line_item_total_matches_amount
   validate :paid_by_matches_company
   validate :paid_state_is_complete
+  validate :payee_employee_is_company_contractor, if: :will_save_change_to_payee_employee_id?
   # Mirrors the DB-level partial unique index `idx_ne_checks_on_company_check_num`
   # so that a duplicate `check_number` (now editable through the Edit modal)
   # surfaces as a clean 422 with a field error instead of bubbling
@@ -250,6 +254,12 @@ class NonEmployeeCheck < ApplicationRecord
       return nil unless pay_period
       "#{pay_period.start_date.strftime('%m/%d/%Y')} - #{pay_period.end_date.strftime('%m/%d/%Y')}"
     end
+  end
+
+  def payee_employee_is_company_contractor
+    return if payee_employee_id.nil?
+
+    errors.add(:payee_employee, "must be a contractor of this client") unless check_type == "contractor" && payee_employee&.company_id == company_id && payee_employee.contractor?
   end
 
   def paid_by_matches_company

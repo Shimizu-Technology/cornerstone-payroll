@@ -154,6 +154,11 @@ class StaffRolePolicy
     "api/v1/admin/payroll_filing_responsibilities#upsert" => :manage_filing_review,
     "api/v1/admin/payroll_filing_records#create_event" => :manage_filing_review,
     "api/v1/admin/year_end#create_acknowledgement" => :manage_filing_review,
+    "api/v1/admin/year_end#link_one_off_payee" => :manage_filing_review,
+    "api/v1/admin/year_end#create_one_off_payee_contractor" => :manage_filing_review,
+    "api/v1/admin/year_end#unlink_one_off_payee" => :manage_filing_review,
+    # The 1099 sign-off: the same access as the W-2 sign-off.
+    "api/v1/admin/year_end#form_1099_mark_ready" => :manage_client_administration,
     "api/v1/admin/checks#reverse_paycheck" => :payroll_operations,
     "api/v1/admin/non_employee_checks#mark_paid" => :payroll_operations,
     "api/v1/admin/payroll_items#update_payment_method" => :payroll_operations,
@@ -188,6 +193,8 @@ class StaffRolePolicy
     "api/v1/admin/reports#form_1099_pub1220" => :manage_client_administration,
     "api/v1/admin/reports#form_1096_totals" => :manage_client_administration,
     "api/v1/admin/reports#w2_gu_efw2" => :manage_client_administration,
+    # Full TINs: the same access as the 1099 sign-off.
+    "api/v1/admin/reports#form_1099_nec_payer_record" => :manage_client_administration,
     "api/v1/admin/employees#review_intake_exception" => :manage_client_configuration,
     "api/v1/admin/employees#terminate" => :manage_client_configuration,
     "api/v1/admin/employees#deactivate" => :manage_employee_status,

@@ -5,7 +5,10 @@ module YearEnd
   #
   #   1. who files the year's W-2GUs and 1099s (required before anything else)
   #   2. employer details the forms print
-  #   3. employees (and 1099 payees) missing an SSN/TIN or address
+  #   3. employees (and 1099 payees) missing an SSN/TIN or address, and
+  #      one-off 1099 payees to link to a contractor or mark as owing none
+  #   -  mark 1099s ready: only when Cornerstone files the client's 1099s. A
+  #      fingerprint-bound sign-off on what prints on the 1099-NECs.
   #   4. W-2GU totals reconciled to the 941 quarters and W-1s
   #   5. judgment warnings: fixed, or acknowledged in the audit log
   #   6. prior-provider overlap
@@ -13,11 +16,14 @@ module YearEnd
   #   8. print and file: the documents to print, keep or send. Not a sign-off;
   #      it never changes the status, issue count or next step.
   #
-  # Every step reports what is wrong and the one action that fixes it. The same
-  # blockers gate the W-2GU "mark ready" endpoint from FIRST_TAX_YEAR onward.
+  # Steps are numbered in the order shown, so the W-2 steps move down one
+  # when the 1099 step is there. Every step reports what is wrong and the one
+  # action that fixes it. The same blockers gate the W-2GU "mark ready"
+  # endpoint from FIRST_TAX_YEAR onward; the 1099 ones gate "mark 1099s
+  # ready". Neither sign-off waits on the other.
   class Checklist
     FIRST_TAX_YEAR = 2026
-    STEP_KEYS = %w[filing_decision employer people reconciliation review_warnings prior_provider mark_ready print_and_file].freeze
+    STEP_KEYS = %w[filing_decision employer people form_1099_ready reconciliation review_warnings prior_provider mark_ready print_and_file].freeze
     PARTY_LABELS = {
       "cornerstone" => "Cornerstone files",
       "client" => "The client files",
@@ -42,8 +48,12 @@ module YearEnd
     # and employee item once, and the W-2 sign-off group (reconciliation,
     # warnings, overlap, mark ready) as one item until it is done.
     SIGN_OFF_STEPS = %w[reconciliation review_warnings prior_provider mark_ready].freeze
-    # The 1099 decision and 1099 payee items never hold up the W-2s.
-    FORM_1099_ONLY_CODES = %w[FORM_1099_FILER_NOT_CHOSEN PAYEE_DETAILS_MISSING PAYEES_UNAVAILABLE PAYEE_IDENTITY_UNRESOLVED].freeze
+    # The 1099 decision, 1099 payee items and the 1099 sign-off never hold up
+    # the W-2s.
+    FORM_1099_ONLY_CODES = %w[FORM_1099_FILER_NOT_CHOSEN PAYEE_DETAILS_MISSING PAYEES_UNAVAILABLE PAYEE_IDENTITY_UNRESOLVED
+                              PAYEE_DUPLICATE_TIN FORM_1099_NOT_MARKED_READY].freeze
+    # Employer items only the W-2 filing needs; they never hold up the 1099s.
+    W2_ONLY_EMPLOYER_CODES = %w[EMPLOYER_CONTACT_NAME_MISSING EMPLOYER_EFILE_INVALID].freeze
 
     def call
       # Taken before the steps run, so a change made while they run leaves
@@ -54,11 +64,17 @@ module YearEnd
       EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(steps), readiness: readiness) if year == 2026 && files?("w2_gu")
       status = overall_status(steps)
       # Lets the clients list keep showing Ready until any input changes, and
-      # stops it showing Ready once a run finds something.
-      status == "ready" ? ReadyCheck.record(company.id, year, revision) : ReadyCheck.clear(company.id, year)
+      # stops it showing Ready once a run finds something. The list checks
+      # the 1099 items (payees and the 1099 sign-off) live, so only the rest
+      # of the checklist has to have checked out.
+      only_1099_open = status == "needs_action" && decisions_recorded? && files_any? &&
+        steps.all? { |step| step[:issues].all? { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) } }
+      status == "ready" || only_1099_open ? ReadyCheck.record(company.id, year, revision) : ReadyCheck.clear(company.id, year)
       issue_count = steps.reject { |step| step[:key].in?(SIGN_OFF_STEPS) }.sum { |step| step[:issues].length } +
         (sign_off_needed?(steps) ? 1 : 0)
       next_step = steps.find { |step| step[:status] == "action_needed" }
+      steps = numbered(steps)
+      documents = print_and_file_step(steps)
 
       {
         company: {
@@ -74,7 +90,7 @@ module YearEnd
         files_w2: files?("w2_gu"),
         files_1099: files?("form_1099"),
         permissions: permissions,
-        steps: steps + [ print_and_file_step ]
+        steps: steps + [ documents.merge(number: steps.length + 1) ]
       }
     rescue StandardError
       ReadyCheck.clear(company.id, year)
@@ -87,8 +103,8 @@ module YearEnd
     def w2_mark_ready_blockers
       revision = InputRevision.for(company.id, year)[company.id]
       readiness = EfileCheck.current_readiness_stamp(company.id, year)
-      blockers = w2_blockers_from(steps_before_ready)
-      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(build_steps), readiness: readiness) if year == 2026 && files?("w2_gu")
+      blockers = w2_blockers_from(w2_steps_before_ready)
+      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(w2_steps_before_ready + [ w2_mark_ready ]), readiness: readiness) if year == 2026 && files?("w2_gu")
       blockers
     end
 
@@ -139,6 +155,21 @@ module YearEnd
       @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).structured_problems.reject { |problem| problem[:scope] == :submitter }
     end
 
+    # What "mark 1099s ready" enforces: the 1099 decision, the employer
+    # details a 1099 prints, and every 1099 payee item. W-2 items never hold
+    # up the 1099s.
+    def form_1099_mark_ready_blockers
+      form_1099_blockers_from(base_steps)
+    end
+
+    # The 1099 filing state built from this checklist's own 1099-NEC report.
+    def form_1099_state
+      @form_1099_state ||= begin
+        form_1099_rows
+        Form1099NecFilingState.new(company: company, year: year, report: @form_1099_report, report_error: @contractor_error).call
+      end
+    end
+
     private
 
     attr_reader :company, :year, :user
@@ -148,23 +179,47 @@ module YearEnd
     end
 
     def build_steps
-      @build_steps ||= steps_before_ready + [ w2_step("mark_ready", "Mark W-2s ready") { mark_ready_step(steps_before_ready) } ]
+      @build_steps ||= steps_before_ready + [ w2_mark_ready ]
     end
 
+    def w2_mark_ready
+      @w2_mark_ready ||= w2_step("mark_ready", "Mark W-2s ready") { mark_ready_step(w2_steps_before_ready) }
+    end
+
+    # The 1099 sign-off sits after the people step, only when Cornerstone
+    # files the client's 1099s.
     def steps_before_ready
-      # Employer and people checks run as soon as one recorded decision has
-      # Cornerstone filing, so the W-2s never wait on the 1099 decision.
-      @steps_before_ready ||= begin
+      @steps_before_ready ||= base_steps + [ (form_1099_ready_step(base_steps) if files?("form_1099")) ].compact + w2_checks
+    end
+
+    # What the W-2 sign-off waits on; never the 1099 sign-off.
+    def w2_steps_before_ready
+      base_steps + w2_checks
+    end
+
+    def w2_checks
+      @w2_checks ||= [
+        w2_step("reconciliation", "Reconcile W-2s to the 941s and W-1s") { reconciliation_step },
+        w2_step("review_warnings", "Review warnings") { review_warnings_step },
+        w2_step("prior_provider", "Prior provider overlap") { prior_provider_step }
+      ]
+    end
+
+    # Employer and people checks run as soon as one recorded decision has
+    # Cornerstone filing, so the W-2s never wait on the 1099 decision.
+    def base_steps
+      @base_steps ||= begin
         evaluable = files_any? || decisions_recorded?
         [
           filing_decision_step,
           evaluable ? employer_step : waiting_step("employer", "Employer details"),
-          evaluable ? people_step : waiting_step("people", "Employees and payees"),
-          w2_step("reconciliation", "Reconcile W-2s to the 941s and W-1s") { reconciliation_step },
-          w2_step("review_warnings", "Review warnings") { review_warnings_step },
-          w2_step("prior_provider", "Prior provider overlap") { prior_provider_step }
+          evaluable ? people_step : waiting_step("people", "Employees and payees")
         ]
       end
+    end
+
+    def numbered(steps)
+      steps.each_with_index.map { |step, index| step.merge(number: index + 1) }
     end
 
     def w2_blockers_from(steps)
@@ -172,6 +227,17 @@ module YearEnd
         .select { |step| step[:key].in?(%w[filing_decision employer people reconciliation review_warnings prior_provider]) }
         .flat_map { |step| step[:issues] }
         .reject { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) }
+    end
+
+    def form_1099_blockers_from(steps)
+      steps.flat_map do |step|
+        case step[:key]
+        when "filing_decision" then step[:issues].select { |issue| issue[:code] == "FORM_1099_FILER_NOT_CHOSEN" }
+        when "employer" then step[:issues].reject { |issue| issue[:code].in?(W2_ONLY_EMPLOYER_CODES) }
+        when "people" then step[:issues].select { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) }
+        else []
+        end
+      end
     end
 
     # The W-2 checks depend only on the W-2 decision.
@@ -282,15 +348,20 @@ module YearEnd
         .where(company_id: company.id, employment_type: "contractor")
         .financially_reportable
         .where(pay_periods: { id: PayPeriod.reportable_committed.where(company_id: company.id, pay_date: year_range).select(:id) })
-        .distinct.pluck(:employee_id)
+        .distinct.pluck(:employee_id) | issued_contractor_checks.filter_map(&:payee_employee_id)
     end
 
-    # Payees reached only by printed or paid one-off contractor checks. Counted
-    # straight from the checks, so a 1099 setup problem never hides them from
-    # the step 1 default.
+    # Printed or paid contractor checks dated in the year, linked or not.
+    def issued_contractor_checks
+      @issued_contractor_checks ||= OneOffPayees.issued_checks([ company.id ], year)
+    end
+
+    # Payees reached only by printed or paid one-off contractor checks that
+    # are not linked to a contractor. Counted straight from the checks, so a
+    # 1099 setup problem never hides them from the step 1 default.
     def one_off_payee_count
       threshold = InformationReturnThreshold.find_by(form_type: "1099_nec", tax_year: year)&.threshold_amount&.to_d
-      OneOffPayees.reportable_groups(OneOffPayees.issued_check_groups([ company.id ], year), threshold).size
+      OneOffPayees.reportable_groups(OneOffPayees.issued_check_groups([ company.id ], year, checks: issued_contractor_checks), threshold).size
     end
 
     def people_step
@@ -309,7 +380,12 @@ module YearEnd
       issues += efw2_people_issues
       payees = files?("form_1099") ? one_off_payees : []
       issues += payees.reject { |payee| payee[:status] == "identified" }.map do |payee|
-        issue("PAYEE_IDENTITY_UNRESOLVED", one_off_payee_message(payee), warning_code: payee[:code])
+        issue("PAYEE_IDENTITY_UNRESOLVED", one_off_payee_message(payee), warning_code: payee[:code], payee_key: payee[:payee_key])
+      end
+      duplicates = files?("form_1099") ? Form1099NecAggregator.duplicate_tin_groups(reportable_contractors) : []
+      issues += duplicates.map do |group|
+        issue("PAYEE_DUPLICATE_TIN", "#{group.map(&:full_name).to_sentence} have the same TIN, so they would get #{group.length} separate 1099s. " \
+                                    "Correct the wrong TIN, or ask for help combining the records.", employee_id: group.first.id, employee_ids: group.map(&:id))
       end
       issues << issue("PAYEES_UNAVAILABLE", @contractor_error) if files?("form_1099") && !contractors_available?
 
@@ -320,6 +396,9 @@ module YearEnd
           employees: employees,
           contractors: contractors,
           one_off_payees: payees,
+          duplicate_tins: duplicates.map { |group| group.map { |employee| { employee_id: employee.id, name: employee.full_name } } },
+          link_candidates: files?("form_1099") ? link_candidates(payees) : [],
+          linked_checks: files?("form_1099") ? linked_check_groups : [],
           w2_employee_count: files?("w2_gu") ? w2_employees.size : 0,
           contractor_count: files?("form_1099") && contractors_available? ? reportable_contractors.size : 0,
           contractor_error: @contractor_error
@@ -331,7 +410,8 @@ module YearEnd
     # 1099-only PAYEES_UNAVAILABLE issue), never complete.
     def form_1099_rows
       @form_1099_rows ||= begin
-        Array(Form1099NecAggregator.new(company, year).generate[:reportable_contractors])
+        @form_1099_report = Form1099NecAggregator.new(company, year).generate
+        Array(@form_1099_report[:reportable_contractors])
       rescue ActiveRecord::RecordNotFound, ArgumentError => e
         @contractor_error = "1099 payees could not be loaded: #{e.message.delete_suffix('.')}. Fix the #{year} 1099-NEC setup, then reload this page."
         []
@@ -355,12 +435,54 @@ module YearEnd
       @one_off_payees ||= OneOffPayees.new(company: company, year: year, rows: form_1099_rows).call
     end
 
+    # Contractor records a one-off payee can be linked to. A record whose name
+    # matches the payee's exactly is flagged so the screen can suggest it;
+    # nothing is ever linked by name automatically.
+    def link_candidates(payees)
+      return [] if payees.all? { |payee| payee[:status] == "identified" }
+
+      names = payees.to_set { |payee| payee[:name].to_s.strip.downcase }
+      company.employees.contractor.order(:last_name, :first_name, :id).map do |employee|
+        tin = employee.form_1099_tin
+        {
+          employee_id: employee.id,
+          name: employee.full_name,
+          business_name: employee.business_name,
+          status: employee.status,
+          tin_type: tin&.dig(:type),
+          tin_last4: tin&.dig(:digits)&.last(4),
+          has_address: [ employee.address_line1, employee.city, employee.state, employee.zip ].all?(&:present?),
+          name_matches: [ employee.full_name, employee.business_name ].compact_blank.any? { |name| names.include?(name.strip.downcase) }
+        }
+      end
+    end
+
+    # One-off checks already linked to a contractor, so a wrong link can be
+    # seen and undone.
+    def linked_check_groups
+      linked = issued_contractor_checks.select(&:payee_employee_id)
+      return [] if linked.empty?
+
+      employees = company.employees.where(id: linked.map(&:payee_employee_id)).index_by(&:id)
+      linked.group_by(&:payee_employee_id).map do |employee_id, checks|
+        {
+          employee_id: employee_id,
+          name: employees[employee_id]&.full_name,
+          total: checks.sum(0.to_d) { |check| check.amount.to_d }.round(2).to_f,
+          checks: checks.sort_by(&:id).map do |check|
+            { id: check.id, check_number: check.check_number, payable_to: check.payable_to,
+              payment_date: check.effective_payment_date&.iso8601, amount: check.amount.to_d.round(2).to_f }
+          end
+        }
+      end.sort_by { |group| [ group[:name].to_s.downcase, group[:employee_id] ] }
+    end
+
     def one_off_payee_message(payee)
       numbers = payee[:checks].filter_map { |check| check[:check_number] }
       checks = numbers.any? ? "check#{'s' if numbers.length > 1} #{numbers.to_sentence}" : "#{payee[:payment_count]} one-off check#{'s' unless payee[:payment_count] == 1}"
-      prefix = payee[:acknowledgement_stale] ? "The checks changed after #{payee[:name]} was identified. " : ""
+      prefix = payee[:acknowledgement_stale] ? "#{payee[:name]} needs to be resolved again: the checks changed, or the earlier note only said who the payee was. " : ""
       "#{prefix}#{payee[:name]} was paid #{ActiveSupport::NumberHelper.number_to_currency(payee[:total_compensation])} by #{checks} " \
-        "with no contractor record or TIN. Record who this payee is."
+        "with no contractor record or TIN. Link the checks to a contractor, or record why no 1099 is due."
     end
 
     def contractors_available?
@@ -370,7 +492,7 @@ module YearEnd
 
     def person_row(employee, w2:)
       missing = []
-      missing << "ssn" unless w2 ? employee.valid_filing_ssn? : (employee.valid_filing_ssn? || employee.contractor_ein.present?)
+      missing << "ssn" unless w2 ? employee.valid_filing_ssn? : employee.form_1099_tin.present?
       missing << "address" if [ employee.address_line1, employee.city, employee.state, employee.zip ].any?(&:blank?)
       return if missing.empty?
 
@@ -386,6 +508,84 @@ module YearEnd
         zip: employee.zip,
         edit_path: "/companies/#{company.id}/employees/#{employee.id}/edit"
       }
+    end
+
+    # -- Mark 1099s ready ----------------------------------------------
+
+    # The 1099 sign-off, bound to Form1099InputsFingerprint. It is needed
+    # only when some payee gets a 1099; it counts one issue until it matches
+    # the current inputs. W-2 items never hold it up.
+    def form_1099_ready_step(earlier_steps)
+      key = "form_1099_ready"
+      title = "Mark 1099s ready"
+      state = form_1099_state
+      blockers = form_1099_blockers_from(earlier_steps)
+      rows = state.payee_rows
+      readiness = state.readiness
+      threshold = state.report&.dig(:meta, :filing_threshold)
+
+      # A one-off payee not yet resolved may still become a 1099.
+      may_be_due = rows.any? || one_off_payees.any? { |payee| payee[:status] != "identified" }
+
+      issues = []
+      if state.report.nil?
+        issues << issue("FORM_1099_NOT_MARKED_READY", "The 1099 payees could not be loaded, so the 1099s can't be marked ready yet.")
+      elsif may_be_due && !state.current?
+        issues << issue("FORM_1099_NOT_MARKED_READY", readiness&.marked? ? "Payees, amounts or payer details changed after the #{year} 1099s were marked ready. Mark them ready again." : "Mark the #{year} 1099s ready once the steps above are done.")
+      end
+      summary = if state.report.nil?
+        "Fix the 1099 payee list in the employees and payees step first."
+      elsif !may_be_due
+        "No payee reached #{ActiveSupport::NumberHelper.number_to_currency(threshold, precision: 0)} in #{year}, so there are no 1099s to mark ready."
+      elsif state.current?
+        "Marked ready#{readiness.marked_ready_at ? " on #{format_date(readiness.marked_ready_at.in_time_zone('Pacific/Guam'))}" : ''}#{readiness.marked_ready_by_name.present? ? " by #{readiness.marked_ready_by_name}" : ''}."
+      else
+        "This records your sign-off on the payees and amounts below."
+      end
+      reason = if company.test_workspace?
+        "Not available in a practice copy."
+      elsif !permissions[:can_mark_ready]
+        "A manager or admin marks the 1099s ready."
+      end
+
+      step(
+        key, title, issues,
+        summary: summary,
+        data: {
+          readiness: readiness&.payload(fingerprint: state.fingerprint),
+          inputs_fingerprint: state.fingerprint,
+          can_mark_ready: state.report.present? && rows.any? && blockers.empty?,
+          unavailable_reason: reason,
+          blockers: blockers,
+          remaining_before_ready: blockers.length,
+          filing_threshold: threshold&.to_d&.round(2)&.to_f,
+          payee_count: rows.length,
+          total_compensation: rows.sum(0.to_d) { |row| row[:total_compensation].to_d }.round(2).to_f,
+          no_1099_due_count: one_off_payees.count { |payee| payee[:status] == "identified" },
+          payees: form_1099_payee_summaries(rows)
+        }
+      )
+    end
+
+    # What each 1099 will show, for the sign-off: the name, the TIN's last
+    # four digits and the Box 1a amount.
+    def form_1099_payee_summaries(rows)
+      employees = company.employees.where(id: rows.map { |row| row[:employee_id] }).index_by(&:id)
+      rows.filter_map do |row|
+        employee = employees[row[:employee_id]]
+        next unless employee
+
+        tin = employee.form_1099_tin
+        {
+          employee_id: employee.id,
+          name: employee.business_contractor? && employee.business_name.present? ? employee.business_name : employee.full_name,
+          tin_type: tin&.dig(:type),
+          tin_last4: tin&.dig(:digits)&.last(4),
+          total_compensation: row[:total_compensation].to_d.round(2).to_f,
+          linked_check_count: Array(row[:non_employee_check_ids]).length,
+          edit_path: "/companies/#{company.id}/employees/#{employee.id}/edit"
+        }
+      end.sort_by { |payee| [ payee[:name].to_s.downcase, payee[:employee_id] ] }
     end
 
     # -- Steps 4 and 5 ---------------------------------------------------
@@ -575,47 +775,109 @@ module YearEnd
     # A list of documents, each with a one-line explanation and a download.
     # Status "available" sits outside the checklist's done/needs-action
     # counting, which ignores this step entirely.
-    def print_and_file_step
+    # `steps` are the numbered steps above, so the summary can name the step
+    # that makes the drafts final.
+    def print_and_file_step(steps)
       key = "print_and_file"
       title = "Print and file"
-      return waiting_step(key, title) unless responsibilities["w2_gu"] || responsibilities["form_1099"]
-      return not_needed_step(key, title, "Cornerstone does not file #{year} W-2s for this client.") unless files?("w2_gu") || files?("form_1099")
+      unless files_any?
+        return waiting_step(key, title) unless decisions_recorded?
 
-      readiness, fingerprint = w2_readiness
+        return not_needed_step(key, title, "Cornerstone files no #{year} forms for this client.")
+      end
+
       practice = company.test_workspace?
-      final = !practice && W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
-      summary = if !files?("w2_gu")
-        practice ? "1099 filing downloads are unavailable in a practice copy." : "Review the 1099 drafts below. Final downloads require the 1099s to be marked ready."
-      elsif practice
+      groups = []
+      if files?("w2_gu")
+        readiness, fingerprint = w2_readiness
+        final = !practice && W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
+        groups << { forms: "W-2s", step: steps.find { |step| step[:key] == "mark_ready" }, final: final, documents: w2_copy_documents(final) }
+      end
+      if files?("form_1099")
+        final = form_1099_state.final
+        groups << { forms: "1099s", step: steps.find { |step| step[:key] == "form_1099_ready" }, final: final, documents: form_1099_documents(final) }
+      end
+      summary = if practice
         "This is a practice copy, so every document is a draft. Review them, but don't hand them out or file them."
-      elsif final
-        "The #{year} W-2s are marked ready. Download each document below."
+      elsif groups.all? { |group| group[:final] }
+        "The #{year} #{groups.map { |group| group[:forms] }.join(' and ')} are marked ready. Download each document below."
+      elsif groups.one?
+        "Drafts until the #{groups.first[:forms]} are marked ready in step #{groups.first[:step]&.fetch(:number)}. Review them, but don't hand them out yet."
       else
-        "Drafts until the W-2s are marked ready in step 7. Review them, but don't hand them out yet."
+        drafts = groups.reject { |group| group[:final] }
+        "#{drafts.map { |group| "#{group[:forms].delete_suffix('s')} documents are drafts until the #{group[:forms]} are marked ready in step #{group[:step]&.fetch(:number)}" }.join('. ')}. " \
+          "Review drafts, but don't hand them out yet."
       end
       {
         key: key, number: STEP_KEYS.index(key) + 1, title: title, status: "available",
         summary: summary,
         issues: [],
-        data: { final: final, documents: (files?("w2_gu") ? w2_copy_documents(final) : []) + form1099_documents }
+        data: { final: groups.all? { |group| group[:final] }, documents: groups.flat_map { |group| group[:documents] } }
       }
     end
 
-    def form1099_documents
-      return [] unless files?("form_1099")
+    # The official 1099-NEC copies: one recipient copy per contractor and the
+    # payer's record with full TINs.
+    def form_1099_documents(final)
+      state = form_1099_state
+      count = state.payee_rows.length
+      unavailable = if !Form1099NecOfficialCopies.supported_tax_year?(year)
+        Form1099NecOfficialCopies.unsupported_message(year)
+      elsif state.report.nil?
+        "The 1099 payees could not be loaded. Fix them in the employees and payees step first."
+      elsif count.zero?
+        "No payee reached #{ActiveSupport::NumberHelper.number_to_currency(state.report.dig(:meta, :filing_threshold), precision: 0)} in #{year}, so there are no 1099s."
+      end
+      contractors = "#{count} contractor#{'s' unless count == 1}"
+      [
+        {
+          key: "form_1099_recipient_copies", title: "1099-NEC for each contractor (Copy B)",
+          description: "Print and give or mail to each contractor by #{format_date(furnish_due_date)}.",
+          detail: "#{contractors}, one sheet each, by name: Copy B on the front, the IRS instructions on the back. " \
+                  "Print double-sided. TINs show only the last four digits.",
+          contains_full_ssn: false, contains_full_tin: false, path: "/admin/reports/form_1099_nec_recipient_copies"
+        },
+        {
+          key: "form_1099_payer_record", title: "1099-NEC payer record",
+          description: "Keep with your filing records. Not mailed when you e-file with Guam DRT.",
+          detail: "#{contractors}, one form a page, on the IRS Copy 1 page. Each download is recorded in the activity log.",
+          contains_full_ssn: false, contains_full_tin: true, path: "/admin/reports/form_1099_nec_payer_record"
+        }
+      ].map do |document|
+        restriction = if document[:contains_full_tin] && company.test_workspace?
+          "Not available in a practice copy — it contains full TINs."
+        elsif document[:contains_full_tin] && !permissions[:can_mark_ready]
+          "Needs client-management access (contains full TINs)."
+        end
+        reason = unavailable || restriction
+        document.except(:path).merge(
+          format: "pdf", draft: !final, available: reason.nil?, unavailable_reason: reason,
+          download: { path: document[:path], params: { year: year } }
+        )
+      end + form_1099_filing_documents(final)
+    end
 
-      final = Form1099Readiness.final?(company: company, year: year)
-      reason = drt_unavailable_reason || ("Only tax year 2026 is supported" unless year == 2026)
+    # The Pub 1220 e-file for GuamTax and the 1096 totals sheet. Final only
+    # on the same "1099s ready" sign-off as the copies (Form1099Readiness).
+    def form_1099_filing_documents(final)
+      restriction = if company.test_workspace?
+        "Not available in a practice copy"
+      elsif !permissions[:can_mark_ready]
+        "Needs client-management access"
+      end
+      reason = ("Only tax year 2026 is supported" unless year == 2026)
       [
         [ "form_1099_pub1220", "1099 e-file for GuamTax", "txt" ],
         [ "form_1096_totals", "1096 totals (for your records)", "pdf" ]
       ].map do |path, title, format|
+        efile = format == "txt"
+        unavailable = reason || (restriction && (efile ? "#{restriction} — it contains full TINs." : "#{restriction}."))
         {
           key: path, title: title, format: format, draft: !final,
-          description: format == "txt" ? "Upload to GuamTax after the 1099s are marked ready." : "For your records — not for filing.",
+          description: efile ? "Upload to GuamTax after the 1099s are marked ready." : "For your records — not for filing.",
           detail: "Totals use reportable payees only. Each download is recorded in the activity log.",
-          contains_full_ssn: format == "txt", available: reason.nil?, unavailable_reason: format == "pdf" ? reason&.gsub(" (contains full SSNs)", "")&.gsub(" — it contains full SSNs", "") : reason,
-          draft_confirmation: !final && format == "txt" ? "Test file only — review it, but don't upload it as your filing." : nil,
+          contains_full_ssn: efile, contains_full_tin: efile, available: unavailable.nil?, unavailable_reason: unavailable,
+          draft_confirmation: !final && efile ? "Test file only — review it, but don't upload it as your filing." : nil,
           download: { path: "/admin/reports/#{path}", params: { year: year, mode: final ? "final" : "draft" } }
         }
       end
@@ -634,7 +896,7 @@ module YearEnd
       [
         {
           key: "w2_employee_copies", title: "Employee copies (B and C)",
-          description: "Print and give to each employee by #{format_date(w2_employee_due_date)}.",
+          description: "Print and give to each employee by #{format_date(furnish_due_date)}.",
           detail: "#{employees}, one sheet each, by last name: Copy B on top, Copy C below, IRS instructions on the back. " \
                   "Print double-sided, flipping on the long edge. SSNs show only the last four digits.",
           contains_full_ssn: false
@@ -696,7 +958,7 @@ module YearEnd
     end
 
     # January 31 of the next year, or the next business day after a weekend.
-    def w2_employee_due_date
+    def furnish_due_date
       date = Date.new(year + 1, 1, 31)
       date += 1 until date.on_weekday?
       date
