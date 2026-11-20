@@ -2,6 +2,7 @@
 
 class TestWorkspaceSafetyPolicy
   BLOCKED_ACTIONS = {
+    "api/v1/admin/filing_submitters" => %w[update],
     # These records are shared across live companies, rather than copied into a workspace.
     "api/v1/admin/annual_retirement_limits" => %w[create update],
     "api/v1/admin/tax_configs" => %w[
@@ -20,7 +21,7 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/general_transmittals" => %w[generate_pdf artifact_pdf],
     "api/v1/admin/reports" => %w[
       start_quarterly_compliance_packet_workflow update_quarterly_compliance_packet_task
-      quarterly_compliance_packet_official_form_download w2_gu_mark_ready
+      quarterly_compliance_packet_official_form_download w2_gu_mark_ready w2_gu_efw2 w3ss_pdf
       transmittal_log_pdf full_print_package_pdf check_signoff_sheet check_signoff_pdf
       w2_gu_copy_1_drt
     ],

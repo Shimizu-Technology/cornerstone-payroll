@@ -3,7 +3,7 @@
 class AuditRecordSnapshot
   SAFE_FIELDS = {
     "Employee" => %w[
-      first_name middle_name last_name email hire_date termination_date department_id job_title
+      first_name middle_name last_name name_suffix email hire_date termination_date department_id job_title
       employment_type salary_type pay_rate pay_frequency payment_delivery_method filing_status allowances additional_withholding
       retirement_rate roth_retirement_rate employer_retirement_match_rate employer_roth_match_rate
       business_name contractor_type contractor_pay_type w9_on_file address_line1 address_line2 city state zip phone status
@@ -13,7 +13,10 @@ class AuditRecordSnapshot
       run_purpose includes_base_salary includes_recurring_items parallel_run notes
       correction_status voided_at void_reason
     ],
-    "Company" => %w[name legal_name email phone address_line1 address_line2 city state zip status],
+    "Company" => %w[
+      name legal_name email phone address_line1 address_line2 city state zip status
+      filing_contact_name kind_of_employer employment_code establishment_number
+    ],
     # Every non-sensitive input staff can edit on a payroll row.
     "PayrollItem" => %w[
       salary_override hours_worked overtime_hours holiday_hours pto_hours bonus reported_tips tips_paid_out tip_pool

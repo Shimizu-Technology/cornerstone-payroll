@@ -12,7 +12,7 @@
     "lint": "eslint src --ext .ts,.tsx",
     "test": "vitest run src",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "gate": "./scripts/gate.sh",
     "audit:gate": "node scripts/audit-gate.mjs",
     "test:e2e": "playwright test --project=public",

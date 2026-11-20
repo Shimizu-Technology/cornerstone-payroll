@@ -524,6 +524,14 @@ module Api
         # Downloads W-2GU annual summary as CSV.
         # Params:
         #   year [Integer] – tax year (defaults to current year)
+        def w2_gu_efw2
+          download_wage_filing_file(pdf: false)
+        end
+
+        def w3ss_pdf
+          download_wage_filing_file(pdf: true)
+        end
+
         def w2_gu_csv
           report_data, error_response = build_w2_gu_report_data
           return error_response if error_response
@@ -793,7 +801,10 @@ module Api
               }, status: :conflict
             end
             if filing.current?(fingerprint)
-              YearEnd::ReadyCheck.record(company.id, year, year_end_revision) if year_end_revision
+              if year_end_revision
+                YearEnd::ReadyCheck.record(company.id, year, year_end_revision)
+                YearEnd::EfileCheck.signed_off(company.id, year, year_end_revision, filing)
+              end
               return render json: { filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate }
             end
 
@@ -807,7 +818,10 @@ module Api
               "marked_ready_by_id" => filing.marked_ready_by_id, "notes" => filing.notes
             } ]
             filing.save!
-            YearEnd::ReadyCheck.record(company.id, year, year_end_revision) if year_end_revision
+            if year_end_revision
+              YearEnd::ReadyCheck.record(company.id, year, year_end_revision)
+              YearEnd::EfileCheck.signed_off(company.id, year, year_end_revision, filing)
+            end
             render json: {
               filing: filing_readiness_payload(filing, fingerprint: fingerprint),
               revalidation: revalidation_payload(fresh_preflight), filing_gate: filing_gate
@@ -1915,6 +1929,43 @@ module Api
 
         # Shared year validation + aggregation for W-2GU exports (CSV/PDF).
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
+        def download_wage_filing_file(pdf:)
+          response.set_header("Cache-Control", "no-store")
+          year = Integer(params[:year], exception: false)
+          raise ArgumentError, "Only tax year 2026 is supported" unless year == 2026
+          raise ArgumentError, "Choose draft or final" unless params[:mode].in?(%w[draft final])
+
+          company = Company.find(current_company_id)
+          company.with_lock do
+            revalidate_current_company_write_access!(company: company, capability: pdf ? nil : :manage_client_administration)
+            final = params[:mode] == "final"
+            gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:filings, "w2_gu")
+            decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
+            raise ArgumentError, "Record that Cornerstone files this client's W-2s before downloading" unless decision&.responsible_party == "cornerstone"
+            raise ArgumentError, gate[:blockers].map { |b| b.is_a?(Hash) ? b[:message] : b }.join("; ") if gate[:blockers].any?
+
+            report = W2GuAggregator.new(company, year).generate
+            fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: report).call
+            readiness = W2FilingReadiness.find_by(company: company, year: year)
+            raise ArgumentError, "Mark W-2s ready on the current inputs before downloading a final file" if final && !readiness&.current?(fingerprint)
+
+            submitter = FilingSubmitter.find_by(organization_id: company.organization_id)
+            generator = Efw2W2GuGenerator.new(company: company, year: year, submitter: submitter, report: report)
+            wage_file = generator.generate
+            content = pdf ? W3ssPdfGenerator.new(company: company, report: report, draft: !final).generate : wage_file
+            current = ActiveRecord::Base.uncached { W2FilingInputsFingerprint.new(company: company.reload, year: year).call }
+            raise ArgumentError, "Filing inputs changed during generation; refresh and try again" unless current == fingerprint
+
+            AuditLog.record!(user: current_user, company_id: company.id, action: pdf ? "w3ss#download" : "efw2#download",
+              record_type: "Company", record_id: company.id,
+              metadata: { year: year, mode: params[:mode], readiness_fingerprint: fingerprint, sha256: Digest::SHA256.hexdigest(content) })
+            send_data content, filename: "#{company.name.parameterize}-#{year}-#{final ? 'FINAL' : 'DRAFT'}-#{pdf ? 'W3SS.pdf' : 'EFW2.txt'}",
+              type: pdf ? "application/pdf" : "text/plain; charset=us-ascii", disposition: "attachment"
+          end
+        rescue ArgumentError => e
+          render json: { error: e.message, problems: e.respond_to?(:problems) ? e.problems : [ e.message ] }, status: :unprocessable_entity
+        end
+
         def build_w2_gu_report_data
           raw_year = params[:year]
           year = if raw_year.present?

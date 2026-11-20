@@ -305,7 +305,7 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       expect(response.parsed_body.fetch("company")).to include(
         "id" => client_company.id,
         "can_update" => true,
-        "editable_fields" => contain_exactly("address_line1", "address_line2", "city", "state", "zip", "phone", "email")
+        "editable_fields" => contain_exactly("address_line1", "address_line2", "city", "state", "zip", "phone", "email", "filing_contact_name")
       )
     end
 

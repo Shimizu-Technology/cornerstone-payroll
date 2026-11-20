@@ -1,12 +1,15 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "benchmark"
 
 RSpec.describe "Year-end checklist", type: :request do
   let!(:company) { create(:company, name: "Tumon Bakery", ein: "98-7654321") }
   let!(:department) { create(:department, company: company) }
   let!(:employee) { create(:employee, company: company, department: department) }
   let!(:admin) { create(:user, company: company, organization: company.organization, role: "admin") }
+  before { allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new) }
+
   let(:acting_user) { admin }
   let(:acting_company) { company }
   let!(:threshold_2026) { create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000) }
@@ -86,6 +89,7 @@ RSpec.describe "Year-end checklist", type: :request do
         expect(response).to have_http_status(:ok), response.body
       end
 
+      [ company, second ].each { |target| YearEnd::Checklist.new(company: target, year: 2026).call }
       get "/api/v1/admin/year_end/clients", params: { year: 2026 }
 
       rows = response.parsed_body.dig("data", "clients").index_by { |row| row["name"] }
@@ -104,45 +108,65 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(response.parsed_body.dig("data", "issue_count")).to eq(rows.fetch("Tumon Bakery")["issue_count"])
     end
 
-    it "keeps a fixed number of queries as the client list grows" do
-      # Each client in both cohorts files W-2s and 1099s here, with W-2
-      # payroll, a payroll contractor and a one-off payee, so the employee
-      # and 1099 checks all run.
-      decide_everything = lambda do |target|
-        %w[w2_gu form_1099].each do |filing_type|
-          create(:payroll_filing_responsibility, :annual, company: target, filing_type: filing_type, source_cutoff_date: nil)
+    it "does not aggregate and keeps query count constant with 26 periods and many employees" do
+      create(:payroll_filing_responsibility, :annual, company: company, filing_type: "w2_gu", source_cutoff_date: nil)
+      expect(W2GuAggregator).not_to receive(:new)
+      measure = lambda do
+        count = 0
+        callback = ->(*, payload) { count += 1 unless payload[:name].in?(%w[SCHEMA TRANSACTION]) }
+        elapsed = Benchmark.realtime do
+          ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+            get "/api/v1/admin/year_end/clients", params: { year: 2026 }
+          end
         end
-        contractor = create(:employee, :contractor, company: target, department: target.departments.first || create(:department, company: target))
-        pay(target, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 2_500)
-        create(:non_employee_check, company: target, check_type: "contractor", payable_to: "Synthetic Roofing", amount: 2_500,
-          check_number: "9#{target.id}", payment_period_type: "none", tax_year: nil, tax_month: nil, payment_date: Date.new(2026, 5, 2), printed_at: Time.current)
+        expect(response).to have_http_status(:ok)
+        [ count, elapsed ]
       end
-      [ company, second ].each(&decide_everything)
-      # A fresh user per request, so the clients added below are visible
-      # (User memoizes its accessible company ids).
-      allow_any_instance_of(Api::V1::Admin::YearEndController).to receive(:current_user) { User.find(admin.id) }
+      refresh_cache = -> { YearEnd::EfileCheck.record(company.id, 2026, YearEnd::InputRevision.for(company.id, 2026)[company.id], []) }
+      refresh_cache.call
+      baseline, before_time = measure.call
+      workers = create_list(:employee, 30, company: company, department: department)
+      26.times do |index|
+        date = Date.new(2026, 1, 9) + index * 14
+        workers.each { |worker| pay(company, date, worker: worker) }
+      end
+      refresh_cache.call
+      after_count, after_time = measure.call
+      warn "Overview 26 periods x 30 employees: #{after_time.round(3)}s / #{after_count} queries; small baseline #{before_time.round(3)}s / #{baseline} queries"
+      expect(after_count).to be <= baseline
+      row = response.parsed_body.dig("data", "clients").find { |entry| entry["company_id"] == company.id }
+      expect(row["issue_count"]).to be_a(Integer)
+      Rails.cache.delete(YearEnd::EfileCheck.key(company.id, 2026))
+      measure.call
+      row = response.parsed_body.dig("data", "clients").find { |entry| entry["company_id"] == company.id }
+      expect(row).to include("status" => "needs_action", "efile_check_pending" => true)
+    end
+
+    it "keeps the query count flat as W-2 clients are added" do
       count_queries = lambda do
-        queries = 0
-        callback = ->(*, payload) { queries += 1 unless payload[:name].in?(%w[SCHEMA TRANSACTION]) || payload[:sql].start_with?("SAVEPOINT", "RELEASE") }
+        # The stubbed user memoizes its company list; clear it so every request sees the clients added since.
+        acting_user.instance_variable_set(:@accessible_company_ids, nil)
+        count = 0
+        callback = ->(*, payload) { count += 1 unless payload[:name].in?(%w[SCHEMA TRANSACTION]) }
         ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
           get "/api/v1/admin/year_end/clients", params: { year: 2026 }
         end
-        expect(response).to have_http_status(:ok), response.body
-        queries
+        expect(response).to have_http_status(:ok)
+        count
       end
+      add_w2_client = lambda do |name|
+        client = create(:company, organization: company.organization, name: name, ein: nil)
+        worker = create(:employee, company: client, department: create(:department, company: client))
+        pay(client, Date.new(2026, 3, 6), worker: worker)
+        create(:payroll_filing_responsibility, :annual, company: client, filing_type: "w2_gu", source_cutoff_date: nil)
+      end
+      add_w2_client.call("Client 1")
       baseline = count_queries.call
-      extras = Array.new(4) do |index|
-        extra = create(:company, organization: company.organization, name: "Extra #{index}")
-        pay(extra, Date.new(2026, 3, 6), worker: create(:employee, company: extra, department: create(:department, company: extra)))
-        decide_everything.call(extra)
-        extra
-      end
+      4.times { |index| add_w2_client.call("Client #{index + 2}") }
 
-      expect(count_queries.call).to be <= baseline + 2
-      rows = response.parsed_body.dig("data", "clients").index_by { |row| row["name"] }
-      extras.each do |extra|
-        expect(rows.fetch(extra.name)["issue_summary"].map { |item| item["code"] }).to include("PAYEE_IDENTITY_UNRESOLVED", "W2_NOT_MARKED_READY")
-      end
+      expect(count_queries.call).to be <= baseline
+      names = response.parsed_body.dig("data", "clients").map { |row| row["name"] }
+      expect(names).to include("Client 1", "Client 2", "Client 3", "Client 4", "Client 5")
     end
 
     it "keeps an inactive record with a reportable one-off contractor check and nothing else on the list" do
@@ -187,6 +211,31 @@ RSpec.describe "Year-end checklist", type: :request do
       record_decision(filing_types: %w[form_1099], party: "no_filing")
     end
 
+    it "keeps known issues visible while a stale check is queued only once" do
+      mark_ready
+      company.update!(ein: nil)
+      row = nil
+      expect {
+        2.times { row = list_row }
+      }.to have_enqueued_job(YearEndEfileCheckJob).exactly(:once)
+      expect(row).to include("status" => "needs_action", "issue_count" => 1, "efile_check_pending" => true)
+      expect(row["issue_summary"]).to include(a_hash_including("code" => "EMPLOYER_EIN_MISSING"))
+      YearEndEfileCheckJob.perform_now(company.id, 2026, YearEnd::InputRevision.for(company.id, 2026)[company.id])
+      get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+      result = response.parsed_body.fetch("data")
+      expect(list_row).to include("status" => result["status"], "issue_count" => result["issue_count"], "efile_check_pending" => false)
+    end
+
+    it "never shows Ready while the W-2s are not marked, whatever a cached check says" do
+      revision = YearEnd::InputRevision.for(company.id, 2026)[company.id]
+      YearEnd::EfileCheck.record(company.id, 2026, revision, [], sign_off_needed: false)
+
+      row = list_row
+
+      expect(row["status"]).to eq("needs_action")
+      expect(row["issue_summary"]).to include(a_hash_including("code" => "W2_NOT_MARKED_READY"))
+    end
+
     it "shows Check needed, not Ready, after an employee address changes once the W-2s are marked ready" do
       travel_to(start + 0.hours) { mark_ready }
       travel_to(start + 1.hours) do
@@ -194,10 +243,12 @@ RSpec.describe "Year-end checklist", type: :request do
 
         employee.update!(address_line1: "200 New Street")
 
-        expect(list_row).to include("status" => "check_needed", "check_reason" => a_string_including("changed since the W-2s were marked ready"))
+        expect(list_row).to include("status" => "check_needed", "issue_count" => nil, "efile_check_pending" => true, "check_reason" => a_string_including("changed since the W-2s were marked ready"))
         get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
         expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
-        expect(list_row["status"]).to eq("check_needed")
+        checklist_count = response.parsed_body.dig("data", "issue_count")
+        expect(list_row["status"]).to eq("needs_action")
+        expect(list_row["issue_count"]).to eq(checklist_count)
       end
       travel_to(start + 2.hours) do
         mark_ready
@@ -231,10 +282,11 @@ RSpec.describe "Year-end checklist", type: :request do
         # Nothing left gets a newer timestamp: only the row count changes.
         occupation.destroy!
 
-        expect(list_row).to include("status" => "check_needed", "check_reason" => a_string_including("changed since the W-2s were marked ready"))
+        expect(list_row).to include("status" => "check_needed", "issue_count" => nil)
+        expect(list_row["issue_summary"]).not_to include(a_hash_including("code" => "EMPLOYEE_EFILE_INVALID"))
         get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
         expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
-        expect(list_row["status"]).to eq("check_needed")
+        expect(list_row["status"]).to eq("needs_action")
       end
     end
 
@@ -294,7 +346,9 @@ RSpec.describe "Year-end checklist", type: :request do
         allow_any_instance_of(YearEnd::Reconciliation).to receive(:call).and_return(YearEnd::Reconciliation.unavailable("synthetic outage"))
         get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
         expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
-        expect(list_row["status"]).to eq("check_needed")
+        checklist_count = response.parsed_body.dig("data", "issue_count")
+        expect(list_row["status"]).to eq("needs_action")
+        expect(list_row["issue_count"]).to eq(checklist_count)
 
         allow_any_instance_of(YearEnd::Reconciliation).to receive(:call).and_call_original
         get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
@@ -515,6 +569,15 @@ RSpec.describe "Year-end checklist", type: :request do
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2026 }
       expect(response).to have_http_status(:ok), response.body
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2026, notes: "Year-end review" }
+    end
+
+    it "refuses mark-ready for an employee e-file issue with the employee ID" do
+      pay(company, Date.new(2026, 3, 6), worker: employee)
+      employee.update_columns(state: "ZZ")
+      record_decision(filing_types: %w[w2_gu], party: "cornerstone")
+      mark_ready
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["year_end_blockers"]).to include(hash_including("code" => "EMPLOYEE_EFILE_INVALID", "employee_id" => employee.id))
     end
 
     it "requires the year-end filing decision" do

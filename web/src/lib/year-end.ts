@@ -27,7 +27,8 @@ export interface YearEndClientRow {
   name: string;
   active: boolean;
   status: YearEndClientStatus;
-  issue_count: number;
+  issue_count: number | null;
+  efile_check_pending?: boolean;
   issue_summary: Array<{ code: string; label: string; count: number }>;
   w2: YearEndDecisionSummary | null;
   form_1099: YearEndDecisionSummary | null;
@@ -189,7 +190,9 @@ export interface YearEndDocument {
   /** One plain line: what it is for and what to do with it. */
   description: string;
   detail: string;
-  format: 'pdf';
+  format: 'pdf' | 'txt';
+  /** Explicit acknowledgement before downloading a test file. */
+  draft_confirmation?: string | null;
   contains_full_ssn: boolean;
   /** Watermarked DRAFT: the W-2s are not marked ready on the current numbers. */
   draft: boolean;
@@ -232,6 +235,8 @@ export type YearEndStep =
       state: string | null;
       zip: string | null;
       phone: string | null;
+      filing_contact_name?: string | null;
+      kind_of_employer?: string;
       email: string | null;
     }>
   | StepBase<'people', {
@@ -304,7 +309,7 @@ export function reconciliationTargetLink(target: YearEndLookAt, source: YearEndR
   return { to: reportPeriodPath('w2-gu', taxYear), label: 'Open W-2GU report' };
 }
 
-export function clientStatusLabel(row: { status: YearEndClientStatus; issue_count: number }): string {
+export function clientStatusLabel(row: { status: YearEndClientStatus; issue_count: number | null }): string {
   if (row.status === 'ready') return 'Ready';
   if (row.status === 'not_filing') return 'No forms by Cornerstone';
   if (row.status === 'check_needed') return 'Check needed';

@@ -16,7 +16,7 @@ export function PrintAndFileStep({ checklist, step }: {
   return (
     <ul className="divide-y divide-neutral-200 rounded-xl border border-neutral-200">
       {step.data.documents.map((document) => (
-        <DocumentRow key={document.key} document={document} companyId={checklist.company.id} />
+        <DocumentRow key={`${document.key}:${document.draft}`} document={document} companyId={checklist.company.id} />
       ))}
     </ul>
   );
@@ -35,11 +35,14 @@ function downloadError(err: unknown): string {
 
 function DocumentRow({ document, companyId }: { document: YearEndDocument; companyId: number }): ReactElement {
   const stillMounted = useStillMounted();
+  const [confirmed, setConfirmed] = useState(false);
+  const needsConfirmation = document.draft && !!document.draft_confirmation;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const headingId = `year-end-document-${document.key}`;
 
   async function download() {
+    if (loading || !document.available || (needsConfirmation && !confirmed)) return;
     setLoading(true);
     setError(null);
     try {
@@ -71,6 +74,12 @@ function DocumentRow({ document, companyId }: { document: YearEndDocument; compa
         {!document.available && document.unavailable_reason && (
           <p className="mt-2 text-sm text-neutral-700">{document.unavailable_reason}</p>
         )}
+        {document.available && needsConfirmation && (
+          <label className="mt-3 flex min-h-11 items-start gap-2 text-sm text-neutral-700">
+            <input type="checkbox" className="mt-1" checked={confirmed} disabled={loading} onChange={(event) => setConfirmed(event.target.checked)} />
+            {document.draft_confirmation}
+          </label>
+        )}
         {error && (
           <div role="alert" className="mt-3 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">
             <p className="whitespace-pre-line">{error}</p>
@@ -84,12 +93,12 @@ function DocumentRow({ document, companyId }: { document: YearEndDocument; compa
         className="w-full shrink-0 sm:w-auto"
         variant={document.draft ? 'outline' : 'primary'}
         onClick={() => void download()}
-        disabled={!document.available}
+        disabled={!document.available || (needsConfirmation && !confirmed)}
         loading={loading}
-        loadingLabel="Preparing PDF…"
+        loadingLabel={document.format === 'pdf' ? 'Preparing PDF…' : 'Preparing file…'}
         aria-describedby={headingId}
       >
-        <Download className="mr-1.5 h-4 w-4" aria-hidden="true" />{document.draft ? 'Download draft' : 'Download PDF'}
+        <Download className="mr-1.5 h-4 w-4" aria-hidden="true" />{document.draft ? 'Download draft' : document.format === 'pdf' ? 'Download PDF' : 'Download e-file'}
       </Button>
     </li>
   );
