@@ -12,6 +12,13 @@ class InvoiceNumberAllocator
 
   def call
     billing_profile.with_lock do
+      if billing_profile.numbering_style == "continuing"
+        number = billing_profile.next_invoice_number
+        number += 1 while Invoice.exists?(invoice_billing_profile: billing_profile, invoice_number: number.to_s)
+        billing_profile.update!(next_invoice_number: number + 1)
+        return number.to_s
+      end
+
       sequence = InvoiceNumberSequence.find_or_initialize_by(
         invoice_billing_profile: billing_profile,
         sequence_year: invoice_date.year

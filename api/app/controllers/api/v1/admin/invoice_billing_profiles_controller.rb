@@ -85,10 +85,13 @@ module Api
             :payment_instructions,
             :default_payment_terms,
             :invoice_prefix,
+            :numbering_style,
+            :next_invoice_number,
             :remit_to,
             :footer_note,
             :active,
-            :is_default
+            :is_default,
+            service_catalog: [ :name, :description_template, :line_kind ]
           )
         end
 
@@ -109,6 +112,9 @@ module Api
             payment_instructions: profile.payment_instructions,
             default_payment_terms: profile.default_payment_terms,
             invoice_prefix: profile.invoice_prefix,
+            numbering_style: profile.numbering_style,
+            next_invoice_number: profile.next_invoice_number,
+            service_catalog: profile.service_catalog,
             remit_to: profile.remit_to,
             footer_note: profile.footer_note,
             has_logo: profile.logo_storage_key.present?,

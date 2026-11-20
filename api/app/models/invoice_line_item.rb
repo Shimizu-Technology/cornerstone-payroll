@@ -8,6 +8,7 @@ class InvoiceLineItem < ApplicationRecord
   before_update :prevent_issued_invoice_change
   before_destroy :prevent_issued_invoice_change
 
+  validates :line_kind, inclusion: { in: %w[service_fee reimbursement] }
   validates :description, presence: true
   validates :quantity, numericality: { greater_than_or_equal_to: 0 }
   validates :rate, numericality: { greater_than_or_equal_to: 0 }
