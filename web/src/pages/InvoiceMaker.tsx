@@ -660,7 +660,7 @@ export function InvoiceMaker() {
       invoice_recipient_id: recipientId,
       payment_terms: recipient?.payment_terms || current.payment_terms || selectedBillingProfile?.default_payment_terms || '',
       email_subject: recipient
-        ? `Invoice ${displayInvoiceNumber(current.invoice_number)} from ${selectedBillingProfile?.name || 'your business'}`.trim()
+        ? `Invoice ${current.invoice_number && !current.invoice_number.startsWith('DRAFT-') ? `${current.invoice_number} ` : ''}from ${selectedBillingProfile?.name || 'your business'}`.trim()
         : current.email_subject,
       email_body: recipient
         ? `Hi ${recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,`

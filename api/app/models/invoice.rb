@@ -141,8 +141,10 @@ class Invoice < ApplicationRecord
       return total
     end
 
+    # A line's blank quantity or rate counts as 0 here; the line normalizes
+    # it the same way, but only after this runs.
     line_items.reject(&:marked_for_destruction?).sum(BigDecimal("0")) do |item|
-      (BigDecimal(item.quantity.to_s) * BigDecimal(item.rate.to_s)).round(2, :half_up)
+      (BigDecimal((item.quantity || 0).to_s) * BigDecimal((item.rate || 0).to_s)).round(2, :half_up)
     end
   end
 
