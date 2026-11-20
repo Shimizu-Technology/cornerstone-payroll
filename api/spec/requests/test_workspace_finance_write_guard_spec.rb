@@ -27,6 +27,7 @@ RSpec.describe "Live finance guards in payroll test context", type: :request do
     [ :post, "/api/v1/admin/invoice_recipients" ],
     [ :post, "/api/v1/admin/invoice_billing_profiles" ],
     [ :post, "/api/v1/admin/invoice_billing_profiles/999/logo" ],
+    [ :patch, "/api/v1/admin/invoice_billing_profiles/999" ],
     [ :post, "/api/v1/admin/invoice_recurrences" ],
     [ :post, "/api/v1/admin/invoice_send_schedules" ],
     [ :post, "/api/v1/admin/invoice_chat_sessions" ],
@@ -51,5 +52,14 @@ RSpec.describe "Live finance guards in payroll test context", type: :request do
     expect(response.parsed_body.fetch("finance_books").pluck("id")).to include(book.id)
     get "/api/v1/admin/invoices", headers: expected_headers
     expect(response).to have_http_status(:ok)
+  end
+
+  it "keeps the read-only invoice style sample available" do
+    profile = InvoiceBillingProfile.create!(organization: home.organization, finance_book: book, name: "Sample sender")
+
+    expect { post "/api/v1/admin/invoice_billing_profiles/#{profile.id}/sample_pdf", headers: headers }
+      .not_to change { profile.reload.attributes }
+    expect(response).to have_http_status(:ok)
+    expect(response.media_type).to eq("application/pdf")
   end
 end

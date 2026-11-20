@@ -1,11 +1,13 @@
 import { invoicePreviewLines, newManualInvoiceLine } from '@/lib/invoice-maker-lines';
 import { invoiceDraftDueDate } from '@/lib/invoice-defaults';
 import { invoiceBusinessDate } from '@/lib/invoice-defaults';
+import { INVOICE_THEMES } from '@/lib/invoiceStyle';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
+import { PdfTextWarning } from '@/components/finance/PdfTextWarning';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
-import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Loader2, Mail, MessageSquare, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Loader2, Mail, MessageSquare, Palette, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +27,7 @@ import {
   type Invoice,
   type InvoiceBillingProfile,
   type InvoiceBillingProfilePayload,
+  type InvoicePdfTextIssue,
   type InvoiceDiscountType,
   type InvoiceLineItem,
   type InvoicePayload,
@@ -46,6 +49,7 @@ type OptimisticChatMessage = InvoiceChatMessage & {
   session_id: number;
 };
 
+const themeLabel = (theme?: string | null) => INVOICE_THEMES.find((entry) => entry.id === theme)?.name || 'Classic';
 const displayInvoiceNumber = (number?: string | null) => number?.startsWith('DRAFT-') || !number ? 'Draft' : number;
 
 interface ChatAttachmentPreview {
@@ -280,6 +284,7 @@ export function InvoiceMaker() {
   const [invoiceForm, setInvoiceForm] = useState<InvoiceFormState>(emptyInvoiceForm);
   const [billingProfileForm, setBillingProfileForm] = useState<BillingProfileFormState>(emptyBillingProfileForm);
   const [billingLogoFile, setBillingLogoFile] = useState<File | null>(null);
+  const billingProfileFormBaseline = useRef('');
   const [recipientForm, setRecipientForm] = useState<RecipientFormState>(emptyRecipientForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -290,6 +295,7 @@ export function InvoiceMaker() {
   const [showRecipientForm, setShowRecipientForm] = useState(false);
   const [showBillingProfileForm, setShowBillingProfileForm] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [pdfTextIssues, setPdfTextIssues] = useState<InvoicePdfTextIssue[]>([]);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [chatError, setChatError, chatErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -491,6 +497,7 @@ export function InvoiceMaker() {
       payment_terms: defaultProfile?.default_payment_terms || '',
     };
     setInvoiceForm(nextForm);
+    setPdfTextIssues([]);
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
     setError(null);
     setSuccess(null);
@@ -548,6 +555,7 @@ export function InvoiceMaker() {
       })),
     };
     setInvoiceForm(nextForm);
+    setPdfTextIssues(invoice.pdf_unprintable_text || []);
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
   };
 
@@ -716,6 +724,7 @@ export function InvoiceMaker() {
         ? await invoicesApi.update(invoiceForm.id, payload, markDraft)
         : await invoicesApi.create(payload);
       savedInvoiceSignatureRef.current = invoicePayloadSignature(payload);
+      setPdfTextIssues(response.invoice.pdf_unprintable_text || []);
       if (reloadAfterSave) {
         await loadData();
         await loadInvoice(response.invoice.id);
@@ -1205,7 +1214,7 @@ export function InvoiceMaker() {
 
   const editBillingProfile = (profile: InvoiceBillingProfile) => {
     setBillingLogoFile(null);
-    setBillingProfileForm({
+    const nextForm: BillingProfileFormState = {
       numbering_style: profile.numbering_style || 'yearly',
       next_invoice_number: profile.next_invoice_number || 1,
       service_catalog: profile.service_catalog || [],
@@ -1223,8 +1232,20 @@ export function InvoiceMaker() {
       footer_note: profile.footer_note || '',
       active: profile.active,
       is_default: profile.is_default,
-    });
+    };
+    billingProfileFormBaseline.current = JSON.stringify(nextForm);
+    setBillingProfileForm(nextForm);
     setShowBillingProfileForm(true);
+  };
+
+  const hasUnsavedBillingProfileChanges = () => (
+    showBillingProfileForm && (JSON.stringify(billingProfileForm) !== billingProfileFormBaseline.current || Boolean(billingLogoFile))
+  );
+
+  // Leaving for the style page drops unsaved invoice and profile edits, so ask first.
+  const confirmLeaveForStyle = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (!hasUnsavedInvoiceChanges() && !hasUnsavedBillingProfileChanges()) return;
+    if (!window.confirm('Leave without saving? Unsaved invoice or billing profile changes will be lost.')) event.preventDefault();
   };
 
   const saveBillingProfile = async () => {
@@ -1501,6 +1522,19 @@ export function InvoiceMaker() {
             </div>
             <Textarea value={billingProfileForm.default_payment_terms} onChange={(event) => setBillingProfileForm((current) => ({ ...current, default_payment_terms: event.target.value }))} placeholder="Default payment terms" rows={2} />
             <Textarea value={billingProfileForm.footer_note} onChange={(event) => setBillingProfileForm((current) => ({ ...current, footer_note: event.target.value }))} placeholder="Footer note" rows={2} />
+            {billingProfileForm.id && (
+              <div className="flex flex-col gap-2 rounded-xl border border-neutral-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-neutral-900">Invoice style</p>
+                  <p className="text-xs leading-relaxed text-neutral-600">
+                    {themeLabel(billingProfiles.find((profile) => profile.id === billingProfileForm.id)?.invoice_theme)} theme. Choose a theme, brand color, logo size and what each invoice shows.
+                  </p>
+                </div>
+                <Link to={`/tools/invoices/billing-profiles/${billingProfileForm.id}/style`} onClick={confirmLeaveForStyle} className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:border-primary-300 hover:bg-primary-50/60">
+                  <Palette className="mr-1.5 h-4 w-4" aria-hidden="true" />Edit invoice style
+                </Link>
+              </div>
+            )}
             <div className="rounded-xl border border-neutral-200 bg-white p-3">
               <div className="flex items-center gap-2 text-sm font-medium text-neutral-900"><ImagePlus className="h-4 w-4 text-primary-700" />Invoice logo</div>
               <p className="mt-1 text-xs leading-relaxed text-neutral-600">Optional PNG or JPEG, up to 1 MB. It appears on new PDF previews and issued invoices. Existing issued PDFs keep their original appearance.</p>
@@ -1547,7 +1581,7 @@ export function InvoiceMaker() {
             >
               <span className="font-medium text-neutral-900">{profile.name}</span>
               {profile.is_default && <span className="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">Default</span>}
-              <span className="block truncate text-xs text-neutral-600">{profile.email || profile.phone || profile.website || 'No contact details'} · {profile.has_logo ? 'Logo attached' : 'No logo'}</span>
+              <span className="block truncate text-xs text-neutral-600">{profile.email || profile.phone || profile.website || 'No contact details'} · {profile.has_logo ? 'Logo attached' : 'No logo'} · {themeLabel(profile.invoice_theme)} style</span>
             </button>
           ))}
         </div>
@@ -1906,6 +1940,7 @@ export function InvoiceMaker() {
                 </div>
               )}
 
+              <PdfTextWarning issues={invoiceForm.status === 'draft' || !invoiceForm.status ? pdfTextIssues : []} />
               <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={financeReadOnly || saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceCannotSaveDraft}>
                   <Save className="mr-1.5 h-4 w-4" />
@@ -2368,6 +2403,7 @@ export function InvoiceMaker() {
                 Close
               </Button>
             </div>
+            {pdfTextIssues.length > 0 && <div className="border-b p-3"><PdfTextWarning issues={pdfTextIssues} /></div>}
             <iframe title="Invoice preview" src={previewUrl} className="h-full w-full" />
           </div>
         </div>

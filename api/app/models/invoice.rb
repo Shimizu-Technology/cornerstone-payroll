@@ -5,7 +5,9 @@ class Invoice < ApplicationRecord
   ORIGINS = %w[native imported].freeze
   DISCOUNT_TYPES = %w[none percent amount].freeze
   PRIMARY_ARTIFACT_KINDS = %w[issued_pdf imported_original legacy_snapshot].freeze
-  SNAPSHOT_VERSION = 2
+  # 3 records the PDF style ("style"); earlier snapshots render with the
+  # legacy layout.
+  SNAPSHOT_VERSION = 3
 
   belongs_to :company, optional: true
   belongs_to :organization
@@ -536,6 +538,7 @@ class Invoice < ApplicationRecord
       },
       "billing_profile" => billing_profile_snapshot,
       "recipient" => recipient_snapshot,
+      "style" => invoice_billing_profile&.invoice_style&.to_snapshot,
       "line_items" => line_items.reject(&:marked_for_destruction?).sort_by { |item| [ item.position.to_i, item.id.to_i ] }.map do |item|
         {
           "line_kind" => item.line_kind,

@@ -720,6 +720,7 @@ Rails.application.routes.draw do
           member do
             post :logo, action: :upload_logo
             delete :logo, action: :remove_logo
+            post :sample_pdf
           end
         end
         resources :invoice_recipients, except: [ :new, :edit ]
