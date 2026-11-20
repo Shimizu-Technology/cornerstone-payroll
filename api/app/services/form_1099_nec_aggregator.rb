@@ -22,7 +22,7 @@ class Form1099NecAggregator
 
   def generate
     rows = contractors.map { |contractor| contractor_row(contractor) } + standalone_contractor_rows
-    reportable = rows.select { |r| r[:total_compensation] >= filing_threshold }
+    reportable = rows.select { |r| r[:requires_filing] }
 
     {
       meta: {
@@ -57,8 +57,8 @@ class Form1099NecAggregator
       totals: {
         total_compensation: rows.sum(0.to_d) { |r| r[:total_compensation].to_d }.round(2).to_f,
         reportable_compensation: reportable.sum(0.to_d) { |r| r[:total_compensation].to_d }.round(2).to_f,
-        reportable_federal_withheld: reportable.sum(0.to_d) { |r| r[:federal_withheld].to_d }.round(2).to_f,
-        total_federal_withheld: rows.sum(0.to_d) { |r| r[:federal_withheld].to_d }.round(2).to_f
+        reportable_federal_withheld: reportable.sum(0.to_d) { |r| r[:federal_withheld].to_d }.round(2),
+        total_federal_withheld: rows.sum(0.to_d) { |r| r[:federal_withheld].to_d }.round(2)
       }
     }
   end
@@ -134,13 +134,13 @@ class Form1099NecAggregator
   def contractor_row(contractor)
     sums = aggregated_items[contractor.id]
     total_comp = sums&.total_gross.to_f
-    withheld = sums&.total_withheld.to_f
+    withheld = sums&.total_withheld.to_d
 
     compliance_issues = []
     compliance_issues << "Missing SSN/TIN" unless contractor.valid_filing_ssn? || contractor.contractor_ein.present?
     compliance_issues << "Missing address" if contractor.address_line1.blank?
     compliance_issues << "W-9 not on file" unless contractor.w9_on_file?
-    compliance_issues << "Below filing threshold ($#{filing_threshold.to_f})" if total_comp < filing_threshold
+    compliance_issues << "Below filing threshold ($#{filing_threshold.to_f})" if total_comp < filing_threshold && withheld.zero?
 
     {
       employee_id: contractor.id,
@@ -157,7 +157,8 @@ class Form1099NecAggregator
       total_compensation: total_comp.round(2),
       federal_withheld: withheld.round(2),
       payment_count: sums&.payment_count.to_i,
-      requires_filing: total_comp >= filing_threshold,
+      requires_filing: total_comp >= filing_threshold || !withheld.zero?,
+      filing_reason: !withheld.zero? ? "tax withheld" : ("filing threshold reached" if total_comp >= filing_threshold),
       w9_on_file: contractor.w9_on_file?,
       compliance_issues: compliance_issues
     }

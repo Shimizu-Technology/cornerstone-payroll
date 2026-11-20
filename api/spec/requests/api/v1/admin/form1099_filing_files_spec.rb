@@ -6,7 +6,7 @@ require "pdf/reader"
 RSpec.describe "1099 filing files", type: :request do
   let(:company) { create(:company, ein: "66-1234567", filing_contact_name: "Contact", phone: "6715554321", email: "employer@example.com") }
   let(:user) { create(:user, company: company, role: "admin") }
-  let(:employee) { create(:employee, company: company, ssn_encrypted: "123-45-6789") }
+  let(:employee) { create(:employee, :contractor, company: company, ssn_encrypted: "123-45-6789") }
   let(:row) { { employee_id: employee.id, name: employee.full_name, tin_type: "SSN", total_compensation: 3000, federal_withheld: 25 } }
   let(:report) { { reportable_contractors: [ row ], totals: { reportable_federal_withheld: 25, reportable_compensation: 3000 } } }
   before do
@@ -142,7 +142,7 @@ RSpec.describe "1099 filing files", type: :request do
     expect(response).to have_http_status(:ok)
     reader = PDF::Reader.new(StringIO.new(response.body))
     expect(reader.pages.length).to eq(1)
-    expect(reader.pages.first.text).to include("For your records", "2026", "3000.00", "25.00")
+    expect(reader.pages.first.text).to include("For your records", "2026", "3,000.00", "25.00")
     expect(AuditLog.find_by!(action: "form1096#download").metadata["sha256"]).to eq(Digest::SHA256.hexdigest(response.body))
   end
 
@@ -150,5 +150,24 @@ RSpec.describe "1099 filing files", type: :request do
     user.update!(role: "client")
     get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "draft" }
     expect(response).to have_http_status(:forbidden)
+  end
+  it "exports real payroll TIN/name fields and blocks a real unidentified check" do
+    allow_any_instance_of(Form1099NecAggregator).to receive(:generate).and_call_original
+    employee.update!(employment_type: "contractor", contractor_type: "business", contractor_ein: "66-2345678", business_name: "ABC Services")
+    period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 5, 15))
+    create(:payroll_item, company: company, employee: employee, pay_period: period,
+      employment_type: "contractor", gross_pay: 1500, net_pay: 1400, withholding_tax: 100)
+    get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "draft" }
+    expect(response).to have_http_status(:ok)
+    expect(response.body[1510, 10]).to eq("1662345678")
+    expect(response.body[1787, 40].strip).to eq("ABC SERVICES")
+    check = create(:non_employee_check, company: company, check_type: "contractor", payable_to: "Unidentified Vendor",
+      payment_date: Date.new(2026, 5, 15), amount: 2100, printed_at: Time.current)
+    get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "draft" }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.body).to include("Unidentified Vendor: missing TIN and address")
+    check.update!(voided: true, voided_at: Time.current, void_reason: "Duplicate check, identity reconciled with payroll")
+    get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "draft" }
+    expect(response).to have_http_status(:ok)
   end
 end

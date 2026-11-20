@@ -4,7 +4,7 @@ require "rails_helper"
 
 RSpec.describe Form1099Pub1220Generator do
   let(:company) { create(:company, name: "Payer", ein: "66-1234567", address_line1: "2 Main", address_line2: nil, city: "Hagatna", state: "GU", zip: "96910", phone: "6715554321") }
-  let(:person) { create(:employee, company: company, first_name: "Jane", last_name: "Doe", middle_name: nil, ssn_encrypted: "123-45-6789", address_line1: "3 Main", address_line2: nil, city: "Hagatna", state: "GU", zip: "96910") }
+  let(:person) { create(:employee, id: 123, company: company, first_name: "Jane", last_name: "Doe", middle_name: nil, ssn_encrypted: "123-45-6789", address_line1: "3 Main", address_line2: nil, city: "Hagatna", state: "GU", zip: "96910") }
   let(:submitter) { FilingSubmitter.create!(organization: company.organization, ein: "66-7654321", name: "Practice", address_line1: "1 Main", city: "Hagatna", state: "GU", zip: "96910", contact_name: "Dafne", contact_phone: "6715551234", contact_email: "filing@example.com", tcc: "ABCDE") }
   let(:row) { { employee_id: person.id, name: "Jane Doe", tin_type: "SSN", total_compensation: 2345.67, federal_withheld: 12.34 } }
   let(:report) { { reportable_contractors: [ row ], totals: { reportable_federal_withheld: 12.34, reportable_compensation: 2345.67 } } }
@@ -47,7 +47,7 @@ RSpec.describe Form1099Pub1220Generator do
     row[:total_compensation] = 10_000_000_000
     expect { build.call }.to raise_error(described_class::InvalidFile, /amount/)
     row[:total_compensation] = 2345.67
-    person.update_columns(first_name: "李")
+    person.update_columns(last_name: "李")
     expect { build.call }.to raise_error(described_class::InvalidFile, /unsupported/)
   end
 
@@ -74,5 +74,41 @@ RSpec.describe Form1099Pub1220Generator do
       mutate.call(records)
       expect { generator.self_check!(records) }.to raise_error(described_class::InvalidFile)
     end
+  end
+  { "Li-Smith" => "LI  ", "Garza Morales" => "GARZ", "Ko Tenorio" => "KO  ", "De La Cruz" => "DELA" }.each do |surname, control|
+    it "uses Exhibit 1 name control for #{surname}" do
+      person.update_columns(last_name: surname)
+      expect(generator.generate[1506, 4]).to eq(control)
+    end
+  end
+
+  it "reports named width and text problems before writing any records" do
+    person.update_columns(address_line1: "A" * 30, address_line2: "B" * 15)
+    company.name = "P" * 41
+    submitter.contact_name = "李"
+    expect(generator).not_to receive(:record)
+    expect { generator.generate }.to raise_error(described_class::InvalidFile, /Jane Doe: the address is longer than 40/)
+    expect(generator.problems.join).to include("Payer: the name", "Transmitter: the contact name")
+  end
+
+  it "rejects punctuation-only payees by name before writing" do
+    person.update_columns(first_name: ".", last_name: "'", middle_name: nil)
+    expect(generator).not_to receive(:record)
+    expect { generator.generate }.to raise_error(described_class::InvalidFile, /Jane Doe: payee name contains no usable/)
+  end
+
+  it "uses the second name line for an SSN business and continuation of a long name" do
+    person.update_columns(business_name: "Jane Services")
+    expect(generator.generate[1787, 80]).to eq("DOE JANE".ljust(40) + "JANE SERVICES".ljust(40))
+    person.update_columns(last_name: "A" * 45, business_name: nil)
+    expect(described_class.new(company: company, year: 2026, submitter: submitter, draft: true, report: report).generate[1787, 80].strip).to eq("A" * 45 + " JANE")
+  end
+
+  it "matches a two-payee literal golden with SSN, EIN, withholding and counts" do
+    business = create(:employee, :contractor, id: 124, company: company, contractor_type: "business", contractor_ein: "66-2345678", business_name: "ABC Services",
+      address_line1: "4 Main", address_line2: nil, city: "Hagatna", state: "GU", zip: "96910")
+    report[:reportable_contractors] << { employee_id: business.id, name: business.full_name, tin_type: "EIN", total_compensation: 1500, federal_withheld: 100 }
+    report[:totals] = { reportable_compensation: 3845.67, reportable_federal_withheld: 112.34 }
+    expect(generator.generate.b).to eq(File.binread(Rails.root.join("spec/fixtures/pub1220_2026_two_payee_golden.txt")))
   end
 end

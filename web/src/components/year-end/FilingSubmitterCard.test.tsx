@@ -23,5 +23,12 @@ it('keeps TCC read only for staff', async () => {
   render(<FilingSubmitterCard />);
   await screen.findByText('E-file details complete.');
   fireEvent.click(screen.getByRole('button', { name: 'View submitter profile' }));
-  expect((screen.getByLabelText(/Transmitter control code/) as HTMLInputElement).disabled).toBe(true);
+  expect(screen.queryByLabelText(/Transmitter control code/)).toBeNull();
+  expect(screen.getByText(/Transmitter control code.*ABCDE\./)).toBeTruthy();
+});
+
+it('treats a whitespace-only TCC as missing', async () => {
+  mocks.get.mockResolvedValue({ exists: true, profile: { tcc: '     ' }, missing_fields: [], can_edit: true });
+  render(<FilingSubmitterCard />);
+  expect(await screen.findByText('Add the transmitter control code (TCC) from DRT to download the final 1099 e-file. Drafts work without it.')).toBeTruthy();
 });

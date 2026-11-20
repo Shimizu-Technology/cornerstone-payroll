@@ -12,6 +12,7 @@ class FilingSubmitter < ApplicationRecord
   validates :contact_email, format: { with: URI::MailTo::EMAIL_REGEXP }, length: { maximum: 40 }, allow_blank: true
   validates :contact_phone, format: { with: /\A[\d ()+.-]{10,25}\z/ }, allow_blank: true
 
+  before_validation { self.tcc = tcc&.strip.presence }
   before_validation { self.state = state&.strip; self.zip = zip&.strip }
 
   validate :ssa_format

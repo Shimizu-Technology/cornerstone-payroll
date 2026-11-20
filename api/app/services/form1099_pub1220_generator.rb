@@ -11,7 +11,7 @@ class Form1099Pub1220Generator
     end
   end
 
-  TCC_PROBLEM = "Add the transmitter control code (TCC) DRT gave Cornerstone, or confirm with DRT that none is needed"
+  TCC_PROBLEM = "Add the transmitter control code (TCC) from DRT to download the final 1099 e-file. Drafts work without it."
   attr_reader :report
 
   def initialize(company:, year:, submitter:, draft:, report: nil)
@@ -60,6 +60,10 @@ class Form1099Pub1220Generator
       found << "#{label}: valid SSN required" if row[:tin_type] == "SSN" && !person.valid_filing_ssn?
       found << "#{label}: unknown TIN type" unless row[:tin_type].in?(%w[SSN EIN])
       identity_problems(person, label, found)
+      [ person.first_name, person.last_name, person.middle_name, person.business_name ].each { |name| validate_field(name, 80, label, "name", found) }
+      payee_names(person, row).each_with_index { |name, i| validate_field(name, 40, label, "payee name line #{i + 1}", found) }
+      found << "#{label}: payee name contains no usable letters or numbers" if payee_names(person, row).first.to_s !~ /[A-Z0-9]/
+      validate_field(name_control(person), 4, label, "name control", found) unless row[:tin_type] == "EIN"
     end
     ids = @rows.map { |row| row[:employee_id] }.compact
     found << "Duplicate payee rows" unless ids.uniq.length == ids.length
@@ -94,9 +98,49 @@ class Form1099Pub1220Generator
   private
 
   def identity_problems(object, label, found)
+    unless object.is_a?(Employee)
+      validate_field(object.name, 40, label, "name", found)
+    end
+    validate_field([ object.address_line1, object.address_line2 ].compact_blank.join(" "), 40, label, "address", found)
+    validate_field(object.city, 40, label, "city", found)
+    validate_field(tin(object.phone), 15, label, "phone", found) if object == @company
+    if object == @submitter
+      validate_field(object.contact_name, 40, label, "contact name", found)
+      validate_field(object.contact_email, 50, label, "contact email", found, raw: true)
+    end
     found << "#{label}: name required" if object.respond_to?(:name) ? object.name.blank? : object.full_name.blank?
     found << "#{label}: complete address required" if [ object.address_line1, object.city, object.state, object.zip ].any?(&:blank?)
     found << "#{label}: unsupported state/territory or ZIP" unless object.state.to_s.upcase.in?(Efw2Formatting::STATES) && object.zip.to_s.match?(/\A\d{5}(-?\d{4})?\z/)
+  end
+
+  def validate_field(value, width, label, field, found, raw: false)
+    text = raw ? value.to_s : Efw2Formatting.transliterated(value)
+    if text.include?("?") || !text.ascii_only? || value.to_s.match?(/[\r\n]/)
+      found << "#{label}: the #{field} contains unsupported characters — edit the profile."
+      return
+    end
+    text = raw ? value.to_s : clean(value)
+    found << "#{label}: the #{field} is longer than #{width} characters — shorten it on the profile." if text.bytesize > width
+  end
+
+  # Exhibit 1: hyphens and double surnames use the first surname; De La
+  # remains part of the surname (De La Cruz => DELA).
+  def name_control(person)
+    surname = person.last_name.to_s.split("-").first.to_s
+    surname = surname.split.first.to_s unless surname.match?(/\Ade la /i)
+    Efw2Formatting.clean(surname).delete(".'").gsub(/[^A-Z0-9]/, "")[0, 4]
+  end
+
+  # SSN: individual first, business second. EIN: business first. A long
+  # primary name may continue onto line 2 only when it is otherwise unused.
+  def payee_names(person, row)
+    primary = row[:tin_type] == "EIN" ? person.business_name.presence || person.full_name : "#{person.last_name} #{person.first_name} #{person.middle_name}".strip
+    secondary = row[:tin_type] == "SSN" ? person.business_name.to_s : ""
+    names = [ primary, secondary ].map { |v| Efw2Formatting.clean(v).delete(".'").gsub(/[^A-Z0-9 &-]/, "") }
+    if names[0].length > 40 && names[1].blank?
+      names = [ names[0][0, 40], names[0][40..] ]
+    end
+    names
   end
 
   def clean(value)
@@ -176,17 +220,20 @@ class Form1099Pub1220Generator
   def payee(row)
     person = @people.fetch(row[:employee_id])
     ein = row[:tin_type] == "EIN"
-    name = ein ? person.business_name.presence || person.full_name : "#{person.last_name} #{person.first_name} #{person.middle_name}".strip
+    names = payee_names(person, row)
     record("B").tap do |r|
       put(r, 2, 4, @year)
       # Business name controls have entity-specific rules: blanks are expressly allowed.
-      put(r, 7, 4, ein ? "" : clean(person.last_name).gsub(/[^A-Z0-9]/, "")[0, 4])
+      put(r, 7, 4, ein ? "" : name_control(person))
       put(r, 11, 1, ein ? "1" : "2")
       put(r, 12, 9, ein ? tin(person.contractor_ein) : person.ssn_digits)
+      # Stable issuer account number lets corrections match the original payee.
+      put(r, 21, 20, "C#{person.id.to_s.rjust(6, '0')}")
       (0...18).each { |i| number(r, 55 + i * 12, 12, 0) }
       number(r, 55, 12, cents(row.fetch(:total_compensation)))
       number(r, 91, 12, cents(row.fetch(:federal_withheld)))
-      put(r, 288, 40, clean(name).gsub(/[^A-Z0-9 &-]/, ""))
+      put(r, 288, 40, names[0])
+      put(r, 328, 40, names[1])
       address(r, person, 368, 448, 488, 490)
       number(r, 723, 12, 0)
       number(r, 735, 12, 0)
