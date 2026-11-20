@@ -566,6 +566,58 @@ describe('Year-end checklist', () => {
     click.mockRestore();
   });
 
+  it('remounts print and file on a tax-year change, so a 2026 download still running is never saved or shown on 2027', async () => {
+    vi.setSystemTime(new Date('2027-01-15T12:00:00+10:00'));
+    const createObjectURL = vi.fn(() => 'blob:w2');
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const settle: Array<() => void> = [];
+    const pending = (outcome: 'finishes' | 'fails') => new Promise((resolve, reject) => {
+      settle.push(() => (outcome === 'finishes'
+        ? resolve({ blob: new Blob(['%PDF'], { type: 'application/pdf' }), filename: 'W-2GU_2026_Tumon_Bakery_Employee_Copies_B_C.pdf' })
+        : reject(new ApiError('The download could not be recorded in the activity log, so the file was not sent. Try again.', 503))));
+    });
+    const printStep = (year: number) => {
+      const base = printAndFile(true) as ActiveYearEndStep<'print_and_file'>;
+      const document = base.data.documents[0];
+      return { ...base, data: { ...base.data, documents: [document, { ...document, key: 'w2_drt_copy_1', title: 'Copy 1 for Guam DRT', download: { path: '/admin/reports/w2_gu_copy_1_drt', params: { year } } }]
+        .map((entry) => ({ ...entry, download: { ...entry.download, params: { year } } })) } };
+    };
+    // Every load resolves at once, the case where the clear and the next
+    // checklist could be batched into one render.
+    mocks.checklist.mockImplementation(async (year: number) => checklist([...working(), printStep(year)], { status: 'ready', issue_count: 0, next_step: null, tax_year: year }));
+    mocks.downloadDocument.mockReturnValueOnce(pending('finishes')).mockReturnValueOnce(pending('fails'));
+
+    renderPage();
+
+    const before = await screen.findByRole('region', { name: /Print and file/ });
+    for (const button of within(before).getAllByRole('button', { name: 'Download PDF' })) fireEvent.click(button);
+    expect(mocks.downloadDocument.mock.calls.map(([download]) => download.params)).toEqual([{ year: 2026 }, { year: 2026 }]);
+
+    fireEvent.change(screen.getByLabelText('Tax year'), { target: { value: '2027' } });
+    // The 2026 rows are gone as soon as the year changes.
+    expect(before.isConnected).toBe(false);
+    expect(await screen.findByText('2027 year-end checklist')).toBeTruthy();
+
+    const after = await screen.findByRole('region', { name: /Print and file/ });
+    expect(within(after).getAllByRole('button', { name: 'Download PDF' }).map((button) => button.hasAttribute('disabled'))).toEqual([false, false]);
+
+    settle.forEach((done) => done());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Neither the 2026 file nor its failure reaches the 2027 page.
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/could not be recorded|W-2GU_2026/)).toBeNull();
+
+    // A download started on 2027 asks for 2027.
+    mocks.downloadDocument.mockReturnValueOnce(pending('finishes'));
+    fireEvent.click(within(after).getAllByRole('button', { name: 'Download PDF' })[0]);
+    expect(mocks.downloadDocument).toHaveBeenLastCalledWith(expect.objectContaining({ params: { year: 2027 } }), 7);
+    click.mockRestore();
+  });
+
   it('runs a fresh preflight, then marks ready on that fingerprint', async () => {
     const markedReady = step('mark_ready', 7, 'Mark W-2s ready', 'done', { data: { filing: { status: 'filing_ready', stale: false, marked_ready_at: '2026-11-19T02:00:00Z', notes: 'Checked' }, can_mark_ready: true, remaining_before_ready: 0 } });
     mocks.checklist.mockResolvedValueOnce(checklist(working())).mockResolvedValue(checklist(working({ markReady: markedReady })));
