@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { filingSubmitterApi } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,6 +24,8 @@ export function FilingSubmitterCard() {
   const [canEdit, setCanEdit] = useState(false);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
     let active = true;
@@ -46,6 +48,9 @@ export function FilingSubmitterCard() {
     };
   }, []);
   async function save() {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     setError('');
     setSaved(false);
     try {
@@ -56,6 +61,9 @@ export function FilingSubmitterCard() {
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   }
   return (
@@ -67,7 +75,7 @@ export function FilingSubmitterCard() {
         <p className="text-sm">
           Cornerstone's e-file details
         </p>
-        <Button disabled={loading || !!error && !Object.keys(profile).length} variant="outline" onClick={() => setOpen(!open)}>
+        <Button disabled={saving || loading || !!error && !Object.keys(profile).length} variant="outline" onClick={() => setOpen(!open)}>
           {open ? 'Close' : 'View submitter profile'}
         </Button>
       </div>
@@ -80,6 +88,7 @@ export function FilingSubmitterCard() {
       {open && (
         <form
           className="space-y-3"
+          onChange={() => { setSaved(false); setError(''); }}
           onSubmit={(e) => {
             e.preventDefault();
             void save();
@@ -91,7 +100,7 @@ export function FilingSubmitterCard() {
                 key={key}
                 label={label}
                 value={profile[key] ?? ''}
-                disabled={!canEdit}
+                disabled={saving || !canEdit}
                 onChange={(e) =>
                   setProfile({ ...profile, [key]: e.target.value })
                 }
@@ -99,7 +108,7 @@ export function FilingSubmitterCard() {
             ))}
           </div>
           {canEdit ? (
-            <Button type="submit">Save submitter profile</Button>
+            <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save submitter profile'}</Button>
           ) : (
             <p className="text-sm">
               An organization admin can edit this profile.

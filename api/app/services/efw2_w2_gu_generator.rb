@@ -42,7 +42,9 @@ class Efw2W2GuGenerator
   private
 
   def put(record, position, width, value)
-    record[position - 1, width] = value.to_s[0, width].ljust(width)
+    raise InvalidFile, [ "EFW2 field at position #{position} exceeds #{width} characters" ] if value.to_s.length > width
+
+    record[position - 1, width] = value.to_s.ljust(width)
   end
 
   def money(record, position, width, cents)
@@ -154,62 +156,69 @@ class Efw2W2GuGenerator
   def structured_problems
     problems = []
     problems << "Only tax year 2026 is supported by this EFW2 layout" unless @year == 2026
-    problems << "Add the practice submitter profile" unless @submitter
+    problems.map! { |message| { scope: :employer, employee_id: nil, code: :year_unsupported, message: message } }
+    submitter_problems = Efw2Formatting::Problems.new(scope: :submitter)
+    add_problem(submitter_problems, :submitter_missing, "Add the practice submitter profile") unless @submitter
     if @submitter
-      problems += @submitter.missing_fields.map { |field| "Submitter #{field} is required" }
-      problems += @submitter.errors.full_messages unless @submitter.valid?
-      validate_identity(@submitter, "Submitter", problems)
-      validate_text(@submitter, "Submitter", %i[name address_line1 address_line2 city contact_name], problems)
-      problems << "Submitter contact email must follow SSA email formatting rules" unless valid_contact_email?(@submitter.contact_email)
-      problems << "Submitter contact phone must contain 10 digits" unless @submitter.contact_phone.to_s.gsub(/\D/, "").match?(/\A\d{10}\z/)
+      @submitter.missing_fields.each { |field| add_problem(submitter_problems, :required_field_missing, "Submitter #{field} is required") }
+      @submitter.errors.full_messages.each { |message| add_problem(submitter_problems, :submitter_validation, message) } unless @submitter.valid?
+      validate_identity(@submitter, "Submitter", submitter_problems)
+      validate_widths(@submitter, "Submitter", { name: 57, contact_name: 27 }, submitter_problems)
+      validate_text(@submitter, "Submitter", %i[name address_line1 address_line2 city contact_name], submitter_problems)
+      add_problem(submitter_problems, :email_invalid, "Submitter contact email must follow SSA email formatting rules") unless valid_contact_email?(@submitter.contact_email)
+      add_problem(submitter_problems, :phone_invalid, "Submitter contact phone must contain 10 digits") unless @submitter.contact_phone.to_s.gsub(/\D/, "").match?(/\A\d{10}\z/)
     end
-    problems.concat(employer_problems(@company))
-    problems << "No employee wage records to export" if report[:employees].empty?
+    problems.concat(submitter_problems)
+    problems.concat(employer_problems(@company, structured: true))
+    population_problems = Efw2Formatting::Problems.new(scope: :employee)
+    add_problem(population_problems, :no_wage_records, "No employee wage records to export") if report[:employees].empty?
     ids = report[:employees].pluck(:employee_id)
-    problems << "Duplicate employee rows must be resolved" if ids.uniq.length != ids.length
+    add_problem(population_problems, :duplicate_employee_rows, "Duplicate employee rows must be resolved") if ids.uniq.length != ids.length
+    add_problem(population_problems, :employee_count_overflow, "Employee count exceeds the 7-digit EFW2 field") if ids.length > 9_999_999
     if report.dig(:meta, :employee_count) && report[:meta][:employee_count] != ids.length
-      problems << "Aggregator employee count mismatch"
+      add_problem(population_problems, :employee_count_mismatch, "Aggregator employee count mismatch")
     end
-    problems.map! { |message| { message: message } }
+    problems.concat(population_problems)
     ssns = @employees.values.map(&:ssn_digits).compact
     duplicate_ssns = ssns.tally.select { |_ssn, count| count > 1 }.keys
     duplicates = @employees.values.group_by(&:ssn_digits).slice(*duplicate_ssns).values
     duplicates.each do |group|
-      group.each { |employee| problems << { employee_id: employee.id, message: "#{[ employee.full_name, employee.name_suffix ].compact_blank.join(" ")}: duplicate SSN shared with #{group.reject { |other| other.id == employee.id }.map { |other| [ other.full_name, other.name_suffix ].compact_blank.join(" ") }.join(', ')}; correct the employee records" } }
+      group.each { |employee| problems << { scope: :employee, employee_id: employee.id, code: :ssn_duplicate, message: "#{[ employee.full_name, employee.name_suffix ].compact_blank.join(" ")}: duplicate SSN shared with #{group.reject { |other| other.id == employee.id }.map { |other| [ other.full_name, other.name_suffix ].compact_blank.join(" ") }.join(', ')}; correct the employee records" } }
     end
     report[:employees].each do |row|
       employee = @employees[row[:employee_id]]
       if !employee
-        problems << { employee_id: row[:employee_id], message: "An employee wage record is unavailable; refresh the report" }
+        problems << { scope: :employee, employee_id: row[:employee_id], code: :employee_unavailable, message: "An employee wage record is unavailable; refresh the report" }
         next
       end
-      start = problems.length
+      employee_problems = Efw2Formatting::Problems.new(scope: :employee, employee_id: employee.id)
       label = [ employee.full_name, employee.name_suffix ].compact_blank.join(" ")
-      validate_text(employee, label, %i[first_name middle_name last_name name_suffix address_line1 address_line2 city], problems)
-      problems << "#{label}: valid SSN required" unless employee.ssn_digits.to_s.match?(/\A(?!000|666|9)\d{3}(?!00)\d{2}(?!0000)\d{4}\z/)
-      problems << "#{label}: first and last name required" if clean(employee.first_name, name: true).blank? || clean(employee.last_name, name: true).blank?
-      validate_address(employee, label, problems)
-      problems << "#{label}: Social Security wages plus tips exceed 2026 wage base" if cents(row[BOXES[2]]) + cents(row[BOXES[6]]) > 18_450_000
-      problems << "#{label}: Social Security tax exceeds $11,439.00" if cents(row[BOXES[3]]) > 1_143_900
+      validate_text(employee, label, %i[first_name middle_name last_name name_suffix address_line1 address_line2 city], employee_problems)
+      add_problem(employee_problems, :ssn_invalid, "#{label}: valid SSN required") unless employee.ssn_digits.to_s.match?(/\A(?!000|666|9)\d{3}(?!00)\d{2}(?!0000)\d{4}\z/)
+      add_problem(employee_problems, :employee_name_missing, "#{label}: first and last name required") if clean(employee.first_name, name: true).blank? || clean(employee.last_name, name: true).blank?
+      validate_widths(employee, label, { first_name: 15, middle_name: 15, last_name: 20, name_suffix: 4 }, employee_problems, name: true)
+      validate_address(employee, label, employee_problems)
+      add_problem(employee_problems, :ss_wage_base_exceeded, "#{label}: Social Security wages plus tips exceed 2026 wage base") if cents(row[BOXES[2]]) + cents(row[BOXES[6]]) > 18_450_000
+      add_problem(employee_problems, :ss_tax_max_exceeded, "#{label}: Social Security tax exceeds $11,439.00") if cents(row[BOXES[3]]) > 1_143_900
       BOXES.each_with_index do |box, i|
         amount = cents(row[box])
-        problems << "#{label}: Box #{i + 1} is negative" if amount.negative?
-        problems << "#{label}: Box #{i + 1} exceeds the 11-digit e-file field" if amount > 99_999_999_999
+        add_problem(employee_problems, :box_amount_negative, "#{label}: Box #{i + 1} is negative") if amount.negative?
+        add_problem(employee_problems, :box_amount_overflow, "#{label}: Box #{i + 1} exceeds the 11-digit e-file field") if amount > 99_999_999_999
       end
       ss_wages = cents(row[BOXES[2]]) + cents(row[BOXES[6]])
-      problems << "#{label}: Box 5 Medicare wages must equal or exceed Box 3 wages plus Box 7 tips" if cents(row[BOXES[4]]) < ss_wages
-      problems << "#{label}: Box 4 Social Security tax requires Box 3 wages or Box 7 tips" if cents(row[BOXES[3]]).positive? && ss_wages.zero?
-      problems << "#{label}: Box 6 Medicare tax requires Box 5 Medicare wages" if cents(row[BOXES[5]]).positive? && cents(row[BOXES[4]]).zero?
+      add_problem(employee_problems, :medicare_wages_invalid, "#{label}: Box 5 Medicare wages must equal or exceed Box 3 wages plus Box 7 tips") if cents(row[BOXES[4]]) < ss_wages
+      add_problem(employee_problems, :ss_wages_missing, "#{label}: Box 4 Social Security tax requires Box 3 wages or Box 7 tips") if cents(row[BOXES[3]]).positive? && ss_wages.zero?
+      add_problem(employee_problems, :medicare_wages_missing, "#{label}: Box 6 Medicare tax requires Box 5 Medicare wages") if cents(row[BOXES[5]]).positive? && cents(row[BOXES[4]]).zero?
       Array(row[:box12]).each do |entry|
         amount = cents(entry[:amount])
-        problems << "#{label}: Box 12 #{entry[:code]} is negative or exceeds the 11-digit e-file field" unless amount.between?(0, 99_999_999_999)
+        add_problem(employee_problems, :box12_amount_invalid, "#{label}: Box 12 #{entry[:code]} is negative or exceeds the 11-digit e-file field") unless amount.between?(0, 99_999_999_999)
       end
-      Array(row[:box12]).each { |entry| problems << "#{label}: unsupported Box 12 code #{entry[:code]}" unless BOX12.key?(entry[:code]) }
+      Array(row[:box12]).each { |entry| add_problem(employee_problems, :box12_code_unsupported, "#{label}: unsupported Box 12 code #{entry[:code]}") unless BOX12.key?(entry[:code]) }
       entries = Array(row[:box12])
-      problems << "#{label}: duplicate Box 12 codes" if entries.pluck(:code).uniq.length != entries.length
+      add_problem(employee_problems, :box12_duplicate, "#{label}: duplicate Box 12 codes") if entries.pluck(:code).uniq.length != entries.length
       codes = Array(row[:box14b_tipped_occupation_codes])
-      problems << "#{label}: invalid tipped occupation codes" if codes.any? { |code| !code.to_s.match?(/\A\d{3}\z/) }
-      problems[start..].each_with_index { |message, index| problems[start + index] = { employee_id: employee.id, message: message } }
+      add_problem(employee_problems, :occupation_code_invalid, "#{label}: invalid tipped occupation codes") if codes.any? { |code| !code.to_s.match?(/\A\d{3}\z/) }
+      problems.concat(employee_problems)
     end
     problems.uniq
   end

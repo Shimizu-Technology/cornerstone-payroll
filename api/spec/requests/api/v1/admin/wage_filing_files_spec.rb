@@ -44,6 +44,21 @@ RSpec.describe "Wage filing files", type: :request do
     expect(response).to have_http_status(:ok)
   end
 
+  it "rechecks delegated EFW2 access after waiting for the company lock" do
+    user.update!(role: "accountant")
+    grantor = create(:user, company: company, role: "admin")
+    assignment = create(:company_assignment, user: user, company: company, client_management: true, granted_by: grantor)
+    allow_any_instance_of(Company).to receive(:lock!).and_wrap_original do |original, *args|
+      assignment.update!(client_management: false)
+      original.call(*args)
+    end
+    expect(W2GuAggregator).not_to receive(:new)
+    expect(AuditLog).not_to receive(:record!)
+    get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }
+    expect(response).to have_http_status(:forbidden)
+    expect(response.body).not_to include("123456789", "RW")
+  end
+
   it "audits a draft download without SSNs and prevents caching" do
     expect { get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" } }.to change(AuditLog.where(action: "efw2#download"), :count).by(1)
     expect(response).to have_http_status(:ok)

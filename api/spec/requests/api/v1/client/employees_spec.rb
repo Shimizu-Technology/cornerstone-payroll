@@ -174,6 +174,22 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
   end
 
   describe "PATCH /api/v1/client/employees/:id" do
+    it "persists suffix directly and does not write it again when unchanged" do
+      patch "/api/v1/client/employees/#{employee.id}", params: { employee: { name_suffix: "JR" } }
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.reload.name_suffix).to eq("JR")
+      expect(EmployeeChangeRequest.where(employee: employee)).not_to exist
+      updates = []
+      observer = ->(*, payload) { updates << payload[:sql] if payload[:sql].start_with?('UPDATE "employees"') }
+      ActiveSupport::Notifications.subscribed(observer, "sql.active_record") do
+        patch "/api/v1/client/employees/#{employee.id}", params: { employee: { name_suffix: "JR", job_title: "Lead Clerk" } }
+      end
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.reload).to have_attributes(name_suffix: "JR", job_title: "Lead Clerk")
+      expect(updates).not_to be_empty
+      expect(updates.join).not_to include('"name_suffix"')
+    end
+
     it "directs retirement changes to the dated staff workflow once an election exists" do
       employee.employee_retirement_elections.create!(
         company: company,
