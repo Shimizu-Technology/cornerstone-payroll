@@ -4662,8 +4662,12 @@ module Api
             ]
           end
           [
-            { name: "1099-NEC", rows: [ headers ] + rows },
-            { name: "Totals", rows: (report[:totals] || {}).to_a },
+            { name: "1099-NEC", rows: [ headers ] + rows,
+              styles: { money: { format_code: "$#,##0.00;[Red]-$#,##0.00" } },
+              row_style_rules: [ { rows: 1..rows.length, styles: [ nil, nil, nil, nil, nil, :money, :money ] } ] },
+            { name: "Totals", rows: (report[:totals] || {}).to_a,
+              styles: { money: { format_code: "$#,##0.00;[Red]-$#,##0.00" } },
+              row_style_rules: [ { rows: 0...(report[:totals] || {}).length, styles: [ nil, :money ] } ] },
             report_info_sheet(report, title: "1099-NEC", description: REPORT_DESCRIPTIONS[:form_1099_nec])
           ]
         end

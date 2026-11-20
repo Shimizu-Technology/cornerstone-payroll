@@ -100,6 +100,7 @@ class Form1099Pub1220Generator
   def identity_problems(object, label, found)
     unless object.is_a?(Employee)
       validate_field(object.name, 40, label, "name", found)
+      found << "#{label}: name contains no usable letters or numbers" unless Efw2Formatting.clean(object.name).match?(/[A-Z0-9]/)
     end
     validate_field([ object.address_line1, object.address_line2 ].compact_blank.join(" "), 40, label, "address", found)
     validate_field(object.city, 40, label, "city", found)
@@ -123,11 +124,11 @@ class Form1099Pub1220Generator
     found << "#{label}: the #{field} is longer than #{width} characters — shorten it on the profile." if text.bytesize > width
   end
 
-  # Exhibit 1: hyphens and double surnames use the first surname; De La
-  # remains part of the surname (De La Cruz => DELA).
+  # Exhibit 1: use the first surname, retaining leading surname particles.
   def name_control(person)
-    surname = person.last_name.to_s.split("-").first.to_s
-    surname = surname.split.first.to_s unless surname.match?(/\Ade la /i)
+    words = person.last_name.to_s.split("-").first.to_s.split
+    particle = words.join(" ").match(/\A(?:de la|de las|de los|del|de|san|santa|st)\s+/i)
+    surname = particle ? words.take(particle[0].split.length + 1).join(" ") : words.first.to_s
     Efw2Formatting.clean(surname).delete(".'").gsub(/[^A-Z0-9]/, "")[0, 4]
   end
 
@@ -138,7 +139,8 @@ class Form1099Pub1220Generator
     secondary = row[:tin_type] == "SSN" ? person.business_name.to_s : ""
     names = [ primary, secondary ].map { |v| Efw2Formatting.clean(v).delete(".'").gsub(/[^A-Z0-9 &-]/, "") }
     if names[0].length > 40 && names[1].blank?
-      names = [ names[0][0, 40], names[0][40..] ]
+      split_at = names[0][0, 41].rindex(" ") || 40
+      names = [ names[0][0, split_at], names[0][split_at..].lstrip ]
     end
     names
   end

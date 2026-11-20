@@ -378,6 +378,23 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(list_row["status"]).to eq("ready")
     end
 
+    it "does not call a 1099-only client Ready while a below-threshold contractor with withholding has no TIN" do
+      record_decision(filing_types: %w[w2_gu], party: "client")
+      record_decision(filing_types: %w[form_1099], party: "cornerstone")
+      contractor = create(:employee, :contractor, company: company, department: department)
+      contractor.update_columns(ssn_encrypted: nil, contractor_ein: nil)
+      pay(company, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 500, net_pay: 450, withholding_tax: 50)
+
+      row = list_row
+      expect(row).to include("status" => "needs_action")
+      expect(row["issue_summary"].map { |item| item["code"] }).to eq(%w[PAYEE_DETAILS_MISSING])
+      get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+      expect(response.parsed_body.dig("data", "issue_count")).to eq(row["issue_count"])
+
+      contractor.update_columns(ssn_encrypted: "900-70-4321")
+      expect(list_row["status"]).to eq("ready")
+    end
+
     it "keeps a 1099 client off Ready until a one-off contractor payee is identified through the endpoint" do
       record_decision(filing_types: %w[w2_gu], party: "client")
       record_decision(filing_types: %w[form_1099], party: "cornerstone")
