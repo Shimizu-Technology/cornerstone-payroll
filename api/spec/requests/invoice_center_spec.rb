@@ -114,6 +114,26 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(profile.reload.next_invoice_number).to eq(7055)
   end
 
+  it "rolls back the continuing counter and answers 422 when the number collides after allocation, on every issue path" do
+    profile.update!(numbering_style: "continuing", next_invoice_number: 7055)
+    allow(InvoiceNumberAllocator).to receive(:call).and_wrap_original do |original, *args, **kwargs|
+      original.call(*args, **kwargs)
+      raise ActiveRecord::RecordNotUnique
+    end
+    [
+      ->(invoice) { post "/api/v1/admin/invoices/#{invoice.id}/issue" },
+      ->(invoice) { patch "/api/v1/admin/invoices/#{invoice.id}/update_status", params: { status: "open" } },
+      ->(invoice) { post "/api/v1/admin/invoices/#{invoice.id}/generate_pdf" }
+    ].each do |issue_request|
+      invoice = create_draft(invoice_number: nil)
+      issue_request.call(invoice)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to eq([ "Invoice number has already been taken" ])
+      expect(invoice.reload).to be_draft
+      expect(profile.reload.next_invoice_number).to eq(7055)
+    end
+  end
+
   it "requires separate operator reasons for void and uncollectible actions" do
     invoice = create_draft
     invoice.issue!(actor: admin_user)
