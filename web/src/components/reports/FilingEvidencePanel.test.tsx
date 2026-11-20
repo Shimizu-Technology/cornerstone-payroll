@@ -97,6 +97,26 @@ describe('FilingEvidencePanel', () => {
     expect(screen.queryByRole('button', { name: 'Record resubmission' })).toBeNull();
   });
 
+  it('keeps a save for the previous year out of the newly chosen year', async () => {
+    const saved: PayrollFilingRecord = { ...submitted, filing_type: 'w2_gu_w3_ss', quarter: null, events: [{ ...submitted.events[0], notes: 'Saved for 2026' }] };
+    let resolveSave!: (response: { filing: PayrollFilingRecord }) => void;
+    const save = new Promise<{ filing: PayrollFilingRecord }>((resolve) => { resolveSave = resolve; });
+    apiMocks.payrollFilingRecord.mockResolvedValueOnce({ filing: null, downloads: [{ id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', file_digest: 'b'.repeat(64), current: true }] })
+      .mockResolvedValue({ filing: null, downloads: [] });
+    apiMocks.recordPayrollFilingEvent.mockReturnValue(save);
+    const { rerender } = render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} agency="ssa" preparationReady readinessMessage="Ready" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record submission' }));
+    fireEvent.change(screen.getByLabelText('Agency reference number'), { target: { value: 'CONF' } });
+    fireEvent.change(screen.getByLabelText('Prepared / recorded by'), { target: { value: 'Dana' } });
+    fireEvent.submit(screen.getByRole('button', { name: /Sav/ }).closest('form')!);
+    await waitFor(() => expect(apiMocks.recordPayrollFilingEvent).toHaveBeenCalledTimes(1));
+    rerender(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2027} agency="ssa" preparationReady readinessMessage="Ready" />);
+    await waitFor(() => expect(apiMocks.payrollFilingRecord).toHaveBeenCalledTimes(2));
+    await act(async () => { resolveSave({ filing: saved }); await save; });
+    expect(await screen.findByText('No agency submission recorded.')).toBeTruthy();
+    expect(screen.queryByText('Saved for 2026')).toBeNull();
+  });
+
   it('refreshes to the newest current file and labels stale downloads', async () => {
     const file = { created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', file_digest: 'b'.repeat(64) };
     apiMocks.payrollFilingRecord.mockResolvedValueOnce({ filing: null, downloads: [{ ...file, id: 93, current: false }, { ...file, id: 91, current: true }] })

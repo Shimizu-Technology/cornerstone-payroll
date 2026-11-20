@@ -99,7 +99,7 @@ module YearEnd
     end
 
     def filing_progress
-      FilingProgress.new(company: company, year: year).call
+      FilingProgress.new(company: company, year: year, form_1099_due: !files?("form_1099") || !no_1099_filings?).call
     rescue StandardError
       Rails.logger.warn("year_end_filing_progress_failed company_id=#{company.id} tax_year=#{year}")
       []

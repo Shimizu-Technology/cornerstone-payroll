@@ -407,6 +407,19 @@ RSpec.describe YearEnd::Checklist do
       expect(issue[:message]).to start_with("Synthetic Roofing needs to be resolved again: the checks changed")
     end
 
+    it "leaves the 1099 filing out of progress and reminders while no payee gets a 1099" do
+      decide(w2: "client", form_1099: "cornerstone")
+      allow(Date).to receive(:current).and_return(Date.new(2027, 1, 10))
+      overview = -> { YearEnd::ClientsOverview.new(user: accountant, year: 2026).call }
+      expect(checklist[:filing_progress]).to eq([])
+      expect(overview.call[:clients].sole[:filing_progress]).to eq([])
+      expect(overview.call[:filing_reminder_count]).to eq(0)
+
+      contractor_check(2_500, "9001")
+      expect(checklist[:filing_progress].map { |filing| filing[:filing_type] }).to eq(%w[form_1099_nec])
+      expect(overview.call[:filing_reminder_count]).to eq(1)
+    end
+
     it "refuses an identification made on checks that have since changed" do
       contractor_check(2_500, "9001")
       decide(w2: "client", form_1099: "cornerstone")
