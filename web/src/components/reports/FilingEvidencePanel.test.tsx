@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PayrollFilingRecord } from '@/services/api';
 import { FilingEvidencePanel } from './FilingEvidencePanel';
@@ -72,6 +72,29 @@ describe('FilingEvidencePanel', () => {
     expect(screen.queryByLabelText('Agency')).toBeNull();
     expect(screen.queryByLabelText('Final file uploaded')).toBeNull();
     expect((screen.getByLabelText('Receipt or agency response') as HTMLInputElement).required).toBe(true);
+  });
+
+  it('keeps saved status and history when an earlier refresh resolves afterwards', async () => {
+    const rejected: PayrollFilingRecord = { ...submitted, filing_type: 'w2_gu_w3_ss', quarter: null, status: 'rejected', confirmation_number: 'OLD' };
+    const saved: PayrollFilingRecord = { ...rejected, status: 'submitted', confirmation_number: 'RETRY', events: [...rejected.events, {
+      ...submitted.events[0], id: 22, event_type: 'resubmitted', from_status: 'rejected', to_status: 'submitted', reference_number: 'RETRY', notes: 'Saved retry history',
+    }] };
+    let resolveRefresh!: (response: { filing: PayrollFilingRecord }) => void;
+    const refresh = new Promise<{ filing: PayrollFilingRecord }>((resolve) => { resolveRefresh = resolve; });
+    apiMocks.payrollFilingRecord.mockResolvedValueOnce({ filing: rejected, downloads: [{ id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', sha256: 'b'.repeat(64), current: true }] }).mockReturnValueOnce(refresh);
+    apiMocks.recordPayrollFilingEvent.mockResolvedValue({ filing: saved });
+    render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} agency="ssa" preparationReady readinessMessage="Ready" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record resubmission' }));
+    fireEvent.change(screen.getByLabelText('Agency reference number'), { target: { value: 'RETRY' } });
+    fireEvent.change(screen.getByLabelText('Prepared / recorded by'), { target: { value: 'Dana' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh files' }));
+    await waitFor(() => expect(apiMocks.payrollFilingRecord).toHaveBeenCalledTimes(2));
+    fireEvent.submit(screen.getByRole('button', { name: 'Save evidence' }).closest('form')!);
+    expect(await screen.findByText('Saved retry history')).toBeTruthy();
+    await act(async () => { resolveRefresh({ filing: rejected }); await refresh; });
+    expect(screen.getByText('Submitted; waiting for the agency result.')).toBeTruthy();
+    expect(screen.getByText('Saved retry history')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Record resubmission' })).toBeNull();
   });
 
   it('refreshes to the newest current file and labels stale downloads', async () => {

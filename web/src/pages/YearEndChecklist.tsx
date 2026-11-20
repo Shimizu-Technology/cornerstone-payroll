@@ -230,10 +230,10 @@ export function YearEndChecklist(): ReactElement {
                   <CardDescription>After you file outside the app, keep the receipt and the agency's result here.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {checklist.files_w2 && (['ssa', 'drt'].map((agency) => (
+                  {checklist.files_w2 && ((checklist.tax_year >= 2026 ? ['ssa', 'drt'] : [undefined]).map((agency) => (
                     <FilingEvidencePanel
-                      key={agency}
-                      agency={agency}
+                      key={agency ?? 'receipt'}
+                      {...(agency ? { agency } : {})}
                       filingType="w2_gu_w3_ss"
                       taxYear={checklist.tax_year}
                       companyId={checklist.company.id}

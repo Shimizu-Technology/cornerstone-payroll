@@ -135,17 +135,20 @@ function FilingEvidencePanelContent({
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [eventType, setEventType] = useState<PayrollFilingEventType | null>(null);
   const [saving, setSaving] = useState(false);
+  const loadGenerationRef = useRef(0);
   const idempotencyKeyRef = useRef<string | null>(null);
   const isPayment = filingType === 'form_500_payment';
 
   useEffect(() => {
     let active = true;
+    const generation = ++loadGenerationRef.current;
+    const isCurrent = () => active && generation === loadGenerationRef.current;
     setLoading(true);
     setError(null);
     void reportsApi.payrollFilingRecord(filingType, taxYear, quarter, companyId, agency)
-      .then((response) => { if (active) { setFiling(response.filing); setDownloads(response.downloads || []); setDownloadId(String(response.downloads?.find((file) => file.current)?.id || '')); setLegacy(response.legacy_filing || null); } })
-      .catch((err) => { if (active) setError(err instanceof Error ? err.message : 'Unable to load filing evidence'); })
-      .finally(() => { if (active) setLoading(false); });
+      .then((response) => { if (isCurrent()) { setFiling(response.filing); setDownloads(response.downloads || []); setDownloadId(String(response.downloads?.find((file) => file.current)?.id || '')); setLegacy(response.legacy_filing || null); } })
+      .catch((err) => { if (isCurrent()) setError(err instanceof Error ? err.message : 'Unable to load filing evidence'); })
+      .finally(() => { if (isCurrent()) setLoading(false); });
     return () => { active = false; };
   }, [loadAttempt, agency, companyId, filingType, quarter, setError, taxYear]);
 
@@ -171,6 +174,9 @@ function FilingEvidencePanelContent({
     setError(null);
     try {
       const response = await reportsApi.recordPayrollFilingEvent(data, companyId);
+      // A refresh may have read the old filing before this save completed.
+      loadGenerationRef.current += 1;
+      setLoading(false);
       setFiling(response.filing);
       setEventType(null);
       idempotencyKeyRef.current = null;
