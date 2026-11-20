@@ -77,9 +77,9 @@ module YearEnd
       raise
     end
 
-    # Blockers the W-2GU "mark ready" action enforces. Preflight still owns
-    # employee SSN/address, and the 1099 decision and payee details never
-    # hold up the W-2s.
+    # Blockers the W-2GU "mark ready" action enforces, including the people
+    # step's e-file problems. The 1099 decision and payee details never hold
+    # up the W-2s.
     def w2_mark_ready_blockers
       revision = InputRevision.for(company.id, year)[company.id]
       blockers = w2_blockers_from(steps_before_ready)

@@ -11,8 +11,9 @@ module YearEnd
       Rails.cache.write(key(company_id, year), { revision: revision, issues: issues, sign_off_needed: sign_off_needed }, expires_in: ReadyCheck::EXPIRES_IN)
     end
 
-    # Atomic across web processes with the production Solid Cache store. The
-    # lease also recovers from a worker disappearing before its ensure runs.
+    # Deduplicates repeated list loads. Two first loads at the same moment can
+    # both enqueue; that only costs a repeated check. The lease also recovers
+    # from a worker disappearing before its ensure runs.
     def self.pending_key(company_id, year, revision)
       "#{key(company_id, year)}/pending/#{revision}"
     end
