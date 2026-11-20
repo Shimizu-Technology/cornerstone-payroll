@@ -65,6 +65,7 @@ module Api
 
         def recipient_attributes
           params.require(:invoice_recipient).permit(
+            :company_id,
             :name,
             :email,
             :address,

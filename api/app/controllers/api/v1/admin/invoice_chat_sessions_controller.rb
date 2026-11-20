@@ -143,10 +143,10 @@ module Api
             created_invoice = true
             @session.messages.create!(
               role: "assistant",
-              content: "Created draft invoice #{invoice.invoice_number}. You can keep using this chat for the next invoice.",
+              content: "Created draft invoice #{invoice.display_number}. You can keep using this chat for the next invoice.",
               preview: preview.merge(
                 "created_invoice_id" => invoice.id,
-                "created_invoice_number" => invoice.invoice_number
+                "created_invoice_number" => invoice.display_number
               ),
               preview_version: @session.current_preview_version,
               has_preview: true
@@ -314,10 +314,12 @@ module Api
         def line_item_attributes_from_preview(item)
           description = item["description"].to_s.strip
           quantity = BigDecimal(item["quantity"].to_s)
-          rate = BigDecimal(item["rate"].to_s)
-          return nil if description.blank? || quantity <= 0 || rate < 0
+          rate = item["rate"].present? ? BigDecimal(item["rate"].to_s) : nil
+          return nil if description.blank? || quantity <= 0 || (rate && rate < 0)
 
           {
+            item_name: item["item_name"].to_s,
+            line_kind: item["line_kind"].presence || "service_fee",
             description: description,
             quantity: quantity,
             rate: rate,

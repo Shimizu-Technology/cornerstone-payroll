@@ -13,6 +13,15 @@ RSpec.describe "Invoice correctness" do
     expect(invoice.snapshot.fetch("line_items").sum { |line| BigDecimal(line.fetch("amount")) }).to eq(invoice.total_amount)
   end
 
+  it "treats a line with no rate as zero instead of failing" do
+    invoice = create(:invoice)
+    invoice.line_items.build(description: "Monthly service", quantity: 1, rate: 700, position: 0)
+    invoice.line_items.build(description: "Rate to be decided", quantity: 1, rate: nil, position: 1)
+    invoice.save!
+    expect(invoice.reload.total_amount).to eq(BigDecimal("700"))
+    expect(invoice.line_items.order(:position).last.rate).to eq(0)
+  end
+
   it "refreshes old drafts before freezing evidence and preserves old issued totals during voids" do
     invoice = create(:invoice)
     2.times { |i| invoice.line_items.create!(description: "Fractional", quantity: "0.5", rate: "0.01", position: i) }

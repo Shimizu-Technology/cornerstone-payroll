@@ -8,7 +8,7 @@ class InvoiceReceivablesSummary
   end
 
   def call
-    rows = invoices.includes(:invoice_recipient, :payments, :credit_notes).to_a
+    rows = invoices.includes(:invoice_recipient, :payments, :credit_notes, :line_items).to_a
     visible_rows = rows.reject(&:archived?)
     open_rows = rows.select do |invoice|
       invoice.balance_due.positive? && !invoice.voided? && !invoice.draft? && !invoice.uncollectible?
@@ -17,6 +17,7 @@ class InvoiceReceivablesSummary
     {
       as_of: as_of,
       totals: {
+        billed_service_fees: money(rows.sum(&:service_fee_amount)),
         outstanding: money(open_rows.sum(&:balance_due)),
         overdue: money(open_rows.select { |invoice| overdue?(invoice) }.sum(&:balance_due)),
         paid: money(rows.sum(&:amount_paid)),

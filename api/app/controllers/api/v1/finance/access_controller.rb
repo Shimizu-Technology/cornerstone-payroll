@@ -15,7 +15,7 @@ module Api
           customer_reference service_period_start service_period_end notes payment_terms email_subject
           email_body discount_type discount_value line_items
         ].freeze
-        LINE_ITEM_FIELDS = %w[id description quantity rate service_date position].freeze
+        LINE_ITEM_FIELDS = %w[id line_kind description quantity rate service_date position].freeze
 
         before_action :authenticate_token!
         before_action :require_explicit_scope!

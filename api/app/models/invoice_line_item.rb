@@ -8,6 +8,7 @@ class InvoiceLineItem < ApplicationRecord
   before_update :prevent_issued_invoice_change
   before_destroy :prevent_issued_invoice_change
 
+  validates :line_kind, inclusion: { in: %w[service_fee reimbursement] }
   validates :description, presence: true
   validates :quantity, numericality: { greater_than_or_equal_to: 0 }
   validates :rate, numericality: { greater_than_or_equal_to: 0 }
@@ -26,6 +27,7 @@ class InvoiceLineItem < ApplicationRecord
   end
 
   def normalize_values
+    self.item_name = item_name.to_s.strip
     self.description = description.to_s.strip
     self.quantity = 0 if quantity.nil?
     self.rate = 0 if rate.nil?
@@ -46,5 +48,6 @@ class InvoiceLineItem < ApplicationRecord
 
   def calculate_amount
     self.amount = (BigDecimal(quantity.to_s) * BigDecimal(rate.to_s)).round(2, :half_up)
+    self.reimbursement_review_required = line_kind == "reimbursement" && amount.zero?
   end
 end
