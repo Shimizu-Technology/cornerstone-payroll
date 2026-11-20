@@ -86,7 +86,12 @@ export function YearEndChecklist(): ReactElement {
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const [searchParams, setSearchParams] = useSearchParams();
   const year = parseYearEndTaxYear(searchParams.get('year'));
-  const [checklist, setChecklist] = useState<Checklist | null>(null);
+  const [loaded, setChecklist] = useState<Checklist | null>(null);
+  // Only the route's client and year are ever shown. A checklist still held
+  // from the previous client or year unmounts its steps in the same render
+  // as the switch, so a download or save they started can't land here, even
+  // if React batches the clear below with the next load.
+  const checklist = loaded && loaded.company.id === companyId && loaded.tax_year === year ? loaded : null;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { notify } = useFeedback();
@@ -181,7 +186,8 @@ export function YearEndChecklist(): ReactElement {
             <StatusPanel checklist={checklist} />
             <ol className="space-y-3" aria-busy={loading || undefined}>
               {checklist.steps.map((step) => (
-                <li key={`${checklist.company.id}-${step.key}-${step.status}`}>
+                // Scoped by client and year: a new client or year always remounts each step.
+                <li key={`${checklist.company.id}:${checklist.tax_year}-${step.key}-${step.status}`}>
                   <StepCard
                     step={step}
                     isNext={checklist.next_step === step.key}
