@@ -44,6 +44,21 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
     end
   end
 
+  it "applies customer terms and omitted rates when confirming an AI draft without exposing internal draft numbers" do
+    recipient = create(:invoice_recipient, company: company, default_rate: 3000, payment_terms: "Net 15")
+    profile = create(:invoice_billing_profile, organization: company.organization, numbering_style: "continuing")
+    session = create(:invoice_chat_session, company: company, created_by: admin_user, current_preview: {
+      "invoice_recipient_id" => recipient.id, "invoice_billing_profile_id" => profile.id,
+      "invoice_date" => "2026-11-02", "line_items" => [ { "description" => "Accounting Services", "quantity" => 1 } ]
+    }, current_preview_version: 1)
+    post "/api/v1/admin/invoice_chat_sessions/#{session.id}/confirm"
+    expect(response).to have_http_status(:created), response.body
+    invoice = Invoice.find(response.parsed_body.dig("invoice", "id"))
+    expect(invoice).to have_attributes(total_amount: 3000.to_d, payment_terms: "Net 15", due_date: Date.new(2026, 11, 17))
+    expect(session.messages.last.content).to include("Draft")
+    expect(session.messages.last.content).not_to include("DRAFT-")
+  end
+
   describe "POST /api/v1/admin/invoice_chat_sessions/:id/message" do
     it "stores the user message, AI response, and structured preview" do
       recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")

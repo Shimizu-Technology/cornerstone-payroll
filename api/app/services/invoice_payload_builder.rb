@@ -29,6 +29,8 @@ class InvoicePayloadBuilder
       invoice_number: invoice.invoice_number,
       invoice_date: invoice.invoice_date,
       due_date: invoice.due_date,
+      due_date_manual: invoice.due_date_manual,
+      service_period_manual: invoice.service_period_manual,
       currency: invoice.currency,
       customer_reference: invoice.customer_reference,
       origin: invoice.origin,
@@ -140,6 +142,9 @@ class InvoicePayloadBuilder
     {
       id: item.id,
       line_kind: item.line_kind,
+      item_name: item.item_name,
+      description_template: item.description_template,
+      reimbursement_review_required: item.reimbursement_review_required,
       description: item.description,
       quantity: item.quantity.to_f,
       rate: item.rate.to_f,

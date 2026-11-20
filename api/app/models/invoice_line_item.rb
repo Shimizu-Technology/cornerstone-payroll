@@ -27,6 +27,7 @@ class InvoiceLineItem < ApplicationRecord
   end
 
   def normalize_values
+    self.item_name = item_name.to_s.strip
     self.description = description.to_s.strip
     self.quantity = 0 if quantity.nil?
     self.rate = 0 if rate.nil?

@@ -24,6 +24,22 @@ RSpec.describe InvoicePdfGenerator do
     expect(text).to include(invoice.invoice_number, "CUSTOMER-REF-2026", "Payroll services", "Due within 16 days")
   end
 
+  it "prints separate product and description columns and hides draft identifiers" do
+    invoice.invoice_billing_profile.update!(numbering_style: "continuing")
+    invoice.update!(invoice_number: "DRAFT-test-placeholder")
+    invoice.line_items.first.update!(item_name: "Accounting Consulting", description: "Accounting Services – November 2026")
+    invoice.line_items.create!(item_name: "Reimbursement", description: "Payment of Social Security and Medicare", quantity: 1, rate: 125, position: 1, line_kind: "reimbursement")
+    text = reader_for(invoice).pages.map(&:text).join("\n")
+    expect(text).to include("Product or service", "Description", "Qty", "Rate", "Amount", "Accounting Consulting", "Reimbursement", "Draft")
+    expect(text).not_to include("DRAFT-", "Pass-through")
+  end
+
+  it "retains the original four-column layout for empty item names" do
+    runs = reader_for(invoice).pages.first.runs
+    expect(runs.map(&:text)).to include("Description", "Qty", "Rate", "Amount")
+    expect(runs.map(&:text)).not_to include("Product or service", "#")
+  end
+
   it "keeps the party cards below dynamic invoice metadata" do
     runs = reader_for(invoice).pages.first.runs
     reference = runs.find { |run| run.text.include?("INVOICE DATE") }

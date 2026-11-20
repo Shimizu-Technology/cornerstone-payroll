@@ -8,7 +8,7 @@ class InvoiceReceivablesSummary
   end
 
   def call
-    rows = invoices.includes(:invoice_recipient, :payments, :credit_notes).to_a
+    rows = invoices.includes(:invoice_recipient, :payments, :credit_notes, :line_items).to_a
     visible_rows = rows.reject(&:archived?)
     open_rows = rows.select do |invoice|
       invoice.balance_due.positive? && !invoice.voided? && !invoice.draft? && !invoice.uncollectible?

@@ -11,3 +11,14 @@ export function customerDefaults<T extends { payment_terms: string; customerDefa
       return { ...line, rate: inheritRate ? customer?.default_rate || 0 : line.rate, customerDefaultRate: inheritRate };
     }) };
 }
+
+export function invoiceDraftDueDate<T extends { invoice_date: string; due_date: string; payment_terms: string; due_date_manual?: boolean }>(draft: T): T {
+  if (draft.due_date_manual || !draft.invoice_date) return draft;
+  const terms = draft.payment_terms.trim();
+  const days = terms.match(/^Net\s+(\d+)$/i)?.[1];
+  if (!days && terms.toLowerCase() !== 'due on receipt') return { ...draft, due_date: '' };
+  const date = new Date(`${draft.invoice_date}T12:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return draft;
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return { ...draft, due_date: date.toISOString().slice(0, 10) };
+}

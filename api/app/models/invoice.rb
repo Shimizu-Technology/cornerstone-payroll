@@ -34,6 +34,7 @@ class Invoice < ApplicationRecord
   before_validation :default_organization_from_company
   before_validation :default_billing_profile
   before_validation :assign_invoice_number, on: :create
+  before_validation :apply_customer_defaults, on: :create
   before_validation :default_due_date
   before_validation :sync_total_amount
   include FinanceBookOwned
@@ -184,6 +185,7 @@ class Invoice < ApplicationRecord
     with_lock do
       raise_invalid_transition!("Only draft invoices can be issued") unless draft?
 
+      validate_reimbursement_review!
       prepare_number_for_issue!
       save!
       snapshot_payload = snapshot.presence || issued_snapshot(actor: actor, issued_at: issued_at)
@@ -202,6 +204,34 @@ class Invoice < ApplicationRecord
     return unless draft? && invoice_number.to_s.start_with?("DRAFT-")
 
     update!(invoice_number: InvoiceNumberAllocator.call(billing_profile: invoice_billing_profile, invoice_date: invoice_date))
+  end
+
+  def due_date=(value)
+    super
+    self.due_date_manual = value.present?
+  end
+
+  def service_period_start=(value)
+    super
+    self.service_period_manual = true if value.present?
+  end
+
+  def service_period_end=(value)
+    super
+    self.service_period_manual = true if value.present?
+  end
+
+  def display_number
+    invoice_number.to_s.start_with?("DRAFT-") ? "Draft" : invoice_number
+  end
+
+  def validate_reimbursement_review!
+    return unless line_items.reject(&:marked_for_destruction?).any? do |line|
+      line.line_kind == "reimbursement" && line.reimbursement_review_required? && line.amount.zero?
+    end
+
+    errors.add(:line_items, "set this month's reimbursement amount or remove the line before issuing")
+    raise ActiveRecord::RecordInvalid, self
   end
 
   # Billed fees, net of the invoice-level discount, exclude pass-through reimbursements.
@@ -244,6 +274,8 @@ class Invoice < ApplicationRecord
   end
 
   def mark_uncollectible!(actor:, reason:)
+    raise_invalid_transition!("An uncollectible reason is required") if reason.to_s.strip.blank?
+
     with_lock do
       raise_invalid_transition!("Only open invoices can be marked uncollectible") unless open?
       raise_invalid_transition!("Paid invoices cannot be marked uncollectible") if paid?
@@ -320,7 +352,7 @@ class Invoice < ApplicationRecord
     self.status = status.presence || "draft"
     self.origin = origin.presence || "native"
     self.currency = currency.to_s.strip.upcase.presence || "USD"
-    self.invoice_number = invoice_number.to_s.strip.presence
+    self.invoice_number = invoice_number.to_s.strip.presence || (invoice_number_in_database if persisted? && draft?)
     self.customer_reference = customer_reference.to_s.strip.presence
     self.notes = notes.to_s.strip.presence
     self.payment_terms = payment_terms.to_s.strip.presence
@@ -346,12 +378,27 @@ class Invoice < ApplicationRecord
     )
   end
 
+  def apply_customer_defaults
+    return unless draft?
+
+    self.payment_terms ||= invoice_recipient&.payment_terms.presence || invoice_billing_profile&.default_payment_terms
+    first_fee = line_items.reject(&:marked_for_destruction?).find { |line| line.line_kind == "service_fee" }
+    if first_fee && (!first_fee.rate_came_from_user? || first_fee.rate_before_type_cast.nil?) && invoice_recipient&.default_rate.present?
+      first_fee.rate = invoice_recipient.default_rate
+    end
+  end
+
   def default_due_date
-    return unless draft? && due_date.blank? && invoice_date.present?
+    return unless draft? && !due_date_manual? && invoice_date.present?
 
     days = payment_terms.to_s.match(/\ANet\s+(\d+)\z/i)&.captures&.first
-    self.due_date = invoice_date + days.to_i if days
-    self.due_date = invoice_date if payment_terms.to_s.casecmp?("Due on receipt")
+    return unless days || payment_terms.to_s.casecmp?("Due on receipt")
+
+    self[:due_date] = if days
+      invoice_date + days.to_i
+    elsif payment_terms.to_s.casecmp?("Due on receipt")
+      invoice_date
+    end
   end
 
   def sync_total_amount
@@ -490,6 +537,8 @@ class Invoice < ApplicationRecord
       "line_items" => line_items.reject(&:marked_for_destruction?).sort_by { |item| [ item.position.to_i, item.id.to_i ] }.map do |item|
         {
           "line_kind" => item.line_kind,
+          "item_name" => item.item_name,
+          "description_template" => item.description_template,
           "description" => item.description,
           "quantity" => item.quantity.to_s,
           "rate" => item.rate.to_s,

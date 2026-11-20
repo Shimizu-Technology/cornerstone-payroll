@@ -385,13 +385,13 @@ class InvoiceAiPreviewService
   def normalize_line_item(item)
     description = item["description"].to_s.strip.presence
     quantity = BigDecimal(item["quantity"].to_s)
-    rate = BigDecimal(item["rate"].to_s)
-    return nil if description.blank? || quantity <= 0 || rate.negative?
+    rate = item["rate"].present? ? BigDecimal(item["rate"].to_s) : nil
+    return nil if description.blank? || quantity <= 0 || (rate && rate.negative?)
 
     {
       "description" => description,
       "quantity" => quantity.to_f,
-      "rate" => rate.to_f,
+      "rate" => rate&.to_f,
       "service_date" => normalize_date(item["service_date"])
     }
   rescue ArgumentError

@@ -1,3 +1,4 @@
+import { invoiceDraftDueDate } from '@/lib/invoice-defaults';
 import { invoiceBusinessDate } from '@/lib/invoice-defaults';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
@@ -44,6 +45,8 @@ type OptimisticChatMessage = InvoiceChatMessage & {
   session_id: number;
 };
 
+const displayInvoiceNumber = (number?: string | null) => number?.startsWith('DRAFT-') || !number ? 'Draft' : number;
+
 interface ChatAttachmentPreview {
   key: string;
   file: File;
@@ -57,8 +60,10 @@ interface InvoiceFormState {
   invoice_number: string;
   invoice_date: string;
   due_date: string;
+  due_date_manual?: boolean;
   discount_type: InvoiceDiscountType;
   discount_value: string;
+  service_period_manual?: boolean;
   service_period_start: string;
   service_period_end: string;
   notes: string;
@@ -446,8 +451,10 @@ export function InvoiceMaker() {
     invoice_number: state.invoice_number.trim() || null,
     invoice_date: state.invoice_date,
     due_date: state.due_date || null,
+    due_date_manual: !!state.due_date_manual,
     discount_type: state.discount_type,
     discount_value: state.discount_type === 'none' ? 0 : Number(state.discount_value || 0),
+    service_period_manual: !!state.service_period_manual,
     service_period_start: state.service_period_start || null,
     service_period_end: state.service_period_end || null,
     notes: state.notes.trim() || null,
@@ -456,6 +463,9 @@ export function InvoiceMaker() {
     email_body: state.email_body.trim() || null,
     line_items: state.line_items.map((item, index) => ({
       id: item.id,
+      item_name: item.item_name,
+      line_kind: item.line_kind,
+      description_template: item.description_template,
       description: item.description.trim(),
       quantity: Number(item.quantity || 0),
       rate: Number(item.rate || 0),
@@ -507,11 +517,13 @@ export function InvoiceMaker() {
       id: invoice.id,
       invoice_billing_profile_id: String(invoice.invoice_billing_profile_id),
       invoice_recipient_id: String(invoice.invoice_recipient_id),
-      invoice_number: invoice.invoice_number || '',
+      invoice_number: invoice.invoice_number.startsWith('DRAFT-') ? '' : invoice.invoice_number,
       invoice_date: invoice.invoice_date,
       due_date: invoice.due_date || '',
+      due_date_manual: !!invoice.due_date_manual,
       discount_type: invoice.discount_type || 'none',
       discount_value: invoice.discount_type === 'none' ? '' : String(invoice.discount_value ?? ''),
+      service_period_manual: !!invoice.service_period_manual,
       service_period_start: invoice.service_period_start || '',
       service_period_end: invoice.service_period_end || '',
       notes: invoice.notes || '',
@@ -643,12 +655,12 @@ export function InvoiceMaker() {
 
   const applyRecipientDefaults = (recipientId: string) => {
     const recipient = recipients.find((candidate) => String(candidate.id) === recipientId);
-    setInvoiceForm((current) => ({
+    setInvoiceForm((current) => invoiceDraftDueDate({
       ...current,
       invoice_recipient_id: recipientId,
       payment_terms: recipient?.payment_terms || current.payment_terms || selectedBillingProfile?.default_payment_terms || '',
       email_subject: recipient
-        ? `Invoice ${current.invoice_number || ''} from ${selectedBillingProfile?.name || 'your business'}`.trim()
+        ? `Invoice ${displayInvoiceNumber(current.invoice_number)} from ${selectedBillingProfile?.name || 'your business'}`.trim()
         : current.email_subject,
       email_body: recipient
         ? `Hi ${recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,`
@@ -1367,7 +1379,7 @@ export function InvoiceMaker() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-neutral-900">{invoice.invoice_number}</p>
+                    <p className="truncate text-sm font-semibold text-neutral-900">{displayInvoiceNumber(invoice.invoice_number)}</p>
                     <p className="truncate text-xs text-neutral-600">
                       {invoice.billing_profile_name || 'Unknown sender'} to {invoice.recipient_name || 'No recipient'}
                     </p>
@@ -1756,20 +1768,20 @@ export function InvoiceMaker() {
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Invoice Date</span>
-                  <Input type="date" value={invoiceForm.invoice_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
+                  <Input type="date" value={invoiceForm.invoice_date} onChange={(event) => setInvoiceForm((current) => invoiceDraftDueDate({ ...current, invoice_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Due Date</span>
-                  <Input type="date" min={invoiceForm.invoice_date} value={invoiceForm.due_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, due_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
+                  <Input type="date" min={invoiceForm.invoice_date} value={invoiceForm.due_date} onChange={(event) => setInvoiceForm((current) => invoiceDraftDueDate({ ...current, due_date: event.target.value, due_date_manual: !!event.target.value }))} disabled={selectedInvoiceReadOnly} />
                 </label>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Period Start</span>
-                    <Input type="date" value={invoiceForm.service_period_start} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_start: event.target.value }))} disabled={selectedInvoiceReadOnly} />
+                    <Input type="date" value={invoiceForm.service_period_start} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_start: event.target.value, service_period_manual: true }))} disabled={selectedInvoiceReadOnly} />
                   </label>
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Period End</span>
-                    <Input type="date" value={invoiceForm.service_period_end} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_end: event.target.value }))} disabled={selectedInvoiceReadOnly} />
+                    <Input type="date" value={invoiceForm.service_period_end} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_end: event.target.value, service_period_manual: true }))} disabled={selectedInvoiceReadOnly} />
                   </label>
                 </div>
               </div>
@@ -1860,7 +1872,7 @@ export function InvoiceMaker() {
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Payment Terms</span>
-                  <Textarea value={invoiceForm.payment_terms} onChange={(event) => setInvoiceForm((current) => ({ ...current, payment_terms: event.target.value }))} rows={3} disabled={selectedInvoiceReadOnly} />
+                  <Textarea value={invoiceForm.payment_terms} onChange={(event) => setInvoiceForm((current) => invoiceDraftDueDate({ ...current, payment_terms: event.target.value }))} rows={3} disabled={selectedInvoiceReadOnly} />
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Notes</span>
@@ -2164,7 +2176,7 @@ export function InvoiceMaker() {
                             {createdChatInvoice.status === 'generated' ? 'Invoice generated' : 'Draft invoice created'}
                           </p>
                           <p className="mt-1 text-sm text-neutral-600">
-                            {createdChatInvoice.invoice_number} for {createdChatInvoice.recipient_name || 'the selected recipient'} · {currency(createdChatInvoice.total_amount)}
+                            {displayInvoiceNumber(createdChatInvoice.invoice_number)} for {createdChatInvoice.recipient_name || 'the selected recipient'} · {currency(createdChatInvoice.total_amount)}
                           </p>
                         </div>
                       </div>
@@ -2300,7 +2312,7 @@ export function InvoiceMaker() {
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <p className="truncate text-sm font-semibold text-neutral-900">
-                                {session.invoice_number || session.recipient_name || session.title}
+                                {session.invoice_number ? displayInvoiceNumber(session.invoice_number) : session.recipient_name || session.title}
                               </p>
                               <p className="truncate text-xs text-neutral-600">
                                 {session.message_count} message{session.message_count === 1 ? '' : 's'}

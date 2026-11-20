@@ -5091,6 +5091,9 @@ export interface InvoiceRecipient {
 }
 
 export interface InvoiceLineItem {
+  item_name?: string;
+  description_template?: string | null;
+  reimbursement_review_required?: boolean;
   line_kind?: 'service_fee' | 'reimbursement';
   id?: number;
   description: string;
@@ -5104,6 +5107,8 @@ export interface InvoiceLineItem {
 }
 
 export interface Invoice {
+  due_date_manual?: boolean;
+  service_period_manual?: boolean;
   company_name?: string | null;
   service_fee_amount?: number;
   id: number;
@@ -5176,6 +5181,8 @@ export interface InvoiceRecipientPayload {
 }
 
 export interface InvoicePayload {
+  due_date_manual?: boolean;
+  service_period_manual?: boolean;
   invoice_recipient_id: number;
   invoice_billing_profile_id?: number;
   invoice_number?: string | null;
