@@ -5458,8 +5458,8 @@ export const invoicesApi = {
     ),
   delete: (id: number) =>
     api.delete<{ message: string }>(`/admin/invoices/${id}`),
-  updateStatus: (id: number, status: InvoiceStatus | 'restored') =>
-    api.patch<{ invoice: Invoice }>(`/admin/invoices/${id}/update_status`, { status }),
+  updateStatus: (id: number, status: InvoiceStatus | 'restored', reason?: string) =>
+    api.patch<{ invoice: Invoice }>(`/admin/invoices/${id}/update_status`, { status, reason }),
   previewPdf: (id: number) =>
     api.postBlob(`/admin/invoices/${id}/preview_pdf`, {}),
   generatePdf: (id: number) =>
