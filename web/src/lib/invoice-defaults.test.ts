@@ -11,6 +11,14 @@ it('includes partially paid overdue balances but excludes settled or voided bill
 });
 it('fills saved customer defaults and preserves entered values', () => {
   const customer = { payment_terms: 'Net 30', default_rate: 500 };
-  expect(customerDefaults({ payment_terms: '', line_items: [{ rate: 0 }] }, customer)).toEqual({ payment_terms: 'Net 30', line_items: [{ rate: 500 }] });
-  expect(customerDefaults({ payment_terms: 'Net 15', line_items: [{ rate: 700 }] }, customer)).toEqual({ payment_terms: 'Net 15', line_items: [{ rate: 700 }] });
+  expect(customerDefaults({ payment_terms: '', line_items: [{ rate: 0 }] }, customer)).toMatchObject({ payment_terms: 'Net 30', line_items: [{ rate: 500 }] });
+  expect(customerDefaults({ payment_terms: 'Net 15', line_items: [{ rate: 700 }] }, customer)).toMatchObject({ payment_terms: 'Net 15', line_items: [{ rate: 700 }] });
+});
+
+it('replaces inherited defaults when switching clients, preserving manually edited zero rates', () => {
+  const first = customerDefaults({ payment_terms: '', line_items: [{ rate: 0, customerDefaultRate: true }] }, { payment_terms: 'Net 30', default_rate: 500 });
+  const second = customerDefaults(first, { payment_terms: 'Net 15', default_rate: 125 });
+  expect(second).toMatchObject({ payment_terms: 'Net 15', line_items: [{ rate: 125 }] });
+  const edited = customerDefaults({ ...second, customerDefaultTerms: false, payment_terms: 'Custom', line_items: [{ rate: 0, customerDefaultRate: false }] }, { payment_terms: 'Net 30', default_rate: 700 });
+  expect(edited).toMatchObject({ payment_terms: 'Custom', line_items: [{ rate: 0 }] });
 });

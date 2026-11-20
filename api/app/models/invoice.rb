@@ -180,17 +180,20 @@ class Invoice < ApplicationRecord
   end
 
   def issue!(actor:, snapshot: nil, issued_at: Time.current)
-    raise_invalid_transition!("Only draft invoices can be issued") unless draft?
+    with_lock do
+      raise_invalid_transition!("Only draft invoices can be issued") unless draft?
 
-    snapshot_payload = snapshot.presence || issued_snapshot(actor: actor, issued_at: issued_at)
-    update!(
-      status: "open",
-      issued_at: issued_at,
-      generated_at: issued_at,
-      updated_by: actor,
-      snapshot: snapshot_payload,
-      snapshot_version: SNAPSHOT_VERSION
-    )
+      save!
+      snapshot_payload = snapshot.presence || issued_snapshot(actor: actor, issued_at: issued_at)
+      update!(
+        status: "open",
+        issued_at: issued_at,
+        generated_at: issued_at,
+        updated_by: actor,
+        snapshot: snapshot_payload,
+        snapshot_version: SNAPSHOT_VERSION
+      )
+    end
   end
 
   def mark_generated!(actor:, snapshot: nil)
@@ -322,6 +325,8 @@ class Invoice < ApplicationRecord
   end
 
   def sync_total_amount
+    return if persisted? && status_in_database != "draft"
+
     return if origin == "imported" && line_items.empty? && total_amount.present?
 
     self.total_amount = [ subtotal_amount - discount_amount, BigDecimal("0") ].max

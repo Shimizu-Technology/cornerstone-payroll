@@ -33,7 +33,7 @@ import {
 } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 import { FinanceBookSelector } from '@/contexts/FinanceBookContext';
-import { invoiceLineAmount, invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
+import { invoiceSubtotal as sumInvoiceLines, invoiceLineAmount, invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 
 type DraftLineItem = InvoiceLineItem & {
   local_id: string;
@@ -388,7 +388,7 @@ export function InvoiceMaker() {
   );
 
   const invoiceSubtotal = useMemo(
-    () => activeLineItems.reduce((sum, item) => sum + invoiceLineAmount(Number(item.quantity || 0), Number(item.rate || 0)), 0),
+    () => sumInvoiceLines(activeLineItems),
     [activeLineItems]
   );
   const discountInput = Number(invoiceForm.discount_value || 0);

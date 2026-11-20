@@ -39,7 +39,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { invoiceLineAmount, invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
+import { invoiceSubtotal as sumInvoiceLines, invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 import { invoiceSendState, type SendState } from '@/lib/invoice-send-state';
 import {
   invoiceBillingProfilesApi,
@@ -71,6 +71,7 @@ type FinancialActivity =
 
 interface DraftLine extends InvoiceLineItem {
   localId: string;
+  customerDefaultRate?: boolean;
 }
 
 interface DraftForm {
@@ -81,6 +82,7 @@ interface DraftForm {
   due_date: string;
   customer_reference: string;
   payment_terms: string;
+  customerDefaultTerms?: boolean;
   notes: string;
   discount_type: InvoiceDiscountType;
   discount_value: string;
@@ -105,7 +107,7 @@ interface ImportForm {
 }
 
 const dateOnly = invoiceBusinessDate;
-const newLine = (): DraftLine => ({ localId: crypto.randomUUID(), description: '', quantity: 1, rate: 0, position: 0 });
+const newLine = (): DraftLine => ({ localId: crypto.randomUUID(), customerDefaultRate: true, description: '', quantity: 1, rate: 0, position: 0 });
 const emptyDraft = (): DraftForm => ({
   invoice_billing_profile_id: '',
   invoice_recipient_id: '',
@@ -114,6 +116,7 @@ const emptyDraft = (): DraftForm => ({
   due_date: '',
   customer_reference: '',
   payment_terms: '',
+  customerDefaultTerms: true,
   notes: '',
   discount_type: 'none',
   discount_value: '',
@@ -482,7 +485,7 @@ export function InvoiceCenter() {
     const lines = submittedDraftLines;
     if (!lines.length) throw new Error('Add at least one invoice line');
     const discountValue = draft.discount_type === 'none' ? 0 : Number(draft.discount_value);
-    const subtotal = lines.reduce((sum, line) => sum + invoiceLineAmount(Number(line.quantity), Number(line.rate)), 0);
+    const subtotal = sumInvoiceLines(lines);
     if (draft.discount_type !== 'none' && draft.discount_value.trim() === '') throw new Error('Enter a discount');
     if (!Number.isFinite(discountValue) || discountValue < 0) throw new Error('Enter a valid discount');
     if (draft.discount_type === 'percent' && discountValue > 100) throw new Error('Percentage discount cannot exceed 100%');
@@ -770,7 +773,7 @@ export function InvoiceCenter() {
       ? user?.organization_name || `Organization #${invoiceOrganizationId}`
       : otherOrganization?.id === invoiceOrganizationId ? otherOrganization.name : `Organization #${invoiceOrganizationId}`);
 
-  const invoiceSubtotal = submittedDraftLines.reduce((sum, line) => sum + invoiceLineAmount(Number(line.quantity || 0), Number(line.rate || 0)), 0);
+  const invoiceSubtotal = sumInvoiceLines(submittedDraftLines);
   const discountInput = Number(draft.discount_value || 0);
   const invoiceDiscount = draft.discount_type === 'none' || !Number.isFinite(discountInput)
     ? 0
@@ -931,7 +934,7 @@ export function InvoiceCenter() {
               {draft.line_items.map((line, index) => <div key={line.localId} className="grid gap-2 rounded-xl border border-neutral-200 p-3 sm:grid-cols-[minmax(0,1fr)_90px_120px_36px]">
                 <Input value={line.description} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, description: e.target.value } : item) })} placeholder="Description" aria-label={`Line ${index + 1} description`} />
                 <Input type="number" min="0" step="0.01" value={line.quantity} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, quantity: Number(e.target.value) } : item) })} aria-label="Quantity" />
-                <Input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, rate: Number(e.target.value) } : item) })} aria-label="Rate" />
+                <Input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => setDraft({ ...draft, line_items: draft.line_items.map((item) => item.localId === line.localId ? { ...item, rate: Number(e.target.value), customerDefaultRate: false } : item) })} aria-label="Rate" />
                 <button type="button" onClick={() => setDraft({ ...draft, line_items: draft.line_items.filter((item) => item.localId !== line.localId) })} className="rounded-md text-neutral-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove line ${index + 1}`}><X className="mx-auto h-4 w-4" /></button>
               </div>)}
             </div></div>
@@ -951,7 +954,7 @@ export function InvoiceCenter() {
                 </label>}
               </div>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium">Payment terms<Textarea className="mt-1" value={draft.payment_terms} onChange={(e) => setDraft({ ...draft, payment_terms: e.target.value })} rows={3} /></label><label className="text-sm font-medium">Notes<Textarea className="mt-1" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={3} /></label></div>
+            <div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium">Payment terms<Textarea className="mt-1" value={draft.payment_terms} onChange={(e) => setDraft({ ...draft, payment_terms: e.target.value, customerDefaultTerms: false })} rows={3} /></label><label className="text-sm font-medium">Notes<Textarea className="mt-1" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={3} /></label></div>
           </div>
           <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
             <p className="text-sm font-medium text-neutral-500">Draft total</p>
