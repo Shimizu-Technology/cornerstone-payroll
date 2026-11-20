@@ -139,7 +139,9 @@ class PayrollFilingEvidenceRecorder
     raise Error, "Preparer name is required" if attributes[:preparer_name].blank?
     raise Error, "Idempotency key is required" if attributes[:idempotency_key].blank?
 
-    if quarter.present? && return_filing? && event_type.in?(%w[submitted resubmitted]) && attributes[:signer_name].blank?
+    # From the first checklist year an annual submission is bound to the
+    # final e-file instead and needs no signer. Earlier years keep it.
+    if (quarter.present? || tax_year < YearEnd::Checklist::FIRST_TAX_YEAR) && return_filing? && event_type.in?(%w[submitted resubmitted]) && attributes[:signer_name].blank?
       raise Error, "Signer name is required for a tax return submission"
     end
     if event_type.in?(%w[accepted_with_errors rejected correction_needed]) && attributes[:notes].blank?
