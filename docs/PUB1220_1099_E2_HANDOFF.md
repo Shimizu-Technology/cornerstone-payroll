@@ -25,7 +25,7 @@ All positions below are one-based and inclusive. Unused fields remain spaces exc
 
 Domestic US/territory addresses, including GU, are supported. Foreign addresses, corrections, direct sales and second-TIN-notice workflows are outside this milestone. Name/address overflow is refused instead of truncating. SSNs use the app's filing-validity rule; business name controls remain blank because entity-specific rules cannot safely be inferred from a display name.
 
-TCC is optional in settings and excluded from the SSA missing-fields list. Drafts use the unmistakable `TEST0` placeholder when absent, because Pub 1220 requires the field, and set T28 to `T`. Finals refuse an absent TCC with the specified DRT question. An answer that no TCC is needed still requires a future explicit implementation decision; no bypass exists here.
+TCC is optional in settings and excluded from the SSA missing-fields list. T-record name/address punctuation is removed, with contact email case preserved as the spec permits. Drafts use the unmistakable `TEST0` placeholder when absent, because Pub 1220 requires the field, and set T28 to `T`. Finals refuse an absent TCC with the specified DRT question. An answer that no TCC is needed still requires a future explicit implementation decision; no bypass exists here.
 
 ## E1 integration seam
 
@@ -57,14 +57,14 @@ Screenshots: `docs/evidence/pub1220/draft-390.png`, `error-390.png`, `submitter-
 
 ## Cleanup and next action
 
-Lifecycle session `manual-20261120-120658-93526-9f4d`: owned Vite PID 94061 terminated and preview tab closed/released. Shared PostgreSQL service remains borrowed. The task database is dropped after gates. The branch and checkout remain for the lead's review/E1 integration; no runtime handoff is intended.
+Lifecycle session `manual-20261120-120658-93526-9f4d`: owned Vite PID 94061 terminated and preview tab closed/released. Shared PostgreSQL service remains borrowed. The task database `cp_test_pub1220` was dropped after gates; a catalog query confirmed zero matching databases. The branch and checkout remain for the lead's review/E1 integration; no runtime handoff is intended.
 
 Next: review the final PR head, integrate E1's identity/readiness contract, retest combined flows, and obtain DRT confirmation/test-upload acceptance. Exact final gate results are recorded in the PR and worker return.
 
 ## Verification ledger
 
-- Affected Rails run on final implementation: 57 examples, 0 failures, including migration rollback/reapply, generator golden/corruption/input checks, request security/races, settings and 1099-only checklist rows.
+- Affected Rails run on final implementation: 58 examples, 0 failures, including migration rollback/reapply, generator golden/corruption/input checks, request security/races, settings and 1099-only checklist rows.
 - Frontend: `npm run lint`, `npx tsc --noEmit -p tsconfig.app.json`, `npx tsc -b`, `npm test`: passed, 209 files / 2,082 tests.
 - `bundle exec rubocop`: passed; exact final count in the PR.
-- First `bundle exec rspec`: 7,648 examples, 2 failures, 4 pending. The TCC migration-sequence failure was fixed and retested. The other failure is `client_document_converter_process_spec.rb:51`: this host's RubyGems startup adds `PKG_CONFIG_PATH` inside a clean child environment. The same behavior reproduces with `env -i ... ruby -rjson -e 'puts ENV.keys.to_json'` outside Rails; `--disable-gems` removes it. No converter implementation or isolation assertion was weakened. A final full-suite rerun follows these fixes; see the PR for the result.
+- First `bundle exec rspec`: 7,648 examples, 2 failures, 4 pending. The TCC migration-sequence failure was fixed and retested. The other failure is `client_document_converter_process_spec.rb:51`: this host's RubyGems startup adds `PKG_CONFIG_PATH` inside a clean child environment. The same behavior reproduces with `env -i ... ruby -rjson -e 'puts ENV.keys.to_json'` outside Rails; `--disable-gems` removes it. No converter implementation or isolation assertion was weakened. Final full rerun: **7,654 examples, 1 failure, 4 pending** (10m54s). The only failure is the converter environment test above. The final T-record punctuation cleanup was then covered by the 58-example affected run; the full run predates that small formatting-only fix.
 - Four transaction-pooler scenarios require external pooler URLs and are pending on this host.
