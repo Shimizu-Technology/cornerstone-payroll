@@ -364,7 +364,7 @@ RSpec.describe "Year-end checklist", type: :request do
     it "does not call a 1099-only client Ready while a reportable contractor has no TIN" do
       record_decision(filing_types: %w[w2_gu], party: "client")
       record_decision(filing_types: %w[form_1099], party: "cornerstone")
-      contractor = create(:employee, :contractor, company: company, department: department)
+      contractor = create(:employee, :contractor, company: company, department: department, w9_on_file: true)
       contractor.update_columns(ssn_encrypted: nil, contractor_ein: nil)
       pay(company, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 2_500, withholding_tax: 0)
 
@@ -403,7 +403,7 @@ RSpec.describe "Year-end checklist", type: :request do
     it "agrees with the checklist on a one-off payee linked to a contractor, the 1099 sign-off and a later change" do
       record_decision(filing_types: %w[w2_gu], party: "client")
       record_decision(filing_types: %w[form_1099], party: "cornerstone")
-      contractor = create(:employee, :contractor, company: company, department: department, first_name: "Ana", last_name: "Cruz")
+      contractor = create(:employee, :contractor, company: company, department: department, first_name: "Ana", last_name: "Cruz", w9_on_file: true)
       pay(company, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 1_200, withholding_tax: 0)
       create(:non_employee_check, company: company, check_type: "contractor", payable_to: "Ana Cruz", amount: 1_000,
         check_number: "9001", payment_period_type: "none", tax_year: nil, tax_month: nil, payment_date: Date.new(2026, 5, 2), printed_at: Time.current)
@@ -426,11 +426,45 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(expect_parity).to include("status" => "needs_action", "issue_count" => 1)
     end
 
+    it "agrees with the checklist on a reportable payee whose W-9 is not on file" do
+      record_decision(filing_types: %w[w2_gu], party: "client")
+      record_decision(filing_types: %w[form_1099], party: "cornerstone")
+      contractor = create(:employee, :contractor, company: company, department: department, ssn_encrypted: "900-70-4321", w9_on_file: false)
+      pay(company, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 2_500, withholding_tax: 0)
+
+      row = expect_parity
+      expect(row["issue_summary"]).to eq([
+        { "code" => "PAYEE_W9_MISSING", "label" => "W-9 not on file", "count" => 1 },
+        { "code" => "FORM_1099_NOT_MARKED_READY", "label" => "Mark 1099s ready", "count" => 1 }
+      ])
+
+      contractor.update!(w9_on_file: true)
+      expect(expect_parity["issue_summary"].map { |item| item["code"] }).to eq(%w[FORM_1099_NOT_MARKED_READY])
+      mark_1099s_ready
+      expect(expect_parity["status"]).to eq("ready")
+    end
+
+    it "agrees with the checklist on a smaller unlinked check: never a blocker, but it expires a 1099 sign-off" do
+      record_decision(filing_types: %w[w2_gu], party: "client")
+      record_decision(filing_types: %w[form_1099], party: "cornerstone")
+      contractor = create(:employee, :contractor, company: company, department: department, first_name: "Ana", last_name: "Cruz", w9_on_file: true)
+      pay(company, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 3_000, withholding_tax: 0)
+      mark_1099s_ready
+      expect(expect_parity["status"]).to eq("ready")
+
+      create(:non_employee_check, company: company, check_type: "contractor", payable_to: "Ana Cruz", amount: 1_000,
+        check_number: "9001", payment_period_type: "none", tax_year: nil, tax_month: nil, payment_date: Date.new(2026, 6, 2), printed_at: Time.current)
+
+      expect(expect_parity["issue_summary"].map { |item| item["code"] }).to eq(%w[FORM_1099_NOT_MARKED_READY])
+      mark_1099s_ready
+      expect(expect_parity["status"]).to eq("ready")
+    end
+
     it "agrees with the checklist on two contractor records that share a TIN" do
       record_decision(filing_types: %w[w2_gu], party: "client")
       record_decision(filing_types: %w[form_1099], party: "cornerstone")
-      first = create(:employee, :contractor, company: company, department: department, ssn_encrypted: "900-70-1111")
-      second = create(:employee, :contractor, company: company, department: department, ssn_encrypted: "900701111")
+      first = create(:employee, :contractor, company: company, department: department, ssn_encrypted: "900-70-1111", w9_on_file: true)
+      second = create(:employee, :contractor, company: company, department: department, ssn_encrypted: "900701111", w9_on_file: true)
       [ first, second ].each { |worker| pay(company, Date.new(2026, 5, 8), worker: worker, employment_type: "contractor", gross_pay: 2_500, withholding_tax: 0) }
 
       row = expect_parity
@@ -444,7 +478,7 @@ RSpec.describe "Year-end checklist", type: :request do
 
     it "counts the 1099 sign-off for a client whose W-2s are marked ready, and never the other way round" do
       record_decision(filing_types: %w[form_1099], party: "cornerstone")
-      contractor = create(:employee, :contractor, company: company, department: department)
+      contractor = create(:employee, :contractor, company: company, department: department, w9_on_file: true)
       pay(company, Date.new(2026, 5, 8), worker: contractor, employment_type: "contractor", gross_pay: 2_500, withholding_tax: 0)
       mark_ready
       YearEndEfileCheckJob.perform_now(company.id, 2026, YearEnd::InputRevision.for(company.id, 2026)[company.id])

@@ -263,6 +263,7 @@ module YearEnd
 
       details = form_1099_payees.fetch(company.id, {})
       issues = Array.new(details[:missing].to_i) { { code: "PAYEE_DETAILS_MISSING", label: "1099 payees missing a TIN or address" } } +
+        Array.new(details[:w9_missing].to_i) { { code: "PAYEE_W9_MISSING", label: "W-9 not on file" } } +
         Array.new(details[:duplicate_tins].to_i) { { code: "PAYEE_DUPLICATE_TIN", label: "1099 payees sharing one TIN" } } +
         Array.new(unidentified_one_off_payees[company.id].to_i) { { code: "PAYEE_IDENTITY_UNRESOLVED", label: "One-off 1099 payees to resolve" } }
       # A one-off payee not yet resolved may still become a 1099.
@@ -295,7 +296,8 @@ module YearEnd
 
     # Form1099NecAggregator's reportable contractors (payroll plus linked
     # one-off checks), for every 1099 client at once: how many there are, how
-    # many lack a TIN or address, and how many groups share one TIN.
+    # many lack a TIN or address, how many have no W-9 on file, and how many
+    # groups share one TIN.
     def form_1099_payees
       @form_1099_payees ||= begin
         totals = Hash.new(0.to_d)
@@ -320,6 +322,7 @@ module YearEnd
           {
             reportable: employees.length,
             missing: employees.count { |employee| employee.form_1099_tin.nil? || [ employee.address_line1, employee.city, employee.state, employee.zip ].any?(&:blank?) },
+            w9_missing: employees.count { |employee| !employee.w9_on_file? },
             duplicate_tins: Form1099NecAggregator.duplicate_tin_groups(employees).length
           }
         end

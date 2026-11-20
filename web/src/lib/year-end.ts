@@ -97,7 +97,10 @@ export interface YearEndOneOffPayee {
   checks: Array<{ id: number; check_number: string | null; payment_date: string | null; amount: number }>;
   checks_path: string;
   digest: string;
-  status: 'needs_identity' | 'identified';
+  /** below_threshold: a smaller payee, listed only so it can be linked. */
+  status: 'needs_identity' | 'identified' | 'below_threshold';
+  /** Smaller payees only: linked to the contractor with the largest year total, the 1099 threshold would be reached. */
+  could_reach_threshold?: boolean;
   acknowledgement: {
     note: string;
     acknowledged_at: string | null;
@@ -115,6 +118,8 @@ export interface YearEndLinkCandidate {
   tin_type: 'SSN' | 'EIN' | null;
   tin_last4: string | null;
   has_address: boolean;
+  /** Payroll pay plus linked one-off checks this year. */
+  year_total?: number;
   /** Its name matches a one-off payee's exactly: suggested, never linked automatically. */
   name_matches: boolean;
 }
@@ -293,6 +298,10 @@ export type YearEndStep =
       employees: YearEndPerson[];
       contractors: YearEndPerson[];
       one_off_payees: YearEndOneOffPayee[];
+      /** Unlinked one-off payees below the 1099 threshold: never blocking, listed to link. */
+      smaller_one_off_payees?: YearEndOneOffPayee[];
+      /** Reportable 1099 payees whose W-9 is not on file. */
+      w9_missing?: Array<{ employee_id: number; name: string; edit_path: string }>;
       /** Contractor records that share one TIN (they would get two 1099s). */
       duplicate_tins?: Array<Array<{ employee_id: number; name: string }>>;
       link_candidates?: YearEndLinkCandidate[];
@@ -314,6 +323,8 @@ export type YearEndStep =
       payee_count: number;
       total_compensation: number;
       no_1099_due_count: number;
+      smaller_one_off_count?: number;
+      smaller_could_reach_count?: number;
       payees: YearEnd1099Payee[];
     }>
   | StepBase<'reconciliation', YearEndReconciliation>

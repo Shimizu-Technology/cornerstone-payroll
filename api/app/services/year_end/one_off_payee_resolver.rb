@@ -100,12 +100,14 @@ module YearEnd
     end
 
     # The payee as the checklist shows it now. Its digest binds the decision
-    # to the exact checks and amounts the reviewer saw.
+    # to the exact checks and amounts the reviewer saw. Any unlinked payee can
+    # be resolved, below the threshold too: the threshold applies to the
+    # contractor's total after the checks are linked.
     def current_payee!(code, digest)
       raise Refused, "Unknown payee" unless OneOffPayees.code?(code)
 
       report = Form1099NecAggregator.new(company, tax_year).generate
-      rows = Array(report[:reportable_contractors]).select { |row| row[:employee_id].nil? && row[:payee_key].present? }
+      rows = Array(report[:all_contractors]).select { |row| row[:employee_id].nil? && row[:payee_key].present? }
       row = rows.find { |candidate| OneOffPayees.code_for(candidate[:payee_key]) == code.to_s }
       raise StalePayee, "This payee is no longer on the list. Reload the checklist." unless row
 

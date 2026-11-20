@@ -32,6 +32,12 @@ function candidateLabel(candidate: YearEndLinkCandidate): string {
   return `${name}: ${tin}${candidate.status === 'active' ? '' : `, ${candidate.status}`}`;
 }
 
+/** The contractor's name or business name is this payee's name exactly (ignoring case and spacing). */
+function matchesPayee(candidate: YearEndLinkCandidate, payee: YearEndOneOffPayee): boolean {
+  const name = payee.name.trim().replace(/\s+/g, ' ').toLowerCase();
+  return [candidate.name, candidate.business_name].some((value) => value != null && value.trim().replace(/\s+/g, ' ').toLowerCase() === name);
+}
+
 /** Splits a payee name into a first and last name to start the form with. */
 function nameParts(name: string): { first: string; last: string } {
   const words = name.trim().split(/\s+/);
@@ -74,8 +80,8 @@ function LinkForm({ checklist, payee, candidates, onSaved, onRefresh }: {
   onSaved: (message: string) => Promise<void>;
   onRefresh: () => Promise<void>;
 }): ReactElement {
-  const suggested = candidates.filter((candidate) => candidate.name_matches);
-  const others = candidates.filter((candidate) => !candidate.name_matches);
+  const suggested = candidates.filter((candidate) => matchesPayee(candidate, payee));
+  const others = candidates.filter((candidate) => !matchesPayee(candidate, payee));
   const [employeeId, setEmployeeId] = useState(suggested.length === 1 ? String(suggested[0].employee_id) : '');
   const { stale, saving, error, submit } = useSubmit(payee, onRefresh);
   const idPrefix = `link-${oneOffPayeeAnchor(payee.payee_key)}`;
@@ -114,6 +120,7 @@ function LinkForm({ checklist, payee, candidates, onSaved, onRefresh }: {
       {chosen && (
         <p className="text-sm text-neutral-700">
           {formatCurrency(payee.total_compensation)} goes on {chosen.name}&rsquo;s 1099 with their payroll pay.
+          {chosen.year_total !== undefined && ` With the ${formatCurrency(chosen.year_total)} already paid this year, that's ${formatCurrency(chosen.year_total + payee.total_compensation)}.`}
           {!chosen.tin_type || !chosen.has_address ? ` ${chosen.name} still needs ${[!chosen.tin_type && 'a TIN', !chosen.has_address && 'an address'].filter(Boolean).join(' and ')}; the list above will show it.` : ''}
         </p>
       )}
@@ -243,7 +250,7 @@ function OneOffPayeeRow({ checklist, payee, candidates, onSaved, onRefresh }: {
   onRefresh: () => Promise<void>;
 }): ReactElement {
   const identified = payee.status === 'identified';
-  const [choice, setChoice] = useState<Resolution | null>(candidates.some((candidate) => candidate.name_matches) ? 'link' : null);
+  const [choice, setChoice] = useState<Resolution | null>(candidates.some((candidate) => matchesPayee(candidate, payee)) ? 'link' : null);
   const anchor = oneOffPayeeAnchor(payee.payee_key);
 
   return (
@@ -387,6 +394,77 @@ export function LinkedChecksList({ checklist, groups, onSaved }: {
       <h3 className="text-sm font-semibold text-neutral-900">One-off checks linked to contractors ({groups.length})</h3>
       <ul className="divide-y divide-neutral-200">
         {groups.map((group) => <LinkedGroup key={group.employee_id} checklist={checklist} group={group} onSaved={onSaved} />)}
+      </ul>
+    </div>
+  );
+}
+
+function SmallerPayeeRow({ checklist, payee, candidates, onSaved, onRefresh }: {
+  checklist: YearEndChecklist;
+  payee: YearEndOneOffPayee;
+  candidates: YearEndLinkCandidate[];
+  onSaved: (message: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
+}): ReactElement {
+  const [linking, setLinking] = useState(false);
+  const anchor = oneOffPayeeAnchor(payee.payee_key);
+  const suggested = candidates.find((candidate) => matchesPayee(candidate, payee));
+
+  return (
+    <li id={anchor} className="scroll-mt-28 py-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="font-medium text-neutral-950 [overflow-wrap:anywhere]">{payee.name}</p>
+          {payee.could_reach_threshold && <Badge variant="warning" className="mt-1">Could reach the 1099 threshold with a contractor</Badge>}
+          <p className="mt-1 text-sm text-neutral-700">
+            {formatCurrency(payee.total_compensation)} in {payee.payment_count} one-off check{payee.payment_count === 1 ? '' : 's'}: {checkLine(payee.checks)}
+          </p>
+          {suggested && <p className="mt-1 text-sm text-neutral-600">Same name as contractor {suggested.name}.</p>}
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:shrink-0">
+          {checklist.permissions.can_acknowledge && candidates.length > 0 && !linking && (
+            <Button size="sm" variant="outline" onClick={() => setLinking(true)} aria-label={`Link ${payee.name}'s checks to a contractor`}>Link to a contractor</Button>
+          )}
+          <Link
+            to={payee.checks_path}
+            aria-label={`Open checks for ${payee.name}`}
+            className="inline-flex min-h-11 items-center justify-center gap-1 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:border-primary-300 hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 sm:min-h-9"
+          >
+            Open checks<ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </div>
+      </div>
+      {linking && (
+        <div className="mt-3 space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+          <LinkForm checklist={checklist} payee={payee} candidates={candidates} onSaved={onSaved} onRefresh={onRefresh} />
+          <Button type="button" size="sm" variant="ghost" className="w-full sm:w-auto" onClick={() => setLinking(false)}>Cancel</Button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Unlinked one-off payees below the 1099 threshold. None of them blocks the
+ * 1099s, but a check to a contractor the client already pays belongs on that
+ * contractor's 1099, so each can be linked here.
+ */
+export function SmallerOneOffPayeeList({ checklist, payees, candidates, onSaved, onRefresh }: {
+  checklist: YearEndChecklist;
+  payees: YearEndOneOffPayee[];
+  candidates: YearEndLinkCandidate[];
+  onSaved: (message: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
+}): ReactElement | null {
+  if (payees.length === 0) return null;
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-neutral-900">Smaller one-off checks (link them if they&rsquo;re to a contractor you already pay) ({payees.length})</h3>
+      <p className="text-sm text-neutral-600">
+        Each is under the 1099 threshold on its own, so it doesn&rsquo;t hold anything up. If one went to a contractor, link it: it counts toward that contractor&rsquo;s 1099.
+      </p>
+      <ul className="divide-y divide-neutral-200">
+        {payees.map((payee) => <SmallerPayeeRow key={payee.code} checklist={checklist} payee={payee} candidates={candidates} onSaved={onSaved} onRefresh={onRefresh} />)}
       </ul>
     </div>
   );
