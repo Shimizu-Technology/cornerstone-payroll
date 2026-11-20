@@ -41,7 +41,7 @@ class Invoice < ApplicationRecord
   validates :invoice_date, presence: true
   validates :status, inclusion: { in: STATUSES }
   validates :origin, inclusion: { in: ORIGINS }
-  validates :currency, format: { with: /\A[A-Z]{3}\z/ }
+  validates :currency, inclusion: { in: %w[USD] }
   validates :total_amount, numericality: { greater_than_or_equal_to: 0 }
   validates :discount_type, inclusion: { in: DISCOUNT_TYPES }
   validates :discount_value, numericality: { greater_than_or_equal_to: 0 }
@@ -53,6 +53,7 @@ class Invoice < ApplicationRecord
   validate :recurrence_must_belong_to_organization
   validate :finance_relations_must_belong_to_book
   validate :due_date_cannot_precede_invoice_date
+  validate :service_period_order
   validate :discount_within_subtotal
   validate :must_have_line_items, if: :issued?
   validate :issued_financial_content_is_immutable, on: :update
@@ -120,6 +121,8 @@ class Invoice < ApplicationRecord
   end
 
   def balance_due
+    return BigDecimal("0") if voided?
+
     [ BigDecimal(total_amount.to_s) - amount_paid - credit_total, BigDecimal("0") ].max
   end
 
@@ -137,7 +140,7 @@ class Invoice < ApplicationRecord
     end
 
     line_items.reject(&:marked_for_destruction?).sum(BigDecimal("0")) do |item|
-      BigDecimal(item.quantity.to_s) * BigDecimal(item.rate.to_s)
+      (BigDecimal(item.quantity.to_s) * BigDecimal(item.rate.to_s)).round(2, :half_up)
     end
   end
 
@@ -177,17 +180,20 @@ class Invoice < ApplicationRecord
   end
 
   def issue!(actor:, snapshot: nil, issued_at: Time.current)
-    raise_invalid_transition!("Only draft invoices can be issued") unless draft?
+    with_lock do
+      raise_invalid_transition!("Only draft invoices can be issued") unless draft?
 
-    snapshot_payload = snapshot.presence || issued_snapshot(actor: actor, issued_at: issued_at)
-    update!(
-      status: "open",
-      issued_at: issued_at,
-      generated_at: issued_at,
-      updated_by: actor,
-      snapshot: snapshot_payload,
-      snapshot_version: SNAPSHOT_VERSION
-    )
+      save!
+      snapshot_payload = snapshot.presence || issued_snapshot(actor: actor, issued_at: issued_at)
+      update!(
+        status: "open",
+        issued_at: issued_at,
+        generated_at: issued_at,
+        updated_by: actor,
+        snapshot: snapshot_payload,
+        snapshot_version: SNAPSHOT_VERSION
+      )
+    end
   end
 
   def mark_generated!(actor:, snapshot: nil)
@@ -207,6 +213,8 @@ class Invoice < ApplicationRecord
   end
 
   def void!(actor:, reason:)
+    raise_invalid_transition!("A void reason is required") if reason.to_s.strip.blank?
+
     with_lock do
       raise_invalid_transition!("Draft invoices should be deleted instead of voided") if draft?
       raise_invalid_transition!("Paid invoices require payment reversal before voiding") if amount_paid.positive?
@@ -317,6 +325,8 @@ class Invoice < ApplicationRecord
   end
 
   def sync_total_amount
+    return if persisted? && status_in_database != "draft"
+
     return if origin == "imported" && line_items.empty? && total_amount.present?
 
     self.total_amount = [ subtotal_amount - discount_amount, BigDecimal("0") ].max
@@ -365,6 +375,12 @@ class Invoice < ApplicationRecord
     return if due_date.blank? || invoice_date.blank? || due_date >= invoice_date
 
     errors.add(:due_date, "cannot be before the invoice date")
+  end
+
+  def service_period_order
+    return if service_period_start.blank? || service_period_end.blank? || service_period_end >= service_period_start
+
+    errors.add(:service_period_end, "cannot be before the service period start")
   end
 
   def discount_within_subtotal

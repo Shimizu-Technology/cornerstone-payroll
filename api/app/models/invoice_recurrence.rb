@@ -19,7 +19,7 @@ class InvoiceRecurrence < ApplicationRecord
   validate :source_belongs_to_book
   validate :ends_after_start
 
-  scope :due, ->(today = Date.current) { where(active: true).where("next_on <= ?", today) }
+  scope :due, ->(today = PayrollBusinessClock.today) { where(active: true).where("next_on <= ?", today) }
 
   def occurrence_date(index = occurrence_index)
     interval_unit == "month" ? start_on.advance(months: index * interval_count) : start_on + (index * interval_count * 7)

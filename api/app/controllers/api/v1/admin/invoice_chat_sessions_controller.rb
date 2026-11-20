@@ -233,7 +233,7 @@ module Api
             company_id: @session.company_id,
             invoice_recipient: recipient,
             invoice_billing_profile: billing_profile_from_preview!(preview),
-            invoice_date: parse_preview_date(preview["invoice_date"]) || Date.current,
+            invoice_date: parse_preview_date(preview["invoice_date"]) || PayrollBusinessClock.today,
             service_period_start: parse_preview_date(preview["service_period_start"]),
             service_period_end: parse_preview_date(preview["service_period_end"]),
             payment_terms: preview["payment_terms"].presence,
