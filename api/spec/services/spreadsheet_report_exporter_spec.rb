@@ -50,6 +50,23 @@ RSpec.describe SpreadsheetReportExporter do
     end
   end
 
+  it "preserves decimal money as numeric cells with a currency style" do
+    amount = BigDecimal("1234567890.12")
+    exporter = described_class.new(filename: "money.xlsx", sheets: [ {
+      name: "Money", rows: [ [ amount ] ],
+      styles: { money: { format_code: "$#,##0.00" } },
+      row_style_rules: [ { rows: 0, styles: [ :money ] } ]
+    } ])
+    expect(exporter.send(:cell_value, amount)).to equal(amount)
+    Zip::File.open_buffer(StringIO.new(exporter.generate)) do |archive|
+      xml = Nokogiri::XML(archive.read("xl/worksheets/sheet1.xml"))
+      cell = xml.at_xpath("//*[local-name()='c'][@r='A1']")
+      expect(cell["t"]).to eq("n")
+      expect(cell.at_xpath("*[local-name()='v']").text.to_d).to eq(amount)
+      expect(archive.read("xl/styles.xml")).to include("$#,##0.00")
+    end
+  end
+
   it "stores formula-like source text as inert spreadsheet values" do
     workbook_bytes = described_class.new(
       filename: "safe.xlsx",

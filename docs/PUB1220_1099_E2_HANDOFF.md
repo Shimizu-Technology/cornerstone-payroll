@@ -71,3 +71,5 @@ Next: review the final PR head, integrate E1's identity/readiness contract, rete
 - Four transaction-pooler scenarios require external pooler URLs and are pending on this host.
 
 Review round 1 changes and current verification are recorded in [pub1220-review-round1.md](qa/pub1220-review-round1.md); that ledger supersedes earlier gate/screenshot status above.
+
+Review round 2 changes and verification are recorded in [pub1220-review-round2.md](qa/pub1220-review-round2.md); that ledger supersedes round-1 status for this fix round.

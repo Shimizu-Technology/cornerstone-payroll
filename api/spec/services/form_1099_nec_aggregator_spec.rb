@@ -118,6 +118,12 @@ RSpec.describe Form1099NecAggregator, type: :service do
     expect(described_class.new(company, 2025).generate[:reportable_contractors].sole[:total_compensation]).to eq(600)
     expect(described_class.new(company, 2026).generate[:reportable_contractors].sole[:total_compensation]).to eq(2000)
   end
+  it "prefers the threshold reason when compensation and withholding both require filing" do
+    create(:payroll_item, company: company, employee: contractor, pay_period: pay_period,
+      employment_type: "contractor", gross_pay: 2500, net_pay: 2450, withholding_tax: 50)
+    expect(described_class.new(company, 2026).generate[:reportable_contractors].sole[:filing_reason]).to eq("filing threshold reached")
+  end
+
   [ 0, 12.34 ].each do |withheld|
     it "reports $1,500 only when tax was withheld (#{withheld}) and serializes decimal totals" do
       create(:payroll_item, company: company, employee: contractor, pay_period: pay_period,

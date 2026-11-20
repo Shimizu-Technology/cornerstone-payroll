@@ -158,7 +158,7 @@ class Form1099NecAggregator
       federal_withheld: withheld.round(2),
       payment_count: sums&.payment_count.to_i,
       requires_filing: total_comp >= filing_threshold || !withheld.zero?,
-      filing_reason: !withheld.zero? ? "tax withheld" : ("filing threshold reached" if total_comp >= filing_threshold),
+      filing_reason: total_comp >= filing_threshold ? "filing threshold reached" : ("tax withheld" unless withheld.zero?),
       w9_on_file: contractor.w9_on_file?,
       compliance_issues: compliance_issues
     }

@@ -3622,6 +3622,26 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     expect(workbook.sheet("Totals").column(1)).to include("Box 2 Guam Income Tax Withheld")
   end
 
+  it "formats 1099 compensation and decimal withholding as money in detail and totals sheets" do
+    amount = BigDecimal("50.12")
+    sheets = Api::V1::Admin::ReportsController.new.send(:form_1099_nec_sheets, {
+      meta: { company_name: company.name },
+      all_contractors: [ { name: "Synthetic Contractor", total_compensation: 500, federal_withheld: amount } ],
+      totals: { total_federal_withheld: amount }
+    })
+    bytes = SpreadsheetReportExporter.new(filename: "1099.xlsx", sheets: sheets).generate
+    Zip::File.open_buffer(StringIO.new(bytes)) do |archive|
+      [ [ "sheet1", "G2" ], [ "sheet2", "B1" ] ].each do |sheet, ref|
+        xml = Nokogiri::XML(archive.read("xl/worksheets/#{sheet}.xml"))
+        cell = xml.at_xpath("//*[local-name()='c'][@r='#{ref}']")
+        expect(cell["t"]).to eq("n")
+        expect(cell["s"].to_i).to be > 0
+        expect(cell.at_xpath("*[local-name()='v']").text.to_d).to eq(amount)
+      end
+      expect(archive.read("xl/styles.xml")).to include("$#,##0.00")
+    end
+  end
+
   describe "filing workbook report info sheets" do
     it "includes client and generated-at metadata for 941-GU, W-2GU, and 1099-NEC sheets" do
       controller = Api::V1::Admin::ReportsController.new
