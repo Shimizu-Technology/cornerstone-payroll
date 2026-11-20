@@ -533,22 +533,29 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(expect_parity["status"]).to eq("ready")
     end
 
-    it "keeps a 1099 client off Ready until a one-off contractor payee is identified through the endpoint" do
+    # Who a payee is gets settled by linking the checks to a contractor (the
+    # form_1099_year_end_spec covers that); an acknowledgement here records
+    # that no 1099 is due, for example a payment to a utility for goods.
+    it "keeps a 1099 client off Ready until a one-off payee is decided no 1099 due through the endpoint" do
       record_decision(filing_types: %w[w2_gu], party: "client")
       record_decision(filing_types: %w[form_1099], party: "cornerstone")
-      create(:non_employee_check, company: company, check_type: "contractor", payable_to: "Synthetic Roofing", amount: 2_500,
+      create(:non_employee_check, company: company, check_type: "contractor", payable_to: "Guam Power Authority", amount: 2_500,
         check_number: "9001", payment_period_type: "none", tax_year: nil, tax_month: nil, payment_date: Date.new(2026, 5, 2), printed_at: Time.current)
 
       expect(list_row["issue_summary"].map { |item| item["code"] }).to eq(%w[PAYEE_IDENTITY_UNRESOLVED FORM_1099_NOT_MARKED_READY])
       payee = checklist_step("people").dig("data", "one_off_payees").sole
-      expect(payee).to include("status" => "needs_identity", "name" => "Synthetic Roofing")
+      expect(payee).to include("status" => "needs_identity", "name" => "Guam Power Authority")
 
       post "/api/v1/admin/year_end/acknowledgements", params: { acknowledgement: {
-        tax_year: 2026, warning_code: payee["code"], warning_digest: payee["digest"], note: "Synthetic Roofing LLC; W-9 and EIN in the client folder."
+        tax_year: 2026, warning_code: payee["code"], warning_digest: payee["digest"],
+        note: "Power bill for the shop, a utility paid for service to the premises, not for a contractor's services. No 1099 is due."
       } }
       expect(response).to have_http_status(:created), response.body
 
       expect(checklist_step("people")["status"]).to eq("done")
+      expect(checklist_step("form_1099_ready").dig("data", "no_1099_due_count")).to eq(1)
+      expect(checklist_step("form_1099_ready").dig("data", "payee_count")).to eq(0)
+      expect(Form1099NecAggregator.new(company, 2026).generate[:reportable_contractors].sole[:employee_id]).to be_nil
       expect(list_row["status"]).to eq("ready")
     end
   end

@@ -44,6 +44,11 @@ class NonEmployeeCheck < ApplicationRecord
 
   before_validation :normalize_payment_period_type
   before_validation :clear_inapplicable_tax_period_fields
+  # A linked check's amount goes on its contractor's 1099. Changing who the
+  # check is payable to breaks that tie, so the link is removed on every
+  # save path and the check returns to the unresolved one-off payees.
+  before_save :clear_payee_link_when_payee_renamed
+  after_save :record_payee_link_cleared_by_rename
 
   validates :payable_to, presence: true
   validates :amount, presence: true, numericality: { greater_than: 0 }
@@ -254,6 +259,47 @@ class NonEmployeeCheck < ApplicationRecord
       return nil unless pay_period
       "#{pay_period.start_date.strftime('%m/%d/%Y')} - #{pay_period.end_date.strftime('%m/%d/%Y')}"
     end
+  end
+
+  def clear_payee_link_when_payee_renamed
+    @payee_link_cleared_from = nil
+    return unless persisted? && will_save_change_to_payable_to? && payee_employee_id_in_database.present?
+
+    @payee_link_cleared_from = payee_employee_id_in_database
+    self.payee_employee_id = nil
+  end
+
+  # Written in the same transaction as the rename: an edit-history row on
+  # the check and an audit entry, like an undo from the year-end checklist.
+  def record_payee_link_cleared_by_rename
+    previous = @payee_link_cleared_from
+    return unless previous
+
+    @payee_link_cleared_from = nil
+    contractor = Employee.find_by(id: previous)
+    previous_payable_to, = saved_change_to_payable_to
+    reason = "Payee changed from #{previous_payable_to} to #{payable_to}, so the check is no longer linked to " \
+             "#{contractor&.full_name || 'its contractor'} for the 1099-NEC"
+    edits.create!(
+      edited_by: Current.user,
+      before: { "payee_employee_id" => previous },
+      after: { "payee_employee_id" => nil },
+      changed_fields: [ "payee_employee_id" ],
+      reason: reason
+    )
+    AuditLog.record!(
+      organization_id: company.organization_id, company_id: company_id,
+      action: "year_end_one_off_payees#unlinked", record_type: "non_employee_checks", record_id: id,
+      subject_name: "#{company.name} #{effective_payment_date.year} 1099: unlinked 1 one-off check (payee renamed)",
+      metadata: {
+        tax_year: effective_payment_date.year,
+        reason: "payee_renamed",
+        checks: [ {
+          id: id, check_number: check_number, payable_to: payable_to, previous_payable_to: previous_payable_to,
+          amount: amount.to_d.round(2).to_s("F"), previous_employee_id: previous, previous_employee_name: contractor&.full_name
+        } ]
+      }
+    )
   end
 
   def payee_employee_is_company_contractor

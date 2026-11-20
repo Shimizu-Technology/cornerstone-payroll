@@ -5,7 +5,7 @@ require "digest"
 # Hash filing inputs, never activity timestamps, so a refreshed report or check
 # printing does not silently invalidate a genuine accountant attestation.
 class W2FilingInputsFingerprint
-  RULE_VERSION = "w2-gu-current-inputs-v1"
+  RULE_VERSION = "w2-gu-current-inputs-v2"
   ITEM_FIELDS = %w[id employee_id pay_period_id employment_type gross_pay reported_tips
                   withholding_tax additional_withholding social_security_tax medicare_tax
                   non_taxable_pay social_security_taxable_wages social_security_taxable_tips
@@ -46,9 +46,11 @@ class W2FilingInputsFingerprint
           }
         end,
       identities: Employee.where(company_id: company.id, id: ids).order(:id).map do |employee|
-        # Full SSN matters even when its displayed last four digits are unchanged.
+        # Full SSN matters even when its displayed last four digits are
+        # unchanged. It goes in keyed (TaxIdDigest): the fingerprint reaches
+        # the browser next to the last four digits.
         employee.attributes.slice("id", "first_name", "middle_name", "last_name", "name_suffix", "address_line1", "address_line2", "city", "state", "zip")
-          .merge("ssn" => employee.ssn_digits)
+          .merge("ssn" => TaxIdDigest.call(employee.ssn_digits))
       end,
       items: PayrollItem.joins(:pay_period).includes(:pay_period).where(company_id: company.id)
         .financially_reportable.reportable.where.not(employment_type: "contractor")

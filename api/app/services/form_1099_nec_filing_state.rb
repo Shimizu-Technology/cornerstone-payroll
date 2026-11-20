@@ -20,8 +20,9 @@ class Form1099NecFilingState
 
     # The rows that get a 1099: contractor records, including any one-off
     # checks linked to them. Unlinked one-off payees have no TIN or address.
+    # The sign-off, the copies, the e-file and the 1096 all use these rows.
     def payee_rows
-      reportable_rows.select { |row| row[:employee_id] }
+      Form1099NecFilingState.payee_rows(report)
     end
 
     # Changes whenever the sign-off, the inputs or the decision change.
@@ -33,6 +34,30 @@ class Form1099NecFilingState
 
   def self.call(company:, year:)
     new(company: company, year: year).call
+  end
+
+  # The 1099-NEC report's rows that get a 1099: contractor records (with any
+  # linked one-off checks). Mark ready signs off on exactly these, and the
+  # e-file and 1096 (Form1099Pub1220Generator) are built from them, so their
+  # record counts and totals match what was signed off.
+  def self.payee_rows(report)
+    Array(report&.dig(:reportable_contractors)).select { |row| row[:employee_id] }
+  end
+
+  # Unlinked one-off payees at or above the threshold with no current "no
+  # 1099 is due" decision. They block the sign-off; until they are linked or
+  # decided, no file can say whether they get a 1099. A payee decided "no
+  # 1099 due" on its current checks is left out of every 1099 output.
+  def self.unresolved_one_off_rows(company:, year:, report:)
+    unlinked = Array(report&.dig(:reportable_contractors)).reject { |row| row[:employee_id] }
+    return [] if unlinked.empty?
+
+    digests = YearEnd::OneOffPayees.new(company: company, year: year, rows: unlinked).digests
+    decided = company.year_end_acknowledgements.where(tax_year: Integer(year), warning_code: digests.keys).pluck(:warning_code, :warning_digest).to_h
+    unlinked.reject do |row|
+      code = row[:payee_key].present? && YearEnd::OneOffPayees.code_for(row[:payee_key])
+      code && decided[code].present? && decided[code] == digests[code]
+    end
   end
 
   # report / report_error: a 1099-NEC report the caller already built (or the

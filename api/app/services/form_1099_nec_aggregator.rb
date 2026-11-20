@@ -154,7 +154,8 @@ class Form1099NecAggregator
   def contractor_row(contractor)
     sums = aggregated_items[contractor.id]
     checks = Array(linked_checks[contractor.id]).sort_by(&:id)
-    total_comp = (sums&.total_gross.to_d + checks.sum(0.to_d) { |check| check.amount.to_d }).round(2).to_f
+    # BigDecimal for the threshold checks; a JSON number only in the row.
+    total_comp = (sums&.total_gross.to_d + checks.sum(0.to_d) { |check| check.amount.to_d }).round(2)
     withheld = sums&.total_withheld.to_d
 
     compliance_issues = []
@@ -172,7 +173,7 @@ class Form1099NecAggregator
       tin_type: tin ? tin[:type] : (contractor.business_contractor? ? "EIN" : "SSN"),
       tin_last_four: tin&.dig(:digits)&.last(4),
       address: contractor.full_address,
-      total_compensation: total_comp.round(2),
+      total_compensation: total_comp.to_f,
       federal_withheld: withheld.round(2),
       payment_count: sums&.payment_count.to_i + checks.length,
       payroll_payment_count: sums&.payment_count.to_i,

@@ -192,6 +192,9 @@ class PayrollFilingEvidenceRecorder
     if YearEnd::Checklist.applies_to?(tax_year)
       state = Form1099NecFilingState.call(company: company.reload, year: tax_year)
       raise Error, "Cornerstone does not file #{tax_year} 1099s for this client" unless state.cornerstone_files
+      # Nothing is due: there is no sign-off to record and no file to submit.
+      # The checklist's filing-evidence panel shows the same message.
+      raise Error, "No 1099s to file for #{tax_year}" if state.report && state.payee_rows.empty?
       raise Error, "Mark the #{tax_year} 1099s ready in the year-end checklist first" unless state.readiness&.marked?
       raise Error, "The 1099s changed after they were marked ready. Review them and mark them ready again." unless state.final
 

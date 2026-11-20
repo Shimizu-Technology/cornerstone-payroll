@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactElement } from 'react';
+import { useRef, useState, type FormEvent, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { ArrowRight, Undo2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -45,7 +45,13 @@ function nameParts(name: string): { first: string; last: string } {
   return { first: words.slice(0, -1).join(' '), last: words[words.length - 1] };
 }
 
-/** Errors other than a stale-data refusal, which the stale notice handles. */
+/**
+ * Errors other than a stale-data refusal, which the stale notice handles.
+ * onDone is the page's save handler (it refreshes the checklist), so it runs
+ * after every successful request, even when the reviewer has closed this
+ * form meanwhile; the page itself ignores a save from another client or
+ * year. Only this form's own state is skipped once it has unmounted.
+ */
 function useSubmit(payee: YearEndOneOffPayee, onRefresh: () => Promise<void>) {
   const stillMounted = useStillMounted();
   const stale = useStaleReview(payee.digest, onRefresh);
@@ -58,8 +64,7 @@ function useSubmit(payee: YearEndOneOffPayee, onRefresh: () => Promise<void>) {
     setError(null);
     try {
       await action();
-      if (!stillMounted()) return;
-      stale.clear();
+      if (stillMounted()) stale.clear();
       await onDone();
     } catch (err) {
       if (!stillMounted()) return;
@@ -140,9 +145,12 @@ function AddContractorForm({ checklist, payee, onSaved, onRefresh }: {
   const parts = nameParts(payee.name);
   const [values, setValues] = useState({
     contractor_type: 'individual' as 'individual' | 'business',
-    first_name: parts.first, middle_name: '', last_name: parts.last, business_name: payee.name, tin: '',
+    first_name: parts.first, middle_name: '', last_name: parts.last, business_name: payee.name,
     address_line1: '', address_line2: '', city: '', state: 'GU', zip: '', w9_on_file: true,
   });
+  // The SSN or EIN stays in the input only (uncontrolled), never in React
+  // state: it is read when the request is built, and stays typed for a retry.
+  const tinRef = useRef<HTMLInputElement>(null);
   const { stale, saving, error, submit } = useSubmit(payee, onRefresh);
   const idPrefix = `add-${oneOffPayeeAnchor(payee.payee_key)}`;
   const business = values.contractor_type === 'business';
@@ -159,7 +167,7 @@ function AddContractorForm({ checklist, payee, onSaved, onRefresh }: {
         const contractor: OneOffPayeeContractorInput = {
           contractor_type: values.contractor_type,
           first_name: values.first_name.trim(), middle_name: values.middle_name.trim(), last_name: values.last_name.trim(),
-          business_name: business ? values.business_name.trim() : undefined, tin: values.tin.trim(),
+          business_name: business ? values.business_name.trim() : undefined, tin: (tinRef.current?.value ?? '').trim(),
           address_line1: values.address_line1.trim(), address_line2: values.address_line2.trim(), city: values.city.trim(),
           state: values.state.trim(), zip: values.zip.trim(), w9_on_file: values.w9_on_file,
         };
@@ -185,7 +193,8 @@ function AddContractorForm({ checklist, payee, onSaved, onRefresh }: {
       </fieldset>
       <div className="grid gap-3 sm:grid-cols-2">
         {business && text('business_name', 'Business name', { required: true })}
-        {text('tin', business ? 'EIN' : 'SSN', { required: true, inputMode: 'numeric', placeholder: business ? '12-3456789' : '123-45-6789', maxLength: 11 })}
+        <Input key="tin" ref={tinRef} id={`${idPrefix}-tin`} label={business ? 'EIN' : 'SSN'} disabled={saving} autoComplete="off" required
+          inputMode="numeric" placeholder={business ? '12-3456789' : '123-45-6789'} maxLength={11} />
         {text('first_name', business ? 'Contact first name' : 'First name', { required: true })}
         {!business && text('middle_name', 'Middle name (optional)')}
         {text('last_name', business ? 'Contact last name' : 'Last name', { required: true })}
@@ -344,8 +353,13 @@ function LinkedGroup({ checklist, group, onSaved }: {
     setSaving(true);
     setError(null);
     try {
-      await yearEndApi.unlinkOneOffPayee({ tax_year: checklist.tax_year, check_ids: group.checks.map((check) => check.id) }, checklist.company.id);
-      if (!stillMounted()) return;
+      // Names the contractor shown, so an undo from an out-of-date page
+      // never clears a newer link to someone else (the server answers 409).
+      await yearEndApi.unlinkOneOffPayee(
+        { tax_year: checklist.tax_year, employee_id: group.employee_id, check_ids: group.checks.map((check) => check.id) },
+        checklist.company.id,
+      );
+      // The page's handler refreshes the checklist even if this row is gone.
       await onSaved(`Unlinked the checks from ${name}.`);
     } catch (err) {
       if (stillMounted()) setError(err instanceof Error && err.message ? err.message : 'Could not undo the link.');

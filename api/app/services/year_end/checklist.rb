@@ -456,16 +456,17 @@ module YearEnd
     # Unlinked one-off payees below the threshold. They never block a
     # sign-off by themselves, but a check to a contractor the client already
     # pays belongs on that contractor's 1099, so they are listed to link.
-    # could_reach_threshold: linked to a contractor still under the
-    # threshold (the one with the largest year total), the combined total
-    # would reach it, so a 1099 would be due that otherwise isn't. A check
-    # that would only add to an existing 1099 is listed but not flagged.
+    # could_reach_threshold: linked to a contractor who doesn't already get
+    # a 1099 (the one with the largest year total), the combined total would
+    # reach the threshold, so a 1099 would be due that otherwise isn't. A
+    # check that would only add to an existing 1099 (a contractor at the
+    # threshold, or under it with tax withheld) is listed but not flagged.
     def smaller_one_off_payees
       @smaller_one_off_payees ||= begin
         rows = form_1099_all_rows.reject { |row| row[:requires_filing] }
         threshold = @form_1099_report&.dig(:meta, :filing_threshold)&.to_d
-        top = form_1099_all_rows.select { |row| row[:employee_id] }.map { |row| row[:total_compensation].to_d }
-          .select { |total| threshold.nil? || total < threshold }.max
+        top = form_1099_all_rows.select { |row| row[:employee_id] && !row[:requires_filing] }
+          .map { |row| row[:total_compensation].to_d }.max
         OneOffPayees.new(company: company, year: year, rows: rows).call.map do |payee|
           payee.except(:status, :acknowledgement, :acknowledgement_stale).merge(
             status: "below_threshold",
@@ -848,30 +849,52 @@ module YearEnd
       end
       if files?("form_1099")
         final = form_1099_state.final
-        groups << { forms: "1099s", step: steps.find { |step| step[:key] == "form_1099_ready" }, final: final, documents: form_1099_documents(final) }
+        none = no_1099_filings?
+        groups << { forms: "1099s", step: steps.find { |step| step[:key] == "form_1099_ready" }, final: final, none_needed: none,
+                    documents: form_1099_documents(final, none_needed: none) }
       end
+      # A year with no 1099s has nothing to mark ready or file.
+      pending = groups.reject { |group| group[:none_needed] }
+      none_note = ("No 1099 filings are needed for #{year}: no payee gets a 1099." if pending.length < groups.length)
       summary = if practice
         "This is a practice copy, so every document is a draft. Review them, but don't hand them out or file them."
-      elsif groups.all? { |group| group[:final] }
-        "The #{year} #{groups.map { |group| group[:forms] }.join(' and ')} are marked ready. Download each document below."
-      elsif groups.one?
-        "Drafts until the #{groups.first[:forms]} are marked ready in step #{groups.first[:step]&.fetch(:number)}. Review them, but don't hand them out yet."
+      elsif pending.empty?
+        none_note
+      elsif pending.all? { |group| group[:final] }
+        "The #{year} #{pending.map { |group| group[:forms] }.join(' and ')} are marked ready. Download each document below."
+      elsif pending.one?
+        "Drafts until the #{pending.first[:forms]} are marked ready in step #{pending.first[:step]&.fetch(:number)}. Review them, but don't hand them out yet."
       else
-        drafts = groups.reject { |group| group[:final] }
+        drafts = pending.reject { |group| group[:final] }
         "#{drafts.map { |group| "#{group[:forms].delete_suffix('s')} documents are drafts until the #{group[:forms]} are marked ready in step #{group[:step]&.fetch(:number)}" }.join('. ')}. " \
           "Review drafts, but don't hand them out yet."
       end
+      summary = [ summary, none_note ].compact.uniq.join(" ") unless practice
       {
         key: key, number: STEP_KEYS.index(key) + 1, title: title, status: "available",
         summary: summary,
         issues: [],
-        data: { final: groups.all? { |group| group[:final] }, documents: groups.flat_map { |group| group[:documents] } }
+        data: {
+          final: pending.any? && pending.all? { |group| group[:final] },
+          no_1099_filings: groups.any? { |group| group[:none_needed] },
+          documents: groups.flat_map { |group| group[:documents] }
+        }
       }
+    end
+
+    # Cornerstone files the 1099s, but no payee gets one and none could: no
+    # contractor row, no one-off payee still undecided, and no smaller
+    # one-off payee that could reach the threshold with a contractor.
+    def no_1099_filings?
+      state = form_1099_state
+      state.report.present? && state.payee_rows.empty? &&
+        one_off_payees.all? { |payee| payee[:status] == "identified" } &&
+        smaller_one_off_payees.none? { |payee| payee[:could_reach_threshold] }
     end
 
     # The official 1099-NEC copies: one recipient copy per contractor and the
     # payer's record with full TINs.
-    def form_1099_documents(final)
+    def form_1099_documents(final, none_needed: false)
       state = form_1099_state
       count = state.payee_rows.length
       unavailable = if !Form1099NecOfficialCopies.supported_tax_year?(year)
@@ -907,18 +930,27 @@ module YearEnd
           format: "pdf", draft: !final, available: reason.nil?, unavailable_reason: reason,
           download: { path: document[:path], params: { year: year } }
         )
-      end + form_1099_filing_documents(final)
+      end + form_1099_filing_documents(final, payee_count: count, none_needed: none_needed)
     end
 
     # The Pub 1220 e-file for GuamTax and the 1096 totals sheet. Final only
     # on the same "1099s ready" sign-off as the copies (Form1099Readiness).
-    def form_1099_filing_documents(final)
+    # Built from the payees the sign-off covers, so with none there is no file.
+    def form_1099_filing_documents(final, payee_count:, none_needed:)
       restriction = if company.test_workspace?
         "Not available in a practice copy"
       elsif !permissions[:can_mark_ready]
         "Needs client-management access"
       end
-      reason = ("Only tax year 2026 is supported" unless year == 2026)
+      reason = if year != 2026
+        "Only tax year 2026 is supported"
+      elsif form_1099_state.report.nil?
+        "The 1099 payees could not be loaded. Fix them in the employees and payees step first."
+      elsif none_needed
+        "No 1099 filings are needed for #{year}: no payee gets a 1099."
+      elsif payee_count.zero?
+        "No contractor gets a 1099 yet. Resolve the one-off payees in the employees and payees step first."
+      end
       [
         [ "form_1099_pub1220", "1099 e-file for GuamTax", "txt" ],
         [ "form_1096_totals", "1096 totals (for your records)", "pdf" ]
