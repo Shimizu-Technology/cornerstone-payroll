@@ -129,10 +129,7 @@ class PayPeriodCorrectionService
         correction_status: "voided",
         voided_at:         void_time,
         voided_by_id:      actor&.id,
-        void_reason:       reason,
-        **locked.tax_sync_refresh_attributes(reference_time: void_time).merge(
-          PayrollTaxSyncService.configured? ? { tax_sync_idempotency_key: "cpr-#{locked.id}-void-#{SecureRandom.uuid}" } : {}
-        )
+        void_reason:       reason
       )
 
       PayrollYtdSnapshotRefresh.call(pay_period: locked, employee_ids: employee_ids)
@@ -151,12 +148,6 @@ class PayPeriodCorrectionService
       if was_correction_run && source_period.present?
         if source_period.superseded_by_id == locked.id
           source_period.update!(superseded_by_id: nil)
-        end
-      end
-
-      if PayrollTaxSyncService.configured?
-        ActiveRecord.after_all_transactions_commit do
-          PayrollTaxSyncJob.perform_later(locked.id)
         end
       end
 

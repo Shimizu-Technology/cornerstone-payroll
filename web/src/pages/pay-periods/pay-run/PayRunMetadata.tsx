@@ -1,6 +1,5 @@
 
 
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -11,10 +10,7 @@ import { runPurposeLabels } from './payRunSupport';
 import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunMetadata({
-  MAX_SYNC_ATTEMPTS,
-  canRetrySyncTax,
   formatCorrectionPayDate,
-  handleRetryTaxSync,
   isApproved,
   isCalculated,
   isCommitted,
@@ -23,10 +19,7 @@ export function PayRunMetadata({
   payDateCorrections,
   payPeriod,
   processedBy,
-  retryingSyncTax,
-  statusConfig,
-  syncConfig,
-  syncStatus
+  statusConfig
 }: PayRunSectionProps<'metadata'>) {
   return (<>
 <div className="flex flex-wrap items-center gap-3">
@@ -51,38 +44,6 @@ export function PayRunMetadata({
               Processed {formatGuamDateTime(payPeriod.committed_at)}
               {processedBy ? ` by ${processedBy}` : ''}
             </span>
-          )}
-          {isCommitted && syncConfig && (
-            <>
-              <Badge variant={syncConfig.variant}>
-                {syncConfig.label}
-              </Badge>
-              {syncStatus === 'synced' && payPeriod.tax_synced_at && (
-                <span className="text-sm text-neutral-600">
-                  Synced {formatGuamDateTime(payPeriod.tax_synced_at)}
-                </span>
-              )}
-              {syncStatus === 'failed' && payPeriod.tax_sync_last_error && (
-                <span className="text-sm text-danger-600 max-w-md truncate" title={payPeriod.tax_sync_last_error}>
-                  {payPeriod.tax_sync_last_error}
-                </span>
-              )}
-              {canRetrySyncTax && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRetryTaxSync}
-                  disabled={retryingSyncTax}
-                >
-                  {retryingSyncTax ? 'Retrying...' : 'Retry Tax Sync'}
-                </Button>
-              )}
-              {payPeriod.tax_sync_attempts != null && payPeriod.tax_sync_attempts > 0 && syncStatus !== 'synced' && (
-                <span className="text-xs text-neutral-600">
-                  Attempt {payPeriod.tax_sync_attempts}/{MAX_SYNC_ATTEMPTS}
-                </span>
-              )}
-            </>
           )}
         </div>
 {payDateCorrections.length > 0 && (

@@ -29,12 +29,11 @@ RSpec.describe "Earned payroll and retired checks" do
       company_ytd: CompanyYtdTotal.find_by!(company: company, year: 2024).attributes.except("updated_at"),
       computed_ytd: employee.calculate_ytd_gross(2024),
       cap_context: employee.ytd_totals_before(year: 2024, pay_date: Date.new(2024, 12, 31), pay_period_id: period.id + 1),
-      liability: period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount"),
-      tax: PayrollTaxSyncPayloadBuilder.new(period.reload).build.slice(:line_items, :totals)
+      liability: period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")
     }
   end
 
-  it "retains the committed $900 in reports, computed YTD, caps, cached YTD, tax payload and liabilities" do
+  it "retains the committed $900 in reports, computed YTD, caps, cached YTD and liabilities" do
     expect(item.gross_pay).to eq(900)
     before = financial_snapshot
     item.void!(user: actor, reason: "Retire damaged paper check only")
@@ -63,21 +62,6 @@ RSpec.describe "Earned payroll and retired checks" do
     expect(item.reload.attributes).to eq(snapshot)
     ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Explicit accounting reversal")
     expect(LegacyCheckVoidDetection.items).not_to include(item)
-  end
-
-  it "uses a distinct tax revision for separate reversals within the same second" do
-    other = create(:employee, company: company)
-    other_item = create(:payroll_item, pay_period: period, employee: other, gross_pay: 100, net_pay: 100)
-    other.ytd_totals_for(2024).add_payroll_item!(other_item)
-    CompanyYtdTotal.find_by!(company: company, year: 2024).add_payroll_item!(other_item)
-    allow(PayrollTaxSyncService).to receive(:configured?).and_return(true)
-    freeze_time do
-      ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Reverse first incorrect wages")
-      first_key = period.reload.tax_sync_idempotency_key
-      ReversePaycheckService.call(payroll_item: other_item, actor: actor, reason: "Reverse second incorrect wages")
-      expect(period.reload.tax_sync_idempotency_key).not_to eq(first_key)
-      expect(PayrollTaxSyncPayloadBuilder.new(period).build[:totals][:gross_pay]).to eq(0)
-    end
   end
 
   %w[delivered cleared direct_deposit].each do |payment_state|
@@ -194,7 +178,6 @@ RSpec.describe "Earned payroll and retired checks" do
     expect(CompanyYtdTotal.find_by!(company: company, year: 2024).gross_pay).to eq(100)
     expect(period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)
     expect(W2GuAggregator.new(company, 2024, include_historical: false).generate.fetch(:employees).map { |r| r[:employee_id] }).not_to include(employee.id)
-    expect(PayrollTaxSyncPayloadBuilder.new(period).build[:line_items].map { |r| r[:payroll_item_id] }).not_to include(item.id)
     expect { ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Duplicate reversal request") }.to raise_error(ArgumentError, /already been reversed/)
     PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Reverse remaining payroll wages")
     expect(CompanyYtdTotal.find_by!(company: company, year: 2024).gross_pay).to eq(0)

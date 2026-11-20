@@ -296,18 +296,17 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     expect(disposition.corrective_payroll_item.net_pay).to eq(-23.09)
   end
 
-  [ "tax sync", "pay date correction" ].each do |operation|
+  # Rows written before the Tax push was removed still carry its status
+  # columns; changes to them must not invalidate saved evidence.
+  [ "retired tax sync columns", "pay date correction" ].each do |operation|
     it "keeps posted successor evidence verifiable after supported #{operation} and retries its same receipt" do
       period, current = paid_successor
       current.update!(check_date: period.pay_date) if operation == "pay date correction"
       disposition = confirm
       receipt = disposition.time_tracking_correction_receipt
       retained = [ disposition.attributes, receipt.payload.deep_dup, current.check_events.order(:id).map(&:attributes) ]
-      if operation == "tax sync"
-        allow(PayrollTaxSyncService).to receive(:configured?).and_return(true)
-        allow_any_instance_of(PayrollTaxSyncService).to receive(:post_to_cst).and_return(Struct.new(:code, :body).new("204", ""))
-        PayrollTaxSyncJob.new.perform(period.id)
-        expect(period.reload.tax_sync_status).to eq("synced")
+      if operation == "retired tax sync columns"
+        period.update_columns(tax_sync_status: "synced", tax_sync_attempts: 1, tax_synced_at: Time.current, tax_sync_idempotency_key: "cpr-legacy-#{period.id}")
       else
         PayPeriodPayDateCorrectionService.call(pay_period: period, actor: actor,
           new_pay_date: period.pay_date + 1.day, reason: "Correct the clerical synthetic pay date")
@@ -337,9 +336,7 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     legacy["target"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(current.attributes)))
     legacy["target_period"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(period.attributes)))
     retained = legacy.deep_dup
-    allow(PayrollTaxSyncService).to receive(:configured?).and_return(true)
-    allow_any_instance_of(PayrollTaxSyncService).to receive(:post_to_cst).and_return(Struct.new(:code, :body).new("204", ""))
-    PayrollTaxSyncJob.new.perform(period.id)
+    period.update_columns(tax_sync_status: "synced", tax_sync_attempts: 1, tax_synced_at: Time.current, tax_sync_idempotency_key: "cpr-legacy-#{period.id}")
     expect(resolver.matches_saved_evidence?(legacy)).to be(true)
     expect(legacy).to eq(retained)
     legacy["target"].delete("withholding_tax")

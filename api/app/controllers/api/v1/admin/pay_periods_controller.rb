@@ -15,7 +15,7 @@ module Api
                       :create_correction_run, :reopen_unpaid, :refresh_setup, :generate_fit_check,
                       :corrective_paychecks, :adopt_confirmed_workweek, :connect_corrected_hours
         before_action :set_pay_period, only: [
-          :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit, :retry_tax_sync,
+          :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit,
           :promoted_payment_preview, :prepare_promoted_payment,
           :correct_pay_date, :void, :create_correction_run, :reopen_unpaid, :refresh_setup, :correction_preflight, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
@@ -1041,23 +1041,6 @@ module Api
                  status: :unprocessable_entity
         end
 
-        # POST /api/v1/admin/pay_periods/:id/retry_tax_sync
-        def retry_tax_sync
-          unless PayrollTaxSyncService.configured?
-            @pay_period.update!(@pay_period.tax_sync_disabled_attributes)
-            return render json: { error: "Tax sync is not configured" }, status: :unprocessable_entity
-          end
-
-          unless @pay_period.can_retry_sync?
-            return render json: { error: "Tax sync cannot be retried for this pay period" }, status: :unprocessable_entity
-          end
-
-          @pay_period.update!(tax_sync_status: "pending", tax_sync_last_error: nil)
-          PayrollTaxSyncJob.perform_later(@pay_period.id)
-
-          render json: { pay_period: pay_period_json(@pay_period) }
-        end
-
         private
 
         # Both full-run calculation paths use this decision under the financial
@@ -1452,10 +1435,6 @@ module Api
             committed_by_id: pay_period.committed_by_id,
             processed_at: pay_period.committed_at,
             processed_by_name: lifecycle.dig(:committed, :actor_name),
-            tax_sync_status: tax_sync_visible? ? pay_period.tax_sync_status : nil,
-            tax_sync_attempts: tax_sync_visible? ? pay_period.tax_sync_attempts : 0,
-            tax_sync_last_error: tax_sync_visible? ? pay_period.tax_sync_last_error : nil,
-            tax_synced_at: tax_sync_visible? ? pay_period.tax_synced_at : nil,
             lifecycle: lifecycle,
             ineligible_workers: list ? nil : PayrollRunEligibility.new(pay_period).payload,
             expected_entries: list ? nil : PayrollExpectedEntries.new(pay_period).payload,
@@ -1812,7 +1791,6 @@ module Api
             status:            supplemental.status,
             cycle:             supplemental.cycle,
             notes:             supplemental.notes,
-            tax_sync_status:   tax_sync_visible? ? supplemental.tax_sync_status : nil,
             payroll_items: items.map do |item|
               {
                 id:                              item.id,
@@ -1927,10 +1905,6 @@ module Api
           }
         end
 
-        def tax_sync_visible?
-          PayrollTaxSyncService.configured?
-        end
-
         def pay_period_lifecycle_summary(pay_period)
           logs = pay_period_audit_logs(pay_period)
 
@@ -1966,8 +1940,7 @@ module Api
               "pay_periods#commit",
               timestamp: pay_period.committed_at,
               user_id: pay_period.committed_by_id
-            ),
-            tax_synced: tax_sync_visible? ? lifecycle_event_json(timestamp: pay_period.tax_synced_at) : nil
+            )
           }.compact
         end
 

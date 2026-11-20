@@ -621,7 +621,6 @@ export interface EmployeeFormData {
 // ----------------
 
 export type PayPeriodStatus = 'draft' | 'calculated' | 'approved' | 'committed' | 'retired_history';
-export type TaxSyncStatus = 'pending' | 'syncing' | 'synced' | 'failed';
 export type PayRunPurpose = 'regular' | 'off_cycle_tips' | 'bonus' | 'commission' | 'correction' | 'final' | 'adjustment';
 
 // CPR-71: Payroll correction lifecycle
@@ -1388,14 +1387,8 @@ export interface PayPeriod {
     approved?: PayPeriodLifecycleEvent;
     unapproved?: PayPeriodLifecycleEvent;
     committed?: PayPeriodLifecycleEvent;
-    tax_synced?: PayPeriodLifecycleEvent;
   };
   pay_date_corrections?: PayDateCorrection[];
-  // Tax sync fields (CPR-53)
-  tax_sync_status?: TaxSyncStatus | null;
-  tax_sync_attempts?: number;
-  tax_sync_last_error?: string | null;
-  tax_synced_at?: string | null;
   // CPR-71: correction lifecycle fields
   source_correction_required?: boolean;
   correction_status?: CorrectionStatus | null;
@@ -1875,7 +1868,6 @@ export interface SupplementalPayPeriodSummary {
   status: PayPeriodStatus;
   cycle: 'supplemental';
   notes: string | null;
-  tax_sync_status: TaxSyncStatus | null;
   payroll_items: Array<{
     id: number;
     employee_id: number;

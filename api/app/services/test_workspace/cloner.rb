@@ -120,7 +120,7 @@ module TestWorkspace
         approved_at: source.approved_at || source.committed_at,
         committed_by_id: nil,
         committed_at: nil,
-        tax_sync_status: "pending",
+        tax_sync_status: nil,
         tax_sync_attempts: 0,
         tax_sync_last_error: nil,
         tax_synced_at: nil,

@@ -79,10 +79,6 @@ class ReversePaycheckService
         AuditLog.record!(user: actor, company_id: company.id, action: "payroll_item#reversed",
           record_type: "PayrollItem", record_id: item.id, subject_name: item.employee_full_name,
           metadata: { reason: reason, pay_period_id: period.id, gross_pay: item.gross_pay, net_pay: item.net_pay })
-        if period.prepare_tax_sync_if_configured!
-          period.update!(tax_sync_idempotency_key: "cpr-#{period.id}-paycheck-reversal-#{SecureRandom.uuid}")
-          ActiveRecord.after_all_transactions_commit { PayrollTaxSyncJob.perform_later(period.id) }
-        end
         item
       end
     end

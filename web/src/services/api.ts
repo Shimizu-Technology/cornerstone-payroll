@@ -1589,8 +1589,6 @@ export const payPeriodsApi = {
         noop: boolean;
       };
     }>(`/admin/pay_periods/${id}/correct_pay_date`, data),
-  retryTaxSync: (id: number) =>
-    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/retry_tax_sync`),
   generateFitCheck: (id: number) =>
     api.post<{ message: string; check_id: number }>(`/admin/pay_periods/${id}/generate_fit_check`),
   // Either file can be sent alone; the current package keeps the other one.
