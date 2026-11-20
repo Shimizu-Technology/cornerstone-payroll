@@ -10,7 +10,7 @@ export function mountFilingEvidenceHarness() {
     reads[agency!] = (reads[agency!] || 0) + 1;
     return {
       filing: records[agency!] || null,
-      downloads: [{ id: reads[agency!] > 1 ? 94 : 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana Example', sha256: 'b'.repeat(64), current: true }, { id: 90, created_at: '2026-11-19T01:00:00Z', actor_name: 'Dana Example', sha256: 'c'.repeat(64), current: false }],
+      downloads: [{ id: reads[agency!] > 1 ? 94 : 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana Example', file_digest: 'b'.repeat(64), current: true }, { id: 90, created_at: '2026-11-19T01:00:00Z', actor_name: 'Dana Example', file_digest: 'c'.repeat(64), current: false }],
     };
   };
   reportsApi.recordPayrollFilingEvent = async (data) => {
@@ -32,7 +32,7 @@ export function mountFilingEvidenceHarness() {
         preparer_name: String(data.get('preparer_name')), signer_name: null, signer_title: null, notes: String(data.get('notes')),
         source_fingerprint: 'a'.repeat(64), recorded_by: 'Dana Example', evidence_document: null,
         download_audit_id: type === 'submitted' || type === 'resubmitted' ? Number(data.get('download_audit_id')) : null,
-        file_sha256: type === 'submitted' || type === 'resubmitted' ? 'b'.repeat(64) : null,
+        file_digest: type === 'submitted' || type === 'resubmitted' ? 'b'.repeat(64) : null,
       }],
     } as PayrollFilingRecord;
     records[agency] = record;
@@ -48,5 +48,5 @@ export function mountConnectedFilingEvidenceHarness(companyId: number) {
   const container = document.createElement('main');
   Object.assign(container.style, { position: 'fixed', inset: '0', zIndex: '200', overflow: 'auto', background: 'white', padding: '16px' });
   document.body.appendChild(container);
-  createRoot(container).render(<><h1>File and confirm · Fictional client (local API)</h1>{['ssa', 'drt'].map((agency) => <section key={agency} data-agency={agency}><FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} companyId={companyId} agency={agency} preparationReady readinessMessage="Ready" /></section>)}</>);
+  createRoot(container).render(<><h1>File and confirm · Fictional client (local API)</h1>{['ssa', 'drt'].map((agency) => <section key={agency} data-agency={agency}><FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} companyId={companyId} agency={agency} preparationReady readinessMessage="Ready" /></section>)}<section data-agency="1099"><FilingEvidencePanel filingType="form_1099_nec" taxYear={2026} companyId={companyId} agency="drt" preparationReady readinessMessage="Ready" /></section></>);
 }

@@ -2729,7 +2729,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_150000) do
     t.string "to_status", null: false
     t.datetime "updated_at", null: false
     t.bigint "download_audit_id"
-    t.string "file_sha256"
+    t.string "file_digest"
     t.index [ "company_id", "idempotency_key" ], name: "idx_payroll_filing_events_idempotency", unique: true
     t.index [ "company_id" ], name: "index_payroll_filing_events_on_company_id"
     t.index [ "download_audit_id" ], name: "index_payroll_filing_events_on_download_audit_id"

@@ -174,7 +174,7 @@ describe('Year-end checklist', () => {
     vi.spyOn(yearEnd, 'parseYearEndTaxYear').mockReturnValue(year);
     mocks.checklist.mockResolvedValue(checklist([], { tax_year: year, files_w2: true, files_1099: false }));
     renderPage(year);
-    await screen.findByText('9. File and confirm');
+    await screen.findByText('1. File and confirm');
     await waitFor(() => expect(mocks.filingRecord).toHaveBeenCalledTimes(year < 2026 ? 1 : 2));
     expect(screen.getAllByText('No agency submission recorded.')).toHaveLength(year < 2026 ? 1 : 2);
     if (year < 2026) {
@@ -185,6 +185,13 @@ describe('Year-end checklist', () => {
       expect(mocks.filingRecord).toHaveBeenCalledWith('w2_gu_w3_ss', 2026, undefined, 7, 'ssa');
       expect(mocks.filingRecord).toHaveBeenCalledWith('w2_gu_w3_ss', 2026, undefined, 7, 'drt');
     }
+  });
+
+  it('numbers filing confirmation after every preparation step, including 1099s', async () => {
+    const steps = [...working(), step('form_1099_ready', 8, 'Mark the 1099s ready', 'waiting'), printAndFile(false)];
+    mocks.checklist.mockResolvedValue(checklist(steps));
+    renderPage();
+    expect(await screen.findByText(`${steps.length + 1}. File and confirm`)).toBeTruthy();
   });
 
   it('asks who files first and locks the later steps', async () => {

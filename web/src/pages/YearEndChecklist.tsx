@@ -226,7 +226,7 @@ export function YearEndChecklist(): ReactElement {
             {(checklist.files_w2 || checklist.files_1099) && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">9. File and confirm</CardTitle>
+                  <CardTitle className="text-base">{checklist.steps.length + 1}. File and confirm</CardTitle>
                   <CardDescription>After you file outside the app, keep the receipt and the agency's result here.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
