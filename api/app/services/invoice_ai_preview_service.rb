@@ -93,9 +93,11 @@ class InvoiceAiPreviewService
         "email_body": string or null,
         "line_items": [
           {
+            "item_name": string,
+            "line_kind": "service_fee" or "reimbursement",
             "description": string,
             "quantity": number,
-            "rate": number,
+            "rate": number or null,
             "service_date": "YYYY-MM-DD" or null
           }
         ]
@@ -107,7 +109,7 @@ class InvoiceAiPreviewService
       If the staff asks what clients, customers, or bill-to profiles are saved, answer using only the active invoice recipients, not billing profiles.
       If the staff asks for a bill-to recipient that is not in the recipient list and gives at least the recipient name, set invoice_recipient_id to null and fill new_recipient. Email and billing address are helpful but optional.
       If the bill-to recipient is unclear, set invoice_recipient_id and new_recipient to null and ask a clarification question.
-      Use numeric quantity and rate values. Do not include currency symbols in numeric fields.
+      Use numeric quantity and rate values. Do not include currency symbols in numeric fields. Leave an unspecified rate null so customer defaults can apply; preserve an explicitly entered zero. Classify reimbursements as reimbursement and preserve product or service names separately from descriptions.
       Only include payment_terms when the staff explicitly asks for terms or the current preview already has terms they did not ask to remove.
       If the staff is modifying an existing preview, preserve fields they did not ask to change.
       For hourly invoices, use quantity as hours and rate as the hourly rate. If an attachment shows total hours and total/net pay, derive the rate from total divided by hours when no explicit rate is supplied.
@@ -389,6 +391,8 @@ class InvoiceAiPreviewService
     return nil if description.blank? || quantity <= 0 || (rate && rate.negative?)
 
     {
+      "item_name" => item["item_name"].to_s.strip,
+      "line_kind" => item["line_kind"].presence || "service_fee",
       "description" => description,
       "quantity" => quantity.to_f,
       "rate" => rate&.to_f,

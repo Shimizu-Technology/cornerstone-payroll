@@ -5373,9 +5373,11 @@ export interface InvoiceAiPreview {
   email_subject?: string | null;
   email_body?: string | null;
   line_items?: Array<{
+    item_name?: string;
+    line_kind?: 'service_fee' | 'reimbursement';
     description: string;
     quantity: number;
-    rate: number;
+    rate?: number | null;
     service_date?: string | null;
   }>;
 }

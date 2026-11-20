@@ -77,6 +77,43 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(invoice.snapshot.fetch("line_items").first.fetch("item_name")).to eq("Accounting Consulting")
   end
 
+  [ nil, 0 ].each do |rate|
+    it "requires reimbursement review through the API for #{rate.inspect}, then issues an entered positive amount" do
+      recipient.update!(default_rate: 3000)
+      post "/api/v1/admin/invoices", params: { invoice: {
+        invoice_billing_profile_id: profile.id, invoice_recipient_id: recipient.id, invoice_date: "2026-11-02",
+        line_items: [ { item_name: "Reimbursement", line_kind: "reimbursement", description: "Tax payment", quantity: 1 }.tap { |line| line[:rate] = rate unless rate.nil? } ]
+      } }, as: :json
+      expect(response).to have_http_status(:created), response.body
+      invoice = Invoice.find(response.parsed_body.dig("invoice", "id"))
+      expect(invoice.line_items.sole).to have_attributes(rate: 0.to_d, reimbursement_review_required: true)
+      post "/api/v1/admin/invoices/#{invoice.id}/issue"
+      expect(response).to have_http_status(:unprocessable_entity), response.body
+      expect(invoice.reload).to be_draft
+      expect(invoice.artifacts).to be_empty
+      line = invoice.line_items.sole
+      patch "/api/v1/admin/invoices/#{invoice.id}", params: { invoice: {
+        line_items: [ { id: line.id, item_name: line.item_name, line_kind: line.line_kind, description: line.description, quantity: 1, rate: 125 } ]
+      } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      post "/api/v1/admin/invoices/#{invoice.id}/issue"
+      expect(response).to have_http_status(:ok), response.body
+      expect(invoice.reload).to have_attributes(status: "open", total_amount: 125.to_d)
+    end
+  end
+
+  it "returns a validation response when continuing-number issue races with a manually held number" do
+    profile.update!(numbering_style: "continuing", next_invoice_number: 7055)
+    invoice = create_draft(invoice_number: nil)
+    allow(InvoiceNumberAllocator).to receive(:call).and_raise(ActiveRecord::RecordNotUnique)
+    post "/api/v1/admin/invoices/#{invoice.id}/issue"
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("errors")).to eq([ "Invoice number has already been taken" ])
+    expect(invoice.reload).to be_draft
+    expect(invoice.artifacts).to be_empty
+    expect(profile.reload.next_invoice_number).to eq(7055)
+  end
+
   it "requires separate operator reasons for void and uncollectible actions" do
     invoice = create_draft
     invoice.issue!(actor: admin_user)

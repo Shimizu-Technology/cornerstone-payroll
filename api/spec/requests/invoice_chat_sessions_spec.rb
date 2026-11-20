@@ -59,6 +59,33 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
     expect(session.messages.last.content).not_to include("DRAFT-")
   end
 
+  [ nil, 0, 125 ].each do |rate|
+    it "preserves normalized AI reimbursement classification and reviews its #{rate.inspect} amount before issue" do
+      recipient = create(:invoice_recipient, company: company, default_rate: 3000)
+      session = create(:invoice_chat_session, company: company, created_by: admin_user)
+      raw_preview = { "status" => "preview", "invoice_recipient_id" => recipient.id, "invoice_date" => "2026-11-02",
+                      "line_items" => [ { "item_name" => "Reimbursement", "line_kind" => "reimbursement", "description" => "Tax payment", "quantity" => 1, "rate" => rate } ] }
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return("test-key")
+      allow(HTTParty).to receive(:post).and_return(double("AI response", success?: true, dig: raw_preview.to_json))
+      post "/api/v1/admin/invoice_chat_sessions/#{session.id}/message", params: { content: "Prepare tax reimbursement" }
+      expect(response).to have_http_status(:ok), response.body
+      expect(session.reload.current_preview.fetch("line_items").sole).to include("item_name" => "Reimbursement", "line_kind" => "reimbursement", "rate" => rate)
+      post "/api/v1/admin/invoice_chat_sessions/#{session.id}/confirm"
+      expect(response).to have_http_status(:created), response.body
+      invoice = Invoice.find(response.parsed_body.dig("invoice", "id"))
+      expect(invoice.line_items.sole).to have_attributes(item_name: "Reimbursement", line_kind: "reimbursement", rate: (rate || 0).to_d,
+                                                       reimbursement_review_required: !rate.to_i.positive?)
+      if rate.to_i.positive?
+        invoice.issue!(actor: admin_user)
+        expect(invoice.reload).to be_open
+      else
+        expect { invoice.issue!(actor: admin_user) }.to raise_error(ActiveRecord::RecordInvalid, /reimbursement/)
+        expect(invoice.reload).to be_draft
+      end
+    end
+  end
+
   describe "POST /api/v1/admin/invoice_chat_sessions/:id/message" do
     it "stores the user message, AI response, and structured preview" do
       recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")

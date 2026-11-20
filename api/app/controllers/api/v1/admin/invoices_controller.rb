@@ -103,6 +103,8 @@ module Api
           }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         rescue R2StorageService::UploadError, R2StorageService::DownloadError, Prawn::Errors::CannotFit => e
           Rails.logger.warn("Invoice issue failed: #{e.class}: #{e.message}")
           render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity

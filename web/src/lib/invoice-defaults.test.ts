@@ -36,3 +36,26 @@ it('allows recovery from an empty invoice date and does not invent dates for cus
   expect(invoiceDraftDueDate({ invoice_date: '', payment_terms: 'Net 15', due_date: '' }).due_date).toBe('');
   expect(invoiceDraftDueDate({ invoice_date: '2026-12-02', payment_terms: 'See contract', due_date: '' }).due_date).toBe('');
 });
+
+it('changes only the first active service fee on a restored draft, leaving reimbursements and extra fee defaults alone', () => {
+  const restored = { payment_terms: 'Net 15', line_items: [
+    { line_kind: 'service_fee', rate: 0, _destroy: true },
+    { line_kind: 'reimbursement', rate: 0 },
+    { line_kind: 'service_fee', rate: 0 },
+    { line_kind: 'service_fee', rate: 80, customerDefaultRate: true },
+    { line_kind: 'reimbursement', rate: 125, customerDefaultRate: true },
+  ] };
+  const changed = customerDefaults(restored, { default_rate: 3000 });
+  expect(changed.line_items.map((line) => line.rate)).toEqual([0, 0, 3000, 80, 125]);
+  expect(customerDefaults(changed, { default_rate: 700 }).line_items.map((line) => line.rate)).toEqual([0, 0, 700, 80, 125]);
+});
+it('preserves explicit first-fee rates and never moves the monthly fee to a later line', () => {
+  for (const rate of [0, 275]) {
+    const changed = customerDefaults({ payment_terms: '', line_items: [
+      { line_kind: 'service_fee', rate, customerDefaultRate: false },
+      { line_kind: 'service_fee', rate: 0, customerDefaultRate: true },
+      { line_kind: 'reimbursement', rate: 0 },
+    ] }, { default_rate: 3000 });
+    expect(changed.line_items.map((line) => line.rate)).toEqual([rate, 0, 0]);
+  }
+});

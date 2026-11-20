@@ -87,6 +87,40 @@ RSpec.describe "Practice billing" do
     expect(draft.line_items.first).to have_attributes(rate: 150.to_d, description: "Services May 2026")
   end
 
+  [
+    { reimbursement: 1000, fee: 300, discount: 400, expected: 300 },
+    { reimbursement: 0, fee: 100, discount: 200, expected: 100 },
+    { reimbursement: 1000, fee: 300, discount: 0, expected: 0 }
+  ].each do |scenario|
+    it "completes and advances recurring drafts with discount #{scenario[:discount]}, fee #{scenario[:fee]} and reimbursement #{scenario[:reimbursement]}" do
+      source = create(:invoice, :with_line_item)
+      source.invoice_billing_profile.update!(numbering_style: "continuing")
+      source.line_items.first.update!(quantity: 1, rate: 500)
+      if scenario[:reimbursement].positive?
+        source.line_items.create!(description: "Tax payment", quantity: 1, rate: scenario[:reimbursement], line_kind: "reimbursement", position: 1)
+      end
+      source.update!(discount_type: scenario[:discount].positive? ? "amount" : "none", discount_value: scenario[:discount])
+      source.issue!(actor: nil)
+      source.invoice_recipient.update!(default_rate: scenario[:fee])
+      recurrence = InvoiceRecurrence.create!(organization: source.organization, finance_book: source.finance_book,
+        source_invoice: source, start_on: Date.new(2026, 6, 1), next_on: Date.new(2026, 6, 1),
+        interval_unit: "month", interval_count: 1, due_after_days: 15)
+      InvoiceRecurrenceGenerator.generate_due!(today: Date.new(2026, 6, 1))
+      draft = recurrence.generated_invoices.sole
+      expect(draft).to have_attributes(status: "draft", discount_value: scenario[:expected].to_d, total_amount: (scenario[:fee] - scenario[:expected]).to_d)
+      expect(recurrence.reload.next_on).to eq(Date.new(2026, 7, 1))
+      if scenario[:discount].positive?
+        expect(draft.notes).to include("Review recurring discount", "capped")
+        expect(draft.events.find_by!(event_type: "recurring_discount_capped").metadata).to include(
+          "original_discount" => scenario[:discount].to_d.to_s("F"), "capped_discount" => scenario[:expected].to_d.to_s("F"))
+      else
+        expect(draft.events.where(event_type: "recurring_discount_capped")).to be_empty
+        expect(draft.notes).to eq(source.notes)
+      end
+      expect { InvoiceRecurrenceGenerator.generate_due!(today: Date.new(2026, 6, 1)) }.not_to change(Invoice, :count)
+    end
+  end
+
   it "groups discounted issued fees by client and service month with explicit legacy boundaries" do
     invoice = create(:invoice, :with_line_item, discount_type: "amount", discount_value: 40)
     invoice.line_items.create!(description: "Taxes", quantity: 1, rate: 100, line_kind: "reimbursement", position: 1)
@@ -97,7 +131,9 @@ RSpec.describe "Practice billing" do
       invoice_billing_profile: invoice.invoice_billing_profile, invoice_recipient: invoice.invoice_recipient,
       company: nil, origin: "imported", total_amount: 200)
     imported.update_columns(status: "open")
-    rows = InvoiceServiceFeeRevenue.call(finance_book: invoice.finance_book)
+    expect(InvoiceServiceFeeRevenue.call(finance_book: invoice.finance_book, service_month_from: Date.new(2026, 6, 1))).to be_empty
+    expect(InvoiceServiceFeeRevenue.call(finance_book: invoice.finance_book, service_month_through: Date.new(2026, 4, 1))).to be_empty
+    rows = InvoiceServiceFeeRevenue.call(finance_book: invoice.finance_book, service_month_from: Date.new(2026, 5, 15), service_month_through: Date.new(2026, 5, 15))
     expect(rows).to include(company_id: invoice.company_id, service_month: Date.new(2026, 5, 1), amount: 270.to_d)
     expect(rows).to include(company_id: nil, service_month: Date.new(2026, 5, 1), amount: 0.to_d)
     invoice.void!(actor: nil, reason: "Test replacement")

@@ -31,6 +31,7 @@ RSpec.describe InvoicePdfGenerator do
     invoice.line_items.create!(item_name: "Reimbursement", description: "Payment of Social Security and Medicare", quantity: 1, rate: 125, position: 1, line_kind: "reimbursement")
     text = reader_for(invoice).pages.map(&:text).join("\n")
     expect(text).to include("Product or service", "Description", "Qty", "Rate", "Amount", "Accounting Consulting", "Reimbursement", "Draft")
+    expect(reader_for(invoice).pages.first.runs.map(&:text)).to include("#", "1")
     expect(text).not_to include("DRAFT-", "Pass-through")
   end
 

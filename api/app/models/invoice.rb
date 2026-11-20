@@ -229,7 +229,7 @@ class Invoice < ApplicationRecord
 
   def validate_reimbursement_review!
     return unless line_items.reject(&:marked_for_destruction?).any? do |line|
-      line.line_kind == "reimbursement" && line.reimbursement_review_required? && line.amount.zero?
+      line.line_kind == "reimbursement" && line.amount.zero?
     end
 
     errors.add(:line_items, "set this month's reimbursement amount or remove the line before issuing")
