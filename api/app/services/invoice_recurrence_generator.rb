@@ -2,7 +2,7 @@
 
 class InvoiceRecurrenceGenerator
   def self.generate_due!(today: nil)
-    InvoiceRecurrence.where(active: true).where("next_on <= ?", today || Date.current + 1).order(:id).pluck(:id).each do |id|
+    InvoiceRecurrence.where(active: true).where("next_on <= ?", today || PayrollBusinessClock.today + 1).order(:id).pluck(:id).each do |id|
       begin
         120.times { break unless generate!(id, today: today) }
       rescue StandardError => e
