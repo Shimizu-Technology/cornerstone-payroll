@@ -63,7 +63,7 @@ module Api
             raise ArgumentError, "Issued invoice financial content is immutable" unless @invoice.draft?
 
             @invoice.assign_attributes(invoice_attributes)
-            @invoice.company = optional_source_company if params.dig(:invoice, :company_id).present?
+            @invoice.company = optional_source_company if params[:invoice].key?(:company_id)
             @invoice.updated_by = current_user
             assign_line_items!(@invoice)
             @invoice.save!
@@ -103,6 +103,8 @@ module Api
           }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         rescue R2StorageService::UploadError, R2StorageService::DownloadError, Prawn::Errors::CannotFit => e
           Rails.logger.warn("Invoice issue failed: #{e.class}: #{e.message}")
           render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
@@ -144,7 +146,7 @@ module Api
           when "voided"
             @invoice.void!(actor: current_user, reason: params[:reason])
           when "uncollectible"
-            @invoice.mark_uncollectible!(actor: current_user, reason: params[:reason].presence || "Marked uncollectible by operator")
+            @invoice.mark_uncollectible!(actor: current_user, reason: params[:reason])
           when "archived"
             @invoice.archive!(actor: current_user)
           when "restored"
@@ -158,6 +160,8 @@ module Api
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         rescue R2StorageService::UploadError, R2StorageService::DownloadError, Prawn::Errors::CannotFit
           render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
         end
@@ -184,6 +188,8 @@ module Api
           send_artifact(artifact, disposition: "attachment")
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         rescue R2StorageService::UploadError, R2StorageService::DownloadError, Prawn::Errors::CannotFit => e
           Rails.logger.warn("Invoice PDF generation failed: #{e.class}: #{e.message}")
           render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
@@ -261,7 +267,7 @@ module Api
           Invoice
             .where(finance_book_id: current_finance_book.id)
             .includes(
-              :invoice_recipient, :invoice_billing_profile, :line_items, :created_by, :updated_by,
+              :invoice_recipient, :invoice_billing_profile, :company, :line_items, :created_by, :updated_by,
               :artifacts, :events, :deliveries,
               payments: [ :recorded_by, :reversed_by ],
               credit_notes: [ :issued_by, :voided_by ]
@@ -282,10 +288,12 @@ module Api
             :invoice_number,
             :invoice_date,
             :due_date,
+            :due_date_manual,
             :currency,
             :customer_reference,
             :service_period_start,
             :service_period_end,
+            :service_period_manual,
             :notes,
             :payment_terms,
             :email_subject,
@@ -329,7 +337,7 @@ module Api
           Array(params.dig(:invoice, :line_items)).map do |item|
             item_hash = item.respond_to?(:to_unsafe_h) ? item.to_unsafe_h : item
             ActionController::Parameters.new(item_hash).permit(
-              :id, :description, :quantity, :rate, :service_date, :position, :_destroy
+              :id, :line_kind, :item_name, :description_template, :description, :quantity, :rate, :service_date, :position, :_destroy
             )
           end
         end
@@ -349,9 +357,12 @@ module Api
             item = attrs[:id].present? ? existing_by_id[attrs[:id].to_s] : nil
             item ||= invoice.line_items.build
             item.assign_attributes(
+              line_kind: attrs[:line_kind].presence || "service_fee",
+              item_name: attrs[:item_name].to_s,
+              description_template: attrs[:description_template],
               description: attrs[:description],
               quantity: attrs[:quantity].presence || 0,
-              rate: attrs[:rate].presence || 0,
+              rate: attrs[:rate].presence,
               service_date: attrs[:service_date].presence,
               position: attrs[:position].presence || index
             )

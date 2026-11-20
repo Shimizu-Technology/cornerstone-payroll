@@ -11,6 +11,10 @@ class InvoiceBillingProfile < ApplicationRecord
   before_save :clear_other_defaults, if: :is_default?
   include FinanceBookOwned
 
+  validates :numbering_style, inclusion: { in: %w[yearly continuing] }
+  validates :next_invoice_number, numericality: { only_integer: true, greater_than: 0 }
+  validate :valid_service_catalog
+
   validates :name, presence: true, uniqueness: { scope: :finance_book_id }
   validates :invoice_prefix, length: { maximum: 16 }, allow_blank: true
   validates :logo_content_type, inclusion: { in: InvoiceLogoStorageService::CONTENT_TYPES }, allow_nil: true
@@ -74,6 +78,15 @@ class InvoiceBillingProfile < ApplicationRecord
   end
 
   private
+
+  def valid_service_catalog
+    valid = service_catalog.is_a?(Array) && service_catalog.size <= 50 && service_catalog.all? do |entry|
+      entry.is_a?(Hash) && entry["name"].is_a?(String) && entry["name"].present? &&
+        entry["description_template"].is_a?(String) && entry["description_template"].present? &&
+        entry["line_kind"].in?(%w[service_fee reimbursement])
+    end
+    errors.add(:service_catalog, "must contain up to 50 named services with a description template and valid line kind") unless valid
+  end
 
   def logo_fields_are_complete
     fields = [ logo_storage_key, logo_content_type, logo_sha256, logo_byte_size ]

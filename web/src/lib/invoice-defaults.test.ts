@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { customerDefaults, invoiceBusinessDate, invoiceIsOverdue } from './invoice-defaults';
+import { customerDefaults, invoiceBusinessDate, invoiceIsOverdue, invoiceDraftDueDate } from './invoice-defaults';
 
 it('uses Guam date across the UTC midnight boundary', () => {
   expect(invoiceBusinessDate(new Date('2026-11-20T15:00:00Z'))).toBe('2026-11-21');
@@ -21,4 +21,41 @@ it('replaces inherited defaults when switching clients, preserving manually edit
   expect(second).toMatchObject({ payment_terms: 'Net 15', line_items: [{ rate: 125 }] });
   const edited = customerDefaults({ ...second, customerDefaultTerms: false, payment_terms: 'Custom', line_items: [{ rate: 0, customerDefaultRate: false }] }, { payment_terms: 'Net 30', default_rate: 700 });
   expect(edited).toMatchObject({ payment_terms: 'Custom', line_items: [{ rate: 0 }] });
+});
+
+it('recomputes automatic draft due dates from terms and invoice dates across months', () => {
+  const draft = { invoice_date: '2026-12-20', payment_terms: 'Net 15', due_date: '2026-11-17', due_date_manual: false };
+  expect(invoiceDraftDueDate(draft).due_date).toBe('2027-01-04');
+  expect(invoiceDraftDueDate({ ...draft, payment_terms: ' Net 30 ' }).due_date).toBe('2027-01-19');
+  expect(invoiceDraftDueDate({ ...draft, payment_terms: 'Due on receipt' }).due_date).toBe('2026-12-20');
+});
+it('preserves a manually selected due date when terms or invoice date change', () => {
+  expect(invoiceDraftDueDate({ invoice_date: '2026-12-02', payment_terms: 'Net 30', due_date: '2027-02-01', due_date_manual: true }).due_date).toBe('2027-02-01');
+});
+it('allows recovery from an empty invoice date and does not invent dates for custom terms', () => {
+  expect(invoiceDraftDueDate({ invoice_date: '', payment_terms: 'Net 15', due_date: '' }).due_date).toBe('');
+  expect(invoiceDraftDueDate({ invoice_date: '2026-12-02', payment_terms: 'See contract', due_date: '' }).due_date).toBe('');
+});
+
+it('changes only the first active service fee on a restored draft, leaving reimbursements and extra fee defaults alone', () => {
+  const restored = { payment_terms: 'Net 15', line_items: [
+    { line_kind: 'service_fee', rate: 0, _destroy: true },
+    { line_kind: 'reimbursement', rate: 0 },
+    { line_kind: 'service_fee', rate: 0 },
+    { line_kind: 'service_fee', rate: 80, customerDefaultRate: true },
+    { line_kind: 'reimbursement', rate: 125, customerDefaultRate: true },
+  ] };
+  const changed = customerDefaults(restored, { default_rate: 3000 });
+  expect(changed.line_items.map((line) => line.rate)).toEqual([0, 0, 3000, 80, 125]);
+  expect(customerDefaults(changed, { default_rate: 700 }).line_items.map((line) => line.rate)).toEqual([0, 0, 700, 80, 125]);
+});
+it('preserves explicit first-fee rates and never moves the monthly fee to a later line', () => {
+  for (const rate of [0, 275]) {
+    const changed = customerDefaults({ payment_terms: '', line_items: [
+      { line_kind: 'service_fee', rate, customerDefaultRate: false },
+      { line_kind: 'service_fee', rate: 0, customerDefaultRate: true },
+      { line_kind: 'reimbursement', rate: 0 },
+    ] }, { default_rate: 3000 });
+    expect(changed.line_items.map((line) => line.rate)).toEqual([rate, 0, 0]);
+  }
 });
