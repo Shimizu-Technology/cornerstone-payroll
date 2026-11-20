@@ -113,6 +113,7 @@ module Api
           params.require(:employee).permit(
             :first_name,
             :middle_name,
+            :name_suffix,
             :last_name,
             :job_title,
             :email,

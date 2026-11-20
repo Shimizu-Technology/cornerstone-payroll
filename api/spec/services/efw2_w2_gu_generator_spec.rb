@@ -45,6 +45,52 @@ RSpec.describe Efw2W2GuGenerator do
     expect(fresh.problems.join).not_to include("duplicate SSN")
   end
 
+  it "uses case-insensitive IANA TLDs for both filing email fields" do
+    %w[filing@example.com filing@example.COM filing@agency.gu filing@example.co.uk filing@example.technology].each do |email|
+      company.email = email
+      submitter.contact_email = email
+      expect(generator.problems.grep(/email/)).to be_empty
+    end
+    %w[filing@example.con filing@example.guam].each do |email|
+      company.email = email
+      submitter.contact_email = email
+      expect(generator.structured_problems).to include(
+        hash_including(scope: :employer, employee_id: nil, message: /email/),
+        hash_including(scope: :submitter, employee_id: nil, message: /email/)
+      )
+    end
+  end
+
+  it "rejects every over-width text field by name and accepts its exact cleaned width" do
+    groups = [
+      [ company, :employer, { name: 57, filing_contact_name: 27, establishment_number: 4, address_line1: 22, address_line2: 22, city: 22 } ],
+      [ submitter, :submitter, { name: 57, contact_name: 27, address_line1: 22, address_line2: 22, city: 22 } ],
+      [ employee, :employee, { first_name: 15, middle_name: 15, last_name: 20, name_suffix: 4, address_line1: 22, address_line2: 22, city: 22 } ]
+    ]
+    groups.each do |object, scope, widths|
+      widths.each do |field, width|
+        original = object.public_send(field)
+        object.update_columns(field => "A" * (width + 1))
+        fresh = described_class.new(company: company.reload, year: 2026, submitter: submitter.reload, report: report)
+        expect(fresh.structured_problems).to include(hash_including(scope: scope, employee_id: scope == :employee ? employee.id : nil, message: /#{field.to_s.humanize.downcase} exceeds the #{width}-character/))
+        expect { fresh.generate }.to raise_error(described_class::InvalidFile, /exceeds/)
+        object.update_columns(field => "A" * width)
+        fresh = described_class.new(company: company.reload, year: 2026, submitter: submitter.reload, report: report)
+        expect(fresh.problems.grep(/#{field.to_s.humanize.downcase} exceeds/)).to be_empty
+        object.update_columns(field => original)
+      end
+    end
+  end
+
+  it "keeps scope and employee identity independent of employee name prefixes" do
+    %w[Employer Submitter].each do |first_name|
+      employee.update_columns(first_name: first_name, last_name: "Jones", state: "ZZ")
+      fresh = described_class.new(company: company, year: 2026, submitter: nil, report: report)
+      expect(fresh.structured_problems).to include(hash_including(scope: :employee, employee_id: employee.id, message: /#{first_name}.*Jones.*valid US/))
+      expect(fresh.structured_problems).to all(include(:scope, :employee_id, :code, :message))
+    end
+  end
+
   # Independent positional reader: one-based inclusive fields, no generator map.
   def field(records, type, first, last)
     records.find { |r| r[0, 2] == type }.byteslice(first - 1, last - first + 1)

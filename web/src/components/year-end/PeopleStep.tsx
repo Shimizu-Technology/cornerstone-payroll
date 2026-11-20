@@ -276,7 +276,7 @@ export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
     <div className="space-y-5">
       {efileIssues.length > 0 && <ul className="space-y-2 text-sm">{efileIssues.map((issue, index) => <li key={`${issue.employee_id}-${index}`}>
         <p>{issue.message}</p>
-        {issue.employee_id && <Link to={`/companies/${checklist.company.id}/employees/${issue.employee_id}/edit?returnTo=${encodeURIComponent(returnTo)}`}>Edit employee</Link>}
+        {issue.employee_id && <Link to={employeeEditPath(checklist.company.id, issue.employee_id, { returnTo })}>Edit employee</Link>}
       </li>)}</ul>}
       <PeopleList title="Employees" people={employees} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
       <PeopleList title="1099 payees" people={contractors} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />

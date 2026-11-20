@@ -1931,6 +1931,7 @@ module Api
 
           company = Company.find(current_company_id)
           company.with_lock do
+            revalidate_current_company_write_access!(company: company, capability: pdf ? nil : :manage_client_administration)
             final = params[:mode] == "final"
             gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:filings, "w2_gu")
             decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")

@@ -41,3 +41,9 @@ All API commands used `RAILS_ENV=test TEST_DATABASE_URL=postgres://localhost:543
 - `bundle exec rubocop`: 1,925 files, no offenses.
 
 Subsequent CodeRabbit findings supplied by the lead are handled in the follow-up commit in this round; final gate results are recorded below.
+
+## Review fixes before #502 integration
+
+The review selection passed 116 API examples and 35 web tests. The corrected full web gate passed 207 files / 2,056 tests and build. A full API rerun was started, then intentionally stopped when the lead requested rebasing and integrating merged #502; that superseded run has no acceptance result. The final combined source is tested below.
+
+The IANA snapshot is vendored from https://data.iana.org/TLD/tlds-alpha-by-domain.txt (version in file header). `.con` and literal `.guam` are not delegated; `.gu`, `.com` (case-insensitive), `.co.uk`, and long delegated TLDs are accepted. There is no runtime DNS or network dependency. Scope, employee ID and stable codes now drive checklist classification/suppression. EfileCheck v2 invalidates entries computed before these validation fixes.

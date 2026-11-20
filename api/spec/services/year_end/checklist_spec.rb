@@ -76,6 +76,18 @@ RSpec.describe YearEnd::Checklist do
     expect(overview.call[:issue_count]).to eq(result[:issue_count])
   end
 
+  it "keeps employee e-file issues for people named Employer Jones and Submitter Jones" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    %w[Employer Submitter].each do |first_name|
+      employee.update!(first_name: first_name, last_name: "Jones", state: "ZZ")
+      result = checklist
+      expect(step(result, "people")[:issues]).to include(hash_including(code: "EMPLOYEE_EFILE_INVALID", employee_id: employee.id, message: /#{first_name}.*Jones/))
+      row = YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:clients].find { |entry| entry[:company_id] == company.id }
+      expect(row).to include(status: result[:status], issue_count: result[:issue_count])
+    end
+  end
+
   it "requires the filing decision before anything else" do
     pay(Date.new(2026, 3, 6))
 

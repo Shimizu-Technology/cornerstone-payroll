@@ -744,6 +744,8 @@ describe('Year-end checklist', () => {
     const region = await screen.findByRole('region', { name: /Employees and payees/ });
     expect(within(region).getByText(/Ana Cruz Jr./)).toBeTruthy();
     expect(within(region).getByRole('link', { name: 'Edit employee' }).getAttribute('href')).toContain('/companies/7/employees/12/edit');
+    const editUrl = new URL(within(region).getByRole('link', { name: 'Edit employee' }).getAttribute('href')!, 'http://localhost');
+    expect(editUrl.searchParams.get('return_to')).toBe('/companies/7/year-end?year=2026#step-people');
     expect(within(region).queryByText(/have what the forms need/)).toBeNull();
   });
 

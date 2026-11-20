@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { companiesApi } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,7 +37,10 @@ export function EmployerFilingSettings({
   });
   const [editable, setEditable] = useState<string[]>([]);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   async function edit() {
+    setError('');
     try {
       const r = await companiesApi.get(companyId, companyId);
       const c = r.company as typeof r.company & {
@@ -62,6 +65,10 @@ export function EmployerFilingSettings({
     }
   }
   async function save() {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError('');
     try {
       await companiesApi.update(
         companyId,
@@ -81,19 +88,23 @@ export function EmployerFilingSettings({
       setError(
         e instanceof Error ? e.message : 'Could not save filing settings.',
       );
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   }
   return (
     <div className="mt-4 space-y-3 border-t border-neutral-200 pt-3">
       <p className="text-sm">
         Kind of employer: {kinds[kind]}{' '}
-        <Button variant="ghost" size="sm" onClick={() => void edit()}>
+        <Button variant="ghost" size="sm" disabled={saving} onClick={() => void edit()}>
           Change
         </Button>
       </p>
       {open && (
         <form
           className="space-y-3"
+          onChange={() => setError('')}
           onSubmit={(e) => {
             e.preventDefault();
             void save();
@@ -101,7 +112,7 @@ export function EmployerFilingSettings({
         >
           <Select
             label="Kind of employer"
-            disabled={!editable.includes('kind_of_employer')}
+            disabled={saving || !editable.includes('kind_of_employer')}
             value={kind}
             onChange={(e) => setKind(e.target.value)}
           >
@@ -114,7 +125,7 @@ export function EmployerFilingSettings({
           <p className="text-xs text-neutral-600">Most private businesses: None apply.</p>
           <Select
             label="Employment code"
-            disabled={!editable.includes('employment_code')}
+            disabled={saving || !editable.includes('employment_code')}
             value={code}
             onChange={(e) => setCode(e.target.value)}
           >
@@ -127,7 +138,7 @@ export function EmployerFilingSettings({
           <p className="text-xs text-neutral-600">Most Guam businesses: Regular (Form 941).</p>
           <Input
             label="Establishment number (optional)"
-            disabled={!editable.includes('establishment_number')}
+            disabled={saving || !editable.includes('establishment_number')}
             maxLength={4}
             value={establishment}
             onChange={(e) => setEstablishment(e.target.value)}
@@ -141,15 +152,15 @@ export function EmployerFilingSettings({
             <Input
               key={key}
               label={label}
-              disabled={!editable.includes(key)}
+              disabled={saving || !editable.includes(key)}
               value={contact[key as keyof typeof contact]}
               onChange={(e) =>
                 setContact({ ...contact, [key]: e.target.value })
               }
             />
           ))}
-          <Button type="submit" disabled={editable.length === 0}>
-            Save filing settings
+          <Button type="submit" disabled={saving || editable.length === 0}>
+            {saving ? 'Saving…' : 'Save filing settings'}
           </Button>
         </form>
       )}

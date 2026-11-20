@@ -4,7 +4,7 @@ module YearEnd
   # Employee preflight results are expensive; reuse only at the exact input revision.
   module EfileCheck
     def self.key(company_id, year)
-      "year_end/efile_check/v1/#{company_id}/#{year}"
+      "year_end/efile_check/v2/#{company_id}/#{year}"
     end
 
     def self.record(company_id, year, revision, issues, sign_off_needed: nil)

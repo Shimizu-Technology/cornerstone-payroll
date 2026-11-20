@@ -90,16 +90,33 @@ module YearEnd
     def efw2_employer_issues
       return [] unless year == 2026 && files?("w2_gu")
 
-      Efw2Formatting.employer_problems(company).reject { |message| (company.ein.blank? && message.include?("EIN")) || (company.phone.blank? && message.include?("phone")) || (company.email.blank? && message.include?("email")) || (company.filing_contact_name.blank? && message.include?("contact name")) || ([ company.address_line1, company.city, company.state, company.zip ].any?(&:blank?) && (message.include?("street") || message.include?("ZIP"))) }.map { |message| issue("EMPLOYER_EFILE_INVALID", message, field: message.include?("EIN") ? "ein" : message.include?("ZIP") || message.include?("street") ? "address" : nil) }
+      Efw2Formatting.employer_problems(company, structured: true).reject do |problem|
+        case problem[:code]
+        when :ein_invalid then company.ein.blank?
+        when :phone_invalid then company.phone.blank?
+        when :email_invalid then company.email.blank?
+        when :contact_name_missing then company.filing_contact_name.blank?
+        when :address_missing, :address_invalid
+          [ company.address_line1, company.city, company.state, company.zip ].any?(&:blank?)
+        else false
+        end
+      end.map do |problem|
+        field = if problem[:code] == :ein_invalid
+          "ein"
+        elsif problem[:code].in?(%i[address_missing address_invalid state_invalid])
+          "address"
+        end
+        issue("EMPLOYER_EFILE_INVALID", problem[:message], field: field)
+      end
     end
 
     def efw2_people_issues
       missing = w2_employees.to_h { |employee| [ employee.id, person_row(employee, w2: true)&.fetch(:missing_fields, []) || [] ] }
       efw2_problems.filter_map do |problem|
         message = problem[:message]
-        next if message.start_with?("Employer", "Invalid employer")
+        next unless problem[:scope] == :employee
         fields = missing.fetch(problem[:employee_id], [])
-        next if (fields.include?("ssn") && message.include?("valid SSN required")) || (fields.include?("address") && (message.include?("street and city required") || message.include?("valid US/territory state and ZIP required")))
+        next if (fields.include?("ssn") && problem[:code] == :ssn_invalid) || (fields.include?("address") && problem[:code].in?(%i[address_missing address_invalid]))
 
         issue("EMPLOYEE_EFILE_INVALID", message, employee_id: problem[:employee_id])
       end
@@ -108,7 +125,7 @@ module YearEnd
     def efw2_problems
       return [] unless year == 2026 && files?("w2_gu") && w2_report
 
-      @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).structured_problems.reject { |problem| problem[:message].start_with?("Submitter", "Add the practice") }
+      @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).structured_problems.reject { |problem| problem[:scope] == :submitter }
     end
 
     private
