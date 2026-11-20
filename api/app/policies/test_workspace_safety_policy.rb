@@ -23,8 +23,9 @@ class TestWorkspaceSafetyPolicy
       start_quarterly_compliance_packet_workflow update_quarterly_compliance_packet_task
       quarterly_compliance_packet_official_form_download w2_gu_mark_ready w2_gu_efw2 w3ss_pdf form_1099_pub1220 form_1096_totals
       transmittal_log_pdf full_print_package_pdf check_signoff_sheet check_signoff_pdf
-      w2_gu_copy_1_drt
+      w2_gu_copy_1_drt form_1099_nec_payer_record
     ],
+    "api/v1/admin/year_end" => %w[form_1099_mark_ready],
     "api/v1/admin/payroll_filing_records" => %w[create_event],
     "api/v1/admin/invoices" => %w[create update destroy issue record_delivery import update_status generate_pdf],
     "api/v1/admin/invoice_payments" => %w[create reverse],

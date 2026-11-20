@@ -65,10 +65,10 @@ function DocumentRow({ document, companyId }: { document: YearEndDocument; compa
         </div>
         <p className="mt-1 text-sm text-neutral-800">{document.description}</p>
         <p className="mt-1 text-sm leading-6 text-neutral-600">{document.detail}</p>
-        {document.contains_full_ssn && (
+        {(document.contains_full_ssn || document.contains_full_tin) && (
           <p className="mt-2 flex gap-1.5 text-sm text-neutral-700">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" aria-hidden="true" />
-            Full SSNs{document.key === 'form_1099_pub1220' ? ' and EINs' : ''}. Keep the file and the printout somewhere secure.
+            {document.contains_full_tin ? 'Full TINs (SSNs and EINs).' : 'Full SSNs.'} Keep the file and the printout somewhere secure.
           </p>
         )}
         {!document.available && document.unavailable_reason && (

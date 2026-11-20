@@ -10,6 +10,7 @@ export type YearEndStepKey =
   | 'filing_decision'
   | 'employer'
   | 'people'
+  | 'form_1099_ready'
   | 'reconciliation'
   | 'review_warnings'
   | 'prior_provider'
@@ -56,6 +57,10 @@ export interface YearEndIssue {
   warning_code?: string;
   source?: string;
   quarter?: number | null;
+  /** A one-off 1099 payee's key: the row in the people step that fixes it. */
+  payee_key?: string;
+  /** Contractor records that share one TIN. */
+  employee_ids?: number[];
 }
 
 export interface YearEndDecision {
@@ -99,6 +104,49 @@ export interface YearEndOneOffPayee {
     acknowledged_by: { id: number | null; name: string; role: string };
   } | null;
   acknowledgement_stale: boolean;
+}
+
+/** A contractor record a one-off payee's checks can be linked to. */
+export interface YearEndLinkCandidate {
+  employee_id: number;
+  name: string;
+  business_name: string | null;
+  status: string;
+  tin_type: 'SSN' | 'EIN' | null;
+  tin_last4: string | null;
+  has_address: boolean;
+  /** Its name matches a one-off payee's exactly: suggested, never linked automatically. */
+  name_matches: boolean;
+}
+
+/** One-off checks already linked to a contractor, so a wrong link can be undone. */
+export interface YearEndLinkedChecks {
+  employee_id: number;
+  name: string | null;
+  total: number;
+  checks: Array<{ id: number; check_number: string | null; payable_to: string; payment_date: string | null; amount: number }>;
+}
+
+/** What "mark 1099s ready" signs off: what each 1099 will show. */
+export interface YearEnd1099Payee {
+  employee_id: number;
+  name: string;
+  tin_type: 'SSN' | 'EIN' | null;
+  tin_last4: string | null;
+  total_compensation: number;
+  linked_check_count: number;
+  edit_path: string;
+}
+
+export interface YearEnd1099Readiness {
+  tax_year: number;
+  status: 'draft' | 'filing_ready' | 'stale';
+  stale: boolean;
+  marked_ready_at: string | null;
+  marked_ready_by: string | null;
+  notes: string | null;
+  payee_count: number;
+  total_compensation: number;
 }
 
 export interface YearEndReconciliationQuarter {
@@ -194,6 +242,8 @@ export interface YearEndDocument {
   /** Explicit acknowledgement before downloading a test file. */
   draft_confirmation?: string | null;
   contains_full_ssn: boolean;
+  /** Full payee TINs (SSNs and EINs): the 1099 payer record. */
+  contains_full_tin?: boolean;
   /** Watermarked DRAFT: the W-2s are not marked ready on the current numbers. */
   draft: boolean;
   available: boolean;
@@ -243,9 +293,28 @@ export type YearEndStep =
       employees: YearEndPerson[];
       contractors: YearEndPerson[];
       one_off_payees: YearEndOneOffPayee[];
+      /** Contractor records that share one TIN (they would get two 1099s). */
+      duplicate_tins?: Array<Array<{ employee_id: number; name: string }>>;
+      link_candidates?: YearEndLinkCandidate[];
+      linked_checks?: YearEndLinkedChecks[];
       w2_employee_count: number;
       contractor_count: number;
       contractor_error: string | null;
+    }>
+  | StepBase<'form_1099_ready', {
+      readiness: YearEnd1099Readiness | null;
+      /** The inputs this page shows; mark ready is refused if they changed. */
+      inputs_fingerprint: string | null;
+      can_mark_ready: boolean;
+      /** Why this person or workspace can't mark ready, if so. */
+      unavailable_reason: string | null;
+      blockers: YearEndIssue[];
+      remaining_before_ready: number;
+      filing_threshold: number | null;
+      payee_count: number;
+      total_compensation: number;
+      no_1099_due_count: number;
+      payees: YearEnd1099Payee[];
     }>
   | StepBase<'reconciliation', YearEndReconciliation>
   | StepBase<'review_warnings', { warnings: YearEndWarning[] }>
@@ -270,6 +339,16 @@ export interface YearEndChecklist {
   files_1099: boolean;
   permissions: { can_record_decision: boolean; can_acknowledge: boolean; can_mark_ready: boolean };
   steps: YearEndStep[];
+}
+
+/** The element id of a one-off payee's row in the people step, for links that go straight to it. */
+export function oneOffPayeeAnchor(payeeKey: string): string {
+  return `payee-${payeeKey.replace(/\W+/g, '-')}`;
+}
+
+/** The element id of a person's row in the people step. */
+export function personAnchor(kind: 'employee' | 'contractor', employeeId: number): string {
+  return `${kind}-${employeeId}`;
 }
 
 export function findStep<K extends YearEndStepKey>(checklist: YearEndChecklist, key: K): Extract<YearEndStep, { key: K }> | undefined {

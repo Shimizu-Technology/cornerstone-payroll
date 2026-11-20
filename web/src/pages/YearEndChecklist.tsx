@@ -9,6 +9,7 @@ import { Select } from '@/components/ui/select';
 import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
 import { EmployerStep } from '@/components/year-end/EmployerStep';
 import { FilingDecisionStep } from '@/components/year-end/FilingDecisionStep';
+import { Form1099ReadyStep } from '@/components/year-end/Form1099ReadyStep';
 import { MarkReadyStep } from '@/components/year-end/MarkReadyStep';
 import { PeopleStep } from '@/components/year-end/PeopleStep';
 import { PrintAndFileStep } from '@/components/year-end/PrintAndFileStep';
@@ -26,6 +27,7 @@ function stepBody(checklist: Checklist, step: YearEndStep, onSaved: (message: st
     case 'filing_decision': return <FilingDecisionStep checklist={checklist} step={step} onSaved={onSaved} />;
     case 'employer': return <EmployerStep checklist={checklist} step={step} onSaved={onSaved} />;
     case 'people': return <PeopleStep checklist={checklist} step={step} onSaved={onSaved} onRefresh={onRefresh} />;
+    case 'form_1099_ready': return <Form1099ReadyStep checklist={checklist} step={step} onSaved={onSaved} onRefresh={onRefresh} />;
     case 'reconciliation': return <ReconciliationStep step={step} taxYear={checklist.tax_year} />;
     case 'review_warnings': return <ReviewWarningsStep checklist={checklist} step={step} onSaved={onSaved} onRefresh={onRefresh} />;
     case 'prior_provider':
@@ -221,8 +223,8 @@ export function YearEndChecklist(): ReactElement {
                       filingType="form_1099_nec"
                       taxYear={checklist.tax_year}
                       companyId={checklist.company.id}
-                      preparationReady={checklist.status === 'ready'}
-                      readinessMessage="Finish the checklist above before recording the 1099 filing."
+                      preparationReady={checklist.steps.some((step) => step.key === 'form_1099_ready' && step.status === 'done')}
+                      readinessMessage="Mark the 1099s ready above before recording the 1099 filing."
                     />
                   )}
                 </CardContent>

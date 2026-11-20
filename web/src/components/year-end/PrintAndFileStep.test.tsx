@@ -56,6 +56,32 @@ describe('PrintAndFileStep', () => {
     vi.restoreAllMocks();
   });
 
+  it('marks the 1099 payer record as holding full TINs and downloads the recipient copies from their endpoint', async () => {
+    const recipient = document('form_1099_recipient_copies', {
+      title: '1099-NEC for each contractor (Copy B)', description: 'Print and give or mail to each contractor by Feb 1, 2027.',
+      detail: '3 contractors, one sheet each, by name.', contains_full_ssn: false, contains_full_tin: false, draft: false,
+      download: { path: '/admin/reports/form_1099_nec_recipient_copies', params: { year: 2026 } },
+    });
+    const payer = document('form_1099_payer_record', {
+      title: '1099-NEC payer record', description: 'Keep with your filing records. Not mailed when you e-file with Guam DRT.',
+      detail: '3 contractors, one form a page.', contains_full_ssn: false, contains_full_tin: true, draft: false, available: false,
+      unavailable_reason: 'Needs client-management access (contains full TINs).',
+      download: { path: '/admin/reports/form_1099_nec_payer_record', params: { year: 2026 } },
+    });
+    mocks.downloadDocument.mockResolvedValue({ blob: new Blob(['%PDF']), filename: '1099-NEC_2026_Tumon_Bakery_Recipient_Copies_B.pdf' });
+    render(<PrintAndFileStep checklist={checklist} step={step(true, [recipient, payer])} />);
+
+    const payerRow = row('1099-NEC payer record');
+    expect(within(payerRow).getByText(/Full TINs \(SSNs and EINs\)\. Keep the file and the printout somewhere secure\./)).toBeTruthy();
+    expect(within(payerRow).getByText('Needs client-management access (contains full TINs).')).toBeTruthy();
+    expect(within(payerRow).getByRole('button', { name: 'Download PDF' })).toHaveProperty('disabled', true);
+
+    const recipientRow = row('1099-NEC for each contractor (Copy B)');
+    expect(within(recipientRow).queryByText(/Full TINs/)).toBeNull();
+    fireEvent.click(within(recipientRow).getByRole('button', { name: 'Download PDF' }));
+    await waitFor(() => expect(mocks.downloadDocument).toHaveBeenCalledWith({ path: '/admin/reports/form_1099_nec_recipient_copies', params: { year: 2026 } }, 7));
+  });
+
   it('lists each document with its one-line explanation, as drafts before the W-2s are marked ready', () => {
     render(<PrintAndFileStep checklist={checklist} step={step(false)} />);
 

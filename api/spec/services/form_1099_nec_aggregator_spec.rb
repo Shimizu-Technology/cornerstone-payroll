@@ -138,3 +138,54 @@ RSpec.describe Form1099NecAggregator, type: :service do
     end
   end
 end
+
+RSpec.describe Form1099NecAggregator, "with one-off checks linked to a contractor", type: :service do
+  let(:company) { create(:company) }
+  let(:department) { create(:department, company: company) }
+  let(:contractor) { create(:employee, :contractor, company: company, department: department, first_name: "Asia", last_name: "Taylor") }
+  let!(:threshold_rule) do
+    InformationReturnThreshold.find_or_initialize_by(form_type: "1099_nec", tax_year: 2026).tap do |rule|
+      rule.update!(threshold_amount: 2_000, source_url: "https://www.irs.gov/instructions/i1099mec", effective_on: Date.new(2026, 1, 1))
+    end
+  end
+
+  def check(amount, payable_to: "A. Taylor", **attributes)
+    create(:non_employee_check, company: company, check_type: "contractor", payable_to: payable_to, amount: amount,
+      payment_date: Date.new(2026, 6, 1), printed_at: Time.current, **attributes)
+  end
+
+  it "adds linked checks to the contractor's single row and leaves only unlinked ones as one-off payees" do
+    period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 5, 15))
+    create(:payroll_item, pay_period: period, employee: contractor, company: company, employment_type: "contractor", gross_pay: 900, net_pay: 900, withholding_tax: 0)
+    linked = [ check(800), check(450.25) ]
+    linked.each { |entry| entry.update_columns(payee_employee_id: contractor.id) }
+    unlinked = check(2_100, payable_to: "Someone Else")
+    check(5_000, payee_employee_id: nil, voided: true, voided_at: Time.current, void_reason: "Wrong payee")
+
+    report = described_class.new(company, 2026).generate
+
+    expect(report[:reportable_contractors].map { |row| [ row[:employee_id], row[:name], row[:total_compensation] ] })
+      .to contain_exactly([ contractor.id, "Asia Taylor", 2_150.25 ], [ nil, "Someone Else", 2_100.0 ])
+    row = report[:reportable_contractors].find { |entry| entry[:employee_id] == contractor.id }
+    expect(row).to include(payment_count: 3, payroll_payment_count: 1, non_employee_check_ids: linked.map(&:id).sort)
+    expect(report[:reportable_contractors].find { |entry| entry[:employee_id].nil? }[:non_employee_check_ids]).to eq([ unlinked.id ])
+  end
+
+  it "gives a contractor paid only by linked checks a row of its own" do
+    check(2_400).update_columns(payee_employee_id: contractor.id)
+
+    expect(described_class.new(company, 2026).generate[:reportable_contractors].sole).to include(employee_id: contractor.id, total_compensation: 2_400.0, payroll_payment_count: 0)
+  end
+
+  it "groups contractor records that share one TIN, whatever its formatting" do
+    first = create(:employee, :contractor, company: company, department: department, ssn_encrypted: "900-70-1111")
+    second = create(:employee, :contractor, company: company, department: department, ssn_encrypted: "900701111")
+    business = create(:employee, :business_contractor, company: company, department: department, contractor_ein: "66-1234567")
+    other_business = create(:employee, :business_contractor, company: company, department: department, contractor_ein: "661234567")
+    create(:employee, :contractor, company: company, department: department, ssn_encrypted: "900-70-2222")
+
+    groups = described_class.duplicate_tin_groups(Employee.where(company: company).to_a)
+
+    expect(groups.map { |group| group.map(&:id).sort }).to contain_exactly([ first.id, second.id ].sort, [ business.id, other_business.id ].sort)
+  end
+end
