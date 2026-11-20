@@ -28,6 +28,11 @@ vi.mock('@/services/api', () => ({
 }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 7, name: 'Tumon Bakery' }, activeCompanyId: 7 }) }));
 
+const employerData: ActiveYearEndStep<'employer'>['data'] = {
+  name: 'Tumon Bakery', ein: '98-7654321', address_line1: '1 Marine Dr', address_line2: null,
+  city: 'Tamuning', state: 'GU', zip: '96913', phone: '671-555-0100', email: 'office@example.test',
+};
+
 const permissions = { can_record_decision: true, can_acknowledge: true, can_mark_ready: true };
 
 // A step that ran must carry its full data, typed by key.
@@ -93,7 +98,7 @@ function working(overrides: { reconciliation?: 'match' | 'mismatch'; warnings?: 
   const recon = overrides.reconciliation ?? 'match';
   return [
     decided,
-    step('employer', 2, 'Employer details', 'done', { data: { name: 'Tumon Bakery', ein: '98-7654321', address_line1: '1 Marine Dr', address_line2: null, city: 'Tamuning', state: 'GU', zip: '96913', phone: '671-555-0100', email: 'office@example.test' } }),
+    step('employer', 2, 'Employer details', 'done', { data: employerData }),
     overrides.people ?? step('people', 3, 'Employees and payees', 'done', { data: { employees: [], contractors: [], one_off_payees: [], w2_employee_count: 4, contractor_count: 0, contractor_error: null } }),
     step('reconciliation', 4, 'Reconcile W-2s to the 941s and W-1s', recon === 'match' ? 'done' : 'action_needed', {
       issues: recon === 'match' ? [] : [{ code: 'RECONCILIATION_MISMATCH', line: 'social_security_wages', message: reconciliationLine('mismatch').message! }],
@@ -751,7 +756,7 @@ describe('Year-end checklist', () => {
 
   it('explains who can add a locked EIN', async () => {
     const steps = working();
-    steps[1] = step('employer', 2, 'Employer details', 'action_needed', { issues: [{ code: 'EMPLOYER_EIN_MISSING', message: 'Add EIN', field: 'ein' }], data: { name: 'Tumon Bakery', ein: null, address_line1: '1 Marine Dr', address_line2: null, city: 'Tamuning', state: 'GU', zip: '96913', phone: '671-555-0100', email: 'office@example.test' } });
+    steps[1] = step('employer', 2, 'Employer details', 'action_needed', { issues: [{ code: 'EMPLOYER_EIN_MISSING', message: 'Add EIN', field: 'ein' }], data: { ...employerData, ein: null } });
     mocks.checklist.mockResolvedValue(checklist(steps));
     mocks.companyGet.mockResolvedValue({ company: { editable_fields: ['phone'] } });
     renderPage();

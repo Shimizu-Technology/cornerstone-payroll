@@ -3367,8 +3367,6 @@ export const filingSubmitterApi = {
 };
 
 export const reportsApi = {
-  wageFilingFile: (year: number, companyId: number, mode: 'draft' | 'final', pdf: boolean) =>
-    api.getBlobWithParams(`/admin/reports/${pdf ? 'w3ss_pdf' : 'w2_gu_efw2'}`, { year, mode }, { companyId }),
   dashboard: () =>
     api.get<DashboardResponse>('/admin/reports/dashboard'),
   payrollRegister: (payRunKey: string | number) =>

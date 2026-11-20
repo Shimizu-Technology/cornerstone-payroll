@@ -190,7 +190,9 @@ export interface YearEndDocument {
   /** One plain line: what it is for and what to do with it. */
   description: string;
   detail: string;
-  format: 'pdf';
+  format: 'pdf' | 'txt';
+  /** Explicit acknowledgement before downloading a test file. */
+  draft_confirmation?: string | null;
   contains_full_ssn: boolean;
   /** Watermarked DRAFT: the W-2s are not marked ready on the current numbers. */
   draft: boolean;
