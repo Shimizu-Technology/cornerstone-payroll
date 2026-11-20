@@ -40,6 +40,54 @@ RSpec.describe YearEnd::Checklist do
     result[:steps].find { |entry| entry[:key] == key }
   end
 
+  it "preserves preparation stamps and returns a checklist when filing progress fails" do
+    decide(w2: "client")
+    allow_any_instance_of(described_class).to receive(:overall_status).and_return("ready")
+    baseline = checklist
+    allow_any_instance_of(YearEnd::FilingProgress).to receive(:call).and_raise(StandardError, "private details")
+    expect(YearEnd::ReadyCheck).not_to receive(:clear)
+    expect(Rails.logger).to receive(:warn).with("year_end_filing_progress_failed company_id=#{company.id} tax_year=2026")
+    result = checklist
+    expect(result[:filing_progress]).to eq([])
+    expect(result.except(:filing_progress)).to eq(baseline.except(:filing_progress))
+  end
+
+  it "rolls the filing deadline past weekends using the print-step rule" do
+    expect(YearEnd::FilingProgress.due_date(2031)).to eq(Date.new(2032, 2, 2))
+    expect(YearEnd::FilingProgress.due_date(2026)).to eq(Date.new(2027, 2, 1))
+  end
+
+  it "shows only Cornerstone filings and counts clients needing submission near the deadline" do
+    decide(w2: "client", form_1099: "cornerstone")
+    allow(Date).to receive(:current).and_return(Date.new(2027, 1, 10))
+    result = checklist
+    expect(result[:filing_progress]).to contain_exactly(hash_including(filing_type: "form_1099_nec", agency: "drt", status: "not_filed", due_date: "2027-02-01"))
+    overview = YearEnd::ClientsOverview.new(user: accountant, year: 2026).call
+    expect(overview[:filing_reminder_count]).to eq(1)
+    PayrollFilingRecord.create!(company: company, filing_type: "form_1099_nec", agency: "drt", tax_year: 2026,
+      status: "submitted", submitted_at: Time.current, confirmation_number: "CONF", source_fingerprint: "a" * 64)
+    expect(YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:filing_reminder_count]).to eq(0)
+  end
+
+  it "keeps readiness, issue counts and next step unchanged when agency progress changes" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    before = checklist
+    overview = -> { YearEnd::ClientsOverview.new(user: accountant, year: 2026).call }
+    list_before = overview.call
+    %w[ssa drt].each do |agency|
+      PayrollFilingRecord.create!(company: company, filing_type: "w2_gu_w3_ss", agency: agency, tax_year: 2026,
+        status: "accepted", submitted_at: Time.current, confirmation_number: "CONF", source_fingerprint: "a" * 64)
+    end
+    after = checklist
+    expect(after.slice(:status, :issue_count, :next_step, :steps)).to eq(before.slice(:status, :issue_count, :next_step, :steps))
+    expect(after[:filing_progress].map { |f| f[:status] }).to eq(%w[accepted accepted])
+    list_after = overview.call
+    expect(list_after[:counts]).to eq(list_before[:counts])
+    expect(list_after[:clients].map { |r| r.except(:filing_progress) }).to eq(list_before[:clients].map { |r| r.except(:filing_progress) })
+    expect(list_after[:clients].first[:issue_count]).to eq(after[:issue_count])
+  end
+
   it "keeps the clients list and checklist in parity with a NULL filing contact" do
     pay(Date.new(2026, 3, 6))
     decide
@@ -357,6 +405,36 @@ RSpec.describe YearEnd::Checklist do
       contractor_check(400, "9003")
       issue = step(checklist, "people")[:issues].sole
       expect(issue[:message]).to start_with("Synthetic Roofing needs to be resolved again: the checks changed")
+    end
+
+    it "leaves the 1099 filing out of progress and reminders while no payee gets a 1099" do
+      decide(w2: "client", form_1099: "cornerstone")
+      allow(Date).to receive(:current).and_return(Date.new(2027, 1, 10))
+      overview = -> { YearEnd::ClientsOverview.new(user: accountant, year: 2026).call }
+      expect(checklist[:filing_progress]).to eq([])
+      expect(overview.call[:clients].sole[:filing_progress]).to eq([])
+      expect(overview.call[:filing_reminder_count]).to eq(0)
+
+      contractor_check(2_500, "9001")
+      expect(checklist[:filing_progress].map { |filing| filing[:filing_type] }).to eq(%w[form_1099_nec])
+      expect(overview.call[:filing_reminder_count]).to eq(1)
+    end
+
+    it "keeps the 1099 filing due while a smaller one-off payee could reach the threshold with a contractor's pay" do
+      contractor = create(:employee, :contractor, company: company, department: department)
+      pay(Date.new(2026, 3, 6), worker: contractor, employment_type: "contractor", gross_pay: 1_500, withholding_tax: 0,
+        social_security_tax: 0, medicare_tax: 0, employer_social_security_tax: 0, employer_medicare_tax: 0)
+      contractor_check(400, "9001")
+      decide(w2: "client", form_1099: "cornerstone")
+      allow(Date).to receive(:current).and_return(Date.new(2027, 1, 10))
+      expect(checklist[:filing_progress]).to eq([])
+      expect(YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:filing_reminder_count]).to eq(0)
+
+      contractor_check(200, "9002")
+      expect(checklist[:filing_progress].map { |filing| filing[:filing_type] }).to eq(%w[form_1099_nec])
+      overview = YearEnd::ClientsOverview.new(user: accountant, year: 2026).call
+      expect(overview[:clients].sole[:filing_progress].map { |filing| filing[:filing_type] }).to eq(%w[form_1099_nec])
+      expect(overview[:filing_reminder_count]).to eq(1)
     end
 
     it "refuses an identification made on checks that have since changed" do

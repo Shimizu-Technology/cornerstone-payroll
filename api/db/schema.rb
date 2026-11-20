@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_20_140100) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_20_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2713,7 +2713,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_140100) do
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.string "event_type", null: false
-    t.bigint "evidence_document_id", null: false
+    t.bigint "evidence_document_id"
     t.string "from_status"
     t.string "idempotency_key", null: false
     t.text "notes"
@@ -2728,8 +2728,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_140100) do
     t.jsonb "source_snapshot", default: {}, null: false
     t.string "to_status", null: false
     t.datetime "updated_at", null: false
+    t.bigint "download_audit_id"
+    t.string "file_digest"
     t.index [ "company_id", "idempotency_key" ], name: "idx_payroll_filing_events_idempotency", unique: true
     t.index [ "company_id" ], name: "index_payroll_filing_events_on_company_id"
+    t.index [ "download_audit_id" ], name: "index_payroll_filing_events_on_download_audit_id"
     t.index [ "evidence_document_id" ], name: "index_payroll_filing_events_on_evidence_document_id"
     t.index [ "payroll_filing_record_id", "occurred_at", "id" ], name: "idx_payroll_filing_events_timeline"
     t.index [ "payroll_filing_record_id" ], name: "index_payroll_filing_events_on_payroll_filing_record_id"
@@ -2753,11 +2756,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_140100) do
     t.datetime "submitted_at", null: false
     t.integer "tax_year", null: false
     t.datetime "updated_at", null: false
+    t.string "agency", default: "", null: false
+    t.index [ "company_id", "filing_type", "tax_year", "agency" ], name: "idx_payroll_filings_annual_identity", unique: true, where: "(quarter IS NULL)"
     t.index [ "company_id", "filing_type", "tax_year", "quarter" ], name: "idx_payroll_filings_quarterly_identity", unique: true, where: "(quarter IS NOT NULL)"
-    t.index [ "company_id", "filing_type", "tax_year" ], name: "idx_payroll_filings_annual_identity", unique: true, where: "(quarter IS NULL)"
     t.index [ "company_id" ], name: "index_payroll_filing_records_on_company_id"
     t.index [ "id", "company_id" ], name: "idx_payroll_filing_records_tenant_key", unique: true
     t.check_constraint "(filing_type::text = ANY (ARRAY['w2_gu_w3_ss'::character varying::text, 'form_1099_nec'::character varying::text])) AND quarter IS NULL OR (filing_type::text = ANY (ARRAY['form_500_payment'::character varying::text, 'w1'::character varying::text, 'swica'::character varying::text, 'federal_941'::character varying::text])) AND quarter >= 1 AND quarter <= 4", name: "payroll_filing_records_identity"
+    t.check_constraint "filing_type::text = 'w2_gu_w3_ss'::text AND (agency::text = ANY (ARRAY['ssa'::character varying, 'drt'::character varying, 'legacy'::character varying]::text[])) OR filing_type::text = 'form_1099_nec'::text AND agency::text = 'drt'::text OR quarter IS NOT NULL AND agency::text = ''::text", name: "payroll_filing_records_agency"
     t.check_constraint "status::text = ANY (ARRAY['submitted'::character varying::text, 'accepted'::character varying::text, 'accepted_with_errors'::character varying::text, 'rejected'::character varying::text, 'needs_correction'::character varying::text])", name: "payroll_filing_records_status"
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "payroll_filing_records_tax_year"
   end
@@ -4934,6 +4939,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_20_140100) do
   add_foreign_key "payroll_entry_resolutions", "payroll_standing_changes"
   add_foreign_key "payroll_field_definitions", "companies"
   add_foreign_key "payroll_field_definitions", "employees", column: "owner_employee_id"
+  add_foreign_key "payroll_filing_events", "audit_logs", column: "download_audit_id"
   add_foreign_key "payroll_filing_events", "client_documents", column: "evidence_document_id", on_delete: :restrict
   add_foreign_key "payroll_filing_events", "client_documents", column: [ "evidence_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_filing_events_document_tenant"
   add_foreign_key "payroll_filing_events", "companies", on_delete: :restrict

@@ -3188,7 +3188,11 @@ export type PayrollFilingEvidenceType = 'form_500_payment' | 'w1' | 'swica' | 'f
 export type PayrollFilingStatus = 'submitted' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'needs_correction';
 export type PayrollFilingEventType = 'submitted' | 'resubmitted' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'correction_needed';
 
+export interface FilingDownload { id: number; created_at: string; actor_name: string | null; file_digest: string; current: boolean }
+
 export interface PayrollFilingEvent {
+  download_audit_id?: number | null;
+  file_digest?: string | null;
   id: number;
   event_type: PayrollFilingEventType;
   from_status: PayrollFilingStatus | null;
@@ -3206,10 +3210,12 @@ export interface PayrollFilingEvent {
     file_name: string;
     content_type: string;
     preview_available: boolean;
-  };
+  } | null;
 }
 
 export interface PayrollFilingRecord {
+  agency?: string;
+  agency_label?: string;
   id: number;
   filing_type: PayrollFilingEvidenceType;
   display_name: string;
@@ -3429,9 +3435,10 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_swica_ascii', { year, quarter }),
   updateQuarterlyComplianceTask: (id: number, task: Partial<QuarterlyComplianceTask>) =>
     api.patch<{ task: QuarterlyComplianceTask }>(`/admin/reports/quarterly_compliance_packet_task/${id}`, { task }),
-  payrollFilingRecord: (filingType: PayrollFilingEvidenceType, taxYear: number, quarter?: number, companyId?: number) =>
-    api.get<{ filing: PayrollFilingRecord | null }>('/admin/payroll_filing_records', {
+  payrollFilingRecord: (filingType: PayrollFilingEvidenceType, taxYear: number, quarter?: number, companyId?: number, agency?: string) =>
+    api.get<{ filing: PayrollFilingRecord | null; downloads?: FilingDownload[]; legacy_filing?: PayrollFilingRecord | null }>('/admin/payroll_filing_records', {
       filing_type: filingType,
+      ...(agency ? { agency } : {}),
       tax_year: taxYear,
       ...(quarter ? { quarter } : {}),
     }, { companyId }),

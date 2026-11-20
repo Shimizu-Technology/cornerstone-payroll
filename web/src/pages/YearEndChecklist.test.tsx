@@ -4,12 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { YearEndChecklist } from './YearEndChecklist';
+import * as yearEnd from '@/lib/year-end';
 import { ApiError } from '@/services/api';
 import type { ActiveYearEndStep, YearEndChecklist as Checklist, YearEndIssue, YearEndStep } from '@/lib/year-end';
 
 const mocks = vi.hoisted(() => ({
   checklist: vi.fn(), acknowledge: vi.fn(), downloadDocument: vi.fn(), updateResponsibility: vi.fn(), preflight: vi.fn(), markReady: vi.fn(),
   linkPayee: vi.fn(), addContractor: vi.fn(), unlinkPayee: vi.fn(), mark1099Ready: vi.fn(),
+  filingRecord: vi.fn(async () => ({ filing: null })),
   companyGet: vi.fn(), companyUpdate: vi.fn(), employeeUpdate: vi.fn(),
 }));
 vi.mock('@/services/api', () => ({
@@ -19,7 +21,7 @@ vi.mock('@/services/api', () => ({
   },
   reportsApi: {
     updatePayrollFilingResponsibility: mocks.updateResponsibility, w2GuPreflight: mocks.preflight, w2GuMarkReady: mocks.markReady,
-    payrollFilingRecord: vi.fn(async () => ({ filing: null })),
+    payrollFilingRecord: mocks.filingRecord,
   },
   companiesApi: { get: mocks.companyGet, update: mocks.companyUpdate },
   employeesApi: { update: mocks.employeeUpdate },
@@ -146,10 +148,10 @@ function componentState(element: Element): string {
   return seen.join('\n');
 }
 
-function renderPage() {
+function renderPage(year = 2026) {
   render(
     <FeedbackProvider>
-      <MemoryRouter initialEntries={['/companies/7/year-end?year=2026']}>
+      <MemoryRouter initialEntries={[`/companies/7/year-end?year=${year}`]}>
         <OpenOtherClient />
         <Routes><Route path="/companies/:companyId/year-end" element={<YearEndChecklist />} /></Routes>
       </MemoryRouter>
@@ -158,7 +160,7 @@ function renderPage() {
 }
 
 describe('Year-end checklist', () => {
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -166,6 +168,31 @@ describe('Year-end checklist', () => {
     mocks.updateResponsibility.mockResolvedValue({ data: [] });
   });
   afterEach(() => vi.useRealTimers());
+
+  it.each([2025, 2026])('composes the correct W-2 filing panels for %i', async (year) => {
+    // Supply each year directly to test composition independently of route normalization.
+    vi.spyOn(yearEnd, 'parseYearEndTaxYear').mockReturnValue(year);
+    mocks.checklist.mockResolvedValue(checklist([], { tax_year: year, files_w2: true, files_1099: false }));
+    renderPage(year);
+    await screen.findByText('1. File and confirm');
+    await waitFor(() => expect(mocks.filingRecord).toHaveBeenCalledTimes(year < 2026 ? 1 : 2));
+    expect(screen.getAllByText('No agency submission recorded.')).toHaveLength(year < 2026 ? 1 : 2);
+    if (year < 2026) {
+      expect(mocks.filingRecord).toHaveBeenCalledWith('w2_gu_w3_ss', 2025, undefined, 7, undefined);
+      expect(screen.queryByText(/Social Security \(BSO\) evidence/)).toBeNull();
+      expect(screen.queryByText(/Guam DRT \(GuamTax\) evidence/)).toBeNull();
+    } else {
+      expect(mocks.filingRecord).toHaveBeenCalledWith('w2_gu_w3_ss', 2026, undefined, 7, 'ssa');
+      expect(mocks.filingRecord).toHaveBeenCalledWith('w2_gu_w3_ss', 2026, undefined, 7, 'drt');
+    }
+  });
+
+  it('numbers filing confirmation after every preparation step, including 1099s', async () => {
+    const steps = [...working(), step('form_1099_ready', 8, 'Mark the 1099s ready', 'waiting'), printAndFile(false)];
+    mocks.checklist.mockResolvedValue(checklist(steps));
+    renderPage();
+    expect(await screen.findByText(`${steps.length + 1}. File and confirm`)).toBeTruthy();
+  });
 
   it('asks who files first and locks the later steps', async () => {
     mocks.checklist.mockResolvedValue(checklist(undecided));

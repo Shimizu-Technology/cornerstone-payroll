@@ -90,11 +90,19 @@ module YearEnd
         files_w2: files?("w2_gu"),
         files_1099: files?("form_1099"),
         permissions: permissions,
-        steps: steps + [ documents.merge(number: steps.length + 1) ]
+        steps: steps + [ documents.merge(number: steps.length + 1) ],
+        filing_progress: filing_progress
       }
     rescue StandardError
       ReadyCheck.clear(company.id, year)
       raise
+    end
+
+    def filing_progress
+      FilingProgress.new(company: company, year: year, form_1099_due: !files?("form_1099") || !no_1099_filings?).call
+    rescue StandardError
+      Rails.logger.warn("year_end_filing_progress_failed company_id=#{company.id} tax_year=#{year}")
+      []
     end
 
     # Blockers the W-2GU "mark ready" action enforces, including the people
@@ -1044,9 +1052,7 @@ module YearEnd
 
     # January 31 of the next year, or the next business day after a weekend.
     def furnish_due_date
-      date = Date.new(year + 1, 1, 31)
-      date += 1 until date.on_weekday?
-      date
+      FilingProgress.due_date(year)
     end
 
     # -- Helpers ---------------------------------------------------------
