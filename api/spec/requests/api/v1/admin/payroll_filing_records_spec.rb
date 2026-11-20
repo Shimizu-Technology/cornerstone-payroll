@@ -46,6 +46,7 @@ RSpec.describe "Payroll filing records", type: :request do
 
   it "lists current and stale final downloads" do
     allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:final?).and_return(true)
     [ "a", "c" ].each do |fingerprint|
       AuditLog.record!(user: admin, company_id: company.id, action: "efw2#download", record_type: "Company",
         metadata: { year: 2026, mode: "final", file_digest: FilingFileDigest.call("final filing bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: fingerprint * 64 })
@@ -59,6 +60,28 @@ RSpec.describe "Payroll filing records", type: :request do
     end
   end
 
+  it "labels no download current once the sign-off no longer matches" do
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
+    allow(Form1099Readiness).to receive(:final?).and_return(false)
+    AuditLog.record!(user: admin, company_id: company.id, action: "pub1220#download", record_type: "Company",
+      metadata: { year: 2026, mode: "final", file_digest: FilingFileDigest.call("final 1099 bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: "a" * 64 })
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "form_1099_nec", tax_year: 2026 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("downloads").map { |file| file["current"] }).to eq([ false ])
+  end
+
+  it "loads a 1099 year whose inputs can't be read yet" do
+    allow(Form1099InputsFingerprint).to receive(:new).and_raise(ArgumentError, "No 1099_nec reporting threshold is configured for 2027")
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "form_1099_nec", tax_year: 2027 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to include("filing" => nil, "downloads" => [])
+    AuditLog.record!(user: admin, company_id: company.id, action: "pub1220#download", record_type: "Company",
+      metadata: { year: 2027, mode: "final", file_digest: FilingFileDigest.call("final 1099 bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: "a" * 64 })
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "form_1099_nec", tax_year: 2027 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("downloads").map { |file| file["current"] }).to eq([ false ])
+  end
+
   it "loads and advances prior-year legacy evidence without agency or final-file binding" do
     old = PayrollFilingRecord.create!(company: company, filing_type: "w2_gu_w3_ss", tax_year: 2025,
       status: "rejected", submitted_at: 1.year.ago, confirmation_number: "OLD", source_fingerprint: "a" * 64)
@@ -70,6 +93,9 @@ RSpec.describe "Payroll filing records", type: :request do
     post "/api/v1/admin/payroll_filing_records/events", params: params
     expect(response).to have_http_status(:unprocessable_entity)
     post "/api/v1/admin/payroll_filing_records/events", params: params.merge(file: upload)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to eq("Signer name is required for a tax return submission")
+    post "/api/v1/admin/payroll_filing_records/events", params: params.merge(file: upload, signer_name: "Pat Owner", idempotency_key: SecureRandom.uuid)
     expect(response).to have_http_status(:created), response.body
     expect(response.parsed_body.dig("filing", "id")).to eq(old.id)
     expect(old.reload.status).to eq("submitted")

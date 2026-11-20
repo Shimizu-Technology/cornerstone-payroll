@@ -92,7 +92,7 @@ RSpec.describe PayrollFilingEvidenceRecorder do
         allow_any_instance_of(Form1099NecAggregator).to receive(:generate).and_return({ meta: { reportable_count: 1 }, reportable_contractors: [ { compliance_issues: [] } ] })
         event = described_class.new(company: company, actor: actor, evidence_document: document, attributes: {
           filing_type: filing_type, tax_year: 2025, agency: "ssa", event_type: "resubmitted",
-          reference_number: "RETRY", preparer_name: actor.name, idempotency_key: SecureRandom.uuid
+          reference_number: "RETRY", preparer_name: actor.name, signer_name: "Pat Owner", idempotency_key: SecureRandom.uuid
         }).call
         expect(event.payroll_filing_record_id).to eq(old.id)
         expect(event.download_audit_id).to be_nil

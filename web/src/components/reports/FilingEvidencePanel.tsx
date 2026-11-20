@@ -35,6 +35,12 @@ function messageForStatus(filing: PayrollFilingRecord | null, isPayment: boolean
   return isPayment ? 'Payment was rejected; resolve it and retain the retry confirmation.' : 'Rejected; correct the filing and record the resubmission.';
 }
 
+// "accepted_with_errors" -> "Accepted with errors", for statuses and history.
+function statusText(value: string) {
+  const words = value.replaceAll('_', ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function nextEvents(filing: PayrollFilingRecord | null): PayrollFilingEventType[] {
   if (!filing) return ['submitted'];
   if (filing.status === 'submitted') return ['accepted', 'accepted_with_errors', 'rejected'];
@@ -128,6 +134,7 @@ function FilingEvidencePanelContent({
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [downloadId, setDownloadId] = useState('');
   const [downloads, setDownloads] = useState<FilingDownload[]>([]);
+  const currentDownload = downloads.find((file) => file.current);
   const [legacy, setLegacy] = useState<PayrollFilingRecord | null>(null);
   const formId = useId();
   const [filing, setFiling] = useState<PayrollFilingRecord | null>(null);
@@ -223,8 +230,8 @@ function FilingEvidencePanelContent({
         <Badge variant={tone}>{filing ? filing.status.replaceAll('_', ' ') : 'not submitted'}</Badge>
       </div>
 
-      {annual && <p className="mt-2 text-xs">{filing ? `${filing.status === 'submitted' ? 'Submitted' : filing.status.replaceAll('_', ' ')} ${formatGuamDateTime(filing.resolved_at || filing.submitted_at)} · confirmation ${filing.confirmation_number}` : downloads[0] ? `Final file downloaded ${formatGuamDateTime(downloads[0].created_at)} — record the submission` : `Not filed yet — due ${filingDueDate(taxYear)}`}</p>}
-      {legacy && agency === 'ssa' && <details className="mt-3 text-xs"><summary>Earlier W-2 history — agency not recorded</summary><p>This history does not confirm either portal submission.</p>{legacy.events.map((entry) => <p key={entry.id}>{entry.event_type} · {entry.reference_number} · {formatGuamDateTime(entry.occurred_at)} by {entry.recorded_by} · {entry.notes}{entry.evidence_document && <button type="button" onClick={() => void downloadEvidence(entry.evidence_document!.id, entry.evidence_document!.file_name)}>Download proof</button>}</p>)}</details>}
+      {annual && <p className="mt-2 text-xs">{filing ? `${statusText(filing.status)} ${formatGuamDateTime(filing.resolved_at || filing.submitted_at)} · confirmation ${filing.confirmation_number}` : currentDownload ? `Final file downloaded ${formatGuamDateTime(currentDownload.created_at)} — record the submission` : downloads.length ? `The downloaded file is out of date — download the final file again in Print and file` : `Not filed yet — due ${filingDueDate(taxYear)}`}</p>}
+      {legacy && agency === 'ssa' && <details className="mt-3 text-xs"><summary>Earlier W-2 history — agency not recorded</summary><p>This history does not confirm either portal submission.</p>{legacy.events.map((entry) => <div key={entry.id} className="mt-2 flex flex-wrap items-center justify-between gap-2"><p>{statusText(entry.event_type)} · {entry.reference_number} · {formatGuamDateTime(entry.occurred_at)} by {entry.recorded_by}{entry.notes && ` · ${entry.notes}`}</p>{entry.evidence_document && <Button type="button" size="md" variant="outline" onClick={() => void downloadEvidence(entry.evidence_document!.id, entry.evidence_document!.file_name)}>Download proof</Button>}</div>)}</details>}
       {filing?.source_changed && (
         <div className="mt-3 rounded-lg border border-warning-300 bg-warning-50 px-3 py-2 text-xs text-warning-900">
           Filing data changed after this was filed; a correction may be needed.
@@ -331,7 +338,7 @@ function FilingEvidencePanelContent({
           {[...filing.events].reverse().map((entry) => (
             <li key={entry.id} className="flex flex-wrap items-start justify-between gap-2 text-xs">
               <div>
-                <p className="font-semibold text-neutral-800">{entry.event_type.replaceAll('_', ' ')} · {entry.reference_number}</p>
+                <p className="font-semibold text-neutral-800">{statusText(entry.event_type)} · {entry.reference_number}</p>
                 <p className="mt-0.5 text-neutral-500">{formatGuamDateTime(entry.occurred_at)} by {entry.recorded_by}</p>
                 {entry.notes && <p className="mt-1 max-w-2xl text-neutral-600">{entry.notes}</p>}
               </div>
