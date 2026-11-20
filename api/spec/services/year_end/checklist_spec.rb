@@ -71,7 +71,7 @@ RSpec.describe YearEnd::Checklist do
     expect(overview.call[:issue_count]).to eq(result[:issue_count])
     expect(overview.call[:issue_summary]).to include(hash_including(code: "EMPLOYEE_EFILE_INVALID"))
     employee.update!(state: "GU")
-    expect(overview.call).to include(status: "check_needed", issue_count: nil)
+    expect(overview.call).to include(status: "needs_action", efile_check_pending: true)
     result = checklist
     expect(overview.call[:issue_count]).to eq(result[:issue_count])
   end

@@ -46,6 +46,16 @@ describe('Year-end clients list', () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it('keeps known issues visible and explains a pending employee check', async () => {
+    mocks.clients.mockResolvedValue(overview([row({ efile_check_pending: true, issue_count: 1,
+      issue_summary: [{ code: 'EMPLOYER_EIN_MISSING', label: 'EIN missing', count: 1 }] })]));
+    renderPage();
+    expect((await screen.findAllByText('1 thing to fix')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('EIN missing').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('More may show after the employee e-file check.').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /Refresh/ })).toBeTruthy();
+  });
+
   it('hides the previous year while the newly chosen year loads', async () => {
     vi.setSystemTime(new Date('2027-03-01T12:00:00+10:00'));
     let resolve2026: (value: { data: YearEndClientsOverview }) => void = () => {};
