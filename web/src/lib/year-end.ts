@@ -23,7 +23,10 @@ export interface YearEndDecisionSummary {
   prior_provider_through: string | null;
 }
 
+export interface YearEndFilingProgress { label: string; status: string; agency: string; filing_type: string }
+
 export interface YearEndClientRow {
+  filing_progress?: YearEndFilingProgress[];
   company_id: number;
   name: string;
   active: boolean;
@@ -43,6 +46,7 @@ export interface YearEndClientRow {
 
 export interface YearEndClientsOverview {
   tax_year: number;
+  filing_reminder_count?: number | null;
   clients: YearEndClientRow[];
   counts: Record<YearEndClientStatus, number>;
   hidden: { test_workspaces: number; inactive_without_payroll: number };

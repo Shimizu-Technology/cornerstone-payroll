@@ -40,6 +40,37 @@ RSpec.describe YearEnd::Checklist do
     result[:steps].find { |entry| entry[:key] == key }
   end
 
+  it "shows only Cornerstone filings and counts clients needing submission near the deadline" do
+    decide(w2: "client", form_1099: "cornerstone")
+    allow(Date).to receive(:current).and_return(Date.new(2027, 1, 10))
+    result = checklist
+    expect(result[:filing_progress]).to contain_exactly(hash_including(filing_type: "form_1099_nec", agency: "drt", status: "not_filed", due_date: "2027-02-01"))
+    overview = YearEnd::ClientsOverview.new(user: accountant, year: 2026).call
+    expect(overview[:filing_reminder_count]).to eq(1)
+    PayrollFilingRecord.create!(company: company, filing_type: "form_1099_nec", agency: "drt", tax_year: 2026,
+      status: "submitted", submitted_at: Time.current, confirmation_number: "CONF", source_fingerprint: "a" * 64)
+    expect(YearEnd::ClientsOverview.new(user: accountant, year: 2026).call[:filing_reminder_count]).to eq(0)
+  end
+
+  it "keeps readiness, issue counts and next step unchanged when agency progress changes" do
+    pay(Date.new(2026, 3, 6))
+    decide
+    before = checklist
+    overview = -> { YearEnd::ClientsOverview.new(user: accountant, year: 2026).call }
+    list_before = overview.call
+    %w[ssa drt].each do |agency|
+      PayrollFilingRecord.create!(company: company, filing_type: "w2_gu_w3_ss", agency: agency, tax_year: 2026,
+        status: "accepted", submitted_at: Time.current, confirmation_number: "CONF", source_fingerprint: "a" * 64)
+    end
+    after = checklist
+    expect(after.slice(:status, :issue_count, :next_step, :steps)).to eq(before.slice(:status, :issue_count, :next_step, :steps))
+    expect(after[:filing_progress].map { |f| f[:status] }).to eq(%w[accepted accepted])
+    list_after = overview.call
+    expect(list_after[:counts]).to eq(list_before[:counts])
+    expect(list_after[:clients].map { |r| r.except(:filing_progress) }).to eq(list_before[:clients].map { |r| r.except(:filing_progress) })
+    expect(list_after[:clients].first[:issue_count]).to eq(after[:issue_count])
+  end
+
   it "keeps the clients list and checklist in parity with a NULL filing contact" do
     pay(Date.new(2026, 3, 6))
     decide

@@ -33,6 +33,7 @@ module YearEnd
           ready: rows.count { |row| row[:status] == "ready" },
           not_filing: rows.count { |row| row[:status] == "not_filing" }
         },
+        filing_reminder_count: Date.current >= Date.new(year + 1, 1, 1) ? rows.count { |row| row[:filing_progress].any? { |filing| filing[:status].in?(%w[not_filed rejected needs_correction accepted_with_errors]) } } : nil,
         hidden: {
           test_workspaces: accessible_companies.count(&:test_workspace?),
           inactive_without_payroll: accessible_companies.count { |company| !company.test_workspace? && !company.active? && !relevant_inactive?(company) }
@@ -147,8 +148,25 @@ module YearEnd
         employee_details: files_w2 ? { missing_ssn: 0, missing_address: 0 }.merge(employees_missing_details.fetch(company.id, {}).slice(:missing_ssn, :missing_address)) : nil,
         marked_ready_at: marked ? readiness.marked_ready_at.iso8601 : nil,
         check_reason: status == "check_needed" ? (marked ? "Something may have changed since the W-2s were marked ready. Open the checklist to re-check." : "Open the checklist to check the current employee details and W-2 numbers.") : nil,
+        filing_progress: FilingProgress.new(company: company, year: year,
+          decisions: decisions.values.select { |decision| decision.responsible_party == "cornerstone" }.map(&:filing_type),
+          records: filing_records.fetch(company.id, []), downloads: filing_downloads.fetch(company.id, {})).call,
         checklist_path: "/companies/#{company.id}/year-end?year=#{year}"
       }
+    end
+
+    def filing_records
+      @filing_records ||= PayrollFilingRecord.where(company_id: company_ids, tax_year: year, quarter: nil).group_by(&:company_id)
+    end
+
+    def filing_downloads
+      @filing_downloads ||= AuditLog.where(company_id: company_ids, action: %w[efw2#download pub1220#download])
+        .where("metadata->>'sha256' ~ '^[0-9a-f]{64}$'")
+        .where("metadata->>'year' = ? AND metadata->>'mode' = 'final'", year.to_s).newest_first
+        .each_with_object({}) do |log, result|
+          type = log.action == "efw2#download" ? "w2_gu_w3_ss" : "form_1099_nec"
+          (result[log.company_id] ||= {})[type] ||= log
+        end
     end
 
     def summarize(issues)

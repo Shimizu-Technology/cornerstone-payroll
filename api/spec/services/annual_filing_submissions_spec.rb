@@ -1,0 +1,72 @@
+# frozen_string_literal: true
+
+require "rails_helper"
+
+RSpec.describe PayrollFilingEvidenceRecorder do
+  let(:company) { create(:company) }
+  let(:actor) { create(:user, company: company, organization: company.organization, role: "accountant") }
+  let(:download) do
+    AuditLog.record!(user: actor, company_id: company.id, action: "efw2#download", record_type: "Company",
+      metadata: { year: 2026, mode: "final", sha256: "b" * 64, readiness_fingerprint: "a" * 64 })
+  end
+
+  before do
+    allow_any_instance_of(described_class).to receive(:validate_w2_readiness!)
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
+  end
+
+  def record(agency: "ssa", type: "submitted", **extra)
+    described_class.new(company: company, actor: actor, evidence_document: nil, attributes: {
+      filing_type: "w2_gu_w3_ss", agency: agency, tax_year: 2026, event_type: type,
+      reference_number: "WFID-123", preparer_name: actor.name, idempotency_key: SecureRandom.uuid,
+      download_audit_id: type.in?(%w[submitted resubmitted]) ? download.id : nil, **extra
+    }).call
+  end
+
+  it "tracks each agency independently, binds files and resubmits rejected filings" do
+    ssa = record
+    drt = record(agency: "drt")
+    expect(ssa.payroll_filing_record_id).not_to eq(drt.payroll_filing_record_id)
+    expect(ssa.file_sha256).to eq("b" * 64)
+    expect(ssa.download_audit_id).to eq(download.id)
+    record(type: "accepted")
+    record(agency: "drt", type: "rejected", notes: "Incorrect TIN")
+    record(agency: "drt", type: "resubmitted")
+    expect(ssa.payroll_filing_record.reload.status).to eq("accepted")
+    expect(drt.payroll_filing_record.reload.status).to eq("submitted")
+    expect(drt.payroll_filing_record.events.pluck(:event_type)).to eq(%w[submitted rejected resubmitted])
+  end
+
+  it "records 1099 DRT only from a final Pub 1220 download and current sign-off" do
+    allow(AnnualFilingDownloads).to receive(:form1099_final?).and_return(true)
+    allow_any_instance_of(Form1099NecAggregator).to receive(:generate).and_return({ meta: { reportable_count: 1 }, reportable_contractors: [ { compliance_issues: [] } ] })
+    allow(InformationReturnThreshold).to receive(:for!).and_return(double(threshold_amount: 600))
+    pub = AuditLog.record!(user: actor, company_id: company.id, action: "pub1220#download", record_type: "Company",
+      metadata: { year: 2026, mode: "final", sha256: "b" * 64, readiness_fingerprint: "a" * 64 })
+    event = record(filing_type: "form_1099_nec", download_audit_id: pub.id)
+    expect(event.payroll_filing_record.agency).to eq("drt")
+    expect(event.file_sha256).to eq("b" * 64)
+  end
+
+  it "refuses draft, other-client and other-year downloads" do
+    [ { mode: "draft" }, { year: 2025 } ].each do |changes|
+      bad = AuditLog.record!(user: actor, company_id: company.id, action: "efw2#download", record_type: "Company", metadata: download.metadata.merge(changes.stringify_keys))
+      expect { record(download_audit_id: bad.id) }.to raise_error(described_class::Error, /Choose a final file/)
+    end
+    other = AuditLog.record!(user: actor, company_id: create(:company).id, action: "efw2#download", record_type: "Company", metadata: download.metadata)
+    expect { record(download_audit_id: other.id) }.to raise_error(described_class::Error, /Choose a final file/)
+  end
+
+  it "refuses an old fingerprint and an unassigned new submission" do
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("c" * 64)
+    expect { record }.to raise_error(described_class::Error, /This file is out of date/)
+    expect { record(agency: "legacy") }.to raise_error(described_class::Error, /Choose Social Security/)
+  end
+
+  it "allows an outcome after data changed" do
+    event = record
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("c" * 64)
+    expect { record(type: "accepted") }.not_to raise_error
+    expect(event.payroll_filing_record.reload.status).to eq("accepted")
+  end
+end

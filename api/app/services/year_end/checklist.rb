@@ -90,7 +90,8 @@ module YearEnd
         files_w2: files?("w2_gu"),
         files_1099: files?("form_1099"),
         permissions: permissions,
-        steps: steps + [ documents.merge(number: steps.length + 1) ]
+        steps: steps + [ documents.merge(number: steps.length + 1) ],
+        filing_progress: FilingProgress.new(company: company, year: year).call
       }
     rescue StandardError
       ReadyCheck.clear(company.id, year)

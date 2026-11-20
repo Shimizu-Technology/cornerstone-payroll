@@ -154,6 +154,26 @@ describe('FilingEvidencePanel', () => {
     expect(screen.getByRole('button', { name: 'Record resubmission' })).toBeTruthy();
   });
 
+  it('preselects the latest final download and records the selected agency without a receipt', async () => {
+    apiMocks.payrollFilingRecord.mockResolvedValue({ filing: null, downloads: [
+      { id: 91, created_at: '2026-11-20T01:00:00Z', actor_name: 'Dana', sha256: 'b'.repeat(64) },
+      { id: 90, created_at: '2026-11-19T01:00:00Z', actor_name: 'Dana', sha256: 'a'.repeat(64) },
+    ] });
+    apiMocks.recordPayrollFilingEvent.mockResolvedValue({ filing: { ...submitted, filing_type: 'w2_gu_w3_ss', agency: 'ssa' } });
+    render(<FilingEvidencePanel filingType="w2_gu_w3_ss" taxYear={2026} companyId={3} agency="ssa" preparationReady readinessMessage="Ready" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record submission' }));
+    expect((screen.getByLabelText('Final file uploaded') as HTMLSelectElement).value).toBe('91');
+    expect(screen.getByLabelText('Receipt or agency response').hasAttribute('required')).toBe(false);
+    fireEvent.change(screen.getByLabelText('Agency reference number'), { target: { value: 'WFID-1' } });
+    fireEvent.change(screen.getByLabelText('Prepared / recorded by'), { target: { value: 'Dana' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Save evidence' }).closest('form')!);
+    await waitFor(() => expect(apiMocks.recordPayrollFilingEvent).toHaveBeenCalledOnce());
+    const data = apiMocks.recordPayrollFilingEvent.mock.calls[0][0] as FormData;
+    expect(data.get('agency')).toBe('ssa');
+    expect(data.get('download_audit_id')).toBe('91');
+    expect(apiMocks.recordPayrollFilingEvent.mock.calls[0][1]).toBe(3);
+  });
+
   it('surfaces loading failures through an accessible alert', async () => {
     apiMocks.payrollFilingRecord.mockRejectedValue(new Error('Evidence service unavailable'));
 
