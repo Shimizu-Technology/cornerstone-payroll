@@ -202,7 +202,7 @@ class PayrollFilingEvidenceRecorder
 
     fingerprint = W2FilingInputsFingerprint.new(company: company.reload, year: tax_year).call
     unless readiness.current?(fingerprint)
-      raise Error, "W-2GU readiness is stale. Run preflight, review the current report and mark it ready again."
+      raise Error, "W-2GU readiness is stale. Run preflight, review the current report and mark it ready again. This file is out of date. Download the final file again"
     end
     preflight = W2GuPreflightValidator.new(company: company, year: tax_year).run
     raise Error, "Resolve current W-2GU preflight findings before recording submission" if preflight[:blocking_count].positive?
