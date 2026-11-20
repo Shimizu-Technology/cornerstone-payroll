@@ -21,6 +21,102 @@ RSpec.describe "Payroll filing records", type: :request do
     FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT)
   end
 
+  it "records receipt-free annual submissions per agency, audits them, and warns after inputs change" do
+    allow_any_instance_of(PayrollFilingEvidenceRecorder).to receive(:validate_w2_readiness!)
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
+    download = AuditLog.record!(user: admin, company_id: company.id, action: "efw2#download", record_type: "Company",
+      metadata: { year: 2026, mode: "final", file_digest: FilingFileDigest.call("final filing bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: "a" * 64 })
+    %w[ssa drt].each do |agency|
+      post "/api/v1/admin/payroll_filing_records/events", params: {
+        filing_type: "w2_gu_w3_ss", agency: agency, tax_year: 2026, event_type: "submitted",
+        reference_number: "CONF-#{agency}", preparer_name: "Dana", idempotency_key: SecureRandom.uuid, download_audit_id: download.id
+      }
+      expect(response).to have_http_status(:created), response.body
+      expect(response.parsed_body.dig("filing", "agency")).to eq(agency)
+      expect(response.parsed_body.dig("filing", "events", 0, "file_digest")).to eq(FilingFileDigest.call("final filing bytes"))
+      expect(response.parsed_body.dig("filing", "events", 0).keys).not_to include("sha256", "file_sha256")
+      expect(AuditLog.where(action: "payroll_filing_records#submitted").last.metadata.keys).not_to include("sha256", "file_sha256")
+      expect(AuditLog.where(action: "payroll_filing_records#submitted").last.metadata).to include("agency" => agency, "download_audit_id" => download.id)
+    end
+    expect(PayrollFilingRecord.where(company: company).count).to eq(2)
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("c" * 64)
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
+    expect(response.parsed_body.dig("filing", "source_changed")).to be(true)
+  end
+
+  it "lists current and stale final downloads" do
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:final?).and_return(true)
+    [ "a", "c" ].each do |fingerprint|
+      AuditLog.record!(user: admin, company_id: company.id, action: "efw2#download", record_type: "Company",
+        metadata: { year: 2026, mode: "final", file_digest: FilingFileDigest.call("final filing bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: fingerprint * 64 })
+    end
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("downloads").map { |file| file["current"] }).to eq([ false, true ])
+    response.parsed_body.fetch("downloads").each do |file|
+      expect(file["file_digest"]).to eq(FilingFileDigest.call("final filing bytes"))
+      expect(file.keys).not_to include("sha256", "file_sha256")
+    end
+  end
+
+  it "labels no download current once the sign-off no longer matches" do
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
+    allow(Form1099Readiness).to receive(:final?).and_return(false)
+    AuditLog.record!(user: admin, company_id: company.id, action: "pub1220#download", record_type: "Company",
+      metadata: { year: 2026, mode: "final", file_digest: FilingFileDigest.call("final 1099 bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: "a" * 64 })
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "form_1099_nec", tax_year: 2026 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("downloads").map { |file| file["current"] }).to eq([ false ])
+  end
+
+  it "loads a 1099 year whose inputs can't be read yet" do
+    allow(Form1099InputsFingerprint).to receive(:new).and_raise(ArgumentError, "No 1099_nec reporting threshold is configured for 2027")
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "form_1099_nec", tax_year: 2027 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to include("filing" => nil, "downloads" => [])
+    AuditLog.record!(user: admin, company_id: company.id, action: "pub1220#download", record_type: "Company",
+      metadata: { year: 2027, mode: "final", file_digest: FilingFileDigest.call("final 1099 bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: "a" * 64 })
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "form_1099_nec", tax_year: 2027 }
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("downloads").map { |file| file["current"] }).to eq([ false ])
+  end
+
+  it "loads and advances prior-year legacy evidence without agency or final-file binding" do
+    old = PayrollFilingRecord.create!(company: company, filing_type: "w2_gu_w3_ss", tax_year: 2025,
+      status: "rejected", submitted_at: 1.year.ago, confirmation_number: "OLD", source_fingerprint: "a" * 64)
+    allow_any_instance_of(PayrollFilingEvidenceRecorder).to receive(:validate_w2_readiness!)
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w2_gu_w3_ss", tax_year: 2025, agency: "ssa" }
+    expect(response.parsed_body.dig("filing", "id")).to eq(old.id)
+    params = { filing_type: "w2_gu_w3_ss", tax_year: 2025, event_type: "resubmitted",
+      reference_number: "RETRY", preparer_name: "Dana", idempotency_key: SecureRandom.uuid }
+    post "/api/v1/admin/payroll_filing_records/events", params: params
+    expect(response).to have_http_status(:unprocessable_entity)
+    post "/api/v1/admin/payroll_filing_records/events", params: params.merge(file: upload)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to eq("Signer name is required for a tax return submission")
+    post "/api/v1/admin/payroll_filing_records/events", params: params.merge(file: upload, signer_name: "Pat Owner", idempotency_key: SecureRandom.uuid)
+    expect(response).to have_http_status(:created), response.body
+    expect(response.parsed_body.dig("filing", "id")).to eq(old.id)
+    expect(old.reload.status).to eq("submitted")
+  end
+
+  it "keeps filing-review capability required for recording" do
+    allow(StaffRolePolicy).to receive(:allowed?).and_call_original
+    allow(StaffRolePolicy).to receive(:allowed?).with(admin, :manage_filing_review, company: anything).and_return(false)
+    post "/api/v1/admin/payroll_filing_records/events", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
+    expect(response).to have_http_status(:forbidden)
+    expect(PayrollFilingEvent.count).to eq(0)
+  end
+
+  it "blocks recording in a test workspace" do
+    source = create(:company, organization: company.organization)
+    company.update_columns(payroll_environment: "migration_rehearsal", test_workspace_purpose: "training_replay", migration_rehearsal_status: "ready", migration_source_company_id: source.id, test_workspace_expires_at: 30.days.from_now)
+    post "/api/v1/admin/payroll_filing_records/events", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
+    expect(response).to have_http_status(:forbidden)
+    expect(PayrollFilingEvent.count).to eq(0)
+  end
+
   it "returns no external record until submission evidence exists" do
     get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w1", tax_year: 2026, quarter: 2 }
 

@@ -2,7 +2,7 @@ import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedbac
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { adminClientDocumentsApi, reportsApi, type PayrollFilingEventType, type PayrollFilingRecord, type PayrollFilingEvidenceType } from '@/services/api';
+import { adminClientDocumentsApi, reportsApi, type FilingDownload, type PayrollFilingEventType, type PayrollFilingRecord, type PayrollFilingEvidenceType } from '@/services/api';
 
 const LABELS: Record<PayrollFilingEvidenceType, string> = {
   form_500_payment: 'Form 500 deposit',
@@ -25,7 +25,7 @@ const EVENT_LABELS: Record<PayrollFilingEventType, string> = {
 function messageForStatus(filing: PayrollFilingRecord | null, isPayment: boolean) {
   if (!filing) return isPayment ? 'No payment receipt recorded.' : 'No agency submission recorded.';
   if (filing.status === 'submitted') return isPayment ? 'Payment initiated; confirmation is still pending.' : 'Submitted; waiting for the agency result.';
-  if (filing.status === 'accepted') return isPayment ? 'Payment confirmed with retained proof.' : 'Agency acceptance confirmed with retained proof.';
+  if (filing.status === 'accepted') return isPayment ? 'Payment confirmed with retained proof.' : 'Agency acceptance recorded.';
   if (filing.status === 'accepted_with_errors') return isPayment
     ? 'Payment was received with an issue; resolve it and retain the retry confirmation.'
     : 'Accepted with errors; correct the filing and record the resubmission.';
@@ -33,6 +33,12 @@ function messageForStatus(filing: PayrollFilingRecord | null, isPayment: boolean
     ? 'The payment record needs a correction; resolve it and retain the new confirmation.'
     : 'A correction is required; prepare it and retain the new submission receipt.';
   return isPayment ? 'Payment was rejected; resolve it and retain the retry confirmation.' : 'Rejected; correct the filing and record the resubmission.';
+}
+
+// "accepted_with_errors" -> "Accepted with errors", for statuses and history.
+function statusText(value: string) {
+  const words = value.replaceAll('_', ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function nextEvents(filing: PayrollFilingRecord | null): PayrollFilingEventType[] {
@@ -74,6 +80,12 @@ function guamDateTimeWithOffset(value: FormDataEntryValue | null) {
   return `${value}:00+10:00`;
 }
 
+function filingDueDate(year: number) {
+  const date = new Date(Date.UTC(year + 1, 0, 31));
+  while ([0, 6].includes(date.getUTCDay())) date.setUTCDate(date.getUTCDate() + 1);
+  return date.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function formatGuamDateTime(value: string) {
   return `${new Date(value).toLocaleString('en-US', {
     timeZone: 'Pacific/Guam',
@@ -82,13 +94,36 @@ function formatGuamDateTime(value: string) {
   })} ChST`;
 }
 
-export function FilingEvidencePanel({
+type FilingEvidencePanelProps = {
+  filingType: PayrollFilingEvidenceType;
+  taxYear: number;
+  quarter?: number;
+  preparationReady: boolean;
+  readinessMessage: string;
+  companyId?: number;
+  agency?: string;
+};
+
+export function FilingEvidencePanel(props: FilingEvidencePanelProps) {
+  const [agency, setAgency] = useState('ssa');
+  // Remount on a new filing scope so a save still in flight for the old one
+  // can't land in the new one.
+  const scopeKey = [props.companyId ?? 'current', props.filingType, props.taxYear, props.quarter ?? '', props.agency ?? ''].join(':');
+  if (!props.quarter && props.taxYear >= 2026 && !props.agency) return <div>
+    {props.filingType === 'w2_gu_w3_ss' && <label className="text-sm">Agency<select className="ml-2 min-h-11 rounded border px-2" value={agency} onChange={(event) => setAgency(event.target.value)}><option value="ssa">Social Security (BSO)</option><option value="drt">Guam DRT (GuamTax)</option></select></label>}
+    <FilingEvidencePanelContent key={`${scopeKey}:${agency}`} {...props} agency={props.filingType === 'form_1099_nec' ? 'drt' : agency} />
+  </div>;
+  return <FilingEvidencePanelContent key={scopeKey} {...props} />;
+}
+
+function FilingEvidencePanelContent({
   filingType,
   taxYear,
   quarter,
   preparationReady,
   readinessMessage,
   companyId,
+  agency,
 }: {
   filingType: PayrollFilingEvidenceType;
   taxYear: number;
@@ -97,36 +132,48 @@ export function FilingEvidencePanel({
   readinessMessage: string;
   /** Pin every request to this client instead of the app's current one. */
   companyId?: number;
+  agency?: string;
 }) {
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [downloadId, setDownloadId] = useState('');
+  const [downloads, setDownloads] = useState<FilingDownload[]>([]);
+  const currentDownload = downloads.find((file) => file.current);
+  const [legacy, setLegacy] = useState<PayrollFilingRecord | null>(null);
   const formId = useId();
   const [filing, setFiling] = useState<PayrollFilingRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [eventType, setEventType] = useState<PayrollFilingEventType | null>(null);
   const [saving, setSaving] = useState(false);
+  const loadGenerationRef = useRef(0);
   const idempotencyKeyRef = useRef<string | null>(null);
   const isPayment = filingType === 'form_500_payment';
 
   useEffect(() => {
     let active = true;
+    const generation = ++loadGenerationRef.current;
+    const isCurrent = () => active && generation === loadGenerationRef.current;
     setLoading(true);
     setError(null);
-    void reportsApi.payrollFilingRecord(filingType, taxYear, quarter, companyId)
-      .then((response) => { if (active) setFiling(response.filing); })
-      .catch((err) => { if (active) setError(err instanceof Error ? err.message : 'Unable to load filing evidence'); })
-      .finally(() => { if (active) setLoading(false); });
+    void reportsApi.payrollFilingRecord(filingType, taxYear, quarter, companyId, agency)
+      .then((response) => { if (isCurrent()) { setFiling(response.filing); setDownloads(response.downloads || []); setDownloadId(String(response.downloads?.find((file) => file.current)?.id || '')); setLegacy(response.legacy_filing || null); } })
+      .catch((err) => { if (isCurrent()) setError(err instanceof Error ? err.message : 'Unable to load filing evidence'); })
+      .finally(() => { if (isCurrent()) setLoading(false); });
     return () => { active = false; };
-  }, [companyId, filingType, quarter, setError, taxYear]);
+  }, [loadAttempt, agency, companyId, filingType, quarter, setError, taxYear]);
 
   async function submitEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!eventType) return;
+    if (!eventType || saving) return;
 
     const form = event.currentTarget;
     const data = new FormData(form);
+    const receipt = data.get('file');
+    if (!quarter && receipt instanceof File && receipt.size === 0) data.delete('file');
     const occurredAt = guamDateTimeWithOffset(data.get('occurred_at'));
     if (occurredAt) data.set('occurred_at', occurredAt);
     data.append('filing_type', filingType);
+    if (agency) data.append('agency', agency);
     data.append('tax_year', String(taxYear));
     if (quarter) data.append('quarter', String(quarter));
     data.append('event_type', eventType);
@@ -137,6 +184,9 @@ export function FilingEvidencePanel({
     setError(null);
     try {
       const response = await reportsApi.recordPayrollFilingEvent(data, companyId);
+      // A refresh may have read the old filing before this save completed.
+      loadGenerationRef.current += 1;
+      setLoading(false);
       setFiling(response.filing);
       setEventType(null);
       idempotencyKeyRef.current = null;
@@ -169,22 +219,25 @@ export function FilingEvidencePanel({
     : filing?.status === 'rejected' || filing?.status === 'accepted_with_errors' || filing?.status === 'needs_correction'
       ? 'warning'
       : 'outline';
-  const needsSigner = !isPayment && eventType && ['submitted', 'resubmitted'].includes(eventType);
+  const annual = !quarter && taxYear >= 2026;
+  const needsSigner = !annual && !isPayment && eventType && ['submitted', 'resubmitted'].includes(eventType);
   const needsNotes = eventType === 'accepted_with_errors' || eventType === 'rejected' || eventType === 'correction_needed';
 
   return (
     <div className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-neutral-950">{LABELS[filingType]} evidence</p>
+          <p className="text-sm font-semibold text-neutral-950">{LABELS[filingType]} {agency === 'ssa' ? 'Social Security (BSO)' : agency === 'drt' ? 'Guam DRT (GuamTax)' : ''} evidence</p>
           <p aria-live="polite" className="mt-1 text-xs leading-5 text-neutral-600">{loading ? 'Loading evidence…' : messageForStatus(filing, isPayment)}</p>
         </div>
         <Badge variant={tone}>{filing ? filing.status.replaceAll('_', ' ') : 'not submitted'}</Badge>
       </div>
 
+      {annual && <p className="mt-2 text-xs">{filing ? `${statusText(filing.status)} ${formatGuamDateTime(filing.resolved_at || filing.submitted_at)} · confirmation ${filing.confirmation_number}` : currentDownload ? `Final file downloaded ${formatGuamDateTime(currentDownload.created_at)} — record the submission` : downloads.length ? `The downloaded file is out of date — download the final file again in Print and file` : `Not filed yet — due ${filingDueDate(taxYear)}`}</p>}
+      {legacy && agency === 'ssa' && <details className="mt-3 text-xs"><summary>Earlier W-2 history — agency not recorded</summary><p>This history does not confirm either portal submission.</p>{legacy.events.map((entry) => <div key={entry.id} className="mt-2 flex flex-wrap items-center justify-between gap-2"><p>{statusText(entry.event_type)} · {entry.reference_number} · {formatGuamDateTime(entry.occurred_at)} by {entry.recorded_by}{entry.notes && ` · ${entry.notes}`}</p>{entry.evidence_document && <Button type="button" size="md" variant="outline" onClick={() => void downloadEvidence(entry.evidence_document!.id, entry.evidence_document!.file_name)}>Download proof</Button>}</div>)}</details>}
       {filing?.source_changed && (
         <div className="mt-3 rounded-lg border border-warning-300 bg-warning-50 px-3 py-2 text-xs text-warning-900">
-          Payroll source records changed after the last submission. Review the changes before relying on this evidence or resubmitting.
+          Filing data changed after this was filed; a correction may be needed.
         </div>
       )}
 
@@ -217,8 +270,18 @@ export function FilingEvidencePanel({
         <form id={formId} onSubmit={submitEvent} className="mt-4 space-y-3 rounded-xl border border-neutral-300 bg-white p-4">
           <div>
             <p className="text-sm font-semibold text-neutral-950">{eventLabel(eventType, isPayment)}</p>
-            <p className="mt-1 text-xs text-neutral-500">Attach the actual portal receipt, acknowledgement, or agency response. A generated draft is not evidence.</p>
+            <p className="mt-1 text-xs text-neutral-500">{annual ? 'Add a portal receipt or agency response if available (optional).' : 'Attach the portal receipt or agency response.'}</p>
           </div>
+          {annual && ['submitted', 'resubmitted'].includes(eventType) && <div>
+            <label className="block text-xs font-semibold">Final file uploaded
+              <select name="download_audit_id" required value={downloadId} onChange={(event) => setDownloadId(event.target.value)} className="mt-1 min-h-11 w-full rounded-md border px-2 text-sm">
+                <option value="">Choose a final file</option>
+                {downloads.map((file) => <option key={file.id} value={file.id}>{formatGuamDateTime(file.created_at)} · {file.actor_name} · {file.file_digest.slice(0, 12)}{file.current ? '' : ' · out of date'}</option>)}
+              </select>
+            </label>
+            {downloads.length === 0 && <p className="mt-2 text-xs">Download the final {filingType === 'w2_gu_w3_ss' ? 'W-2' : '1099'} e-file in Print and file first.</p>}
+            <Button type="button" size="sm" variant="outline" disabled={saving || loading} onClick={() => setLoadAttempt((value) => value + 1)}>Refresh files</Button>
+          </div>}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs font-semibold text-neutral-600">
               {isPayment ? 'Payment confirmation number' : 'Agency reference number'}
@@ -245,8 +308,8 @@ export function FilingEvidencePanel({
               </label>
             )}
             <label className="text-xs font-semibold text-neutral-600 sm:col-span-2">
-              Receipt or agency response
-              <input name="file" type="file" required accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx" className="mt-1 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1 file:mr-3 file:rounded-md file:border-0 file:bg-neutral-100 file:px-3 file:py-1 file:text-xs file:font-semibold" />
+              Receipt or agency response {annual ? '(optional)' : ''}
+              <input name="file" type="file" required={!annual} accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx" className="mt-1 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1 file:mr-3 file:rounded-md file:border-0 file:bg-neutral-100 file:px-3 file:py-1 file:text-xs file:font-semibold" />
             </label>
             <label className="text-xs font-semibold text-neutral-600 sm:col-span-2">
               Notes {needsNotes ? '(required)' : '(optional)'}
@@ -271,20 +334,21 @@ export function FilingEvidencePanel({
         </form>
       )}
 
-      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+      {error && <><ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />{!eventType && <Button type="button" variant="outline" onClick={() => setLoadAttempt((value) => value + 1)}>Try again</Button>}</>}
 
       {filing && filing.events.length > 0 && (
         <ol className="mt-4 space-y-2 border-t border-neutral-200 pt-3">
           {[...filing.events].reverse().map((entry) => (
             <li key={entry.id} className="flex flex-wrap items-start justify-between gap-2 text-xs">
               <div>
-                <p className="font-semibold text-neutral-800">{entry.event_type.replaceAll('_', ' ')} · {entry.reference_number}</p>
+                <p className="font-semibold text-neutral-800">{statusText(entry.event_type)} · {entry.reference_number}</p>
                 <p className="mt-0.5 text-neutral-500">{formatGuamDateTime(entry.occurred_at)} by {entry.recorded_by}</p>
                 {entry.notes && <p className="mt-1 max-w-2xl text-neutral-600">{entry.notes}</p>}
               </div>
-              <Button type="button" size="sm" variant="ghost" onClick={() => void downloadEvidence(entry.evidence_document.id, entry.evidence_document.file_name)}>
+              {entry.file_digest && <p>Uploaded file reference: {entry.file_digest.slice(0, 12)}</p>}
+              {entry.evidence_document && <Button type="button" size="sm" variant="ghost" onClick={() => void downloadEvidence(entry.evidence_document!.id, entry.evidence_document!.file_name)}>
                 Download proof
-              </Button>
+              </Button>}
             </li>
           ))}
         </ol>

@@ -93,7 +93,9 @@ RSpec.describe PayrollFilingEvidenceRecorder do
       expect(PayrollFilingRecord.where(company: company)).to be_empty
 
       mark_ready
-      expect(record_event(event_type: "submitted", filing_type: "form_1099_nec").payroll_filing_record.filing_type).to eq("form_1099_nec")
+      download = AuditLog.record!(user: actor, company_id: company.id, action: "pub1220#download", record_type: "Company",
+        metadata: { year: 2026, mode: "final", readiness_fingerprint: Form1099InputsFingerprint.new(company: company.reload, year: 2026).call }.merge(FilingFileDigest.audit_metadata("final 1099 bytes")))
+      expect(record_event(event_type: "submitted", filing_type: "form_1099_nec", download_audit_id: download.id).payroll_filing_record.filing_type).to eq("form_1099_nec")
     end
 
     it "refuses evidence in a year with no 1099s, with the checklist's message" do
@@ -106,7 +108,9 @@ RSpec.describe PayrollFilingEvidenceRecorder do
 
   it "accepts evidence for current revalidated W-2 inputs" do
     ready_w2_workflow
-    event = record_event(event_type: "submitted", filing_type: "w2_gu_w3_ss")
+    download = AuditLog.record!(user: actor, company_id: company.id, action: "efw2#download", record_type: "Company",
+      metadata: { year: 2026, mode: "final", file_digest: FilingFileDigest.call("final filing bytes"), digest_alg: FilingFileDigest::ALGORITHM, readiness_fingerprint: W2FilingInputsFingerprint.new(company: company, year: 2026).call })
+    event = record_event(event_type: "submitted", filing_type: "w2_gu_w3_ss", agency: "ssa", download_audit_id: download.id)
     expect(event.event_type).to eq("submitted")
     expect(event.payroll_filing_record.filing_type).to eq("w2_gu_w3_ss")
   end
