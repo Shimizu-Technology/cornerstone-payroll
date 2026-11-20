@@ -130,9 +130,8 @@ class Efw2W2GuGenerator
     put(rw, 486, 1, row[:box13_statutory_employee] ? "1" : "0")
     put(rw, 488, 1, row[:box13_retirement_plan] ? "1" : "0")
     put(rw, 489, 1, row[:box13_third_party_sick_pay] ? "1" : "0")
-    occupation_codes = Array(row[:box14b_tipped_occupation_codes])
-    occupation_codes = [ "000", *occupation_codes.reject { |code| code == "000" } ] if occupation_codes.include?("000")
-    occupation_codes.first(2).select { Array(row[:box12]).any? { |e| e[:code] == "TP" && cents(e[:amount]).positive? } }.each_with_index { |code, i| put(rw, 490 + i * 3, 3, code) }
+    occupation_codes = W2GuAggregator.box14b_codes(row[:box14b_tipped_occupation_codes])
+    occupation_codes.select { Array(row[:box12]).any? { |e| e[:code] == "TP" && cents(e[:amount]).positive? } }.each_with_index { |code, i| put(rw, 490 + i * 3, 3, code) }
     [ rw, ro ]
   end
 

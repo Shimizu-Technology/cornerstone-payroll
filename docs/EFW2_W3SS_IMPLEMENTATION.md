@@ -36,3 +36,10 @@ W-3SS Box 12a follows the deferred-compensation mapping in EFW2 Appendix E: mode
 Both formats use `Cache-Control: no-store`. Each successful download records actor, company, year, mode, readiness fingerprint and SHA-256 of the returned bytes. Audit metadata excludes SSNs. Test workspaces cannot export filing files. The self-check verifies record lengths/order/counts, monetary subtotals and aggregator totals before returning either format.
 
 No SSA/GuamTax upload occurs in this change. AccuWage and GuamTax acceptance remain operator checks once their 2026 windows/accounts are available. Foreign-address exports and other tax years are rejected; future layouts need explicit implementation.
+
+
+## Year-end integration after #502
+
+Print and file holds four document rows: employee copies B/C, Copy 1 for Guam DRT, the W-2 e-file for SSA and GuamTax, and the W-3SS totals for records. The checklist supplies each endpoint and params. Filing evidence remains a separate card. Draft e-file and W-3SS downloads require an explicit test-file confirmation; finals use the current readiness fingerprint. Full-SSN downloads show their client-management restriction. EFW2 uses `W2GuAggregator.box14b_codes`, the same selection as the printed copies.
+
+EFW2 problems carry scope, code and employee ID. Cleaned fields exceeding their record widths are rejected rather than truncated. Email checks use the vendored IANA TLD snapshot in `api/vendor/iana/`; refresh it from the official source URL in its header/provenance before a filing season if needed. The list shows its known subset of issues while EfileCheck v2 is pending and queues missing checks on the existing default queue, deduplicated by company/year/revision. See the round-3 validation report for deploy and recovery details.

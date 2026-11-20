@@ -32,6 +32,8 @@ RSpec.describe Efw2W2GuGenerator do
     expect(field(generator.generate.split("\r\n"), "RW", 490, 495)).to eq("101102")
     row[:box14b_tipped_occupation_codes] = %w[101 102 000]
     expect(field(generator.generate.split("\r\n"), "RW", 490, 495)).to eq("000101")
+    row[:box14b_tipped_occupation_codes] = %w[101 000]
+    expect(field(generator.generate.split("\r\n"), "RW", 490, 495)).to eq("101000")
     row[:box14b_tipped_occupation_codes] = []
     expect(generator.problems).to be_empty
   end

@@ -576,7 +576,7 @@ module YearEnd
       summary = if practice
         "This is a practice copy, so every document is a draft. Review them, but don't hand them out or file them."
       elsif final
-        "The #{year} W-2s are marked ready. Print each document below."
+        "The #{year} W-2s are marked ready. Download each document below."
       else
         "Drafts until the W-2s are marked ready in step 7. Review them, but don't hand them out yet."
       end
@@ -614,11 +614,40 @@ module YearEnd
         }
       ].map do |document|
         drt = document[:key] == "w2_drt_copy_1"
-        # Test and practice workspaces never produce full SSNs.
         reason = unavailable || (drt_unavailable_reason if drt)
         document.merge(
           format: "pdf", draft: !final, available: reason.nil?, unavailable_reason: reason,
           download: { path: "/admin/reports/#{drt ? 'w2_gu_copy_1_drt' : 'w2_gu_employee_copies'}", params: { year: year } }
+        )
+      end + wage_filing_documents(final, unavailable)
+    end
+
+    def wage_filing_documents(final, unavailable)
+      confirmation = "Test file only — review it, but don't upload it as your filing."
+      [
+        {
+          key: "w2_efile", title: "W-2 e-file (SSA and GuamTax)", format: "txt",
+          description: "One wage file to upload to SSA (BSO) and GuamTax after the W-2s are marked ready.",
+          detail: "Check a draft in AccuWage first. Each download is recorded in the activity log.",
+          contains_full_ssn: true, path: "/admin/reports/w2_gu_efw2"
+        },
+        {
+          key: "w3ss_totals", title: "W-3SS totals (for your records)", format: "pdf",
+          description: "Keep this totals sheet with your filing records; it is not an agency filing.",
+          detail: "The employer totals come from the same W-2 wages as the e-file.",
+          contains_full_ssn: false, path: "/admin/reports/w3ss_pdf"
+        }
+      ].map do |document|
+        restriction = if document[:contains_full_ssn]
+          drt_unavailable_reason
+        elsif company.test_workspace?
+          "Not available in a practice copy."
+        end
+        reason = unavailable || restriction
+        document.except(:path).merge(
+          draft: !final, draft_confirmation: final ? nil : confirmation,
+          available: reason.nil?, unavailable_reason: reason,
+          download: { path: document[:path], params: { year: year, mode: final ? "final" : "draft" } }
         )
       end
     end

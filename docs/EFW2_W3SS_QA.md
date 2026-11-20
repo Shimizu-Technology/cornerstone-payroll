@@ -1,5 +1,7 @@
 # EFW2 / W-3SS fix round 1
 
+Current round 3 and #502 integration: see [round3-validation.md](evidence/efw2-w3ss/round3-validation.md). It supersedes the earlier standalone-card and stale-cache count descriptions below.
+
 November 20, 2026. PR #501, `feature/efw2-w3ss`, isolated checkout `/Users/agent/work/cornerstone-payroll-b`. Starting head `2f0e683bb8259674cc3adca528ae8531ced45dd0` matched origin and was clean. This report covers that source plus the fix-round changes committed with it. Target branch: `main`. Hold for the lead's review; do not merge.
 
 Cornerstone staff prepare each client's 2026 W-2GUs for SSA and Guam DRT. Acceptance for this round: the list and checklist agree on new filing problems; draft and final files require Cornerstone responsibility; format problems appear before sign-off; full-SSN files require delegated client management; the phone and desktop flows remain usable. Source: the lead's review brief, current controllers/services/policies, and SSA Pub 42-007 tax year 2026 v4 (local PDF read only, not committed).
@@ -19,7 +21,7 @@ Cornerstone staff prepare each client's 2026 W-2GUs for SSA and Guam DRT. Accept
 | 6 | Shared SSA save-time checks; first-save race handling; repeat saves update the existing profile; workspace update blocked. | `api/app/models/filing_submitter.rb`, `api/app/controllers/api/v1/admin/filing_submitters_controller.rb`, `api/app/policies/test_workspace_safety_policy.rb` |
 | 7 | Seven literal 512-character golden records transcribed independently from spec positions, with full-record equality. | `api/spec/fixtures/efw2_2026_golden.txt`, `api/spec/services/efw2_w2_gu_generator_spec.rb` |
 | 8 | One contact editor; visible missing/invalid issues; loading state; field helper lines; hide W-2 settings for 1099-only clients. | `web/src/components/year-end/EmployerStep.tsx`, `EmployerFilingSettings.tsx`, `FilingSubmitterCard.tsx` |
-| 9 | Requested e-file/W-3SS/submitter wording and draft confirmation. | `web/src/components/year-end/W2FilingFileRow.tsx`, `FilingSubmitterCard.tsx` |
+| 9 | Requested e-file/W-3SS/submitter wording and draft confirmation. | `web/src/components/year-end/PrintAndFileStep.tsx`, `FilingSubmitterCard.tsx` |
 | 10 | Correct employer-contact comment. | `api/app/services/efw2_w2_gu_generator.rb` |
 | Added access finding | EFW2 requires per-client `manage_client_administration`; delegated accountant/admin allowed, plain accountant denied. W-3SS retains report authorization. Profile edits use `manage_organization` because the details affect every client. | `api/app/policies/staff_role_policy.rb`, `api/app/controllers/api/v1/admin/filing_submitters_controller.rb`, `web/src/pages/YearEndChecklist.tsx` |
 

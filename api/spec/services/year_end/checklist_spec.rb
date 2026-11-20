@@ -467,16 +467,21 @@ RSpec.describe YearEnd::Checklist do
       expect(print_step).to include(status: "available", number: 8, title: "Print and file", issues: [])
       expect(print_step.dig(:data, :final)).to be(false)
       documents = print_step.dig(:data, :documents)
-      expect(documents.map { |document| document[:key] }).to eq(%w[w2_employee_copies w2_drt_copy_1])
+      expect(documents.map { |document| document[:key] }).to eq(%w[w2_employee_copies w2_drt_copy_1 w2_efile w3ss_totals])
       expect(documents.first).to include(
         title: "Employee copies (B and C)", description: "Print and give to each employee by Feb 1, 2027.",
         contains_full_ssn: false, draft: true, available: true, unavailable_reason: nil,
         download: { path: "/admin/reports/w2_gu_employee_copies", params: { year: 2026 } }
       )
       # An accountant without client management can't download full SSNs.
-      expect(documents.last).to include(title: "Copy 1 for Guam DRT", description: "Your record; not mailed when you e-file.",
+      expect(documents[1]).to include(title: "Copy 1 for Guam DRT", description: "Your record; not mailed when you e-file.",
         contains_full_ssn: true, draft: true, available: false, unavailable_reason: "Needs client-management access (contains full SSNs).",
         download: { path: "/admin/reports/w2_gu_copy_1_drt", params: { year: 2026 } })
+      expect(documents[2]).to include(format: "txt", contains_full_ssn: true, available: false,
+        draft_confirmation: a_string_including("Test file only"),
+        download: { path: "/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" } })
+      expect(documents[3]).to include(title: "W-3SS totals (for your records)", available: true,
+        download: { path: "/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" } })
       expect(result).to include(status: "needs_action", next_step: "mark_ready", issue_count: 1)
 
       fingerprint = W2FilingInputsFingerprint.new(company: company, year: 2026).call
@@ -486,7 +491,9 @@ RSpec.describe YearEnd::Checklist do
       result = checklist
       expect(result).to include(status: "ready", issue_count: 0, next_step: nil)
       expect(step(result, "print_and_file").dig(:data, :final)).to be(true)
-      expect(step(result, "print_and_file").dig(:data, :documents).map { |document| document[:draft] }).to eq([ false, false ])
+      expect(step(result, "print_and_file").dig(:data, :documents)[2]).to include(draft_confirmation: nil,
+        download: { path: "/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "final" } })
+      expect(step(result, "print_and_file").dig(:data, :documents).map { |document| document[:draft] }).to eq([ false, false, false, false ])
     end
 
     it "offers Copy 1 to staff who may sign off the W-2s" do
@@ -495,7 +502,8 @@ RSpec.describe YearEnd::Checklist do
       manager = create(:user, company: company, organization: company.organization, role: "manager")
 
       documents = step(described_class.new(company: company.reload, year: 2026, user: manager).call, "print_and_file").dig(:data, :documents)
-      expect(documents.last).to include(available: true, unavailable_reason: nil)
+      expect(documents[1]).to include(available: true, unavailable_reason: nil)
+      expect(documents[2]).to include(available: true, unavailable_reason: nil)
     end
 
     it "keeps a practice copy's documents drafts and withholds Copy 1" do
@@ -511,9 +519,11 @@ RSpec.describe YearEnd::Checklist do
       print_step = step(described_class.new(company: company.reload, year: 2026, user: admin).call, "print_and_file")
       expect(print_step[:summary]).to start_with("This is a practice copy")
       expect(print_step.dig(:data, :final)).to be(false)
-      employee_copies, copy_1 = print_step.dig(:data, :documents)
+      employee_copies, copy_1, efile, totals = print_step.dig(:data, :documents)
       expect(employee_copies).to include(draft: true, available: true)
       expect(copy_1).to include(draft: true, available: false, unavailable_reason: "Not available in a practice copy — it contains full SSNs.")
+      expect(efile).to include(draft: true, available: false, unavailable_reason: "Not available in a practice copy — it contains full SSNs.")
+      expect(totals).to include(draft: true, available: false, unavailable_reason: "Not available in a practice copy.")
     end
 
     # IRS General Instructions for Forms W-2 and W-3 (2026), Box 14b: with
