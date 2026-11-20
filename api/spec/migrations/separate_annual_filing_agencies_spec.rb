@@ -14,6 +14,7 @@ RSpec.describe SeparateAnnualFilingAgencies do
 
   it "preserves prior-year W-2 history as unassigned across rollback and migration" do
     old = filing
+    prior1099 = filing(filing_type: "form_1099_nec")
     actor = create(:user, company: company, organization: company.organization)
     document = create(:client_document, company: company, uploaded_by: actor, category: "filing_evidence", visible_to_client: false)
     event = PayrollFilingEvent.create!(payroll_filing_record: old, company: company, recorded_by: actor,
@@ -23,6 +24,7 @@ RSpec.describe SeparateAnnualFilingAgencies do
     migration.up
     PayrollFilingRecord.reset_column_information
     expect(old.reload).to have_attributes(agency: "legacy", confirmation_number: "OLD", tax_year: 2024)
+    expect(prior1099.reload.agency).to eq("drt")
     expect(event.reload).to have_attributes(reference_number: "OLD", evidence_document_id: document.id, payroll_filing_record_id: old.id)
   end
 

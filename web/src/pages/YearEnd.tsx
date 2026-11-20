@@ -235,7 +235,7 @@ export function YearEnd(): ReactElement {
 
         {overview && (
           <>
-            {overview.filing_reminder_count != null && <p className="text-sm font-semibold text-warning-800">{overview.filing_reminder_count} client(s) not yet filed. Record each portal submission before the deadline.</p>}
+            {overview.filing_reminder_count != null && <p className="text-sm font-semibold text-warning-800">{overview.filing_reminder_count} client(s) need filing attention. Review portal submissions and agency results before the deadline.</p>}
             <dl className="grid grid-cols-3 gap-2 sm:max-w-xl sm:gap-3">
               {[
                 { label: 'To do', value: overview.counts.needs_action + (overview.counts.check_needed ?? 0), tone: 'text-warning-800' },

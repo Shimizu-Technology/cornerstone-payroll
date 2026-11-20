@@ -8,7 +8,14 @@ module YearEnd
       @decisions, @records, @downloads = decisions, records, downloads
     end
 
+    def self.due_date(year)
+      date = Date.new(year + 1, 1, 31)
+      date += 1 until date.on_weekday?
+      date
+    end
+
     def call
+      return [] if @year < Checklist::FIRST_TAX_YEAR
       decisions = @decisions || PayrollFilingResponsibility.where(company_id: @company.id, tax_year: @year, quarter: nil, responsible_party: "cornerstone").pluck(:filing_type)
       return [] if @company.test_workspace?
 
@@ -22,7 +29,7 @@ module YearEnd
         { filing_type: type, agency: agency, label: label, status: record&.status || "not_filed",
           submitted_at: record&.submitted_at&.iso8601, resolved_at: record&.resolved_at&.iso8601,
           confirmation_number: record&.confirmation_number, downloaded_at: download&.created_at&.iso8601,
-          due_date: @year == 2026 ? "2027-02-01" : Date.new(@year + 1, 1, 31).iso8601 }
+          due_date: self.class.due_date(@year).iso8601 }
       end
     end
   end

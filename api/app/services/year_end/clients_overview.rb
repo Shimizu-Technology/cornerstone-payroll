@@ -162,7 +162,8 @@ module YearEnd
     def filing_downloads
       @filing_downloads ||= AuditLog.where(company_id: company_ids, action: %w[efw2#download pub1220#download])
         .where("metadata->>'sha256' ~ '^[0-9a-f]{64}$'")
-        .where("metadata->>'year' = ? AND metadata->>'mode' = 'final'", year.to_s).newest_first
+        .where("metadata->>'year' = ? AND metadata->>'mode' = 'final'", year.to_s)
+        .select("DISTINCT ON (company_id, action) audit_logs.*").order(:company_id, :action, created_at: :desc, id: :desc)
         .each_with_object({}) do |log, result|
           type = log.action == "efw2#download" ? "w2_gu_w3_ss" : "form_1099_nec"
           (result[log.company_id] ||= {})[type] ||= log

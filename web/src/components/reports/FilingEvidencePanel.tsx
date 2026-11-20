@@ -25,7 +25,7 @@ const EVENT_LABELS: Record<PayrollFilingEventType, string> = {
 function messageForStatus(filing: PayrollFilingRecord | null, isPayment: boolean) {
   if (!filing) return isPayment ? 'No payment receipt recorded.' : 'No agency submission recorded.';
   if (filing.status === 'submitted') return isPayment ? 'Payment initiated; confirmation is still pending.' : 'Submitted; waiting for the agency result.';
-  if (filing.status === 'accepted') return isPayment ? 'Payment confirmed with retained proof.' : 'Agency acceptance confirmed with retained proof.';
+  if (filing.status === 'accepted') return isPayment ? 'Payment confirmed with retained proof.' : 'Agency acceptance recorded.';
   if (filing.status === 'accepted_with_errors') return isPayment
     ? 'Payment was received with an issue; resolve it and retain the retry confirmation.'
     : 'Accepted with errors; correct the filing and record the resubmission.';
@@ -74,6 +74,12 @@ function guamDateTimeWithOffset(value: FormDataEntryValue | null) {
   return `${value}:00+10:00`;
 }
 
+function filingDueDate(year: number) {
+  const date = new Date(Date.UTC(year + 1, 0, 31));
+  while ([0, 6].includes(date.getUTCDay())) date.setUTCDate(date.getUTCDate() + 1);
+  return date.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function formatGuamDateTime(value: string) {
   return `${new Date(value).toLocaleString('en-US', {
     timeZone: 'Pacific/Guam',
@@ -94,7 +100,7 @@ type FilingEvidencePanelProps = {
 
 export function FilingEvidencePanel(props: FilingEvidencePanelProps) {
   const [agency, setAgency] = useState('ssa');
-  if (!props.quarter && !props.agency) return <div>
+  if (!props.quarter && props.taxYear >= 2026 && !props.agency) return <div>
     {props.filingType === 'w2_gu_w3_ss' && <label className="text-sm">Agency<select className="ml-2 min-h-11 rounded border px-2" value={agency} onChange={(event) => setAgency(event.target.value)}><option value="ssa">Social Security (BSO)</option><option value="drt">Guam DRT (GuamTax)</option></select></label>}
     <FilingEvidencePanelContent key={agency} {...props} agency={props.filingType === 'form_1099_nec' ? 'drt' : agency} />
   </div>;
@@ -120,6 +126,7 @@ function FilingEvidencePanelContent({
   agency?: string;
 }) {
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [downloadId, setDownloadId] = useState('');
   const [downloads, setDownloads] = useState<FilingDownload[]>([]);
   const [legacy, setLegacy] = useState<PayrollFilingRecord | null>(null);
   const formId = useId();
@@ -136,7 +143,7 @@ function FilingEvidencePanelContent({
     setLoading(true);
     setError(null);
     void reportsApi.payrollFilingRecord(filingType, taxYear, quarter, companyId, agency)
-      .then((response) => { if (active) { setFiling(response.filing); setDownloads(response.downloads || []); setLegacy(response.legacy_filing || null); } })
+      .then((response) => { if (active) { setFiling(response.filing); setDownloads(response.downloads || []); setDownloadId(String(response.downloads?.find((file) => file.current)?.id || '')); setLegacy(response.legacy_filing || null); } })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : 'Unable to load filing evidence'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -196,7 +203,7 @@ function FilingEvidencePanelContent({
     : filing?.status === 'rejected' || filing?.status === 'accepted_with_errors' || filing?.status === 'needs_correction'
       ? 'warning'
       : 'outline';
-  const annual = !quarter;
+  const annual = !quarter && taxYear >= 2026;
   const needsSigner = !annual && !isPayment && eventType && ['submitted', 'resubmitted'].includes(eventType);
   const needsNotes = eventType === 'accepted_with_errors' || eventType === 'rejected' || eventType === 'correction_needed';
 
@@ -210,8 +217,8 @@ function FilingEvidencePanelContent({
         <Badge variant={tone}>{filing ? filing.status.replaceAll('_', ' ') : 'not submitted'}</Badge>
       </div>
 
-      {annual && <p className="mt-2 text-xs">{filing ? `${filing.status === 'submitted' ? 'Submitted' : filing.status.replaceAll('_', ' ')} ${formatGuamDateTime(filing.resolved_at || filing.submitted_at)} · confirmation ${filing.confirmation_number}` : downloads[0] ? `Final file downloaded ${formatGuamDateTime(downloads[0].created_at)} — record the submission` : `Not filed yet — due ${taxYear === 2026 ? 'Feb 1, 2027' : `Jan 31, ${taxYear + 1}`}`}</p>}
-      {legacy && <details className="mt-3 text-xs"><summary>Earlier W-2 history — agency not recorded</summary><p>This history does not confirm either portal submission.</p>{legacy.events.map((entry) => <p key={entry.id}>{entry.event_type} · {entry.reference_number} · {formatGuamDateTime(entry.occurred_at)} by {entry.recorded_by} · {entry.notes}{entry.evidence_document && <button type="button" onClick={() => void downloadEvidence(entry.evidence_document!.id, entry.evidence_document!.file_name)}>Download proof</button>}</p>)}</details>}
+      {annual && <p className="mt-2 text-xs">{filing ? `${filing.status === 'submitted' ? 'Submitted' : filing.status.replaceAll('_', ' ')} ${formatGuamDateTime(filing.resolved_at || filing.submitted_at)} · confirmation ${filing.confirmation_number}` : downloads[0] ? `Final file downloaded ${formatGuamDateTime(downloads[0].created_at)} — record the submission` : `Not filed yet — due ${filingDueDate(taxYear)}`}</p>}
+      {legacy && agency === 'ssa' && <details className="mt-3 text-xs"><summary>Earlier W-2 history — agency not recorded</summary><p>This history does not confirm either portal submission.</p>{legacy.events.map((entry) => <p key={entry.id}>{entry.event_type} · {entry.reference_number} · {formatGuamDateTime(entry.occurred_at)} by {entry.recorded_by} · {entry.notes}{entry.evidence_document && <button type="button" onClick={() => void downloadEvidence(entry.evidence_document!.id, entry.evidence_document!.file_name)}>Download proof</button>}</p>)}</details>}
       {filing?.source_changed && (
         <div className="mt-3 rounded-lg border border-warning-300 bg-warning-50 px-3 py-2 text-xs text-warning-900">
           Filing data changed after this was filed; a correction may be needed.
@@ -247,9 +254,18 @@ function FilingEvidencePanelContent({
         <form id={formId} onSubmit={submitEvent} className="mt-4 space-y-3 rounded-xl border border-neutral-300 bg-white p-4">
           <div>
             <p className="text-sm font-semibold text-neutral-950">{eventLabel(eventType, isPayment)}</p>
-            <p className="mt-1 text-xs text-neutral-500">Attach the actual portal receipt, acknowledgement, or agency response. A generated draft is not evidence.</p>
+            <p className="mt-1 text-xs text-neutral-500">{annual ? 'Add a portal receipt or agency response if available (optional).' : 'Attach the portal receipt or agency response.'}</p>
           </div>
-          {annual && ['submitted', 'resubmitted'].includes(eventType) && <label className="block text-xs font-semibold">Final file uploaded<select name="download_audit_id" required defaultValue={downloads[0]?.id || ''} className="mt-1 min-h-11 w-full rounded-md border px-2 text-sm"><option value="">Choose a final file</option>{downloads.map((file) => <option key={file.id} value={file.id}>{formatGuamDateTime(file.created_at)} · {file.actor_name} · {file.sha256.slice(0, 12)}</option>)}</select><Button type="button" size="sm" variant="outline" disabled={saving || loading} onClick={() => setLoadAttempt((value) => value + 1)}>Refresh files</Button></label>}
+          {annual && ['submitted', 'resubmitted'].includes(eventType) && <div>
+            <label className="block text-xs font-semibold">Final file uploaded
+              <select name="download_audit_id" required value={downloadId} onChange={(event) => setDownloadId(event.target.value)} className="mt-1 min-h-11 w-full rounded-md border px-2 text-sm">
+                <option value="">Choose a final file</option>
+                {downloads.map((file) => <option key={file.id} value={file.id}>{formatGuamDateTime(file.created_at)} · {file.actor_name} · {file.sha256.slice(0, 12)}{file.current ? '' : ' · out of date'}</option>)}
+              </select>
+            </label>
+            {downloads.length === 0 && <p className="mt-2 text-xs">Download the final {filingType === 'w2_gu_w3_ss' ? 'W-2' : '1099'} e-file in Print and file first.</p>}
+            <Button type="button" size="sm" variant="outline" disabled={saving || loading} onClick={() => setLoadAttempt((value) => value + 1)}>Refresh files</Button>
+          </div>}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs font-semibold text-neutral-600">
               {isPayment ? 'Payment confirmation number' : 'Agency reference number'}
@@ -276,7 +292,7 @@ function FilingEvidencePanelContent({
               </label>
             )}
             <label className="text-xs font-semibold text-neutral-600 sm:col-span-2">
-              Receipt or agency response
+              Receipt or agency response {annual ? '(optional)' : ''}
               <input name="file" type="file" required={!annual} accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx" className="mt-1 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1 file:mr-3 file:rounded-md file:border-0 file:bg-neutral-100 file:px-3 file:py-1 file:text-xs file:font-semibold" />
             </label>
             <label className="text-xs font-semibold text-neutral-600 sm:col-span-2">

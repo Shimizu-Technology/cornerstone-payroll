@@ -3188,7 +3188,7 @@ export type PayrollFilingEvidenceType = 'form_500_payment' | 'w1' | 'swica' | 'f
 export type PayrollFilingStatus = 'submitted' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'needs_correction';
 export type PayrollFilingEventType = 'submitted' | 'resubmitted' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'correction_needed';
 
-export interface FilingDownload { id: number; created_at: string; actor_name: string | null; sha256: string }
+export interface FilingDownload { id: number; created_at: string; actor_name: string | null; sha256: string; current: boolean }
 
 export interface PayrollFilingEvent {
   download_audit_id?: number | null;

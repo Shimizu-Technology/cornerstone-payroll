@@ -40,6 +40,23 @@ RSpec.describe YearEnd::Checklist do
     result[:steps].find { |entry| entry[:key] == key }
   end
 
+  it "preserves preparation stamps and returns a checklist when filing progress fails" do
+    decide(w2: "client")
+    allow_any_instance_of(described_class).to receive(:overall_status).and_return("ready")
+    baseline = checklist
+    allow_any_instance_of(YearEnd::FilingProgress).to receive(:call).and_raise(StandardError, "private details")
+    expect(YearEnd::ReadyCheck).not_to receive(:clear)
+    expect(Rails.logger).to receive(:warn).with("year_end_filing_progress_failed company_id=#{company.id} tax_year=2026")
+    result = checklist
+    expect(result[:filing_progress]).to eq([])
+    expect(result.except(:filing_progress)).to eq(baseline.except(:filing_progress))
+  end
+
+  it "rolls the filing deadline past weekends using the print-step rule" do
+    expect(YearEnd::FilingProgress.due_date(2031)).to eq(Date.new(2032, 2, 2))
+    expect(YearEnd::FilingProgress.due_date(2026)).to eq(Date.new(2027, 2, 1))
+  end
+
   it "shows only Cornerstone filings and counts clients needing submission near the deadline" do
     decide(w2: "client", form_1099: "cornerstone")
     allow(Date).to receive(:current).and_return(Date.new(2027, 1, 10))

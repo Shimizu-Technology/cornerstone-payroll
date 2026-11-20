@@ -69,4 +69,32 @@ RSpec.describe PayrollFilingEvidenceRecorder do
     expect { record(type: "accepted") }.not_to raise_error
     expect(event.payroll_filing_record.reload.status).to eq("accepted")
   end
+  %w[w2_gu_w3_ss form_1099_nec].each do |filing_type|
+    %w[rejected needs_correction].each do |status|
+      it "resubmits prior-year #{filing_type} #{status} with a receipt and no file binding" do
+        old = PayrollFilingRecord.create!(company: company, filing_type: filing_type, tax_year: 2025,
+          status: status, submitted_at: 1.year.ago, confirmation_number: "OLD", source_fingerprint: "a" * 64)
+        document = create(:client_document, company: company, uploaded_by: actor, category: "filing_evidence", visible_to_client: false)
+        allow(InformationReturnThreshold).to receive(:for!).and_return(double(threshold_amount: 600))
+        allow(AnnualFilingDownloads).to receive(:form1099_final?).and_raise("Prior years must not use final sign-off")
+        allow_any_instance_of(Form1099NecAggregator).to receive(:generate).and_return({ meta: { reportable_count: 1 }, reportable_contractors: [ { compliance_issues: [] } ] })
+        event = described_class.new(company: company, actor: actor, evidence_document: document, attributes: {
+          filing_type: filing_type, tax_year: 2025, agency: "ssa", event_type: "resubmitted",
+          reference_number: "RETRY", preparer_name: actor.name, idempotency_key: SecureRandom.uuid
+        }).call
+        expect(event.payroll_filing_record_id).to eq(old.id)
+        expect(event.download_audit_id).to be_nil
+        expect(old.reload.status).to eq("submitted")
+      end
+    end
+  end
+
+  it "requires a receipt for prior-year annual evidence" do
+    expect { record(tax_year: 2025, download_audit_id: nil) }.to raise_error(described_class::Error, /Evidence must belong/)
+  end
+
+  it "names the expected e-file when a PDF download is selected" do
+    wrong = AuditLog.record!(user: actor, company_id: company.id, action: "w2#download", record_type: "Company", metadata: download.metadata)
+    expect { record(download_audit_id: wrong.id) }.to raise_error(described_class::Error, "That download is not the W-2 e-file")
+  end
 end
