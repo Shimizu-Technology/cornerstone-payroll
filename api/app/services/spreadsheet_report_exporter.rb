@@ -78,8 +78,6 @@ class SpreadsheetReportExporter
 
   def cell_value(value)
     case value
-    when BigDecimal
-      value.to_f
     when Date, Time, DateTime
       value.to_s
     when String

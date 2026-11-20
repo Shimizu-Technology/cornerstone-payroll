@@ -524,6 +524,14 @@ module Api
         # Downloads W-2GU annual summary as CSV.
         # Params:
         #   year [Integer] – tax year (defaults to current year)
+        def form_1099_pub1220
+          download_1099_filing_file(pdf: false)
+        end
+
+        def form_1096_totals
+          download_1099_filing_file(pdf: true)
+        end
+
         def w2_gu_efw2
           download_wage_filing_file(pdf: false)
         end
@@ -1929,6 +1937,55 @@ module Api
 
         # Shared year validation + aggregation for W-2GU exports (CSV/PDF).
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
+        def download_1099_filing_file(pdf:)
+          response.set_header("Cache-Control", "no-store")
+          year = Integer(params[:year], exception: false)
+          raise ArgumentError, "Only tax year 2026 is supported" unless year == 2026
+          raise ArgumentError, "Choose draft or final" unless params[:mode].in?(%w[draft final])
+
+          company = Company.find(current_company_id)
+          company.with_lock do
+            revalidate_current_company_write_access!(company: company, capability: :manage_client_administration)
+            raise ArgumentError, "Not available in a practice copy" if company.test_workspace?
+
+            final = params[:mode] == "final"
+            decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "form_1099")
+            raise ArgumentError, "Record that Cornerstone files this client's 1099s before downloading" unless decision&.responsible_party == "cornerstone"
+
+            gate = PayrollFilingResponsibilityGate.new(company: company, tax_year: year, filing_type: "form_1099").payload
+            raise ArgumentError, gate[:blockers].map { |b| b.is_a?(Hash) ? b[:message] : b }.join("; ") if gate[:blockers].any?
+
+            if final && !Form1099Readiness.final?(company: company, year: year)
+              return render json: { error: "Mark the 1099s ready first" }, status: :conflict
+            end
+
+            generate_file = lambda do
+              Form1099Pub1220Generator.new(company: company.reload, year: year,
+                submitter: FilingSubmitter.find_by(organization_id: company.organization_id), draft: !final).generate
+            end
+            file = generate_file.call
+            content = pdf ? Form1096TotalsPdfGenerator.new(company: company, file: file, draft: !final).generate : file
+            current = ActiveRecord::Base.uncached { generate_file.call }
+            raise ArgumentError, "Filing inputs changed during generation; refresh and try again" unless current == file
+
+            revalidate_current_company_write_access!(company: company, capability: :manage_client_administration)
+            current_decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "form_1099")
+            raise ArgumentError, "Filing responsibility changed during generation" unless current_decision&.responsible_party == "cornerstone"
+            # A locked history batch can add a gate blocker without the company lock.
+            current_gate = PayrollFilingResponsibilityGate.new(company: company, tax_year: year, filing_type: "form_1099").payload
+            raise ArgumentError, "Filing blockers changed during generation; refresh and try again" if current_gate[:blockers].any?
+            raise ArgumentError, "Filing readiness changed during generation" if final && !Form1099Readiness.final?(company: company, year: year)
+
+            AuditLog.record!(user: current_user, company_id: company.id, action: pdf ? "form1096#download" : "pub1220#download",
+              record_type: "Company", record_id: company.id,
+              metadata: { year: year, mode: params[:mode], sha256: Digest::SHA256.hexdigest(content) })
+            send_data content, filename: "#{company.name.parameterize}-#{year}-#{final ? 'FINAL' : 'DRAFT'}-#{pdf ? '1096-totals.pdf' : '1099-PUB1220.txt'}",
+              type: pdf ? "application/pdf" : "text/plain; charset=us-ascii", disposition: "attachment"
+          end
+        rescue ArgumentError => e
+          render json: { error: e.message, problems: e.respond_to?(:problems) ? e.problems : [ e.message ] }, status: :unprocessable_entity
+        end
+
         def download_wage_filing_file(pdf:)
           response.set_header("Cache-Control", "no-store")
           year = Integer(params[:year], exception: false)
@@ -4608,8 +4665,12 @@ module Api
             ]
           end
           [
-            { name: "1099-NEC", rows: [ headers ] + rows },
-            { name: "Totals", rows: (report[:totals] || {}).to_a },
+            { name: "1099-NEC", rows: [ headers ] + rows,
+              styles: { money: { format_code: "$#,##0.00;[Red]-$#,##0.00" } },
+              row_style_rules: [ { rows: 1..rows.length, styles: [ nil, nil, nil, nil, nil, :money, :money ] } ] },
+            { name: "Totals", rows: (report[:totals] || {}).to_a,
+              styles: { money: { format_code: "$#,##0.00;[Red]-$#,##0.00" } },
+              row_style_rules: [ { rows: 0...(report[:totals] || {}).length, styles: [ nil, :money ] } ] },
             report_info_sheet(report, title: "1099-NEC", description: REPORT_DESCRIPTIONS[:form_1099_nec])
           ]
         end

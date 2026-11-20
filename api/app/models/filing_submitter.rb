@@ -3,7 +3,8 @@
 # One practice profile per organization. Future transmitter identifiers belong here;
 # credentials and passwords do not.
 class FilingSubmitter < ApplicationRecord
-  FIELDS = %i[ein name address_line1 address_line2 city state zip contact_name contact_phone contact_email bso_user_id].freeze
+  FIELDS = %i[ein name address_line1 address_line2 city state zip contact_name contact_phone contact_email bso_user_id tcc].freeze
+  validates :tcc, format: { with: /\A[A-Za-z0-9]{5}\z/ }, allow_blank: true
   belongs_to :organization
   validates :organization_id, uniqueness: true
   validates :ein, format: { with: /\A\d{2}-?\d{7}\z/ }, allow_blank: true
@@ -11,6 +12,7 @@ class FilingSubmitter < ApplicationRecord
   validates :contact_email, format: { with: URI::MailTo::EMAIL_REGEXP }, length: { maximum: 40 }, allow_blank: true
   validates :contact_phone, format: { with: /\A[\d ()+.-]{10,25}\z/ }, allow_blank: true
 
+  before_validation { self.tcc = tcc&.strip.presence }
   before_validation { self.state = state&.strip; self.zip = zip&.strip }
 
   validate :ssa_format
@@ -40,6 +42,6 @@ class FilingSubmitter < ApplicationRecord
   end
 
   def missing_fields
-    (FIELDS - [ :address_line2 ]).select { |field| public_send(field).blank? }
+    (FIELDS - [ :address_line2, :tcc ]).select { |field| public_send(field).blank? }
   end
 end

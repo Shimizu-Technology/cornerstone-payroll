@@ -283,9 +283,10 @@ module YearEnd
             .where(company_id: form_1099_company_ids, employment_type: "contractor")
             .financially_reportable
             .where(pay_periods: { id: PayPeriod.reportable_committed.where(company_id: form_1099_company_ids, pay_date: year_range).select(:id) })
-            .group(:employee_id).sum(:gross_pay)
+            .group(:employee_id)
+            .pluck(:employee_id, Arel.sql("SUM(gross_pay)"), Arel.sql("SUM(COALESCE(withholding_tax, 0))"))
         end
-        reportable_ids = totals.select { |_id, total| total.to_d >= form_1099_threshold }.keys
+        reportable_ids = totals.filter_map { |id, gross, withheld| id if gross.to_d >= form_1099_threshold || !withheld.to_d.zero? }
         Employee.where(id: reportable_ids).each_with_object(Hash.new(0)) do |employee, counts|
           missing_tin = !(employee.valid_filing_ssn? || employee.contractor_ein.present?)
           missing_address = [ employee.address_line1, employee.city, employee.state, employee.zip ].any?(&:blank?)
