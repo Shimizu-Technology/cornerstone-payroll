@@ -36,6 +36,20 @@ RSpec.describe "Wage filing files", type: :request do
     expect(response).to have_http_status(:ok)
   end
 
+  it "refuses the e-file and W-3SS in a test workspace, which carries copied live identities" do
+    source = create(:company, organization: company.organization)
+    company.update_columns(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox",
+      migration_source_company_id: source.id, migration_rehearsal_status: "ready", test_workspace_expires_at: 1.day.from_now)
+
+    expect(AuditLog).not_to receive(:record!)
+    [ [ "w2_gu_efw2", "draft" ], [ "w2_gu_efw2", "final" ], [ "w3ss_pdf", "draft" ] ].each do |action, mode|
+      get "/api/v1/admin/reports/#{action}", params: { year: 2026, mode: mode }
+      expect(response).to have_http_status(:forbidden), "#{action} #{mode}: #{response.body}"
+      expect(response.parsed_body["error"]).to include("unavailable in a test workspace")
+      expect(response.body).not_to include("123456789")
+    end
+  end
+
   it "allows accountants delegated client management for this client" do
     user.update!(role: "accountant")
     grantor = create(:user, company: company, role: "admin")

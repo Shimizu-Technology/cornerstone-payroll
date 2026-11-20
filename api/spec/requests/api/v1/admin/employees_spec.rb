@@ -64,6 +64,16 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       expect(employee.reload).to have_attributes(first_name: "Updated", pay_rate: 27, ssn_encrypted: nil, hire_date: nil, address_line1: nil)
     end
 
+    it "audits a name suffix change, which the W-2 e-file reports" do
+      employee = create(:employee, company: company, department: department)
+
+      patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { name_suffix: "Jr." } }
+
+      expect(response).to have_http_status(:ok)
+      audit = AuditLog.where(action: "employees#update", record_id: employee.id).last
+      expect(audit.metadata).to include("changed_fields" => include("name_suffix"), "after_values" => include("name_suffix" => employee.reload.name_suffix))
+    end
+
     it "allows personal details to remain blank but still rejects a malformed supplied SSN" do
       employee = create(:employee, company: company, department: department)
       employee.update_columns(hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)

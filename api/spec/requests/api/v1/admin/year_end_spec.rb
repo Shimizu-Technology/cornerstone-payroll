@@ -199,6 +199,16 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(list_row).to include("status" => result["status"], "issue_count" => result["issue_count"], "efile_check_pending" => false)
     end
 
+    it "never shows Ready while the W-2s are not marked, whatever a cached check says" do
+      revision = YearEnd::InputRevision.for(company.id, 2026)[company.id]
+      YearEnd::EfileCheck.record(company.id, 2026, revision, [], sign_off_needed: false)
+
+      row = list_row
+
+      expect(row["status"]).to eq("needs_action")
+      expect(row["issue_summary"]).to include(a_hash_including("code" => "W2_NOT_MARKED_READY"))
+    end
+
     it "shows Check needed, not Ready, after an employee address changes once the W-2s are marked ready" do
       travel_to(start + 0.hours) { mark_ready }
       travel_to(start + 1.hours) do

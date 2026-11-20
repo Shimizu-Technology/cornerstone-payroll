@@ -13,6 +13,8 @@ RSpec.describe "Employer filing settings", type: :request do
     patch "/api/v1/admin/companies/#{company.id}", params: { company: { filing_contact_name: "New Contact", kind_of_employer: "T", employment_code: "F", establishment_number: "A001" } }
     expect(response).to have_http_status(:ok)
     expect(company.reload.attributes.slice("filing_contact_name", "kind_of_employer", "employment_code", "establishment_number")).to eq({ "filing_contact_name" => "New Contact", "kind_of_employer" => "T", "employment_code" => "F", "establishment_number" => "A001" })
+    audit = AuditLog.where(action: "companies#update", record_id: company.id).last
+    expect(audit.metadata["after_values"]).to include("filing_contact_name" => "New Contact", "kind_of_employer" => "T", "employment_code" => "F", "establishment_number" => "A001")
   end
 
   it "rejects unsupported territorial employment codes" do

@@ -110,7 +110,8 @@ module YearEnd
       readiness = readinesses[company.id]
       marked = files_w2 && readiness&.status == "filing_ready" && readiness.marked_ready_at.present?
       unchanged = ready_checks[company.id].present? && ready_checks[company.id] == input_revisions[company.id]
-      sign_off_needed = efile_current && !stored[:sign_off_needed].nil? ? stored[:sign_off_needed] : !marked
+      # The live ready mark wins: a cached check can add a sign-off, never remove one.
+      sign_off_needed = !marked || (efile_current && stored[:sign_off_needed] == true)
       if files_w2 && sign_off_needed
         issues << { code: "W2_NOT_MARKED_READY", label: "Check the numbers and mark W-2s ready" }
       end
