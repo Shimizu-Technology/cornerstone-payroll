@@ -287,7 +287,8 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
     it "records an audited sign-off on the inputs the reviewer saw" do
       fingerprint = step("form_1099_ready").dig("data", "inputs_fingerprint")
       expect(step("form_1099_ready")).to include("number" => 4, "status" => "action_needed")
-      expect(step("form_1099_ready").dig("data", "payees").sole).to include("name" => "Ana Cruz", "tin_last4" => "7890", "total_compensation" => 2_500.0)
+      expect(step("form_1099_ready").dig("data", "payees").sole).to include("name" => "Ana Cruz", "tin_last4" => "7890", "total_compensation" => 2_500.0,
+        "federal_withheld" => 0.0, "filing_reason" => "filing threshold reached")
 
       mark_ready(fingerprint)
 

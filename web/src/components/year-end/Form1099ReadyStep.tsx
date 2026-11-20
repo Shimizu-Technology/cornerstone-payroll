@@ -35,8 +35,16 @@ function PayeeList({ step }: { step: StepData }): ReactElement | null {
                 {payee.tin_type ? `${payee.tin_type} ending ${payee.tin_last4}` : 'No TIN'}
                 {payee.linked_check_count > 0 ? ` · includes ${payee.linked_check_count} one-off check${payee.linked_check_count === 1 ? '' : 's'}` : ''}
               </p>
+              {payee.filing_reason === 'tax withheld' && (
+                <p className="text-neutral-600">
+                  {step.data.filing_threshold != null ? `Under ${formatCurrency(step.data.filing_threshold)}; gets` : 'Gets'} a 1099 because tax was withheld.
+                </p>
+              )}
             </div>
-            <p className="shrink-0 font-semibold tabular-nums text-neutral-950">{formatCurrency(payee.total_compensation)}</p>
+            <div className="shrink-0 text-right tabular-nums">
+              <p className="font-semibold text-neutral-950">{formatCurrency(payee.total_compensation)}</p>
+              {payee.federal_withheld > 0 && <p className="text-neutral-600">Box 4 {formatCurrency(payee.federal_withheld)}</p>}
+            </div>
           </li>
         ))}
       </ul>

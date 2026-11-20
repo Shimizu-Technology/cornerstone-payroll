@@ -618,7 +618,8 @@ module YearEnd
     end
 
     # What each 1099 will show, for the sign-off: the name, the TIN's last
-    # four digits and the Box 1a amount.
+    # four digits, the Box 1a amount, any Box 4 withholding and why the
+    # payee gets a 1099.
     def form_1099_payee_summaries(rows)
       employees = company.employees.where(id: rows.map { |row| row[:employee_id] }).index_by(&:id)
       rows.filter_map do |row|
@@ -632,6 +633,8 @@ module YearEnd
           tin_type: tin&.dig(:type),
           tin_last4: tin&.dig(:digits)&.last(4),
           total_compensation: row[:total_compensation].to_d.round(2).to_f,
+          federal_withheld: row[:federal_withheld].to_d.round(2).to_f,
+          filing_reason: row[:filing_reason],
           linked_check_count: Array(row[:non_employee_check_ids]).length,
           edit_path: "/companies/#{company.id}/employees/#{employee.id}/edit"
         }

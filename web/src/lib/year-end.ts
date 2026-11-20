@@ -139,6 +139,8 @@ export interface YearEnd1099Payee {
   tin_type: 'SSN' | 'EIN' | null;
   tin_last4: string | null;
   total_compensation: number;
+  federal_withheld: number;
+  filing_reason: string | null;
   linked_check_count: number;
   edit_path: string;
 }

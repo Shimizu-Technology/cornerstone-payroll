@@ -834,7 +834,10 @@ describe('Year-end checklist: 1099 payees and sign-off', () => {
   const readyData = (extra: Partial<ReadyData> = {}): ReadyData => ({
     readiness: null, inputs_fingerprint: 'fp-1', can_mark_ready: true, unavailable_reason: null, blockers: [], remaining_before_ready: 0,
     filing_threshold: 2000, payee_count: 1, total_compensation: 4000, no_1099_due_count: 0,
-    payees: [{ employee_id: 21, name: 'Ana Cruz', tin_type: 'SSN', tin_last4: '7890', total_compensation: 4000, linked_check_count: 2, edit_path: '/companies/7/employees/21/edit' }],
+    payees: [
+      { employee_id: 21, name: 'Ana Cruz', tin_type: 'SSN', tin_last4: '7890', total_compensation: 4000, federal_withheld: 0, filing_reason: 'filing threshold reached', linked_check_count: 2, edit_path: '/companies/7/employees/21/edit' },
+      { employee_id: 23, name: 'Dee Santos', tin_type: 'SSN', tin_last4: '1111', total_compensation: 500, federal_withheld: 50, filing_reason: 'tax withheld', linked_check_count: 0, edit_path: '/companies/7/employees/23/edit' },
+    ],
     ...extra,
   });
 
@@ -1028,6 +1031,8 @@ describe('Year-end checklist: 1099 payees and sign-off', () => {
     expect(within(list).getByText('Ana Cruz')).toBeTruthy();
     expect(within(list).getByText('SSN ending 7890 · includes 2 one-off checks')).toBeTruthy();
     expect(within(list).getByText('$4,000.00')).toBeTruthy();
+    expect(within(list).getByText('Box 4 $50.00')).toBeTruthy();
+    expect(within(list).getByText('Under $2,000.00; gets a 1099 because tax was withheld.')).toBeTruthy();
     fireEvent.change(within(region).getByLabelText('Notes (optional)'), { target: { value: 'Checked the W-9s' } });
     fireEvent.click(within(region).getByRole('button', { name: 'Mark 2026 1099s ready' }));
 
