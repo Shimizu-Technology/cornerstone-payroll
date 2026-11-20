@@ -1,5 +1,5 @@
 import { useState, type ReactElement, type ReactNode } from 'react';
-import { CheckCircle2, ChevronDown, Circle, CircleAlert, MinusCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Circle, CircleAlert, FileDown, MinusCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { YearEndStep } from '@/lib/year-end';
@@ -9,19 +9,37 @@ const STATUS = {
   action_needed: { label: 'Needs action', variant: 'warning' as const, icon: CircleAlert, tone: 'bg-warning-50 text-warning-800' },
   waiting: { label: 'After step 1', variant: 'default' as const, icon: Circle, tone: 'bg-neutral-100 text-neutral-500' },
   not_needed: { label: 'Not needed', variant: 'default' as const, icon: MinusCircle, tone: 'bg-neutral-100 text-neutral-500' },
+  available: { label: 'Downloads', variant: 'info' as const, icon: FileDown, tone: 'bg-primary-50 text-primary-800' },
 };
 
 interface StepCardProps {
   step: YearEndStep;
   isNext: boolean;
+  /**
+   * Open on first render even when the step needs nothing, and open again
+   * each time this turns true. A manual collapse afterwards sticks.
+   */
+  defaultOpen?: boolean;
+  /**
+   * Keep the body mounted while collapsed, so work it started (a download)
+   * finishes instead of being dropped.
+   */
+  keepMounted?: boolean;
   children?: ReactNode;
 }
 
 /** One checklist step. Steps that need action open by default; finished ones collapse to a line. */
-export function StepCard({ step, isNext, children }: StepCardProps): ReactElement {
+export function StepCard({ step, isNext, defaultOpen = false, keepMounted = false, children }: StepCardProps): ReactElement {
   const status = STATUS[step.status];
   const expandable = Boolean(children) && step.status !== 'waiting' && step.status !== 'not_needed';
-  const [open, setOpen] = useState(step.status === 'action_needed' || isNext);
+  const [open, setOpen] = useState(step.status === 'action_needed' || isNext || defaultOpen);
+  // Adjusted during render rather than in an effect, so the step never
+  // paints closed first.
+  const [openedFor, setOpenedFor] = useState(defaultOpen);
+  if (defaultOpen !== openedFor) {
+    setOpenedFor(defaultOpen);
+    if (defaultOpen) setOpen(true);
+  }
   const Icon = status.icon;
   const headingId = `year-end-step-${step.key}`;
 
@@ -61,8 +79,8 @@ export function StepCard({ step, isNext, children }: StepCardProps): ReactElemen
           </button>
         )}
       </div>
-      {expandable && open && (
-        <div id={`${headingId}-body`} className="border-t border-neutral-200/70 px-4 pb-5 pt-4 sm:px-5">
+      {expandable && (open || keepMounted) && (
+        <div id={`${headingId}-body`} hidden={!open} className="border-t border-neutral-200/70 px-4 pb-5 pt-4 sm:px-5">
           {children}
         </div>
       )}

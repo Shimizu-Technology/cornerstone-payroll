@@ -4,7 +4,8 @@ export const FIRST_YEAR_END_TAX_YEAR = 2026;
 
 export type YearEndParty = 'cornerstone' | 'client' | 'external_provider' | 'no_filing';
 export type YearEndClientStatus = 'needs_action' | 'check_needed' | 'ready' | 'not_filing';
-export type YearEndStepStatus = 'done' | 'action_needed' | 'waiting' | 'not_needed';
+/** "available": a step of documents to download, outside the checklist's done/needs-action counting. */
+export type YearEndStepStatus = 'done' | 'action_needed' | 'waiting' | 'not_needed' | 'available';
 export type YearEndStepKey =
   | 'filing_decision'
   | 'employer'
@@ -12,7 +13,8 @@ export type YearEndStepKey =
   | 'reconciliation'
   | 'review_warnings'
   | 'prior_provider'
-  | 'mark_ready';
+  | 'mark_ready'
+  | 'print_and_file';
 
 export interface YearEndDecisionSummary {
   responsible_party: YearEndParty;
@@ -180,7 +182,23 @@ export interface YearEndReadiness {
   notes: string | null;
 }
 
-type ActiveStepStatus = Extract<YearEndStepStatus, 'done' | 'action_needed'>;
+/** One file to print, keep or send, with the endpoint that downloads it. */
+export interface YearEndDocument {
+  key: string;
+  title: string;
+  /** One plain line: what it is for and what to do with it. */
+  description: string;
+  detail: string;
+  format: 'pdf';
+  contains_full_ssn: boolean;
+  /** Watermarked DRAFT: the W-2s are not marked ready on the current numbers. */
+  draft: boolean;
+  available: boolean;
+  unavailable_reason: string | null;
+  download: { path: string; params: Record<string, string | number> };
+}
+
+type ActiveStepStatus = Extract<YearEndStepStatus, 'done' | 'action_needed' | 'available'>;
 
 interface StepCommon<K extends YearEndStepKey> {
   key: K;
@@ -227,13 +245,14 @@ export type YearEndStep =
   | StepBase<'reconciliation', YearEndReconciliation>
   | StepBase<'review_warnings', { warnings: YearEndWarning[] }>
   | StepBase<'prior_provider', { prior_provider_through: string | null; overlaps: YearEndOverlap[] }>
-  | StepBase<'mark_ready', { filing: YearEndReadiness | null; can_mark_ready: boolean; remaining_before_ready: number }>;
+  | StepBase<'mark_ready', { filing: YearEndReadiness | null; can_mark_ready: boolean; remaining_before_ready: number }>
+  | StepBase<'print_and_file', { final: boolean; documents: YearEndDocument[] }>;
 
 /** A step that ran, narrowed by key: its data is complete. */
 export type ActiveYearEndStep<K extends YearEndStepKey> = Extract<YearEndStep, { key: K; status: ActiveStepStatus }>;
 
 export function isActiveStep<S extends YearEndStep>(step: S): step is Extract<S, { status: ActiveStepStatus }> {
-  return step.status === 'done' || step.status === 'action_needed';
+  return step.status === 'done' || step.status === 'action_needed' || step.status === 'available';
 }
 
 export interface YearEndChecklist {

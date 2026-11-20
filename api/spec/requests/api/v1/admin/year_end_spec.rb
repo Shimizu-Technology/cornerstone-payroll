@@ -238,6 +238,40 @@ RSpec.describe "Year-end checklist", type: :request do
       end
     end
 
+    # IRS General Instructions for Forms W-2 and W-3 (2026), Box 14b: tips
+    # from more than two occupations get any two codes, so this is a warning
+    # to confirm, never a blocker the list can't see.
+    it "agrees with the checklist for an employee with three tipped occupation codes, before and after marking ready" do
+      %w[101 202 303].each { |code| create(:employee_tipped_occupation, employee: employee, occupation_code: code) }
+      checklist = lambda do
+        get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+        expect(response).to have_http_status(:ok), response.body
+        response.parsed_body["data"]
+      end
+
+      travel_to(start + 0.hours) do
+        data = checklist.call
+        expect(data).to include("status" => "needs_action", "issue_count" => 1)
+        expect(list_row).to include("status" => "needs_action", "issue_count" => 1)
+
+        warning = data["steps"].find { |step| step["key"] == "review_warnings" }.dig("data", "warnings").find { |entry| entry["code"] == "box14b_more_than_two_codes" }
+        post "/api/v1/admin/year_end/acknowledgements", params: { acknowledgement: {
+          tax_year: 2026, warning_code: "box14b_more_than_two_codes", warning_digest: warning["digest"],
+          note: "Tips came from three occupations; 101 and 202 are right."
+        } }
+        expect(response).to have_http_status(:created), response.body
+        expect(checklist.call).to include("status" => "needs_action", "issue_count" => 1)
+        expect(list_row).to include("status" => "needs_action", "issue_count" => 1)
+
+        mark_ready
+      end
+      travel_to(start + 1.hours) do
+        expect(list_row).to include("status" => "ready", "issue_count" => 0)
+        expect(checklist.call).to include("status" => "ready", "issue_count" => 0)
+        expect(list_row).to include("status" => "ready", "issue_count" => 0)
+      end
+    end
+
     it "shows Check needed after retirement-year evidence or an import source file is added" do
       travel_to(start + 0.hours) { mark_ready }
       travel_to(start + 1.hours) do

@@ -22,6 +22,7 @@ class TestWorkspaceSafetyPolicy
       start_quarterly_compliance_packet_workflow update_quarterly_compliance_packet_task
       quarterly_compliance_packet_official_form_download w2_gu_mark_ready
       transmittal_log_pdf full_print_package_pdf check_signoff_sheet check_signoff_pdf
+      w2_gu_copy_1_drt
     ],
     "api/v1/admin/payroll_filing_records" => %w[create_event],
     "api/v1/admin/invoices" => %w[create update destroy issue record_delivery import update_status generate_pdf],
