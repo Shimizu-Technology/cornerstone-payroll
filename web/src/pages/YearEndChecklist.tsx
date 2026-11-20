@@ -9,6 +9,7 @@ import { Select } from '@/components/ui/select';
 import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
 import { EmployerStep } from '@/components/year-end/EmployerStep';
 import { FilingDecisionStep } from '@/components/year-end/FilingDecisionStep';
+import { Form1099ReadyStep } from '@/components/year-end/Form1099ReadyStep';
 import { MarkReadyStep } from '@/components/year-end/MarkReadyStep';
 import { PeopleStep } from '@/components/year-end/PeopleStep';
 import { PrintAndFileStep } from '@/components/year-end/PrintAndFileStep';
@@ -18,7 +19,28 @@ import { IssueList, StepCard } from '@/components/year-end/StepCard';
 import { yearEndApi } from '@/services/api';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { yearEndPath } from '@/lib/routes';
-import { clientStatusLabel, isActiveStep, parseYearEndTaxYear, yearEndTaxYears, type YearEndChecklist as Checklist, type YearEndStep } from '@/lib/year-end';
+import { clientStatusLabel, isActiveStep, parseYearEndTaxYear, yearEndTaxYears, type ActiveYearEndStep, type YearEndChecklist as Checklist, type YearEndStep } from '@/lib/year-end';
+
+/**
+ * 1099 filing evidence needs the 1099s marked ready on the current inputs,
+ * as the server's recorder does. A year with no 1099 payee is done without
+ * a sign-off, but has nothing to file, so the actions stay closed.
+ */
+function form1099ReadyStep(checklist: Checklist): ActiveYearEndStep<'form_1099_ready'> | undefined {
+  const step = checklist.steps.find((entry) => entry.key === 'form_1099_ready');
+  return step && step.key === 'form_1099_ready' && isActiveStep(step) ? step : undefined;
+}
+
+function form1099EvidenceReady(checklist: Checklist): boolean {
+  const step = form1099ReadyStep(checklist);
+  return step?.status === 'done' && step.data.payee_count > 0;
+}
+
+function form1099EvidenceMessage(checklist: Checklist): string {
+  const step = form1099ReadyStep(checklist);
+  if (step?.status === 'done' && step.data.payee_count === 0) return `No 1099s to file for ${checklist.tax_year}`;
+  return 'Mark the 1099s ready above before recording the 1099 filing.';
+}
 
 function stepBody(checklist: Checklist, step: YearEndStep, onSaved: (message: string) => Promise<void>, onRefresh: () => Promise<void>): ReactElement | null {
   if (!isActiveStep(step)) return null;
@@ -26,6 +48,7 @@ function stepBody(checklist: Checklist, step: YearEndStep, onSaved: (message: st
     case 'filing_decision': return <FilingDecisionStep checklist={checklist} step={step} onSaved={onSaved} />;
     case 'employer': return <EmployerStep checklist={checklist} step={step} onSaved={onSaved} />;
     case 'people': return <PeopleStep checklist={checklist} step={step} onSaved={onSaved} onRefresh={onRefresh} />;
+    case 'form_1099_ready': return <Form1099ReadyStep checklist={checklist} step={step} onSaved={onSaved} onRefresh={onRefresh} />;
     case 'reconciliation': return <ReconciliationStep step={step} taxYear={checklist.tax_year} />;
     case 'review_warnings': return <ReviewWarningsStep checklist={checklist} step={step} onSaved={onSaved} onRefresh={onRefresh} />;
     case 'prior_provider':
@@ -221,8 +244,8 @@ export function YearEndChecklist(): ReactElement {
                       filingType="form_1099_nec"
                       taxYear={checklist.tax_year}
                       companyId={checklist.company.id}
-                      preparationReady={checklist.status === 'ready'}
-                      readinessMessage="Finish the checklist above before recording the 1099 filing."
+                      preparationReady={form1099EvidenceReady(checklist)}
+                      readinessMessage={form1099EvidenceMessage(checklist)}
                     />
                   )}
                 </CardContent>

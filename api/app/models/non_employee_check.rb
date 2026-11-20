@@ -19,6 +19,9 @@ class NonEmployeeCheck < ApplicationRecord
   belongs_to :company
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :paid_by, class_name: "User", optional: true
+  # The contractor record a one-off contractor check paid, set from the
+  # year-end checklist, so the amount joins that contractor's single 1099.
+  belongs_to :payee_employee, class_name: "Employee", optional: true, inverse_of: :linked_non_employee_checks
   # Use :delete_all (not :destroy) because NonEmployeeCheckEdit#readonly? is
   # true once persisted (audit records are immutable). :destroy would call
   # `destroy` on each edit which raises ActiveRecord::ReadOnlyRecord. The DB
@@ -41,6 +44,11 @@ class NonEmployeeCheck < ApplicationRecord
 
   before_validation :normalize_payment_period_type
   before_validation :clear_inapplicable_tax_period_fields
+  # A linked check's amount goes on its contractor's 1099. Changing who the
+  # check is payable to breaks that tie, so the link is removed on every
+  # save path and the check returns to the unresolved one-off payees.
+  before_save :clear_payee_link_when_payee_renamed
+  after_save :record_payee_link_cleared_by_rename
 
   validates :payable_to, presence: true
   validates :amount, presence: true, numericality: { greater_than: 0 }
@@ -56,6 +64,7 @@ class NonEmployeeCheck < ApplicationRecord
   validate :line_item_total_matches_amount
   validate :paid_by_matches_company
   validate :paid_state_is_complete
+  validate :payee_employee_is_company_contractor, if: :will_save_change_to_payee_employee_id?
   # Mirrors the DB-level partial unique index `idx_ne_checks_on_company_check_num`
   # so that a duplicate `check_number` (now editable through the Edit modal)
   # surfaces as a clean 422 with a field error instead of bubbling
@@ -250,6 +259,53 @@ class NonEmployeeCheck < ApplicationRecord
       return nil unless pay_period
       "#{pay_period.start_date.strftime('%m/%d/%Y')} - #{pay_period.end_date.strftime('%m/%d/%Y')}"
     end
+  end
+
+  def clear_payee_link_when_payee_renamed
+    @payee_link_cleared_from = nil
+    return unless persisted? && will_save_change_to_payable_to? && payee_employee_id_in_database.present?
+
+    @payee_link_cleared_from = payee_employee_id_in_database
+    self.payee_employee_id = nil
+  end
+
+  # Written in the same transaction as the rename: an edit-history row on
+  # the check and an audit entry, like an undo from the year-end checklist.
+  def record_payee_link_cleared_by_rename
+    previous = @payee_link_cleared_from
+    return unless previous
+
+    @payee_link_cleared_from = nil
+    contractor = Employee.find_by(id: previous)
+    previous_payable_to, = saved_change_to_payable_to
+    reason = "Payee changed from #{previous_payable_to} to #{payable_to}, so the check is no longer linked to " \
+             "#{contractor&.full_name || 'its contractor'} for the 1099-NEC"
+    edits.create!(
+      edited_by: Current.user,
+      before: { "payee_employee_id" => previous },
+      after: { "payee_employee_id" => nil },
+      changed_fields: [ "payee_employee_id" ],
+      reason: reason
+    )
+    AuditLog.record!(
+      organization_id: company.organization_id, company_id: company_id,
+      action: "year_end_one_off_payees#unlinked", record_type: "non_employee_checks", record_id: id,
+      subject_name: "#{company.name} #{effective_payment_date.year} 1099: unlinked 1 one-off check (payee renamed)",
+      metadata: {
+        tax_year: effective_payment_date.year,
+        reason: "payee_renamed",
+        checks: [ {
+          id: id, check_number: check_number, payable_to: payable_to, previous_payable_to: previous_payable_to,
+          amount: amount.to_d.round(2).to_s("F"), previous_employee_id: previous, previous_employee_name: contractor&.full_name
+        } ]
+      }
+    )
+  end
+
+  def payee_employee_is_company_contractor
+    return if payee_employee_id.nil?
+
+    errors.add(:payee_employee, "must be a contractor of this client") unless check_type == "contractor" && payee_employee&.company_id == company_id && payee_employee.contractor?
   end
 
   def paid_by_matches_company

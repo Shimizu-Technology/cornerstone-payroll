@@ -548,4 +548,45 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
   ensure
     old ? ENV["DEPLOYMENT_ENV"] = old : ENV.delete("DEPLOYMENT_ENV")
   end
+
+  it "never shows an accountant an unkeyed file hash for a year-end filing download" do
+    accountant = create(:user, organization: organization, company: company, role: :accountant)
+    create(:company_assignment, user: accountant, company: company)
+    raw = Digest::SHA256.hexdigest("synthetic filing file")
+    keyed = FilingFileDigest.call("synthetic filing file")
+    FilingFileDigest::AUDIT_ACTIONS.each do |action|
+      # An older row shape that still carries a raw sha256 beside the keyed digest.
+      create(:audit_log, user: admin, organization: organization, company: company, action: action, record_type: "Company",
+        record_id: company.id, metadata: { "year" => 2026, "sha256" => raw, "file_digest" => keyed, "digest_alg" => FilingFileDigest::ALGORITHM })
+    end
+    check_run_hash = Digest::SHA256.hexdigest("check print run")
+    create(:audit_log, user: admin, organization: organization, company: company, action: "check_print_runs#create",
+      record_type: "CheckPrintRun", metadata: { "sha256" => check_run_hash })
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
+
+    get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => company.id.to_s }, params: { per_page: 50 }
+
+    expect(response).to have_http_status(:ok)
+    rows = response.parsed_body.fetch("data")
+    filing_rows = rows.select { |row| FilingFileDigest::AUDIT_ACTIONS.include?(row["action"]) }
+    expect(filing_rows.pluck("action")).to match_array(FilingFileDigest::AUDIT_ACTIONS)
+    filing_rows.each do |row|
+      expect(row["metadata"]).not_to have_key("sha256")
+      expect(row["metadata"]).to include("file_digest" => keyed, "digest_alg" => "hmac-sha256-v1")
+    end
+    expect(filing_rows.to_json).not_to include(raw)
+    # Unrelated file hashes (check print runs, import sources) are left as they were.
+    expect(rows.find { |row| row["action"] == "check_print_runs#create" }["metadata"]).to eq("sha256" => check_run_hash)
+
+    get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).not_to include(raw)
+    exported = CSV.parse(response.body, headers: true)
+    filing_details = exported.select { |row| FilingFileDigest::AUDIT_ACTIONS.include?(row["Technical action"]) }
+    expect(filing_details.length).to eq(FilingFileDigest::AUDIT_ACTIONS.length)
+    filing_details.each { |row| expect(JSON.parse(row["Advanced details"])).to include("file_digest" => keyed).and(satisfy { |m| !m.key?("sha256") }) }
+    expect(exported.find { |row| row["Technical action"] == "check_print_runs#create" }["Advanced details"]).to include(check_run_hash)
+  end
 end

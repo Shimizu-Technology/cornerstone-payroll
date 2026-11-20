@@ -11,13 +11,25 @@ class Form1099Pub1220Generator
     end
   end
 
+  # The payer's account number for a payee (B 21-40), also printed on the
+  # official copies so paper and e-file match: "C" and the contractor's
+  # record id, stable across years and corrections.
+  def self.account_number(employee)
+    "C#{employee.id.to_s.rjust(6, '0')}"
+  end
+
   TCC_PROBLEM = "Add the transmitter control code (TCC) from DRT to download the final 1099 e-file. Drafts work without it."
   attr_reader :report
 
   def initialize(company:, year:, submitter:, draft:, report: nil)
     @company, @year, @submitter, @draft = company, year.to_i, submitter, draft
     @report = report || Form1099NecAggregator.new(company, year).generate
-    @rows = @report.fetch(:reportable_contractors)
+    # The rows the "1099s ready" sign-off covers (contractor records), so the
+    # record counts and control totals match it. An unlinked one-off payee
+    # decided "no 1099 due" is left out; one still undecided is a problem.
+    @rows = Form1099NecFilingState.payee_rows(@report)
+    @unresolved = Form1099NecFilingState.unresolved_one_off_rows(company: company, year: @year, report: @report)
+    @excluded = @report.fetch(:reportable_contractors).reject { |row| row[:employee_id] }
     @people = company.employees.where(id: @rows.pluck(:employee_id)).index_by(&:id)
   end
 
@@ -34,25 +46,36 @@ class Form1099Pub1220Generator
   def problems
     found = []
     found << "Only tax year 2026 is supported" unless @year == 2026
-    found << "No reportable 1099 payees" if @rows.empty?
+    found << "No reportable 1099 payees" if @rows.empty? && @unresolved.empty?
     found << TCC_PROBLEM if !@draft && @submitter&.tcc.blank?
     found << "Add the practice submitter profile" unless @submitter
-    [ [ @company, "Payer" ], [ @submitter, "Transmitter" ] ].each do |object, label|
-      next unless object
-
-      found << "#{label}: valid EIN required" unless tin(object.ein).match?(/\A\d{9}\z/) && tin(object.ein).chars.uniq.length > 1
-      identity_problems(object, label, found)
-    end
+    found.concat(entity_problems(@company, "Payer"))
     if @submitter
+      found.concat(entity_problems(@submitter, "Transmitter"))
       found << "Transmitter: contact name required" if @submitter.contact_name.blank?
       found << "Transmitter: contact phone must contain 10 digits" unless tin(@submitter.contact_phone).match?(/\A\d{10}\z/)
       found << "Transmitter: invalid TCC" if @submitter.tcc.present? && !@submitter.tcc.match?(/\A[A-Za-z0-9]{5}\z/)
     end
+    found.concat(payee_problems)
+  end
+
+  # What the client's own records must satisfy for this e-file: the payer
+  # and every payee. The transmitter (the practice's submitter profile) is
+  # checked when the file is made. "Mark 1099s ready" refuses a sign-off
+  # these would refuse, so every signed-off client can download its final file.
+  def client_problems
+    entity_problems(@company, "Payer") + payee_problems
+  end
+
+  def payee_problems
+    found = @unresolved.map do |row|
+      "#{row[:name]}: missing TIN and address; link this one-off payee to a contractor, or record that no 1099 is due, before exporting"
+    end
     @rows.each do |row|
       person = @people[row[:employee_id]]
       label = row[:name]
-      if !person
-        found << "#{label}: missing TIN and address; identify this payee before exporting"
+      unless person
+        found << "#{label}: the contractor record could not be found"
         next
       end
       id = row[:tin_type] == "EIN" ? tin(person.contractor_ein) : person.ssn_digits.to_s
@@ -67,6 +90,13 @@ class Form1099Pub1220Generator
     end
     ids = @rows.map { |row| row[:employee_id] }.compact
     found << "Duplicate payee rows" unless ids.uniq.length == ids.length
+    found
+  end
+
+  def entity_problems(object, label)
+    found = []
+    found << "#{label}: valid EIN required" unless tin(object.ein).match?(/\A\d{9}\z/) && tin(object.ein).chars.uniq.length > 1
+    identity_problems(object, label, found)
     found
   end
 
@@ -88,8 +118,11 @@ class Form1099Pub1220Generator
       sum = bs.sum { |r| r[54 + i * 12, 12].to_i }
       found << "C amount total mismatch for code #{i + 1}" unless actual == sum.to_s.rjust(18, "0")
     end
-    found << "Aggregator Box 1 total mismatch" unless c[15, 18].to_i == cents(report.fetch(:totals).fetch(:reportable_compensation))
-    found << "Aggregator Box 4 total mismatch" unless c[69, 18].to_i == cents(report.fetch(:totals).fetch(:reportable_federal_withheld))
+    # The aggregator's totals, less the one-off payees decided "no 1099 due".
+    expected_box1 = cents(report.fetch(:totals).fetch(:reportable_compensation)) - @excluded.sum { |row| cents(row.fetch(:total_compensation)) }
+    expected_box4 = cents(report.fetch(:totals).fetch(:reportable_federal_withheld)) - @excluded.sum { |row| cents(row.fetch(:federal_withheld)) }
+    found << "Aggregator Box 1 total mismatch" unless c[15, 18].to_i == expected_box1
+    found << "Aggregator Box 4 total mismatch" unless c[69, 18].to_i == expected_box4
     raise InvalidFile, found if found.any?
 
     true
@@ -126,6 +159,10 @@ class Form1099Pub1220Generator
 
   # Exhibit 1: use the first surname, retaining leading surname particles.
   def name_control(person)
+    self.class.name_control(person)
+  end
+
+  def self.name_control(person)
     words = person.last_name.to_s.split("-").first.to_s.split
     particle = words.join(" ").match(/\A(?:de la|de las|de los|del|de|san|santa|st)\s+/i)
     surname = particle ? words.take(particle[0].split.length + 1).join(" ") : words.first.to_s
@@ -137,8 +174,13 @@ class Form1099Pub1220Generator
   # and line 1 must end with a whole word (B 288-327). A single word longer
   # than 40 characters is left whole, so preflight refuses it by name.
   def payee_names(person, row)
-    primary = row[:tin_type] == "EIN" ? person.business_name.presence || person.full_name : "#{person.last_name} #{person.first_name} #{person.middle_name}".strip
-    secondary = row[:tin_type] == "SSN" ? person.business_name.to_s : ""
+    self.class.payee_name_lines(person, row[:tin_type])
+  end
+
+  # Public so Form1099InputsFingerprint binds the exact name lines printed.
+  def self.payee_name_lines(person, tin_type)
+    primary = tin_type == "EIN" ? person.business_name.presence || person.full_name : "#{person.last_name} #{person.first_name} #{person.middle_name}".strip
+    secondary = tin_type == "SSN" ? person.business_name.to_s : ""
     names = [ primary, secondary ].map { |v| Efw2Formatting.clean(v).delete(".'").gsub(/[^A-Z0-9 &-]/, "") }
     if names[0].length > 40 && names[1].blank?
       split_at = names[0][0, 41].rindex(" ")
@@ -232,7 +274,7 @@ class Form1099Pub1220Generator
       put(r, 11, 1, ein ? "1" : "2")
       put(r, 12, 9, ein ? tin(person.contractor_ein) : person.ssn_digits)
       # Stable issuer account number lets corrections match the original payee.
-      put(r, 21, 20, "C#{person.id.to_s.rjust(6, '0')}")
+      put(r, 21, 20, self.class.account_number(person))
       (0...18).each { |i| number(r, 55 + i * 12, 12, 0) }
       number(r, 55, 12, cents(row.fetch(:total_compensation)))
       number(r, 91, 12, cents(row.fetch(:federal_withheld)))

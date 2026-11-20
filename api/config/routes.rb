@@ -627,12 +627,18 @@ Rails.application.routes.draw do
         get "reports/form_1099_nec_csv", to: "reports#form_1099_nec_csv"
         get "reports/form_1099_nec_pdf", to: "reports#form_1099_nec_pdf"
         get "reports/form_1099_nec_xlsx", to: "reports#form_1099_nec_xlsx"
+        get "reports/form_1099_nec_recipient_copies", to: "reports#form_1099_nec_recipient_copies"
+        get "reports/form_1099_nec_payer_record", to: "reports#form_1099_nec_payer_record"
 
         get "payroll_filing_responsibilities", to: "payroll_filing_responsibilities#index"
         put "payroll_filing_responsibilities", to: "payroll_filing_responsibilities#upsert"
         get "year_end/clients", to: "year_end#clients"
         get "year_end/checklist", to: "year_end#checklist"
         post "year_end/acknowledgements", to: "year_end#create_acknowledgement"
+        post "year_end/one_off_payees/link", to: "year_end#link_one_off_payee"
+        post "year_end/one_off_payees/contractor", to: "year_end#create_one_off_payee_contractor"
+        post "year_end/one_off_payees/unlink", to: "year_end#unlink_one_off_payee"
+        post "year_end/form_1099_mark_ready", to: "year_end#form_1099_mark_ready"
         get "payroll_filing_records", to: "payroll_filing_records#index"
         post "payroll_filing_records/events", to: "payroll_filing_records#create_event"
 

@@ -4,14 +4,11 @@ import { ArrowRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { employeesApi, yearEndApi } from '@/services/api';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { employeesApi } from '@/services/api';
 import { employeeEditPath } from '@/lib/routes';
-import type { YearEndChecklist, YearEndOneOffPayee, YearEndPerson, ActiveYearEndStep } from '@/lib/year-end';
+import { personAnchor, type YearEndChecklist, type YearEndPerson, type ActiveYearEndStep } from '@/lib/year-end';
 import { useStillMounted } from './useStillMounted';
-import { StaleReviewNotice } from './StaleReview';
-import { isStaleReview, useStaleReview } from './useStaleReview';
+import { LinkedChecksList, OneOffPayeeList, SmallerOneOffPayeeList } from './OneOffPayees';
 
 type PeopleStepData = ActiveYearEndStep<'people'>;
 const PAGE_SIZE = 20;
@@ -99,7 +96,7 @@ function PersonRow({ person, companyId, canEditInline, returnTo, onSaved }: {
   const addressOnly = canEditInline && person.missing_fields.length === 1 && person.missing_fields[0] === 'address';
 
   return (
-    <li className="py-3">
+    <li id={personAnchor(person.kind, person.employee_id)} className="scroll-mt-28 py-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="font-medium text-neutral-950 [overflow-wrap:anywhere]">{person.name}</p>
@@ -148,108 +145,6 @@ function PeopleList({ title, people, companyId, canEditInline, returnTo, onSaved
   );
 }
 
-function IdentifyPayeeForm({ checklist, payee, onSaved, onRefresh }: {
-  checklist: YearEndChecklist;
-  payee: YearEndOneOffPayee;
-  onSaved: (message: string) => Promise<void>;
-  onRefresh: () => Promise<void>;
-}): ReactElement {
-  const [note, setNote] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const stillMounted = useStillMounted();
-  const noteId = `identify-${payee.payee_key.replace(/\W+/g, '-')}`;
-  const stale = useStaleReview(payee.digest, onRefresh);
-
-  return (
-    <form
-      className="mt-3 space-y-2"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        if (!note.trim() || !stale.canSubmit) return;
-        setSaving(true);
-        setError(null);
-        try {
-          await yearEndApi.acknowledge({ tax_year: checklist.tax_year, warning_code: payee.code, warning_digest: payee.digest, note: note.trim() }, checklist.company.id);
-          if (!stillMounted()) return;
-          stale.clear();
-          await onSaved(`Recorded who ${payee.name} is.`);
-        } catch (err) {
-          if (!stillMounted()) return;
-          if (isStaleReview(err)) stale.markRefused();
-          else setError(err instanceof Error ? err.message : 'Could not record who this payee is.');
-        } finally {
-          if (stillMounted()) setSaving(false);
-        }
-      }}
-    >
-      <label htmlFor={noteId} className="block text-xs font-medium text-neutral-700">Who is this payee, and where is their W-9 and TIN?</label>
-      <Textarea id={noteId} value={note} onChange={(event) => setNote(event.target.value)} rows={2} maxLength={2000} required disabled={saving} />
-      <StaleReviewNotice stale={stale} idPrefix={noteId} what="checks" />
-      {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
-      <Button type="submit" size="sm" disabled={!note.trim() || !stale.canSubmit} loading={saving} loadingLabel="Saving…">Record payee</Button>
-    </form>
-  );
-}
-
-function OneOffPayeeRow({ checklist, payee, onSaved, onRefresh }: {
-  checklist: YearEndChecklist;
-  payee: YearEndOneOffPayee;
-  onSaved: (message: string) => Promise<void>;
-  onRefresh: () => Promise<void>;
-}): ReactElement {
-  const identified = payee.status === 'identified';
-  return (
-    <li className="py-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <p className="font-medium text-neutral-950 [overflow-wrap:anywhere]">{payee.name}</p>
-          <Badge variant={identified ? 'success' : 'warning'} className="mt-1">
-            {identified ? 'Identified' : payee.acknowledgement_stale ? 'Checks changed: identify again' : 'Identify this payee'}
-          </Badge>
-          <p className="mt-1 text-sm text-neutral-700">
-            {formatCurrency(payee.total_compensation)} in {payee.payment_count} one-off check{payee.payment_count === 1 ? '' : 's'}:{' '}
-            {payee.checks.map((check) => `${check.check_number ? `#${check.check_number}` : 'no number'}${check.payment_date ? ` on ${formatDate(check.payment_date)}` : ''} (${formatCurrency(check.amount)})`).join(', ')}
-          </p>
-          {identified && payee.acknowledgement && (
-            <p className="mt-1 text-sm text-neutral-600 [overflow-wrap:anywhere]">“{payee.acknowledgement.note}” ({payee.acknowledgement.acknowledged_by.name})</p>
-          )}
-        </div>
-        <Link
-          to={payee.checks_path}
-          aria-label={`Open checks for ${payee.name}`}
-          className="inline-flex min-h-11 items-center justify-center gap-1 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:border-primary-300 hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 sm:min-h-9 sm:shrink-0"
-        >
-          Open checks<ArrowRight className="h-4 w-4" aria-hidden="true" />
-        </Link>
-      </div>
-      {!identified && (checklist.permissions.can_acknowledge
-        ? <IdentifyPayeeForm checklist={checklist} payee={payee} onSaved={onSaved} onRefresh={onRefresh} />
-        : <p className="mt-2 text-sm text-neutral-600">A filing reviewer records who this payee is.</p>)}
-    </li>
-  );
-}
-
-function OneOffPayeeList({ checklist, payees, onSaved, onRefresh }: {
-  checklist: YearEndChecklist;
-  payees: YearEndOneOffPayee[];
-  onSaved: (message: string) => Promise<void>;
-  onRefresh: () => Promise<void>;
-}): ReactElement | null {
-  if (payees.length === 0) return null;
-  return (
-    <div>
-      <h3 className="text-sm font-semibold text-neutral-900">One-off 1099 payees ({payees.length})</h3>
-      <p className="text-sm text-neutral-600">
-        These were paid by contractor checks, not payroll, so there is no contractor record with a TIN or address. If the payee is a contractor in payroll, the 1099 must combine both payments. Say who each one is before the 1099s are ready.
-      </p>
-      <ul className="divide-y divide-neutral-200">
-        {payees.map((payee) => <OneOffPayeeRow key={payee.code} checklist={checklist} payee={payee} onSaved={onSaved} onRefresh={onRefresh} />)}
-      </ul>
-    </div>
-  );
-}
-
 export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
   checklist: YearEndChecklist;
   step: PeopleStepData;
@@ -261,14 +156,23 @@ export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
   const employees = step.data.employees ?? [];
   const contractors = step.data.contractors ?? [];
   const oneOffPayees = step.data.one_off_payees ?? [];
+  const duplicates = step.data.duplicate_tins ?? [];
+  const linked = step.data.linked_checks ?? [];
+  const smaller = step.data.smaller_one_off_payees ?? [];
+  const w9Missing = step.data.w9_missing ?? [];
+  const candidates = step.data.link_candidates ?? [];
   const efileIssues = step.issues.filter((issue) => issue.code === 'EMPLOYEE_EFILE_INVALID');
   const canEditInline = !checklist.company.test_workspace;
 
-  if (employees.length === 0 && contractors.length === 0 && oneOffPayees.length === 0 && efileIssues.length === 0) {
+  if (employees.length === 0 && contractors.length === 0 && oneOffPayees.length === 0 && efileIssues.length === 0 && duplicates.length === 0 && w9Missing.length === 0) {
     return (
-      <p className="text-sm text-neutral-700">
-        {step.data.contractor_error ?? `All ${step.data.w2_employee_count ?? 0} W-2 employees${checklist.files_1099 ? ` and ${step.data.contractor_count ?? 0} 1099 payees` : ''} have what the forms need.`}
-      </p>
+      <div className="space-y-5">
+        <p className="text-sm text-neutral-700">
+          {step.data.contractor_error ?? `All ${step.data.w2_employee_count ?? 0} W-2 employees${checklist.files_1099 ? ` and ${step.data.contractor_count ?? 0} 1099 payees` : ''} have what the forms need.`}
+        </p>
+        <SmallerOneOffPayeeList checklist={checklist} payees={smaller} candidates={candidates} onSaved={onSaved} onRefresh={onRefresh} />
+        <LinkedChecksList checklist={checklist} groups={linked} onSaved={onSaved} />
+      </div>
     );
   }
 
@@ -280,7 +184,54 @@ export function PeopleStep({ checklist, step, onSaved, onRefresh }: {
       </li>)}</ul>}
       <PeopleList title="Employees" people={employees} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
       <PeopleList title="1099 payees" people={contractors} companyId={checklist.company.id} canEditInline={canEditInline} returnTo={returnTo} onSaved={onSaved} />
-      <OneOffPayeeList checklist={checklist} payees={oneOffPayees} onSaved={onSaved} onRefresh={onRefresh} />
+      {w9Missing.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-neutral-900">W-9 not on file ({w9Missing.length})</h3>
+          <p className="text-sm text-neutral-600">Get each payee&rsquo;s W-9, then open the contractor and tick W-9 on file.</p>
+          <ul className="divide-y divide-neutral-200">
+            {w9Missing.map((person) => (
+              <li key={person.employee_id} id={`w9-${person.employee_id}`} className="flex scroll-mt-28 flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="font-medium text-neutral-950 [overflow-wrap:anywhere]">{person.name}</p>
+                  <Badge variant="warning" className="mt-1">W-9 not on file</Badge>
+                </div>
+                <Link
+                  to={employeeEditPath(checklist.company.id, person.employee_id, { returnTo })}
+                  aria-label={`Open ${person.name}`}
+                  className="inline-flex min-h-11 items-center justify-center gap-1 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:border-primary-300 hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 sm:min-h-9 sm:shrink-0"
+                >
+                  Open contractor<ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {duplicates.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-neutral-900">1099 payees sharing one TIN ({duplicates.length})</h3>
+          <p className="text-sm text-neutral-600">Each record would get its own 1099, so one person would get two. Open both and correct the wrong TIN.</p>
+          <ul className="divide-y divide-neutral-200">
+            {duplicates.map((group) => (
+              <li key={group.map((person) => person.employee_id).join('-')} className="flex flex-col gap-2 py-3 sm:flex-row sm:flex-wrap sm:items-center">
+                <Badge variant="warning" className="self-start">Same TIN</Badge>
+                {group.map((person) => (
+                  <Link
+                    key={person.employee_id}
+                    to={employeeEditPath(checklist.company.id, person.employee_id, { returnTo })}
+                    className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:border-primary-300 hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 sm:min-h-9"
+                  >
+                    Open {person.name}<ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Link>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <OneOffPayeeList checklist={checklist} payees={oneOffPayees} candidates={candidates} onSaved={onSaved} onRefresh={onRefresh} />
+      <SmallerOneOffPayeeList checklist={checklist} payees={smaller} candidates={candidates} onSaved={onSaved} onRefresh={onRefresh} />
+      <LinkedChecksList checklist={checklist} groups={linked} onSaved={onSaved} />
       {step.data.contractor_error && <p className="text-sm text-danger-700">{step.data.contractor_error}</p>}
     </div>
   );
