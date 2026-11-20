@@ -44,4 +44,10 @@ RSpec.describe FilingSubmitter do
     profile.valid?
     expect(profile.errors.full_messages.join).to include("Use the 2-letter code, e.g. GU")
   end
+  it "normalizes TCC whitespace on save and stores blanks as nil" do
+    profile = described_class.create!(organization: create(:organization), tcc: "     ")
+    expect(profile.reload.tcc).to be_nil
+    profile.update!(tcc: " ABCDE ")
+    expect(profile.reload.tcc).to eq("ABCDE")
+  end
 end

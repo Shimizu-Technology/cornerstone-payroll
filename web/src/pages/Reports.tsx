@@ -3641,7 +3641,8 @@ interface NecContractor {
   tin_type: string;
   tin_last_four?: string;
   total_compensation: number;
-  federal_withheld: number;
+  federal_withheld: number | string;
+  filing_reason?: string;
   payment_count: number;
   requires_filing: boolean;
   w9_on_file: boolean;
@@ -3663,7 +3664,7 @@ interface NecReport {
   totals: {
     total_compensation: number;
     reportable_compensation: number;
-    total_federal_withheld: number;
+    total_federal_withheld: number | string;
   };
 }
 
@@ -3793,7 +3794,7 @@ function Form1099NecPanel() {
             <CardTitle>{report.meta.company_name} — {report.meta.year} 1099-NEC Summary</CardTitle>
             <CardDescription>
               {report.meta.contractor_count} contractor{report.meta.contractor_count !== 1 ? 's' : ''} &bull;{' '}
-              {report.meta.reportable_count} reportable (&ge; ${report.meta.filing_threshold}) &bull;{' '}
+              {report.meta.reportable_count} reportable (&ge; ${report.meta.filing_threshold} or tax withheld) &bull;{' '}
               Generated {new Date(report.meta.generated_at).toLocaleString()}
             </CardDescription>
           </CardHeader>
@@ -3830,7 +3831,7 @@ function Form1099NecPanel() {
               <div className="space-y-3 sm:hidden">
                 {report.all_contractors.map((contractor) => (
                   <div key={contractor.employee_id} className={`rounded-xl border p-4 ${contractor.compliance_issues.length > 0 ? 'border-red-200 bg-red-50/50' : 'border-neutral-200 bg-white'}`}>
-                    <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-semibold text-neutral-950">{contractor.name}</p>{contractor.business_name && <p className="mt-1 text-xs text-neutral-600">{contractor.business_name}</p>}</div><Badge variant={contractor.requires_filing ? 'success' : 'default'}>{contractor.requires_filing ? 'Reportable' : 'Below threshold'}</Badge></div>
+                    <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-semibold text-neutral-950">{contractor.name}</p>{contractor.business_name && <p className="mt-1 text-xs text-neutral-600">{contractor.business_name}</p>}</div><Badge variant={contractor.requires_filing ? 'success' : 'default'}>{contractor.requires_filing ? contractor.filing_reason === 'tax withheld' ? 'Reportable: tax withheld' : 'Reportable' : 'Below threshold'}</Badge></div>
                     <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Box 1 compensation</dt><dd className="font-semibold">{fmt(contractor.total_compensation)}</dd></div><div><dt className="text-neutral-500">Box 4 withheld</dt><dd className="font-semibold">{fmt(contractor.federal_withheld)}</dd></div><div><dt className="text-neutral-500">TIN</dt><dd>{contractor.tin_type}: ***{contractor.tin_last_four || '????'}</dd></div><div><dt className="text-neutral-500">Payments</dt><dd>{contractor.payment_count}</dd></div><div><dt className="text-neutral-500">W-9</dt><dd>{contractor.w9_on_file ? 'On file' : 'Missing'}</dd></div></dl>
                     {contractor.compliance_issues.length > 0 && <ul className="mt-3 space-y-1 text-xs font-medium text-red-700">{contractor.compliance_issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
                   </div>
@@ -3872,7 +3873,7 @@ function Form1099NecPanel() {
                         <TableCell>
                           {c.requires_filing ? (
                             <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                              Reportable
+                              {c.filing_reason === 'tax withheld' ? 'Reportable: tax withheld' : 'Reportable'}
                             </span>
                           ) : (
                             <span className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">

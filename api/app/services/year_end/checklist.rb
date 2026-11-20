@@ -578,13 +578,15 @@ module YearEnd
     def print_and_file_step
       key = "print_and_file"
       title = "Print and file"
-      return waiting_step(key, title) unless responsibilities["w2_gu"]
-      return not_needed_step(key, title, "Cornerstone does not file #{year} W-2s for this client.") unless files?("w2_gu")
+      return waiting_step(key, title) unless responsibilities["w2_gu"] || responsibilities["form_1099"]
+      return not_needed_step(key, title, "Cornerstone does not file #{year} W-2s for this client.") unless files?("w2_gu") || files?("form_1099")
 
       readiness, fingerprint = w2_readiness
       practice = company.test_workspace?
       final = !practice && W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
-      summary = if practice
+      summary = if !files?("w2_gu")
+        practice ? "1099 filing downloads are unavailable in a practice copy." : "Review the 1099 drafts below. Final downloads require the 1099s to be marked ready."
+      elsif practice
         "This is a practice copy, so every document is a draft. Review them, but don't hand them out or file them."
       elsif final
         "The #{year} W-2s are marked ready. Download each document below."
@@ -595,8 +597,28 @@ module YearEnd
         key: key, number: STEP_KEYS.index(key) + 1, title: title, status: "available",
         summary: summary,
         issues: [],
-        data: { final: final, documents: w2_copy_documents(final) }
+        data: { final: final, documents: (files?("w2_gu") ? w2_copy_documents(final) : []) + form1099_documents }
       }
+    end
+
+    def form1099_documents
+      return [] unless files?("form_1099")
+
+      final = Form1099Readiness.final?(company: company, year: year)
+      reason = drt_unavailable_reason || ("Only tax year 2026 is supported" unless year == 2026)
+      [
+        [ "form_1099_pub1220", "1099 e-file for GuamTax", "txt" ],
+        [ "form_1096_totals", "1096 totals (for your records)", "pdf" ]
+      ].map do |path, title, format|
+        {
+          key: path, title: title, format: format, draft: !final,
+          description: format == "txt" ? "Upload to GuamTax after the 1099s are marked ready." : "For your records — not for filing.",
+          detail: "Totals use reportable payees only. Each download is recorded in the activity log.",
+          contains_full_ssn: format == "txt", available: reason.nil?, unavailable_reason: format == "pdf" ? reason&.gsub(" (contains full SSNs)", "")&.gsub(" — it contains full SSNs", "") : reason,
+          draft_confirmation: !final && format == "txt" ? "Test file only — review it, but don't upload it as your filing." : nil,
+          download: { path: "/admin/reports/#{path}", params: { year: year, mode: final ? "final" : "draft" } }
+        }
+      end
     end
 
     def w2_copy_documents(final)

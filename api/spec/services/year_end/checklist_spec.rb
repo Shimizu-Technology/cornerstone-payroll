@@ -474,6 +474,15 @@ RSpec.describe YearEnd::Checklist do
   end
 
   describe "print and file" do
+    it "lists independent 1099 drafts for a 1099-only client" do
+      decide(w2: "client", form_1099: "cornerstone")
+      result = step(checklist, "print_and_file")
+      expect(result[:status]).to eq("available")
+      expect(result.dig(:data, :documents).pluck(:key)).to eq(%w[form_1099_pub1220 form_1096_totals])
+      expect(result.dig(:data, :documents)).to all(include(draft: true))
+      expect(result.dig(:data, :documents).first[:draft_confirmation]).to eq("Test file only — review it, but don't upload it as your filing.")
+    end
+
     it "waits for the W-2 decision and is not needed when the client files its own W-2s" do
       pay(Date.new(2026, 3, 6))
       expect(step(checklist, "print_and_file")).to include(status: "waiting", number: 8)
