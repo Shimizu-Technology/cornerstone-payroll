@@ -101,7 +101,7 @@ function ClientSection({ title, rows, description }: { title: string; rows: Year
           <MobileRecordCard key={row.company_id}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="font-semibold text-neutral-950 [overflow-wrap:anywhere]">{row.name}</p>
+                <p className="font-semibold text-neutral-950 [overflow-wrap:anywhere]">{row.name}</p><p className="mt-1 text-xs text-neutral-600">{row.filing_progress?.map((filing) => `${filing.label} ${filing.status === 'accepted' ? '✓' : filing.status === 'not_filed' ? '—' : filing.status.replaceAll('_', ' ')}`).join(' · ')}</p>
                 {!row.active && <Badge variant="outline" className="mt-1">Inactive record</Badge>}
               </div>
               <ClientStatus row={row} />
@@ -130,7 +130,7 @@ function ClientSection({ title, rows, description }: { title: string; rows: Year
             {rows.map((row) => (
               <TableRow key={row.company_id}>
                 <TableCell className="min-w-[10rem] whitespace-normal!">
-                  <p className="font-semibold text-neutral-950">{row.name}</p>
+                  <p className="font-semibold text-neutral-950">{row.name}</p><p className="mt-1 text-xs text-neutral-600">{row.filing_progress?.map((filing) => `${filing.label} ${filing.status === 'accepted' ? '✓' : filing.status === 'not_filed' ? '—' : filing.status.replaceAll('_', ' ')}`).join(' · ')}</p>
                   {!row.active && <Badge variant="outline" className="mt-1">Inactive record</Badge>}
                 </TableCell>
                 <TableCell className="whitespace-nowrap"><ClientStatus row={row} /></TableCell>
@@ -235,6 +235,7 @@ export function YearEnd(): ReactElement {
 
         {overview && (
           <>
+            {overview.filing_reminder_count != null && <p className="text-sm font-semibold text-warning-800">{overview.filing_reminder_count} client(s) not yet filed. Record each portal submission before the deadline.</p>}
             <dl className="grid grid-cols-3 gap-2 sm:max-w-xl sm:gap-3">
               {[
                 { label: 'To do', value: overview.counts.needs_action + (overview.counts.check_needed ?? 0), tone: 'text-warning-800' },

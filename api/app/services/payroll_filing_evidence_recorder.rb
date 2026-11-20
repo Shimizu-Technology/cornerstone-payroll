@@ -21,6 +21,7 @@ class PayrollFilingEvidenceRecorder
       record = PayrollFilingRecord.lock.find_by(identity)
       validate_transition!(record)
 
+      download = submission_download!
       source = source_for(record)
       occurred_at = parse_occurred_at!
       validate_chronology!(record, occurred_at)
@@ -40,6 +41,8 @@ class PayrollFilingEvidenceRecorder
         notes: attributes[:notes].presence,
         source_fingerprint: source.fingerprint,
         source_snapshot: source.snapshot,
+        download_audit: download,
+        file_sha256: download&.metadata&.fetch("sha256", nil),
         idempotency_key: attributes[:idempotency_key].presence || SecureRandom.uuid
       )
 
@@ -89,13 +92,36 @@ class PayrollFilingEvidenceRecorder
   end
 
   def identity
-    { company_id: company.id, filing_type: filing_type, tax_year: tax_year, quarter: quarter }
+    { company_id: company.id, filing_type: filing_type, tax_year: tax_year, quarter: quarter, agency: agency }
+  end
+
+  def agency
+    return "" if quarter.present?
+    return "drt" if filing_type == "form_1099_nec"
+
+    attributes[:agency].presence || "legacy"
+  end
+
+  def submission_download!
+    return unless quarter.nil? && event_type.in?(%w[submitted resubmitted])
+
+    raise Error, "Choose Social Security (BSO) or Guam DRT (GuamTax)" unless agency.in?(%w[ssa drt])
+    downloads = AnnualFilingDownloads.new(company: company, year: tax_year, filing_type: filing_type)
+    log = downloads.logs.find_by(id: attributes[:download_audit_id])
+    raise Error, "Choose a final file downloaded for this client and year. Draft files cannot be filed." unless log && log.metadata["sha256"].to_s.match?(/\A[0-9a-f]{64}\z/)
+    unless log.metadata["readiness_fingerprint"] == downloads.fingerprint
+      raise Error, "This file is out of date. Download the final file again"
+    end
+    log
   end
 
   def validate_identity!
     raise Error, "Unsupported filing type" unless filing_type.in?(PayrollFilingRecord::FILING_TYPES)
     raise Error, "tax_year must be a valid tax year" unless tax_year.in?(2000..2200)
     raise Error, "quarter must be 1, 2, 3, or 4" if quarter.present? && !quarter.in?(1..4)
+    raise Error, "Test workspaces cannot record filings" if company.test_workspace?
+    return if evidence_document.nil? && quarter.nil?
+
     raise Error, "Evidence must belong to this company" unless evidence_document&.company_id == company.id
     raise Error, "Choose a filing-evidence document" unless evidence_document.category == "filing_evidence"
     raise Error, "Filing evidence must be retained as an internal document" if evidence_document.visible_to_client?
@@ -107,7 +133,7 @@ class PayrollFilingEvidenceRecorder
     raise Error, "Preparer name is required" if attributes[:preparer_name].blank?
     raise Error, "Idempotency key is required" if attributes[:idempotency_key].blank?
 
-    if return_filing? && event_type.in?(%w[submitted resubmitted]) && attributes[:signer_name].blank?
+    if quarter.present? && return_filing? && event_type.in?(%w[submitted resubmitted]) && attributes[:signer_name].blank?
       raise Error, "Signer name is required for a tax return submission"
     end
     if event_type.in?(%w[accepted_with_errors rejected correction_needed]) && attributes[:notes].blank?

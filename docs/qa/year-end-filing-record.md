@@ -1,0 +1,45 @@
+# Year-end filing record — implementation and acceptance
+
+2026-11-20; branch `feature/year-end-filing-record`, based on main `50e5325b`.
+
+Cornerstone staff prepare year-end files for Guam payroll clients, then upload them outside the app. The W-2 EFW2 file requires two independently confirmed submissions (SSA BSO and GuamTax); Pub 1220 requires GuamTax only. The research goal is generation, review, external upload and retained acceptance evidence (`W2GU_1099_YEAR_END_FILING_RESEARCH_2026-11-17.md`, §8 step 5). This change records staff-reported portal activity; it does not upload files or imply agency acceptance from a download.
+
+## Storage and deployment
+
+Annual identity now includes `agency`. Quarterly identities remain unchanged. Existing W-2 records, including prior years, become `legacy` (agency not recorded), retaining IDs, receipts, events and references. They remain readable in the agency panels and do not count as either agency's acceptance. Existing 1099 records become DRT records.
+
+The migration does not rewrite append-only events. It adds a nullable download-audit foreign key and SHA256 to events and allows an optional receipt for annual events. Quarterly receipts remain required by the recorder and model. Rollback refuses with explicit counts when agency records or file-bound/receipt-free events would lose information. Preserve the schema and roll back application code instead; old application versions cannot correctly distinguish the two W-2 agencies and should not record annual filings while rolled back.
+
+Only final EFW2 and Pub 1220 download audit entries qualify as portal-upload files. PDF copies and transmittals do not. Submitted/resubmitted events retain the selected audit ID and SHA256. Selection is company/year/action/mode scoped and checked against the current filing-input fingerprint. Historical Pub 1220 audits lacking a fingerprint require a fresh download. Source changes after filing warn without blocking outcomes.
+
+Preparation readiness, `SIGN_OFF_STEPS`, `ReadyCheck`, `EfileCheck`, counts and next-step selection are unchanged. Filing progress is a separate payload and the “File and confirm” card follows the preparation steps. The clients list batches filing records/download lookups. A deadline-period reminder counts clients with an unfiled or correction/retry-required agency submission.
+
+The existing `manage_filing_review` capability remains required. Test workspaces are blocked. Each recorded event produces a domain audit, atomically with the event.
+
+Requires the API migration and web build; a production frontend build is expected. No production access or deployment performed. PR #504 supplies the real 1099 sign-off. Before #504, final 1099 recording remains disabled; the integration detects its `Form1099FilingReadiness` / `Form1099InputsFingerprint` classes when available. Reconcile the reports-controller audit metadata line when integrating #504.
+
+## Agent-executed acceptance
+
+Factories only, isolated local Postgres databases. No real client records or portal submissions. Chromium at 390×844 and 1440×1000; no native phone, Safari or WebKit coverage.
+
+| Required case | Result | Evidence |
+| --- | --- | --- |
+| Record SSA, independently record DRT | Passed at both widths | Real local Rails API, separate agency records |
+| Accept SSA, reject DRT, resubmit DRT | Passed at both widths | SSA accepted with 2 events; DRT submitted with 3 events; verified in Postgres |
+| Preserve agency outcomes on reload | Passed | Reloaded panels retained accepted SSA and submitted DRT with histories |
+| Pending state, latest file selection, no horizontal overflow | Passed | Repeatable Playwright fictional-transport suite, 2 tests |
+| Draft, wrong company/year, stale file refusal | Passed in automated service specs | `annual_filing_submissions_spec.rb` |
+| Post-filing data change warning without blocking outcome | Passed in service/request specs | `payroll_filing_records_spec.rb` and recorder specs |
+| Preparation parity after both agency records accepted | Passed in checklist/list spec | Same status, issue count, next step, steps and list counts |
+
+Screenshots: `docs/evidence/filing-record/connected-390.png`, `connected-1440.png` (real local API); `lifecycle-390.png`, `lifecycle-1440.png` (repeatable fictional browser transport).
+
+The connected browser fixture uses factory payroll/sign-off data and a synthetic final-download audit; it tests recording and persistence, not file generation or portal delivery. File generators have their existing test suites. Real agency acceptance of a client filing remains an operational milestone outside this change.
+
+## Verification
+
+Final command results are recorded in the PR. Initial full Vitest run had one employee-documents pagination timeout (2,083 passed, 1 failed); rerunning the entire suite with two workers passed all 2,084 tests. Impeccable advisory scan returned no findings. No repository hooks or tooling were installed by that scan.
+
+QA browser tab, Vite server and Rails server were stopped; the UI database was dropped. The test database is dropped after the backend gate completes. Shared Postgres remains available. Branch and checkout remain for Claude and CodeRabbit review; do not merge from this worker.
+
+The unchanged converter environment spec reproduces its failure in isolation: this Mac mini's portable Ruby `rbconfig.rb` (lines 426–432) adds `PKG_CONFIG_PATH` at Ruby startup. The application converter passes the four intended variables with `unsetenv_others: true`; the expected-key assertion then sees Ruby's added variable. No converter code, test or Ruby installation was changed here. A slow-drip response-deadline test also failed under the first full-suite load and passed in the focused rerun.

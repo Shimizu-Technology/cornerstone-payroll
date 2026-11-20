@@ -18,7 +18,19 @@ class PayrollFilingRecord < ApplicationRecord
   validates :tax_year, numericality: { only_integer: true, greater_than_or_equal_to: 2000, less_than_or_equal_to: 2200 }
   validates :submitted_at, :confirmation_number, presence: true
   validates :source_fingerprint, format: { with: /\A[0-9a-f]{64}\z/ }
-  validates :filing_type, uniqueness: { scope: %i[company_id tax_year quarter] }
+  validates :filing_type, uniqueness: { scope: %i[company_id tax_year quarter agency] }
+  before_validation do
+    self.agency = filing_type == "w2_gu_w3_ss" ? "legacy" : (filing_type == "form_1099_nec" ? "drt" : "") if agency.blank?
+  end
+  validate do
+    allowed = filing_type == "w2_gu_w3_ss" ? %w[ssa drt legacy] : (filing_type == "form_1099_nec" ? %w[drt] : [ "" ])
+    errors.add(:agency, "is invalid for this filing") unless agency.in?(allowed)
+  end
+
+  def agency_label
+    { "ssa" => "Social Security (BSO)", "drt" => "Guam DRT (GuamTax)", "legacy" => "Agency not recorded", "" => nil }[agency]
+  end
+
   validate :quarter_matches_filing_type
 
   def annual?

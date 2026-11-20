@@ -226,22 +226,25 @@ export function YearEndChecklist(): ReactElement {
             {(checklist.files_w2 || checklist.files_1099) && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Filing evidence</CardTitle>
+                  <CardTitle className="text-base">9. File and confirm</CardTitle>
                   <CardDescription>After you file outside the app, keep the receipt and the agency's result here.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {checklist.files_w2 && (
+                  {checklist.files_w2 && (['ssa', 'drt'].map((agency) => (
                     <FilingEvidencePanel
+                      key={agency}
+                      agency={agency}
                       filingType="w2_gu_w3_ss"
                       taxYear={checklist.tax_year}
                       companyId={checklist.company.id}
                       preparationReady={checklist.steps.some((step) => step.key === 'mark_ready' && step.status === 'done')}
                       readinessMessage="Mark the W-2s ready above before recording delivery to SSA or DRT."
                     />
-                  )}
+                  )))}
                   {checklist.files_1099 && (
                     <FilingEvidencePanel
                       filingType="form_1099_nec"
+                      agency="drt"
                       taxYear={checklist.tax_year}
                       companyId={checklist.company.id}
                       preparationReady={form1099EvidenceReady(checklist)}

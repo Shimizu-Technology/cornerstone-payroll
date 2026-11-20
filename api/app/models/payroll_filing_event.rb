@@ -6,7 +6,8 @@ class PayrollFilingEvent < ApplicationRecord
   belongs_to :payroll_filing_record, inverse_of: :events
   belongs_to :company
   belongs_to :recorded_by, class_name: "User"
-  belongs_to :evidence_document, class_name: "ClientDocument"
+  belongs_to :evidence_document, class_name: "ClientDocument", optional: true
+  belongs_to :download_audit, class_name: "AuditLog", optional: true
 
   validates :event_type, inclusion: { in: EVENT_TYPES }
   validates :to_status, inclusion: { in: PayrollFilingRecord::STATUSES }
@@ -14,6 +15,8 @@ class PayrollFilingEvent < ApplicationRecord
   validates :occurred_at, :reference_number, :preparer_name, :idempotency_key, presence: true
   validates :idempotency_key, uniqueness: { scope: :company_id }
   validates :source_fingerprint, format: { with: /\A[0-9a-f]{64}\z/ }
+  validates :evidence_document, presence: true, if: -> { payroll_filing_record && !payroll_filing_record.annual? }
+  validates :file_sha256, format: { with: /\A[0-9a-f]{64}\z/ }, allow_nil: true
   validate :tenant_consistency
   validate :occurred_at_is_not_in_the_future
 
@@ -26,7 +29,8 @@ class PayrollFilingEvent < ApplicationRecord
     return if company.blank?
 
     errors.add(:payroll_filing_record, "must belong to the company") if payroll_filing_record&.company_id != company_id
-    errors.add(:evidence_document, "must belong to the company") if evidence_document&.company_id != company_id
+    errors.add(:evidence_document, "must belong to the company") if evidence_document && evidence_document.company_id != company_id
+    errors.add(:download_audit, "must belong to the company") if download_audit && download_audit.company_id != company_id
     errors.add(:recorded_by, "must belong to the company's organization") if recorded_by&.organization_id != company.organization_id
   end
 

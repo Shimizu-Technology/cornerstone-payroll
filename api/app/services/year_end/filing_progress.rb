@@ -1,0 +1,29 @@
+# frozen_string_literal: true
+
+module YearEnd
+  # Deliberately independent of preparation counts, ready stamps and next_step.
+  class FilingProgress
+    def initialize(company:, year:, decisions: nil, records: nil, downloads: nil)
+      @company, @year = company, year
+      @decisions, @records, @downloads = decisions, records, downloads
+    end
+
+    def call
+      decisions = @decisions || PayrollFilingResponsibility.where(company_id: @company.id, tax_year: @year, quarter: nil, responsible_party: "cornerstone").pluck(:filing_type)
+      return [] if @company.test_workspace?
+
+      identities = []
+      identities += [ [ "w2_gu_w3_ss", "ssa", "W-2: SSA" ], [ "w2_gu_w3_ss", "drt", "W-2: DRT" ] ] if decisions.include?("w2_gu")
+      identities << [ "form_1099_nec", "drt", "1099: DRT" ] if decisions.include?("form_1099")
+      records = (@records || PayrollFilingRecord.where(company_id: @company.id, tax_year: @year, quarter: nil)).index_by { |r| [ r.filing_type, r.agency ] }
+      identities.map do |type, agency, label|
+        record = records[[ type, agency ]]
+        download = record ? nil : (@downloads ? @downloads[type] : AnnualFilingDownloads.new(company: @company, year: @year, filing_type: type).logs.first)
+        { filing_type: type, agency: agency, label: label, status: record&.status || "not_filed",
+          submitted_at: record&.submitted_at&.iso8601, resolved_at: record&.resolved_at&.iso8601,
+          confirmation_number: record&.confirmation_number, downloaded_at: download&.created_at&.iso8601,
+          due_date: @year == 2026 ? "2027-02-01" : Date.new(@year + 1, 1, 31).iso8601 }
+      end
+    end
+  end
+end

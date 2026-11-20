@@ -106,7 +106,9 @@ RSpec.describe PayrollFilingEvidenceRecorder do
 
   it "accepts evidence for current revalidated W-2 inputs" do
     ready_w2_workflow
-    event = record_event(event_type: "submitted", filing_type: "w2_gu_w3_ss")
+    download = AuditLog.record!(user: actor, company_id: company.id, action: "efw2#download", record_type: "Company",
+      metadata: { year: 2026, mode: "final", sha256: "b" * 64, readiness_fingerprint: W2FilingInputsFingerprint.new(company: company, year: 2026).call })
+    event = record_event(event_type: "submitted", filing_type: "w2_gu_w3_ss", agency: "ssa", download_audit_id: download.id)
     expect(event.event_type).to eq("submitted")
     expect(event.payroll_filing_record.filing_type).to eq("w2_gu_w3_ss")
   end

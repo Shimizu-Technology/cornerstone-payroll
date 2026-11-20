@@ -1992,7 +1992,7 @@ module Api
 
             AuditLog.record!(user: current_user, company_id: company.id, action: pdf ? "form1096#download" : "pub1220#download",
               record_type: "Company", record_id: company.id,
-              metadata: { year: year, mode: params[:mode] }.merge(FilingFileDigest.audit_metadata(content)))
+              metadata: { year: year, mode: params[:mode], readiness_fingerprint: Form1099InputsFingerprint.new(company: company, year: year).call }.merge(FilingFileDigest.audit_metadata(content)))
             send_data content, filename: "#{company.name.parameterize}-#{year}-#{final ? 'FINAL' : 'DRAFT'}-#{pdf ? '1096-totals.pdf' : '1099-PUB1220.txt'}",
               type: pdf ? "application/pdf" : "text/plain; charset=us-ascii", disposition: "attachment"
           end

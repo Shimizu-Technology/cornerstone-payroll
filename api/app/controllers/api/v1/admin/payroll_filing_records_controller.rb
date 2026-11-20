@@ -11,13 +11,17 @@ module Api
           return if performed?
 
           record = PayrollFilingRecord.includes(events: [ :recorded_by, :evidence_document ]).find_by(identity)
-          render json: { filing: record ? serialize_record(record) : nil }
+          downloads = AnnualFilingDownloads.new(company: current_company, year: identity[:tax_year], filing_type: identity[:filing_type])
+          legacy = identity[:filing_type] == "w2_gu_w3_ss" && identity[:agency] != "legacy" ? PayrollFilingRecord.find_by(identity.merge(agency: "legacy")) : nil
+          render json: { filing: record ? serialize_record(record) : nil,
+            legacy_filing: legacy ? serialize_record(legacy) : nil,
+            downloads: downloads.logs.map { |log| { id: log.id, created_at: log.created_at.iso8601, actor_name: log.actor_name, sha256: log.metadata["sha256"] } } }
         end
 
         def create_event
           identity = filing_identity
           return if performed?
-          return render json: { error: "Choose the agency receipt or response file" }, status: :unprocessable_entity unless params[:file].present?
+          return render json: { error: "Choose the agency receipt or response file" }, status: :unprocessable_entity unless params[:file].present? || identity[:quarter].nil?
           return render json: { error: "Idempotency key is required" }, status: :unprocessable_entity if params[:idempotency_key].blank?
 
           existing_event = PayrollFilingEvent.includes(:evidence_document).find_by(
@@ -26,8 +30,8 @@ module Api
           )
           return render_idempotent_event(existing_event, identity) if existing_event
 
-          upload_result = upload_evidence(identity)
-          document = upload_result.documents.fetch(0)
+          upload_result = upload_evidence(identity) if params[:file].present?
+          document = upload_result&.documents&.fetch(0)
           event = PayrollFilingRecord.transaction do
             recorded_event = PayrollFilingEvidenceRecorder.new(
               company: current_company,
@@ -49,7 +53,10 @@ module Api
                 tax_year: recorded_event.payroll_filing_record.tax_year,
                 quarter: recorded_event.payroll_filing_record.quarter,
                 reference_number: recorded_event.reference_number,
-                evidence_document_id: document.id,
+                evidence_document_id: document&.id,
+                agency: recorded_event.payroll_filing_record.agency,
+                download_audit_id: recorded_event.download_audit_id,
+                file_sha256: recorded_event.file_sha256,
                 source_fingerprint: recorded_event.source_fingerprint
               },
               ip_address: request.remote_ip,
@@ -114,11 +121,13 @@ module Api
             return {}
           end
 
-          { company_id: current_company_id, filing_type: filing_type, tax_year: tax_year, quarter: quarter }
+          { company_id: current_company_id, filing_type: filing_type, tax_year: tax_year, quarter: quarter,
+            agency: annual ? (filing_type == "form_1099_nec" ? "drt" : params[:agency].presence || "legacy") : "" }
         end
 
         def event_params
           params.permit(
+            :download_audit_id,
             :event_type,
             :occurred_at,
             :reference_number,
@@ -187,9 +196,10 @@ module Api
             event.preparer_name == params[:preparer_name].to_s.strip &&
             event.signer_name.to_s == params[:signer_name].to_s.strip &&
             event.signer_title.to_s == params[:signer_title].to_s.strip &&
+            event.download_audit_id.to_s == params[:download_audit_id].to_s &&
             event.notes.to_s == params[:notes].to_s &&
             same_occurred_at?(event) &&
-            record.attributes.slice("company_id", "filing_type", "tax_year", "quarter") == identity.stringify_keys &&
+            record.attributes.slice("company_id", "filing_type", "tax_year", "quarter", "agency") == identity.stringify_keys &&
             evidence_digest(event.evidence_document) == uploaded_file_digest
         end
 
@@ -202,11 +212,15 @@ module Api
         end
 
         def evidence_digest(document)
+          return nil unless document
+
           data = R2StorageService.new.download(document.file_key)
           data && Digest::SHA256.hexdigest(data)
         end
 
         def uploaded_file_digest
+          return nil unless params[:file].present?
+
           file = params[:file]
           io = file.respond_to?(:tempfile) ? file.tempfile : file
           io.rewind if io.respond_to?(:rewind)
@@ -225,6 +239,8 @@ module Api
             id: record.id,
             filing_type: record.filing_type,
             display_name: record.display_name,
+            agency: record.agency,
+            agency_label: record.agency_label,
             tax_year: record.tax_year,
             quarter: record.quarter,
             status: record.status,
@@ -233,9 +249,18 @@ module Api
             confirmation_number: record.confirmation_number,
             source_fingerprint: record.source_fingerprint,
             current_source_fingerprint: current_source.fingerprint,
-            source_changed: record.source_fingerprint != current_source.fingerprint,
+            source_changed: source_changed?(record, current_source),
             events: record.events.map { |event| serialize_event(event) }
           }
+        end
+
+        def source_changed?(record, current_source)
+          return record.source_fingerprint != current_source.fingerprint unless record.annual?
+
+          submitted = record.events.reverse.find { |event| event.download_audit_id.present? }
+          return record.source_fingerprint != current_source.fingerprint unless submitted
+
+          submitted.download_audit.metadata["readiness_fingerprint"] != AnnualFilingDownloads.new(company: record.company, year: record.tax_year, filing_type: record.filing_type).fingerprint
         end
 
         def serialize_event(event)
@@ -252,7 +277,9 @@ module Api
             notes: event.notes,
             source_fingerprint: event.source_fingerprint,
             recorded_by: event.recorded_by.name,
-            evidence_document: {
+            download_audit_id: event.download_audit_id,
+            file_sha256: event.file_sha256,
+            evidence_document: event.evidence_document && {
               id: event.evidence_document.id,
               file_name: event.evidence_document.file_name,
               content_type: event.evidence_document.content_type,

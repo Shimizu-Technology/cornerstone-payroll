@@ -21,6 +21,43 @@ RSpec.describe "Payroll filing records", type: :request do
     FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT)
   end
 
+  it "records receipt-free annual submissions per agency, audits them, and warns after inputs change" do
+    allow_any_instance_of(PayrollFilingEvidenceRecorder).to receive(:validate_w2_readiness!)
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("a" * 64)
+    download = AuditLog.record!(user: admin, company_id: company.id, action: "efw2#download", record_type: "Company",
+      metadata: { year: 2026, mode: "final", sha256: "b" * 64, readiness_fingerprint: "a" * 64 })
+    %w[ssa drt].each do |agency|
+      post "/api/v1/admin/payroll_filing_records/events", params: {
+        filing_type: "w2_gu_w3_ss", agency: agency, tax_year: 2026, event_type: "submitted",
+        reference_number: "CONF-#{agency}", preparer_name: "Dana", idempotency_key: SecureRandom.uuid, download_audit_id: download.id
+      }
+      expect(response).to have_http_status(:created), response.body
+      expect(response.parsed_body.dig("filing", "agency")).to eq(agency)
+      expect(response.parsed_body.dig("filing", "events", 0, "file_sha256")).to eq("b" * 64)
+      expect(AuditLog.where(action: "payroll_filing_records#submitted").last.metadata).to include("agency" => agency, "download_audit_id" => download.id)
+    end
+    expect(PayrollFilingRecord.where(company: company).count).to eq(2)
+    allow_any_instance_of(AnnualFilingDownloads).to receive(:fingerprint).and_return("c" * 64)
+    get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
+    expect(response.parsed_body.dig("filing", "source_changed")).to be(true)
+  end
+
+  it "keeps filing-review capability required for recording" do
+    allow(StaffRolePolicy).to receive(:allowed?).and_call_original
+    allow(StaffRolePolicy).to receive(:allowed?).with(admin, :manage_filing_review, company: anything).and_return(false)
+    post "/api/v1/admin/payroll_filing_records/events", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
+    expect(response).to have_http_status(:forbidden)
+    expect(PayrollFilingEvent.count).to eq(0)
+  end
+
+  it "blocks recording in a test workspace" do
+    source = create(:company, organization: company.organization)
+    company.update_columns(payroll_environment: "migration_rehearsal", test_workspace_purpose: "training_replay", migration_rehearsal_status: "ready", migration_source_company_id: source.id, test_workspace_expires_at: 30.days.from_now)
+    post "/api/v1/admin/payroll_filing_records/events", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
+    expect(response).to have_http_status(:forbidden)
+    expect(PayrollFilingEvent.count).to eq(0)
+  end
+
   it "returns no external record until submission evidence exists" do
     get "/api/v1/admin/payroll_filing_records", params: { filing_type: "w1", tax_year: 2026, quarter: 2 }
 
