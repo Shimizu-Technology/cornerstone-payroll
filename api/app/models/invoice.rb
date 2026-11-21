@@ -50,6 +50,7 @@ class Invoice < ApplicationRecord
   validates :discount_type, inclusion: { in: DISCOUNT_TYPES }
   validates :discount_value, numericality: { greater_than_or_equal_to: 0 }
   validate :discount_value_has_cent_precision
+  validate :continuing_number_unique_ignoring_zeros, if: -> { will_save_change_to_invoice_number? || will_save_change_to_invoice_billing_profile_id? }
   validate :recipient_must_belong_to_organization
   validate :billing_profile_must_belong_to_organization
   validate :company_must_belong_to_organization
@@ -587,5 +588,18 @@ class Invoice < ApplicationRecord
       "address" => recipient&.address,
       "payment_terms" => recipient&.payment_terms
     }
+  end
+
+  # For a continuing sequence, "7055" and "07055" are the same number: a
+  # number typed in (an imported original, an edit) may not repeat another
+  # invoice's number from the same sender with or without leading zeros,
+  # whichever was entered first.
+  def continuing_number_unique_ignoring_zeros
+    return unless invoice_billing_profile&.numbering_style == "continuing" && invoice_number.to_s.match?(/\A\d+\z/)
+
+    other = Invoice.where(invoice_billing_profile_id: invoice_billing_profile_id).where.not(id: id)
+                   .where("invoice_number ~ '^[0-9]+$' AND ltrim(invoice_number, '0') = ?", invoice_number.to_s.sub(/\A0+/, ""))
+                   .pick(:invoice_number)
+    errors.add(:invoice_number, "#{invoice_number} is the same number as #{other}, already used by this sender") if other
   end
 end

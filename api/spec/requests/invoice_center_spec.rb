@@ -368,6 +368,51 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     file&.close!
   end
 
+  describe "continuing numbers with and without leading zeros" do
+    let!(:continuing) do
+      create(:invoice_billing_profile, organization: company.organization, name: "Cornerstone", numbering_style: "continuing",
+                                       next_invoice_number: 7060, invoice_number_width: 5)
+    end
+
+    def import_number(number)
+      file = Tempfile.new([ "original", ".pdf" ])
+      file.binmode
+      file.write("%PDF-1.4\noriginal #{number}\n%%EOF\n")
+      file.rewind
+      post "/api/v1/admin/invoices/import", params: {
+        file: Rack::Test::UploadedFile.new(file.path, "application/pdf", original_filename: "#{number}.pdf"),
+        invoice_recipient_id: recipient.id, invoice_billing_profile_id: continuing.id, invoice_number: number,
+        invoice_date: "2026-06-01", total_amount: "100.00"
+      }
+    ensure
+      file&.close!
+    end
+
+    it "rejects 7055 after 07055" do
+      import_number("07055")
+      expect(response).to have_http_status(:created), response.body
+      expect { import_number("7055") }.not_to change(Invoice, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.body).to include("same number as 07055")
+    end
+
+    it "rejects 07055 after 7055" do
+      import_number("7055")
+      expect(response).to have_http_status(:created), response.body
+      expect { import_number("07055") }.not_to change(Invoice, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.body).to include("same number as 7055")
+    end
+
+    it "returns the sender's numbering settings on the invoice" do
+      import_number("07055")
+      invoice_id = response.parsed_body.dig("invoice", "id")
+      get "/api/v1/admin/invoices/#{invoice_id}"
+      profile = response.parsed_body.dig("invoice", "invoice_billing_profile") || response.parsed_body.dig("invoice", "billing_profile")
+      expect(profile).to include("numbering_style" => "continuing", "invoice_number_width" => 5, "next_invoice_number_preview" => "07060")
+    end
+  end
+
   it "rejects malformed imported discount values without creating an invoice" do
     expect do
       post "/api/v1/admin/invoices/import", params: {

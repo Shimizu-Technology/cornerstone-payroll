@@ -78,6 +78,12 @@ RSpec.describe "Invoice style settings API", type: :request do
 
     patch "/api/v1/admin/invoice_billing_profiles/#{profile.id}", params: { invoice_billing_profile: { invoice_number_width: "" } }, as: :json
     expect(response.parsed_body.fetch("invoice_billing_profile")).to include("invoice_number_width" => nil, "next_invoice_number_preview" => "7055")
+
+    [ "2.5", "0", "13" ].each do |width|
+      patch "/api/v1/admin/invoice_billing_profiles/#{profile.id}", params: { invoice_billing_profile: { invoice_number_width: width } }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity), "width #{width} should be rejected"
+    end
+    expect(profile.reload.invoice_number_width).to be_nil
   end
 
   it "reports the theme color when no accent is chosen and rejects a bad accent or theme" do
