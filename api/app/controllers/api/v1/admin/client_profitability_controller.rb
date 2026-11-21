@@ -196,7 +196,10 @@ module Api
             settings: settings,
             period: ClientProfitability::Period.parse(params[:from], params[:through]),
             cost_pending: BOOLEAN.cast(params[:cost_pending]) == true,
-            spread_overhead: BOOLEAN.cast(params[:spread_overhead]) == true
+            spread_overhead: BOOLEAN.cast(params[:spread_overhead]) == true,
+            # The basis the report on screen was built with, so its CSV matches
+            # it even if someone changes the saved setting in between.
+            cost_basis: params[:cost_basis].presence&.to_s
           ).call
         end
 

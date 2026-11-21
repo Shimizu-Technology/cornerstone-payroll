@@ -21,7 +21,14 @@ module ClientProfitability
 
     attr_reader :period
 
-    def initialize(organization:, period:, settings: ClientProfitabilitySetting.for(organization), cost_pending: false, spread_overhead: false)
+    # cost_basis: "pay_date" or "work_period"; nil uses the saved setting.
+    def initialize(organization:, period:, settings: ClientProfitabilitySetting.for(organization), cost_pending: false, spread_overhead: false,
+                   cost_basis: nil)
+      if cost_basis && !ClientProfitabilitySetting::COST_BASES.include?(cost_basis)
+        raise ArgumentError, "Count pay by must be pay date or work period"
+      end
+
+      @requested_cost_basis = cost_basis
       @organization = organization
       @period = period
       @settings = settings
@@ -148,7 +155,7 @@ module ClientProfitability
     end
 
     def cost_basis
-      @settings.cost_basis.presence || "pay_date"
+      @requested_cost_basis || @settings.cost_basis.presence || "pay_date"
     end
 
     # How pay was dated, and how this total compares with the Annual Payroll

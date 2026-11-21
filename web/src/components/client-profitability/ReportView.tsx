@@ -8,6 +8,7 @@ import {
   type ProfitabilityLine,
   type ProfitabilityPerson,
   type ProfitabilityReport,
+  type CostBasis,
   type ReportPeriodMode,
   type ReportQuery,
 } from '@/services/clientProfitability';
@@ -227,7 +228,11 @@ function HowCalculated({ report }: { report: ProfitabilityReport }) {
           <p><strong>Cost</strong> counts pay by <strong>pay date</strong>, the same “total payroll cost” the Annual Payroll Summary shows for{report.practice_company ? ` ${report.practice_company.name}` : ' the staff payroll client'} and these pay dates: gross pay, non-taxable pay, the employer’s Social Security and Medicare, and employer contributions such as retirement match, including imported QuickBooks paychecks. Each person’s share is split across the clients they logged hours to in Cornerstone Tax, in proportion to their approved hours. Imported paychecks that aren’t linked to an employee are left out of the totals, as in that summary, and listed on their own. To count pay in the months the work was done instead, change Setup → Count pay by.</p>
         )}
         <p><strong>Pending hours</strong> (not yet approved in Tax) are shown but only get cost when “Count pending hours” is on. <strong>Internal / overhead</strong> is time on Cornerstone’s own work; it gets its share of cost and stays on its own line unless you spread it across clients by hours.</p>
-        <p><strong>Margin</strong> is fees minus cost. <strong>Fees per hour</strong> is fees divided by hours, so time on a client with no fees shows $0.00. Pay is matched by pay date and hours by work date, so a month can look uneven when a paycheck covers work from the month before; quarters smooth that out.</p>
+        <p><strong>Margin</strong> is fees minus cost. <strong>Fees per hour</strong> is fees divided by hours, so time on a client with no fees shows $0.00.{' '}
+          {report.cost_basis.basis === 'work_period'
+            ? 'Pay and hours are both matched by the days worked, so each month carries the pay for its own work, even when the paycheck came later.'
+            : 'Pay is matched by pay date and hours by work date, so a month can look uneven when a paycheck covers work from the month before; quarters smooth that out.'}
+        </p>
       </div>
       {report.staff.length > 0 && (
         <div className="mt-4 overflow-x-auto">
@@ -262,9 +267,11 @@ export interface ReportDefaults {
   costPending: boolean;
   spreadOverhead: boolean;
   period: ReportPeriodMode;
+  /** "Count pay by" from Setup; the report and its CSV both use it. */
+  costBasis: CostBasis;
 }
 
-const BUILT_IN_DEFAULTS: ReportDefaults = { costPending: false, spreadOverhead: false, period: 'month' };
+const BUILT_IN_DEFAULTS: ReportDefaults = { costPending: false, spreadOverhead: false, period: 'month', costBasis: 'pay_date' };
 
 export function ReportView({ reloadKey, onGoTo, defaults = BUILT_IN_DEFAULTS }: {
   reloadKey: number;
@@ -283,7 +290,8 @@ export function ReportView({ reloadKey, onGoTo, defaults = BUILT_IN_DEFAULTS }: 
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
-  const query: ReportQuery = useMemo(() => ({ ...period, cost_pending: costPending, spread_overhead: spreadOverhead }), [period, costPending, spreadOverhead]);
+  const query: ReportQuery = useMemo(() => ({ ...period, cost_pending: costPending, spread_overhead: spreadOverhead, cost_basis: defaults.costBasis }),
+    [period, costPending, spreadOverhead, defaults.costBasis]);
 
   useEffect(() => {
     let current = true;

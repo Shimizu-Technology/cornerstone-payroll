@@ -175,6 +175,8 @@ export interface ReportQuery {
   through: string;
   cost_pending: boolean;
   spread_overhead: boolean;
+  /** Sent with both the report and its CSV, so the file matches the screen. */
+  cost_basis: CostBasis;
 }
 
 export const clientProfitabilityApi = {

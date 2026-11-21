@@ -1,5 +1,6 @@
 import { invoicePreviewLines, newManualInvoiceLine } from '@/lib/invoice-maker-lines';
-import { formatContinuingNumber, parseNumberWidth } from '@/lib/invoiceNumber';
+import { numberWidthForSave } from '@/lib/invoiceNumber';
+import { InvoiceNumberWidthField } from '@/components/invoices/InvoiceNumberWidthField';
 import { invoiceDraftDueDate } from '@/lib/invoice-defaults';
 import { invoiceBusinessDate } from '@/lib/invoice-defaults';
 import { INVOICE_THEMES } from '@/lib/invoiceStyle';
@@ -1200,7 +1201,10 @@ export function InvoiceMaker() {
   const buildBillingProfilePayload = (): InvoiceBillingProfilePayload => ({
     numbering_style: billingProfileForm.numbering_style,
     next_invoice_number: billingProfileForm.next_invoice_number,
-    invoice_number_width: parseNumberWidth(billingProfileForm.invoice_number_width),
+    ...(() => {
+      const width = numberWidthForSave(billingProfileForm.numbering_style, billingProfileForm.invoice_number_width);
+      return width.ok && width.value !== undefined ? { invoice_number_width: width.value } : {};
+    })(),
     service_catalog: billingProfileForm.service_catalog,
     name: billingProfileForm.name.trim(),
     legal_name: billingProfileForm.legal_name.trim() || null,
@@ -1259,6 +1263,12 @@ export function InvoiceMaker() {
     setBillingProfileSaving(true);
     setError(null);
     try {
+      // An invalid "Digits in invoice number" must be fixed, not saved as blank.
+      const width = numberWidthForSave(billingProfileForm.numbering_style, billingProfileForm.invoice_number_width);
+      if (!width.ok) {
+        document.getElementById('invoice-number-width')?.focus();
+        throw new Error(width.error);
+      }
       const payload = buildBillingProfilePayload();
       if (!payload.name) throw new Error('Billing profile name is required');
       const response = billingProfileForm.id
@@ -1523,16 +1533,8 @@ export function InvoiceMaker() {
               <label className="text-sm">Number format<select aria-label="Number format" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value={billingProfileForm.numbering_style} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, numbering_style: e.target.value as 'yearly' | 'continuing' })}><option value="yearly">Prefix and year (existing)</option><option value="continuing">Plain continuing sequence</option></select></label>
               {billingProfileForm.numbering_style === 'continuing' && <label className="text-sm">Next invoice number<Input aria-label="Next invoice number" type="number" min="1" step="1" value={billingProfileForm.next_invoice_number} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, next_invoice_number: Number(e.target.value) })} /></label>}
               {billingProfileForm.numbering_style === 'continuing' && (
-                <div className="sm:col-span-2">
-                  <label htmlFor="invoice-number-width" className="text-sm">Digits in invoice number</label>
-                  <Input id="invoice-number-width" aria-describedby="invoice-number-width-hint invoice-number-width-example" type="number" min="1" max="12" step="1" inputMode="numeric"
-                    placeholder="Leave blank for no leading zeros" value={billingProfileForm.invoice_number_width}
-                    onChange={(e) => setBillingProfileForm({ ...billingProfileForm, invoice_number_width: e.target.value })} />
-                  <p id="invoice-number-width-hint" className="mt-1 text-xs text-neutral-600">Adds leading zeros so numbers line up with your past invoices: 5 digits turns 7055 into 07055. Issued invoices keep their numbers.</p>
-                  <p id="invoice-number-width-example" aria-live="polite" className="mt-1 text-sm font-semibold text-neutral-900">
-                    Next invoice: {formatContinuingNumber(billingProfileForm.next_invoice_number || 1, parseNumberWidth(billingProfileForm.invoice_number_width))}
-                  </p>
-                </div>
+                <InvoiceNumberWidthField value={billingProfileForm.invoice_number_width} nextNumber={billingProfileForm.next_invoice_number}
+                  onChange={(value) => setBillingProfileForm({ ...billingProfileForm, invoice_number_width: value })} />
               )}
               <div className="space-y-2 sm:col-span-2"><p className="text-sm font-medium">Saved services · use {'{month}'} for the service month</p>{billingProfileForm.service_catalog.map((service, index) => <div key={index} className="grid gap-2 sm:grid-cols-3"><Input aria-label={`Service ${index + 1} name`} value={service.name} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, name: e.target.value } : entry) })} /><Input aria-label={`Service ${index + 1} template`} value={service.description_template} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, description_template: e.target.value } : entry) })} /><select aria-label={`Service ${index + 1} kind`} value={service.line_kind} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, line_kind: e.target.value as 'service_fee' | 'reimbursement' } : entry) })}><option value="service_fee">Service fee</option><option value="reimbursement">Reimbursement</option></select><Button type="button" variant="outline" onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.filter((_, i) => i !== index) })}>Remove service</Button></div>)}<Button type="button" variant="outline" onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: [...billingProfileForm.service_catalog, { name: 'Accounting Consulting', description_template: 'Accounting Services – {month}', line_kind: 'service_fee' }] })}>Add saved service</Button></div>
               <Input value={billingProfileForm.invoice_prefix} onChange={(event) => setBillingProfileForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Invoice prefix" />

@@ -277,12 +277,12 @@ describe('ClientProfitability', () => {
 
   it('starts the report from the saved defaults, which can still be changed for one view', async () => {
     state.overview.mockResolvedValue(overview({
-      settings: { ...overview().settings, default_cost_pending: true, default_spread_overhead: true, default_period: 'quarter' },
+      settings: { ...overview().settings, default_cost_pending: true, default_spread_overhead: true, default_period: 'quarter', cost_basis: 'work_period' },
     }));
     renderPage('/reports/client-profitability?tab=report');
     await waitFor(() => expect(state.report).toHaveBeenCalled());
-    const first = state.report.mock.calls[0][0] as { from: string; through: string; cost_pending: boolean; spread_overhead: boolean };
-    expect(first).toMatchObject({ cost_pending: true, spread_overhead: true });
+    const first = state.report.mock.calls[0][0] as { from: string; through: string; cost_pending: boolean; spread_overhead: boolean; cost_basis: string };
+    expect(first).toMatchObject({ cost_pending: true, spread_overhead: true, cost_basis: 'work_period' });
     expect(Number(first.through.slice(5)) - Number(first.from.slice(5))).toBe(2);
     expect((screen.getByRole('radio', { name: 'Quarter' }) as HTMLButtonElement).getAttribute('aria-checked')).toBe('true');
 
@@ -300,5 +300,8 @@ describe('ClientProfitability', () => {
     renderPage('/reports/client-profitability?tab=report');
     expect(await screen.findByText(/Pay is counted by work period: \$3,000\.00/)).toBeTruthy();
     expect(screen.getByText(/counts \$1,500\.00 for paychecks paid in these months, \$1,500\.00 less\. The difference is pay for work done in one range but paid in another\./)).toBeTruthy();
+    await userEvent.click(screen.getByText('How this is calculated'));
+    expect(screen.getByText(/Pay and hours are both matched by the days worked/)).toBeTruthy();
+    expect(screen.queryByText(/Pay is matched by pay date and hours by work date/)).toBeNull();
   });
 });

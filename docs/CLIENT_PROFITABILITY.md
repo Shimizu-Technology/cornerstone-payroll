@@ -63,11 +63,15 @@ Until both environment variables are set, the page shows a "not connected" panel
 
 **Cost basis ("Count pay by").**
 - **Pay date** (default): each paycheck counts in full in the month it was paid. Totals equal the Annual Payroll Summary's total payroll cost for the same months.
-- **Work period**: each paycheck is spread evenly over the days of its pay period, and the report counts the days that fall in the chosen months. A check paid December 2 for November 16–30 counts in November. Imported paychecks use their own period dates, and an imported adjustment follows its paycheck. The same paychecks are counted as with pay date. They're found by pay date up to 120 days either side of the range, then spread.
-- With work period, the report shows the difference from the Annual Payroll Summary for the chosen months, and why: pay for work in one range that was paid in another. Over a range that covers every worked day of the paychecks involved, the two agree.
+- **Work period**: each paycheck is spread over the days of its pay period, and the report counts the days that fall in the chosen months. A check paid December 2 for November 16–30 counts in November.
+  - The same paychecks are eligible as with pay date (voided runs, reversed paychecks and legacy items stay out, and corrections count). They're chosen because their pay period overlaps the chosen months, however late they were paid: a November paycheck paid in May still counts in November. A pay period without a usable date range falls back to its pay date.
+  - Imported paychecks use their own period dates, and an imported adjustment follows its paycheck's period.
+  - Amounts are split in whole cents per day. Leftover cents go one each to the last days of the pay period, so the months of a range always add up to the range exactly. Pay, employer taxes and employer contributions are each split this way, and a row's total is their sum.
+- With work period, the report shows the difference from the Annual Payroll Summary for the chosen months, and why: pay for work in one range that was paid in another. The two agree only when the range contains both every worked day **and** every pay date of the paychecks involved. A November report covers all of November 16–30, but the December 2 pay date is outside it, so it shows a difference.
+- The CSV is built with the same basis as the report on screen, even if someone changes the saved setting in between.
 - Allocation to clients by approved hours is the same under both.
 
-**Cost per person.** Total cost always equals the Annual Payroll Summary's **Total payroll cost** for the staff payroll client and the same pay dates. The report doesn't re-derive it; it asks that service (`AnnualPayrollSummary#payroll_cost_by_employee`, using the same sources as `#period_row`). That total includes:
+**Cost per person.** With the default pay-date basis, total cost always equals the Annual Payroll Summary's **Total payroll cost** for the staff payroll client and the same pay dates (with work period, see above). The report doesn't re-derive it; it asks that service (`AnnualPayrollSummary#payroll_cost_by_employee`, using the same sources as `#period_row`). That total includes:
 - gross pay
 - non-taxable pay
 - the employer's Social Security and Medicare
