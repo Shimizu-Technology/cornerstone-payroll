@@ -63,8 +63,8 @@ export default function StandingChangesSettings() {
         }}>
           <h3 className="font-semibold">Missing regulars</h3>
           <p className="text-sm">Check active employees paid in at least this many recent committed regular runs.</p>
-          <div className="grid gap-3 sm:grid-cols-2"><label className="block space-y-1.5"><span className={FIELD_LABEL}>Paid in at least</span><NumericInput inputMode="numeric" min={1} value={rule.threshold} emptyValue={rule.threshold} disabled={!canEdit || busy} onValueChange={threshold => setRule({ ...rule, threshold: threshold ?? rule.threshold })} /></label>
-          <label className="block space-y-1.5"><span className={FIELD_LABEL}>Last regular runs</span><NumericInput inputMode="numeric" min={1} value={rule.lookback} emptyValue={rule.lookback} disabled={!canEdit || busy} onValueChange={lookback => setRule({ ...rule, lookback: lookback ?? rule.lookback })} /></label></div>
+          <div className="grid gap-3 sm:grid-cols-2"><label className="block space-y-1.5"><span className={FIELD_LABEL}>Paid in at least</span><NumericInput inputMode="numeric" min={1} value={rule.threshold} restoreOnEmpty disabled={!canEdit || busy} onValueChange={threshold => setRule({ ...rule, threshold: threshold ?? rule.threshold })} /></label>
+          <label className="block space-y-1.5"><span className={FIELD_LABEL}>Last regular runs</span><NumericInput inputMode="numeric" min={1} value={rule.lookback} restoreOnEmpty disabled={!canEdit || busy} onValueChange={lookback => setRule({ ...rule, lookback: lookback ?? rule.lookback })} /></label></div>
           <Button disabled={!canEdit || busy}>Save missing-regular rule</Button>
         </form>
         <ul className="space-y-3">{data.defaults.filter(row => row.active).map(row => {

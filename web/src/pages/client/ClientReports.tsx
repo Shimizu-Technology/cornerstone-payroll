@@ -305,7 +305,7 @@ export function ClientReports() {
               <h2 className="text-xl font-semibold">Report catalog</h2>
               <p className="text-sm text-gray-600">Reports include finished payroll only. Select a pay period below for payroll reports, or a year and quarter for tax reports.</p>
               <div className="grid gap-3 sm:grid-cols-3">
-                <label>Tax year<NumericInput aria-label="Tax year" inputMode="numeric" min={1} value={reportYear} emptyValue={reportYear} onValueChange={year => setReportYear(year ?? reportYear)} /></label>
+                <label>Tax year<NumericInput aria-label="Tax year" inputMode="numeric" min={1} value={reportYear} restoreOnEmpty onValueChange={year => setReportYear(year ?? reportYear)} /></label>
                 <label>Quarter<select aria-label="Quarter" value={quarter} onChange={e => setQuarter(e.target.value)} className="block h-11 w-full rounded border px-3">{[1,2,3,4].map(q => <option key={q} value={q}>Q{q}</option>)}</select></label>
                 <label>Employee<select disabled={employeesLoading || !!employeeError} aria-label="Report employee" value={employeeId} onChange={e => setEmployeeId(e.target.value)} className="block h-11 w-full rounded border px-3"><option value="">{employeesLoading ? 'Loading employees...' : 'Choose employee'}</option>{employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}</select></label>
               </div>
