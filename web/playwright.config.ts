@@ -19,7 +19,7 @@ export default defineConfig({
   // The release lane mutates one shared, production-shaped fixture across a
   // deliberate lifecycle sequence. Keep it single-worker locally as well as in
   // CI so the standalone owner scenario cannot race the serial workflow suite.
-  workers: process.env.CI || releaseLane ? 1 : undefined,
+  workers: releaseLane ? 1 : process.env.CI ? 3 : undefined,
   reporter: process.env.CI ? [['html', { open: 'never' }], ['github']] : 'list',
   use: {
     baseURL: externalBaseUrl || localBaseUrl,

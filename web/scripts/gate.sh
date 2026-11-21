@@ -24,7 +24,11 @@ echo ""
 
 # 3. Unit tests
 echo "🧪 Unit tests..."
-npm test
+if [ -n "${VITEST_MAX_WORKERS:-}" ]; then
+  npm test -- --maxWorkers="$VITEST_MAX_WORKERS"
+else
+  npm test
+fi
 echo "✅ Unit tests: OK"
 echo ""
 
