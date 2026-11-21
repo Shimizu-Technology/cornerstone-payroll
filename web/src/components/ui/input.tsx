@@ -1,5 +1,5 @@
 import { useId, forwardRef, type InputHTMLAttributes, type WheelEvent } from 'react';
-import { cn } from '@/lib/utils';
+import { controlClassName, FIELD_LABEL } from './field-styles';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -22,7 +22,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="space-y-1.5">
         {label && (
-          <label htmlFor={inputId} className="block text-xs font-medium text-neutral-600">
+          <label htmlFor={inputId} className={FIELD_LABEL}>
             {label}
           </label>
         )}
@@ -30,15 +30,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={inputId}
           type={type}
-          className={cn(
-            'block w-full rounded-xl border bg-white px-3.5 py-2.5 text-base sm:text-sm text-neutral-900 shadow-sm transition-[border-color,background-color,color,box-shadow] duration-150 ease-out placeholder:text-neutral-400',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 focus-visible:border-primary-400',
-            error
-              ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200'
-              : 'border-neutral-300',
-            'disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
-            className
-          )}
+          className={controlClassName(className, { invalid: !!error })}
           aria-invalid={error ? 'true' : 'false'}
           aria-describedby={error ? `${inputId}-error` : helperText ? `${inputId}-helper` : undefined}
           {...props}

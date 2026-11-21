@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { CheckCircle2, Clock3, Download, FileLock2, Maximize2, Plus, Printer, Settings2, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { checksApi, printerProfilesApi, type PrinterProfile } from '@/services/api';
@@ -641,7 +642,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                       <div className="mt-2"><p className="font-semibold text-neutral-950">{run.printer_profile_name || 'Legacy company calibration'}</p><p className="mt-1 text-xs leading-5 text-neutral-500">Package snapshot{run.printer_profile_lock_version !== null ? ` · profile version ${run.printer_profile_lock_version}` : ''}. Later profile edits do not change this PDF.</p></div>
                     ) : (
                       <>
-                        <select aria-label="Printer profile" className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm font-medium text-neutral-900" value={queue?.meta.printer_profile?.id ?? ''} onChange={(event) => { const profile = compatibleProfiles.find((candidate) => candidate.id === Number(event.target.value)); if (profile) void selectPrinterProfile(profile); }} disabled={!queue || generationInProgress || busyAction === 'profiles'}>
+                        <select aria-label="Printer profile" className={controlClassName('mt-2 font-medium')} value={queue?.meta.printer_profile?.id ?? ''} onChange={(event) => { const profile = compatibleProfiles.find((candidate) => candidate.id === Number(event.target.value)); if (profile) void selectPrinterProfile(profile); }} disabled={!queue || generationInProgress || busyAction === 'profiles'}>
                           <option value="" disabled>Select a calibrated printer…</option>{compatibleProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
                         </select>
                         <p className="mt-2 text-xs leading-5 text-neutral-500">Profiles are shared by the organization. This selection applies only to you.</p>

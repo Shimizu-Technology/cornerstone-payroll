@@ -75,6 +75,22 @@
   --color-danger-950: #450a0a;
 }
 
+/*
+ * Tailwind v4 draws a bare `border` in the text colour, so dividers, cards and
+ * table rows without an explicit colour rendered as near-black lines while the
+ * rest of the app uses neutral-200. Restore the light default; any explicit
+ * border colour utility still wins because utilities sit above this base layer.
+ */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-neutral-200, currentcolor);
+  }
+}
+
 html,
 body,
 #root {

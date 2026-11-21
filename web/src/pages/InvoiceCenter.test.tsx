@@ -142,6 +142,25 @@ describe('InvoiceCenter', () => {
     expect(within(dialog).getByRole('textbox', { name: /Invoice number/ }).getAttribute('placeholder')).toBe('Next: 07055 (assigned when issued)');
   });
 
+  it('keeps each line-item field labelled after the row layout change', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><InvoiceCenter /></MemoryRouter>);
+    await screen.findByRole('button', { name: /07052/ });
+    await user.click(screen.getByRole('button', { name: 'New invoice' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New invoice' });
+
+    await user.type(within(dialog).getByRole('textbox', { name: 'Line 1 product or service' }), 'Bookkeeping');
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Line 1 kind' }), 'reimbursement');
+    expect(within(dialog).getByRole('textbox', { name: 'Line 1 description' })).toBeTruthy();
+    expect(within(dialog).getByRole('spinbutton', { name: 'Quantity' })).toBeTruthy();
+    expect(within(dialog).getByRole('spinbutton', { name: 'Rate' })).toBeTruthy();
+    expect(within(dialog).getByRole('textbox', { name: 'Line 1 product or service' })).toHaveProperty('value', 'Bookkeeping');
+    expect(within(dialog).getByRole('combobox', { name: 'Line 1 kind' })).toHaveProperty('value', 'reimbursement');
+
+    await user.click(within(dialog).getByRole('button', { name: 'Remove line 1' }));
+    expect(within(dialog).queryByRole('textbox', { name: 'Line 1 product or service' })).toBeNull();
+  });
+
   it('starts a recurrence the period after the invoice and follows the customer terms', async () => {
     const { user, dialog } = await openInvoice();
 

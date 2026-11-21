@@ -2,6 +2,7 @@ import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedbac
 import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Database, PencilLine } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { reportsApi } from '@/services/api';
@@ -183,7 +184,7 @@ export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: Filing
                             value={responsibleParty}
                             onChange={(event) => setResponsibleParty(event.target.value as typeof responsibleParty)}
                             disabled={saving}
-                            className="mt-1.5 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 focus:outline-none focus:ring-2 focus:ring-primary-300"
+                            className={controlClassName('mt-1.5')}
                           >
                             <option value="cornerstone">Cornerstone</option>
                             <option value="external_provider">External payroll provider</option>
@@ -197,7 +198,7 @@ export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: Filing
                             value={importedInclusion}
                             onChange={(event) => setImportedInclusion(event.target.value as typeof importedInclusion)}
                             disabled={saving}
-                            className="mt-1.5 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 focus:outline-none focus:ring-2 focus:ring-primary-300"
+                            className={controlClassName('mt-1.5')}
                           >
                             <option value="included">Included</option>
                             <option value="excluded">Excluded</option>
@@ -210,7 +211,7 @@ export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: Filing
                             value={sourceCutoffDate}
                             onChange={(event) => setSourceCutoffDate(event.target.value)}
                             disabled={saving}
-                            className="mt-1.5 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 focus:outline-none focus:ring-2 focus:ring-primary-300"
+                            className={controlClassName('mt-1.5')}
                           />
                         </label>
                         <label className="text-sm font-medium text-neutral-800">
@@ -221,7 +222,7 @@ export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: Filing
                             disabled={saving}
                             maxLength={2000}
                             placeholder="Provider, confirmation, or exception details"
-                            className="mt-1.5 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 focus:outline-none focus:ring-2 focus:ring-primary-300"
+                            className={controlClassName('mt-1.5')}
                           />
                         </label>
                       </div>

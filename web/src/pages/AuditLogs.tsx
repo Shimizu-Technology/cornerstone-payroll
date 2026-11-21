@@ -3,6 +3,7 @@ import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedbac
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { controlClassName } from '@/components/ui/field-styles';
 import { AuditEventDetails } from '@/components/audit/AuditEventDetails';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
@@ -273,7 +274,7 @@ function CompanyActivityHistory(): ReactElement {
             {isAdmin && <label className="space-y-1.5 text-sm font-medium text-neutral-700">
               <span>Person</span>
               <select
-                className="min-h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                className={controlClassName()}
                 value={userFilter}
                 onChange={(e) => {
                   setUserFilter(e.target.value);
