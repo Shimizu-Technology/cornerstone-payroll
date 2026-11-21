@@ -51,6 +51,11 @@ Until both environment variables are set, the page shows a "not connected" panel
 ## Linking (Payroll side only)
 
 - **Tax client → Payroll client.** Fees are keyed by the payroll client (`companies`) that an invoice is explicitly linked to, so each Tax client is linked to a company (`work_hour_client_links`) or marked **Internal / overhead**. Tax's own internal client (`system_kind: "internal"`) counts as overhead automatically. Suggestions compare names after removing punctuation and words like Inc, LLC and Corp. An exact match is marked "same name"; otherwise the best match sharing at least half its words is marked "similar name". Every suggestion must be confirmed.
+- **Tax client → invoice customer (no payroll).** Some clients are billed in Invoice Center but have no Payroll client, such as "Roland's Watch Repair (Ponce)". A Tax client can be linked straight to that invoice customer (disposition `recipient`, `invoice_recipient_id`).
+  - Fees on that customer's invoices with no payroll client count on that row instead of on "Fees not linked to a client", and the row's hours are costed as usual.
+  - Only customers in the report's financial book that have no Payroll client are offered. A customer that has one is linked through that client, so its fees are never counted twice.
+  - The dropdown groups the choices as "Payroll clients" and "Invoice customers (no payroll)", plus Internal / overhead. Suggestions look at both lists, Payroll clients first.
+  - The database check on dispositions allows exactly one target per link: a company, an invoice customer, or neither for internal.
 - **Tax user → employee.** Each Tax user is linked to an employee of the staff payroll client, or marked **Not on payroll**, for an owner paid by draw. Their hours are then shown with no cost. The suggestion is an exact email match, or a unique first-name match with the start of the email.
 - Links are saved, editable and reused for every period. **Unlink** keeps the row (marked inactive, with who changed it); linking again reactivates it.
 - Changing the staff payroll client sends people linked to the old client's employees back to "needs linking". An employee link must always point at the current staff payroll client.

@@ -152,6 +152,33 @@ RSpec.describe "Client profitability", type: :request do
     expect(json["needs_linking"]).to eq("clients" => 0, "staff" => 0)
   end
 
+  it "offers invoice customers with no Payroll client, suggests them by name, and links to one" do
+    ClientProfitabilitySetting.create!(organization: organization, practice_company: practice)
+    book = FinanceBook.default_for!(organization)
+    customer = create(:invoice_recipient, organization: organization, company: nil, finance_book: book, name: "Roland's Watch Repair (Ponce)")
+    create(:invoice_recipient, organization: organization, company: acme, finance_book: book, name: "Acme billing contact")
+    import = WorkHourImport.create!(organization: organization, range_start: Date.new(2026, 10, 1), range_end: Date.new(2026, 10, 31),
+                                    status: "succeeded")
+    WorkHourRow.create!(organization: organization, work_hour_import: import, tax_user_id: 12, work_date: Date.new(2026, 10, 5),
+                        tax_client_id: 880, client_name: "Roland's Watch Repair – Zenaida Ponce", hours: 2, approval_state: "approved")
+
+    get "/api/v1/admin/client_profitability/links"
+    expect(json["recipients"]).to eq([ { "id" => customer.id, "name" => "Roland's Watch Repair (Ponce)" } ])
+    roland = json["clients"].find { |client| client["tax_client_id"] == 880 }
+    expect(roland["suggestion"]).to include("disposition" => "recipient", "invoice_recipient_id" => customer.id, "match" => "similar")
+
+    put "/api/v1/admin/client_profitability/client_links/880", params: { disposition: "recipient", invoice_recipient_id: create(:invoice_recipient, company: nil, organization: create(:organization)).id }
+    expect(response).to have_http_status(:unprocessable_content) # another organization's customer
+    put "/api/v1/admin/client_profitability/client_links/880", params: { disposition: "recipient", invoice_recipient_id: customer.id }
+    expect(response).to have_http_status(:ok)
+    get "/api/v1/admin/client_profitability/links"
+    expect(json["clients"].find { |client| client["tax_client_id"] == 880 }["link"])
+      .to include("disposition" => "recipient", "invoice_recipient_id" => customer.id, "recipient_name" => "Roland's Watch Repair (Ponce)")
+
+    delete "/api/v1/admin/client_profitability/client_links/880"
+    expect(WorkHourClientLink.find_by(tax_client_id: 880)).to have_attributes(active: false, disposition: "recipient")
+  end
+
   it "returns the report and a CSV, keeping unlinked hours visible" do
     ClientProfitabilitySetting.create!(organization: organization, practice_company: practice)
     seed_hours

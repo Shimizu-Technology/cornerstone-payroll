@@ -196,6 +196,31 @@ RSpec.describe ClientProfitability::Report do
     expect(ApplicationRecord).to have_received(:transaction).with(isolation: :repeatable_read).once
   end
 
+  it "gives an invoice customer with no Payroll client its own row: fees, hours, cost and margin" do
+    customer = Invoice.find_by!(organization_id: organization.id, company_id: nil).invoice_recipient
+    WorkHourClientLink.create!(organization: organization, tax_client_id: 999, disposition: "recipient", invoice_recipient: customer)
+
+    result = report
+    line = result[:clients].find { |client| client[:kind] == "recipient" }
+    expect(line).to include(name: customer.name, invoice_recipient_id: customer.id, company_id: nil, hours: "3.00", fees: "300.00",
+                            cost: "807.37", margin: "-507.37", margin_percent: "-169.1", effective_rate: "100.00")
+    expect(line[:people].map { |person| person[:name] }).to eq([ "Benjo Cruz" ])
+    expect(result[:unassigned].map { |entry| entry[:name] }).not_to include("Gamma LLC")
+    expect(result[:unlinked_fees]).to eq(fees: "0.00", tax_prep_fees: "0.00")
+    # Nothing is counted twice or lost: the totals are the same as before linking.
+    expect(result[:totals]).to include(cost: "6459.00", fees: "2600.00", hours: "22.00")
+  end
+
+  it "spreads overhead onto an invoice-customer row like any client" do
+    customer = Invoice.find_by!(organization_id: organization.id, company_id: nil).invoice_recipient
+    WorkHourClientLink.create!(organization: organization, tax_client_id: 999, disposition: "recipient", invoice_recipient: customer)
+    result = report(spread_overhead: true)
+    shares = result[:clients].sum(BigDecimal("0")) { |client| client[:overhead_cost].to_d }
+    expect(shares).to eq(BigDecimal("645.90"))
+    expect(result[:clients].find { |client| client[:kind] == "recipient" }[:overhead_cost].to_d).to be_positive
+    expect(result[:totals]).to include(cost: "6459.00")
+  end
+
   it "shows a client with fees but no hours" do
     WorkHourRow.where(tax_client_id: 346).delete_all
     expect(client(report, "Beta Builders")).to include(hours: "0.00", cost: "0.00", fees: "800.00", margin: "800.00", effective_rate: nil)
@@ -249,5 +274,32 @@ RSpec.describe WorkHourStaffLink do
     expect(inside).to be_valid
     expect(outside).not_to be_valid
     expect(outside.errors[:employee].join).to match(/staff payroll/)
+  end
+end
+
+RSpec.describe WorkHourClientLink do
+  let(:company) { create(:company) }
+  let(:organization) { company.organization }
+  let(:book) { FinanceBook.default_for!(organization) }
+  let(:customer) { create(:invoice_recipient, organization: organization, company: nil, finance_book: book, name: "Roland's Watch Repair (Ponce)") }
+
+  it "links an invoice customer that has no Payroll client, and nothing else" do
+    expect(described_class.new(organization: organization, tax_client_id: 1, disposition: "recipient", invoice_recipient: customer)).to be_valid
+    with_client = create(:invoice_recipient, organization: organization, company: company, finance_book: book)
+    expect(described_class.new(organization: organization, tax_client_id: 2, disposition: "recipient", invoice_recipient: with_client))
+      .not_to be_valid
+    elsewhere = create(:invoice_recipient, company: nil, organization: create(:organization))
+    expect(described_class.new(organization: organization, tax_client_id: 3, disposition: "recipient", invoice_recipient: elsewhere))
+      .not_to be_valid
+    expect(described_class.new(organization: organization, tax_client_id: 4, disposition: "company", company: company, invoice_recipient: customer))
+      .not_to be_valid
+  end
+
+  it "is backed by the database check on dispositions" do
+    link = described_class.create!(organization: organization, tax_client_id: 5, disposition: "recipient", invoice_recipient: customer)
+    expect { described_class.transaction(requires_new: true) { link.update_columns(invoice_recipient_id: nil) } }
+      .to raise_error(ActiveRecord::CheckViolation)
+    expect { described_class.transaction(requires_new: true) { link.reload.update_columns(company_id: company.id) } }
+      .to raise_error(ActiveRecord::CheckViolation)
   end
 end

@@ -12,11 +12,20 @@ module ClientProfitability
     end
 
     def call
-      { clients: clients, staff: staff, companies: company_options, employees: employee_options }
+      { clients: clients, staff: staff, companies: company_options, recipients: recipient_options, employees: employee_options }
     end
 
     def companies
       @companies ||= Company.where(organization_id: @organization.id).live_payroll.order(:name).to_a
+    end
+
+    # Invoice customers with no Payroll client, from the book the report
+    # reads fees from.
+    def recipients
+      @recipients ||= begin
+        book = @settings.effective_finance_book
+        book ? InvoiceRecipient.where(organization_id: @organization.id, finance_book_id: book.id, company_id: nil, active: true).order(:name).to_a : []
+      end
     end
 
     def practice_employees
@@ -34,8 +43,10 @@ module ClientProfitability
     end
 
     def clients
-      links = WorkHourClientLink.active.where(organization_id: @organization.id)
+      links = WorkHourClientLink.active.where(organization_id: @organization.id).includes(:invoice_recipient)
                                 .where("company_id IS NULL OR company_id IN (?)", Company.where(organization_id: @organization.id).select(:id))
+                                .where("invoice_recipient_id IS NULL OR invoice_recipient_id IN (?)",
+                                       InvoiceRecipient.where(organization_id: @organization.id, company_id: nil).select(:id))
                                 .index_by(&:tax_client_id)
       stats = rows.where(unassigned: false).where.not(tax_client_id: nil).group(:tax_client_id)
                   .pluck(:tax_client_id, Arel.sql("SUM(hours)"), Arel.sql("MAX(work_date)"), Arel.sql("BOOL_OR(system_kind = 'internal')"))
@@ -53,7 +64,8 @@ module ClientProfitability
           hours: format("%.2f", hours.to_d),
           last_worked_on: last_worked_on&.iso8601,
           internal_in_tax: internal == true,
-          link: link && { disposition: link.disposition, company_id: link.company_id, company_name: company_names[link.company_id] },
+          link: link && { disposition: link.disposition, company_id: link.company_id, company_name: company_names[link.company_id],
+                          invoice_recipient_id: link.invoice_recipient_id, recipient_name: link.invoice_recipient&.name },
           handled_automatically: link.nil? && internal == true,
           suggestion: link ? nil : client_suggestion(name, internal == true)
         }
@@ -70,14 +82,24 @@ module ClientProfitability
       target = normalize(name)
       return nil if target.empty?
 
-      exact = companies.find { |company| normalize(company.name) == target }
-      return { disposition: "company", company_id: exact.id, label: exact.name, match: "exact" } if exact
+      # Payroll clients first, then invoice customers with no Payroll client.
+      candidates = companies.map { |company| [ :company, company ] } + recipients.map { |recipient| [ :recipient, recipient ] }
+      exact = candidates.find { |_kind, record| normalize(record.name) == target }
+      return suggestion_for(*exact, "exact") if exact
 
       tokens = target.split
-      best = companies.map { |company| [ company, similarity(tokens, normalize(company.name).split) ] }.max_by(&:last)
+      best = candidates.map { |kind, record| [ kind, record, similarity(tokens, normalize(record.name).split) ] }.max_by(&:last)
       return nil unless best && best.last >= 0.5
 
-      { disposition: "company", company_id: best.first.id, label: best.first.name, match: "similar" }
+      suggestion_for(best[0], best[1], "similar")
+    end
+
+    def suggestion_for(kind, record, match)
+      if kind == :company
+        { disposition: "company", company_id: record.id, label: record.name, match: match }
+      else
+        { disposition: "recipient", invoice_recipient_id: record.id, label: record.name, match: match }
+      end
     end
 
     def staff
@@ -118,6 +140,10 @@ module ClientProfitability
 
     def company_options
       companies.map { |company| { id: company.id, name: company.name } }
+    end
+
+    def recipient_options
+      recipients.map { |recipient| { id: recipient.id, name: recipient.name } }
     end
 
     def employee_options
