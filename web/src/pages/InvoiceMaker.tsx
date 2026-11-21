@@ -531,6 +531,10 @@ export function InvoiceMaker() {
     return invoicePayloadSignature(buildPayload()) !== savedSignature;
   };
 
+  // What leaving the invoice would lose: invoice edits, or an issued
+  // invoice's email edit, which is saved separately (issuedEmail).
+  const hasUnsavedWork = () => hasUnsavedInvoiceChanges() || issuedEmailChanged;
+
   const resetInvoiceForm = () => {
     const defaultProfile = billingProfiles.find((profile) => profile.is_default) || billingProfiles[0];
     const nextForm = {
@@ -691,13 +695,13 @@ export function InvoiceMaker() {
       return;
     }
 
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    if (hasUnsavedWork() && !window.confirm('Discard unsaved invoice changes?')) return;
     setInvoiceMode('manual');
     loadInvoice(id);
   };
 
   const handleNewInvoice = () => {
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    if (hasUnsavedWork() && !window.confirm('Discard unsaved invoice changes?')) return;
     setInvoiceMode('manual');
     resetInvoiceForm();
   };
@@ -803,15 +807,22 @@ export function InvoiceMaker() {
     const subject = reset ? '' : issuedEmail.subject.trim();
     const body = reset ? '' : issuedEmail.body.trim();
     if (!reset && (!subject || !body)) { setError('Enter a subject and a message for the email'); return; }
+    const invoiceId = invoiceForm.id;
     setSavingEmail(true);
     setError(null);
     try {
-      const response = await invoicesApi.updateEmail(invoiceForm.id, {
+      const response = await invoicesApi.updateEmail(invoiceId, {
         email_subject: subject === issuedEmail.content.default_subject ? '' : subject,
         email_body: body === issuedEmail.content.default_body ? '' : body,
       });
       const content = response.invoice.email;
-      if (content) setIssuedEmail({ invoiceId: response.invoice.id, subject: content.subject, body: content.body, content });
+      // Apply the saved email only if this invoice is still the one open;
+      // a late response must not replace another invoice's email.
+      if (content) {
+        setIssuedEmail((current) => current?.invoiceId === invoiceId
+          ? { invoiceId, subject: content.subject, body: content.body, content }
+          : current);
+      }
       setSuccess(reset ? 'Email set back to the default.' : 'Email saved. The issued PDF is unchanged.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
@@ -1196,7 +1207,7 @@ export function InvoiceMaker() {
   const usePreviewAsDraft = () => {
     const preview = activeChatSession?.current_preview as InvoiceAiPreview | undefined;
     if (!preview || preview.status !== 'preview') return;
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    if (hasUnsavedWork() && !window.confirm('Discard unsaved invoice changes?')) return;
 
     applyPreviewToForm(preview);
     setSuccess('AI preview loaded as an unsaved draft.');
@@ -1258,7 +1269,7 @@ export function InvoiceMaker() {
 
   const editCreatedChatInvoiceManually = () => {
     if (!createdChatInvoice) return;
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    if (hasUnsavedWork() && !window.confirm('Discard unsaved invoice changes?')) return;
 
     hydrateInvoiceForm(createdChatInvoice);
     setInvoiceMode('manual');
@@ -1333,7 +1344,7 @@ export function InvoiceMaker() {
 
   // Leaving for the style page drops unsaved invoice and profile edits, so ask first.
   const confirmLeaveForStyle = (event: ReactMouseEvent<HTMLAnchorElement>) => {
-    if (!hasUnsavedInvoiceChanges() && !hasUnsavedBillingProfileChanges()) return;
+    if (!hasUnsavedWork() && !hasUnsavedBillingProfileChanges()) return;
     if (!window.confirm('Leave without saving? Unsaved invoice or billing profile changes will be lost.')) event.preventDefault();
   };
 

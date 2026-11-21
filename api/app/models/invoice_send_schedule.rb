@@ -11,8 +11,11 @@ class InvoiceSendSchedule < ApplicationRecord
 
   validates :status, inclusion: { in: STATUSES }
   validates :send_at, presence: true
-  validates :rendered_subject, length: { maximum: Invoice::EMAIL_SUBJECT_MAX }
-  validates :rendered_body, length: { maximum: Invoice::EMAIL_BODY_MAX }
+  # Limits apply to text reviewed before a send (a pending schedule being
+  # created or edited). Text frozen when a send is claimed, and existing
+  # rows, are kept as they are so claims and retries always work.
+  validates :rendered_subject, length: { maximum: Invoice::EMAIL_SUBJECT_MAX }, if: -> { reviewed_text_changed?(:rendered_subject) }
+  validates :rendered_body, length: { maximum: Invoice::EMAIL_BODY_MAX }, if: -> { reviewed_text_changed?(:rendered_body) }
   validate :invoice_belongs_to_organization
   validate :invoice_belongs_to_book
   validate :recipients_are_valid
@@ -58,6 +61,10 @@ class InvoiceSendSchedule < ApplicationRecord
   private_class_method :advisory_lock_binds
 
   private
+
+  def reviewed_text_changed?(attribute)
+    status == "pending" && will_save_change_to_attribute?(attribute)
+  end
 
   def finance_book_parent
     invoice
