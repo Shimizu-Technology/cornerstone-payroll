@@ -19,8 +19,9 @@ RSpec.describe AddNormalizedInvoiceNumberIndex do
     invoice
   end
 
+  # Fixture rows go first, so the index can always be rebuilt even when an
+  # example failed with its duplicates still in place.
   after do
-    migration.migrate(:up) unless index_exists.call
     organization_id = profile.organization_id
     invoice_ids = Invoice.where(organization_id: organization_id).pluck(:id)
     InvoiceLineItem.where(invoice_id: invoice_ids).delete_all
@@ -30,6 +31,8 @@ RSpec.describe AddNormalizedInvoiceNumberIndex do
     InvoiceBillingProfile.where(organization_id: organization_id).delete_all
     FinanceBook.where(organization_id: organization.id).delete_all
     Organization.where(id: organization.id).delete_all
+  ensure
+    migration.migrate(:up) unless index_exists.call
   end
 
   it "refuses to build the index over existing duplicates, naming them" do

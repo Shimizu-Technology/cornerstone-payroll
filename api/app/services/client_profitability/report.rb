@@ -140,8 +140,19 @@ module ClientProfitability
         @pay_date_total = ZERO
         if @practice_company
           summary = AnnualPayrollSummary.new(company: @practice_company)
-          result = summary.payroll_cost_by_employee(reporting_period, basis: cost_basis)
-          @pay_date_total = cost_basis == "pay_date" ? result[:total_payroll_cost] : summary.payroll_cost_by_employee(reporting_period)[:total_payroll_cost]
+          result = nil
+          # Both totals come from one snapshot, so the difference shown next
+          # to the Annual Payroll Summary can't straddle a payroll change made
+          # between the two reads (same pattern as the cloners).
+          options = ApplicationRecord.connection.transaction_open? ? {} : { isolation: :repeatable_read }
+          ApplicationRecord.transaction(**options) do
+            result = summary.payroll_cost_by_employee(reporting_period, basis: cost_basis)
+            @pay_date_total = if cost_basis == "pay_date"
+              result[:total_payroll_cost]
+            else
+              summary.payroll_cost_by_employee(reporting_period)[:total_payroll_cost]
+            end
+          end
           @excluded_unlinked = result[:excluded_unlinked]
           result[:by_employee]
         else

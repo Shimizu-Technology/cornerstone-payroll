@@ -39,22 +39,28 @@ RSpec.describe "Invoice numbers saved concurrently" do
       end
     end
 
-    workers = %w[7055 07055].map do |number|
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          invoice = build(:invoice, :with_line_item, company: nil, organization: profile.organization, origin: "imported",
-                                                     invoice_billing_profile: InvoiceBillingProfile.find(profile.id),
-                                                     invoice_recipient: recipient, invoice_number: number)
-          invoice.save!
-          :saved
-        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
-          e.class
+    workers = []
+    begin
+      workers = %w[7055 07055].map do |number|
+        Thread.new do
+          ActiveRecord::Base.connection_pool.with_connection do
+            invoice = build(:invoice, :with_line_item, company: nil, organization: profile.organization, origin: "imported",
+                                                       invoice_billing_profile: InvoiceBillingProfile.find(profile.id),
+                                                       invoice_recipient: recipient, invoice_number: number)
+            invoice.save!
+            :saved
+          rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+            e.class
+          end
         end
       end
+      validations = 2.times.map { Timeout.timeout(10) { arrived.pop } }
+    ensure
+      # Always let the workers finish (bounded) before the after hook removes
+      # their records, even when a wait above timed out.
+      workers.size.times { release << true }
+      results = workers.map { |worker| worker.join(10)&.value || (worker.kill && :stuck) }
     end
-    validations = 2.times.map { Timeout.timeout(10) { arrived.pop } }
-    2.times { release << true }
-    results = workers.map(&:value)
 
     expect(validations).to eq([ [], [] ]) # both passed validation: only the index can stop the second
     expect(results).to contain_exactly(:saved, ActiveRecord::RecordNotUnique)

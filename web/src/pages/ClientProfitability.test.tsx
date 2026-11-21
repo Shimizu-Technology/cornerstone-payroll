@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProfitabilityLine, ProfitabilityOverview, ProfitabilityReport } from '@/services/clientProfitability';
+import { ReportView } from '@/components/client-profitability/ReportView';
 import { ClientProfitability } from './ClientProfitability';
 
 const state = vi.hoisted(() => ({
@@ -303,5 +304,24 @@ describe('ClientProfitability', () => {
     await userEvent.click(screen.getByText('How this is calculated'));
     expect(screen.getByText(/Pay and hours are both matched by the days worked/)).toBeTruthy();
     expect(screen.queryByText(/Pay is matched by pay date and hours by work date/)).toBeNull();
+  });
+
+  it('keeps the cost basis of an open report until it is opened again', async () => {
+    state.overview.mockResolvedValue(overview());
+    const onGoTo = vi.fn();
+    const defaults = { costPending: false, spreadOverhead: false, period: 'month' as const, costBasis: 'pay_date' as const };
+    const view = render(<MemoryRouter><ReportView reloadKey={0} onGoTo={onGoTo} defaults={defaults} /></MemoryRouter>);
+    await waitFor(() => expect(state.report).toHaveBeenCalledTimes(1));
+    expect(state.report.mock.lastCall?.[0]).toMatchObject({ cost_basis: 'pay_date' });
+
+    // An hours refresh finishes after someone saved "work period": the overview and reloadKey change.
+    view.rerender(<MemoryRouter><ReportView reloadKey={1} onGoTo={onGoTo} defaults={{ ...defaults, costBasis: 'work_period' }} /></MemoryRouter>);
+    await waitFor(() => expect(state.report).toHaveBeenCalledTimes(2));
+    expect(state.report.mock.lastCall?.[0]).toMatchObject({ cost_basis: 'pay_date' });
+    view.unmount();
+
+    render(<MemoryRouter><ReportView reloadKey={1} onGoTo={onGoTo} defaults={{ ...defaults, costBasis: 'work_period' }} /></MemoryRouter>);
+    await waitFor(() => expect(state.report).toHaveBeenCalledTimes(3));
+    expect(state.report.mock.lastCall?.[0]).toMatchObject({ cost_basis: 'work_period' });
   });
 });
