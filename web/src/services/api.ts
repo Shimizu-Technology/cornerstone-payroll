@@ -297,8 +297,10 @@ class ApiClient {
   // POST multipart form data returning a Blob (for previews built from an unsaved upload)
   async postFormBlob(endpoint: string, formData: FormData): Promise<BlobDownload> {
     const initiatingCompanyId = this.activeCompanyId;
-    const token = await this.resolveAuthToken();
+    // Scope headers are read before waiting for the token, so a switch made
+    // while it resolves can't redirect this request to another organization.
     const headers: Record<string, string> = this.financeHeaders(endpoint);
+    const token = await this.resolveAuthToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
@@ -318,8 +320,8 @@ class ApiClient {
   // CPR-66: GET raw Blob (for authenticated PDF download)
   async getBlob(endpoint: string, params?: Record<string, string | number | boolean | undefined>): Promise<Blob> {
     const initiatingCompanyId = this.activeCompanyId;
-    const token = await this.resolveAuthToken();
     const headers: Record<string, string> = this.financeHeaders(endpoint);
+    const token = await this.resolveAuthToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
@@ -344,8 +346,8 @@ class ApiClient {
   // POST with JSON body returning a Blob (for reports with complex params like arrays)
   async postBlob(endpoint: string, body?: Record<string, unknown>): Promise<BlobDownload> {
     const initiatingCompanyId = this.activeCompanyId;
-    const token = await this.resolveAuthToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json', ...this.financeHeaders(endpoint) };
+    const token = await this.resolveAuthToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
@@ -384,8 +386,8 @@ class ApiClient {
     options: Pick<RequestOptions, "companyId"> = {},
   ): Promise<BlobDownload> {
     const initiatingCompanyId = options.companyId === undefined ? this.activeCompanyId : options.companyId;
-    const token = await this.resolveAuthToken();
     const headers: Record<string, string> = this.financeHeaders(endpoint);
+    const token = await this.resolveAuthToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 

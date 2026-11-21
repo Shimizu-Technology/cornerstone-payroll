@@ -85,6 +85,38 @@ RSpec.describe TaxWorkHours::Importer do
     expect(import.reload).to have_attributes(status: "running", claim_token: "someone-else")
   end
 
+  it "stops a worker whose lease runs out during a slow month, without saving" do
+    import = import_for(Date.new(2026, 11, 1), Date.new(2026, 11, 30))
+    slow = InterleavedFeed.new do
+      travel_to(Time.current + WorkHourImport::RUNNING_LEASE + 1.minute) # the request took longer than the lease
+      payload([ row("2026-11-02", hours: 8) ])
+    end
+    result = described_class.call(import, client: slow)
+    expect(result).to have_attributes(status: "failed", error_code: "lease_expired", claim_token: nil)
+    expect(WorkHourRow.count).to eq(0)
+  ensure
+    travel_back
+  end
+
+  it "stops a worker whose lease runs out after its last renewal, before it saves" do
+    import = import_for(Date.new(2026, 11, 1), Date.new(2026, 11, 30))
+    allow(import).to receive(:renew_lease!).and_wrap_original do |original, token|
+      original.call(token).tap { travel_to(Time.current + WorkHourImport::RUNNING_LEASE + 1.minute) }
+    end
+    result = described_class.call(import, client: FakeFeed.new([ Date.new(2026, 11, 1), Date.new(2026, 11, 30) ] => payload([ row("2026-11-02") ])))
+    expect(result).to have_attributes(status: "failed", error_code: "lease_expired")
+    expect(WorkHourRow.count).to eq(0)
+  ensure
+    travel_back
+  end
+
+  it "can't renew an expired lease, even with the right token" do
+    import = import_for(Date.new(2026, 11, 1), Date.new(2026, 11, 30))
+    token = import.claim!
+    expect(import.renew_lease!(token)).to be(true)
+    expect(import.renew_lease!(token, now: Time.current + WorkHourImport::RUNNING_LEASE + 1.second)).to be(false)
+  end
+
   it "lets exactly one worker claim an import" do
     import = import_for(Date.new(2026, 11, 1), Date.new(2026, 11, 30))
     first = WorkHourImport.find(import.id).claim!

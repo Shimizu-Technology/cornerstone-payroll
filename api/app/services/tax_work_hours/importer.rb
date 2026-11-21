@@ -5,11 +5,10 @@ module TaxWorkHours
   # replaces every stored row in that range in a single transaction. If any
   # month fails, nothing already stored changes.
   class Importer
-    LOCK_NAMESPACE = 72_604 # "work hours" import lock, combined with the organization id.
-
-    # Raised inside the replacement transaction when another worker has taken
-    # this import over; rolls the replacement back.
+    # Raised inside the replacement transaction when this worker no longer
+    # holds a live claim; rolls the replacement back.
     class Superseded < StandardError; end
+    class LeaseLost < StandardError; end
 
     def self.call(import, client: Client.new)
       new(import, client:).call
@@ -29,11 +28,14 @@ module TaxWorkHours
       payloads = []
       month_ranges.each do |first, last|
         payloads << [ first, last, @client.fetch(start_date: first, end_date: last) ]
-        return @import.reload unless @import.renew_lease!(@token)
+        raise LeaseLost unless @import.renew_lease!(@token)
       end
       replace!(payloads)
       @import.reload
-    rescue Superseded
+    rescue Superseded, LeaseLost
+      # Nothing was saved. If no other worker took the import over, record
+      # that this one ran out of time; otherwise leave it to that worker.
+      @import.expire_lease!(@token)
       @import.reload
     rescue Error => e
       fail!(e.code, e.message)
@@ -71,14 +73,18 @@ module TaxWorkHours
       counts = payloads.map { |_first, _last, payload| payload["counts"].is_a?(Hash) ? payload["counts"] : {} }
 
       WorkHourRow.transaction do
-        WorkHourRow.connection.execute(
-          WorkHourRow.sanitize_sql_array([ "SELECT pg_advisory_xact_lock(?, ?)", LOCK_NAMESPACE, @import.organization_id ])
-        )
-        # Commit only while this worker still holds the import. A worker that
-        # lost its lease (and was replaced, or whose import was abandoned and
-        # superseded by a new refresh) must not overwrite newer hours.
-        current = WorkHourImport.lock.find(@import.id)
-        raise Superseded unless current.status == "running" && current.claim_token == @token
+        # Same lock order as WorkHourImport.reserve!: organization, then
+        # import. Taking the organization first also covers the share lock
+        # the row inserts need on it, so a concurrent reservation waits
+        # instead of deadlocking.
+        Organization.lock.find(@import.organization_id)
+        # Commit only while this worker holds a live claim. The status, token
+        # and lease are checked by the database while the row is locked; a
+        # worker that was replaced, or whose lease ran out (even after its
+        # last renewal), must not overwrite newer hours.
+        current = WorkHourImport.lock.where(id: @import.id, status: "running", claim_token: @token)
+                                .where("lease_expires_at > ?", Time.current).first
+        raise Superseded unless current
 
         WorkHourRow.where(organization_id: @import.organization_id, work_date: @import.range_start..@import.range_end).delete_all
         rows.each_slice(1_000) { |slice| WorkHourRow.insert_all!(slice) }
