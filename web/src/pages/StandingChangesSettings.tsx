@@ -54,14 +54,17 @@ export default function StandingChangesSettings() {
       {!data ? loading ? <p role="status">Loading defaults…</p> : <Button type="button" variant="outline" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Try loading defaults again</Button> : <>
         <form className="space-y-3 rounded-lg border border-neutral-200 p-4" onSubmit={event => {
           event.preventDefault(); if (!canEdit || busy) return;
+          if (!Number.isInteger(rule.lookback) || !Number.isInteger(rule.threshold) || rule.lookback < 1 || rule.lookback > 24 || rule.threshold < 1 || rule.threshold > rule.lookback) {
+            setError('Use whole numbers: last regular runs from 1 to 24, and paid in at least from 1 up to that number.'); return;
+          }
           setBusy(true); setError(null);
           void api.patch<Settings>(root + '/rule', { regular_pay_lookback: rule.lookback, regular_pay_threshold: rule.threshold })
             .then(setData).catch(err => setError(err instanceof Error ? err.message : 'Could not save rule')).finally(() => setBusy(false));
         }}>
           <h3 className="font-semibold">Missing regulars</h3>
           <p className="text-sm">Check active employees paid in at least this many recent committed regular runs.</p>
-          <div className="grid gap-3 sm:grid-cols-2"><label className="block space-y-1.5"><span className={FIELD_LABEL}>Paid in at least</span><NumericInput inputMode="numeric" min={1} max={rule.lookback} value={rule.threshold} emptyValue={rule.threshold} disabled={!canEdit || busy} onValueChange={threshold => setRule({ ...rule, threshold: threshold ?? rule.threshold })} /></label>
-          <label className="block space-y-1.5"><span className={FIELD_LABEL}>Last regular runs</span><NumericInput inputMode="numeric" min={1} max={24} value={rule.lookback} emptyValue={rule.lookback} disabled={!canEdit || busy} onValueChange={lookback => { const next = lookback ?? rule.lookback; setRule({ ...rule, lookback: next, threshold: Math.min(rule.threshold, next) }); }} /></label></div>
+          <div className="grid gap-3 sm:grid-cols-2"><label className="block space-y-1.5"><span className={FIELD_LABEL}>Paid in at least</span><NumericInput inputMode="numeric" min={1} value={rule.threshold} emptyValue={rule.threshold} disabled={!canEdit || busy} onValueChange={threshold => setRule({ ...rule, threshold: threshold ?? rule.threshold })} /></label>
+          <label className="block space-y-1.5"><span className={FIELD_LABEL}>Last regular runs</span><NumericInput inputMode="numeric" min={1} value={rule.lookback} emptyValue={rule.lookback} disabled={!canEdit || busy} onValueChange={lookback => setRule({ ...rule, lookback: lookback ?? rule.lookback })} /></label></div>
           <Button disabled={!canEdit || busy}>Save missing-regular rule</Button>
         </form>
         <ul className="space-y-3">{data.defaults.filter(row => row.active).map(row => {
@@ -87,7 +90,7 @@ export default function StandingChangesSettings() {
               <option value="">Choose employee</option>{data.employees.filter(employee => employee.status === 'active' && (employee.variable_salary || (employee.hourly && employee.wage_rates.length > 0))).map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
             </Select>
             {draft.kind === 'extra_hours' && <Select label="Saved job and rate" value={draft.employee_wage_rate_id || ''} onChange={event => setDraft({ ...draft, employee_wage_rate_id: Number(event.target.value) || null })}><option value="">Choose saved job</option>{data.employees.find(employee => employee.id === draft.employee_id)?.wage_rates.map(rate => <option key={rate.id} value={rate.id}>{rate.label} · ${rate.rate}/hr</option>)}</Select>}
-            <label className="block space-y-1.5"><span className={FIELD_LABEL}>Order</span><NumericInput inputMode="numeric" min={0} value={draft.position} onValueChange={position => setDraft({ ...draft, position: position ?? 0 })} /></label>
+            <label className="block space-y-1.5"><span className={FIELD_LABEL}>Order</span><NumericInput inputMode="numeric" min={0} value={draft.position} notifyEmptyOnChange onValueChange={position => setDraft({ ...draft, position: Math.trunc(position ?? 0) })} /></label>
           </fieldset>
           <div className="flex flex-wrap gap-2"><Button type="submit" disabled={!canEdit || busy || !draft.employee_id || (draft.kind === 'extra_hours' && !draft.employee_wage_rate_id)}>{busy ? 'Saving…' : 'Save default'}</Button>{draft.id && <Button type="button" variant="outline" onClick={() => setDraft(blank())}>Cancel edit</Button>}</div>
         </form>
