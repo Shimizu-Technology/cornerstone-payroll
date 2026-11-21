@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProfitabilityLine, ProfitabilityOverview, ProfitabilityReport } from '@/services/clientProfitability';
+import { ReportView } from '@/components/client-profitability/ReportView';
 import { ClientProfitability } from './ClientProfitability';
 
 const state = vi.hoisted(() => ({
@@ -27,7 +28,8 @@ vi.mock('@/components/layout/Header', () => ({ Header: ({ title }: { title: stri
 function overview(overrides: Partial<ProfitabilityOverview> = {}): ProfitabilityOverview {
   return {
     connection: { connected: true, missing: [], problem: null, tax_host: 'tax.example.test' },
-    settings: { practice_company_id: 1, finance_book_id: null, effective_finance_book_id: 3, tax_prep_service_names: ['Tax Preparation'] },
+    settings: { practice_company_id: 1, finance_book_id: null, effective_finance_book_id: 3, tax_prep_service_names: ['Tax Preparation'],
+      default_cost_pending: false, default_spread_overhead: false, default_period: 'month', cost_basis: 'pay_date' },
     options: { companies: [{ id: 1, name: 'Cornerstone' }, { id: 2, name: 'Acme Bakery' }], finance_books: [{ id: 3, name: 'Cornerstone' }], service_names: ['Bookkeeping', 'Tax Preparation'] },
     imports: [],
     has_hours: true,
@@ -50,7 +52,8 @@ function line(overrides: Partial<ProfitabilityLine>): ProfitabilityLine {
 function report(): ProfitabilityReport {
   return {
     period: { from: '2026-10', through: '2026-10', start_date: '2026-10-01', end_date: '2026-10-31', label: 'October 2026' },
-    options: { cost_pending: false, spread_overhead: false },
+    options: { cost_pending: false, spread_overhead: false, cost_basis: 'pay_date' },
+    cost_basis: { basis: 'pay_date', cost: '6459.00', annual_payroll_summary_cost: '6459.00', difference: '0.00' },
     practice_company: { id: 1, name: 'Cornerstone' },
     finance_book: { id: 3, name: 'Cornerstone' },
     coverage: { missing_months: [], missing_month_labels: [], last_refreshed_at: null, pending_hours: '2.00' },
@@ -141,7 +144,8 @@ describe('ClientProfitability', () => {
     renderPage();
     await userEvent.click(await screen.findByRole('checkbox', { name: 'Bookkeeping' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }));
-    expect(state.updateSettings).toHaveBeenCalledWith({ practice_company_id: 1, finance_book_id: null, tax_prep_service_names: ['Tax Preparation', 'Bookkeeping'] });
+    expect(state.updateSettings).toHaveBeenCalledWith({ practice_company_id: 1, finance_book_id: null, tax_prep_service_names: ['Tax Preparation', 'Bookkeeping'],
+      default_cost_pending: false, default_spread_overhead: false, default_period: 'month', cost_basis: 'pay_date' });
     expect(await screen.findByText('Settings saved.')).toBeTruthy();
   });
 
@@ -256,5 +260,68 @@ describe('ClientProfitability', () => {
     expect(await screen.findByText(/No hours have been pulled from Tax yet/)).toBeTruthy();
     expect(await screen.findByText('New Tax Client', undefined, { timeout: 4000 })).toBeTruthy();
     expect(state.links).toHaveBeenCalledTimes(2);
+  });
+
+  it('saves report defaults and how pay is counted', async () => {
+    state.overview.mockResolvedValue(overview({ has_hours: false }));
+    state.updateSettings.mockResolvedValue(overview());
+    renderPage('/reports/client-profitability?tab=setup');
+    await userEvent.click(await screen.findByRole('radio', { name: /Work period/ }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /Count pending hours in cost/ }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /Spread internal\/overhead time/ }));
+    await userEvent.selectOptions(screen.getByLabelText('Default period'), 'quarter');
+    await userEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(state.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      cost_basis: 'work_period', default_cost_pending: true, default_spread_overhead: true, default_period: 'quarter',
+    }));
+  });
+
+  it('starts the report from the saved defaults, which can still be changed for one view', async () => {
+    state.overview.mockResolvedValue(overview({
+      settings: { ...overview().settings, default_cost_pending: true, default_spread_overhead: true, default_period: 'quarter', cost_basis: 'work_period' },
+    }));
+    renderPage('/reports/client-profitability?tab=report');
+    await waitFor(() => expect(state.report).toHaveBeenCalled());
+    const first = state.report.mock.calls[0][0] as { from: string; through: string; cost_pending: boolean; spread_overhead: boolean; cost_basis: string };
+    expect(first).toMatchObject({ cost_pending: true, spread_overhead: true, cost_basis: 'work_period' });
+    expect(Number(first.through.slice(5)) - Number(first.from.slice(5))).toBe(2);
+    expect((screen.getByRole('radio', { name: 'Quarter' }) as HTMLButtonElement).getAttribute('aria-checked')).toBe('true');
+
+    await userEvent.click(screen.getByRole('checkbox', { name: /Count pending hours in cost/ }));
+    await waitFor(() => expect(state.report).toHaveBeenLastCalledWith(expect.objectContaining({ cost_pending: false })));
+  });
+
+  it('explains the difference from the Annual Payroll Summary when counting by work period', async () => {
+    state.overview.mockResolvedValue(overview());
+    state.report.mockResolvedValue({
+      ...report(),
+      options: { cost_pending: false, spread_overhead: false, cost_basis: 'work_period' },
+      cost_basis: { basis: 'work_period', cost: '3000.00', annual_payroll_summary_cost: '1500.00', difference: '1500.00' },
+    });
+    renderPage('/reports/client-profitability?tab=report');
+    expect(await screen.findByText(/Pay is counted by work period: \$3,000\.00/)).toBeTruthy();
+    expect(screen.getByText(/counts \$1,500\.00 for paychecks paid in these months, \$1,500\.00 less\. The difference is pay for work done in one range but paid in another\./)).toBeTruthy();
+    await userEvent.click(screen.getByText('How this is calculated'));
+    expect(screen.getByText(/Pay and hours are both matched by the days worked/)).toBeTruthy();
+    expect(screen.queryByText(/Pay is matched by pay date and hours by work date/)).toBeNull();
+  });
+
+  it('keeps the cost basis of an open report until it is opened again', async () => {
+    state.overview.mockResolvedValue(overview());
+    const onGoTo = vi.fn();
+    const defaults = { costPending: false, spreadOverhead: false, period: 'month' as const, costBasis: 'pay_date' as const };
+    const view = render(<MemoryRouter><ReportView reloadKey={0} onGoTo={onGoTo} defaults={defaults} /></MemoryRouter>);
+    await waitFor(() => expect(state.report).toHaveBeenCalledTimes(1));
+    expect(state.report.mock.lastCall?.[0]).toMatchObject({ cost_basis: 'pay_date' });
+
+    // An hours refresh finishes after someone saved "work period": the overview and reloadKey change.
+    view.rerender(<MemoryRouter><ReportView reloadKey={1} onGoTo={onGoTo} defaults={{ ...defaults, costBasis: 'work_period' }} /></MemoryRouter>);
+    await waitFor(() => expect(state.report).toHaveBeenCalledTimes(2));
+    expect(state.report.mock.lastCall?.[0]).toMatchObject({ cost_basis: 'pay_date' });
+    view.unmount();
+
+    render(<MemoryRouter><ReportView reloadKey={1} onGoTo={onGoTo} defaults={{ ...defaults, costBasis: 'work_period' }} /></MemoryRouter>);
+    await waitFor(() => expect(state.report).toHaveBeenCalledTimes(3));
+    expect(state.report.mock.lastCall?.[0]).toMatchObject({ cost_basis: 'work_period' });
   });
 });

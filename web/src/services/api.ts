@@ -5099,6 +5099,8 @@ export interface InvoiceBillingProfile {
   show_how_to_pay?: boolean;
   numbering_style?: 'yearly' | 'continuing';
   next_invoice_number?: number;
+  invoice_number_width?: number | null;
+  next_invoice_number_preview?: string;
   service_catalog?: InvoiceService[];
   id: number;
   organization_id: number;
@@ -5387,6 +5389,7 @@ export interface InvoiceReceivablesSummary {
 export interface InvoiceBillingProfilePayload extends Partial<Omit<InvoiceStyleSettings, 'footer_note' | 'payment_instructions'>> {
   numbering_style?: 'yearly' | 'continuing';
   next_invoice_number?: number;
+  invoice_number_width?: number | null;
   service_catalog?: InvoiceService[];
   name: string;
   legal_name?: string | null;

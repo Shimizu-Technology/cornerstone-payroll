@@ -53,7 +53,7 @@ module InvoicePdf
     end
 
     def sample_number(profile, today)
-      return profile.next_invoice_number.to_s if profile.numbering_style == "continuing"
+      return profile.format_continuing_number(profile.next_invoice_number) if profile.numbering_style == "continuing"
 
       "#{profile.invoice_prefix.presence || 'INV'}-#{today.year}-0001"
     end

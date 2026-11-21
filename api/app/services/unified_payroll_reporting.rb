@@ -23,12 +23,27 @@ class UnifiedPayrollReporting
   end
 
   def historical_adjustments(employee_id: nil)
-    scope = HistoricalPaycheckAdjustment.joins(historical_paycheck: :historical_import_batch)
-                                        .includes(historical_paycheck: :historical_pay_period)
-                                        .where(company_id: @company_id, effective_pay_date: @period.range)
-                                        .where(historical_import_batches: { company_id: @company_id, status: "locked" })
+    scope = locked_adjustment_scope.where(effective_pay_date: @period.range)
     scope = scope.where(historical_paychecks: { employee_id: employee_id }) if employee_id
     scope.chronological.to_a
+  end
+
+  # The same eligible imported paychecks as historical_paychecks /
+  # unlinked_historical_paychecks, but chosen because their pay period
+  # overlaps the range rather than because they were paid in it (client
+  # profitability's "work period" basis). linked: true, false or nil (both).
+  def historical_paychecks_worked_in(linked: nil)
+    scope = locked_historical_scope.where("historical_paychecks.period_start <= ? AND historical_paychecks.period_end >= ?",
+                                          @period.end_date, @period.start_date)
+    scope = scope.where.not(employee_id: nil) if linked == true
+    scope = scope.where(employee_id: nil) if linked == false
+    scope.to_a
+  end
+
+  # Imported adjustments whose paycheck's pay period overlaps the range.
+  def historical_adjustments_worked_in
+    locked_adjustment_scope.where("historical_paychecks.period_start <= ? AND historical_paychecks.period_end >= ?",
+                                  @period.end_date, @period.start_date).chronological.to_a
   end
 
   def add_historical_to_employee_row(row, paychecks, adjustments = [])
@@ -269,11 +284,23 @@ class UnifiedPayrollReporting
   end
 
   def historical_scope
+    locked_historical_scope.where(pay_date: @period.range)
+  end
+
+  # Imported paychecks that count at all: this company, from a locked batch.
+  def locked_historical_scope
     HistoricalPaycheck
       .joins(:historical_import_batch)
       .includes(:historical_import_batch, :historical_pay_period)
-      .where(company_id: @company_id, pay_date: @period.range)
+      .where(company_id: @company_id)
       .where(historical_import_batches: { company_id: @company_id, status: "locked" })
+  end
+
+  def locked_adjustment_scope
+    HistoricalPaycheckAdjustment.joins(historical_paycheck: :historical_import_batch)
+                                .includes(historical_paycheck: :historical_pay_period)
+                                .where(company_id: @company_id)
+                                .where(historical_import_batches: { company_id: @company_id, status: "locked" })
   end
 
   def linked_historical_scope

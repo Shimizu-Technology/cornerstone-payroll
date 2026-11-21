@@ -6,6 +6,10 @@ module ClientProfitability
   # CSV of a Report: one row per client line, then one row per person on it.
   # Names are neutralized against spreadsheet formulas; numbers stay numbers.
   class CsvExport
+    BASIS_LABELS = {
+      "pay_date" => "Pay date (matches the Annual Payroll Summary)",
+      "work_period" => "Work period (each paycheck spread over the days it covers)"
+    }.freeze
     HEADERS = [ "Section", "Client", "Person", "Hours", "Pending hours", "Cost", "Overhead share in cost", "Fees",
                 "Tax prep fees", "Other fees", "Margin", "Margin %", "Fees per hour" ].freeze
 
@@ -23,6 +27,7 @@ module ClientProfitability
         csv << [ "Client profitability", text(@report.dig(:period, :label)) ]
         csv << [ "Pending hours costed", @report.dig(:options, :cost_pending) ? "Yes" : "No",
                  "Overhead spread across clients", @report.dig(:options, :spread_overhead) ? "Yes" : "No" ]
+        csv << [ "Count pay by", BASIS_LABELS.fetch(@report.dig(:options, :cost_basis) || "pay_date") ]
         csv << []
         csv << HEADERS
         @report[:clients].each { |line| write_line(csv, "Client", line) }

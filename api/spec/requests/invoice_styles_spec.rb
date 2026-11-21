@@ -68,6 +68,24 @@ RSpec.describe "Invoice style settings API", type: :request do
     expect(profile.reload.invoice_theme).to eq("banner")
   end
 
+  it "saves the invoice number width and shows the next number with it" do
+    patch "/api/v1/admin/invoice_billing_profiles/#{profile.id}", params: { invoice_billing_profile: {
+      numbering_style: "continuing", next_invoice_number: 7055, invoice_number_width: 5
+    } }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("invoice_billing_profile"))
+      .to include("invoice_number_width" => 5, "next_invoice_number_preview" => "07055")
+
+    patch "/api/v1/admin/invoice_billing_profiles/#{profile.id}", params: { invoice_billing_profile: { invoice_number_width: "" } }, as: :json
+    expect(response.parsed_body.fetch("invoice_billing_profile")).to include("invoice_number_width" => nil, "next_invoice_number_preview" => "7055")
+
+    [ "2.5", "0", "13" ].each do |width|
+      patch "/api/v1/admin/invoice_billing_profiles/#{profile.id}", params: { invoice_billing_profile: { invoice_number_width: width } }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity), "width #{width} should be rejected"
+    end
+    expect(profile.reload.invoice_number_width).to be_nil
+  end
+
   it "reports the theme color when no accent is chosen and rejects a bad accent or theme" do
     get "/api/v1/admin/invoice_billing_profiles/#{profile.id}"
     expect(response.parsed_body.dig("invoice_billing_profile", "effective_accent_color")).to eq("#1F4E79")

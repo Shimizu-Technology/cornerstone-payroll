@@ -19,7 +19,12 @@ Only organization admins and super admins can open it (capability `view_client_p
 3. **Staff payroll client.** On **Setup**, choose the Payroll client that runs Cornerstone's own staff payroll. On production that is "Cornerstone". This is a saved setting (`client_profitability_settings.practice_company_id`), not a hard-coded id. The page calls it "the client that runs Cornerstone's own staff payroll" because "practice" already means practice copies (test workspaces) elsewhere in Payroll.
 4. **Financial book.** The default book is used unless you choose another. Only invoices in that book count as fees.
 5. **Tax-prep services.** Tick the services that are tax preparation (see below).
-6. **Refresh hours from Tax**, then **Link clients & staff**.
+6. **Report defaults.** Where the report starts each time it opens; people can still change these on screen for one view. All are saved per organization.
+   - **Count pending hours in cost**: off by default.
+   - **Spread internal/overhead time across clients**: off by default.
+   - **Default period**: month by default (or quarter, or custom months).
+7. **Count pay by** (see "Cost basis" below): **pay date** by default, which matches the Annual Payroll Summary, or **work period**.
+8. **Refresh hours from Tax**, then **Link clients & staff**.
 
 Until both environment variables are set, the page shows a "not connected" panel listing what's missing. It makes no calls to Tax, and the nightly refresh does nothing.
 
@@ -54,9 +59,19 @@ Until both environment variables are set, the page shows a "not connected" panel
 
 ## How the numbers are calculated
 
-**Period.** One month, one quarter, or a custom range of whole months (up to 24). Hours count by **work date**, staff pay by **pay date**, and fees by **service month**.
+**Period.** One month, one quarter, or a custom range of whole months (up to 24). Hours count by **work date**, staff pay by **pay date** (or work period, see below), and fees by **service month**.
 
-**Cost per person.** Total cost always equals the Annual Payroll Summary's **Total payroll cost** for the staff payroll client and the same pay dates. The report doesn't re-derive it; it asks that service (`AnnualPayrollSummary#payroll_cost_by_employee`, using the same sources as `#period_row`). That total includes:
+**Cost basis ("Count pay by").**
+- **Pay date** (default): each paycheck counts in full in the month it was paid. Totals equal the Annual Payroll Summary's total payroll cost for the same months.
+- **Work period**: each paycheck is spread over the days of its pay period, and the report counts the days that fall in the chosen months. A check paid December 2 for November 16–30 counts in November.
+  - The same paychecks are eligible as with pay date (voided runs, reversed paychecks and legacy items stay out, and corrections count). They're chosen because their pay period overlaps the chosen months, however late they were paid: a November paycheck paid in May still counts in November. A pay period without a usable date range falls back to its pay date.
+  - Imported paychecks use their own period dates, and an imported adjustment follows its paycheck's period.
+  - Amounts are split in whole cents per day. Leftover cents go one each to the last days of the pay period, so the months of a range always add up to the range exactly. Pay, employer taxes and employer contributions are each split this way, and a row's total is their sum.
+- With work period, the report shows the difference from the Annual Payroll Summary for the chosen months, and why: pay for work in one range that was paid in another. The two are guaranteed to agree when the range contains both every worked day **and** every pay date of the paychecks involved. They can also agree by coincidence otherwise, when pay moving in and out of the range happens to balance. A November report covers all of November 16–30, but the December 2 pay date is outside it, so it can show a difference.
+- The CSV is built with the same basis as the report on screen, even if someone changes the saved setting in between.
+- Allocation to clients by approved hours is the same under both.
+
+**Cost per person.** With the default pay-date basis, total cost always equals the Annual Payroll Summary's **Total payroll cost** for the staff payroll client and the same pay dates (with work period, see above). The report doesn't re-derive it; it asks that service (`AnnualPayrollSummary#payroll_cost_by_employee`, using the same sources as `#period_row`). That total includes:
 - gross pay
 - non-taxable pay
 - the employer's Social Security and Medicare
@@ -99,9 +114,10 @@ This classification needs no change to issued invoices, which stay immutable, an
 
 ## Limits
 
-- Pay is matched by pay date and hours by work date. A paycheck that covers late-September work but is paid in October costs October's hours, so single months can look uneven. Quarters smooth this out.
+- With the default pay-date basis, pay is matched by pay date and hours by work date. A paycheck that covers late-September work but is paid in October costs October's hours, so single months can look uneven. Quarters smooth this out, or switch **Count pay by** to work period.
+- Work-period spreading is by calendar days, not by the hours on the paycheck.
 - A Tax client links to exactly one Payroll client. If one Payroll client has several Tax clients, link each of them to it.
 - Fees can only be joined when the invoice is explicitly linked to a payroll client. Payroll doesn't guess a client from a recipient's name.
 - Owners or staff paid outside Payroll have no cost unless their pay runs through the staff payroll client.
 - The report uses whatever hours were last pulled. Refresh after Tax approvals change. Months that haven't been pulled are flagged at the top of the report.
-- **CSV export** (`/export`) holds the same lines as the screen, plus one row per person, and is recorded in Activity History.
+- **CSV export** (`/export`) holds the same lines as the screen, plus one row per person. It records which "Count pay by" basis was used and is recorded in Activity History.
