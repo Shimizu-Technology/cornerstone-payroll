@@ -1765,6 +1765,8 @@ export function InvoiceMaker() {
   const selectedInvoiceReadOnly = selectedInvoiceArchived || Boolean(invoiceForm.status && invoiceForm.status !== 'draft');
   // An issued invoice's email stays editable; a voided or archived one's doesn't.
   const savingThisEmail = savingEmailFor !== null && savingEmailFor === invoiceForm.id;
+  // One email save at a time: another invoice's save must finish first.
+  const savingOtherEmail = savingEmailFor !== null && !savingThisEmail;
   const emailDraftLocked = selectedInvoiceArchived || invoiceForm.status === 'voided' || (selectedInvoiceReadOnly && !issuedEmailActive) || savingThisEmail;
   const selectedInvoiceCannotSaveDraft = selectedInvoiceReadOnly;
   const selectedInvoiceHasBlockedUnsavedChanges = selectedInvoiceCannotSaveDraft && hasUnsavedInvoiceChanges();
@@ -2066,8 +2068,9 @@ export function InvoiceMaker() {
                   </label>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-neutral-500">{emailDraftCustomized ? 'Edited email. Leave the subject or message blank to use its default.' : 'Default email: updates with the invoice number, customer, month and amount.'}</span>
-                    {issuedEmailActive && <Button type="button" size="sm" onClick={() => void saveIssuedEmail()} disabled={!issuedEmailChanged || financeReadOnly || emailDraftLocked}>{savingThisEmail ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}Save email</Button>}
-                    {emailDraftCustomized && <Button type="button" size="sm" variant="ghost" onClick={restoreDefaultEmail} disabled={emailDraftLocked}>Use default</Button>}
+                    {issuedEmailActive && savingOtherEmail && <span className="text-xs text-neutral-500" role="status">Saving another invoice's email…</span>}
+                    {issuedEmailActive && <Button type="button" size="sm" onClick={() => void saveIssuedEmail()} disabled={!issuedEmailChanged || financeReadOnly || emailDraftLocked || savingOtherEmail}>{savingThisEmail ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}Save email</Button>}
+                    {emailDraftCustomized && <Button type="button" size="sm" variant="ghost" onClick={restoreDefaultEmail} disabled={emailDraftLocked || (issuedEmailActive && savingOtherEmail)}>Use default</Button>}
                   </div>
                 </div>
               </div>

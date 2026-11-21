@@ -188,6 +188,28 @@ describe('InvoiceMaker', () => {
       expect(screen.queryByText('Email saved. The issued PDF is unchanged.')).toBeNull();
     });
 
+    it("holds the next invoice's save until the first one finishes", async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      let finishSave: (value: { invoice: Invoice }) => void = () => {};
+      api.invoices.updateEmail.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve; }));
+      const { user } = await editFirstInvoiceSubject();
+
+      await user.click(screen.getByRole('button', { name: 'Save email' }));
+      await user.click(screen.getByText('07053'));
+      const subject = screen.getByRole('textbox', { name: 'Subject' });
+      await waitFor(() => expect(subject).toHaveProperty('value', SECOND_SUBJECT));
+      await user.type(subject, ' (edited)');
+
+      const save = screen.getByRole('button', { name: 'Save email' });
+      expect((save as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.getByText("Saving another invoice's email…")).toBeTruthy();
+
+      finishSave({ invoice: issuedInvoice() });
+      await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
+      expect(screen.queryByText("Saving another invoice's email…")).toBeNull();
+      expect(subject).toHaveProperty('value', `${SECOND_SUBJECT} (edited)`);
+    });
+
     it('locks the email fields while the save is in flight', async () => {
       let finishSave: (value: { invoice: Invoice }) => void = () => {};
       api.invoices.updateEmail.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
