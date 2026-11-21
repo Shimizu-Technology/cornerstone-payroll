@@ -98,3 +98,36 @@ it('saves the client missing-regular threshold separately from entry configurati
   fireEvent.click(screen.getByRole('button', { name: 'Save missing-regular rule' }));
   await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/admin/payroll_standing_changes/rule', { regular_pay_lookback: 4, regular_pay_threshold: 2 }));
 });
+it('keeps the threshold while the run count is retyped', async () => {
+  mocks.patch.mockResolvedValue(fixture);
+  render(<StandingChangesSettings />);
+  const lookback = await screen.findByLabelText('Last regular runs');
+  fireEvent.focus(lookback);
+  fireEvent.change(lookback, { target: { value: '1' } });
+  fireEvent.change(lookback, { target: { value: '12' } });
+  fireEvent.blur(lookback);
+  fireEvent.click(screen.getByRole('button', { name: 'Save missing-regular rule' }));
+  await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/admin/payroll_standing_changes/rule', { regular_pay_lookback: 12, regular_pay_threshold: 3 }));
+});
+it('refuses a fractional or too-high threshold instead of saving it', async () => {
+  render(<StandingChangesSettings />);
+  const threshold = await screen.findByLabelText('Paid in at least');
+  fireEvent.change(threshold, { target: { value: '2.5' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save missing-regular rule' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Use whole numbers');
+  fireEvent.change(threshold, { target: { value: '5' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save missing-regular rule' }));
+  expect(mocks.patch).not.toHaveBeenCalled();
+});
+it('saves a cleared order as 0 when the form is submitted with Enter', async () => {
+  const existing = { id: 11, kind: 'owner_pay', employee_id: 1, employee_wage_rate_id: null, position: 5, active: true };
+  mocks.get.mockResolvedValue({ ...fixture, defaults: [existing] });
+  mocks.patch.mockResolvedValue({ ...fixture, defaults: [{ ...existing, position: 0 }] });
+  render(<StandingChangesSettings />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit default for Morgan Owner' }));
+  const order = screen.getByLabelText('Order');
+  fireEvent.focus(order);
+  fireEvent.change(order, { target: { value: '' } });
+  fireEvent.submit(order.closest('form')!);
+  await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/admin/payroll_standing_changes/11', { standing_change: { ...existing, position: 0 } }));
+});

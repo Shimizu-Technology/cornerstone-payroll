@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Button } from '@/components/ui/button';
 import type { TaxConfig } from '@/services/api';
 
@@ -21,17 +21,17 @@ export function TaxWithholdingEditor({ config, saving, onSave, onCancel }: {
     {tables.map(filing => <fieldset key={filing.filing_status} className="min-w-0 space-y-3 rounded border border-neutral-200 p-3">
       <legend className="px-1 font-medium">{filing.filing_status.replaceAll('_', ' ')}</legend>
       <label className="block text-xs font-medium text-neutral-600">Annual deduction / worksheet adjustment
-        <Input aria-label={`${filing.filing_status} annual deduction`} type="number" min="0" step="0.01" value={filing.standard_deduction} className={inputClass}
-          onChange={event => update(filing.filing_status, { standard_deduction: Number(event.target.value) })} />
+        <NumericInput aria-label={`${filing.filing_status} annual deduction`} min={0} value={filing.standard_deduction} className={inputClass} notifyEmptyOnChange
+          onValueChange={amount => update(filing.filing_status, { standard_deduction: amount ?? 0 })} />
       </label>
       <div className="overflow-x-auto"><table className="w-full text-left text-sm">
         <thead><tr><th className="p-1">From ($)</th><th className="p-1">To ($, exclusive)</th><th className="p-1">Rate (decimal)</th><th><span className="sr-only">Actions</span></th></tr></thead>
         <tbody>{filing.brackets.map((bracket, index) => <tr key={index}>
           {(['min_income', 'max_income', 'rate'] as const).map(key => <td className="p-1" key={key}>
-            <Input aria-label={`${filing.filing_status} bracket ${index + 1} ${key}`} type="number" min="0" max={key === 'rate' ? '0.999999' : undefined} step="any" value={bracket[key] ?? ''} className={inputClass}
-              placeholder={key === 'max_income' ? 'No limit' : undefined}
-              onChange={event => update(filing.filing_status, { brackets: filing.brackets.map((row, rowIndex) => rowIndex === index
-                ? { ...row, [key]: key === 'max_income' && event.target.value === '' ? null : Number(event.target.value) } : row) })} />
+            <NumericInput aria-label={`${filing.filing_status} bracket ${index + 1} ${key}`} min={0} value={bracket[key]} className={inputClass}
+              placeholder={key === 'max_income' ? 'No limit' : undefined} emptyValue={key === 'max_income' ? null : 0} notifyEmptyOnChange
+              onValueChange={amount => update(filing.filing_status, { brackets: filing.brackets.map((row, rowIndex) => rowIndex === index
+                ? { ...row, [key]: key === 'max_income' ? amount : amount ?? 0 } : row) })} />
           </td>)}
           <td><Button variant="ghost" size="sm" disabled={saving} aria-label={`Remove ${filing.filing_status} bracket ${index + 1}`} onClick={() => update(filing.filing_status, { brackets: filing.brackets.filter((_, rowIndex) => rowIndex !== index) })}>Remove</Button></td>
         </tr>)}</tbody>
