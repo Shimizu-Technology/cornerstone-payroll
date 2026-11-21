@@ -59,8 +59,9 @@ export interface ProfitabilityOverview {
 }
 
 export interface LinkSuggestion {
-  disposition: 'company' | 'internal' | 'employee';
+  disposition: 'company' | 'recipient' | 'internal' | 'employee';
   company_id?: number;
+  invoice_recipient_id?: number;
   employee_id?: number;
   label: string;
   match: 'exact' | 'similar' | 'internal';
@@ -73,7 +74,13 @@ export interface TaxClientEntry {
   last_worked_on: string | null;
   internal_in_tax: boolean;
   handled_automatically: boolean;
-  link: { disposition: 'company' | 'internal'; company_id: number | null; company_name: string | null } | null;
+  link: {
+    disposition: 'company' | 'recipient' | 'internal';
+    company_id: number | null;
+    company_name: string | null;
+    invoice_recipient_id?: number | null;
+    recipient_name?: string | null;
+  } | null;
   suggestion: LinkSuggestion | null;
 }
 
@@ -89,6 +96,8 @@ export interface LinkQueueData {
   clients: TaxClientEntry[];
   staff: TaxStaffEntry[];
   companies: NamedOption[];
+  /** Invoice customers with no Payroll client (fees on their invoices count for the linked row). */
+  recipients: NamedOption[];
   employees: Array<NamedOption & { status: string }>;
 }
 
@@ -107,8 +116,9 @@ export interface ProfitabilityPerson {
 
 export interface ProfitabilityLine {
   key: string;
-  kind: 'company' | 'overhead' | 'unlinked_client' | 'no_client';
+  kind: 'company' | 'recipient' | 'overhead' | 'unlinked_client' | 'no_client';
   company_id: number | null;
+  invoice_recipient_id?: number | null;
   tax_client_id: number | null;
   name: string;
   hours: string;
@@ -196,7 +206,12 @@ export const clientProfitabilityApi = {
   importStatus: (id: number): Promise<{ import: WorkHourImportStatus }> =>
     api.get<{ import: WorkHourImportStatus }>(`${BASE}/imports/${id}`, undefined, NO_COMPANY),
   links: (): Promise<LinkQueueData> => api.get<LinkQueueData>(`${BASE}/links`, undefined, NO_COMPANY),
-  linkClient: (taxClientId: number, data: { disposition: 'company' | 'internal'; company_id?: number; tax_client_name?: string }): Promise<{ ok: true }> =>
+  linkClient: (taxClientId: number, data: {
+    disposition: 'company' | 'recipient' | 'internal';
+    company_id?: number;
+    invoice_recipient_id?: number;
+    tax_client_name?: string;
+  }): Promise<{ ok: true }> =>
     api.put<{ ok: true }>(`${BASE}/client_links/${taxClientId}`, data, NO_COMPANY),
   unlinkClient: (taxClientId: number): Promise<void> => api.delete<void>(`${BASE}/client_links/${taxClientId}`, NO_COMPANY),
   linkStaff: (taxUserId: number, data: { disposition: 'employee' | 'no_payroll'; employee_id?: number; email?: string | null }): Promise<{ ok: true }> =>

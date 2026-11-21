@@ -150,7 +150,7 @@ function DesktopTable({ lines, caption, expanded, onToggle, dimmed }: {
                     <button type="button" onClick={() => onToggle(line.key)} aria-expanded={open}
                       className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-neutral-900 hover:bg-neutral-50">
                       {open ? <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" /> : <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />}
-                      <span>{line.name}</span>
+                      <span>{line.name}{line.kind === 'recipient' && <span className="ml-2 text-xs font-normal text-neutral-600">Invoice customer</span>}</span>
                     </button>
                   </th>
                   <td className="px-3 text-right tabular-nums">{hours(line.hours)}</td>
@@ -184,7 +184,10 @@ function MobileCards({ lines, expanded, onToggle }: { lines: ProfitabilityLine[]
         return (
           <li key={line.key} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
-              <h3 className="text-base font-semibold text-neutral-950">{line.name}</h3>
+              <h3 className="text-base font-semibold text-neutral-950">
+                {line.name}
+                {line.kind === 'recipient' && <span className="block text-xs font-normal text-neutral-600">Invoice customer (no payroll)</span>}
+              </h3>
               <p className={cn('shrink-0 text-base font-semibold tabular-nums', isNegative(line.margin) && 'text-red-800')}>{money(line.margin)}</p>
             </div>
             <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">

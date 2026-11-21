@@ -432,6 +432,29 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     end
   end
 
+  it "archives instead of deleting an invoice customer that a client profitability link points to" do
+    ClientProfitabilitySetting.create!(organization: company.organization)
+    link = WorkHourClientLink.create!(organization: company.organization, tax_client_id: 880, disposition: "recipient", invoice_recipient: recipient)
+    link.update!(active: false) # even an inactive link keeps its history
+
+    delete "/api/v1/admin/invoice_recipients/#{recipient.id}"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["message"]).to eq("Invoice recipient archived")
+    expect(recipient.reload.active).to be(false)
+    expect(link.reload.invoice_recipient_id).to eq(recipient.id)
+
+    # The database refuses a hard delete too, instead of dropping the link.
+    expect { InvoiceRecipient.transaction(requires_new: true) { InvoiceRecipient.where(id: recipient.id).delete_all } }
+      .to raise_error(ActiveRecord::InvalidForeignKey)
+  end
+
+  it "still deletes an invoice customer with no invoices and no client links" do
+    unused = create(:invoice_recipient, organization: company.organization, company: nil, name: "Unused customer")
+    delete "/api/v1/admin/invoice_recipients/#{unused.id}"
+    expect(response.parsed_body["message"]).to eq("Invoice recipient deleted")
+    expect(InvoiceRecipient.exists?(unused.id)).to be(false)
+  end
+
   it "rejects malformed imported discount values without creating an invoice" do
     expect do
       post "/api/v1/admin/invoices/import", params: {

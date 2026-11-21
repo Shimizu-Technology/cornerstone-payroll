@@ -196,6 +196,82 @@ RSpec.describe ClientProfitability::Report do
     expect(ApplicationRecord).to have_received(:transaction).with(isolation: :repeatable_read).once
   end
 
+  it "gives an invoice customer with no Payroll client its own row: fees, hours, cost and margin" do
+    customer = Invoice.find_by!(organization_id: organization.id, company_id: nil).invoice_recipient
+    WorkHourClientLink.create!(organization: organization, tax_client_id: 999, disposition: "recipient", invoice_recipient: customer)
+
+    result = report
+    line = result[:clients].find { |client| client[:kind] == "recipient" }
+    expect(line).to include(name: customer.name, invoice_recipient_id: customer.id, company_id: nil, hours: "3.00", fees: "300.00",
+                            cost: "807.37", margin: "-507.37", margin_percent: "-169.1", effective_rate: "100.00")
+    expect(line[:people].map { |person| person[:name] }).to eq([ "Benjo Cruz" ])
+    expect(result[:unassigned].map { |entry| entry[:name] }).not_to include("Gamma LLC")
+    expect(result[:unlinked_fees]).to eq(fees: "0.00", tax_prep_fees: "0.00")
+    # Nothing is counted twice or lost: the totals are the same as before linking.
+    expect(result[:totals]).to include(cost: "6459.00", fees: "2600.00", hours: "22.00")
+  end
+
+  describe "when an invoice customer later gets a Payroll client" do
+    let(:invoice) { Invoice.find_by!(organization_id: organization.id, company_id: nil) }
+    let(:customer) { invoice.invoice_recipient }
+    let!(:link) { WorkHourClientLink.create!(organization: organization, tax_client_id: 999, disposition: "recipient", invoice_recipient: customer) }
+
+    it "keeps its earlier invoices with that client once the Tax link is moved to it, without counting them twice" do
+      before_move = report
+      expect(before_move[:clients].find { |client| client[:kind] == "recipient" }).to include(fees: "300.00")
+
+      customer.update!(company: acme)
+      link.update!(disposition: "company", company: acme, invoice_recipient: nil)
+      after_move = report
+      expect(after_move[:clients].map { |client| client[:kind] }).not_to include("recipient")
+      expect(client(after_move, "Acme Bakery")).to include(fees: "1800.00", hours: "13.00") # 1,500 + the earlier 300; 10 + Gamma's 3 hours
+      expect(after_move[:unlinked_fees]).to eq(fees: "0.00", tax_prep_fees: "0.00")
+      expect(after_move[:totals]).to include(fees: before_move.dig(:totals, :fees), cost: before_move.dig(:totals, :cost), hours: "22.00")
+    end
+
+    it "counts a still-active link to that customer as its Payroll client" do
+      customer.update!(company: acme)
+      result = report
+      expect(result[:clients].map { |client| client[:kind] }).not_to include("recipient")
+      expect(client(result, "Acme Bakery")).to include(fees: "1800.00", hours: "13.00")
+      expect(result[:totals]).to include(fees: "2600.00", cost: "6459.00")
+    end
+
+    it "infers nothing when no Tax client is linked to the customer's new Payroll client" do
+      link.update!(active: false)
+      delta = create(:company, organization: organization, name: "Delta Dental")
+      customer.update!(company: delta)
+      result = report
+      expect(result[:unlinked_fees]).to eq(fees: "300.00", tax_prep_fees: "0.00")
+      expect(result[:clients].map { |client| client[:name] }).not_to include("Delta Dental")
+      expect(result[:totals]).to include(fees: "2600.00")
+    end
+  end
+
+  it "treats a link to an invoice customer outside the report's financial book as not linked" do
+    other_book = FinanceBook.create!(organization: organization, name: "Second book", legal_name: "Second book", kind: "organization")
+    elsewhere = create(:invoice_recipient, organization: organization, company: nil, finance_book: other_book, name: "Other book customer")
+    settings.update!(finance_book: FinanceBook.find_by!(organization: organization, is_default: true))
+    link = WorkHourClientLink.new(organization: organization, tax_client_id: 999, disposition: "recipient", invoice_recipient: elsewhere)
+    expect(link).not_to be_valid
+    expect(link.errors[:invoice_recipient].join).to match(/financial book/)
+    link.save!(validate: false) # e.g. the report's book was changed after linking
+    result = report
+    expect(result[:clients].map { |client| client[:name] }).not_to include("Other book customer")
+    expect(result[:unassigned].map { |line| line[:name] }).to include("Gamma LLC")
+    expect(result[:totals]).to include(fees: "2600.00", cost: "6459.00")
+  end
+
+  it "spreads overhead onto an invoice-customer row like any client" do
+    customer = Invoice.find_by!(organization_id: organization.id, company_id: nil).invoice_recipient
+    WorkHourClientLink.create!(organization: organization, tax_client_id: 999, disposition: "recipient", invoice_recipient: customer)
+    result = report(spread_overhead: true)
+    shares = result[:clients].sum(BigDecimal("0")) { |client| client[:overhead_cost].to_d }
+    expect(shares).to eq(BigDecimal("645.90"))
+    expect(result[:clients].find { |client| client[:kind] == "recipient" }[:overhead_cost].to_d).to be_positive
+    expect(result[:totals]).to include(cost: "6459.00")
+  end
+
   it "shows a client with fees but no hours" do
     WorkHourRow.where(tax_client_id: 346).delete_all
     expect(client(report, "Beta Builders")).to include(hours: "0.00", cost: "0.00", fees: "800.00", margin: "800.00", effective_rate: nil)
@@ -249,5 +325,32 @@ RSpec.describe WorkHourStaffLink do
     expect(inside).to be_valid
     expect(outside).not_to be_valid
     expect(outside.errors[:employee].join).to match(/staff payroll/)
+  end
+end
+
+RSpec.describe WorkHourClientLink do
+  let(:company) { create(:company) }
+  let(:organization) { company.organization }
+  let(:book) { FinanceBook.default_for!(organization) }
+  let(:customer) { create(:invoice_recipient, organization: organization, company: nil, finance_book: book, name: "Roland's Watch Repair (Ponce)") }
+
+  it "links an invoice customer that has no Payroll client, and nothing else" do
+    expect(described_class.new(organization: organization, tax_client_id: 1, disposition: "recipient", invoice_recipient: customer)).to be_valid
+    with_client = create(:invoice_recipient, organization: organization, company: company, finance_book: book)
+    expect(described_class.new(organization: organization, tax_client_id: 2, disposition: "recipient", invoice_recipient: with_client))
+      .not_to be_valid
+    elsewhere = create(:invoice_recipient, company: nil, organization: create(:organization))
+    expect(described_class.new(organization: organization, tax_client_id: 3, disposition: "recipient", invoice_recipient: elsewhere))
+      .not_to be_valid
+    expect(described_class.new(organization: organization, tax_client_id: 4, disposition: "company", company: company, invoice_recipient: customer))
+      .not_to be_valid
+  end
+
+  it "is backed by the database check on dispositions" do
+    link = described_class.create!(organization: organization, tax_client_id: 5, disposition: "recipient", invoice_recipient: customer)
+    expect { described_class.transaction(requires_new: true) { link.update_columns(invoice_recipient_id: nil) } }
+      .to raise_error(ActiveRecord::CheckViolation)
+    expect { described_class.transaction(requires_new: true) { link.reload.update_columns(company_id: company.id) } }
+      .to raise_error(ActiveRecord::CheckViolation)
   end
 end

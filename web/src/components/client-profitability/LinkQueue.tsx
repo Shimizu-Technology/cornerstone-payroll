@@ -13,24 +13,48 @@ function matchText(match: string): string {
   return 'similar name';
 }
 
+/** Select values: "company:ID", "recipient:ID" or "internal". */
+function clientChoice(target: { disposition: string; company_id?: number | null; invoice_recipient_id?: number | null } | null | undefined): string {
+  if (!target) return '';
+  if (target.disposition === 'internal') return INTERNAL;
+  if (target.disposition === 'recipient') return `recipient:${target.invoice_recipient_id}`;
+  return `company:${target.company_id}`;
+}
+
+/** What a client choice is called, for the confirmation after saving. */
+function clientChoiceLabel(value: string, data: LinkQueueData): string {
+  if (value === INTERNAL) return 'Internal / overhead';
+  const [kind, id] = value.split(':');
+  const options = kind === 'recipient' ? data.recipients : data.companies;
+  return options.find((option) => String(option.id) === id)?.name ?? '';
+}
+
+function linkLabel(link: NonNullable<TaxClientEntry['link']>): string {
+  if (link.disposition === 'internal') return 'Internal / overhead';
+  if (link.disposition === 'recipient') return link.recipient_name ?? '';
+  return link.company_name ?? '';
+}
+
 function ClientCard({ entry, data, onSaved }: { entry: TaxClientEntry; data: LinkQueueData; onSaved: () => void }) {
   const [editing, setEditing] = useState(entry.link === null && !entry.handled_automatically);
-  const [choice, setChoice] = useState(() => {
-    if (entry.link) return entry.link.disposition === 'internal' ? INTERNAL : String(entry.link.company_id);
-    if (entry.suggestion) return entry.suggestion.disposition === 'internal' ? INTERNAL : String(entry.suggestion.company_id);
-    return '';
-  });
+  const [choice, setChoice] = useState(() => clientChoice(entry.link) || clientChoice(entry.suggestion));
+  // The name just saved, shown until the reloaded queue brings the link back.
+  const [savedLabel, setSavedLabel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function save(value: string) {
-    if (!value) { setError('Choose a Payroll client or Internal / overhead.'); return; }
+    if (!value) { setError('Choose a Payroll client, an invoice customer or Internal / overhead.'); return; }
     setBusy(true);
     setError(null);
+    const [kind, id] = value.split(':');
     try {
       await clientProfitabilityApi.linkClient(entry.tax_client_id, value === INTERNAL
         ? { disposition: 'internal', tax_client_name: entry.name }
-        : { disposition: 'company', company_id: Number(value), tax_client_name: entry.name });
+        : kind === 'recipient'
+          ? { disposition: 'recipient', invoice_recipient_id: Number(id), tax_client_name: entry.name }
+          : { disposition: 'company', company_id: Number(id), tax_client_name: entry.name });
+      setSavedLabel(clientChoiceLabel(value, data));
       setEditing(false);
       onSaved();
     } catch (saveError) {
@@ -52,7 +76,7 @@ function ClientCard({ entry, data, onSaved }: { entry: TaxClientEntry; data: Lin
     }
   }
 
-  const linkedTo = entry.link?.disposition === 'internal' ? 'Internal / overhead' : entry.link?.company_name;
+  const linkedTo = savedLabel ?? (entry.link ? linkLabel(entry.link) : '');
   return (
     <li className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -61,20 +85,26 @@ function ClientCard({ entry, data, onSaved }: { entry: TaxClientEntry; data: Lin
       </div>
       {!editing ? (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-neutral-800">
-            {entry.handled_automatically && !entry.link ? 'Counted as internal / overhead (Tax marks it as Cornerstone’s own time).' : <>Linked to <strong>{linkedTo}</strong></>}
+          <p role="status" className="text-sm text-neutral-800">
+            {entry.handled_automatically && !entry.link && !savedLabel
+              ? 'Counted as internal / overhead (Tax marks it as Cornerstone’s own time).'
+              : <>Linked to <strong>{linkedTo}</strong></>}
           </p>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setEditing(true)} disabled={busy} className="min-h-11 sm:min-h-11">Change</Button>
-            {entry.link && <Button variant="ghost" onClick={() => void unlink()} disabled={busy} className="min-h-11 sm:min-h-11"><Unlink className="mr-2 h-4 w-4" aria-hidden="true" />Unlink</Button>}
+            {(entry.link || savedLabel) && <Button variant="ghost" onClick={() => void unlink()} disabled={busy} className="min-h-11 sm:min-h-11"><Unlink className="mr-2 h-4 w-4" aria-hidden="true" />Unlink</Button>}
           </div>
         </div>
       ) : (
         <div className="mt-3 space-y-3">
           {entry.suggestion && !entry.link && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-primary-50 px-3 py-2">
-              <p className="text-sm text-primary-950">Suggested: <strong>{entry.suggestion.label}</strong> <span className="text-primary-800">({matchText(entry.suggestion.match)})</span></p>
-              <Button onClick={() => void save(entry.suggestion?.disposition === 'internal' ? INTERNAL : String(entry.suggestion?.company_id))} disabled={busy} className="min-h-11 sm:min-h-11">
+              <p className="text-sm text-primary-950">
+                Suggested: <strong>{entry.suggestion.label}</strong>
+                {entry.suggestion.disposition === 'recipient' && ' (invoice customer)'}{' '}
+                <span className="text-primary-800">({matchText(entry.suggestion.match)})</span>
+              </p>
+              <Button onClick={() => void save(clientChoice(entry.suggestion))} disabled={busy} className="min-h-11 sm:min-h-11">
                 Use suggestion
               </Button>
             </div>
@@ -83,10 +113,20 @@ function ClientCard({ entry, data, onSaved }: { entry: TaxClientEntry; data: Lin
             <SelectField label="Count these hours for" value={choice} onChange={(event) => setChoice(event.target.value)}>
               <option value="">Choose…</option>
               <option value={INTERNAL}>Internal / overhead (not a client)</option>
-              {data.companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+              {data.companies.length > 0 && (
+                <optgroup label="Payroll clients">
+                  {data.companies.map((company) => <option key={`company-${company.id}`} value={`company:${company.id}`}>{company.name}</option>)}
+                </optgroup>
+              )}
+              {data.recipients.length > 0 && (
+                <optgroup label="Invoice customers (no payroll)">
+                  {data.recipients.map((recipient) => <option key={`recipient-${recipient.id}`} value={`recipient:${recipient.id}`}>{recipient.name}</option>)}
+                </optgroup>
+              )}
             </SelectField>
             <Button variant="secondary" onClick={() => void save(choice)} disabled={busy} className="min-h-11 sm:min-h-11"><Link2 className="mr-2 h-4 w-4" aria-hidden="true" />Save link</Button>
           </div>
+          <p className="text-xs leading-5 text-neutral-600">Pick an invoice customer when the client is billed in Invoice Center but has no payroll with us; its invoice fees count on this row.</p>
         </div>
       )}
       {error && <p role="alert" className="mt-2 text-sm text-red-800">{error}</p>}
@@ -100,6 +140,8 @@ function StaffCard({ entry, data, onSaved }: { entry: TaxStaffEntry; data: LinkQ
     if (entry.link) return entry.link.disposition === 'no_payroll' ? NO_PAYROLL : String(entry.link.employee_id);
     return entry.suggestion?.employee_id ? String(entry.suggestion.employee_id) : '';
   });
+  // What was just saved, shown until the reloaded queue brings the link back.
+  const [saved, setSaved] = useState<{ noPayroll: boolean; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,6 +153,9 @@ function StaffCard({ entry, data, onSaved }: { entry: TaxStaffEntry; data: LinkQ
       await clientProfitabilityApi.linkStaff(entry.tax_user_id, value === NO_PAYROLL
         ? { disposition: 'no_payroll', email: entry.email }
         : { disposition: 'employee', employee_id: Number(value), email: entry.email });
+      setSaved(value === NO_PAYROLL
+        ? { noPayroll: true, name: '' }
+        : { noPayroll: false, name: data.employees.find((employee) => String(employee.id) === value)?.name ?? '' });
       setEditing(false);
       onSaved();
     } catch (saveError) {
@@ -133,17 +178,18 @@ function StaffCard({ entry, data, onSaved }: { entry: TaxStaffEntry; data: LinkQ
   }
 
   const name = entry.email ?? `Tax user #${entry.tax_user_id}`;
+  const shown = saved ?? (entry.link ? { noPayroll: entry.link.disposition === 'no_payroll', name: entry.link.employee_name ?? '' } : null);
   return (
     <li className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="break-all text-base font-semibold text-neutral-950">{name}</h3>
         <p className="text-sm text-neutral-600">{hours(entry.hours)} hours</p>
       </div>
-      {!editing && entry.link ? (
+      {!editing && shown ? (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-neutral-800">
-            {entry.link.disposition === 'no_payroll' ? 'Not on payroll: hours are shown with no cost.' : <>Paid as <strong>{entry.link.employee_name}</strong></>}
-            {!entry.link.in_practice_company && <span className="block text-amber-800">This employee isn’t in the staff payroll client chosen in Setup.</span>}
+          <p role="status" className="text-sm text-neutral-800">
+            {shown.noPayroll ? 'Not on payroll: hours are shown with no cost.' : <>Paid as <strong>{shown.name}</strong></>}
+            {entry.link && !entry.link.in_practice_company && <span className="block text-amber-800">This employee isn’t in the staff payroll client chosen in Setup.</span>}
           </p>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setEditing(true)} disabled={busy} className="min-h-11 sm:min-h-11">Change</Button>

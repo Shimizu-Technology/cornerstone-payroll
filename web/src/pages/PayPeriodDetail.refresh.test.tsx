@@ -2123,16 +2123,24 @@ it('clears staff email attestation when the reviewed revision changes', async ()
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  const reviewed = { ...initialPayPeriod, status: 'approved',
+    payroll_review: { id: 91, revision: 1, status: 'pending', published_at: '2026-11-17', acknowledgement: 'Exact revision' } } as PayPeriod;
   let controller: Extract<ReturnType<typeof usePayRunController>, { status: 'ready' }>['sections'];
   function AttestationHarness() {
-    const result = usePayRunController({ initialPayPeriod: { ...initialPayPeriod, status: 'approved',
-      payroll_review: { id: 91, revision: 1, status: 'pending', published_at: '2026-11-17', acknowledgement: 'Exact revision' } } as PayPeriod });
+    const result = usePayRunController({ initialPayPeriod: reviewed });
     if (result.status !== 'ready') return null;
     controller = result.sections;
     return <output>{controller.dialogs.clientApprovalConfirmed ? 'confirmed' : 'unconfirmed'}:{controller.dialogs.clientApprovalEvidence}</output>;
   }
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<AttestationHarness />} /></Routes></MemoryRouter>);
   await screen.findByText('unconfirmed:');
+  // The render that shows "unconfirmed:" is the one where the initial load
+  // sets the pay period (review id none -> 91). It also schedules the effect
+  // that clears the attestation for a new review. findByText can see that
+  // render before React has run the effect; the act() below then runs the
+  // pending effect after the confirmation, wiping it (CI run 44867811384).
+  // Flush pending effects before confirming.
+  await act(async () => {});
   act(() => { controller.dialogs.setClientApprovalOpen(true); controller.dialogs.setClientApprovalConfirmed(true); controller.dialogs.setClientApprovalEvidence('Email for revision 1'); });
   expect(screen.getByText('confirmed:Email for revision 1')).toBeTruthy();
   act(() => { controller.dialogs.setPayPeriod(current => current && { ...current, payroll_review: { ...current.payroll_review!, id: 92, revision: 2 } }); });
