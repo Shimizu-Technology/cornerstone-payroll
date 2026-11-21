@@ -802,7 +802,7 @@ export function ChecksPayments() {
               )}
               <Link
                 to="/check-settings"
-                className="inline-flex items-center rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm font-medium text-neutral-700 shadow-sm hover:bg-neutral-50"
+                className="inline-flex min-h-11 items-center rounded-xl border border-neutral-300 bg-white px-3.5 py-2 text-sm font-medium text-neutral-700 shadow-sm hover:bg-neutral-50 sm:min-h-10 sm:pointer-coarse:min-h-11"
               >
                 <Settings className="mr-1.5 h-4 w-4" /> Check Settings
               </Link>

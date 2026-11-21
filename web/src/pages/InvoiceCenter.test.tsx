@@ -157,6 +157,19 @@ describe('InvoiceCenter', () => {
     expect(within(dialog).getByRole('textbox', { name: 'Line 1 product or service' })).toHaveProperty('value', 'Bookkeeping');
     expect(within(dialog).getByRole('combobox', { name: 'Line 1 kind' })).toHaveProperty('value', 'reimbursement');
 
+    // In the five-column layout each label is a subgrid over one shared label row and one
+    // shared input row, so the inputs line up even when a narrow column wraps its label.
+    for (const field of [
+      within(dialog).getByRole('textbox', { name: 'Line 1 product or service' }),
+      within(dialog).getByRole('textbox', { name: 'Line 1 description' }),
+      within(dialog).getByRole('spinbutton', { name: 'Quantity' }),
+      within(dialog).getByRole('spinbutton', { name: 'Rate' }),
+    ]) {
+      const label = field.closest('label')!.className.split(/\s+/);
+      expect(label).toEqual(expect.arrayContaining(['@2xl:grid', '@2xl:grid-rows-subgrid', '@2xl:row-start-1']));
+    }
+    expect(within(dialog).getByRole('button', { name: 'Remove line 1' }).className.split(/\s+/)).toContain('@2xl:row-start-2');
+
     await user.click(within(dialog).getByRole('button', { name: 'Remove line 1' }));
     expect(within(dialog).queryByRole('textbox', { name: 'Line 1 product or service' })).toBeNull();
   });

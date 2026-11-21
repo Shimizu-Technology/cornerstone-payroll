@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
+import { ICON_CONTROL_SIZE } from '@/components/ui/field-styles';
 import {
   Table,
   TableBody,
@@ -207,7 +208,7 @@ export function Departments() {
               </Button>
               <Button
                 variant="ghost"
-                className="sm:h-10 sm:w-10 sm:px-0"
+                className="sm:h-10 sm:w-10 sm:px-0 sm:pointer-coarse:h-11 sm:pointer-coarse:w-11"
                 onClick={handleCancelAdd}
                 disabled={isSavingNew}
                 aria-label="Cancel adding department"
@@ -326,7 +327,7 @@ export function Departments() {
                             autoFocus
                           />
                           <Button
-                            className="h-10 w-10 px-0"
+                            className={ICON_CONTROL_SIZE}
                             onClick={handleSaveEdit}
                             disabled={isSavingEdit}
                             aria-label="Save department name"
@@ -335,7 +336,7 @@ export function Departments() {
                           </Button>
                           <Button
                             variant="ghost"
-                            className="h-10 w-10 px-0"
+                            className={ICON_CONTROL_SIZE}
                             onClick={handleCancelEdit}
                             disabled={isSavingEdit}
                             aria-label="Cancel editing department"
