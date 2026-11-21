@@ -131,3 +131,17 @@ it('saves a cleared order as 0 when the form is submitted with Enter', async () 
   fireEvent.submit(order.closest('form')!);
   await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/admin/payroll_standing_changes/11', { standing_change: { ...existing, position: 0 } }));
 });
+it('refuses a fractional order and a run count below the threshold', async () => {
+  const existing = { id: 11, kind: 'owner_pay', employee_id: 1, employee_wage_rate_id: null, position: 5, active: true };
+  mocks.get.mockResolvedValue({ ...fixture, defaults: [existing] });
+  render(<StandingChangesSettings />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit default for Monique Owner' }));
+  fireEvent.change(screen.getByLabelText('Order'), { target: { value: '1.5' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save default' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Order must be a whole number');
+  // Lowering the run count below the threshold is refused rather than silently changing the threshold.
+  fireEvent.change(screen.getByLabelText('Last regular runs'), { target: { value: '2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save missing-regular rule' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Use whole numbers'));
+  expect(mocks.patch).not.toHaveBeenCalled();
+});

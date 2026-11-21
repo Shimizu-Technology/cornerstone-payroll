@@ -36,6 +36,7 @@ export default function StandingChangesSettings() {
   }, [loadAttempt]);
   const save = async (row: DefaultRow) => {
     if (!canEdit || busy) return;
+    if (!Number.isInteger(row.position)) { setError('Order must be a whole number.'); return; }
     setBusy(true); setError(null); setSuccess(null);
     try {
       const result = row.id ? await api.patch<Settings>(`${root}/${row.id}`, { standing_change: row }) : await api.post<Settings>(root, { standing_change: row });
@@ -90,7 +91,7 @@ export default function StandingChangesSettings() {
               <option value="">Choose employee</option>{data.employees.filter(employee => employee.status === 'active' && (employee.variable_salary || (employee.hourly && employee.wage_rates.length > 0))).map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
             </Select>
             {draft.kind === 'extra_hours' && <Select label="Saved job and rate" value={draft.employee_wage_rate_id || ''} onChange={event => setDraft({ ...draft, employee_wage_rate_id: Number(event.target.value) || null })}><option value="">Choose saved job</option>{data.employees.find(employee => employee.id === draft.employee_id)?.wage_rates.map(rate => <option key={rate.id} value={rate.id}>{rate.label} · ${rate.rate}/hr</option>)}</Select>}
-            <label className="block space-y-1.5"><span className={FIELD_LABEL}>Order</span><NumericInput inputMode="numeric" min={0} value={draft.position} notifyEmptyOnChange onValueChange={position => setDraft({ ...draft, position: Math.trunc(position ?? 0) })} /></label>
+            <label className="block space-y-1.5"><span className={FIELD_LABEL}>Order</span><NumericInput inputMode="numeric" min={0} value={draft.position} notifyEmptyOnChange onValueChange={position => setDraft({ ...draft, position: position ?? 0 })} /></label>
           </fieldset>
           <div className="flex flex-wrap gap-2"><Button type="submit" disabled={!canEdit || busy || !draft.employee_id || (draft.kind === 'extra_hours' && !draft.employee_wage_rate_id)}>{busy ? 'Saving…' : 'Save default'}</Button>{draft.id && <Button type="button" variant="outline" onClick={() => setDraft(blank())}>Cancel edit</Button>}</div>
         </form>
