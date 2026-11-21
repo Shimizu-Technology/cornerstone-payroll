@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { CheckCircle2, CircleAlert, Clock3, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { clientProfitabilityApi, type ProfitabilityOverview, type WorkHourImportStatus } from '@/services/clientProfitability';
@@ -56,10 +56,13 @@ function ImportRow({ entry }: { entry: WorkHourImportStatus }) {
 interface SetupPanelProps {
   overview: ProfitabilityOverview;
   onChanged: (overview?: ProfitabilityOverview) => void;
-  onRefreshed: () => void;
+  /** The refresh the page is watching (it keeps watching on other tabs). */
+  activeImport: WorkHourImportStatus | null;
+  monitorError: string | null;
+  onStarted: (started: WorkHourImportStatus) => void;
 }
 
-export function SetupPanel({ overview, onChanged, onRefreshed }: SetupPanelProps) {
+export function SetupPanel({ overview, onChanged, activeImport, monitorError, onStarted }: SetupPanelProps) {
   const months = useMemo(() => recentMonths(new Date()), []);
   const [practiceCompanyId, setPracticeCompanyId] = useState(String(overview.settings.practice_company_id ?? ''));
   const [financeBookId, setFinanceBookId] = useState(String(overview.settings.finance_book_id ?? ''));
@@ -68,19 +71,9 @@ export function SetupPanel({ overview, onChanged, onRefreshed }: SetupPanelProps
   const [message, setMessage] = useState<{ tone: 'error' | 'success'; text: string } | null>(null);
   const [from, setFrom] = useState(months[1]);
   const [through, setThrough] = useState(months[0]);
-  const [refreshing, setRefreshing] = useState<WorkHourImportStatus | null>(null);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!refreshing || !['queued', 'running'].includes(refreshing.status)) return undefined;
-    const timer = window.setTimeout(() => {
-      void clientProfitabilityApi.importStatus(refreshing.id).then(({ import: next }) => {
-        setRefreshing(next);
-        if (next.status === 'succeeded' || next.status === 'failed') onRefreshed();
-      }).catch((error: unknown) => setRefreshError(error instanceof Error ? error.message : 'Couldn’t check the refresh.'));
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [refreshing, onRefreshed]);
+  const [startError, setStartError] = useState<string | null>(null);
+  const refreshing = activeImport;
+  const refreshError = startError ?? monitorError;
 
   const serviceNames = Array.from(new Set([...overview.options.service_names, ...taxPrep]));
 
@@ -103,12 +96,12 @@ export function SetupPanel({ overview, onChanged, onRefreshed }: SetupPanelProps
   }
 
   async function refresh() {
-    setRefreshError(null);
+    setStartError(null);
     try {
       const { import: started } = await clientProfitabilityApi.refresh(from <= through ? from : through, from <= through ? through : from);
-      setRefreshing(started);
+      onStarted(started);
     } catch (error) {
-      setRefreshError(error instanceof Error ? error.message : 'Couldn’t start the refresh.');
+      setStartError(error instanceof Error ? error.message : 'Couldn’t start the refresh.');
     }
   }
 

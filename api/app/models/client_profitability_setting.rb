@@ -20,6 +20,22 @@ class ClientProfitabilitySetting < ApplicationRecord
     find_or_initialize_by(organization: organization)
   end
 
+  # The practice company, but only while it still belongs to this
+  # organization (a company can be transferred to another organization).
+  # Every read of practice payroll or employees goes through this.
+  def effective_practice_company
+    practice_company if practice_company&.organization_id == organization_id
+  end
+
+  # When the practice company changes, employee links to the old company's
+  # staff would silently carry no cost; deactivate them so those people show
+  # as "needs linking" again. Call inside the settings save transaction.
+  def deactivate_stale_staff_links!
+    links = WorkHourStaffLink.active.where(organization_id: organization_id, disposition: "employee")
+    links = links.where.not(employee_id: Employee.where(company_id: practice_company_id).select(:id)) if practice_company_id
+    links.update_all(active: false, updated_at: Time.current)
+  end
+
   # The book whose invoices supply fees: the saved choice, otherwise the
   # organization's default (or only) shared book.
   def effective_finance_book

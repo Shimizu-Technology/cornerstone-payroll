@@ -38,7 +38,11 @@ RSpec.describe TaxWorkHours::Client do
 
   it "signs the full path when Tax is served under a path prefix" do
     prefixed = TaxWorkHours::Configuration.new(base_url: "https://tax.example.test/backend/", secret: secret)
-    stub_request(:get, "https://tax.example.test/backend/api/v1/payroll/work_hours?end=2026-11-29&start=2026-11-16")
+    path = "/backend/api/v1/payroll/work_hours"
+    expected = OpenSSL::HMAC.hexdigest("SHA256", secret, [ "GET", path, "end=2026-11-29&start=2026-11-16", "1795000000",
+                                                           OpenSSL::Digest::SHA256.hexdigest("") ].join("\n"))
+    stub_request(:get, "https://tax.example.test#{path}?end=2026-11-29&start=2026-11-16")
+      .with(headers: { "X-Work-Hours-Timestamp" => "1795000000", "X-Work-Hours-Signature" => expected })
       .to_return(status: 200, body: payload)
     result = described_class.new(configuration: prefixed, clock: -> { now })
                             .fetch(start_date: Date.new(2026, 11, 16), end_date: Date.new(2026, 11, 29))

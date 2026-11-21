@@ -33,8 +33,16 @@ class CreateClientProfitability < ActiveRecord::Migration[8.1]
       t.datetime :source_generated_at
       t.string :error_code
       t.text :error_message
+      # The worker currently allowed to run this import, and until when. A
+      # worker renews the lease while fetching; only the holder of claim_token
+      # may commit rows (TaxWorkHours::Importer).
+      t.string :claim_token
+      t.datetime :lease_expires_at
       t.timestamps
       t.index [ :organization_id, :created_at ]
+      # At most one queued or running import per organization, for manual and
+      # nightly refreshes alike (WorkHourImport.reserve!).
+      t.index :organization_id, unique: true, where: "status IN ('queued', 'running')", name: "index_work_hour_imports_one_active_per_organization"
       t.check_constraint "status IN ('queued', 'running', 'succeeded', 'failed')", name: "work_hour_import_status_valid"
       t.check_constraint "trigger IN ('manual', 'scheduled')", name: "work_hour_import_trigger_valid"
       t.check_constraint "range_end >= range_start", name: "work_hour_import_range_order"
@@ -74,6 +82,7 @@ class CreateClientProfitability < ActiveRecord::Migration[8.1]
       t.string :tax_client_name
       t.string :disposition, null: false
       t.references :company, foreign_key: { on_delete: :cascade }
+      t.boolean :active, null: false, default: true
       t.references :linked_by, foreign_key: { to_table: :users }
       t.timestamps
       t.index [ :organization_id, :tax_client_id ], unique: true
@@ -87,6 +96,7 @@ class CreateClientProfitability < ActiveRecord::Migration[8.1]
       t.string :email
       t.string :disposition, null: false
       t.references :employee, foreign_key: { on_delete: :cascade }
+      t.boolean :active, null: false, default: true
       t.references :linked_by, foreign_key: { to_table: :users }
       t.timestamps
       t.index [ :organization_id, :tax_user_id ], unique: true

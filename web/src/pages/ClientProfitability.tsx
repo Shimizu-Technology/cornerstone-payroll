@@ -5,9 +5,15 @@ import { LinkQueue } from '@/components/client-profitability/LinkQueue';
 import { ReportView } from '@/components/client-profitability/ReportView';
 import { ConnectionSteps, SetupPanel } from '@/components/client-profitability/SetupPanel';
 import { cn } from '@/lib/utils';
-import { clientProfitabilityApi, type ProfitabilityOverview } from '@/services/clientProfitability';
+import { clientProfitabilityApi, type ProfitabilityOverview, type WorkHourImportStatus } from '@/services/clientProfitability';
 
 type Tab = 'report' | 'link' | 'setup';
+const POLL_MS = 1500;
+const MAX_POLL_FAILURES = 5;
+
+function inProgress(entry: WorkHourImportStatus | null | undefined): boolean {
+  return entry !== null && entry !== undefined && (entry.status === 'queued' || entry.status === 'running');
+}
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'report', label: 'Report' },
   { id: 'link', label: 'Link clients & staff' },
@@ -34,6 +40,41 @@ export function ClientProfitability() {
   useEffect(loadOverview, [loadOverview]);
 
   const refreshAll = useCallback(() => { loadOverview(); setReloadKey((key) => key + 1); }, [loadOverview]);
+
+  // The page, not the Setup section, watches a running refresh, so it keeps
+  // going when someone opens another section and the report reloads when it
+  // ends. A refresh already running on the server (started earlier, or by the
+  // nightly job) is picked up from the overview.
+  const [watched, setWatched] = useState<WorkHourImportStatus | null>(null);
+  const [pollFailures, setPollFailures] = useState(0);
+  const [monitorError, setMonitorError] = useState<string | null>(null);
+  const serverActive = overview?.imports.find((entry) => inProgress(entry)) ?? null;
+  const activeImport: WorkHourImportStatus | null = watched && inProgress(watched) ? watched : serverActive && serverActive.id !== watched?.id ? serverActive : null;
+  const startWatching = useCallback((started: WorkHourImportStatus) => {
+    setWatched(started);
+    setPollFailures(0);
+    setMonitorError(null);
+  }, []);
+  useEffect(() => {
+    if (!activeImport || pollFailures >= MAX_POLL_FAILURES) return undefined;
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void clientProfitabilityApi.importStatus(activeImport.id).then(({ import: next }) => {
+        if (!current) return;
+        setPollFailures(0);
+        setMonitorError(null);
+        setWatched(next);
+        if (!inProgress(next)) refreshAll();
+      }).catch(() => {
+        if (!current) return;
+        setPollFailures((count) => count + 1);
+        setMonitorError(pollFailures + 1 >= MAX_POLL_FAILURES
+          ? 'Couldn’t check on the refresh. Reload the page to see how it finished.'
+          : 'Couldn’t check on the refresh. Trying again…');
+      });
+    }, POLL_MS * (pollFailures + 1));
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [activeImport, pollFailures, refreshAll]);
   const settingsChanged = useCallback((updated?: ProfitabilityOverview) => {
     if (updated) setOverview(updated); else loadOverview();
     setReloadKey((key) => key + 1);
@@ -68,7 +109,10 @@ export function ClientProfitability() {
               ? <ReportView reloadKey={reloadKey} onGoTo={goTo} />
               : <p className="rounded-2xl border border-neutral-200 bg-white p-6 text-sm leading-6 text-neutral-700">The report fills in once Cornerstone Tax is connected and hours have been refreshed. Follow the steps above, then open Setup.</p>)}
             {tab === 'link' && <LinkQueue onChanged={refreshAll} />}
-            {tab === 'setup' && <SetupPanel overview={overview} onChanged={settingsChanged} onRefreshed={refreshAll} />}
+            {tab === 'setup' && (
+              <SetupPanel overview={overview} onChanged={settingsChanged} activeImport={activeImport} monitorError={monitorError}
+                onStarted={startWatching} />
+            )}
           </>
         )}
       </main>

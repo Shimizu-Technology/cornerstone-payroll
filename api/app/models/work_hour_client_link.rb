@@ -10,6 +10,10 @@ class WorkHourClientLink < ApplicationRecord
   belongs_to :company, optional: true
   belongs_to :linked_by, class_name: "User", optional: true
 
+  # Unlinking deactivates the row (keeping who linked it and when);
+  # relinking reactivates the same row.
+  scope :active, -> { where(active: true) }
+
   validates :tax_client_id, presence: true, uniqueness: { scope: :organization_id }
   validates :disposition, inclusion: { in: DISPOSITIONS }
   validate :company_matches_disposition

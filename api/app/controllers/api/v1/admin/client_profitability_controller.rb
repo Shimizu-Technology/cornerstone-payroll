@@ -9,15 +9,24 @@ module Api
       class ClientProfitabilityController < BaseController
         BOOLEAN = ActiveModel::Type::Boolean.new
 
-        before_action :require_organization!
+        before_action :resolve_profitability_organization!
 
         def show
           render json: overview
         end
 
         def update_settings
-          settings.assign_attributes(settings_params.merge(updated_by: current_user))
-          if settings.save
+          saved = ClientProfitabilitySetting.transaction do
+            settings.assign_attributes(settings_params.merge(updated_by: current_user))
+            company_changed = settings.practice_company_id_changed?
+            next false unless settings.save
+
+            # Links to the old staff payroll client's employees would carry no
+            # cost; they go back to "needs linking".
+            settings.deactivate_stale_staff_links! if company_changed
+            true
+          end
+          if saved
             render json: overview
           else
             render json: { error: settings.errors.full_messages.to_sentence }, status: :unprocessable_entity
@@ -36,21 +45,27 @@ module Api
             return render json: { error: "Choose months that have already started." }, status: :unprocessable_entity
           end
 
-          import = WorkHourImport.transaction do
-            current_organization.lock!
-            if WorkHourImport.in_progress.exists?(organization_id: current_organization.id)
-              nil
-            else
-              WorkHourImport.create!(organization: current_organization, requested_by: current_user, trigger: "manual",
-                                     range_start: period.start_date, range_end: [ period.end_date, today ].min)
-            end
+          import = WorkHourImport.reserve!(organization: current_organization, requested_by: current_user, trigger: "manual",
+                                           range_start: period.start_date, range_end: [ period.end_date, today ].min)
+          enqueued = begin
+            TaxWorkHoursImportJob.perform_later(import.id)
+          rescue StandardError => e
+            Rails.logger.error("[TaxWorkHours] could not enqueue import #{import.id}: #{e.class}")
+            false
           end
-          unless import
-            return render json: { error: "A refresh is already running. Wait for it to finish.", code: "in_progress" }, status: :conflict
+          unless enqueued
+            # Release the reservation so the next refresh isn't blocked.
+            WorkHourImport.where(id: import.id, status: "queued")
+                          .update_all(status: "failed", finished_at: Time.current, lease_expires_at: nil, error_code: "not_queued",
+                                      error_message: "Payroll couldn't start the refresh. Nothing was changed. Try again in a minute.",
+                                      updated_at: Time.current)
+            import.reload
+            return render json: { error: import.error_message, code: "not_queued", import: import.as_status_json }, status: :service_unavailable
           end
 
-          TaxWorkHoursImportJob.perform_later(import.id)
           render json: { import: import.as_status_json }, status: :accepted
+        rescue WorkHourImport::Busy => e
+          render json: { error: e.message, code: "in_progress" }, status: :conflict
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
@@ -70,13 +85,14 @@ module Api
           link = WorkHourClientLink.find_or_initialize_by(organization: current_organization, tax_client_id: tax_id(:tax_client_id))
           disposition = params[:disposition].to_s
           company = disposition == "company" ? Company.find_by(id: params[:company_id], organization_id: current_organization.id) : nil
-          link.assign_attributes(disposition: disposition, company: company, linked_by: current_user,
+          link.assign_attributes(active: true, disposition: disposition, company: company, linked_by: current_user,
                                  tax_client_name: params[:tax_client_name].to_s.strip.presence || link.tax_client_name)
           save_link(link)
         end
 
         def unlink_client
-          WorkHourClientLink.where(organization: current_organization, tax_client_id: tax_id(:tax_client_id)).delete_all
+          WorkHourClientLink.active.where(organization: current_organization, tax_client_id: tax_id(:tax_client_id))
+                            .update_all(active: false, linked_by_id: current_user.id, updated_at: Time.current)
           head :no_content
         end
 
@@ -85,20 +101,22 @@ module Api
           disposition = params[:disposition].to_s
           employee = nil
           if disposition == "employee"
-            unless settings.practice_company_id
-              return render json: { error: "Choose the practice company first." }, status: :unprocessable_entity
+            practice = settings.effective_practice_company
+            unless practice
+              return render json: { error: "Choose the client that runs Cornerstone's own staff payroll first." }, status: :unprocessable_entity
             end
 
-            employee = Employee.find_by(id: params[:employee_id], company_id: settings.practice_company_id)
-            return render json: { error: "Choose an employee of #{settings.practice_company.name}." }, status: :unprocessable_entity unless employee
+            employee = Employee.find_by(id: params[:employee_id], company_id: practice.id)
+            return render json: { error: "Choose an employee of #{practice.name}." }, status: :unprocessable_entity unless employee
           end
-          link.assign_attributes(disposition: disposition, employee: employee, linked_by: current_user,
+          link.assign_attributes(active: true, disposition: disposition, employee: employee, linked_by: current_user,
                                  email: params[:email].to_s.strip.downcase.presence || link.email)
           save_link(link)
         end
 
         def unlink_staff
-          WorkHourStaffLink.where(organization: current_organization, tax_user_id: tax_id(:tax_user_id)).delete_all
+          WorkHourStaffLink.active.where(organization: current_organization, tax_user_id: tax_id(:tax_user_id))
+                           .update_all(active: false, linked_by_id: current_user.id, updated_at: Time.current)
           head :no_content
         end
 
@@ -117,8 +135,33 @@ module Api
 
         private
 
-        def require_organization!
-          render json: { error: "Select an organization" }, status: :unprocessable_entity unless current_organization
+        # The organization chosen in the switcher, sent as X-Organization-Id
+        # and validated like the finance controllers do: a super admin may
+        # name any organization (and must name one), everyone else only their
+        # own. This controller is not a finance request, so the selected
+        # financial book header is ignored and the saved book is used.
+        def resolve_profitability_organization!
+          raw = request.headers["X-Organization-Id"].presence
+          if raw.nil?
+            return render json: { error: "Select an organization" }, status: :unprocessable_entity if current_user.super_admin?
+
+            @profitability_organization = current_user.organization
+          else
+            return render json: { error: "Invalid organization context" }, status: :unprocessable_entity unless raw.to_s.match?(/\A[1-9]\d*\z/)
+
+            organization = Organization.find_by(id: raw.to_i)
+            return render json: { error: "Organization not found" }, status: :not_found unless organization
+            unless current_user.super_admin? || organization.id == current_user.organization_id
+              return render json: { error: "You do not have access to this organization" }, status: :forbidden
+            end
+
+            @profitability_organization = organization
+          end
+          render json: { error: "Select an organization" }, status: :unprocessable_entity unless @profitability_organization
+        end
+
+        def current_organization
+          @profitability_organization
         end
 
         def settings

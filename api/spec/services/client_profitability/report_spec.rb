@@ -148,6 +148,32 @@ RSpec.describe ClientProfitability::Report do
     expect(entry).to include(reason: "no_hours", cost: "2153.00")
   end
 
+  it "counts an employee's cost once when two Tax identities point at them" do
+    WorkHourStaffLink.create!(organization: organization, tax_user_id: 16, disposition: "employee", employee: mark)
+    hours(16, 4, client_id: 346)
+    result = report
+    marks = result[:staff].select { |person| person[:name] == "Mark Santos" }
+    expect(marks.length).to eq(1)
+    expect(marks.first).to include(cost: "3229.50", hours: "14.00", tax_user_ids: [ 12, 16 ])
+    expect(result[:totals]).to include(cost: "6459.00")
+  end
+
+  it "stops reading a practice company that was moved to another organization" do
+    other = create(:organization)
+    practice.update_columns(organization_id: other.id)
+    result = report
+    expect(result[:practice_company]).to be_nil
+    expect(result[:totals]).to include(cost: "0.00")
+    expect(ClientProfitability::LinkQueue.new(organization: organization, settings: settings.reload).practice_employees).to eq([])
+  end
+
+  it "ignores unlinked (inactive) links" do
+    WorkHourClientLink.find_by(tax_client_id: 345).update!(active: false)
+    result = report
+    expect(client(result, "Acme Bakery")).to include(hours: "0.00", fees: "1500.00")
+    expect(result[:unassigned].map { |line| line[:name] }).to include("Tax client 345")
+  end
+
   it "shows a client with fees but no hours" do
     WorkHourRow.where(tax_client_id: 346).delete_all
     expect(client(report, "Beta Builders")).to include(hours: "0.00", cost: "0.00", fees: "800.00", margin: "800.00", effective_rate: nil)
@@ -186,5 +212,20 @@ RSpec.describe InvoiceServiceFeeRevenue do
     split = described_class.call(finance_book: invoice.finance_book, tax_prep_service_names: [ "Tax Preparation" ])
     expect(split.first).to include(amount: BigDecimal("900"), tax_prep_amount: BigDecimal("360"))
     expect(described_class.call(finance_book: invoice.finance_book, tax_prep_service_names: []).first[:tax_prep_amount]).to eq(0)
+  end
+end
+
+RSpec.describe WorkHourStaffLink do
+  it "only links employees of the organization's current staff payroll client" do
+    practice = create(:company)
+    other = create(:company, organization: practice.organization)
+    ClientProfitabilitySetting.create!(organization: practice.organization, practice_company: practice)
+    inside = described_class.new(organization: practice.organization, tax_user_id: 1, disposition: "employee",
+                                 employee: create(:employee, company: practice))
+    outside = described_class.new(organization: practice.organization, tax_user_id: 2, disposition: "employee",
+                                  employee: create(:employee, company: other))
+    expect(inside).to be_valid
+    expect(outside).not_to be_valid
+    expect(outside.errors[:employee].join).to match(/staff payroll/)
   end
 end

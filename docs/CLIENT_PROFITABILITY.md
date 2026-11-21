@@ -10,6 +10,8 @@ Tax never receives pay data, and Payroll only reads from Tax.
 
 Only organization admins and super admins can open it (capability `view_client_profitability`). Managers and accountants can't, because the report shows what each staff member costs.
 
+**Organization.** Every request works on the organization chosen in the switcher. The web app sends it as `X-Organization-Id`. The server checks it the same way the finance controllers do: an org admin may only name their own organization, and a super admin must name one. The financial-book header is ignored here, so the report always uses the book saved in Setup.
+
 ## Setup
 
 1. **Shared secret.** Generate one long random value, for example `openssl rand -hex 32`. Set it as `PAYROLL_WORK_HOURS_SECRET` on **both** the Tax server and the Payroll API server. It is separate from the time summary's `PAYROLL_SHARED_SECRET`; don't reuse one for the other. Payroll never stores the secret in its database or sends it in a request.
@@ -23,8 +25,15 @@ Until both environment variables are set, the page shows a "not connected" panel
 
 ## Pulling hours
 
-- **Refresh hours from Tax** (Setup) queues `TaxWorkHoursImportJob` for whole months, up to 24 months back and never past today. Only one refresh runs at a time per organization. A queued or running refresh older than 15 minutes counts as abandoned.
+- **Refresh hours from Tax** (Setup) queues `TaxWorkHoursImportJob` for whole months, up to 24 months back and never past today. If the job can't be queued, the refresh is marked failed straight away and the page says to try again.
 - **Nightly**, `TaxWorkHoursNightlyRefreshJob` (`config/recurring.yml`, 2am) refreshes last month through today for each organization that has chosen its staff payroll client.
+- **One refresh at a time.**
+  - Manual and nightly refreshes both start through `WorkHourImport.reserve!`, under the organization row lock.
+  - A partial unique index allows only one queued or running import per organization.
+  - A worker claims an import (`claim!`) and renews a 5-minute lease after each month.
+  - If a worker dies, the next job retry waits out the lease, then takes the import over. A queued import that no worker picks up within 15 minutes, or a running one past its lease, is marked "interrupted" when the next refresh starts.
+  - Rows are replaced only while the worker still holds its claim, checked under a row lock inside the replacement transaction. A slow worker that lost its claim can't overwrite newer hours.
+- The Setup section isn't the only place that watches a refresh. The page keeps watching it from any section, picks up one already running on the server (for example the nightly job), and reloads the report when it ends.
 - The feed allows at most 62 days per request and doesn't paginate, so Payroll asks for one calendar month at a time.
 - **Signing** (`TaxWorkHours::Signer`) follows the contract exactly. The string to sign is `METHOD\npath\ncanonical query\ntimestamp\nsha256(body)`; the signature is hex HMAC-SHA256 of it, sent with `X-Work-Hours-Timestamp` and `X-Work-Hours-Signature`. Each query key is sent once. `spec/services/tax_work_hours/signer_spec.rb` pins the doc example's signature, computed with Tax's own code.
 - **Timeouts and retries.** Connecting times out after 5 seconds and reading after 30. Timeouts, refused connections and HTTP 429/500/502/504 are retried twice, after 0.5 and then 1 second. A 401 (wrong secret or clock skew beyond ±5 minutes), 503 (secret not set on Tax), 422, or an unreadable payload is not retried. The refresh records a plain-language reason that never includes the secret.
@@ -35,24 +44,29 @@ Until both environment variables are set, the page shows a "not connected" panel
 
 - **Tax client → Payroll client.** Fees are keyed by the payroll client (`companies`) that an invoice is explicitly linked to, so each Tax client is linked to a company (`work_hour_client_links`) or marked **Internal / overhead**. Tax's own internal client (`system_kind: "internal"`) counts as overhead automatically. Suggestions compare names after removing punctuation and words like Inc, LLC and Corp. An exact match is marked "same name"; otherwise the best match sharing at least half its words is marked "similar name". Every suggestion must be confirmed.
 - **Tax user → employee.** Each Tax user is linked to an employee of the staff payroll client, or marked **Not on payroll**, for an owner paid by draw. Their hours are then shown with no cost. The suggestion is an exact email match, or a unique first-name match with the start of the email.
-- Links are saved, editable and reused for every period. Anything not linked stays visible: hours for an unlinked Tax client show under **Not tied to a client → Not linked yet**, hours with no client in Tax show as **No client chosen in Tax**, and an unlinked person's hours show with no cost.
+- Links are saved, editable and reused for every period. **Unlink** keeps the row (marked inactive, with who changed it); linking again reactivates it.
+- Changing the staff payroll client sends people linked to the old client's employees back to "needs linking". An employee link must always point at the current staff payroll client.
+- If a client or the staff payroll client is moved to another organization, this organization's report stops reading it.
+- Anything not linked stays visible: hours for an unlinked Tax client show under **Not tied to a client → Not linked yet**, hours with no client in Tax show as **No client chosen in Tax**, and an unlinked person's hours show with no cost.
 
 ## How the numbers are calculated
 
 **Period.** One month, one quarter, or a custom range of whole months (up to 24). Hours count by **work date**, staff pay by **pay date**, and fees by **service month**.
 
-**Cost per person.** Each paycheck in the staff payroll client whose pay date falls in the period counts at the same total as the Annual Payroll Summary's "Total payroll cost":
+**Cost per person.** Total cost always equals the Annual Payroll Summary's **Total payroll cost** for the staff payroll client and the same pay dates. The report doesn't re-derive it; it asks that service (`AnnualPayrollSummary#payroll_cost_by_employee`, using the same sources as `#period_row`). That total includes:
 - gross pay
 - non-taxable pay
 - the employer's Social Security and Medicare
 - employer contributions, such as retirement match and employer benefit items
+- imported QuickBooks or prior-provider paychecks linked to an employee, and imported adjustments, from locked batches
 
-Imported QuickBooks or prior-provider paychecks in a locked import batch are included. Voided runs, reversed paychecks and legacy-disposition items are excluded, as in the existing reports.
+Voided runs, reversed paychecks and legacy-disposition items are excluded, as in the existing reports.
 
-**Allocation.** Each person's cost is split across every place they logged hours in the period, in proportion to approved hours: clients, overhead, unlinked Tax clients and "no client". Tax's `clock` hours count as approved. Splits are to the cent, and the parts always add back to the person's cost. Pay with nowhere to go appears under **Pay not matched to hours** and still counts in the total cost. That covers:
+**Imported pay not linked to an employee** is left out of the Annual Payroll Summary's total, so it is left out here too. It is shown on its own line, "Imported pay not linked to an employee", and is never in a total or on a client. Link the worker in Data Migration to count it. `spec/services/client_profitability/reconciliation_spec.rb` checks that the two reports agree.
+
+**Allocation.** Each person's cost is split across every place they logged hours in the period, in proportion to approved hours: clients, overhead, unlinked Tax clients and "no client". Tax's `clock` hours count as approved. If one employee has several Tax identities, their hours are pooled and their cost is split once; the staff table shows them on one row. Splits are to the cent, and the parts always add back to the person's cost. Pay with nowhere to go appears under **Pay not matched to hours** and still counts in the total cost. That covers:
 - a person with no hours in the period
 - an employee not linked to any Tax user
-- imported paychecks not linked to an employee
 
 **Pending hours.** Hours still waiting for approval in Tax are always shown and are costed only when **Count pending hours in cost** is on.
 

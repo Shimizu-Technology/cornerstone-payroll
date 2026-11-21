@@ -93,6 +93,24 @@ describe('ApiClient company identity', (): void => {
     expect(new Headers(fetchMock.mock.calls[1][1]?.headers).has('X-Organization-Id')).toBe(false);
   });
 
+  it('sends the selected organization, but not the finance book, for client profitability', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    apiClient.setActiveOrganizationId(2);
+    apiClient.setActiveFinanceBookId(9);
+    await apiClient.get('/admin/client_profitability/report', undefined, { companyId: null });
+    await apiClient.getBlobWithParams('/admin/client_profitability/export', undefined, { companyId: null });
+    await apiClient.put('/admin/client_profitability/client_links/1', { disposition: 'internal' }, { companyId: null });
+
+    for (const call of fetchMock.mock.calls) {
+      const headers = new Headers(call[1]?.headers);
+      expect(headers.get('X-Organization-Id')).toBe('2');
+      expect(headers.has('X-Finance-Book-Id')).toBe(false);
+      expect(headers.has('X-Company-Id')).toBe(false);
+    }
+  });
+
   it('sends the selected book on finance JSON, upload, and download requests', async (): Promise<void> => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));

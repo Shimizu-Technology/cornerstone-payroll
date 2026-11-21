@@ -20,8 +20,8 @@ module ClientProfitability
     end
 
     def practice_employees
-      @practice_employees ||= if @settings.practice_company
-        Employee.where(company_id: @settings.practice_company_id).order(:last_name, :first_name).to_a
+      @practice_employees ||= if (company = @settings.effective_practice_company)
+        Employee.where(company_id: company.id).order(:last_name, :first_name).to_a
       else
         []
       end
@@ -34,7 +34,9 @@ module ClientProfitability
     end
 
     def clients
-      links = WorkHourClientLink.where(organization_id: @organization.id).index_by(&:tax_client_id)
+      links = WorkHourClientLink.active.where(organization_id: @organization.id)
+                                .where("company_id IS NULL OR company_id IN (?)", Company.where(organization_id: @organization.id).select(:id))
+                                .index_by(&:tax_client_id)
       stats = rows.where(unassigned: false).where.not(tax_client_id: nil).group(:tax_client_id)
                   .pluck(:tax_client_id, Arel.sql("SUM(hours)"), Arel.sql("MAX(work_date)"), Arel.sql("BOOL_OR(system_kind = 'internal')"))
       names = latest_names
@@ -79,7 +81,10 @@ module ClientProfitability
     end
 
     def staff
-      links = WorkHourStaffLink.where(organization_id: @organization.id).includes(:employee).index_by(&:tax_user_id)
+      practice_id = @settings.effective_practice_company&.id
+      links = WorkHourStaffLink.active.where(organization_id: @organization.id).includes(:employee)
+                               .select { |link| link.disposition == "no_payroll" || link.employee&.company_id == practice_id }
+                               .index_by(&:tax_user_id)
       stats = rows.group(:tax_user_id).pluck(:tax_user_id, Arel.sql("SUM(hours)"), Arel.sql("MAX(email)"))
       ids = (stats.map(&:first) + links.keys).uniq
 
@@ -92,7 +97,7 @@ module ClientProfitability
           email: email,
           hours: format("%.2f", hours.to_d),
           link: link && { disposition: link.disposition, employee_id: link.employee_id, employee_name: link.employee&.full_name,
-                          in_practice_company: link.employee.nil? || link.employee.company_id == @settings.practice_company_id },
+                          in_practice_company: true },
           suggestion: link ? nil : staff_suggestion(email)
         }
       end.sort_by { |person| [ person[:link] ? 1 : 0, person[:email].to_s ] }

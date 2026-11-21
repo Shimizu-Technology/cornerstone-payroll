@@ -55,16 +55,31 @@ class AnnualPayrollSummary
     }
   end
 
-  private
+  # total_payroll_cost for a pay-date range, split by employee, using exactly
+  # the sources period_row counts: native paychecks, locked imported paychecks
+  # linked to an employee, and every locked imported adjustment. Adjustments
+  # whose imported paycheck has no employee are under by_employee[nil].
+  # Imported paychecks not linked to an employee are left out of the total,
+  # as in period_row's excluded_unlinked_*, and reported in :excluded_unlinked.
+  def payroll_cost_by_employee(period)
+    costs = Hash.new { |hash, key| hash[key] = { pay: 0.to_d, employer_taxes: 0.to_d, employer_contributions: 0.to_d, total: 0.to_d } }
+    native_items_for(period).each do |item|
+      cost = native_item_cost(item)
+      add_cost(costs[item.employee_id], cost[:gross_pay] + cost[:non_taxable_pay], cost[:employer_taxes], cost[:employer_contributions], cost[:total])
+    end
+    unified = UnifiedPayrollReporting.new(company_id: company.id, period: period)
+    unified.historical_paychecks.each { |row| add_historical_cost(costs[row.employee_id], row) }
+    unified.historical_adjustments.each { |row| add_historical_cost(costs[row.historical_paycheck.employee_id], row) }
+    unlinked = unified.unlinked_historical_paychecks
+    {
+      by_employee: costs,
+      total_payroll_cost: costs.values.sum(0.to_d) { |cost| cost[:total] },
+      excluded_unlinked: { paycheck_count: unlinked.length, total_payroll_cost: sum(unlinked, :total_payroll_cost) }
+    }
+  end
 
-  attr_reader :company
-
-  def row_for(year)
-    period = PayrollReportingPeriod.new(
-      start_date: Date.new(year, 1, 1),
-      end_date: Date.new(year, 12, 31),
-      year: year
-    )
+  # The same summary row as a year's, for any pay-date range.
+  def period_row(period)
     native_items = native_items_for(period).to_a
     unified = UnifiedPayrollReporting.new(company_id: company.id, period: period)
     imported_paychecks = unified.historical_paychecks
@@ -74,7 +89,6 @@ class AnnualPayrollSummary
     imported = unified.historical_financial_totals(imported_paychecks, adjustments)
 
     {
-      year: year,
       payroll_count: native_items.map(&:pay_period_id).uniq.length + regular_historical_period_count(imported_paychecks),
       paycheck_count: native_items.length + regular_historical_paycheck_count(imported_paychecks),
       employee_count: (native_items.map(&:employee_id) + imported_paychecks.map(&:employee_id)).compact.uniq.length,
@@ -90,6 +104,30 @@ class AnnualPayrollSummary
       excluded_unlinked_net_pay: money(sum(unlinked, :net_pay)),
       **TOTAL_FIELDS.index_with { |field| field == :hours ? number(native[field] + imported[field], 4) : money(native[field] + imported[field]) }
     }
+  end
+
+  private
+
+  def add_historical_cost(entry, row)
+    add_cost(entry, row.gross_pay.to_d, row.employer_taxes.to_d, row.employer_contributions.to_d, row.total_payroll_cost.to_d)
+  end
+
+  def add_cost(entry, pay, employer_taxes, employer_contributions, total)
+    entry[:pay] += pay
+    entry[:employer_taxes] += employer_taxes
+    entry[:employer_contributions] += employer_contributions
+    entry[:total] += total
+  end
+
+  attr_reader :company
+
+  def row_for(year)
+    period = PayrollReportingPeriod.new(
+      start_date: Date.new(year, 1, 1),
+      end_date: Date.new(year, 12, 31),
+      year: year
+    )
+    { year: year }.merge(period_row(period))
   end
 
   def available_years

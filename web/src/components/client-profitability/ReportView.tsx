@@ -207,7 +207,7 @@ function LineGroup(props: { lines: ProfitabilityLine[]; caption: string; expande
 const REASONS: Record<string, string> = {
   not_linked: 'Not linked to anyone in Tax, so their pay can’t be matched to hours.',
   no_hours: 'No hours logged in Tax for this period.',
-  unlinked_paychecks: 'Imported paychecks that aren’t linked to an employee.',
+  unlinked_adjustments: 'Corrections to imported paychecks whose employee isn’t linked.',
 };
 
 function HowCalculated({ report }: { report: ProfitabilityReport }) {
@@ -216,7 +216,7 @@ function HowCalculated({ report }: { report: ProfitabilityReport }) {
       <summary className="flex min-h-11 cursor-pointer items-center text-base font-semibold text-neutral-950">How this is calculated</summary>
       <div className="mt-3 space-y-3 text-sm leading-6 text-neutral-700">
         <p><strong>Fees</strong> are issued invoices (not drafts or voids) linked to each client, by service month, without reimbursements. Discounts are spread across the lines. Payments and credits don’t change them.</p>
-        <p><strong>Cost</strong> starts with each staff member’s paychecks paid in this period{report.practice_company ? ` in ${report.practice_company.name}` : ''}: gross pay, non-taxable pay, the employer’s Social Security and Medicare, and employer contributions such as retirement match. That total is split across the clients they logged hours to in Cornerstone Tax, in proportion to their approved hours.</p>
+        <p><strong>Cost</strong> is the same “total payroll cost” the Annual Payroll Summary shows for{report.practice_company ? ` ${report.practice_company.name}` : ' the staff payroll client'} and these pay dates: gross pay, non-taxable pay, the employer’s Social Security and Medicare, and employer contributions such as retirement match, including imported QuickBooks paychecks. Each person’s share is split across the clients they logged hours to in Cornerstone Tax, in proportion to their approved hours. Imported paychecks that aren’t linked to an employee are left out of the totals, as in that summary, and listed on their own.</p>
         <p><strong>Pending hours</strong> (not yet approved in Tax) are shown but only get cost when “Count pending hours” is on. <strong>Internal / overhead</strong> is time on Cornerstone’s own work; it gets its share of cost and stays on its own line unless you spread it across clients by hours.</p>
         <p><strong>Margin</strong> is fees minus cost. <strong>Fees per hour</strong> is fees divided by hours. Pay is matched by pay date and hours by work date, so a month can look uneven when a paycheck covers work from the month before; quarters smooth that out.</p>
       </div>
@@ -229,7 +229,7 @@ function HowCalculated({ report }: { report: ProfitabilityReport }) {
             </thead>
             <tbody className="divide-y divide-neutral-100">
               {report.staff.map((person) => (
-                <tr key={person.tax_user_id}>
+                <tr key={person.key}>
                   <th scope="row" className="py-2 pr-3 text-left font-medium text-neutral-900">{person.name}
                     {person.status !== 'employee' && <span className="block text-xs font-normal text-neutral-600">{person.status === 'no_payroll' ? 'Not on payroll' : 'Not linked yet'}</span>}
                   </th>
@@ -258,7 +258,10 @@ export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (
   const [period, setPeriod] = useState(defaultPeriod);
   const [costPending, setCostPending] = useState(false);
   const [spreadOverhead, setSpreadOverhead] = useState(false);
-  const [report, setReport] = useState<ProfitabilityReport | null>(null);
+  // The report on screen and the exact options that produced it: labels and
+  // the CSV always describe what is shown, not options still loading.
+  const [shown, setShown] = useState<{ report: ProfitabilityReport; query: ReportQuery } | null>(null);
+  const report = shown?.report ?? null;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -269,8 +272,12 @@ export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (
     let current = true;
     setLoading(true);
     setError(null);
-    void clientProfitabilityApi.report(query).then((data) => { if (current) setReport(data); })
-      .catch((loadError: unknown) => { if (current) setError(loadError instanceof Error ? loadError.message : 'Couldn’t load the report.'); })
+    void clientProfitabilityApi.report(query).then((data) => { if (current) setShown({ report: data, query }); })
+      .catch((loadError: unknown) => {
+        if (!current) return;
+        setShown(null);
+        setError(loadError instanceof Error ? loadError.message : 'Couldn’t load the report.');
+      })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
   }, [query, reloadKey]);
@@ -284,10 +291,11 @@ export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (
   }
 
   async function download() {
+    if (!shown) return;
     setDownloading(true);
     try {
-      const { blob, filename } = await clientProfitabilityApi.exportCsv(query);
-      saveBlob(blob, filename || `client-profitability-${query.from}.csv`);
+      const { blob, filename } = await clientProfitabilityApi.exportCsv(shown.query);
+      saveBlob(blob, filename || `client-profitability-${shown.query.from}.csv`);
     } catch (downloadError) {
       setError(downloadError instanceof Error ? downloadError.message : 'Couldn’t download the CSV.');
     } finally {
@@ -309,7 +317,7 @@ export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (
           <Toggle checked={spreadOverhead} onChange={setSpreadOverhead} label="Spread internal / overhead time across clients"
             help="Moves the cost of Cornerstone’s own time onto clients, in proportion to their hours." />
         </div>
-        <Button variant="outline" onClick={() => void download()} loading={downloading} disabled={!report} className="min-h-11 sm:min-h-11">
+        <Button variant="outline" onClick={() => void download()} loading={downloading} disabled={!shown || loading} className="min-h-11 sm:min-h-11">
           <Download className="mr-2 h-4 w-4" aria-hidden="true" />Download CSV
         </Button>
       </section>
@@ -341,7 +349,7 @@ export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (
             )}
             {!isZero(report.coverage.pending_hours) && (
               <p className="rounded-xl border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
-                {hours(report.coverage.pending_hours)} hours are still waiting for approval in Tax{costPending ? ' and are included in cost.' : ' and aren’t costed.'}
+                {hours(report.coverage.pending_hours)} hours are still waiting for approval in Tax{report.options.cost_pending ? ' and are included in cost.' : ' and aren’t costed.'}
               </p>
             )}
           </div>
@@ -360,7 +368,7 @@ export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (
               : <LineGroup lines={report.clients} caption="Profit by client" expanded={expanded} onToggle={toggle} />}
           </section>
 
-          {(otherLines.length > 0 || report.unallocated_costs.length > 0 || !isZero(report.unlinked_fees.fees)) && (
+          {(otherLines.length > 0 || report.unallocated_costs.length > 0 || !isZero(report.unlinked_fees.fees) || report.imported_pay_not_linked.paycheck_count > 0) && (
             <section aria-labelledby="other-heading" className="space-y-3">
               <h2 id="other-heading" className="text-lg font-semibold text-neutral-950">Not tied to a client</h2>
               {report.overhead?.spread && <p className="text-sm text-neutral-700">Internal / overhead cost is spread across the clients above; it’s listed here for reference and counted once in the totals.</p>}
@@ -374,6 +382,17 @@ export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (
                     </li>
                   ))}
                 </ul>
+              )}
+              {report.imported_pay_not_linked.paycheck_count > 0 && (
+                <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border border-dashed border-neutral-300 bg-white p-3 text-sm">
+                  <span>
+                    <strong className="text-neutral-900">Imported pay not linked to an employee</strong>
+                    <span className="block text-neutral-600">
+                      {report.imported_pay_not_linked.paycheck_count} imported paycheck{report.imported_pay_not_linked.paycheck_count === 1 ? '' : 's'}. Not in the totals or any client, matching the Annual Payroll Summary. Link the worker in Data Migration to count it.
+                    </span>
+                  </span>
+                  <span className="tabular-nums text-neutral-900">{money(report.imported_pay_not_linked.cost)}</span>
+                </div>
               )}
               {!isZero(report.unlinked_fees.fees) && (
                 <p className="rounded-xl border border-neutral-200 bg-white p-3 text-sm text-neutral-800">
