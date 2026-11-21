@@ -43,6 +43,8 @@ class WorkHourClientLink < ApplicationRecord
         errors.add(:invoice_recipient, "must be chosen")
       elsif invoice_recipient.organization_id != organization_id || invoice_recipient.finance_book&.personal?
         errors.add(:invoice_recipient, "must be an invoice customer in this organization")
+      elsif invoice_recipient.finance_book_id != ClientProfitabilitySetting.for(organization).effective_finance_book&.id
+        errors.add(:invoice_recipient, "must be in the financial book the profitability report reads fees from")
       elsif invoice_recipient.company_id.present?
         errors.add(:invoice_recipient, "has a Payroll client; link to that client instead")
       end

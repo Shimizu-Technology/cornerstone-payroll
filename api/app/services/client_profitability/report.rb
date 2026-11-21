@@ -44,10 +44,12 @@ module ClientProfitability
       @practice_company = @settings.effective_practice_company
       # Only active links, and only to records that still belong here (a
       # company can be transferred to another organization).
-      @client_links = WorkHourClientLink.active.where(organization_id: @organization.id)
+      # Links to an invoice customer count only for customers in the book the
+      # report reads fees from; any other is treated as not linked.
+      @client_links = WorkHourClientLink.active.where(organization_id: @organization.id).includes(:invoice_recipient)
                                         .where("company_id IS NULL OR company_id IN (?)", Company.where(organization_id: @organization.id).select(:id))
                                         .where("invoice_recipient_id IS NULL OR invoice_recipient_id IN (?)",
-                                               InvoiceRecipient.where(organization_id: @organization.id, company_id: nil).select(:id))
+                                               InvoiceRecipient.where(organization_id: @organization.id, finance_book_id: finance_book&.id).select(:id))
                                         .index_by(&:tax_client_id)
       @staff_links = WorkHourStaffLink.active.where(organization_id: @organization.id).includes(:employee)
                                       .select { |link| link.disposition == "no_payroll" || link.employee&.company_id == @practice_company&.id }
@@ -125,7 +127,7 @@ module ClientProfitability
       if link&.disposition == "company"
         Bucket.new(key: "company:#{link.company_id}", kind: "company", company_id: link.company_id)
       elsif link&.disposition == "recipient"
-        Bucket.new(key: "recipient:#{link.invoice_recipient_id}", kind: "recipient", invoice_recipient_id: link.invoice_recipient_id)
+        recipient_bucket(link)
       elsif link&.disposition == "internal" || row.internal?
         Bucket.new(key: "overhead", kind: "overhead", name: "Internal / overhead")
       else
@@ -230,21 +232,50 @@ module ClientProfitability
       @employee_names[employee_id] || "Employee ##{employee_id}"
     end
 
-    # Fees keyed by report line: "company:ID" for invoices linked to a
-    # Payroll client, "recipient:ID" for invoices of a customer with no
-    # Payroll client that a Tax client is linked to, nil for the rest.
+    # A link to an invoice customer is that customer's row, unless the
+    # customer has since been given a Payroll client: then it counts as that
+    # client, like a company link would.
+    def recipient_bucket(link)
+      company_id = recipient_company_id(link.invoice_recipient)
+      if company_id
+        Bucket.new(key: "company:#{company_id}", kind: "company", company_id: company_id)
+      else
+        Bucket.new(key: "recipient:#{link.invoice_recipient_id}", kind: "recipient", invoice_recipient_id: link.invoice_recipient_id)
+      end
+    end
+
+    def recipient_company_id(recipient)
+      company_id = recipient&.company_id
+      company_id if company_id && Company.where(id: company_id, organization_id: @organization.id).exists?
+    end
+
+    # Fees keyed by report line. Every invoice lands on exactly one key:
+    # - linked to a Payroll client: "company:ID";
+    # - no Payroll client, and its customer has an explicit link here: that
+    #   link's line ("recipient:ID", or "company:ID" once the customer has a
+    #   Payroll client);
+    # - no Payroll client, its customer has since been given one, and a Tax
+    #   client is linked to that Payroll client: "company:ID" (so earlier
+    #   company-less invoices follow the customer when its link is moved);
+    # - otherwise nil ("Fees not linked to a client"). Nothing is inferred
+    #   from names.
     def fee_rows
       return {} unless finance_book
 
-      linked_recipients = @client_links.values.filter_map { |link| link.invoice_recipient_id if link.disposition == "recipient" }.to_set
-      InvoiceServiceFeeRevenue.call(finance_book: finance_book, service_month_from: @period.start_date,
-                                    service_month_through: @period.end_date,
-                                    tax_prep_service_names: @settings.tax_prep_service_names, by_recipient: true)
-                              .each_with_object({}) do |row, totals|
+      recipient_keys = @client_links.values.select { |link| link.disposition == "recipient" }
+                                    .to_h { |link| [ link.invoice_recipient_id, recipient_bucket(link).key ] }
+      linked_companies = @client_links.values.filter_map { |link| link.company_id if link.disposition == "company" }.to_set
+      rows = InvoiceServiceFeeRevenue.call(finance_book: finance_book, service_month_from: @period.start_date,
+                                           service_month_through: @period.end_date,
+                                           tax_prep_service_names: @settings.tax_prep_service_names, by_recipient: true)
+      recipient_companies = InvoiceRecipient.where(id: rows.filter_map { |row| row[:invoice_recipient_id] }).pluck(:id, :company_id).to_h
+      rows.each_with_object({}) do |row, totals|
         key = if row[:company_id]
           "company:#{row[:company_id]}"
-        elsif linked_recipients.include?(row[:invoice_recipient_id])
-          "recipient:#{row[:invoice_recipient_id]}"
+        elsif recipient_keys.key?(row[:invoice_recipient_id])
+          recipient_keys[row[:invoice_recipient_id]]
+        elsif (company_id = recipient_companies[row[:invoice_recipient_id]]) && linked_companies.include?(company_id)
+          "company:#{company_id}"
         end
         entry = totals[key] ||= { amount: ZERO, tax_prep_amount: ZERO }
         entry[:amount] += row[:amount]

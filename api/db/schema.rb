@@ -5351,7 +5351,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_030000) do
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
   add_foreign_key "work_hour_client_links", "companies", on_delete: :cascade
-  add_foreign_key "work_hour_client_links", "invoice_recipients", on_delete: :cascade
+  add_foreign_key "work_hour_client_links", "invoice_recipients"
   add_foreign_key "work_hour_client_links", "organizations"
   add_foreign_key "work_hour_client_links", "users", column: "linked_by_id"
   add_foreign_key "work_hour_imports", "organizations"

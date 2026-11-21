@@ -7,7 +7,9 @@ class AddInvoiceRecipientToWorkHourClientLinks < ActiveRecord::Migration[8.1]
   CONSTRAINT = "work_hour_client_link_disposition_valid"
 
   def up
-    add_reference :work_hour_client_links, :invoice_recipient, foreign_key: { on_delete: :cascade }
+    # No cascade: deleting a customer must not silently drop saved links
+    # (InvoiceRecipient archives instead while links reference it).
+    add_reference :work_hour_client_links, :invoice_recipient, foreign_key: true
     remove_check_constraint :work_hour_client_links, name: CONSTRAINT
     add_check_constraint :work_hour_client_links, <<~SQL.squish, name: CONSTRAINT
       (disposition = 'company' AND company_id IS NOT NULL AND invoice_recipient_id IS NULL) OR

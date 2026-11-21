@@ -169,6 +169,12 @@ RSpec.describe "Client profitability", type: :request do
 
     put "/api/v1/admin/client_profitability/client_links/880", params: { disposition: "recipient", invoice_recipient_id: create(:invoice_recipient, company: nil, organization: create(:organization)).id }
     expect(response).to have_http_status(:unprocessable_content) # another organization's customer
+    other_book = FinanceBook.create!(organization: organization, name: "Second book", legal_name: "Second book", kind: "organization")
+    ClientProfitabilitySetting.find_by!(organization: organization).update!(finance_book: book)
+    other_customer = create(:invoice_recipient, organization: organization, company: nil, finance_book: other_book)
+    put "/api/v1/admin/client_profitability/client_links/880", params: { disposition: "recipient", invoice_recipient_id: other_customer.id }
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(json["error"]).to match(/financial book/)
     put "/api/v1/admin/client_profitability/client_links/880", params: { disposition: "recipient", invoice_recipient_id: customer.id }
     expect(response).to have_http_status(:ok)
     get "/api/v1/admin/client_profitability/links"
