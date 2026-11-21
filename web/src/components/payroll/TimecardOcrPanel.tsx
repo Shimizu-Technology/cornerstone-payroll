@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
+import { controlClassName } from '@/components/ui/field-styles';
 import { formatCurrency } from '@/lib/utils';
 
 // ──── Time format helpers ──────────────────────────────
@@ -1513,16 +1514,17 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
         {(
           <div className="flex flex-wrap items-center gap-2">
             <input
-              className="border rounded px-3 py-1.5 text-sm flex-1 min-w-[200px] max-w-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+              aria-label="Search timecards"
+              className={controlClassName('w-auto flex-1 min-w-[200px] max-w-sm')}
               placeholder="Search employee, card date, or pay period..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
-            <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" onClick={handleSearch}>Search</Button>
+            <Button variant="outline" onClick={handleSearch}>Search</Button>
             <Select
               aria-label="Timecard status"
-              className="w-36 py-1.5"
+              className="w-36"
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             >
@@ -1534,7 +1536,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
               <option value="failed">Failed</option>
             </Select>
             {(activeSearch || statusFilter) && (
-              <Button size="sm" variant="outline" className="text-neutral-500" onClick={() => { setSearchQuery(''); setActiveSearch(''); setStatusFilter(''); setPage(1); }}>
+              <Button variant="outline" className="text-neutral-500" onClick={() => { setSearchQuery(''); setActiveSearch(''); setStatusFilter(''); setPage(1); }}>
                 Clear filters
               </Button>
             )}

@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -341,7 +342,7 @@ export function PayrollRegisterPanel() {
                     setError(null);
                   }}
                   disabled={busy}
-                  className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                  className={controlClassName('w-auto')}
                 >
                   {payPeriods.length === 0 && <option value="">No reportable pay periods</option>}
                   {payPeriods.map((pp) => (
@@ -530,16 +531,16 @@ function TaxSummaryPanel() {
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="ts-period-mode" className="text-xs font-medium text-neutral-600">Period</label>
-              <select id="ts-period-mode" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as 'calendar' | 'custom'); setReport(null); setError(null); }} className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
+              <select id="ts-period-mode" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as 'calendar' | 'custom'); setReport(null); setError(null); }} className={controlClassName('w-auto')}>
                 <option value="calendar">Year / quarter</option>
                 <option value="custom">Custom pay dates</option>
               </select>
             </div>
             {periodMode === 'custom' ? (
               <>
-                <input aria-label="Tax summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+                <input aria-label="Tax summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className={controlClassName('w-auto')} />
                 <span className="text-sm text-neutral-500">to</span>
-                <input aria-label="Tax summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+                <input aria-label="Tax summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className={controlClassName('w-auto')} />
               </>
             ) : <>
             <div className="flex items-center gap-2">
@@ -553,7 +554,7 @@ function TaxSummaryPanel() {
                   setError(null);
                 }}
                 disabled={busy}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                className={controlClassName('w-auto')}
               >
                 {yearOptions.map((y) => (
                   <option key={y} value={y}>{y}</option>
@@ -573,7 +574,7 @@ function TaxSummaryPanel() {
                     setError(null);
                   }}
                   disabled={busy}
-                  className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                  className={controlClassName('w-auto')}
                 >
                   <option value="">Full Year</option>
                   <option value="1">Q1 (Jan–Mar)</option>
@@ -898,7 +899,7 @@ export function W2GuPanel() {
                   setFilingNotes('');
                 }}
                 disabled={busy}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                className={controlClassName('w-auto')}
               >
                 {yearOptions.map((y) => (
                   <option key={y} value={y}>{y}</option>
@@ -954,7 +955,7 @@ export function W2GuPanel() {
               onChange={(e) => setFilingNotes(e.target.value)}
               disabled={busy || filing?.status === 'filing_ready'}
               placeholder="Add operator notes before marking filing ready"
-              className="w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              className="w-full min-h-[72px] rounded-xl border border-neutral-300 bg-white px-3.5 py-2 text-base text-neutral-900 shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:opacity-60 sm:text-sm"
             />
           </div>
           {error && (
@@ -1346,7 +1347,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                     setError(null);
                   }}
                   disabled={loading}
-                  className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                  className={controlClassName('w-auto')}
                 >
                   {employees.length === 0 && <option value="">No active employees</option>}
                   {employees.map((emp) => (
@@ -1357,9 +1358,9 @@ export function EmployeePayHistoryPanel(): ReactNode {
                 </select>
               )}
             </div>
-            <input aria-label="Employee history start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+            <input aria-label="Employee history start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className={controlClassName('w-auto')} />
             <span className="text-sm text-neutral-500">to</span>
-            <input aria-label="Employee history end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+            <input aria-label="Employee history end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className={controlClassName('w-auto')} />
             <Button onClick={loadReport} disabled={loading || !selectedEmployeeId}>
               {loading ? 'Loading…' : 'View Report'}
             </Button>
@@ -1671,7 +1672,7 @@ export function YtdSummaryPanel() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
-            <select aria-label="Payroll summary period type" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as typeof periodMode); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
+            <select aria-label="Payroll summary period type" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as typeof periodMode); setReport(null); }} className={controlClassName('w-auto')}>
               <option value="ytd">Year to date</option>
               <option value="pay_run">Single payroll run</option>
               <option value="rolling_year">Past 12 months</option>
@@ -1688,7 +1689,7 @@ export function YtdSummaryPanel() {
                     id="ytd-pay-run"
                     value={selectedPayRunKey}
                     onChange={(event) => { setSelectedPayRunKey(event.target.value); setReport(null); setError(null); }}
-                    className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                    className={controlClassName('min-w-0 flex-1 w-auto')}
                   >
                     {payRuns.length === 0 && <option value="">No reportable payroll runs</option>}
                     {payRuns.map((payRun) => (
@@ -1700,9 +1701,9 @@ export function YtdSummaryPanel() {
                 )}
               </div>
             ) : periodMode === 'custom' ? <>
-              <input aria-label="Payroll summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+              <input aria-label="Payroll summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className={controlClassName('w-auto')} />
               <span className="text-sm text-neutral-500">to</span>
-              <input aria-label="Payroll summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+              <input aria-label="Payroll summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className={controlClassName('w-auto')} />
             </> : periodMode === 'year' || periodMode === 'quarter' || periodMode === 'month' ? <>
             <div className="flex items-center gap-2">
               <label htmlFor="ytd-year" className="text-xs font-medium text-neutral-600">Year</label>
@@ -1711,7 +1712,7 @@ export function YtdSummaryPanel() {
                 value={year}
                 onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); }}
                 disabled={loading}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                className={controlClassName('w-auto')}
               >
                 {yearOptions.map((y) => (
                   <option key={y} value={y}>{y}</option>
@@ -1721,7 +1722,7 @@ export function YtdSummaryPanel() {
             {periodMode === 'quarter' && (
               <div className="flex items-center gap-2">
                 <label htmlFor="ytd-quarter" className="text-xs font-medium text-neutral-600">Quarter</label>
-                <select id="ytd-quarter" value={quarter} onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
+                <select id="ytd-quarter" value={quarter} onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); }} className={controlClassName('w-auto')}>
                   {[1, 2, 3, 4].map((value) => <option key={value} value={value}>Q{value}</option>)}
                 </select>
               </div>
@@ -1729,7 +1730,7 @@ export function YtdSummaryPanel() {
             {periodMode === 'month' && (
               <div className="flex items-center gap-2">
                 <label htmlFor="ytd-month" className="text-xs font-medium text-neutral-600">Month</label>
-                <select id="ytd-month" value={month} onChange={(e) => { setMonth(Number(e.target.value)); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
+                <select id="ytd-month" value={month} onChange={(e) => { setMonth(Number(e.target.value)); setReport(null); }} className={controlClassName('w-auto')}>
                   {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => (
                     <option key={value} value={value}>{new Date(2000, value - 1, 1).toLocaleString('en-US', { month: 'long' })}</option>
                   ))}
@@ -1744,7 +1745,7 @@ export function YtdSummaryPanel() {
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setReport(null); }}
                 placeholder="Employee name"
-                className="h-9 w-48 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                className={controlClassName('w-48')}
               />
             </div>
             <div className="flex items-center gap-2">
@@ -1753,7 +1754,7 @@ export function YtdSummaryPanel() {
                 id="ytd-type"
                 value={employmentType}
                 onChange={(e) => { setEmploymentType(e.target.value); setReport(null); }}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                className={controlClassName('w-auto')}
               >
                 <option value="all">All types</option>
                 <option value="hourly">Hourly</option>
@@ -1767,7 +1768,7 @@ export function YtdSummaryPanel() {
                 id="ytd-status"
                 value={status}
                 onChange={(e) => { setStatus(e.target.value); setReport(null); }}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                className={controlClassName('w-auto')}
               >
                 <option value="all">All statuses</option>
                 <option value="active">Active</option>
@@ -2333,7 +2334,7 @@ function EmployerLiabilityPanel() {
                 value={year}
                 onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); }}
                 disabled={loading}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                className={controlClassName('w-auto')}
               >
                 {yearOptions.map((y) => (
                   <option key={y} value={y}>{y}</option>
@@ -2347,7 +2348,7 @@ function EmployerLiabilityPanel() {
                 value={quarter ?? ''}
                 onChange={(e) => { setQuarter(e.target.value ? Number(e.target.value) : undefined); setReport(null); setError(null); }}
                 disabled={loading}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                className={controlClassName('w-auto')}
               >
                 <option value="">Full Year</option>
                 <option value="1">Q1 (Jan–Mar)</option>
@@ -2624,7 +2625,7 @@ export function QuarterlyCompliancePacketPanel() {
                 value={year}
                 onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); setBridgeRecoveryPath(null); setCanRecordFilingResponsibility(false); }}
                 disabled={loading}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                className={controlClassName('w-auto')}
               >
                 {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
@@ -2636,7 +2637,7 @@ export function QuarterlyCompliancePacketPanel() {
                 value={quarter}
                 onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); setError(null); setBridgeRecoveryPath(null); setCanRecordFilingResponsibility(false); }}
                 disabled={loading}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                className={controlClassName('w-auto')}
               >
                 <option value="1">Q1 (Jan-Mar)</option>
                 <option value="2">Q2 (Apr-Jun)</option>
@@ -2741,7 +2742,7 @@ export function QuarterlyCompliancePacketPanel() {
                             value={task.status}
                             disabled={savingTaskId === task.id || !QUARTERLY_PREPARATION_STATUSES.includes(task.status)}
                             onChange={(e) => updateTask(task, { status: e.target.value })}
-                            className="mt-1 h-9 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-900"
+                            className={controlClassName('mt-1')}
                           >
                             {!QUARTERLY_PREPARATION_STATUSES.includes(task.status) && (
                               <option value={task.status}>Legacy: {task.status.replaceAll('_', ' ')}</option>
@@ -3144,25 +3145,25 @@ function QuarterlyOfficialFormModal({
                   <section className="rounded-md border bg-white p-4">
                     <div className="grid gap-3 md:grid-cols-2">
                       <Field label="Company Name">
-                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_name || ''} onChange={(e) => updateField('company_name', e.target.value)} />
+                        <input className={controlClassName()} value={fields.company_name || ''} onChange={(e) => updateField('company_name', e.target.value)} />
                       </Field>
                       <Field label="EIN">
-                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.ein || ''} onChange={(e) => updateField('ein', e.target.value)} />
+                        <input className={controlClassName()} value={fields.ein || ''} onChange={(e) => updateField('ein', e.target.value)} />
                       </Field>
                       <Field label="Address Line 1">
-                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_address_line1 || fields.company_address || ''} onChange={(e) => updateField('company_address_line1', e.target.value)} />
+                        <input className={controlClassName()} value={fields.company_address_line1 || fields.company_address || ''} onChange={(e) => updateField('company_address_line1', e.target.value)} />
                       </Field>
                       <Field label="Address Line 2">
-                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_address_line2 || ''} onChange={(e) => updateField('company_address_line2', e.target.value)} />
+                        <input className={controlClassName()} value={fields.company_address_line2 || ''} onChange={(e) => updateField('company_address_line2', e.target.value)} />
                       </Field>
                       <Field label="City">
-                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_city || ''} onChange={(e) => updateField('company_city', e.target.value)} />
+                        <input className={controlClassName()} value={fields.company_city || ''} onChange={(e) => updateField('company_city', e.target.value)} />
                       </Field>
                       <Field label="State">
-                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_state || ''} onChange={(e) => updateField('company_state', e.target.value)} />
+                        <input className={controlClassName()} value={fields.company_state || ''} onChange={(e) => updateField('company_state', e.target.value)} />
                       </Field>
                       <Field label="ZIP">
-                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_zip || ''} onChange={(e) => updateField('company_zip', e.target.value)} />
+                        <input className={controlClassName()} value={fields.company_zip || ''} onChange={(e) => updateField('company_zip', e.target.value)} />
                       </Field>
                     </div>
                   </section>
@@ -3173,7 +3174,7 @@ function QuarterlyOfficialFormModal({
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         {Object.entries(fields.lines).filter(([, value]) => value !== null).map(([key, value]) => (
                           <Field key={key} label={key.replaceAll('_', ' ')}>
-                            <input className="h-9 w-full rounded-md border px-3 text-sm" value={String(value ?? '')} onChange={(e) => updateLine(key, e.target.value)} />
+                            <input className={controlClassName()} value={String(value ?? '')} onChange={(e) => updateLine(key, e.target.value)} />
                           </Field>
                         ))}
                       </div>
@@ -3186,8 +3187,8 @@ function QuarterlyOfficialFormModal({
                       <div className="mt-3 space-y-2">
                         {fields.daily_liabilities.map((row, index) => (
                           <div key={`${row.pay_date}-${index}`} className="grid grid-cols-[1fr_140px] gap-3">
-                            <input className="h-9 rounded-md border px-3 text-sm" value={row.pay_date} readOnly />
-                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={row.amount} onChange={(e) => updateDaily(index, e.target.value)} />
+                            <input className={controlClassName('w-auto')} value={row.pay_date} readOnly />
+                            <input className={controlClassName('text-right w-auto')} value={row.amount} onChange={(e) => updateDaily(index, e.target.value)} />
                           </div>
                         ))}
                       </div>
@@ -3200,10 +3201,10 @@ function QuarterlyOfficialFormModal({
                       <div className="mt-3 space-y-3">
                         {fields.employees.map((employee, index) => (
                           <div key={`${employee.employee_id}-${index}`} className="grid gap-2 rounded-md border p-3 md:grid-cols-3">
-                            <input className="h-9 rounded-md border px-3 text-sm md:col-span-3" value={String(employee.name || '')} onChange={(e) => updateEmployee(index, 'name', e.target.value)} />
-                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={String(employee.swica_wages || 0)} onChange={(e) => updateEmployee(index, 'swica_wages', e.target.value)} />
-                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={String(employee.guam_withholding || 0)} onChange={(e) => updateEmployee(index, 'guam_withholding', e.target.value)} />
-                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={String(employee.reported_tips || 0)} onChange={(e) => updateEmployee(index, 'reported_tips', e.target.value)} />
+                            <input className={controlClassName('md:col-span-3 w-auto')} value={String(employee.name || '')} onChange={(e) => updateEmployee(index, 'name', e.target.value)} />
+                            <input className={controlClassName('text-right w-auto')} value={String(employee.swica_wages || 0)} onChange={(e) => updateEmployee(index, 'swica_wages', e.target.value)} />
+                            <input className={controlClassName('text-right w-auto')} value={String(employee.guam_withholding || 0)} onChange={(e) => updateEmployee(index, 'guam_withholding', e.target.value)} />
+                            <input className={controlClassName('text-right w-auto')} value={String(employee.reported_tips || 0)} onChange={(e) => updateEmployee(index, 'reported_tips', e.target.value)} />
                           </div>
                         ))}
                       </div>
@@ -3321,7 +3322,7 @@ export function Form941GuPanel() {
                 value={year}
                 onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); }}
                 disabled={loading}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                className={controlClassName('w-auto')}
               >
                 {yearOptions.map((y) => (
                   <option key={y} value={y}>{y}</option>
@@ -3335,7 +3336,7 @@ export function Form941GuPanel() {
                 value={quarter}
                 onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); setError(null); }}
                 disabled={loading}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                className={controlClassName('w-auto')}
               >
                 <option value="1">Q1 (Jan–Mar)</option>
                 <option value="2">Q2 (Apr–Jun)</option>
@@ -3750,7 +3751,7 @@ function Form1099NecPanel() {
             <div>
               <label className="block text-xs font-medium text-neutral-600 mb-1">Tax Year</label>
               <select
-                className="border rounded-md px-3 py-2 text-sm"
+                className={controlClassName('w-auto')}
                 value={year}
                 onChange={(e) => setYear(Number(e.target.value))}
               >

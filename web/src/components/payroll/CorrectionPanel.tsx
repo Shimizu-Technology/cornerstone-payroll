@@ -34,6 +34,7 @@ import {
 import { useNavigate } from 'react-router';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
+import { controlClassName } from '@/components/ui/field-styles';
 import { useCompany } from '@/contexts/CompanyContext';
 import { FinancialCorrectionSourcePanel } from './FinancialCorrectionSourcePanel';
 import { Badge } from '@/components/ui/badge';
@@ -792,7 +793,7 @@ function VoidModalBody({
       <input
         id={voidConfirmId}
         type="text"
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-red-400 focus:border-red-400 disabled:bg-gray-100"
+        className={controlClassName('font-mono')}
         placeholder="VOID"
         value={voidConfirmText}
         disabled={loading}
@@ -865,7 +866,7 @@ function CreateCorrectionModalBody({
       <input
         id={corrPayDateId}
         type="date"
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400 disabled:bg-gray-100"
+        className={controlClassName()}
         value={correctionPayDate}
         disabled={loading}
         onChange={(e) => onPayDateChange(e.target.value)}

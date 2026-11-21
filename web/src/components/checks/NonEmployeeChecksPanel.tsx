@@ -2,6 +2,7 @@ import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/a
 import { useState, useEffect, useLayoutEffect, useCallback, useId, useMemo, useRef } from 'react';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { Button } from '@/components/ui/button';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -416,7 +417,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
               <label className="flex items-center gap-2 text-sm text-blue-900">
                 Start slot
                 <select
-                  className="rounded border border-blue-200 bg-white px-2 py-1 text-sm text-gray-900"
+                  className={controlClassName('w-auto')}
                   value={startingSlot}
                   onChange={(e) => setStartingSlot(Number(e.target.value))}
                   disabled={pdfLoading !== null}
@@ -492,7 +493,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
             </div>
             <div className="space-y-1.5">
               <label htmlFor={`${formId}-check-type`} className="block text-sm font-medium text-neutral-700">Check Type</label>
-              <select id={`${formId}-check-type`} className="w-full border rounded px-3 py-2 text-sm" value={formData.check_type} onChange={e => setFormData(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}>
+              <select id={`${formId}-check-type`} className={controlClassName()} value={formData.check_type} onChange={e => setFormData(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}>
                 {Object.entries(CHECK_TYPE_LABELS).map(([val, label]) => (
                   <option key={val} value={val}>{label}</option>
                 ))}

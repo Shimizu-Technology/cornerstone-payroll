@@ -232,7 +232,8 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
 }
 
 function Field({ label, helper, children }: { label: string; helper?: string; children: ReactElement }): ReactElement {
-  return <label className="block text-sm font-medium text-neutral-700">{label}{helper && <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500">{helper}</span>}<span className="mt-2 block">{children}</span></label>;
+  // Control pushed to the bottom so a longer label or helper doesn't drop it below its neighbour.
+  return <label className="flex h-full flex-col text-sm font-medium text-neutral-700"><span>{label}</span>{helper && <span className="mt-1 block text-xs font-normal leading-5 text-neutral-500">{helper}</span>}<span className="mt-auto block pt-2">{children}</span></label>;
 }
 function Value({ label, value }: { label: string; value: string }): ReactElement {
   return <div className="rounded-xl border border-neutral-200 p-4"><p className="text-xs font-semibold text-neutral-500">{label}</p><p className="mt-2 text-lg font-bold tabular-nums text-neutral-900">{value}</p></div>;
