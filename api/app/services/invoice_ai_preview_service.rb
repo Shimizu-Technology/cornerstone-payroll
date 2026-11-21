@@ -110,6 +110,7 @@ class InvoiceAiPreviewService
       If the staff asks for a bill-to recipient that is not in the recipient list and gives at least the recipient name, set invoice_recipient_id to null and fill new_recipient. Email and billing address are helpful but optional.
       If the bill-to recipient is unclear, set invoice_recipient_id and new_recipient to null and ask a clarification question.
       Use numeric quantity and rate values. Do not include currency symbols in numeric fields. Leave an unspecified rate null so customer defaults can apply; preserve an explicitly entered zero. Classify reimbursements as reimbursement and preserve product or service names separately from descriptions.
+      Leave email_subject and email_body null unless the staff asks for specific email wording or the current preview already has wording they did not ask to remove; the application writes the default email (invoice number, customer and service month).
       Only include payment_terms when the staff explicitly asks for terms or the current preview already has terms they did not ask to remove.
       If the staff is modifying an existing preview, preserve fields they did not ask to change.
       For hourly invoices, use quantity as hours and rate as the hourly rate. If an attachment shows total hours and total/net pay, derive the rate from total divided by hours when no explicit rate is supplied.
@@ -225,8 +226,10 @@ class InvoiceAiPreviewService
       "service_period_end" => normalize_date(raw["service_period_end"]),
       "payment_terms" => raw["payment_terms"].presence,
       "notes" => raw["notes"].presence,
-      "email_subject" => raw["email_subject"].presence || email_subject_for(recipient_name, billing_profile),
-      "email_body" => raw["email_body"].presence || email_body_for(recipient_name, billing_profile),
+      # Blank keeps the default email (InvoiceEmailContent), which names the
+      # issued number, customer and service month.
+      "email_subject" => raw["email_subject"].presence,
+      "email_body" => raw["email_body"].presence,
       "line_items" => line_items
     }
   end
@@ -254,8 +257,8 @@ class InvoiceAiPreviewService
       "service_period_end" => nil,
       "payment_terms" => nil,
       "notes" => nil,
-      "email_subject" => email_subject_for(recipient&.name, billing_profile),
-      "email_body" => email_body_for(recipient&.name, billing_profile),
+      "email_subject" => nil,
+      "email_body" => nil,
       "line_items" => line_items
     }
   end
@@ -433,17 +436,6 @@ class InvoiceAiPreviewService
     "Which active invoice recipient should this be billed to?"
   end
 
-  def email_subject_for(recipient_name, billing_profile)
-    return nil if recipient_name.blank?
-
-    "Invoice from #{billing_profile&.name || company.name}"
-  end
-
-  def email_body_for(recipient_name, billing_profile)
-    return nil if recipient_name.blank?
-
-    "Hi #{recipient_name},\n\nPlease find the attached invoice for your records.\n\nThank you,\n#{billing_profile&.name || company.name}"
-  end
 
   def api_key
     ENV["OPENROUTER_API_KEY"].presence

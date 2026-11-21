@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeesPath } from '@/lib/routes';
-import { formatDate, formatGuamDateTime } from '@/lib/utils';
+import { formatDate, formatGuamDate, formatGuamDateTime } from '@/lib/utils';
 import { payrollGoLiveApi, type PayrollGoLivePayload, type PayrollGoLiveReview } from '@/services/api';
 
 type SourceTotals = {
@@ -215,7 +215,7 @@ export function PayrollGoLive(): ReactElement {
       {(error || notice) && <ActionFeedback retryKey={errorFeedbackAttempt} tone={error ? "error" : "success"} message={error || notice || ""} />}
 
       <Card>
-        <CardHeader><div className="flex flex-wrap items-start justify-between gap-4"><div><CardTitle>1. Transfer reviewed setup</CardTitle><CardDescription className="mt-1">Match predecessor employees to the successor roster, preview every count, then copy only live configuration.</CardDescription></div>{review?.setup_applied_at && <Badge variant="success">Applied {formatDate(review.setup_applied_at)}</Badge>}</div></CardHeader>
+        <CardHeader><div className="flex flex-wrap items-start justify-between gap-4"><div><CardTitle>1. Transfer reviewed setup</CardTitle><CardDescription className="mt-1">Match predecessor employees to the successor roster, preview every count, then copy only live configuration.</CardDescription></div>{review?.setup_applied_at && <Badge variant="success">Applied {formatGuamDate(review.setup_applied_at)}</Badge>}</div></CardHeader>
         <CardContent className="space-y-5">
           <form className="grid gap-4 md:grid-cols-3" onSubmit={previewSetup}>
             <FieldSelect label="Predecessor client" value={sourceCompanyId} onChange={setSourceCompanyId} disabled={!payload.permissions.can_preview_setup || sealed || Boolean(review?.setup_applied_at)} required>

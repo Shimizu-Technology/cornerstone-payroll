@@ -186,7 +186,7 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
     expect(Resend::Emails).to have_received(:send).once do |message, options:|
       expect(message[:to]).to contain_exactly("customer@example.com", "accounts@example.com")
       expect(message[:attachments].sole[:content]).to be_an(Array)
-      expect(message[:text]).to include("current balance is USD 170.00")
+      expect(message[:text]).to include("The amount due is $170.00, due on receipt.")
       expect(options[:idempotency_key]).to eq("invoice-send-#{schedule.id}")
     end
     expect { InvoiceScheduledSender.send!(schedule.id) }.not_to change(InvoiceDelivery, :count)

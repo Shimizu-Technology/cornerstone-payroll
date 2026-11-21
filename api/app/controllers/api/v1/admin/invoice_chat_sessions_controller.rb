@@ -446,7 +446,7 @@ module Api
             numbering_style: profile.numbering_style,
             next_invoice_number: profile.next_invoice_number,
             invoice_number_width: profile.invoice_number_width,
-            next_invoice_number_preview: profile.format_continuing_number(profile.next_invoice_number),
+            next_invoice_number_preview: profile.next_number_preview,
             remit_to: profile.remit_to,
             footer_note: profile.footer_note,
             active: profile.active,

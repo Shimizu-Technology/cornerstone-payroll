@@ -17,11 +17,12 @@ class InvoiceScheduledSender
 
           invoice = schedule.invoice
           profile = invoice.invoice_billing_profile
-          business = profile.legal_name.presence || profile.name
-          details = invoice.snapshot.is_a?(Hash) && invoice.snapshot["invoice"].is_a?(Hash) ? invoice.snapshot["invoice"] : {}
-          subject = details["email_subject"].presence || "Invoice #{invoice.invoice_number} from #{business}"
-          body = details["email_body"].presence ||
-            "Please find invoice #{invoice.invoice_number} attached. The current balance is #{invoice.currency} #{format('%.2f', invoice.balance_due)}."
+          # Text reviewed in the send panel was stored on the schedule. Without
+          # it, send the invoice's current email (saved text or the default).
+          # The email is delivery content, so the issued snapshot isn't read.
+          content = InvoiceEmailContent.for(invoice)
+          subject = content[:subject]
+          body = content[:body]
           reply_to = profile.email if profile.email.present? && profile.email.match?(URI::MailTo::EMAIL_REGEXP)
           claimed_at = Time.current
           schedule.update!(status: "sending", attempts: schedule.attempts + 1, claimed_at: claimed_at,
@@ -76,6 +77,8 @@ class InvoiceScheduledSender
               recipient: recipient,
               delivered_at: sent_at,
               provider_reference: reference,
+              email_subject: schedule.rendered_subject,
+              email_body: schedule.rendered_body,
               notes: "Accepted by email provider; delivery to inbox is not confirmed",
               recorded_by: schedule.created_by
             )

@@ -5216,6 +5216,10 @@ export interface Invoice {
   credit_notes?: InvoiceCreditNote[];
   deliveries?: InvoiceDelivery[];
   events?: InvoiceEvent[];
+  /** The email that would be sent now, and its defaults. Delivery content, not invoice evidence. */
+  email?: InvoiceEmailContent;
+  /** Customer terms that set recurring drafts' due dates (continuing senders), or null. */
+  recurring_terms?: InvoiceRecurringTerms | null;
   invoice_billing_profile?: InvoiceBillingProfile | null;
   invoice_recipient?: InvoiceRecipient | null;
   line_items?: InvoiceLineItem[];
@@ -5306,12 +5310,29 @@ export interface InvoiceCreditNote {
   created_at: string;
 }
 
+export interface InvoiceEmailContent {
+  subject: string;
+  body: string;
+  default_subject: string;
+  default_body: string;
+  subject_customized: boolean;
+  body_customized: boolean;
+}
+
+export interface InvoiceRecurringTerms {
+  payment_terms: string;
+  due_after_days: number;
+}
+
 export interface InvoiceDelivery {
   id: number;
   channel: string;
   recipient?: string | null;
   delivered_at: string;
   provider_reference?: string | null;
+  /** What a provider send said; blank for deliveries recorded by hand. */
+  email_subject?: string | null;
+  email_body?: string | null;
   notes?: string | null;
   artifact_id?: number | null;
   recorded_by_name?: string | null;
@@ -5339,6 +5360,8 @@ export interface InvoiceRecurrence {
   interval_count: number;
   occurrence_index: number;
   due_after_days: number;
+  /** Set when the customer's terms decide due dates instead of due_after_days. */
+  due_terms?: InvoiceRecurringTerms | null;
   active: boolean;
   created_at: string;
 }
@@ -5355,6 +5378,9 @@ export interface InvoiceSendSchedule {
   last_error?: string | null;
   claimed_at?: string | null;
   sent_at?: string | null;
+  /** Text reviewed before sending; null sends the invoice's email as it stands when claimed. */
+  subject?: string | null;
+  body?: string | null;
   created_at: string;
 }
 
@@ -5584,6 +5610,9 @@ export const invoicesApi = {
     api.post<{ invoice: Invoice }>(`/admin/invoices/${id}/record_delivery`, data),
   correctDelivery: (invoiceId: number, deliveryId: number, data: { delivered_at: string; reason: string }) =>
     api.patch<{ invoice: Invoice }>(`/admin/invoices/${invoiceId}/deliveries/${deliveryId}`, data),
+  /** Saves the invoice's email (also after issue; the issued PDF is unchanged). Blank returns to the default. */
+  updateEmail: (id: number, data: { email_subject?: string | null; email_body?: string | null }) =>
+    api.patch<{ invoice: Invoice }>(`/admin/invoices/${id}/email`, data),
   recordPayment: (id: number, data: { amount: number; received_on: string; payment_method: string; reference_number?: string; notes?: string }) =>
     api.post<{ payment_id: number; invoice: Invoice }>(`/admin/invoices/${id}/payments`, data),
   reversePayment: (invoiceId: number, paymentId: number, reason: string) =>
@@ -5596,7 +5625,7 @@ export const invoicesApi = {
 
 export const invoiceRecurrencesApi = {
   list: () => api.get<{ invoice_recurrences: InvoiceRecurrence[] }>('/admin/invoice_recurrences'),
-  create: (data: { source_invoice_id: number; start_on: string; ends_on?: string | null; interval_unit: 'week' | 'month'; interval_count: number; due_after_days: number }) =>
+  create: (data: { source_invoice_id: number; start_on: string; ends_on?: string | null; interval_unit: 'week' | 'month'; interval_count: number; due_after_days?: number }) =>
     api.post<{ invoice_recurrence: InvoiceRecurrence }>('/admin/invoice_recurrences', data),
   update: (id: number, active: boolean) =>
     api.patch<{ invoice_recurrence: InvoiceRecurrence }>(`/admin/invoice_recurrences/${id}`, { active }),
@@ -5604,9 +5633,9 @@ export const invoiceRecurrencesApi = {
 
 export const invoiceSendSchedulesApi = {
   list: () => api.get<{ invoice_send_schedules: InvoiceSendSchedule[] }>('/admin/invoice_send_schedules'),
-  create: (data: { invoice_id: number; recipients: string[]; send_at?: string; send_now?: boolean }) =>
+  create: (data: { invoice_id: number; recipients: string[]; send_at?: string; send_now?: boolean; subject?: string; body?: string }) =>
     api.post<{ invoice_send_schedule: InvoiceSendSchedule }>('/admin/invoice_send_schedules', data),
-  update: (id: number, data: { recipients?: string[]; send_at?: string; cancel?: boolean; retry?: boolean }) =>
+  update: (id: number, data: { recipients?: string[]; send_at?: string; cancel?: boolean; retry?: boolean; subject?: string; body?: string }) =>
     api.patch<{ invoice_send_schedule: InvoiceSendSchedule }>(`/admin/invoice_send_schedules/${id}`, data),
 };
 

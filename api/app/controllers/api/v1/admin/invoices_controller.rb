@@ -7,7 +7,7 @@ module Api
         before_action :require_admin!
         before_action :set_invoice, only: %i[
           show update destroy update_status preview_pdf generate_pdf issue download_artifact record_delivery
-          correct_delivery
+          correct_delivery update_email
         ]
 
         def index
@@ -197,6 +197,34 @@ module Api
 
         def download_artifact
           send_primary_artifact(disposition: params[:disposition] == "inline" ? "inline" : "attachment")
+        end
+
+        # The email that carries the invoice. It is delivery content, so it can
+        # change after issue; the issued PDF and snapshot stay as they were.
+        # A blank subject or message goes back to the default.
+        def update_email
+          raise ArgumentError, "A voided invoice can't be emailed" if @invoice.voided?
+
+          Invoice.transaction do
+            @invoice.lock!
+            subject = params.key?(:email_subject) ? params[:email_subject].to_s.squish.presence : @invoice.email_subject
+            body = params.key?(:email_body) ? params[:email_body].to_s.strip.presence : @invoice.email_body
+            raise ArgumentError, "Email subject is too long (at most #{Invoice::EMAIL_SUBJECT_MAX} characters)" if subject.to_s.length > Invoice::EMAIL_SUBJECT_MAX
+            raise ArgumentError, "Email message is too long (at most #{Invoice::EMAIL_BODY_MAX} characters)" if body.to_s.length > Invoice::EMAIL_BODY_MAX
+
+            if subject != @invoice.email_subject || body != @invoice.email_body
+              # Only the email columns change, so an issued invoice's
+              # financial content and its validations aren't involved.
+              @invoice.update_columns(email_subject: subject, email_body: body, updated_by_id: current_user&.id, updated_at: Time.current)
+              InvoiceEvent.record!(invoice: @invoice, event_type: "email_updated", actor: current_user,
+                                   metadata: { subject: InvoiceEmailContent.for(@invoice)[:subject],
+                                               subject_customized: subject.present?, body_customized: body.present? })
+            end
+          end
+
+          render json: { invoice: InvoicePayloadBuilder.call(@invoice.reload, detailed: true) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def record_delivery

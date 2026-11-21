@@ -85,6 +85,10 @@ class InvoicePayloadBuilder
       payment_terms: invoice.payment_terms,
       email_subject: invoice.email_subject,
       email_body: invoice.email_body,
+      # What would be sent now, with the defaults for "use the default".
+      email: InvoiceEmailContent.for(invoice),
+      # Customer terms that set recurring drafts' due dates, when they do.
+      recurring_terms: invoice.issued? ? InvoiceRecurrenceGenerator.recurring_terms(invoice) : nil,
       source_metadata: invoice.source_metadata,
       invoice_billing_profile: billing_profile_payload(invoice.invoice_billing_profile),
       # Characters a draft's PDF would print as boxes; issuing is refused until fixed.
@@ -136,7 +140,7 @@ class InvoicePayloadBuilder
       numbering_style: profile.numbering_style,
       next_invoice_number: profile.next_invoice_number,
       invoice_number_width: profile.invoice_number_width,
-      next_invoice_number_preview: profile.format_continuing_number(profile.next_invoice_number),
+      next_invoice_number_preview: profile.next_number_preview,
       remit_to: profile.remit_to,
       footer_note: profile.footer_note,
       active: profile.active,
@@ -220,6 +224,8 @@ class InvoicePayloadBuilder
       recipient: delivery.recipient,
       delivered_at: delivery.delivered_at,
       provider_reference: delivery.provider_reference,
+      email_subject: delivery.email_subject,
+      email_body: delivery.email_body,
       notes: delivery.notes,
       artifact_id: delivery.invoice_artifact_id,
       recorded_by_name: delivery.recorded_by&.name,

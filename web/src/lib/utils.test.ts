@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatDate, formatDateRange, formatGuamDateTime, formatGuamDateTimeShort } from './utils';
+import { formatDate, formatDateRange, formatGuamDate, formatGuamDateTime, formatGuamDateTimeShort } from './utils';
 
 describe('date-only formatting', (): void => {
   const originalTimeZone = process.env.TZ;
@@ -23,6 +23,14 @@ describe('date-only formatting', (): void => {
 
   it('keeps ISO timestamps as instants instead of treating them as calendar dates', (): void => {
     expect(formatDate('2026-01-02T01:00:00Z')).toBe('Jan 1, 2026');
+  });
+
+  it('dates a timestamp by the Guam calendar whatever the browser zone', (): void => {
+    // 8 PM UTC on Nov 20 is already Nov 21 in Guam (UTC+10).
+    expect(formatGuamDate('2026-11-20T20:00:00Z')).toBe('Nov 21, 2026');
+    expect(formatGuamDate('2026-11-20T13:59:59Z')).toBe('Nov 20, 2026');
+    expect(formatGuamDate(null)).toBe('');
+    expect(formatGuamDate('not a date')).toBe('');
   });
 });
 

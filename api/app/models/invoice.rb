@@ -8,6 +8,8 @@ class Invoice < ApplicationRecord
   # 3 records the PDF style ("style"); earlier snapshots render with the
   # legacy layout.
   SNAPSHOT_VERSION = 3
+  EMAIL_SUBJECT_MAX = 300
+  EMAIL_BODY_MAX = 10_000
 
   belongs_to :company, optional: true
   belongs_to :organization
@@ -49,6 +51,8 @@ class Invoice < ApplicationRecord
   validates :total_amount, numericality: { greater_than_or_equal_to: 0 }
   validates :discount_type, inclusion: { in: DISCOUNT_TYPES }
   validates :discount_value, numericality: { greater_than_or_equal_to: 0 }
+  validates :email_subject, length: { maximum: EMAIL_SUBJECT_MAX }
+  validates :email_body, length: { maximum: EMAIL_BODY_MAX }
   validate :discount_value_has_cent_precision
   validate :continuing_number_unique_ignoring_zeros, if: -> { will_save_change_to_invoice_number? || will_save_change_to_invoice_billing_profile_id? }
   validate :recipient_must_belong_to_organization
@@ -364,7 +368,7 @@ class Invoice < ApplicationRecord
     self.customer_reference = customer_reference.to_s.strip.presence
     self.notes = notes.to_s.strip.presence
     self.payment_terms = payment_terms.to_s.strip.presence
-    self.email_subject = email_subject.to_s.strip.presence
+    self.email_subject = email_subject.to_s.squish.presence
     self.email_body = email_body.to_s.strip.presence
     self.source_metadata = source_metadata.presence || {}
     self.discount_type = discount_type.presence || "none"
