@@ -174,7 +174,14 @@ function StaffCard({ entry, data, onSaved }: { entry: TaxStaffEntry; data: LinkQ
   );
 }
 
-export function LinkQueue({ onChanged }: { onChanged: () => void }) {
+interface LinkQueueProps {
+  /** Tells the page a link changed; the page then bumps reloadKey. */
+  onChanged: () => void;
+  /** Bumped by the page when data changes (a link saved, a refresh from Tax finished). */
+  reloadKey: number;
+}
+
+export function LinkQueue({ onChanged, reloadKey }: LinkQueueProps) {
   const [data, setData] = useState<LinkQueueData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showLinked, setShowLinked] = useState(false);
@@ -194,9 +201,11 @@ export function LinkQueue({ onChanged }: { onChanged: () => void }) {
       setError(loadError instanceof Error ? loadError.message : 'Couldn’t load Tax clients and staff.');
     });
   }, []);
-  useEffect(load, [load]);
+  // Loads on mount and whenever the page invalidates the data, through the
+  // same request guard as every other reload.
+  useEffect(load, [load, reloadKey]);
 
-  const saved = useCallback(() => { load(); onChanged(); }, [load, onChanged]);
+  const saved = useCallback(() => { onChanged(); }, [onChanged]);
 
   if (error) {
     return (

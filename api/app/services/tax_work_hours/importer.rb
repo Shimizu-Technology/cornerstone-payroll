@@ -73,11 +73,10 @@ module TaxWorkHours
       counts = payloads.map { |_first, _last, payload| payload["counts"].is_a?(Hash) ? payload["counts"] : {} }
 
       WorkHourRow.transaction do
-        # Same lock order as WorkHourImport.reserve!: organization, then
-        # import. Taking the organization first also covers the share lock
-        # the row inserts need on it, so a concurrent reservation waits
-        # instead of deadlocking.
-        Organization.lock.find(@import.organization_id)
+        # Same lock order as WorkHourImport.reserve!: the organization row
+        # (FOR NO KEY UPDATE), then the import row. A refresh reserved during
+        # this save waits on the organization row instead of deadlocking.
+        Organization.lock(WorkHourImport::ORGANIZATION_LOCK).find(@import.organization_id)
         # Commit only while this worker holds a live claim. The status, token
         # and lease are checked by the database while the row is locked; a
         # worker that was replaced, or whose lease ran out (even after its

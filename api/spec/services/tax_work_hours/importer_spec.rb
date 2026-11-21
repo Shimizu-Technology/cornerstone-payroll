@@ -167,7 +167,8 @@ RSpec.describe TaxWorkHours::Importer do
 
   it "keeps another organization's hours untouched" do
     other = create(:organization)
-    other_import = WorkHourImport.create!(organization: other, range_start: Date.new(2026, 11, 1), range_end: Date.new(2026, 11, 30))
+    other_import = WorkHourImport.create!(organization: other, range_start: Date.new(2026, 11, 1), range_end: Date.new(2026, 11, 30),
+                                          lease_expires_at: 15.minutes.from_now)
     feed = FakeFeed.new([ Date.new(2026, 11, 1), Date.new(2026, 11, 30) ] => payload([ row("2026-11-05") ]))
     described_class.call(other_import, client: feed)
     described_class.call(import_for(Date.new(2026, 11, 1), Date.new(2026, 11, 30)),
@@ -230,6 +231,31 @@ RSpec.describe WorkHourImport do
     end.to raise_error(ActiveRecord::RecordNotUnique)
     expect { described_class.reserve!(organization: create(:organization), trigger: "scheduled", range_start: first.range_start, range_end: first.range_end) }
       .not_to raise_error
+  end
+
+  it "won't let a late job claim a queued import that was already reported as failed" do
+    import = reserve
+    existing = described_class.create!(organization: organization, status: "succeeded", range_start: Date.new(2026, 11, 1),
+                                       range_end: Date.new(2026, 11, 30))
+    WorkHourRow.create!(organization: organization, work_hour_import: existing, tax_user_id: 1, work_date: Date.new(2026, 11, 3),
+                        client_name: "Kept", hours: 2, approval_state: "approved")
+    feed = instance_double(TaxWorkHours::Client)
+    allow(feed).to receive(:fetch)
+    allow(TaxWorkHours::Client).to receive(:new).and_return(feed)
+
+    travel(WorkHourImport::QUEUED_LEASE + 1.minute) do
+      expect(import.reload.as_status_json).to include(status: "failed", error_message: WorkHourImport::INTERRUPTED_MESSAGE)
+      TaxWorkHoursImportJob.new.perform(import.id) # the job is finally dispatched
+      expect(import.reload).to have_attributes(status: "failed", error_code: "interrupted", claim_token: nil)
+    end
+    expect(feed).not_to have_received(:fetch)
+    expect(WorkHourRow.where(organization: organization).pluck(:client_name, :hours)).to eq([ [ "Kept", 2.to_d ] ])
+  end
+
+  it "still lets a worker take over a running import whose lease expired" do
+    import = reserve
+    import.claim!
+    travel(WorkHourImport::RUNNING_LEASE + 1.minute) { expect(described_class.find(import.id).claim!).to be_present }
   end
 
   it "replaces an abandoned import once its lease has run out" do

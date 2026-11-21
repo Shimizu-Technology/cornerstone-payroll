@@ -174,6 +174,14 @@ RSpec.describe ClientProfitability::Report do
     expect(result[:unassigned].map { |line| line[:name] }).to include("Tax client 345")
   end
 
+  it "shows $0.00 fees per hour for a client with work but no billing" do
+    unbilled = create(:company, organization: organization, name: "Unbilled Co")
+    WorkHourClientLink.create!(organization: organization, tax_client_id: 999, disposition: "company", company: unbilled)
+    line = client(report, "Unbilled Co")
+    expect(line).to include(hours: "3.00", fees: "0.00", cost: "807.38", margin: "-807.38", margin_percent: nil, effective_rate: "0.00")
+    expect(report[:overhead]).to include(hours: "2.00", effective_rate: "0.00")
+  end
+
   it "shows a client with fees but no hours" do
     WorkHourRow.where(tax_client_id: 346).delete_all
     expect(client(report, "Beta Builders")).to include(hours: "0.00", cost: "0.00", fees: "800.00", margin: "800.00", effective_rate: nil)

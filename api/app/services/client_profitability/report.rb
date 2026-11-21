@@ -264,7 +264,9 @@ module ClientProfitability
         other_fees: money(line[:fees] - line[:tax_prep_fees]),
         margin: money(margin),
         margin_percent: line[:fees].positive? ? percent(margin / line[:fees]) : nil,
-        effective_rate: line[:hours].positive? && line[:fees].nonzero? ? money(line[:fees] / line[:hours]) : nil,
+        # Fees per counted hour: $0.00 for work that wasn't billed, nil only
+        # when there are no counted hours to divide by.
+        effective_rate: line[:hours].positive? ? money(line[:fees] / line[:hours]) : nil,
         people: line[:people].map do |person|
           person.merge(hours: hours_string(person[:hours]), approved_hours: hours_string(person[:approved_hours]),
                        pending_hours: hours_string(person[:pending_hours]), cost: money(person[:cost]))
@@ -323,7 +325,7 @@ module ClientProfitability
         other_fees: money(fees - tax_prep),
         margin: money(margin),
         margin_percent: fees.positive? ? percent(margin / fees) : nil,
-        effective_rate: hours.positive? && fees.nonzero? ? money(fees / hours) : nil
+        effective_rate: hours.positive? ? money(fees / hours) : nil
       }
     end
 
