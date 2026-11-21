@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
+import { controlClassName } from '@/components/ui/field-styles';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { TaxYearVerification } from '@/components/settings/TaxYearVerification';
@@ -791,7 +792,7 @@ export default function TaxConfigs() {
                   id="copy-tax-year"
                   value={copyFromYear || ''}
                   onChange={(e) => setCopyFromYear(e.target.value ? parseInt(e.target.value) : null)}
-                  className="mt-1 block w-full rounded-md border-neutral-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-base sm:text-sm"
+                  className={controlClassName('mt-1')}
                 >
                   <option value="">Start from scratch</option>
                   {configs.map((c) => (

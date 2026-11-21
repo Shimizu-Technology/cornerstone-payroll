@@ -1,6 +1,7 @@
 import { stagingNavigationUrl } from '@/lib/staging';
 import { supportsSourceOperation } from '@/lib/time-tracking';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { controlClassName } from '@/components/ui/field-styles';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Link2, RefreshCw, Save, ShieldCheck, Trash2, Unplug, X, Zap } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -399,7 +400,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                   value={form.name}
                   onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                   placeholder="Time tracking system"
-                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                  className={controlClassName('mt-1')}
                 />
               </label>
 
@@ -433,7 +434,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                     source_type: e.target.value as TimeTrackingSource['source_type'],
                   }))}
                   disabled={editing}
-                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500"
+                  className={controlClassName('mt-1')}
                 >
                   {sourceTypeOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -452,7 +453,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                   value={form.base_url}
                   onChange={(e) => setForm((prev) => ({ ...prev, base_url: e.target.value }))}
                   placeholder="https://time-tracking-api.example.com"
-                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                  className={controlClassName('mt-1')}
                 />
                 <span className="mt-1 block text-xs text-gray-500">
                   If Fetch Hours returns 404, this usually points at the wrong backend or an API deploy that does not include the payroll export route yet.
@@ -465,7 +466,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                   <input value={form.authorization_origin}
                     onChange={(event) => setForm((previous) => ({ ...previous, authorization_origin: event.target.value }))}
                     placeholder="https://time.example.com"
-                    className="mt-1 w-full rounded-md border px-3 py-2 text-sm" />
+                    className={controlClassName('mt-1')} />
                   <span className="mt-1 block text-xs text-gray-500">Approved website origin for connecting your account. Leave blank for a summary-only source.</span>
                 </label>
               )}
@@ -477,7 +478,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                   value={form.shared_secret}
                   onChange={(e) => setForm((prev) => ({ ...prev, shared_secret: e.target.value }))}
                   placeholder={editing ? 'Keep existing secret' : 'Paste PAYROLL_SHARED_SECRET'}
-                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                  className={controlClassName('mt-1')}
                   autoComplete="new-password"
                 />
                 <span className="mt-1 block text-xs text-gray-500">Must match the source app’s payroll export secret.</span>

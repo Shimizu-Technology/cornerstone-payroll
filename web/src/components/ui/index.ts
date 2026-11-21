@@ -5,3 +5,4 @@ export * from './input';
 export * from './select';
 export * from './table';
 export * from './help-tip';
+export * from './field-styles';
