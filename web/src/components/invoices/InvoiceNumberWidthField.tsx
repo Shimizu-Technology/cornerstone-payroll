@@ -7,7 +7,10 @@ export function InvoiceNumberWidthField({ value, nextNumber, onChange }: { value
   return (
     <div className="sm:col-span-2">
       <label htmlFor="invoice-number-width" className="text-sm">Digits in invoice number</label>
-      <Input id="invoice-number-width" type="number" min="1" max="12" step="1" inputMode="numeric"
+      {/* A text box on purpose: a number box reports an incomplete entry such as
+          "1e" as empty, which would read as "no leading zeros". Here the raw text
+          reaches readNumberWidth, which flags it so the save is blocked. */}
+      <Input id="invoice-number-width" type="text" inputMode="numeric" autoComplete="off" maxLength={4}
         aria-invalid={width.error ? true : undefined}
         aria-describedby={`invoice-number-width-hint ${width.error ? 'invoice-number-width-error' : 'invoice-number-width-example'}`}
         placeholder="Leave blank for no leading zeros" value={value} onChange={(event) => onChange(event.target.value)} />

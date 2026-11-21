@@ -282,6 +282,9 @@ export function ReportView({ reloadKey, onGoTo, defaults = BUILT_IN_DEFAULTS }: 
   const [period, setPeriod] = useState(() => defaultPeriod(defaults.period));
   const [costPending, setCostPending] = useState(defaults.costPending);
   const [spreadOverhead, setSpreadOverhead] = useState(defaults.spreadOverhead);
+  // Fixed for as long as this report is open, like the other defaults: a
+  // basis saved meanwhile (e.g. by another admin) applies the next time it opens.
+  const [costBasis] = useState(defaults.costBasis);
   // The report on screen and the exact options that produced it: labels and
   // the CSV always describe what is shown, not options still loading.
   const [shown, setShown] = useState<{ report: ProfitabilityReport; query: ReportQuery } | null>(null);
@@ -290,8 +293,8 @@ export function ReportView({ reloadKey, onGoTo, defaults = BUILT_IN_DEFAULTS }: 
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
-  const query: ReportQuery = useMemo(() => ({ ...period, cost_pending: costPending, spread_overhead: spreadOverhead, cost_basis: defaults.costBasis }),
-    [period, costPending, spreadOverhead, defaults.costBasis]);
+  const query: ReportQuery = useMemo(() => ({ ...period, cost_pending: costPending, spread_overhead: spreadOverhead, cost_basis: costBasis }),
+    [period, costPending, spreadOverhead, costBasis]);
 
   useEffect(() => {
     let current = true;

@@ -182,6 +182,20 @@ RSpec.describe ClientProfitability::Report do
     expect(report[:overhead]).to include(hours: "2.00", effective_rate: "0.00")
   end
 
+  it "reads both totals for the Annual Payroll Summary comparison in one REPEATABLE READ snapshot" do
+    settings.update!(cost_basis: "work_period")
+    allow(ApplicationRecord.connection).to receive(:transaction_open?).and_return(false)
+    allow(ApplicationRecord).to receive(:transaction).and_call_original
+    allow(ApplicationRecord).to receive(:transaction).with(isolation: :repeatable_read) { |&block| block.call }
+    allow_any_instance_of(AnnualPayrollSummary).to receive(:payroll_cost_by_employee).and_wrap_original do |original, *args, **options|
+      expect(ApplicationRecord).to have_received(:transaction).with(isolation: :repeatable_read)
+      original.call(*args, **options)
+    end
+    result = report
+    expect(result[:cost_basis]).to include(basis: "work_period")
+    expect(ApplicationRecord).to have_received(:transaction).with(isolation: :repeatable_read).once
+  end
+
   it "shows a client with fees but no hours" do
     WorkHourRow.where(tax_client_id: 346).delete_all
     expect(client(report, "Beta Builders")).to include(hours: "0.00", cost: "0.00", fees: "800.00", margin: "800.00", effective_rate: nil)

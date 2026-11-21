@@ -184,6 +184,15 @@ RSpec.describe AnnualPayrollSummary, "#payroll_cost_by_employee with basis: :wor
     expect(total("2026-12-01", "2026-12-31", basis: :pay_date)).to eq(BigDecimal("500.01"))
   end
 
+  it "selects and counts a pay period with an unusable date range by its pay date, through the public path" do
+    item = check("2026-11-01", "2026-11-14", "2026-11-20", "700.00")
+    # A pay period whose end comes before its start can't be spread by days.
+    item.pay_period.update_columns(start_date: Date.new(2026, 12, 10), end_date: Date.new(2026, 10, 5))
+    expect(total("2026-11-01", "2026-11-30")).to eq(700)
+    expect(total("2026-12-01", "2026-12-31")).to eq(0)
+    expect(total("2026-10-01", "2026-10-31")).to eq(0)
+  end
+
   it "falls back to the pay date when a pay period has no usable dates" do
     summary = described_class.new(company: company)
     november = PayrollReportingPeriod.new(start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 30))
