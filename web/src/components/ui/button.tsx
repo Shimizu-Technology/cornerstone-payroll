@@ -32,7 +32,9 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 
     const sizes = {
       sm: 'min-h-9 px-3.5 py-1.5 text-xs sm:min-h-0',
-      md: 'min-h-11 px-4 py-2.5 text-sm sm:min-h-0',
+      // 40px from `sm` for every variant (a bordered button would otherwise be 42px) and 44px on
+      // touch at every width, matching CONTROL_HEIGHT so a button beside an input lines up.
+      md: 'min-h-11 px-4 py-2 text-sm sm:min-h-10 sm:pointer-coarse:min-h-11',
       lg: 'min-h-12 px-6 py-3 text-base sm:min-h-0',
     };
 
