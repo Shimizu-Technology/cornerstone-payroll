@@ -3,6 +3,8 @@ import { numberWidthForSave } from '@/lib/invoiceNumber';
 import { InvoiceNumberWidthField } from '@/components/invoices/InvoiceNumberWidthField';
 import { invoiceDraftDueDate } from '@/lib/invoice-defaults';
 import { invoiceBusinessDate } from '@/lib/invoice-defaults';
+import { defaultInvoiceEmail } from '@/lib/invoice-email';
+import { formatGuamDate } from '@/lib/utils';
 import { INVOICE_THEMES } from '@/lib/invoiceStyle';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
@@ -31,6 +33,7 @@ import {
   type InvoiceBillingProfilePayload,
   type InvoicePdfTextIssue,
   type InvoiceDiscountType,
+  type InvoiceEmailContent,
   type InvoiceLineItem,
   type InvoicePayload,
   type InvoiceRecipient,
@@ -75,8 +78,12 @@ interface InvoiceFormState {
   service_period_end: string;
   notes: string;
   payment_terms: string;
+  /** Saved custom email text; used only when the matching *_custom flag is set. */
   email_subject: string;
   email_body: string;
+  /** False keeps the default email, which follows the draft's number, customer, month and total. */
+  email_subject_custom?: boolean;
+  email_body_custom?: boolean;
   status?: InvoiceStatus;
   archived?: boolean;
   generated_at?: string | null;
@@ -287,6 +294,14 @@ export function InvoiceMaker() {
   const [billingProfiles, setBillingProfiles] = useState<InvoiceBillingProfile[]>([]);
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
   const [invoiceForm, setInvoiceForm] = useState<InvoiceFormState>(emptyInvoiceForm);
+  // An issued invoice's email is edited and saved on its own: it is delivery
+  // content, so saving it leaves the issued PDF and snapshot alone.
+  const [issuedEmail, setIssuedEmail] = useState<{ invoiceId: number; subject: string; body: string; content: InvoiceEmailContent } | null>(null);
+  // The invoice whose email is being saved. Its email inputs are locked
+  // until the save finishes, so text typed meanwhile can't be overwritten.
+  const [savingEmailFor, setSavingEmailFor] = useState<number | null>(null);
+  const openInvoiceIdRef = useRef<number | undefined>(undefined);
+  useEffect(() => { openInvoiceIdRef.current = invoiceForm.id; }, [invoiceForm.id]);
   const [billingProfileForm, setBillingProfileForm] = useState<BillingProfileFormState>(emptyBillingProfileForm);
   const [billingLogoFile, setBillingLogoFile] = useState<File | null>(null);
   const billingProfileFormBaseline = useRef('');
@@ -432,6 +447,32 @@ export function InvoiceMaker() {
     () => billingProfiles.find((profile) => String(profile.id) === invoiceForm.invoice_billing_profile_id),
     [billingProfiles, invoiceForm.invoice_billing_profile_id]
   );
+  // The email the Email Draft shows. An issued invoice shows the API's
+  // email (saved text or its default with the current balance). A draft
+  // shows the default worked out from the form, unless text was typed.
+  const issuedEmailActive = Boolean(issuedEmail && invoiceForm.id === issuedEmail.invoiceId && invoiceForm.status && invoiceForm.status !== 'draft');
+  const draftEmailDefault = defaultInvoiceEmail({
+    number: invoiceForm.invoice_number.trim() || selectedBillingProfile?.next_invoice_number_preview || 'Draft',
+    customer: selectedRecipient?.name,
+    invoiceDate: invoiceForm.invoice_date,
+    serviceStart: invoiceForm.service_period_start,
+    serviceEnd: invoiceForm.service_period_end,
+    amountDue: invoiceTotal,
+    paymentTerms: invoiceForm.payment_terms,
+    dueDate: invoiceForm.due_date,
+    footer: selectedBillingProfile?.footer_note,
+    sender: selectedBillingProfile?.legal_name || selectedBillingProfile?.name,
+  });
+  const emailDraft = issuedEmailActive && issuedEmail
+    ? { subject: issuedEmail.subject, body: issuedEmail.body }
+    : {
+      subject: invoiceForm.email_subject_custom ? invoiceForm.email_subject : draftEmailDefault.subject,
+      body: invoiceForm.email_body_custom ? invoiceForm.email_body : draftEmailDefault.body,
+    };
+  const emailDraftCustomized = issuedEmailActive && issuedEmail
+    ? issuedEmail.content.subject_customized || issuedEmail.content.body_customized
+    : Boolean(invoiceForm.email_subject_custom || invoiceForm.email_body_custom);
+  const issuedEmailChanged = Boolean(issuedEmailActive && issuedEmail && (issuedEmail.subject !== issuedEmail.content.subject || issuedEmail.body !== issuedEmail.content.body));
   const activeRecipients = useMemo(() => recipients.filter((recipient) => recipient.active), [recipients]);
   const activeBillingProfiles = useMemo(() => billingProfiles.filter((profile) => profile.active), [billingProfiles]);
   const filteredInvoices = useMemo(() => {
@@ -471,8 +512,8 @@ export function InvoiceMaker() {
     service_period_end: state.service_period_end || null,
     notes: state.notes.trim() || null,
     payment_terms: state.payment_terms.trim() || null,
-    email_subject: state.email_subject.trim() || null,
-    email_body: state.email_body.trim() || null,
+    email_subject: state.email_subject_custom ? state.email_subject.trim() || null : null,
+    email_body: state.email_body_custom ? state.email_body.trim() || null : null,
     line_items: state.line_items.map((item, index) => ({
       id: item.id,
       item_name: item.item_name,
@@ -493,6 +534,10 @@ export function InvoiceMaker() {
     const savedSignature = savedInvoiceSignatureRef.current || invoicePayloadSignature(buildPayloadForForm(emptyInvoiceForm()));
     return invoicePayloadSignature(buildPayload()) !== savedSignature;
   };
+
+  // What leaving the invoice would lose: invoice edits, or an issued
+  // invoice's email edit, which is saved separately (issuedEmail).
+  const hasUnsavedWork = () => hasUnsavedInvoiceChanges() || issuedEmailChanged;
 
   const resetInvoiceForm = () => {
     const defaultProfile = billingProfiles.find((profile) => profile.is_default) || billingProfiles[0];
@@ -543,6 +588,8 @@ export function InvoiceMaker() {
       payment_terms: invoice.payment_terms || '',
       email_subject: invoice.email_subject || '',
       email_body: invoice.email_body || '',
+      email_subject_custom: !!invoice.email_subject,
+      email_body_custom: !!invoice.email_body,
       status: invoice.status,
       archived: invoice.archived,
       generated_at: invoice.generated_at,
@@ -560,6 +607,7 @@ export function InvoiceMaker() {
       })),
     };
     setInvoiceForm(nextForm);
+    setIssuedEmail(invoice.status !== 'draft' && invoice.email ? { invoiceId: invoice.id, subject: invoice.email.subject, body: invoice.email.body, content: invoice.email } : null);
     setPdfTextIssues(invoice.pdf_unprintable_text || []);
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
   };
@@ -618,6 +666,8 @@ export function InvoiceMaker() {
       payment_terms: preview.payment_terms || '',
       email_subject: preview.email_subject || '',
       email_body: preview.email_body || '',
+      email_subject_custom: !!preview.email_subject,
+      email_body_custom: !!preview.email_body,
       status: 'draft',
       generated_at: null,
       sent_at: null,
@@ -649,13 +699,13 @@ export function InvoiceMaker() {
       return;
     }
 
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    if (hasUnsavedWork() && !window.confirm('Discard unsaved invoice changes?')) return;
     setInvoiceMode('manual');
     loadInvoice(id);
   };
 
   const handleNewInvoice = () => {
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    if (hasUnsavedWork() && !window.confirm('Discard unsaved invoice changes?')) return;
     setInvoiceMode('manual');
     resetInvoiceForm();
   };
@@ -666,12 +716,6 @@ export function InvoiceMaker() {
       ...current,
       invoice_recipient_id: recipientId,
       payment_terms: recipient?.payment_terms || current.payment_terms || selectedBillingProfile?.default_payment_terms || '',
-      email_subject: recipient
-        ? `Invoice ${current.invoice_number && !current.invoice_number.startsWith('DRAFT-') ? `${current.invoice_number} ` : ''}from ${selectedBillingProfile?.name || 'your business'}`.trim()
-        : current.email_subject,
-      email_body: recipient
-        ? `Hi ${recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,`
-        : current.email_body,
     }));
   };
 
@@ -747,6 +791,59 @@ export function InvoiceMaker() {
 
   const handleSaveDraft = () => {
     saveInvoice();
+  };
+
+  const changeEmailDraft = (field: 'subject' | 'body', value: string) => {
+    if (issuedEmailActive) {
+      setIssuedEmail((current) => current && { ...current, [field]: value });
+      return;
+    }
+    setInvoiceForm((current) => field === 'subject'
+      ? { ...current, email_subject: value, email_subject_custom: true }
+      : { ...current, email_body: value, email_body_custom: true });
+  };
+
+  // Saves an issued invoice's email. Text equal to the default is saved
+  // blank so it keeps following the invoice (number, balance).
+  // A blank subject or message restores that field's default.
+  const saveIssuedEmail = async (reset = false): Promise<void> => {
+    if (!issuedEmail || !invoiceForm.id || savingEmailFor !== null) return;
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
+    const subject = reset ? '' : issuedEmail.subject.trim();
+    const body = reset ? '' : issuedEmail.body.trim();
+    const invoiceId = invoiceForm.id;
+    // A late response belongs to the invoice that was saved. If another
+    // invoice is open by then, it leaves that invoice's email and messages alone.
+    const stillOpen = (): boolean => openInvoiceIdRef.current === invoiceId;
+    setSavingEmailFor(invoiceId);
+    setError(null);
+    try {
+      const response = await invoicesApi.updateEmail(invoiceId, {
+        email_subject: subject === issuedEmail.content.default_subject ? '' : subject,
+        email_body: body === issuedEmail.content.default_body ? '' : body,
+      });
+      const content = response.invoice.email;
+      // Apply the saved email only if this invoice is still the one open;
+      // a late response must not replace another invoice's email.
+      if (content) {
+        setIssuedEmail((current) => current?.invoiceId === invoiceId
+          ? { invoiceId, subject: content.subject, body: content.body, content }
+          : current);
+      }
+      if (stillOpen()) {
+        setSuccess(reset ? 'Email set back to the default.' : 'Email saved. The issued PDF is unchanged.');
+        window.setTimeout(() => setSuccess(null), 3500);
+      }
+    } catch (err) {
+      if (stillOpen()) setError(err instanceof Error ? err.message : 'Failed to save the email');
+    } finally {
+      setSavingEmailFor((current) => current === invoiceId ? null : current);
+    }
+  };
+
+  const restoreDefaultEmail = (): void => {
+    if (issuedEmailActive) { void saveIssuedEmail(true); return; }
+    setInvoiceForm((current) => ({ ...current, email_subject: '', email_body: '', email_subject_custom: false, email_body_custom: false }));
   };
 
   const ensureReadyForPdf = () => {
@@ -1119,7 +1216,7 @@ export function InvoiceMaker() {
   const usePreviewAsDraft = () => {
     const preview = activeChatSession?.current_preview as InvoiceAiPreview | undefined;
     if (!preview || preview.status !== 'preview') return;
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    if (hasUnsavedWork() && !window.confirm('Discard unsaved invoice changes?')) return;
 
     applyPreviewToForm(preview);
     setSuccess('AI preview loaded as an unsaved draft.');
@@ -1128,8 +1225,10 @@ export function InvoiceMaker() {
   };
 
   const copyEmail = async () => {
-    const source = invoiceMode === 'ai' && createdChatInvoice ? createdChatInvoice : invoiceForm;
-    const content = [source.email_subject, '', source.email_body].join('\n');
+    const source = invoiceMode === 'ai' && createdChatInvoice
+      ? { subject: createdChatInvoice.email?.subject || createdChatInvoice.email_subject || '', body: createdChatInvoice.email?.body || createdChatInvoice.email_body || '' }
+      : emailDraft;
+    const content = [source.subject, '', source.body].join('\n');
     try {
       await navigator.clipboard.writeText(content.trim());
       setError(null);
@@ -1179,7 +1278,7 @@ export function InvoiceMaker() {
 
   const editCreatedChatInvoiceManually = () => {
     if (!createdChatInvoice) return;
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    if (hasUnsavedWork() && !window.confirm('Discard unsaved invoice changes?')) return;
 
     hydrateInvoiceForm(createdChatInvoice);
     setInvoiceMode('manual');
@@ -1254,7 +1353,7 @@ export function InvoiceMaker() {
 
   // Leaving for the style page drops unsaved invoice and profile edits, so ask first.
   const confirmLeaveForStyle = (event: ReactMouseEvent<HTMLAnchorElement>) => {
-    if (!hasUnsavedInvoiceChanges() && !hasUnsavedBillingProfileChanges()) return;
+    if (!hasUnsavedWork() && !hasUnsavedBillingProfileChanges()) return;
     if (!window.confirm('Leave without saving? Unsaved invoice or billing profile changes will be lost.')) event.preventDefault();
   };
 
@@ -1417,8 +1516,8 @@ export function InvoiceMaker() {
                   <span className="font-medium text-neutral-700">{currency(invoice.total_amount)}</span>
                 </div>
                 <div className="mt-1 text-xs text-neutral-600">
-                  {invoice.generated_at ? `Issued ${formatDateOnly(invoice.generated_at)}` : 'Draft not issued'}
-                  {invoice.archived_at ? ` · Archived ${formatDateOnly(invoice.archived_at)}` : ''}
+                  {invoice.generated_at ? `Issued ${formatGuamDate(invoice.generated_at)}` : 'Draft not issued'}
+                  {invoice.archived_at ? ` · Archived ${formatGuamDate(invoice.archived_at)}` : ''}
                 </div>
               </button>
             ))}
@@ -1520,28 +1619,44 @@ export function InvoiceMaker() {
 
         {showBillingProfileForm && (
           <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
-            <Input value={billingProfileForm.name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, name: event.target.value }))} placeholder="Profile name" />
-            <Input value={billingProfileForm.legal_name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, legal_name: event.target.value }))} placeholder="Legal/display name" />
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Input value={billingProfileForm.phone} onChange={(event) => setBillingProfileForm((current) => ({ ...current, phone: event.target.value }))} placeholder="Phone" />
-              <Input value={billingProfileForm.email} onChange={(event) => setBillingProfileForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
+            {/* Every field keeps a visible label once it's filled in. */}
+            <label className="block text-sm font-medium text-neutral-700">Profile name<Input className="mt-1" value={billingProfileForm.name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, name: event.target.value }))} placeholder="For example, Cornerstone" /></label>
+            <label className="block text-sm font-medium text-neutral-700">Legal or display name<Input className="mt-1" value={billingProfileForm.legal_name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, legal_name: event.target.value }))} placeholder="Printed on invoices and email sign-offs" /></label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="block text-sm font-medium text-neutral-700">Phone<Input className="mt-1" type="tel" value={billingProfileForm.phone} onChange={(event) => setBillingProfileForm((current) => ({ ...current, phone: event.target.value }))} /></label>
+              <label className="block text-sm font-medium text-neutral-700">Email<Input className="mt-1" type="email" value={billingProfileForm.email} onChange={(event) => setBillingProfileForm((current) => ({ ...current, email: event.target.value }))} placeholder="Replies to invoice emails go here" /></label>
             </div>
-            <Input value={billingProfileForm.website} onChange={(event) => setBillingProfileForm((current) => ({ ...current, website: event.target.value }))} placeholder="Website" />
-            <Textarea value={billingProfileForm.address} onChange={(event) => setBillingProfileForm((current) => ({ ...current, address: event.target.value }))} placeholder="Remittance address" rows={2} />
-            <Textarea value={billingProfileForm.payment_instructions} onChange={(event) => setBillingProfileForm((current) => ({ ...current, payment_instructions: event.target.value }))} placeholder="Payment instructions" rows={2} />
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <label className="text-sm">Number format<select aria-label="Number format" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value={billingProfileForm.numbering_style} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, numbering_style: e.target.value as 'yearly' | 'continuing' })}><option value="yearly">Prefix and year (existing)</option><option value="continuing">Plain continuing sequence</option></select></label>
-              {billingProfileForm.numbering_style === 'continuing' && <label className="text-sm">Next invoice number<Input aria-label="Next invoice number" type="number" min="1" step="1" value={billingProfileForm.next_invoice_number} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, next_invoice_number: Number(e.target.value) })} /></label>}
+            <label className="block text-sm font-medium text-neutral-700">Website<Input className="mt-1" value={billingProfileForm.website} onChange={(event) => setBillingProfileForm((current) => ({ ...current, website: event.target.value }))} /></label>
+            <label className="block text-sm font-medium text-neutral-700">Remittance address<Textarea aria-label="Remittance address" className="mt-1" value={billingProfileForm.address} onChange={(event) => setBillingProfileForm((current) => ({ ...current, address: event.target.value }))} rows={2} /></label>
+            <label className="block text-sm font-medium text-neutral-700">Payment instructions<Textarea aria-label="Payment instructions" className="mt-1" value={billingProfileForm.payment_instructions} onChange={(event) => setBillingProfileForm((current) => ({ ...current, payment_instructions: event.target.value }))} rows={2} /></label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="text-sm font-medium text-neutral-700">Number format<select aria-label="Number format" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value={billingProfileForm.numbering_style} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, numbering_style: e.target.value as 'yearly' | 'continuing' })}><option value="yearly">Prefix and year (existing)</option><option value="continuing">Plain continuing sequence</option></select></label>
+              {billingProfileForm.numbering_style === 'continuing' && <label className="text-sm font-medium text-neutral-700">Next invoice number<Input className="mt-1" aria-label="Next invoice number" type="number" min="1" step="1" value={billingProfileForm.next_invoice_number} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, next_invoice_number: Number(e.target.value) })} /></label>}
               {billingProfileForm.numbering_style === 'continuing' && (
                 <InvoiceNumberWidthField value={billingProfileForm.invoice_number_width} nextNumber={billingProfileForm.next_invoice_number}
                   onChange={(value) => setBillingProfileForm({ ...billingProfileForm, invoice_number_width: value })} />
               )}
-              <div className="space-y-2 sm:col-span-2"><p className="text-sm font-medium">Saved services · use {'{month}'} for the service month</p>{billingProfileForm.service_catalog.map((service, index) => <div key={index} className="grid gap-2 sm:grid-cols-3"><Input aria-label={`Service ${index + 1} name`} value={service.name} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, name: e.target.value } : entry) })} /><Input aria-label={`Service ${index + 1} template`} value={service.description_template} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, description_template: e.target.value } : entry) })} /><select aria-label={`Service ${index + 1} kind`} value={service.line_kind} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, line_kind: e.target.value as 'service_fee' | 'reimbursement' } : entry) })}><option value="service_fee">Service fee</option><option value="reimbursement">Reimbursement</option></select><Button type="button" variant="outline" onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.filter((_, i) => i !== index) })}>Remove service</Button></div>)}<Button type="button" variant="outline" onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: [...billingProfileForm.service_catalog, { name: 'Accounting Consulting', description_template: 'Accounting Services – {month}', line_kind: 'service_fee' }] })}>Add saved service</Button></div>
-              <Input value={billingProfileForm.invoice_prefix} onChange={(event) => setBillingProfileForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Invoice prefix" />
-              <Input value={billingProfileForm.remit_to} onChange={(event) => setBillingProfileForm((current) => ({ ...current, remit_to: event.target.value }))} placeholder="Checks payable to" />
+              <label className="text-sm font-medium text-neutral-700">Invoice prefix<Input className="mt-1" value={billingProfileForm.invoice_prefix} onChange={(event) => setBillingProfileForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="For example, ST" /></label>
+              <label className="text-sm font-medium text-neutral-700">Checks payable to<Input className="mt-1" value={billingProfileForm.remit_to} onChange={(event) => setBillingProfileForm((current) => ({ ...current, remit_to: event.target.value }))} /></label>
             </div>
-            <Textarea value={billingProfileForm.default_payment_terms} onChange={(event) => setBillingProfileForm((current) => ({ ...current, default_payment_terms: event.target.value }))} placeholder="Default payment terms" rows={2} />
-            <Textarea value={billingProfileForm.footer_note} onChange={(event) => setBillingProfileForm((current) => ({ ...current, footer_note: event.target.value }))} placeholder="Footer note" rows={2} />
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium text-neutral-700">Saved services</legend>
+              <p className="text-xs text-neutral-500">Use {'{month}'} in a description for the service month.</p>
+              {billingProfileForm.service_catalog.map((service, index) => {
+                const updateService = (change: Partial<typeof service>) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, ...change } : entry) });
+                return <div key={index} className="space-y-2 rounded-lg border border-neutral-200 bg-white p-3">
+                  <label className="block text-xs font-medium text-neutral-600">Service {index + 1} name<Input className="mt-1" value={service.name} onChange={(e) => updateService({ name: e.target.value })} /></label>
+                  <label className="block text-xs font-medium text-neutral-600">Description<Textarea aria-label="Description" className="mt-1" rows={2} value={service.description_template} onChange={(e) => updateService({ description_template: e.target.value })} /></label>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="min-w-40 flex-1 text-xs font-medium text-neutral-600">Kind<select className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm" value={service.line_kind} onChange={(e) => updateService({ line_kind: e.target.value as 'service_fee' | 'reimbursement' })}><option value="service_fee">Service fee</option><option value="reimbursement">Reimbursement</option></select></label>
+                    <Button type="button" variant="outline" aria-label={`Remove service ${index + 1}`} onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.filter((_, i) => i !== index) })}>Remove</Button>
+                  </div>
+                </div>;
+              })}
+              <Button type="button" variant="outline" onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: [...billingProfileForm.service_catalog, { name: 'Accounting Consulting', description_template: 'Accounting Services – {month}', line_kind: 'service_fee' }] })}>Add saved service</Button>
+            </fieldset>
+            <label className="block text-sm font-medium text-neutral-700">Default payment terms<Textarea aria-label="Default payment terms" className="mt-1" value={billingProfileForm.default_payment_terms} onChange={(event) => setBillingProfileForm((current) => ({ ...current, default_payment_terms: event.target.value }))} placeholder="For example, Net 15" rows={2} /></label>
+            <label className="block text-sm font-medium text-neutral-700">Footer note<Textarea aria-label="Footer note" className="mt-1" value={billingProfileForm.footer_note} onChange={(event) => setBillingProfileForm((current) => ({ ...current, footer_note: event.target.value }))} placeholder="Printed on invoices and used to close invoice emails" rows={2} /></label>
             {billingProfileForm.id && (
               <div className="flex flex-col gap-2 rounded-xl border border-neutral-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -1648,6 +1763,11 @@ export function InvoiceMaker() {
   ].filter((event) => Boolean(event.value));
   const selectedInvoiceArchived = Boolean(invoiceForm.archived);
   const selectedInvoiceReadOnly = selectedInvoiceArchived || Boolean(invoiceForm.status && invoiceForm.status !== 'draft');
+  // An issued invoice's email stays editable; a voided or archived one's doesn't.
+  const savingThisEmail = savingEmailFor !== null && savingEmailFor === invoiceForm.id;
+  // One email save at a time: another invoice's save must finish first.
+  const savingOtherEmail = savingEmailFor !== null && !savingThisEmail;
+  const emailDraftLocked = selectedInvoiceArchived || invoiceForm.status === 'voided' || (selectedInvoiceReadOnly && !issuedEmailActive) || savingThisEmail;
   const selectedInvoiceCannotSaveDraft = selectedInvoiceReadOnly;
   const selectedInvoiceHasBlockedUnsavedChanges = selectedInvoiceCannotSaveDraft && hasUnsavedInvoiceChanges();
 
@@ -1930,16 +2050,28 @@ export function InvoiceMaker() {
                       <Mail className="h-4 w-4 text-primary-600" />
                       Email Draft
                     </h3>
-                    <p className="text-xs text-neutral-600">Used when you send the issued invoice from Invoice Center. You can also copy it for manual delivery.</p>
+                    <p className="text-xs text-neutral-600">Sent with the PDF attached when you send from Invoice Center, where you can still change it for one send. You can also copy it for manual delivery.{issuedEmailActive ? " Saving it doesn't change the issued PDF." : ''}</p>
                   </div>
-                  <Button type="button" variant="outline" size="sm" onClick={copyEmail} disabled={!invoiceForm.email_subject && !invoiceForm.email_body}>
+                  <Button type="button" variant="outline" size="sm" onClick={copyEmail} disabled={!emailDraft.subject && !emailDraft.body}>
                     <Copy className="mr-1.5 h-4 w-4" />
                     Copy
                   </Button>
                 </div>
                 <div className="space-y-3">
-                  <Input value={invoiceForm.email_subject} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_subject: event.target.value }))} placeholder="Email subject" aria-label="Email subject" disabled={selectedInvoiceReadOnly} />
-                  <Textarea value={invoiceForm.email_body} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_body: event.target.value }))} placeholder="Email message" aria-label="Email message" rows={4} disabled={selectedInvoiceReadOnly} />
+                  <label className="block space-y-1.5">
+                    <span className="text-sm font-medium text-neutral-700">Subject</span>
+                    <Input value={emailDraft.subject} maxLength={300} onChange={(event) => changeEmailDraft('subject', event.target.value)} disabled={emailDraftLocked} />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-sm font-medium text-neutral-700">Message</span>
+                    <Textarea aria-label="Message" value={emailDraft.body} maxLength={10000} onChange={(event) => changeEmailDraft('body', event.target.value)} rows={7} disabled={emailDraftLocked} />
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-neutral-500">{emailDraftCustomized ? 'Edited email. Leave the subject or message blank to use its default.' : 'Default email: updates with the invoice number, customer, month and amount.'}</span>
+                    {issuedEmailActive && savingOtherEmail && <span className="text-xs text-neutral-500" role="status">Saving another invoice's email…</span>}
+                    {issuedEmailActive && <Button type="button" size="sm" onClick={() => void saveIssuedEmail()} disabled={!issuedEmailChanged || financeReadOnly || emailDraftLocked || savingOtherEmail}>{savingThisEmail ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}Save email</Button>}
+                    {emailDraftCustomized && <Button type="button" size="sm" variant="ghost" onClick={restoreDefaultEmail} disabled={emailDraftLocked || (issuedEmailActive && savingOtherEmail)}>Use default</Button>}
+                  </div>
                 </div>
               </div>
 
@@ -2235,7 +2367,7 @@ export function InvoiceMaker() {
                         <Download className="mr-1.5 h-4 w-4" />
                         {createdChatInvoice.status === 'generated' ? 'Download PDF' : 'Generate PDF'}
                       </Button>
-                      <Button type="button" variant="outline" onClick={copyEmail} disabled={!createdChatInvoice.email_subject && !createdChatInvoice.email_body}>
+                      <Button type="button" variant="outline" onClick={copyEmail}>
                         <Copy className="mr-1.5 h-4 w-4" />
                         {chatEmailCopied ? 'Copied' : 'Copy Email Draft'}
                       </Button>

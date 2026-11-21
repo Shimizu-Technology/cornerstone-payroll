@@ -2,7 +2,7 @@ import { invoiceBusinessDate, customerDefaults, invoiceIsOverdue, invoiceDraftDu
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import {
   Archive,
@@ -42,6 +42,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { invoiceSubtotal as sumInvoiceLines, invoicePercentDiscount, roundInvoiceCurrency } from '@/lib/invoice-money';
 import { invoiceSendState, type SendState } from '@/lib/invoice-send-state';
+import { nextRecurrenceStart, termsDueDays } from '@/lib/invoice-recurrence';
 import {
   invoiceBillingProfilesApi,
   invoiceReceivablesApi,
@@ -238,21 +239,27 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: {
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  const titleId = useId();
+  const subtitleId = useId();
+  // The shared Dialog moves focus in, keeps Tab inside, closes on Escape and
+  // returns focus to the control that opened it. The panel itself scrolls,
+  // with a sticky header.
   return (
-    <div className="invoice-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/45 p-3 sm:p-6">
-      <div className={`invoice-modal-panel flex max-h-[94vh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${wide ? 'max-w-6xl' : 'max-w-3xl'}`}>
-        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 sm:px-6">
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent variant="drawer" aria-labelledby={titleId} aria-describedby={subtitle ? subtitleId : undefined}
+        className={`dialog-wide dialog-center-mobile mx-auto max-h-[94vh] flex-col rounded-2xl shadow-2xl ${wide ? 'max-w-6xl' : 'max-w-3xl'}`}>
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-neutral-200 bg-white px-5 py-4 sm:px-6">
           <div className="min-w-0 flex-1">
-            <h2 className="break-words text-xl font-semibold text-neutral-950">{title}</h2>
-            {subtitle && <p className="mt-1 text-sm text-neutral-500">{subtitle}</p>}
+            <h2 id={titleId} className="break-words text-xl font-semibold text-neutral-950">{title}</h2>
+            {subtitle && <p id={subtitleId} className="mt-1 text-sm text-neutral-500">{subtitle}</p>}
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700" aria-label="Close">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">{children}</div>
-      </div>
-    </div>
+        <div className="p-5 sm:p-6">{children}</div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -277,6 +284,13 @@ export function InvoiceCenter() {
   const [editingDraftId, setEditingDraftId] = useState<number | null>(null);
   const [importForm, setImportForm] = useState<ImportForm>(emptyImport);
   const [sendRecipients, setSendRecipients] = useState('');
+  const [sendSubject, setSendSubject] = useState('');
+  const [sendBody, setSendBody] = useState('');
+  // Keyed to its invoice: details can switch to another invoice (create,
+  // import) without passing through openDetails, and a stale editor must
+  // never show or save one invoice's text under another invoice.
+  const [emailEdit, setEmailEdit] = useState<{ invoiceId: number; subject: string; body: string } | null>(null);
+  const [recurrenceForm, setRecurrenceForm] = useState({ start_on: '', interval_unit: 'month' as 'week' | 'month', interval_count: '1', startEdited: false });
   const [sendAt, setSendAt] = useState('');
   const [sendMode, setSendMode] = useState<'now' | 'later'>('later');
   const [editingSendScheduleId, setEditingSendScheduleId] = useState<number | null>(null);
@@ -290,6 +304,9 @@ export function InvoiceCenter() {
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Preview is disabled while the PDF loads, so focus has left it by the
+  // time the preview opens; return focus to it explicitly on close.
+  const previewButtonRef = useRef<HTMLButtonElement>(null);
   const loadSequence = useRef(0);
   const loadedOrganizationId = useRef<number | undefined>(undefined);
 
@@ -388,6 +405,16 @@ export function InvoiceCenter() {
   }), [invoices, search, statusFilter, sendFilter, sendSchedules]);
 
   const activeProfiles = useMemo(() => profiles.filter((profile) => profile.active), [profiles]);
+  // A continuing sender numbers a draft when it's issued; a yearly sender
+  // numbers it when it's saved. Either way the preview can be overtaken.
+  const draftProfile = profiles.find((profile) => String(profile.id) === draft.invoice_billing_profile_id);
+  const draftNumberPlaceholder = !draftProfile?.next_invoice_number_preview
+    ? 'Assigned automatically'
+    : draftProfile.numbering_style === 'continuing'
+      ? `Next: ${draftProfile.next_invoice_number_preview} (assigned when issued)`
+      : draft.invoice_date && !draftProfile.next_invoice_number_preview.includes(`-${draft.invoice_date.slice(0, 4)}-`)
+        ? 'Assigned when saved'
+        : `Next: ${draftProfile.next_invoice_number_preview} (assigned when saved)`;
   const selectedBusiness = businessFilter === 'all'
     ? null
     : profiles.find((profile) => String(profile.id) === businessFilter) || null;
@@ -437,6 +464,7 @@ export function InvoiceCenter() {
       setModal('details');
       setDetailAction(null);
       setEditingSendScheduleId(null);
+      setEmailEdit(null);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to open invoice');
     } finally {
@@ -584,6 +612,13 @@ export function InvoiceCenter() {
     applyInvoice(response.invoice);
   }, 'Invoice issued and its exact PDF preserved.');
 
+  const closePreview = (): void => {
+    setPreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return null;
+    });
+  };
+
   const previewSelected = async () => {
     if (!selected) return;
     const organizationId = loadedOrganizationId.current;
@@ -722,7 +757,7 @@ export function InvoiceCenter() {
         ends_on: String(values.get('ends_on') || '') || null,
         interval_unit: String(values.get('interval_unit')) as 'week' | 'month',
         interval_count: Number(values.get('interval_count')),
-        due_after_days: Number(values.get('due_after_days')),
+        ...(values.has('due_after_days') ? { due_after_days: Number(values.get('due_after_days')) } : {}),
       });
       setDetailAction(null);
     }, 'Recurring schedule created. Each occurrence becomes a draft for review and issue.');
@@ -734,11 +769,35 @@ export function InvoiceCenter() {
     }, recurrence.active ? 'Recurring schedule paused.' : 'Recurring schedule resumed.');
   };
 
+  const openRecurrence = (): void => {
+    if (!selected) return;
+    setRecurrenceForm({ start_on: nextRecurrenceStart(selected, 'month', 1, dateOnly()), interval_unit: 'month', interval_count: '1', startEdited: false });
+    setDetailAction('recurrence');
+  };
+
+  // Until the date is picked by hand, the first date follows the interval:
+  // the period after the source invoice's.
+  const changeRecurrenceInterval = (change: Partial<{ interval_unit: 'week' | 'month'; interval_count: string }>): void => {
+    setRecurrenceForm((current) => {
+      const next = { ...current, ...change };
+      const count = Math.max(1, Math.trunc(Number(next.interval_count)) || 1);
+      return selected && !current.startEdited ? { ...next, start_on: nextRecurrenceStart(selected, next.interval_unit, count, dateOnly()) } : next;
+    });
+  };
+
+  // The panel starts from what would be sent: the schedule's reviewed text,
+  // else the invoice's email (saved text or the default).
+  const fillSendEmail = (schedule?: InvoiceSendSchedule): void => {
+    setSendSubject(schedule?.subject || selected?.email?.subject || '');
+    setSendBody(schedule?.body || selected?.email?.body || '');
+  };
+
   const openScheduleEmail = (schedule?: InvoiceSendSchedule) => {
     setSendMode('later');
     setEditingSendScheduleId(schedule?.id || null);
     setSendRecipients(schedule?.recipients.join(', ') || selected?.invoice_recipient?.email || '');
     setSendAt(schedule ? localDateTimeInput(schedule.send_at) : '');
+    fillSendEmail(schedule);
     setDetailAction('schedule_email');
   };
 
@@ -747,7 +806,24 @@ export function InvoiceCenter() {
     setEditingSendScheduleId(null);
     setSendRecipients(selected?.invoice_recipient?.email || '');
     setSendAt('');
+    fillSendEmail();
     setDetailAction('schedule_email');
+  };
+
+  const saveInvoiceEmail = (reset = false): void => {
+    if (!selected || !emailEdit || emailEdit.invoiceId !== selected.id) return;
+    const subject = reset ? '' : emailEdit.subject.trim();
+    const body = reset ? '' : emailEdit.body.trim();
+    void run(async () => {
+      // Text matching the default is saved blank so it keeps following the
+      // invoice (number, balance) instead of freezing today's wording.
+      const response = await invoicesApi.updateEmail(selected.id, {
+        email_subject: subject === selected.email?.default_subject ? '' : subject,
+        email_body: body === selected.email?.default_body.trim() ? '' : body,
+      });
+      applyInvoice(response.invoice);
+      setEmailEdit(null);
+    }, reset ? 'Email set back to the default.' : 'Invoice email saved. The issued PDF is unchanged.');
   };
 
   const submitScheduledEmail = (event: React.FormEvent<HTMLFormElement>) => {
@@ -763,13 +839,21 @@ export function InvoiceCenter() {
       setError('Choose a future send time');
       return;
     }
+    const subject = sendSubject.trim();
+    const body = sendBody.trim();
+    if (!subject || !body) {
+      setError('Enter a subject and a message for the email');
+      return;
+    }
+    // The text reviewed here is what is sent.
+    const content = { subject, body };
     void run(async () => {
       if (editingSendScheduleId) {
-        await invoiceSendSchedulesApi.update(editingSendScheduleId, { recipients, send_at: at!.toISOString() });
+        await invoiceSendSchedulesApi.update(editingSendScheduleId, { recipients, send_at: at!.toISOString(), ...content });
       } else {
         await invoiceSendSchedulesApi.create(sendMode === 'now'
-          ? { invoice_id: selected.id, recipients, send_now: true }
-          : { invoice_id: selected.id, recipients, send_at: at!.toISOString() });
+          ? { invoice_id: selected.id, recipients, send_now: true, ...content }
+          : { invoice_id: selected.id, recipients, send_at: at!.toISOString(), ...content });
       }
       setDetailAction(null);
       setEditingSendScheduleId(null);
@@ -828,6 +912,8 @@ export function InvoiceCenter() {
         )}
       />
 
+      {/* Content gets the header's side gutter (px-4 / sm:px-6 / lg:px-8). */}
+      <div className="space-y-6 px-4 pb-8 sm:px-6 lg:px-8">
       <FinanceBookSelector disabled={busy || scopeLoading} />
 
       <div className="flex flex-col gap-4 rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50/80 to-white p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -893,7 +979,7 @@ export function InvoiceCenter() {
               return <div key={recurrence.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
                 <div>
                   <button type="button" onClick={() => openDetails(recurrence.source_invoice_id)} className="font-semibold text-neutral-900 underline-offset-2 hover:text-primary-700 hover:underline">{source?.invoice_number || `Invoice #${recurrence.source_invoice_id}`}</button>
-                  <p className="mt-0.5 text-neutral-500">Every {recurrence.interval_count > 1 ? `${recurrence.interval_count} ` : ''}{recurrence.interval_unit}{recurrence.interval_count > 1 ? 's' : ''} · Next {formatDate(recurrence.next_on)} · Due {recurrence.due_after_days} days after invoice date{recurrence.ends_on ? ` · Ends ${formatDate(recurrence.ends_on)}` : ''}</p>
+                  <p className="mt-0.5 text-neutral-500">Every {recurrence.interval_count > 1 ? `${recurrence.interval_count} ` : ''}{recurrence.interval_unit}{recurrence.interval_count > 1 ? 's' : ''} · Next {formatDate(recurrence.next_on)} · {recurrence.due_terms ? `Due per customer terms (${recurrence.due_terms.payment_terms})` : `Due ${recurrence.due_after_days} days after invoice date`}{recurrence.ends_on ? ` · Ends ${formatDate(recurrence.ends_on)}` : ''}</p>
                 </div>
                 <div className="flex items-center gap-2"><Badge className={recurrence.active ? 'bg-emerald-50 text-emerald-800' : 'bg-neutral-100 text-neutral-600'}>{recurrence.active ? 'Active' : 'Paused'}</Badge><Button variant="outline" size="sm" onClick={() => updateRecurrence(recurrence)} disabled={busy || financeReadOnly}>{recurrence.active ? <Pause className="mr-1 h-3.5 w-3.5" /> : <RotateCcw className="mr-1 h-3.5 w-3.5" />}{recurrence.active ? 'Pause' : 'Resume'}</Button></div>
               </div>;
@@ -949,6 +1035,8 @@ export function InvoiceCenter() {
         </div>
       </div>
 
+      </div>
+
       {modal === 'new' && <ModalShell title={editingDraftId ? "Edit draft invoice" : "New invoice"} subtitle="Save a draft first. Issuing it freezes the financial details and preserves the exact PDF." onClose={closeDraftModal} wide>
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
           <div className="space-y-5">
@@ -959,7 +1047,7 @@ export function InvoiceCenter() {
               <label className="text-sm font-medium">Service month<Input className="mt-1" type="month" value={draft.service_period_start.slice(0, 7)} onChange={(e) => { if (e.target.value) setDraft({ ...withPeriod(draft, serviceMonth(`${e.target.value}-01`).service_period_start, serviceMonth(`${e.target.value}-01`).service_period_end), servicePeriodEdited: true }); }} /></label>
               <label className="text-sm font-medium">Service period start<Input className="mt-1" type="date" value={draft.service_period_start} onChange={(e) => setDraft({ ...withPeriod(draft, e.target.value, draft.service_period_end), servicePeriodEdited: true })} /></label>
               <label className="text-sm font-medium">Service period end<Input className="mt-1" type="date" value={draft.service_period_end} onChange={(e) => setDraft({ ...draft, service_period_end: e.target.value, servicePeriodEdited: true })} /></label>
-              <label className="text-sm font-medium">Invoice number <span className="font-normal text-neutral-400">(automatic if blank)</span><Input className="mt-1" value={draft.invoice_number} onChange={(e) => setDraft({ ...draft, invoice_number: e.target.value })} placeholder="ST-2026-0001" /></label>
+              <label className="text-sm font-medium">Invoice number <span className="font-normal text-neutral-400">(automatic if blank)</span><Input className="mt-1" value={draft.invoice_number} onChange={(e) => setDraft({ ...draft, invoice_number: e.target.value })} placeholder={draftNumberPlaceholder} /></label>
               <label className="text-sm font-medium">Customer reference<Input className="mt-1" value={draft.customer_reference} onChange={(e) => setDraft({ ...draft, customer_reference: e.target.value })} placeholder="PO number or project" /></label>
               <label className="text-sm font-medium">Invoice date<Input className="mt-1" type="date" value={draft.invoice_date} onChange={(e) => setDraft(withDueDate({ ...(!draft.servicePeriodEdited && e.target.value && profiles.find((p) => String(p.id) === draft.invoice_billing_profile_id)?.numbering_style === 'continuing' ? withPeriod(draft, serviceMonth(e.target.value).service_period_start, serviceMonth(e.target.value).service_period_end) : draft), invoice_date: e.target.value }))} /></label>
               <label className="text-sm font-medium">Due date<Input className="mt-1" type="date" value={draft.due_date} onChange={(e) => setDraft({ ...draft, due_date: e.target.value, due_date_manual: !!e.target.value })} /></label>
@@ -1046,9 +1134,9 @@ export function InvoiceCenter() {
           {selected.discount_type !== 'none' && <div className="flex flex-wrap gap-x-6 gap-y-1 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700"><span>Subtotal <strong>{money(selected.subtotal_amount, selected.currency)}</strong></span><span>Discount{selected.discount_type === 'percent' ? ` (${selected.discount_value}%)` : ''} <strong>−{money(selected.discount_amount, selected.currency)}</strong></span></div>}
           {selected.legacy_artifact_missing && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">This legacy invoice has lifecycle history but no exact preserved file. New and imported invoices always preserve immutable evidence.</div>}
           <div className="flex min-h-11 flex-wrap gap-2 transition-all duration-200">
-            <Button variant="outline" onClick={previewSelected} disabled={busy}><Eye className="mr-1.5 h-4 w-4" />Preview</Button>
+            <Button ref={previewButtonRef} variant="outline" onClick={previewSelected} disabled={busy}><Eye className="mr-1.5 h-4 w-4" />Preview</Button>
             {selected.status === 'draft' ? <><Button variant="outline" disabled={financeReadOnly} onClick={editSelectedDraft}>Edit draft</Button><Button onClick={issueSelected} disabled={busy || financeReadOnly}><CheckCircle2 className="mr-1.5 h-4 w-4" />Issue invoice</Button></> : <Button variant="outline" onClick={downloadSelected} disabled={!selected.has_artifact || busy}><Download className="mr-1.5 h-4 w-4" />Download original</Button>}
-            {selected.origin === 'native' && selected.base_status === 'open' && <Button variant="outline" onClick={() => setDetailAction('recurrence')} disabled={busy || financeReadOnly}><CalendarClock className="mr-1.5 h-4 w-4" />Make recurring</Button>}
+            {selected.origin === 'native' && selected.base_status === 'open' && <Button variant="outline" onClick={openRecurrence} disabled={busy || financeReadOnly}><CalendarClock className="mr-1.5 h-4 w-4" />Make recurring</Button>}
             {selected.base_status === 'open' && selected.artifacts?.some((artifact) => artifact.content_type === 'application/pdf' && ['issued_pdf', 'imported_original', 'legacy_snapshot'].includes(artifact.kind)) && <><Button onClick={openSendNow} disabled={busy || financeReadOnly}><Send className="mr-1.5 h-4 w-4" />Send now</Button><Button variant="outline" onClick={() => openScheduleEmail()} disabled={busy || financeReadOnly}><CalendarClock className="mr-1.5 h-4 w-4" />Schedule email</Button></>}
             {!['draft', 'voided'].includes(selected.status) && <Button variant="outline" disabled={financeReadOnly} onClick={() => setDetailAction('delivery')}><MailCheck className="mr-1.5 h-4 w-4" />Mark as sent (by my own email)</Button>}
             {!['draft', 'voided', 'uncollectible'].includes(selected.status) && <><Button variant="outline" onClick={() => setDetailAction('payment')} disabled={financeReadOnly || selected.balance_due <= 0}><CircleDollarSign className="mr-1.5 h-4 w-4" />Record payment</Button><Button variant="outline" onClick={() => setDetailAction('credit')} disabled={financeReadOnly || selected.balance_due <= 0}><FileText className="mr-1.5 h-4 w-4" />Issue credit</Button></>}
@@ -1063,20 +1151,25 @@ export function InvoiceCenter() {
             {detailAction === 'recurrence' && <form onSubmit={submitRecurrence} className="space-y-4">
               <div><h3 className="font-semibold text-neutral-900">Create recurring drafts</h3><p className="mt-1 text-sm text-neutral-600">The issued invoice supplies the line items, discount, and sender. New occurrences are drafts that need review and issue.</p></div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                <label className="text-sm font-medium">First invoice date<Input required name="start_on" type="date" min={dateOnly()} defaultValue={dateOnly()} className="mt-1" /></label>
-                <label className="text-sm font-medium">Repeat<select name="interval_unit" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="month">Monthly</option><option value="week">Weekly</option></select></label>
-                <label className="text-sm font-medium">Every<Input required name="interval_count" type="number" min="1" step="1" defaultValue="1" className="mt-1" /></label>
-                <label className="text-sm font-medium">Due after days<Input required name="due_after_days" type="number" min="0" step="1" defaultValue="30" className="mt-1" /></label>
+                <label className="text-sm font-medium">First invoice date<Input required name="start_on" type="date" min={dateOnly()} value={recurrenceForm.start_on} onChange={(event) => setRecurrenceForm((current) => ({ ...current, start_on: event.target.value, startEdited: true }))} className="mt-1" /></label>
+                <label className="text-sm font-medium">Repeat<select name="interval_unit" value={recurrenceForm.interval_unit} onChange={(event) => changeRecurrenceInterval({ interval_unit: event.target.value as 'week' | 'month' })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="month">Monthly</option><option value="week">Weekly</option></select></label>
+                <label className="text-sm font-medium">Every<Input required name="interval_count" type="number" min="1" step="1" value={recurrenceForm.interval_count} onChange={(event) => changeRecurrenceInterval({ interval_count: event.target.value })} className="mt-1" /></label>
+                {!selected.recurring_terms && <label className="text-sm font-medium">Due after days<Input required name="due_after_days" type="number" min="0" step="1" defaultValue={termsDueDays(selected.payment_terms) ?? 30} className="mt-1" /></label>}
                 <label className="text-sm font-medium">End date (optional)<Input name="ends_on" type="date" min={dateOnly()} className="mt-1" /></label>
               </div>
+              {selected.recurring_terms && <p className="text-sm text-neutral-600">Each draft is due by {selected.recipient_name || 'the customer'}'s terms: <strong>{selected.recurring_terms.payment_terms}</strong>{selected.recurring_terms.due_after_days ? ` (${selected.recurring_terms.due_after_days} days after the invoice date)` : ''}. Change the customer's terms to change this.</p>}
+              <p className="text-xs text-neutral-500">The first draft covers {formatDate(recurrenceForm.start_on)} to the day before the next one. It starts with the default email for its own number and month.</p>
               <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || financeReadOnly}>Create schedule</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div>
             </form>}
             {detailAction === 'schedule_email' && <form onSubmit={submitScheduledEmail} className="space-y-4">
-              <div><h3 className="font-semibold text-neutral-900">{editingSendScheduleId ? 'Change scheduled email' : sendMode === 'now' ? 'Send invoice now' : 'Schedule invoice email'}</h3><p className="mt-1 text-sm text-neutral-600">Review the recipients before sending the preserved PDF for {displayNumber(selected.invoice_number)}. A send is recorded when the provider accepts it; inbox delivery is not confirmed.</p></div>
+              <div><h3 className="font-semibold text-neutral-900">{editingSendScheduleId ? 'Change scheduled email' : sendMode === 'now' ? 'Send invoice now' : 'Schedule invoice email'}</h3><p className="mt-1 text-sm text-neutral-600">Review the email before sending the preserved PDF for {displayNumber(selected.invoice_number)} as an attachment. A send is recorded when the provider accepts it; inbox delivery is not confirmed.</p></div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="text-sm font-medium">Recipients <span className="font-normal text-neutral-500">(up to 10, separated by commas)</span><Textarea required value={sendRecipients} onChange={(event) => setSendRecipients(event.target.value)} rows={2} className="mt-1" placeholder="billing@example.com, owner@example.com" /></label>
                 {sendMode === 'later' && <label className="text-sm font-medium">Send at <span className="font-normal text-neutral-500">({Intl.DateTimeFormat().resolvedOptions().timeZone})</span><Input required type="datetime-local" value={sendAt} onChange={(event) => setSendAt(event.target.value)} className="mt-1" /></label>}
+                <label className="text-sm font-medium sm:col-span-2">Subject<Input required maxLength={300} value={sendSubject} onChange={(event) => setSendSubject(event.target.value)} className="mt-1" /></label>
+                <label className="text-sm font-medium sm:col-span-2">Message<Textarea aria-label="Message" required maxLength={10000} value={sendBody} onChange={(event) => setSendBody(event.target.value)} rows={8} className="mt-1" /></label>
               </div>
+              <p className="text-xs text-neutral-500">Changes here apply to this send and are kept in the delivery history. To change the email this invoice uses every time, edit it under Email message.</p>
               <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || financeReadOnly}>{editingSendScheduleId ? 'Save changes' : sendMode === 'now' ? 'Confirm and send' : 'Schedule email'}</Button><Button type="button" variant="ghost" onClick={() => { setDetailAction(null); setEditingSendScheduleId(null); }}>Cancel</Button></div>
             </form>}
             {detailAction === 'delivery' && <form onSubmit={submitDelivery} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"><label className="text-sm font-medium">Channel<select name="channel" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="email">Email</option><option value="mail">Mail</option><option value="hand_delivery">Hand delivery</option><option value="portal">Portal</option><option value="other">Other</option></select></label><label className="text-sm font-medium">Recipient<Input name="recipient" defaultValue={selected.invoice_recipient?.email || ''} className="mt-1" /></label><label className="text-sm font-medium">Delivered at<Input name="delivered_at" type="datetime-local" className="mt-1" /></label><label className="text-sm font-medium">Reference<Input name="provider_reference" className="mt-1" /></label><label className="text-sm font-medium">Notes<Input name="notes" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy || financeReadOnly}>Mark as sent (by my own email)</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
@@ -1096,6 +1189,20 @@ export function InvoiceCenter() {
                 ))}
                 {!financialActivity.length && <p className="py-3 text-sm text-neutral-500">No payments or credits recorded.</p>}
               </div></div>
+              {selected.email && selected.base_status !== 'voided' && <section aria-labelledby="invoice-email-heading" className="rounded-xl border border-neutral-200 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3"><h3 id="invoice-email-heading" className="flex items-center gap-2 font-semibold"><Send className="h-4 w-4" />Email message</h3><span className="text-xs text-neutral-400">{selected.email.subject_customized || selected.email.body_customized ? 'Edited' : 'Default'}</span></div>
+                <p className="mt-1 text-xs text-neutral-500">Sent with the invoice PDF attached. Changing it doesn't change the {selected.base_status === 'draft' ? 'invoice' : 'issued PDF'}.</p>
+                {emailEdit?.invoiceId === selected.id ? <form aria-label="Edit invoice email" onSubmit={(event) => { event.preventDefault(); saveInvoiceEmail(); }} className="mt-3 space-y-3">
+                  <label className="block text-sm font-medium">Subject<Input maxLength={300} value={emailEdit.subject} onChange={(event) => setEmailEdit({ ...emailEdit, subject: event.target.value })} className="mt-1" /></label>
+                  <label className="block text-sm font-medium">Message<Textarea aria-label="Message" maxLength={10000} value={emailEdit.body} onChange={(event) => setEmailEdit({ ...emailEdit, body: event.target.value })} rows={8} className="mt-1" /></label>
+                  <p className="text-xs text-neutral-500">Leave the subject or message blank to use its default.</p>
+                  <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || financeReadOnly}>Save email</Button>{(selected.email.subject_customized || selected.email.body_customized) && <Button type="button" variant="outline" disabled={busy || financeReadOnly} onClick={() => saveInvoiceEmail(true)}>Use default</Button>}<Button type="button" variant="ghost" onClick={() => setEmailEdit(null)}>Cancel</Button></div>
+                </form> : <div className="mt-3 space-y-2 text-sm">
+                  <p className="break-words"><span className="text-neutral-400">Subject </span><span className="font-medium text-neutral-900">{selected.email.subject}</span></p>
+                  <p className="whitespace-pre-wrap break-words rounded-lg bg-neutral-50 p-3 text-neutral-700">{selected.email.body}</p>
+                  <Button type="button" size="sm" variant="outline" disabled={busy || financeReadOnly} onClick={() => setEmailEdit({ invoiceId: selected.id, subject: selected.email!.subject, body: selected.email!.body })}>Edit email</Button>
+                </div>}
+              </section>}
               <div className="rounded-xl border border-neutral-200 p-4">
                 <div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><CalendarClock className="h-4 w-4" />Scheduled email</h3><span className="text-xs text-neutral-400">{selectedSendSchedules.length} records</span></div>
                 <p className="mt-1 text-xs text-neutral-500">Sent means accepted by the email provider. Inbox delivery is not confirmed.</p>
@@ -1103,6 +1210,7 @@ export function InvoiceCenter() {
                   {selectedSendSchedules.map((schedule) => <div key={schedule.id} className="rounded-lg bg-neutral-50 p-3 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium capitalize">{schedule.status === 'sent' ? 'Provider accepted' : schedule.status}</p><span className="text-xs text-neutral-500">{formatDateTime(schedule.send_at)}</span></div>
                     <p className="mt-1 break-words text-neutral-600">To {schedule.recipients.join(', ')}</p>
+                    <p className="mt-1 break-words text-xs text-neutral-500">{schedule.subject ? `Subject: ${schedule.subject}` : "Uses the invoice's email when it sends"}</p>
                     {schedule.last_error && <p className="mt-1 text-xs text-red-700">Send failed: {schedule.last_error}</p>}
                     {schedule.provider_reference && <p className="mt-1 text-xs text-neutral-500">Provider reference: {schedule.provider_reference}</p>}
                     {schedule.status === 'pending' && <div className="mt-2 flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => openScheduleEmail(schedule)} disabled={busy || financeReadOnly}>Edit</Button><Button type="button" size="sm" variant="outline" onClick={() => cancelScheduledEmail(schedule)} disabled={busy || financeReadOnly}>Cancel send</Button></div>}
@@ -1116,6 +1224,8 @@ export function InvoiceCenter() {
                 <div className="mt-3 space-y-2">{deliveryHistory.map((delivery) => <div key={delivery.id} className="rounded-lg bg-neutral-50 p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium capitalize">{delivery.channel.replaceAll('_', ' ')}</p><span className="text-xs text-neutral-400">{formatDateTime(delivery.delivered_at)}</span></div>
                   <p className="mt-1 text-neutral-600">To {delivery.recipient || 'Recipient not recorded'}</p>
+                  {delivery.email_subject && <p className="mt-1 break-words text-neutral-700">Subject: {delivery.email_subject}</p>}
+                  {delivery.email_body && <details className="mt-1 text-xs text-neutral-600"><summary className="cursor-pointer font-medium text-primary-700">Message sent</summary><p className="mt-1 whitespace-pre-wrap break-words rounded-md bg-white p-2">{delivery.email_body}</p></details>}
                   {delivery.provider_reference && <p className="mt-1 text-xs text-neutral-500">Reference: {delivery.provider_reference}</p>}
                   {delivery.notes && <p className="mt-1 text-xs text-neutral-500">{delivery.notes}</p>}
                   <p className="mt-1 text-xs text-neutral-400">Recorded {formatDateTime(delivery.created_at)}{delivery.recorded_by_name ? ` · ${delivery.recorded_by_name}` : ''}{delivery.artifact_id ? ' · Preserved invoice attached' : ''}</p>
@@ -1132,7 +1242,7 @@ export function InvoiceCenter() {
         </div>
       </ModalShell>}
 
-      {previewUrl && <div className="invoice-modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-neutral-950/60 p-4"><div className="invoice-modal-panel flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white"><div className="flex items-center justify-between border-b px-4 py-3"><div><span className="font-semibold">Invoice preview</span>{selected && <span className="ml-2 text-sm text-neutral-400">{displayNumber(selected.invoice_number)}</span>}</div><Button variant="ghost" onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>Close</Button></div><iframe title="Invoice preview" src={previewUrl} className="h-full w-full" /></div></div>}
+      {previewUrl && <Dialog open onOpenChange={(open) => { if (!open) closePreview(); }} returnFocusRef={previewButtonRef}><DialogContent variant="drawer" aria-labelledby="invoice-preview-title" className="dialog-wide dialog-center-mobile mx-auto h-[92vh]! max-w-6xl flex-col overflow-hidden! rounded-2xl"><div className="flex items-center justify-between border-b px-4 py-3"><div><span id="invoice-preview-title" className="font-semibold">Invoice preview</span>{selected && <span className="ml-2 text-sm text-neutral-400">{displayNumber(selected.invoice_number)}</span>}</div><Button variant="ghost" onClick={closePreview}>Close</Button></div><iframe title="Invoice preview" src={previewUrl} className="min-h-0 w-full flex-1" /></DialogContent></Dialog>}
 
       {busy && !modal && <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-neutral-950 px-4 py-2 text-sm text-white shadow-lg"><Loader2 className="h-4 w-4 animate-spin" />Working</div>}
     </div>

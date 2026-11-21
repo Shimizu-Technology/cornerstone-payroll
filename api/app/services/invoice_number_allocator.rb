@@ -5,6 +5,12 @@ class InvoiceNumberAllocator
     new(billing_profile: billing_profile, invoice_date: invoice_date).call
   end
 
+  # The number the next issue would take, without reserving it. Another
+  # issue can take it first, so screens label it "assigned when issued".
+  def self.preview(billing_profile:, invoice_date:)
+    new(billing_profile: billing_profile, invoice_date: invoice_date).preview
+  end
+
   def initialize(billing_profile:, invoice_date:)
     @billing_profile = billing_profile
     @invoice_date = Date.parse(invoice_date.to_s)
@@ -33,6 +39,22 @@ class InvoiceNumberAllocator
         sequence.save!
         return candidate
       end
+    end
+  end
+
+  def preview
+    if billing_profile.numbering_style == "continuing"
+      number = billing_profile.next_invoice_number
+      number += 1 while continuing_number_taken?(number)
+      return billing_profile.format_continuing_number(number)
+    end
+
+    sequence = InvoiceNumberSequence.find_by(invoice_billing_profile: billing_profile, sequence_year: invoice_date.year)
+    number = sequence ? sequence.last_number : existing_count_for_year
+    loop do
+      number += 1
+      candidate = format_number(number)
+      return candidate unless Invoice.exists?(invoice_billing_profile: billing_profile, invoice_number: candidate)
     end
   end
 

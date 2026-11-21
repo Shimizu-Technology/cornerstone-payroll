@@ -11,6 +11,27 @@ class InvoiceRecurrenceGenerator
     end
   end
 
+  # Days from invoice date to due date that recognized terms set ("Net 15"
+  # is 15, "Due on receipt" is 0), or nil when the terms can't set a date.
+  def self.terms_due_days(terms)
+    text = terms.to_s.strip
+    days = text.match(/\ANet\s+(\d+)\z/i)&.captures&.first
+    return days.to_i if days
+
+    0 if text.casecmp?("Due on receipt")
+  end
+
+  # Terms that set each recurring draft's due date in place of
+  # due_after_days: a continuing sender follows the customer's terms.
+  def self.recurring_terms(source)
+    return nil unless source.invoice_billing_profile&.numbering_style == "continuing"
+
+    original = source.snapshot.is_a?(Hash) && source.snapshot["invoice"].is_a?(Hash) ? source.snapshot["invoice"] : {}
+    terms = source.invoice_recipient&.payment_terms.presence || original["payment_terms"]
+    days = terms_due_days(terms)
+    days.nil? ? nil : { payment_terms: terms.strip, due_after_days: days }
+  end
+
   def self.generate!(id, today: nil)
     InvoiceRecurrence.transaction do
       recurrence = InvoiceRecurrence.lock.find(id)
@@ -33,8 +54,7 @@ class InvoiceRecurrenceGenerator
         original = source.snapshot.fetch("invoice")
         continuing = source.invoice_billing_profile.numbering_style == "continuing"
         terms = continuing ? source.invoice_recipient.payment_terms.presence || original["payment_terms"] : original["payment_terms"]
-        terms_days = terms.to_s.match(/\ANet\s+(\d+)\z/i)&.captures&.first
-        due_days = continuing && terms_days ? terms_days.to_i : continuing && terms.to_s.casecmp?("Due on receipt") ? 0 : recurrence.due_after_days
+        due_days = continuing && terms_due_days(terms) || recurrence.due_after_days
         period_end = recurrence.occurrence_date(recurrence.occurrence_index + 1) - 1
         invoice = Invoice.new(
           organization: recurrence.organization,
@@ -53,8 +73,8 @@ class InvoiceRecurrenceGenerator
           customer_reference: original["customer_reference"],
           notes: original["notes"],
           payment_terms: terms,
-          email_subject: original["email_subject"],
-          email_body: original["email_body"],
+          # The source's email names its own number and month, so each draft
+          # starts from the default email instead (InvoiceEmailContent).
           discount_type: original["discount_type"] || "none",
           discount_value: original["discount_value"] || 0,
           created_by: recurrence.created_by,

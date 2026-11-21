@@ -10,7 +10,7 @@ import { MobileRecordCard } from '@/components/ui/mobile-record';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { yearEndApi } from '@/services/api';
-import { formatDate } from '@/lib/utils';
+import { formatGuamDate } from '@/lib/utils';
 import {
   clientStatusLabel,
   parseYearEndTaxYear,
@@ -54,7 +54,7 @@ function ClientStatus({ row }: { row: YearEndClientRow }): ReactElement {
 
 function IssueChips({ row }: { row: YearEndClientRow }): ReactElement | null {
   if (row.status === 'ready') {
-    return <p className="text-sm text-neutral-600">{row.marked_ready_at ? `W-2s marked ready ${formatDate(row.marked_ready_at)}` : 'Nothing left to do'}</p>;
+    return <p className="text-sm text-neutral-600">{row.marked_ready_at ? `W-2s marked ready ${formatGuamDate(row.marked_ready_at)}` : 'Nothing left to do'}</p>;
   }
   if (row.status === 'check_needed') {
     return <p className="text-sm text-neutral-700">{row.check_reason ?? 'Open the checklist to re-check.'}</p>;

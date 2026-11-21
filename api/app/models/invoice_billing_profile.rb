@@ -75,6 +75,12 @@ class InvoiceBillingProfile < ApplicationRecord
     invoice_number_width ? number.to_s.rjust(invoice_number_width, "0") : number.to_s
   end
 
+  # The number the next invoice from this sender would be issued with, for
+  # previews only (see InvoiceNumberAllocator.preview).
+  def next_number_preview(invoice_date = PayrollBusinessClock.today)
+    InvoiceNumberAllocator.preview(billing_profile: self, invoice_date: invoice_date)
+  end
+
   # The look new invoices from this sender get. Issued invoices keep the
   # style recorded in their snapshot.
   def invoice_style

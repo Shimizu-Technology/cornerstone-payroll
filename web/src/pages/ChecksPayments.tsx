@@ -22,7 +22,7 @@ import { DRT } from '@/lib/constants';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PayrollLiabilityCenter } from '@/components/payroll/PayrollLiabilityCenter';
 import { CheckRegister } from '@/components/checks/CheckRegister';
-import { formatDateRange } from '@/lib/utils';
+import { formatDateRange, formatGuamDate } from '@/lib/utils';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
@@ -849,7 +849,7 @@ export function ChecksPayments() {
                         {check.paid_by_name && <span>Confirmed by {check.paid_by_name}</span>}
                         {check.due_date && <span>Due {formatDate(check.due_date)}</span>}
                         {check.confirmation_number && <span>Confirmation {check.confirmation_number}</span>}
-                        <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{formatDate(check.created_at)}</span>
+                        <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{formatGuamDate(check.created_at)}</span>
                       </div>
                       {(check.memo || check.description) && (
                         <p className="mt-1 max-w-3xl truncate text-sm text-neutral-600">{check.memo || check.description}</p>
