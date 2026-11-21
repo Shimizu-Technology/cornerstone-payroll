@@ -106,7 +106,11 @@ export function ClientProfitability() {
               </div>
             </nav>
             {tab === 'report' && (overview.has_hours || overview.connection.connected
-              ? <ReportView reloadKey={reloadKey} onGoTo={goTo} />
+              ? <ReportView reloadKey={reloadKey} onGoTo={goTo} defaults={{
+                costPending: overview.settings.default_cost_pending,
+                spreadOverhead: overview.settings.default_spread_overhead,
+                period: overview.settings.default_period,
+              }} />
               : <p className="rounded-2xl border border-neutral-200 bg-white p-6 text-sm leading-6 text-neutral-700">The report fills in once Cornerstone Tax is connected and hours have been refreshed. Follow the steps above, then open Setup.</p>)}
             {tab === 'link' && <LinkQueue onChanged={refreshAll} reloadKey={reloadKey} />}
             {tab === 'setup' && (

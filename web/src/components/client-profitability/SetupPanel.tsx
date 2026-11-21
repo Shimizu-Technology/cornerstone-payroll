@@ -1,7 +1,13 @@
 import { useMemo, useState } from 'react';
 import { CheckCircle2, CircleAlert, Clock3, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { clientProfitabilityApi, type ProfitabilityOverview, type WorkHourImportStatus } from '@/services/clientProfitability';
+import {
+  clientProfitabilityApi,
+  type CostBasis,
+  type ProfitabilityOverview,
+  type ReportPeriodMode,
+  type WorkHourImportStatus,
+} from '@/services/clientProfitability';
 import { formatDate, formatDateTime, hours, monthLabel, recentMonths } from './format';
 import { SelectField } from './SelectField';
 
@@ -67,6 +73,10 @@ export function SetupPanel({ overview, onChanged, activeImport, monitorError, on
   const [practiceCompanyId, setPracticeCompanyId] = useState(String(overview.settings.practice_company_id ?? ''));
   const [financeBookId, setFinanceBookId] = useState(String(overview.settings.finance_book_id ?? ''));
   const [taxPrep, setTaxPrep] = useState<string[]>(overview.settings.tax_prep_service_names);
+  const [defaultCostPending, setDefaultCostPending] = useState(overview.settings.default_cost_pending);
+  const [defaultSpreadOverhead, setDefaultSpreadOverhead] = useState(overview.settings.default_spread_overhead);
+  const [defaultPeriodMode, setDefaultPeriodMode] = useState<ReportPeriodMode>(overview.settings.default_period);
+  const [costBasis, setCostBasis] = useState<CostBasis>(overview.settings.cost_basis);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: 'error' | 'success'; text: string } | null>(null);
   const [from, setFrom] = useState(months[1]);
@@ -85,6 +95,10 @@ export function SetupPanel({ overview, onChanged, activeImport, monitorError, on
         practice_company_id: practiceCompanyId ? Number(practiceCompanyId) : null,
         finance_book_id: financeBookId ? Number(financeBookId) : null,
         tax_prep_service_names: taxPrep,
+        default_cost_pending: defaultCostPending,
+        default_spread_overhead: defaultSpreadOverhead,
+        default_period: defaultPeriodMode,
+        cost_basis: costBasis,
       });
       setMessage({ tone: 'success', text: 'Settings saved.' });
       onChanged(updated);
@@ -173,6 +187,44 @@ export function SetupPanel({ overview, onChanged, activeImport, monitorError, on
               ))}
             </div>
           )}
+        </fieldset>
+        <fieldset className="mt-6">
+          <legend className="text-sm font-medium text-neutral-700">Count pay by</legend>
+          <p className="mt-1 text-xs leading-5 text-neutral-600">Which month a paycheck’s cost lands in. Hours are always split the same way.</p>
+          <div className="mt-2 grid gap-2 lg:grid-cols-2">
+            {([
+              ['pay_date', 'Pay date', 'The month the paycheck was paid. Matches the Annual Payroll Summary.'],
+              ['work_period', 'Work period', 'Spread over the days the paycheck covers: a check paid Dec 2 for Nov 16–30 counts in November.'],
+            ] as Array<[CostBasis, string, string]>).map(([value, label, hint]) => (
+              <label key={value} className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-3">
+                <input type="radio" name="cost-basis" className="mt-0.5 h-5 w-5 shrink-0" value={value} checked={costBasis === value}
+                  onChange={() => setCostBasis(value)} />
+                <span><span className="block text-sm font-semibold text-neutral-900">{label}</span><span className="block text-xs leading-5 text-neutral-600">{hint}</span></span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset className="mt-6">
+          <legend className="text-sm font-medium text-neutral-700">Report defaults</legend>
+          <p className="mt-1 text-xs leading-5 text-neutral-600">Where the report starts each time it opens. You can still change these on the report for one view.</p>
+          <div className="mt-2 grid gap-2 lg:grid-cols-2">
+            <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-3">
+              <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 rounded border-neutral-300" checked={defaultCostPending}
+                onChange={(event) => setDefaultCostPending(event.target.checked)} />
+              <span><span className="block text-sm font-semibold text-neutral-900">Count pending hours in cost</span><span className="block text-xs leading-5 text-neutral-600">Hours still waiting for approval in Tax also get a share of staff pay.</span></span>
+            </label>
+            <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-3">
+              <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 rounded border-neutral-300" checked={defaultSpreadOverhead}
+                onChange={(event) => setDefaultSpreadOverhead(event.target.checked)} />
+              <span><span className="block text-sm font-semibold text-neutral-900">Spread internal/overhead time across clients</span><span className="block text-xs leading-5 text-neutral-600">Moves the cost of Cornerstone’s own time onto clients, by their hours.</span></span>
+            </label>
+            <SelectField wrapperClassName="lg:max-w-xs" label="Default period" value={defaultPeriodMode}
+              onChange={(event) => setDefaultPeriodMode(event.target.value as ReportPeriodMode)} help="The report opens on last month, or the quarter that holds it.">
+              <option value="month">Month</option>
+              <option value="quarter">Quarter</option>
+              <option value="custom">Custom months</option>
+            </SelectField>
+          </div>
         </fieldset>
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <Button onClick={() => void save()} loading={saving} className="min-h-11 sm:min-h-11">Save settings</Button>

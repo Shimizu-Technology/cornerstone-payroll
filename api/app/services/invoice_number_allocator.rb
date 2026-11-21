@@ -14,9 +14,9 @@ class InvoiceNumberAllocator
     billing_profile.with_lock do
       if billing_profile.numbering_style == "continuing"
         number = billing_profile.next_invoice_number
-        number += 1 while Invoice.exists?(invoice_billing_profile: billing_profile, invoice_number: number.to_s)
+        number += 1 while continuing_number_taken?(number)
         billing_profile.update!(next_invoice_number: number + 1)
-        return number.to_s
+        return billing_profile.format_continuing_number(number)
       end
 
       sequence = InvoiceNumberSequence.find_or_initialize_by(
@@ -39,6 +39,14 @@ class InvoiceNumberAllocator
   private
 
   attr_reader :billing_profile, :invoice_date
+
+  # A continuing number is the same number with or without leading zeros:
+  # "7055" and "07055" can't both be issued for one sender.
+  def continuing_number_taken?(number)
+    Invoice.where(invoice_billing_profile: billing_profile)
+           .where("invoice_number ~ '^[0-9]+$' AND ltrim(invoice_number, '0') = ?", number.to_s)
+           .exists?
+  end
 
   def existing_count_for_year
     Invoice.where(

@@ -8,17 +8,22 @@ import {
   type ProfitabilityLine,
   type ProfitabilityPerson,
   type ProfitabilityReport,
+  type ReportPeriodMode,
   type ReportQuery,
 } from '@/services/clientProfitability';
-import { hours, isNegative, isZero, money, monthLabel, percent, recentMonths, recentQuarters } from './format';
+import { defaultPeriod, hours, isNegative, isZero, money, monthLabel, percent, recentMonths, recentQuarters } from './format';
 import { SelectField } from './SelectField';
 
-type Mode = 'month' | 'quarter' | 'custom';
+type Mode = ReportPeriodMode;
 
-function PeriodPicker({ value, onChange }: { value: { from: string; through: string }; onChange: (next: { from: string; through: string }) => void }) {
+function PeriodPicker({ value, initialMode, onChange }: {
+  value: { from: string; through: string };
+  initialMode: Mode;
+  onChange: (next: { from: string; through: string }) => void;
+}) {
   const months = useMemo(() => recentMonths(new Date()), []);
   const quarters = useMemo(() => recentQuarters(new Date()), []);
-  const [mode, setMode] = useState<Mode>(() => (value.from === value.through ? 'month' : quarters.some((quarter) => quarter.from === value.from && quarter.through === value.through) ? 'quarter' : 'custom'));
+  const [mode, setMode] = useState<Mode>(initialMode);
 
   function choose(next: Mode) {
     setMode(next);
@@ -216,7 +221,11 @@ function HowCalculated({ report }: { report: ProfitabilityReport }) {
       <summary className="flex min-h-11 cursor-pointer items-center text-base font-semibold text-neutral-950">How this is calculated</summary>
       <div className="mt-3 space-y-3 text-sm leading-6 text-neutral-700">
         <p><strong>Fees</strong> are issued invoices (not drafts or voids) linked to each client, by service month, without reimbursements. Discounts are spread across the lines. Payments and credits don’t change them.</p>
-        <p><strong>Cost</strong> is the same “total payroll cost” the Annual Payroll Summary shows for{report.practice_company ? ` ${report.practice_company.name}` : ' the staff payroll client'} and these pay dates: gross pay, non-taxable pay, the employer’s Social Security and Medicare, and employer contributions such as retirement match, including imported QuickBooks paychecks. Each person’s share is split across the clients they logged hours to in Cornerstone Tax, in proportion to their approved hours. Imported paychecks that aren’t linked to an employee are left out of the totals, as in that summary, and listed on their own.</p>
+        {report.cost_basis.basis === 'work_period' ? (
+          <p><strong>Cost</strong> counts pay by <strong>work period</strong> (Setup → Count pay by): each paycheck{report.practice_company ? ` from ${report.practice_company.name}` : ''} is spread evenly over the days of its pay period, and only the days in these months count. A check paid December 2 for November 16–30 counts in November. It includes gross pay, non-taxable pay, the employer’s Social Security and Medicare, employer contributions such as retirement match, and imported QuickBooks paychecks. That’s why it can differ from the Annual Payroll Summary, which counts each paycheck in the month it was paid. Each person’s share is split across the clients they logged hours to in Cornerstone Tax, in proportion to their approved hours. Imported paychecks that aren’t linked to an employee are left out of the totals and listed on their own.</p>
+        ) : (
+          <p><strong>Cost</strong> counts pay by <strong>pay date</strong>, the same “total payroll cost” the Annual Payroll Summary shows for{report.practice_company ? ` ${report.practice_company.name}` : ' the staff payroll client'} and these pay dates: gross pay, non-taxable pay, the employer’s Social Security and Medicare, and employer contributions such as retirement match, including imported QuickBooks paychecks. Each person’s share is split across the clients they logged hours to in Cornerstone Tax, in proportion to their approved hours. Imported paychecks that aren’t linked to an employee are left out of the totals, as in that summary, and listed on their own. To count pay in the months the work was done instead, change Setup → Count pay by.</p>
+        )}
         <p><strong>Pending hours</strong> (not yet approved in Tax) are shown but only get cost when “Count pending hours” is on. <strong>Internal / overhead</strong> is time on Cornerstone’s own work; it gets its share of cost and stays on its own line unless you spread it across clients by hours.</p>
         <p><strong>Margin</strong> is fees minus cost. <strong>Fees per hour</strong> is fees divided by hours, so time on a client with no fees shows $0.00. Pay is matched by pay date and hours by work date, so a month can look uneven when a paycheck covers work from the month before; quarters smooth that out.</p>
       </div>
@@ -249,15 +258,23 @@ function HowCalculated({ report }: { report: ProfitabilityReport }) {
   );
 }
 
-function defaultPeriod(): { from: string; through: string } {
-  const previous = recentMonths(new Date(), 2)[1];
-  return { from: previous, through: previous };
+export interface ReportDefaults {
+  costPending: boolean;
+  spreadOverhead: boolean;
+  period: ReportPeriodMode;
 }
 
-export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (tab: 'link' | 'setup') => void }) {
-  const [period, setPeriod] = useState(defaultPeriod);
-  const [costPending, setCostPending] = useState(false);
-  const [spreadOverhead, setSpreadOverhead] = useState(false);
+const BUILT_IN_DEFAULTS: ReportDefaults = { costPending: false, spreadOverhead: false, period: 'month' };
+
+export function ReportView({ reloadKey, onGoTo, defaults = BUILT_IN_DEFAULTS }: {
+  reloadKey: number;
+  onGoTo: (tab: 'link' | 'setup') => void;
+  /** The organization's saved starting point (Setup → Report defaults). */
+  defaults?: ReportDefaults;
+}) {
+  const [period, setPeriod] = useState(() => defaultPeriod(defaults.period));
+  const [costPending, setCostPending] = useState(defaults.costPending);
+  const [spreadOverhead, setSpreadOverhead] = useState(defaults.spreadOverhead);
   // The report on screen and the exact options that produced it: labels and
   // the CSV always describe what is shown, not options still loading.
   const [shown, setShown] = useState<{ report: ProfitabilityReport; query: ReportQuery } | null>(null);
@@ -310,7 +327,7 @@ export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (
   return (
     <div className="space-y-6">
       <section aria-label="Report options" className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-6">
-        <PeriodPicker value={period} onChange={setPeriod} />
+        <PeriodPicker value={period} initialMode={defaults.period} onChange={setPeriod} />
         <div className="grid gap-3 lg:grid-cols-2">
           <Toggle checked={costPending} onChange={setCostPending} label="Count pending hours in cost"
             help="Hours still waiting for approval in Tax also get a share of staff pay." />
@@ -345,6 +362,14 @@ export function ReportView({ reloadKey, onGoTo }: { reloadKey: number; onGoTo: (
                 {notLinked > 0 && `${notLinked} Tax client${notLinked === 1 ? '' : 's'} `}{notLinked > 0 && staffNotLinked > 0 && 'and '}
                 {staffNotLinked > 0 && `${staffNotLinked} staff member${staffNotLinked === 1 ? '' : 's'} `}
                 aren’t linked yet, so some hours or pay aren’t counted against a client. <button type="button" className="min-h-11 font-semibold underline" onClick={() => onGoTo('link')}>Link them</button>
+              </p>
+            )}
+            {report.cost_basis.basis === 'work_period' && (
+              <p className="rounded-xl border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
+                Pay is counted by work period: {money(report.cost_basis.cost)}. The Annual Payroll Summary counts {money(report.cost_basis.annual_payroll_summary_cost)} for paychecks paid in these months
+                {isZero(report.cost_basis.difference)
+                  ? ', the same amount.'
+                  : `, ${money(report.cost_basis.difference.replace('-', ''))} ${isNegative(report.cost_basis.difference) ? 'more' : 'less'}. The difference is pay for work done in one range but paid in another.`}
               </p>
             )}
             {!isZero(report.coverage.pending_hours) && (
