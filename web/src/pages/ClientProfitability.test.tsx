@@ -239,4 +239,22 @@ describe('ClientProfitability', () => {
     expect(await screen.findByText('Pulling hours from Cornerstone Tax…')).toBeTruthy();
     await waitFor(() => expect(state.importStatus).toHaveBeenCalledWith(9), { timeout: 3000 });
   });
+
+  it('reloads the link queue when a refresh finishes while it is open', async () => {
+    const running = { id: 11, status: 'running' as const, trigger: 'scheduled' as const, range_start: '2026-11-01', range_end: '2026-11-21',
+      requested_by: null, created_at: null, started_at: null, finished_at: null, row_count: 0, total_hours: '0.0',
+      pending_entries: 0, denied_entries: 0, open_clock_entries: 0, error_code: null, error_message: null };
+    state.overview.mockResolvedValueOnce(overview({ imports: [running] })).mockResolvedValue(overview({ imports: [{ ...running, status: 'succeeded' }] }));
+    state.importStatus.mockResolvedValue({ import: { ...running, status: 'succeeded' } });
+    state.links.mockResolvedValueOnce({ clients: [], staff: [], companies: [], employees: [] }).mockResolvedValue({
+      clients: [{ tax_client_id: 777, name: 'New Tax Client', hours: '3.00', last_worked_on: '2026-11-20', internal_in_tax: false,
+        handled_automatically: false, link: null, suggestion: null }],
+      staff: [], companies: [{ id: 2, name: 'Acme Bakery' }], employees: [],
+    });
+    renderPage('/reports/client-profitability?tab=link');
+
+    expect(await screen.findByText(/No hours have been pulled from Tax yet/)).toBeTruthy();
+    expect(await screen.findByText('New Tax Client', undefined, { timeout: 4000 })).toBeTruthy();
+    expect(state.links).toHaveBeenCalledTimes(2);
+  });
 });

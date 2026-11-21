@@ -31,9 +31,11 @@ Until both environment variables are set, the page shows a "not connected" panel
   - Manual and nightly refreshes both start through `WorkHourImport.reserve!`, under the organization row lock.
   - A partial unique index allows only one queued or running import per organization.
   - A worker claims an import (`claim!`) and renews a 5-minute lease after each month.
-  - If a worker dies, the next job retry waits out the lease, then takes the import over. A queued import that no worker picks up within 15 minutes, or a running one past its lease, is marked "interrupted" when the next refresh starts.
+  - If a worker dies, the next job retry waits out the lease, then takes the import over.
+  - A queued import that no worker picks up within 15 minutes is reported as "interrupted, nothing was changed". A job that finally arrives after that can't claim it; the claim marks the import failed instead, so hours never change after the page has said they won't. A running import past its lease, or a queued one, is also marked "interrupted" when the next refresh starts.
   - Rows are replaced only while the worker still holds its claim **and** its lease hasn't ended. The database checks both while the import row is locked inside the replacement transaction. A lease that has ended can't be renewed, even by the worker that held it. A worker that runs out of time, during a slow month or after its last renewal, saves nothing; if nobody took the import over, the refresh is marked "took too long" and can be retried.
-  - Locks are always taken in the same order: the organization row, then the import row. That holds both for starting a refresh and for saving one, so a refresh started while another is saving waits instead of deadlocking.
+  - Locks are always taken in the same order: the organization row, then the import row. That holds both for starting a refresh and for saving one, so a refresh started while another is saving waits instead of deadlocking. The organization row is locked `FOR NO KEY UPDATE`: refreshes still wait for each other, but unrelated writes that only reference the organization (foreign keys) aren't blocked during a save.
+- After a refresh finishes, the report and the link queue both reload, so new Tax clients and staff show up without reopening the page.
 - The Setup section isn't the only place that watches a refresh. The page keeps watching it from any section, picks up one already running on the server (for example the nightly job), and reloads the report when it ends.
 - The feed allows at most 62 days per request and doesn't paginate, so Payroll asks for one calendar month at a time.
 - **Signing** (`TaxWorkHours::Signer`) follows the contract exactly. The string to sign is `METHOD\npath\ncanonical query\ntimestamp\nsha256(body)`; the signature is hex HMAC-SHA256 of it, sent with `X-Work-Hours-Timestamp` and `X-Work-Hours-Signature`. Each query key is sent once. `spec/services/tax_work_hours/signer_spec.rb` pins the doc example's signature, computed with Tax's own code.
@@ -85,7 +87,7 @@ Invoices not linked to a payroll client are shown as **Fees not linked to a clie
 **Columns.**
 - **Margin** = fees − cost.
 - **Margin %** = margin ÷ fees.
-- **Fees per hour** = fees ÷ hours (counted hours, which include pending hours when that toggle is on).
+- **Fees per hour** = fees ÷ hours (counted hours, which include pending hours when that toggle is on). Work that wasn't billed shows $0.00 per hour; it's blank only when there are no counted hours.
 
 ## Tax prep
 

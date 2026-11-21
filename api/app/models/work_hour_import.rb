@@ -28,6 +28,8 @@ class WorkHourImport < ApplicationRecord
   MAX_RANGE_MONTHS = 24
   INTERRUPTED_MESSAGE = "This refresh stopped before it finished. Nothing was changed. Try again."
 
+  ORGANIZATION_LOCK = "FOR NO KEY UPDATE"
+
   class Busy < StandardError; end
 
   belongs_to :organization
@@ -47,7 +49,9 @@ class WorkHourImport < ApplicationRecord
   # one exists. Callers enqueue or run it only after this returns.
   def self.reserve!(organization:, range_start:, range_end:, trigger:, requested_by: nil, now: Time.current)
     transaction do
-      organization.lock!
+      # FOR NO KEY UPDATE serializes refreshes for the organization without
+      # blocking unrelated inserts that only reference it (foreign keys).
+      organization.lock!(ORGANIZATION_LOCK)
       current = active.where(organization_id: organization.id).lock.first
       if current
         raise Busy, "A refresh is already running. Wait for it to finish." if current.lease_expires_at && current.lease_expires_at > now
@@ -62,14 +66,25 @@ class WorkHourImport < ApplicationRecord
   end
 
   # Takes this import for one worker. Returns the claim token, or nil when it
-  # is finished, superseded, or still held by a live worker.
+  # is finished, superseded, still held by a live worker, or was queued so
+  # long that it has already been reported as failed. A queued import is
+  # claimable only while its queued lease is live; one that expired is marked
+  # failed here, so a late job can never change hours after the page said
+  # "nothing was changed". A running import whose lease expired (its worker
+  # died) can still be taken over.
   def claim!(now: Time.current)
     token = SecureRandom.uuid
     claimed = self.class.where(id: id)
-                  .where("status = 'queued' OR (status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= ?))", now)
+                  .where("(status = 'queued' AND lease_expires_at > :now) OR " \
+                         "(status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= :now))", now: now)
                   .update_all(status: "running", claim_token: token, started_at: now, lease_expires_at: now + RUNNING_LEASE,
                               error_code: nil, error_message: nil, updated_at: now)
-    return nil unless claimed == 1
+    if claimed.zero?
+      self.class.where(id: id, status: "queued").where("lease_expires_at IS NULL OR lease_expires_at <= ?", now)
+          .update_all(status: "failed", finished_at: now, claim_token: nil, lease_expires_at: nil, error_code: "interrupted",
+                      error_message: INTERRUPTED_MESSAGE, updated_at: now)
+      return nil
+    end
 
     reload
     token

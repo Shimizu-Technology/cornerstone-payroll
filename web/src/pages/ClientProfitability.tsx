@@ -108,7 +108,7 @@ export function ClientProfitability() {
             {tab === 'report' && (overview.has_hours || overview.connection.connected
               ? <ReportView reloadKey={reloadKey} onGoTo={goTo} />
               : <p className="rounded-2xl border border-neutral-200 bg-white p-6 text-sm leading-6 text-neutral-700">The report fills in once Cornerstone Tax is connected and hours have been refreshed. Follow the steps above, then open Setup.</p>)}
-            {tab === 'link' && <LinkQueue onChanged={refreshAll} />}
+            {tab === 'link' && <LinkQueue onChanged={refreshAll} reloadKey={reloadKey} />}
             {tab === 'setup' && (
               <SetupPanel overview={overview} onChanged={settingsChanged} activeImport={activeImport} monitorError={monitorError}
                 onStarted={startWatching} />
