@@ -27,6 +27,7 @@ const PayRunWorkspace = lazy(() => import('@/pages/pay-periods/PayRunWorkspace')
 const ImportedPayRunDetail = lazy(() => import('@/pages/pay-periods/ImportedPayRunDetail').then((module) => ({ default: module.ImportedPayRunDetail })));
 const PayrollItemDetail = lazy(() => import('@/pages/payroll-items/PayrollItemDetail').then((module) => ({ default: module.PayrollItemDetail })));
 const Reports = lazy(() => import('@/pages/Reports').then((module) => ({ default: module.Reports })));
+const ClientProfitability = lazy(() => import('@/pages/ClientProfitability').then((module) => ({ default: module.ClientProfitability })));
 const ChecksPayments = lazy(() => import('@/pages/ChecksPayments').then((module) => ({ default: module.ChecksPayments })));
 const ClientDashboard = lazy(() => import('@/pages/client/ClientDashboard').then((module) => ({ default: module.ClientDashboard })));
 const ClientPayPeriods = lazy(() => import('@/pages/client/ClientPayPeriods').then((module) => ({ default: module.ClientPayPeriods })));
@@ -378,6 +379,7 @@ function AppRoutes() {
         <Route path="pay-periods/:id/form-500" element={<StaffOnlyRoute><Form500Page /></StaffOnlyRoute>} />
         <Route path="payroll/run" element={<Navigate to="/pay-periods" replace />} />
         <Route path="reports" element={isClient ? <ClientReports /> : <Reports />} />
+        <Route path="reports/client-profitability" element={<CapabilityRoute capability="view_client_profitability"><ClientProfitability /></CapabilityRoute>} />
         <Route path="year-end" element={<StaffOnlyRoute><YearEnd /></StaffOnlyRoute>} />
         <Route path="documents" element={<ClientOnlyRoute><ClientDocuments /></ClientOnlyRoute>} />
         <Route path="change-requests" element={<ClientOnlyRoute><ClientChangeRequests /></ClientOnlyRoute>} />

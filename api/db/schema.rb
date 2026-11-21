@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_21_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -557,6 +557,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_090000) do
     t.index [ "id", "company_id" ], name: "idx_client_portal_threads_tenant_key", unique: true
     t.index [ "resolved_by_id" ], name: "index_client_portal_threads_on_resolved_by_id"
     t.check_constraint "created_by_audience::text = ANY (ARRAY['client'::character varying::text, 'staff'::character varying::text, 'unknown'::character varying::text])", name: "portal_thread_creator_audience"
+  end
+
+  create_table "client_profitability_settings", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "finance_book_id"
+    t.bigint "organization_id", null: false
+    t.bigint "practice_company_id"
+    t.jsonb "tax_prep_service_names", default: [], null: false
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id"
+    t.index [ "finance_book_id" ], name: "index_client_profitability_settings_on_finance_book_id"
+    t.index [ "organization_id" ], name: "index_client_profitability_settings_on_organization_id", unique: true
+    t.index [ "practice_company_id" ], name: "index_client_profitability_settings_on_practice_company_id"
+    t.index [ "updated_by_id" ], name: "index_client_profitability_settings_on_updated_by_id"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -4591,6 +4605,94 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_090000) do
     t.index [ "marked_ready_by_id" ], name: "index_w2_filing_readinesses_on_marked_ready_by_id"
   end
 
+  create_table "work_hour_client_links", force: :cascade do |t|
+    t.bigint "company_id"
+    t.datetime "created_at", null: false
+    t.string "disposition", null: false
+    t.bigint "linked_by_id"
+    t.bigint "organization_id", null: false
+    t.bigint "tax_client_id", null: false
+    t.string "tax_client_name"
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_work_hour_client_links_on_company_id"
+    t.index [ "linked_by_id" ], name: "index_work_hour_client_links_on_linked_by_id"
+    t.index [ "organization_id", "tax_client_id" ], name: "idx_on_organization_id_tax_client_id_1180d70fd4", unique: true
+    t.check_constraint "disposition::text = 'company'::text AND company_id IS NOT NULL OR disposition::text = 'internal'::text AND company_id IS NULL", name: "work_hour_client_link_disposition_valid"
+  end
+
+  create_table "work_hour_imports", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "denied_entries", default: 0, null: false
+    t.string "error_code"
+    t.text "error_message"
+    t.datetime "finished_at"
+    t.integer "open_clock_entries", default: 0, null: false
+    t.bigint "organization_id", null: false
+    t.integer "pending_entries", default: 0, null: false
+    t.date "range_end", null: false
+    t.date "range_start", null: false
+    t.bigint "requested_by_id"
+    t.integer "row_count", default: 0, null: false
+    t.string "schema_version"
+    t.datetime "source_generated_at"
+    t.datetime "started_at"
+    t.string "status", default: "queued", null: false
+    t.decimal "total_hours", precision: 12, scale: 2, default: "0.0", null: false
+    t.string "trigger", default: "manual", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "organization_id" ], name: "index_work_hour_imports_on_organization_id"
+    t.index [ "organization_id", "created_at" ], name: "index_work_hour_imports_on_organization_id_and_created_at"
+    t.index [ "requested_by_id" ], name: "index_work_hour_imports_on_requested_by_id"
+    t.check_constraint "range_end >= range_start", name: "work_hour_import_range_order"
+    t.check_constraint "status::text = ANY (ARRAY['queued'::character varying, 'running'::character varying, 'succeeded'::character varying, 'failed'::character varying]::text[])", name: "work_hour_import_status_valid"
+    t.check_constraint "trigger::text = ANY (ARRAY['manual'::character varying, 'scheduled'::character varying]::text[])", name: "work_hour_import_trigger_valid"
+  end
+
+  create_table "work_hour_rows", force: :cascade do |t|
+    t.string "approval_state", null: false
+    t.string "category"
+    t.bigint "category_id"
+    t.string "client_name", null: false
+    t.datetime "created_at", null: false
+    t.string "email"
+    t.jsonb "entry_ids", default: [], null: false
+    t.decimal "hours", precision: 10, scale: 2, null: false
+    t.integer "minutes", default: 0, null: false
+    t.bigint "organization_id", null: false
+    t.string "period_label"
+    t.date "period_start"
+    t.string "period_type"
+    t.string "system_kind"
+    t.string "task"
+    t.bigint "task_id"
+    t.bigint "tax_client_id"
+    t.bigint "tax_user_id", null: false
+    t.boolean "unassigned", default: false, null: false
+    t.datetime "updated_at", null: false
+    t.date "work_date", null: false
+    t.bigint "work_hour_import_id", null: false
+    t.index [ "organization_id", "tax_client_id" ], name: "index_work_hour_rows_on_organization_id_and_tax_client_id"
+    t.index [ "organization_id", "tax_user_id" ], name: "index_work_hour_rows_on_organization_id_and_tax_user_id"
+    t.index [ "organization_id", "work_date" ], name: "index_work_hour_rows_on_organization_id_and_work_date"
+    t.index [ "work_hour_import_id" ], name: "index_work_hour_rows_on_work_hour_import_id"
+    t.check_constraint "approval_state::text = ANY (ARRAY['approved'::character varying, 'clock'::character varying, 'pending'::character varying]::text[])", name: "work_hour_row_approval_state_valid"
+  end
+
+  create_table "work_hour_staff_links", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "disposition", null: false
+    t.string "email"
+    t.bigint "employee_id"
+    t.bigint "linked_by_id"
+    t.bigint "organization_id", null: false
+    t.bigint "tax_user_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "employee_id" ], name: "index_work_hour_staff_links_on_employee_id"
+    t.index [ "linked_by_id" ], name: "index_work_hour_staff_links_on_linked_by_id"
+    t.index [ "organization_id", "tax_user_id" ], name: "index_work_hour_staff_links_on_organization_id_and_tax_user_id", unique: true
+    t.check_constraint "disposition::text = 'employee'::text AND employee_id IS NOT NULL OR disposition::text = 'no_payroll'::text AND employee_id IS NULL", name: "work_hour_staff_link_disposition_valid"
+  end
+
   create_table "year_end_acknowledgements", force: :cascade do |t|
     t.datetime "acknowledged_at", null: false
     t.string "acknowledged_by_email", null: false
@@ -4681,6 +4783,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_090000) do
   add_foreign_key "client_portal_threads", "companies"
   add_foreign_key "client_portal_threads", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "client_portal_threads", "users", column: "resolved_by_id", on_delete: :nullify
+  add_foreign_key "client_profitability_settings", "companies", column: "practice_company_id", on_delete: :nullify
+  add_foreign_key "client_profitability_settings", "finance_books", on_delete: :nullify
+  add_foreign_key "client_profitability_settings", "organizations"
+  add_foreign_key "client_profitability_settings", "users", column: "updated_by_id"
   add_foreign_key "companies", "companies", column: "migration_source_company_id"
   add_foreign_key "companies", "historical_import_batches", column: "migration_source_batch_id"
   add_foreign_key "companies", "organizations"
@@ -5228,6 +5334,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_090000) do
   add_foreign_key "users", "users", column: "invited_by_id", on_delete: :nullify
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
+  add_foreign_key "work_hour_client_links", "companies", on_delete: :cascade
+  add_foreign_key "work_hour_client_links", "organizations"
+  add_foreign_key "work_hour_client_links", "users", column: "linked_by_id"
+  add_foreign_key "work_hour_imports", "organizations"
+  add_foreign_key "work_hour_imports", "users", column: "requested_by_id"
+  add_foreign_key "work_hour_rows", "organizations"
+  add_foreign_key "work_hour_rows", "work_hour_imports"
+  add_foreign_key "work_hour_staff_links", "employees", on_delete: :cascade
+  add_foreign_key "work_hour_staff_links", "organizations"
+  add_foreign_key "work_hour_staff_links", "users", column: "linked_by_id"
   add_foreign_key "year_end_acknowledgements", "companies"
   add_foreign_key "year_end_acknowledgements", "users", column: "acknowledged_by_id", on_delete: :nullify
 end

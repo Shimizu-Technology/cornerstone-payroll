@@ -4190,7 +4190,7 @@ function EmptyReportSearch({ onClear }: { onClear: () => void }) {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 function ReportsContent() {
-  const { user } = useAuth();
+  const { user, hasCapability } = useAuth();
   const { activeCompanyId } = useCompany();
   const [searchParams, setSearchParams] = useSearchParams();
   const reportParam = searchParams.get('report');
@@ -4320,6 +4320,14 @@ function ReportsContent() {
                 </div>
               </div>
             </div>
+
+            {hasCapability('view_client_profitability') && (
+              <Link to="/reports/client-profitability"
+                className="mt-6 flex min-h-12 items-center justify-between gap-3 rounded-xl border border-primary-200 bg-white px-4 py-3 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">
+                <span>Client profitability<span className="block text-xs font-normal text-neutral-600">Fees, staff cost and margin for every client, using hours from Cornerstone Tax.</span></span>
+                <span aria-hidden="true">→</span>
+              </Link>
+            )}
 
             <div className="mt-6 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
               <label className="relative block">
