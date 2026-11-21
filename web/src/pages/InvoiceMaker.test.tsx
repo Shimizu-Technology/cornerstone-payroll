@@ -119,4 +119,71 @@ describe('InvoiceMaker', () => {
     expect(within(services).getByLabelText('Kind')).toHaveProperty('value', 'service_fee');
     expect(within(services).getByRole('button', { name: 'Remove service 1' })).toBeTruthy();
   });
+
+  describe('an unsaved edit to an issued invoice email', () => {
+    const SECOND_SUBJECT = "Invoice 07053 - MoSa's Hot Box, Inc. - December 2026";
+    const second = () => issuedInvoice({
+      id: 8, invoice_number: '07053',
+      email: { subject: SECOND_SUBJECT, body: BODY, default_subject: SECOND_SUBJECT, default_body: BODY, subject_customized: false, body_customized: false },
+    });
+
+    beforeEach(() => {
+      api.invoices.list.mockResolvedValue({ invoices: [issuedInvoice(), second()] });
+      api.invoices.get.mockImplementation(async (id: number) => ({ invoice: id === 8 ? second() : issuedInvoice() }));
+    });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    async function editFirstInvoiceSubject() {
+      const user = userEvent.setup();
+      renderPage();
+      await user.click(await screen.findByText('07052'));
+      const subject = await screen.findByRole('textbox', { name: 'Subject' });
+      await waitFor(() => expect(subject).toHaveProperty('value', SUBJECT));
+      await user.clear(subject);
+      await user.type(subject, 'Unsaved subject');
+      return { user, subject };
+    }
+
+    it('asks before switching to another invoice and keeps the edit when cancelled', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const { user, subject } = await editFirstInvoiceSubject();
+
+      await user.click(screen.getByText('07053'));
+
+      expect(confirm).toHaveBeenCalledWith('Discard unsaved invoice changes?');
+      expect(api.invoices.get).not.toHaveBeenCalledWith(8);
+      expect(subject).toHaveProperty('value', 'Unsaved subject');
+    });
+
+    it('asks before starting a new invoice', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const { user, subject } = await editFirstInvoiceSubject();
+
+      await user.click(screen.getByRole('button', { name: 'New' }));
+
+      expect(confirm).toHaveBeenCalledWith('Discard unsaved invoice changes?');
+      expect(subject).toHaveProperty('value', 'Unsaved subject');
+    });
+
+    it("doesn't let a late save replace the next invoice's email", async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      let finishSave: (value: { invoice: Invoice }) => void = () => {};
+      api.invoices.updateEmail.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+      const { user } = await editFirstInvoiceSubject();
+
+      await user.click(screen.getByRole('button', { name: 'Save email' }));
+      await user.click(screen.getByText('07053'));
+      const subject = screen.getByRole('textbox', { name: 'Subject' });
+      await waitFor(() => expect(subject).toHaveProperty('value', SECOND_SUBJECT));
+
+      finishSave({ invoice: issuedInvoice({
+        email: { subject: 'Unsaved subject', body: BODY, default_subject: SUBJECT, default_body: BODY, subject_customized: true, body_customized: false },
+      }) });
+      await waitFor(() => expect(api.invoices.updateEmail).toHaveBeenCalledWith(7, { email_subject: 'Unsaved subject', email_body: '' }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(subject).toHaveProperty('value', SECOND_SUBJECT);
+    });
+  });
 });

@@ -86,7 +86,10 @@ class InvoiceScheduledSender
                                  occurred_at: sent_at, metadata: { delivery_id: delivery.id, send_schedule_id: schedule.id,
                                                                    recipient: recipient, provider_reference: reference })
           end
-          invoice.update!(sent_at: invoice.sent_at || sent_at)
+          # The provider has accepted the email. Record it without
+          # revalidating the whole invoice, so an unrelated validation can't
+          # roll back the delivery record.
+          invoice.update_columns(sent_at: sent_at, updated_at: Time.current) if invoice.sent_at.blank?
           schedule.update!(status: "sent", sent_at: sent_at, provider_reference: reference, last_error: nil)
         end
       rescue StandardError => e

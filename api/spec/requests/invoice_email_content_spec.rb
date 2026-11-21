@@ -19,7 +19,7 @@ RSpec.describe "Invoice email content", type: :request do
 
   before do
     [ Api::V1::Admin::InvoicesController, Api::V1::Admin::InvoiceSendSchedulesController,
-      Api::V1::Admin::InvoiceRecurrencesController ].each do |controller|
+      Api::V1::Admin::InvoiceRecurrencesController, Api::V1::Admin::InvoicePaymentsController ].each do |controller|
       allow_any_instance_of(controller).to receive(:current_user).and_return(admin_user)
       allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
     end
@@ -254,6 +254,137 @@ RSpec.describe "Invoice email content", type: :request do
       get "/api/v1/admin/invoices/#{invoice.id}"
 
       expect(response.parsed_body.dig("invoice", "recurring_terms")).to be_nil
+    end
+  end
+
+  describe "older rows with text past today's limits" do
+    let(:long_subject) { "Invoice 07052 #{'x' * 300}" }
+
+    def legacy_invoice
+      issue(november_invoice).tap { |invoice| invoice.update_columns(email_subject: long_subject) }
+    end
+
+    it "still takes the final payment and keeps the saved text" do
+      invoice = legacy_invoice
+
+      post "/api/v1/admin/invoices/#{invoice.id}/payments", params: { amount: 300, received_on: "2026-12-01", payment_method: "check" }
+
+      expect(response).to have_http_status(:created), response.body
+      expect(invoice.reload.balance_due).to eq(0)
+      expect(invoice.email_subject).to eq(long_subject)
+    end
+
+    it "records an accepted send with a shorter reviewed subject" do
+      invoice = legacy_invoice
+      messages = stub_provider("email-legacy")
+      post "/api/v1/admin/invoice_send_schedules", params: {
+        invoice_id: invoice.id, recipients: [ "billing@mosas.example" ], send_at: 1.minute.ago.iso8601, subject: "Invoice 07052", body: "Attached."
+      }, as: :json
+      schedule_id = response.parsed_body.dig("invoice_send_schedule", "id")
+
+      InvoiceScheduledSender.send!(schedule_id)
+
+      expect(messages.sole[:subject]).to eq("Invoice 07052")
+      expect(InvoiceSendSchedule.find(schedule_id)).to have_attributes(status: "sent", provider_reference: "email-legacy")
+      expect(invoice.deliveries.sole).to have_attributes(email_subject: "Invoice 07052", provider_reference: "email-legacy")
+      expect(invoice.reload.sent_at).to be_present
+      expect(invoice.email_subject).to eq(long_subject)
+    end
+
+    it "sends and records the long saved subject when the schedule has no reviewed text" do
+      invoice = legacy_invoice
+      messages = stub_provider
+      post "/api/v1/admin/invoice_send_schedules", params: {
+        invoice_id: invoice.id, recipients: [ "billing@mosas.example" ], send_at: 1.minute.ago.iso8601
+      }, as: :json
+
+      InvoiceScheduledSender.send!(response.parsed_body.dig("invoice_send_schedule", "id"))
+
+      expect(messages.sole[:subject]).to eq(long_subject)
+      expect(invoice.deliveries.sole.email_subject).to eq(long_subject)
+    end
+
+    it "lets a failed schedule with long frozen text go back to pending" do
+      invoice = issue(november_invoice)
+      post "/api/v1/admin/invoice_send_schedules", params: {
+        invoice_id: invoice.id, recipients: [ "billing@mosas.example" ], send_at: 1.minute.ago.iso8601, subject: "Short"
+      }, as: :json
+      schedule = InvoiceSendSchedule.find(response.parsed_body.dig("invoice_send_schedule", "id"))
+      schedule.update_columns(status: "failed", attempts: 1, first_claimed_at: 1.hour.ago, rendered_subject: long_subject,
+                              rendered_body: "b" * 10_001, last_error: "provider response lost")
+
+      patch "/api/v1/admin/invoice_send_schedules/#{schedule.id}", params: { retry: true }, as: :json
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(schedule.reload).to have_attributes(status: "pending", rendered_subject: long_subject)
+    end
+
+    it "still refuses new reviewed text past the limits" do
+      invoice = issue(november_invoice)
+
+      post "/api/v1/admin/invoice_send_schedules", params: {
+        invoice_id: invoice.id, recipients: [ "billing@mosas.example" ], send_at: 1.hour.from_now.iso8601, subject: "x" * 301
+      }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(InvoiceSendSchedule.count).to eq(0)
+    end
+  end
+
+  describe "changing the invoice email after a send is scheduled" do
+    def schedule_send(invoice, **text)
+      post "/api/v1/admin/invoice_send_schedules", params: {
+        invoice_id: invoice.id, recipients: [ "billing@mosas.example" ], send_at: 1.hour.from_now.iso8601, **text
+      }, as: :json
+      InvoiceSendSchedule.find(response.parsed_body.dig("invoice_send_schedule", "id"))
+    end
+
+    it "sends the reviewed text of a schedule that has it, and the current email of one that doesn't" do
+      invoice = issue(november_invoice)
+      reviewed = schedule_send(invoice, subject: "Reviewed subject", body: "Reviewed body")
+      deferred = schedule_send(invoice)
+      patch "/api/v1/admin/invoices/#{invoice.id}/email", params: { email_subject: "Changed later", email_body: "Changed body" }, as: :json
+      expect(response).to have_http_status(:ok)
+      messages = stub_provider
+      [ reviewed, deferred ].each { |schedule| schedule.update_columns(send_at: 1.minute.ago) }
+
+      InvoiceScheduledSender.send!(reviewed.id)
+      InvoiceScheduledSender.send!(deferred.id)
+
+      expect(messages.map { |message| [ message[:subject], message[:text] ] })
+        .to eq([ [ "Reviewed subject", "Reviewed body" ], [ "Changed later", "Changed body" ] ])
+      expect(invoice.deliveries.order(:id).map(&:email_subject)).to eq([ "Reviewed subject", "Changed later" ])
+    end
+  end
+
+  describe "access" do
+    it "requires organization-admin authority to change the email" do
+      invoice = issue(november_invoice)
+      manager = create(:user, company: company, organization: company.organization, role: "manager")
+      allow_any_instance_of(Api::V1::Admin::InvoicesController).to receive(:current_user).and_return(manager)
+
+      patch "/api/v1/admin/invoices/#{invoice.id}/email", params: { email_subject: "Not allowed" }, as: :json
+
+      expect(response).to have_http_status(:forbidden)
+      expect(invoice.reload.email_subject).to be_nil
+      expect(invoice.events.where(event_type: "email_updated")).to be_empty
+    end
+
+    it "keeps email changes inside the selected financial book" do
+      first_book = company.organization.finance_books.find_by!(is_default: true)
+      second_book = company.organization.finance_books.create!(name: "Client books", legal_name: "Client books", kind: "organization")
+      invoice = issue(november_invoice)
+      expect(invoice.finance_book_id).to eq(first_book.id)
+      other_book = { "X-Organization-Id" => company.organization_id.to_s, "X-Finance-Book-Id" => second_book.id.to_s }
+      own_book = { "X-Organization-Id" => company.organization_id.to_s, "X-Finance-Book-Id" => first_book.id.to_s }
+
+      patch "/api/v1/admin/invoices/#{invoice.id}/email", params: { email_subject: "Wrong book" }, headers: other_book, as: :json
+      expect(response).to have_http_status(:not_found)
+      expect(invoice.reload.email_subject).to be_nil
+
+      patch "/api/v1/admin/invoices/#{invoice.id}/email", params: { email_subject: "Right book" }, headers: own_book, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(invoice.reload.email_subject).to eq("Right book")
     end
   end
 end

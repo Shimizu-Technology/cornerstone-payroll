@@ -51,8 +51,10 @@ class Invoice < ApplicationRecord
   validates :total_amount, numericality: { greater_than_or_equal_to: 0 }
   validates :discount_type, inclusion: { in: DISCOUNT_TYPES }
   validates :discount_value, numericality: { greater_than_or_equal_to: 0 }
-  validates :email_subject, length: { maximum: EMAIL_SUBJECT_MAX }
-  validates :email_body, length: { maximum: EMAIL_BODY_MAX }
+  # Limits apply when the email text is written or changed. Older rows may
+  # hold longer text; unrelated saves (payments, status) must still work.
+  validates :email_subject, length: { maximum: EMAIL_SUBJECT_MAX }, if: :will_save_change_to_email_subject?
+  validates :email_body, length: { maximum: EMAIL_BODY_MAX }, if: :will_save_change_to_email_body?
   validate :discount_value_has_cent_precision
   validate :continuing_number_unique_ignoring_zeros, if: -> { will_save_change_to_invoice_number? || will_save_change_to_invoice_billing_profile_id? }
   validate :recipient_must_belong_to_organization
@@ -368,8 +370,9 @@ class Invoice < ApplicationRecord
     self.customer_reference = customer_reference.to_s.strip.presence
     self.notes = notes.to_s.strip.presence
     self.payment_terms = payment_terms.to_s.strip.presence
-    self.email_subject = email_subject.to_s.squish.presence
-    self.email_body = email_body.to_s.strip.presence
+    # Only text being written is normalized; saved text is kept as it was.
+    self.email_subject = email_subject.to_s.squish.presence if new_record? || will_save_change_to_email_subject?
+    self.email_body = email_body.to_s.strip.presence if new_record? || will_save_change_to_email_body?
     self.source_metadata = source_metadata.presence || {}
     self.discount_type = discount_type.presence || "none"
     self.discount_value = 0 if discount_value.nil?
