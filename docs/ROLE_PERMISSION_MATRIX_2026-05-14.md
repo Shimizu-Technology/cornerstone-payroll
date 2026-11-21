@@ -27,6 +27,7 @@ This is the approved staff authorization contract for Cornerstone Payroll. The b
 | Client configuration and sensitive workforce approval (`manage_client_configuration`) | Yes | Yes | Yes | Yes\* | No | No |
 | Client administration (`manage_client_administration`) | Yes | Yes | Yes | Yes\* | No | No |
 | Organization administration | Yes | Yes | No | No | No | No |
+| Client profitability report: per-client staff cost and margin (`view_client_profitability`) | Yes | Yes | No | No | No | No |
 | Platform administration | Yes | No | No | No | No | No |
 | Client portal | No | No | No | No | Yes | No |
 

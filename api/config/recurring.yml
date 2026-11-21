@@ -29,6 +29,13 @@ production:
     queue: default
     schedule: every day at 7am
 
+  # No-op until CORNERSTONE_TAX_API_URL and PAYROLL_WORK_HOURS_SECRET are set
+  # and an organization has chosen its practice company (client profitability).
+  refresh_tax_work_hours:
+    class: TaxWorkHoursNightlyRefreshJob
+    queue: default
+    schedule: every day at 2am
+
   create_recurring_invoice_drafts:
     class: InvoiceRecurrenceDispatchJob
     queue: default

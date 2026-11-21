@@ -712,6 +712,21 @@ Rails.application.routes.draw do
           end
         end
 
+        # Client profitability (hours from Cornerstone Tax, cost, fees, margin)
+        scope "client_profitability", controller: :client_profitability, as: :client_profitability do
+          get "/", action: :show
+          patch "settings", action: :update_settings
+          post "refresh", action: :refresh
+          get "imports/:import_id", action: :import_status, as: :import
+          get "links", action: :links
+          put "client_links/:tax_client_id", action: :link_client, as: :client_link
+          delete "client_links/:tax_client_id", action: :unlink_client
+          put "staff_links/:tax_user_id", action: :link_staff, as: :staff_link
+          delete "staff_links/:tax_user_id", action: :unlink_staff
+          get "report", action: :report
+          get "export", action: :export
+        end
+
         # Invoice Center and bounded accounts receivable
         resources :finance_books, only: [ :index, :create, :update ]
         resources :finance_api_tokens, only: [ :index, :create, :destroy ]

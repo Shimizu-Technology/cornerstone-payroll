@@ -29,6 +29,32 @@ class AnnualPayrollSummary
     }
   end
 
+  # Paychecks counted for a period (by pay date). Also used by
+  # ClientProfitability::Report so the two reports count the same checks.
+  def native_items_for(period)
+    PayrollItem.joins(:pay_period)
+               .includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type)
+               .financially_reportable.reportable
+               .where(company_id: company.id, pay_periods: {
+                 id: @pay_period_scope.where(company_id: company.id, pay_date: period.range).select(:id)
+               })
+  end
+
+  # What one paycheck cost the employer, as counted in total_payroll_cost:
+  # gross pay, non-taxable pay, employer taxes and employer contributions.
+  def native_item_cost(item)
+    non_taxable = native_non_taxable_pay(item)
+    employer_taxes = item.employer_social_security_tax.to_d + item.employer_medicare_tax.to_d
+    employer_contributions = native_employer_contributions(item)
+    {
+      gross_pay: item.gross_pay.to_d,
+      non_taxable_pay: non_taxable,
+      employer_taxes: employer_taxes,
+      employer_contributions: employer_contributions,
+      total: item.gross_pay.to_d + non_taxable + employer_taxes + employer_contributions
+    }
+  end
+
   private
 
   attr_reader :company
@@ -89,15 +115,6 @@ class AnnualPayrollSummary
                                  .pluck(Arel.sql("EXTRACT(YEAR FROM effective_pay_date)::integer"))
   end
 
-  def native_items_for(period)
-    PayrollItem.joins(:pay_period)
-               .includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type)
-               .financially_reportable.reportable
-               .where(company_id: company.id, pay_periods: {
-                 id: @pay_period_scope.where(company_id: company.id, pay_date: period.range).select(:id)
-               })
-  end
-
   def native_totals(items)
     totals = TOTAL_FIELDS.index_with { 0.to_d }
 
@@ -105,9 +122,10 @@ class AnnualPayrollSummary
       pretax = native_pretax_deductions(item)
       employee_taxes = native_employee_taxes(item)
       after_tax = native_after_tax_deductions(item, pretax:, employee_taxes:)
-      non_taxable = native_non_taxable_pay(item)
-      employer_taxes = item.employer_social_security_tax.to_d + item.employer_medicare_tax.to_d
-      employer_contributions = native_employer_contributions(item)
+      cost = native_item_cost(item)
+      non_taxable = cost[:non_taxable_pay]
+      employer_taxes = cost[:employer_taxes]
+      employer_contributions = cost[:employer_contributions]
 
       totals[:hours] += item.total_hours.to_d
       totals[:gross_pay] += item.gross_pay.to_d
@@ -119,7 +137,7 @@ class AnnualPayrollSummary
       totals[:net_pay] += item.net_pay.to_d
       totals[:employer_taxes] += employer_taxes
       totals[:employer_contributions] += employer_contributions
-      totals[:total_payroll_cost] += item.gross_pay.to_d + non_taxable + employer_taxes + employer_contributions
+      totals[:total_payroll_cost] += cost[:total]
     end
 
     totals
