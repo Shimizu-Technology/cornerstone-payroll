@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
+import { ICON_CONTROL_SIZE } from '@/components/ui/field-styles';
 import {
   Table,
   TableBody,
@@ -199,7 +200,6 @@ export function Departments() {
                 />
               </div>
               <Button
-                size="sm"
                 onClick={handleAddNew}
                 disabled={isSavingNew}
               >
@@ -208,7 +208,7 @@ export function Departments() {
               </Button>
               <Button
                 variant="ghost"
-                size="sm"
+                className="sm:h-10 sm:w-10 sm:px-0 sm:pointer-coarse:h-11 sm:pointer-coarse:w-11"
                 onClick={handleCancelAdd}
                 disabled={isSavingNew}
                 aria-label="Cancel adding department"
@@ -314,8 +314,9 @@ export function Departments() {
                   <TableRow key={dept.id}>
                     <TableCell>
                       {editingId === dept.id ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-start gap-2">
                           <Input
+                            aria-label="Department name"
                             value={editName}
                             onChange={(e) => {
                               setEditName(e.target.value);
@@ -326,17 +327,19 @@ export function Departments() {
                             autoFocus
                           />
                           <Button
-                            size="sm"
+                            className={ICON_CONTROL_SIZE}
                             onClick={handleSaveEdit}
                             disabled={isSavingEdit}
+                            aria-label="Save department name"
                           >
                             <Check className="w-4 h-4" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
+                            className={ICON_CONTROL_SIZE}
                             onClick={handleCancelEdit}
                             disabled={isSavingEdit}
+                            aria-label="Cancel editing department"
                           >
                             <X className="w-4 h-4" />
                           </Button>

@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { controlClassName, FIELD_LABEL } from '@/components/ui/field-styles';
 import { Textarea } from '@/components/ui/textarea';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeesPath } from '@/lib/routes';
@@ -427,11 +428,11 @@ function Metric({ label, value }: { label: string; value: string }): ReactElemen
 }
 
 function FieldSelect({ label, value, onChange, children, disabled, required }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode; disabled?: boolean; required?: boolean }): ReactElement {
-  return <label className="space-y-1.5"><span className="block text-sm font-medium text-neutral-700">{label}</span><select className="block w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 shadow-sm focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-200 disabled:bg-neutral-50" value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} required={required}>{children}</select></label>;
+  return <label className="space-y-1.5"><span className={FIELD_LABEL}>{label}</span><select className={controlClassName()} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} required={required}>{children}</select></label>;
 }
 
 function FieldTextarea({ label, value, onChange, disabled, required, helperText }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; required?: boolean; helperText?: string }): ReactElement {
-  return <label className="block space-y-1.5"><span className="block text-sm font-medium text-neutral-700">{label}</span><Textarea className="min-h-28 rounded-xl border-neutral-300 bg-white focus-visible:ring-primary-200" value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} required={required} />{helperText && <span className="block text-sm text-neutral-500">{helperText}</span>}</label>;
+  return <label className="block space-y-1.5"><span className={FIELD_LABEL}>{label}</span><Textarea className="min-h-28 rounded-xl border-neutral-300 bg-white focus-visible:ring-primary-200" value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} required={required} />{helperText && <span className="block text-sm text-neutral-500">{helperText}</span>}</label>;
 }
 
 function MessageList({ tone, title, messages }: { tone: 'danger' | 'warning' | 'neutral'; title: string; messages: string[] }): ReactElement {

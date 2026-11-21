@@ -25,6 +25,7 @@ import {
 import { Header } from '@/components/layout/Header';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { Badge } from '@/components/ui/badge';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -1314,7 +1315,7 @@ export function HistoricalPayroll(): ReactElement {
                         if (fileInputRef.current) fileInputRef.current.value = '';
                       }}
                       disabled={Boolean(action || importProviders.length === 0)}
-                      className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100"
+                      className={controlClassName()}
                     >
                       {importProviders.map((provider) => <option key={provider.key} value={provider.key}>{provider.label}</option>)}
                     </select>
@@ -1340,7 +1341,7 @@ export function HistoricalPayroll(): ReactElement {
               {batches.length > 0 && (
                 <div className="space-y-2">
                   <label htmlFor="historical-batch" className="text-xs font-bold text-neutral-600">Review batch</label>
-                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => selectBatch(Number(event.target.value))} disabled={Boolean(batchListLoading || action || mappingWorkerId || confirmation || archiveWorkersConfirmation || bootstrapApplyOpen || ytdApplyOpen)} className="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100">
+                  <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => selectBatch(Number(event.target.value))} disabled={Boolean(batchListLoading || action || mappingWorkerId || confirmation || archiveWorkersConfirmation || bootstrapApplyOpen || ytdApplyOpen)} className={controlClassName()}>
                     {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.source_label} · {batch.status}</option>)}
                   </select>
                   <div className="flex items-center justify-between gap-3">
@@ -1692,7 +1693,7 @@ export function HistoricalPayroll(): ReactElement {
                           value={worker.employee_id ? String(worker.employee_id) : worker.mapping_status === 'archive_only' ? 'archive_only' : ''}
                           onChange={(event) => void updateWorkerDisposition(worker.id, event.target.value)}
                           disabled={mappingWorkerId !== null}
-                          className="min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:bg-neutral-100"
+                          className={controlClassName()}
                         >
                           <option value="" disabled>Needs review</option>
                           <option value="archive_only">Keep as archive-only</option>
@@ -1723,7 +1724,7 @@ export function HistoricalPayroll(): ReactElement {
                                 value={worker.employee_id ? String(worker.employee_id) : worker.mapping_status === 'archive_only' ? 'archive_only' : ''}
                                 onChange={(event) => void updateWorkerDisposition(worker.id, event.target.value)}
                                 disabled={mappingWorkerId !== null}
-                                className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:bg-neutral-100"
+                                className={controlClassName()}
                               >
                                 <option value="" disabled>Needs review</option>
                                 <option value="archive_only">Keep as archive-only</option>
@@ -1768,20 +1769,20 @@ export function HistoricalPayroll(): ReactElement {
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
                   <label htmlFor="historical-report-type" className="text-xs font-bold text-neutral-600">Report</label>
-                  <select id="historical-report-type" value={reportType} onChange={(event) => { setReportType(event.target.value as HistoricalReportType); setReportPage(1); }} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
+                  <select id="historical-report-type" value={reportType} onChange={(event) => { setReportType(event.target.value as HistoricalReportType); setReportPage(1); }} className={controlClassName('mt-2')}>
                     {HISTORICAL_REPORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </div>
                 <div>
                   <label htmlFor="historical-report-year" className="text-xs font-bold text-neutral-600">Source pay year</label>
-                  <select id="historical-report-year" value={reportYear || ''} onChange={(event) => { setReportYear(event.target.value ? Number(event.target.value) : undefined); setReportPage(1); }} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
+                  <select id="historical-report-year" value={reportYear || ''} onChange={(event) => { setReportYear(event.target.value ? Number(event.target.value) : undefined); setReportPage(1); }} className={controlClassName('mt-2')}>
                     <option value="">All years</option>
                     {report?.available_years.map((yearOption) => <option key={yearOption} value={yearOption}>{yearOption}</option>)}
                   </select>
                 </div>
                 <div>
                   <label htmlFor="historical-report-worker" className="text-xs font-bold text-neutral-600">Worker</label>
-                  <select id="historical-report-worker" value={reportWorker || ''} onChange={(event) => { setReportWorker(event.target.value || undefined); setReportPage(1); }} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
+                  <select id="historical-report-worker" value={reportWorker || ''} onChange={(event) => { setReportWorker(event.target.value || undefined); setReportPage(1); }} className={controlClassName('mt-2')}>
                     <option value="">All workers</option>
                     {report?.available_workers.map((worker) => <option key={worker.key} value={worker.key}>{worker.name}</option>)}
                   </select>
@@ -1878,7 +1879,7 @@ export function HistoricalPayroll(): ReactElement {
                 <div><CardTitle>Paycheck ledger</CardTitle><CardDescription>Final imported values, searchable by employee or check number. Open a row to inspect its itemized source lines.</CardDescription></div>
                 <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)]">
                   <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input aria-label="Search historical paychecks" value={paycheckSearchDraft} onChange={(event) => setPaycheckSearchDraft(event.target.value)} placeholder="Employee or check number" className="pl-9" /></div>
-                  <select aria-label="Filter historical period" value={periodId || ''} onChange={(event) => { setPeriodId(event.target.value ? Number(event.target.value) : undefined); setPage(1); }} className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"><option value="">All {detail.periods.length} periods</option>{detail.periods.map((period) => <option key={period.id} value={period.id}>{shortDate(period.pay_date)} · {period.source_label}{period.period_type === 'opening_summary' ? ' · summary' : ''}</option>)}</select>
+                  <select aria-label="Filter historical period" value={periodId || ''} onChange={(event) => { setPeriodId(event.target.value ? Number(event.target.value) : undefined); setPage(1); }} className={controlClassName()}><option value="">All {detail.periods.length} periods</option>{detail.periods.map((period) => <option key={period.id} value={period.id}>{shortDate(period.pay_date)} · {period.source_label}{period.period_type === 'opening_summary' ? ' · summary' : ''}</option>)}</select>
                 </div>
               </div>
             </CardHeader>
