@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_22_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_22_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -4619,15 +4619,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_020000) do
     t.bigint "company_id"
     t.datetime "created_at", null: false
     t.string "disposition", null: false
+    t.bigint "invoice_recipient_id"
     t.bigint "linked_by_id"
     t.bigint "organization_id", null: false
     t.bigint "tax_client_id", null: false
     t.string "tax_client_name"
     t.datetime "updated_at", null: false
     t.index [ "company_id" ], name: "index_work_hour_client_links_on_company_id"
+    t.index [ "invoice_recipient_id" ], name: "index_work_hour_client_links_on_invoice_recipient_id"
     t.index [ "linked_by_id" ], name: "index_work_hour_client_links_on_linked_by_id"
     t.index [ "organization_id", "tax_client_id" ], name: "idx_on_organization_id_tax_client_id_1180d70fd4", unique: true
-    t.check_constraint "disposition::text = 'company'::text AND company_id IS NOT NULL OR disposition::text = 'internal'::text AND company_id IS NULL", name: "work_hour_client_link_disposition_valid"
+    t.check_constraint "disposition::text = 'company'::text AND company_id IS NOT NULL AND invoice_recipient_id IS NULL OR disposition::text = 'recipient'::text AND invoice_recipient_id IS NOT NULL AND company_id IS NULL OR disposition::text = 'internal'::text AND company_id IS NULL AND invoice_recipient_id IS NULL", name: "work_hour_client_link_disposition_valid"
   end
 
   create_table "work_hour_imports", force: :cascade do |t|
@@ -5349,6 +5351,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_020000) do
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
   add_foreign_key "work_hour_client_links", "companies", on_delete: :cascade
+  add_foreign_key "work_hour_client_links", "invoice_recipients", on_delete: :cascade
   add_foreign_key "work_hour_client_links", "organizations"
   add_foreign_key "work_hour_client_links", "users", column: "linked_by_id"
   add_foreign_key "work_hour_imports", "organizations"

@@ -85,7 +85,8 @@ module Api
           link = WorkHourClientLink.find_or_initialize_by(organization: current_organization, tax_client_id: tax_id(:tax_client_id))
           disposition = params[:disposition].to_s
           company = disposition == "company" ? Company.find_by(id: params[:company_id], organization_id: current_organization.id) : nil
-          link.assign_attributes(active: true, disposition: disposition, company: company, linked_by: current_user,
+          recipient = disposition == "recipient" ? InvoiceRecipient.find_by(id: params[:invoice_recipient_id], organization_id: current_organization.id) : nil
+          link.assign_attributes(active: true, disposition: disposition, company: company, invoice_recipient: recipient, linked_by: current_user,
                                  tax_client_name: params[:tax_client_name].to_s.strip.presence || link.tax_client_name)
           save_link(link)
         end
