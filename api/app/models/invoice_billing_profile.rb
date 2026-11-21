@@ -18,6 +18,7 @@ class InvoiceBillingProfile < ApplicationRecord
                            allow_nil: true
   validates :show_service_period, :show_item_column, :show_how_to_pay, inclusion: { in: [ true, false ] }
   validates :next_invoice_number, numericality: { only_integer: true, greater_than: 0 }
+  validates :invoice_number_width, numericality: { only_integer: true, in: 1..12 }, allow_nil: true
   validate :valid_service_catalog
 
   validates :name, presence: true, uniqueness: { scope: :finance_book_id }
@@ -66,6 +67,12 @@ class InvoiceBillingProfile < ApplicationRecord
       )
       profile
     end
+  end
+
+  # A continuing invoice number as printed: zero-padded to
+  # invoice_number_width digits when set (5: 7055 -> "07055"), never cut.
+  def format_continuing_number(number)
+    invoice_number_width ? number.to_s.rjust(invoice_number_width, "0") : number.to_s
   end
 
   # The look new invoices from this sender get. Issued invoices keep the

@@ -58,6 +58,31 @@ RSpec.describe "Client profitability", type: :request do
     expect(WorkHourImport.count).to eq(0)
   end
 
+  it "saves the report defaults and how pay is counted" do
+    get "/api/v1/admin/client_profitability"
+    expect(json["settings"]).to include("default_cost_pending" => false, "default_spread_overhead" => false,
+                                        "default_period" => "month", "cost_basis" => "pay_date")
+    patch "/api/v1/admin/client_profitability/settings",
+          params: { default_cost_pending: true, default_spread_overhead: true, default_period: "quarter", cost_basis: "work_period" }, as: :json
+    expect(response).to have_http_status(:ok)
+    expect(json["settings"]).to include("default_cost_pending" => true, "default_spread_overhead" => true,
+                                        "default_period" => "quarter", "cost_basis" => "work_period")
+    patch "/api/v1/admin/client_profitability/settings", params: { cost_basis: "accrual" }, as: :json
+    expect(response).to have_http_status(:unprocessable_content)
+  end
+
+  it "builds the report and its CSV with the basis the screen asked for, not a newer saved one" do
+    ClientProfitabilitySetting.create!(organization: organization, practice_company: practice, cost_basis: "work_period")
+    get "/api/v1/admin/client_profitability/report", params: { from: "2026-10", cost_basis: "pay_date" }
+    expect(json.dig("options", "cost_basis")).to eq("pay_date")
+    get "/api/v1/admin/client_profitability/export", params: { from: "2026-10", cost_basis: "pay_date" }
+    expect(CSV.parse(response.body)).to include([ "Count pay by", "Pay date (matches the Annual Payroll Summary)" ])
+    get "/api/v1/admin/client_profitability/report", params: { from: "2026-10" }
+    expect(json.dig("options", "cost_basis")).to eq("work_period")
+    get "/api/v1/admin/client_profitability/export", params: { from: "2026-10", cost_basis: "accrual" }
+    expect(response).to have_http_status(:unprocessable_content)
+  end
+
   it "saves the practice company, book and tax-prep services, and rejects another organization's client" do
     patch "/api/v1/admin/client_profitability/settings",
           params: { practice_company_id: practice.id, tax_prep_service_names: [ "Tax Preparation", "tax preparation" ] }, as: :json
@@ -143,7 +168,7 @@ RSpec.describe "Client profitability", type: :request do
     expect(response).to have_http_status(:ok)
     expect(response.headers["Content-Disposition"]).to include("client-profitability-2026-10.csv")
     csv = CSV.parse(response.body)
-    expect(csv[3].first(4)).to eq([ "Section", "Client", "Person", "Hours" ])
+    expect(csv[4].first(4)).to eq([ "Section", "Client", "Person", "Hours" ])
     expect(csv.map(&:first)).to include("Client", "Person", "Not linked yet", "Total")
     expect(AuditLog.where(action: "client_profitability#export").count).to eq(1)
 

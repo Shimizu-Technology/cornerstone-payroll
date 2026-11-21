@@ -55,27 +55,95 @@ class AnnualPayrollSummary
     }
   end
 
-  # total_payroll_cost for a pay-date range, split by employee, using exactly
-  # the sources period_row counts: native paychecks, locked imported paychecks
-  # linked to an employee, and every locked imported adjustment. Adjustments
-  # whose imported paycheck has no employee are under by_employee[nil].
-  # Imported paychecks not linked to an employee are left out of the total,
-  # as in period_row's excluded_unlinked_*, and reported in :excluded_unlinked.
-  def payroll_cost_by_employee(period)
+  # total_payroll_cost split by employee, using exactly the sources
+  # period_row counts: native paychecks, locked imported paychecks linked to
+  # an employee, and every locked imported adjustment. Adjustments whose
+  # imported paycheck has no employee are under by_employee[nil]. Imported
+  # paychecks not linked to an employee are left out of the total, as in
+  # period_row's excluded_unlinked_*, and reported in :excluded_unlinked.
+  #
+  # basis: :pay_date (default) counts each paycheck whole in the range that
+  # holds its pay date, so the total equals period_row's.
+  #
+  # basis: :work_period counts the part of each paycheck worked in the range.
+  # The same paychecks are eligible (the same reportability scopes); they are
+  # chosen because their pay period overlaps the range, however late they
+  # were paid, and an adjustment follows its imported paycheck's period. Each
+  # amount is split into whole cents per day of the pay period, the leftover
+  # cents going to its last days, so any split of a range into months adds
+  # up to the range exactly. Each component (pay, employer taxes, employer
+  # contributions, and any rest of an imported total) is split the same way
+  # and the row total is their sum, so the parts always add up to it.
+  def payroll_cost_by_employee(period, basis: :pay_date)
+    work_period = basis.to_s == "work_period"
     costs = Hash.new { |hash, key| hash[key] = { pay: 0.to_d, employer_taxes: 0.to_d, employer_contributions: 0.to_d, total: 0.to_d } }
-    native_items_for(period).each do |item|
-      cost = native_item_cost(item)
-      add_cost(costs[item.employee_id], cost[:gross_pay] + cost[:non_taxable_pay], cost[:employer_taxes], cost[:employer_contributions], cost[:total])
-    end
     unified = UnifiedPayrollReporting.new(company_id: company.id, period: period)
-    unified.historical_paychecks.each { |row| add_historical_cost(costs[row.employee_id], row) }
-    unified.historical_adjustments.each { |row| add_historical_cost(costs[row.historical_paycheck.employee_id], row) }
-    unlinked = unified.unlinked_historical_paychecks
+
+    native = work_period ? native_items_worked_in(period) : native_items_for(period).includes(:pay_period)
+    native.each do |item|
+      cost = native_item_cost(item)
+      pay_period = item.pay_period
+      add_parts(costs[item.employee_id], period, work_period && [ pay_period.start_date, pay_period.end_date, pay_period.pay_date ],
+                pay: cost[:gross_pay] + cost[:non_taxable_pay], employer_taxes: cost[:employer_taxes],
+                employer_contributions: cost[:employer_contributions], total: cost[:total])
+    end
+    paychecks = work_period ? unified.historical_paychecks_worked_in(linked: true) : unified.historical_paychecks
+    paychecks.each do |row|
+      add_historical_parts(costs[row.employee_id], period, row, work_period && [ row.period_start, row.period_end, row.pay_date ])
+    end
+    adjustments = work_period ? unified.historical_adjustments_worked_in : unified.historical_adjustments
+    adjustments.each do |row|
+      paycheck = row.historical_paycheck
+      add_historical_parts(costs[paycheck.employee_id], period, row,
+                           work_period && [ paycheck.period_start, paycheck.period_end, row.effective_pay_date ])
+    end
+    costs.reject! { |_employee_id, cost| cost.values.all?(&:zero?) }
+
+    unlinked = work_period ? unified.historical_paychecks_worked_in(linked: false) : unified.unlinked_historical_paychecks
+    excluded = unlinked.sum(0.to_d) do |row|
+      next row.total_payroll_cost.to_d unless work_period
+
+      cents_in_range(row.total_payroll_cost, row.period_start, row.period_end, row.pay_date, period).to_d / 100
+    end
     {
       by_employee: costs,
       total_payroll_cost: costs.values.sum(0.to_d) { |cost| cost[:total] },
-      excluded_unlinked: { paycheck_count: unlinked.length, total_payroll_cost: sum(unlinked, :total_payroll_cost) }
+      excluded_unlinked: { paycheck_count: unlinked.length, total_payroll_cost: excluded }
     }
+  end
+
+  # Native paychecks with the same eligibility as native_items_for, chosen
+  # because their pay period overlaps the range. A pay period without a
+  # usable date range falls back to its pay date.
+  def native_items_worked_in(period)
+    eligible_periods = @pay_period_scope.where(company_id: company.id)
+                                        .where("(pay_periods.start_date <= :last AND pay_periods.end_date >= :first) OR " \
+                                               "((pay_periods.start_date IS NULL OR pay_periods.end_date IS NULL OR " \
+                                               "pay_periods.end_date < pay_periods.start_date) AND pay_periods.pay_date BETWEEN :first AND :last)",
+                                               first: period.start_date, last: period.end_date)
+    PayrollItem.joins(:pay_period)
+               .includes(:pay_period, :payroll_item_field_entries, payroll_item_deductions: :deduction_type)
+               .financially_reportable.reportable
+               .where(company_id: company.id, pay_periods: { id: eligible_periods.select(:id) })
+  end
+
+  # Whole cents of an amount that fall in the range when it is spread over
+  # the days first..last: each day gets the same cents, and the leftover
+  # cents go one each to the last days. Without a usable date range the
+  # whole amount goes where the pay date falls.
+  def cents_in_range(amount, first, last, pay_date, period)
+    cents = (amount.to_d * 100).round(0, :half_up).to_i
+    return 0 if cents.zero?
+    return (period.range.cover?(pay_date) ? cents : 0) if first.nil? || last.nil? || last < first
+
+    from = [ first, period.start_date ].max
+    to = [ last, period.end_date ].min
+    return 0 if to < from
+
+    per_day, leftover = cents.abs.divmod((last - first).to_i + 1)
+    leftover_from = last - leftover + 1
+    leftover_days = leftover.zero? ? 0 : [ (to - [ from, leftover_from ].max).to_i + 1, 0 ].max
+    (cents.negative? ? -1 : 1) * ((per_day * ((to - from).to_i + 1)) + leftover_days)
   end
 
   # The same summary row as a year's, for any pay-date range.
@@ -108,8 +176,24 @@ class AnnualPayrollSummary
 
   private
 
-  def add_historical_cost(entry, row)
-    add_cost(entry, row.gross_pay.to_d, row.employer_taxes.to_d, row.employer_contributions.to_d, row.total_payroll_cost.to_d)
+  def add_historical_parts(entry, period, row, window)
+    add_parts(entry, period, window, pay: row.gross_pay.to_d, employer_taxes: row.employer_taxes.to_d,
+              employer_contributions: row.employer_contributions.to_d, total: row.total_payroll_cost.to_d)
+  end
+
+  # Adds one paycheck's cost: whole when window is false (pay date basis),
+  # otherwise the cents of each component that fall in the range, with the
+  # total built from the components plus any rest of the source total.
+  def add_parts(entry, period, window, pay:, employer_taxes:, employer_contributions:, total:)
+    return add_cost(entry, pay, employer_taxes, employer_contributions, total) unless window
+
+    first, last, pay_date = window
+    portion = ->(amount) { cents_in_range(amount, first, last, pay_date, period).to_d / 100 }
+    pay_part = portion.call(pay)
+    taxes_part = portion.call(employer_taxes)
+    contributions_part = portion.call(employer_contributions)
+    rest_part = portion.call(total - pay - employer_taxes - employer_contributions)
+    add_cost(entry, pay_part, taxes_part, contributions_part, pay_part + taxes_part + contributions_part + rest_part)
   end
 
   def add_cost(entry, pay, employer_taxes, employer_contributions, total)

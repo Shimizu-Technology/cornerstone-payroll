@@ -7,6 +7,9 @@ import api, { type BlobDownload } from './api';
 const NO_COMPANY = { companyId: null } as const;
 const BASE = '/admin/client_profitability';
 
+export type ReportPeriodMode = 'month' | 'quarter' | 'custom';
+export type CostBasis = 'pay_date' | 'work_period';
+
 export interface TaxConnection {
   connected: boolean;
   missing: string[];
@@ -42,6 +45,12 @@ export interface ProfitabilityOverview {
     finance_book_id: number | null;
     effective_finance_book_id: number | null;
     tax_prep_service_names: string[];
+    /** Where the report's toggles and period start; people can still change them per view. */
+    default_cost_pending: boolean;
+    default_spread_overhead: boolean;
+    default_period: ReportPeriodMode;
+    /** "Count pay by": pay date (matches the Annual Payroll Summary) or work period. */
+    cost_basis: CostBasis;
   };
   options: { companies: NamedOption[]; finance_books: NamedOption[]; service_names: string[] };
   imports: WorkHourImportStatus[];
@@ -131,7 +140,9 @@ export interface ProfitabilityTotals {
 
 export interface ProfitabilityReport {
   period: { from: string; through: string; start_date: string; end_date: string; label: string };
-  options: { cost_pending: boolean; spread_overhead: boolean };
+  options: { cost_pending: boolean; spread_overhead: boolean; cost_basis: CostBasis };
+  /** This report's cost next to the Annual Payroll Summary's for the same months. */
+  cost_basis: { basis: CostBasis; cost: string; annual_payroll_summary_cost: string; difference: string };
   practice_company: NamedOption | null;
   finance_book: NamedOption | null;
   coverage: { missing_months: string[]; missing_month_labels: string[]; last_refreshed_at: string | null; pending_hours: string };
@@ -164,11 +175,21 @@ export interface ReportQuery {
   through: string;
   cost_pending: boolean;
   spread_overhead: boolean;
+  /** Sent with both the report and its CSV, so the file matches the screen. */
+  cost_basis: CostBasis;
 }
 
 export const clientProfitabilityApi = {
   overview: (): Promise<ProfitabilityOverview> => api.get<ProfitabilityOverview>(BASE, undefined, NO_COMPANY),
-  updateSettings: (data: { practice_company_id?: number | null; finance_book_id?: number | null; tax_prep_service_names?: string[] }): Promise<ProfitabilityOverview> =>
+  updateSettings: (data: {
+    practice_company_id?: number | null;
+    finance_book_id?: number | null;
+    tax_prep_service_names?: string[];
+    default_cost_pending?: boolean;
+    default_spread_overhead?: boolean;
+    default_period?: ReportPeriodMode;
+    cost_basis?: CostBasis;
+  }): Promise<ProfitabilityOverview> =>
     api.patch<ProfitabilityOverview>(`${BASE}/settings`, data, NO_COMPANY),
   refresh: (from: string, through: string): Promise<{ import: WorkHourImportStatus }> =>
     api.post<{ import: WorkHourImportStatus }>(`${BASE}/refresh`, { from, through }, NO_COMPANY),

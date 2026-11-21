@@ -21,7 +21,14 @@ module ClientProfitability
 
     attr_reader :period
 
-    def initialize(organization:, period:, settings: ClientProfitabilitySetting.for(organization), cost_pending: false, spread_overhead: false)
+    # cost_basis: "pay_date" or "work_period"; nil uses the saved setting.
+    def initialize(organization:, period:, settings: ClientProfitabilitySetting.for(organization), cost_pending: false, spread_overhead: false,
+                   cost_basis: nil)
+      if cost_basis && !ClientProfitabilitySetting::COST_BASES.include?(cost_basis)
+        raise ArgumentError, "Count pay by must be pay date or work period"
+      end
+
+      @requested_cost_basis = cost_basis
       @organization = organization
       @period = period
       @settings = settings
@@ -70,7 +77,8 @@ module ClientProfitability
 
       {
         period: @period.as_json,
-        options: { cost_pending: @cost_pending, spread_overhead: @spread_overhead },
+        options: { cost_pending: @cost_pending, spread_overhead: @spread_overhead, cost_basis: cost_basis },
+        cost_basis: cost_basis_summary,
         practice_company: @practice_company && { id: @practice_company.id, name: @practice_company.name },
         finance_book: finance_book && { id: finance_book.id, name: finance_book.name },
         coverage: coverage,
@@ -129,15 +137,48 @@ module ClientProfitability
     def employee_costs
       @employee_costs ||= begin
         @excluded_unlinked = { paycheck_count: 0, total_payroll_cost: ZERO }
+        @pay_date_total = ZERO
         if @practice_company
-          reporting_period = PayrollReportingPeriod.new(start_date: @period.start_date, end_date: @period.end_date)
-          result = AnnualPayrollSummary.new(company: @practice_company).payroll_cost_by_employee(reporting_period)
+          summary = AnnualPayrollSummary.new(company: @practice_company)
+          result = nil
+          # Both totals come from one snapshot, so the difference shown next
+          # to the Annual Payroll Summary can't straddle a payroll change made
+          # between the two reads (same pattern as the cloners).
+          options = ApplicationRecord.connection.transaction_open? ? {} : { isolation: :repeatable_read }
+          ApplicationRecord.transaction(**options) do
+            result = summary.payroll_cost_by_employee(reporting_period, basis: cost_basis)
+            @pay_date_total = if cost_basis == "pay_date"
+              result[:total_payroll_cost]
+            else
+              summary.payroll_cost_by_employee(reporting_period)[:total_payroll_cost]
+            end
+          end
           @excluded_unlinked = result[:excluded_unlinked]
           result[:by_employee]
         else
           {}
         end
       end
+    end
+
+    def reporting_period
+      PayrollReportingPeriod.new(start_date: @period.start_date, end_date: @period.end_date)
+    end
+
+    def cost_basis
+      @requested_cost_basis || @settings.cost_basis.presence || "pay_date"
+    end
+
+    # How pay was dated, and how this total compares with the Annual Payroll
+    # Summary's total payroll cost for paychecks paid in the same months.
+    def cost_basis_summary
+      reported = employee_costs.values.sum(ZERO) { |cost| cost[:total] }
+      {
+        basis: cost_basis,
+        cost: money(reported),
+        annual_payroll_summary_cost: money(@pay_date_total),
+        difference: money(reported - @pay_date_total)
+      }
     end
 
     # Returns { [bucket_key, tax_user_id] => cost } and records costs that

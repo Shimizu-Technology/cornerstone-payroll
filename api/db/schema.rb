@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_22_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -560,7 +560,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
   end
 
   create_table "client_profitability_settings", force: :cascade do |t|
+    t.string "cost_basis", default: "pay_date", null: false
     t.datetime "created_at", null: false
+    t.boolean "default_cost_pending", default: false, null: false
+    t.string "default_period", default: "month", null: false
+    t.boolean "default_spread_overhead", default: false, null: false
     t.bigint "finance_book_id"
     t.bigint "organization_id", null: false
     t.bigint "practice_company_id"
@@ -571,6 +575,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
     t.index [ "organization_id" ], name: "index_client_profitability_settings_on_organization_id", unique: true
     t.index [ "practice_company_id" ], name: "index_client_profitability_settings_on_practice_company_id"
     t.index [ "updated_by_id" ], name: "index_client_profitability_settings_on_updated_by_id"
+    t.check_constraint "cost_basis::text = ANY (ARRAY['pay_date'::character varying, 'work_period'::character varying]::text[])", name: "client_profitability_cost_basis_valid"
+    t.check_constraint "default_period::text = ANY (ARRAY['month'::character varying, 'quarter'::character varying, 'custom'::character varying]::text[])", name: "client_profitability_default_period_valid"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -2058,6 +2064,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
     t.bigint "finance_book_id", null: false
     t.text "footer_note"
     t.string "invoice_prefix"
+    t.integer "invoice_number_width"
     t.boolean "is_default", default: false, null: false
     t.string "legal_name"
     t.integer "logo_byte_size"
@@ -2090,6 +2097,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
     t.check_constraint "accent_color IS NULL OR accent_color::text ~ '^#[0-9A-F]{6}$'::text", name: "invoice_billing_profile_accent_color_valid"
     t.check_constraint "invoice_theme::text = ANY (ARRAY['classic'::character varying, 'modern'::character varying, 'professional'::character varying, 'banner'::character varying]::text[])", name: "invoice_billing_profile_theme_valid"
     t.check_constraint "logo_size::text = ANY (ARRAY['small'::character varying, 'medium'::character varying, 'large'::character varying]::text[])", name: "invoice_billing_profile_logo_size_valid"
+    t.check_constraint "invoice_number_width IS NULL OR invoice_number_width >= 1 AND invoice_number_width <= 12", name: "invoice_billing_profile_number_width_valid"
   end
 
   create_table "invoice_chat_messages", force: :cascade do |t|
@@ -2377,6 +2385,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
     t.index [ "finance_book_id" ], name: "index_invoices_on_finance_book_id"
     t.index [ "id", "finance_book_id" ], name: "index_invoices_on_id_and_finance_book_id", unique: true
     t.index [ "invoice_billing_profile_id", "invoice_number" ], name: "index_invoices_on_billing_profile_invoice_number", unique: true
+    t.index "invoice_billing_profile_id, ltrim((invoice_number)::text, '0'::text)", name: "index_invoices_on_billing_profile_normalized_number", unique: true, where: "((invoice_number)::text ~ '^[0-9]+$'::text)"
     t.index [ "invoice_billing_profile_id", "status", "due_date" ], name: "idx_invoices_on_profile_status_due_date"
     t.index [ "invoice_billing_profile_id" ], name: "index_invoices_on_invoice_billing_profile_id"
     t.index [ "invoice_recipient_id" ], name: "index_invoices_on_invoice_recipient_id"
