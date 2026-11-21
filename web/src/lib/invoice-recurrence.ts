@@ -31,11 +31,23 @@ export function nextRecurrenceStart(
   count: number,
   today: string,
 ): string {
-  const anchor = (invoice.service_period_start || invoice.invoice_date).slice(0, 10);
+  const anchor = (invoice.service_period_start || invoice.invoice_date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor) || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return today;
   const step = Math.max(1, Math.trunc(count) || 1);
-  let intervals = 1;
-  let next = addInterval(anchor, unit, step);
-  while (next < today && intervals < 1200) {
+  // Start from the number of whole intervals between the anchor and today,
+  // so an old anchor needs no long loop; the loop below only finishes the
+  // last step or two (month lengths vary).
+  let intervals: number;
+  if (unit === 'week') {
+    const days = (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${anchor}T00:00:00Z`)) / 86_400_000;
+    intervals = Math.max(1, Math.ceil(days / (7 * step)));
+  } else {
+    const [anchorYear, anchorMonth] = anchor.split('-').map(Number);
+    const [todayYear, todayMonth] = today.split('-').map(Number);
+    intervals = Math.max(1, Math.floor(((todayYear - anchorYear) * 12 + (todayMonth - anchorMonth)) / step));
+  }
+  let next = addInterval(anchor, unit, step * intervals);
+  while (next < today) {
     intervals += 1;
     next = addInterval(anchor, unit, step * intervals);
   }

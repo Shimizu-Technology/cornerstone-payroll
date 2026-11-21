@@ -331,6 +331,46 @@ RSpec.describe "Invoice email content", type: :request do
     end
   end
 
+  describe "claiming a send" do
+    it "keeps a default subject within the limit when the bill-to name is very long" do
+      recipient.update!(name: "Harbor #{'Bakery ' * 60}LLC")
+      invoice = issue(november_invoice)
+      subject = InvoiceEmailContent.default_subject(invoice)
+
+      expect(subject.length).to eq(Invoice::EMAIL_SUBJECT_MAX)
+      expect(subject).to start_with("Invoice 07052 - Harbor Bakery")
+      expect(subject).to end_with("… - November 2026")
+
+      messages = stub_provider
+      post "/api/v1/admin/invoice_send_schedules", params: {
+        invoice_id: invoice.id, recipients: [ "billing@mosas.example" ], send_at: 1.minute.ago.iso8601
+      }, as: :json
+      schedule_id = response.parsed_body.dig("invoice_send_schedule", "id")
+      InvoiceScheduledSender.send!(schedule_id)
+
+      expect(messages.sole[:subject]).to eq(subject)
+      expect(InvoiceSendSchedule.find(schedule_id)).to have_attributes(status: "sent", rendered_subject: subject)
+    end
+
+    it "marks a claim that fails as failed and re-raises the original error" do
+      invoice = issue(november_invoice)
+      post "/api/v1/admin/invoice_send_schedules", params: {
+        invoice_id: invoice.id, recipients: [ "billing@mosas.example" ], send_at: 1.minute.ago.iso8601
+      }, as: :json
+      schedule_id = response.parsed_body.dig("invoice_send_schedule", "id")
+      stub_provider
+      # The claim's update! fails validation, leaving unsaved changes behind.
+      allow_any_instance_of(InvoiceSendSchedule).to receive(:recipients_are_valid) { |schedule| schedule.errors.add(:recipients, "are unavailable") }
+
+      expect { InvoiceScheduledSender.send!(schedule_id) }.to raise_error(ActiveRecord::RecordInvalid, /Recipients are unavailable/)
+
+      expect(InvoiceSendSchedule.find(schedule_id)).to have_attributes(status: "failed", attempts: 0)
+      expect(InvoiceSendSchedule.find(schedule_id).last_error).to include("ActiveRecord::RecordInvalid")
+      expect(Resend::Emails).not_to have_received(:send)
+      expect(invoice.deliveries).to be_empty
+    end
+  end
+
   describe "changing the invoice email after a send is scheduled" do
     def schedule_send(invoice, **text)
       post "/api/v1/admin/invoice_send_schedules", params: {

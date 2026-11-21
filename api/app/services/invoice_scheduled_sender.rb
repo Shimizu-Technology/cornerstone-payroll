@@ -7,6 +7,7 @@ class InvoiceScheduledSender
   def self.send!(id)
     schedule = InvoiceSendSchedule.find(id)
     InvoiceSendSchedule.with_active_send_lock(id) do
+      claimed = false
       begin
         schedule.with_lock do
           return unless schedule.status.in?(%w[pending queued]) && schedule.send_at <= Time.current
@@ -31,6 +32,7 @@ class InvoiceScheduledSender
                            rendered_body: schedule.rendered_body.presence || body,
                            sender_email: schedule.sender_email.presence || ENV["INVOICE_MAILER_FROM_EMAIL"].presence,
                            reply_to_email: schedule.attempts.zero? ? reply_to : schedule.reply_to_email)
+          claimed = true
         end
 
         # The session advisory lock remains held during I/O. Recovery checks it,
@@ -95,8 +97,14 @@ class InvoiceScheduledSender
       rescue StandardError => e
         # A provider response may have been lost. Keep the same idempotency key
         # for an explicit retry after the operator checks provider delivery.
+        # A failed claim leaves unsaved changes on the record, and locking a
+        # changed record raises, which would hide this error; drop them first.
+        # A claim that failed is marked failed too, so it isn't retried forever.
+        schedule.restore_attributes
         schedule.with_lock do
-          schedule.update!(status: "failed", last_error: "#{e.class}: #{e.message}".truncate(500)) if schedule.status == "sending"
+          if schedule.status == "sending" || (!claimed && schedule.status.in?(%w[pending queued]))
+            schedule.update_columns(status: "failed", last_error: "#{e.class}: #{e.message}".truncate(500), updated_at: Time.current)
+          end
         end
         raise
       end

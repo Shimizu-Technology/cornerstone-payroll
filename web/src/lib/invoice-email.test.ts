@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultInvoiceEmail, invoiceServiceLabel } from './invoice-email';
+import { EMAIL_SUBJECT_MAX, defaultInvoiceEmail, defaultInvoiceSubject, invoiceServiceLabel } from './invoice-email';
 
 describe('defaultInvoiceEmail', () => {
   it('matches the API default (InvoiceEmailContent) for the office example', () => {
@@ -23,6 +23,16 @@ describe('defaultInvoiceEmail', () => {
     expect(email.subject).toBe('Invoice 07053 - Acme - December 2026');
     expect(email.body).toContain('The amount due is $1,250.50, due on receipt.');
     expect(email.body.endsWith('Mahalo!')).toBe(true);
+  });
+});
+
+describe('defaultInvoiceSubject', () => {
+  it('shortens a long customer name so the subject fits, keeping the number and month', () => {
+    const subject = defaultInvoiceSubject('07052', 'A'.repeat(400), 'November 2026');
+    expect(subject.length).toBe(EMAIL_SUBJECT_MAX);
+    expect(subject.startsWith('Invoice 07052 - AAA')).toBe(true);
+    expect(subject.endsWith('A… - November 2026')).toBe(true);
+    expect(defaultInvoiceSubject('07052', 'Acme  \n Bakery', 'November 2026')).toBe('Invoice 07052 - Acme Bakery - November 2026');
   });
 });
 

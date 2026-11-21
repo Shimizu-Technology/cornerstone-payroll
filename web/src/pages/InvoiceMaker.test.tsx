@@ -90,7 +90,7 @@ describe('InvoiceMaker', () => {
     await user.click(screen.getByRole('button', { name: 'Save email' }));
 
     await waitFor(() => expect(api.invoices.updateEmail).toHaveBeenCalledWith(7, { email_subject: 'Invoice 07052 - November', email_body: '' }));
-    expect(await screen.findByText('Edited email')).toBeTruthy();
+    expect(await screen.findByText(/^Edited email/)).toBeTruthy();
   });
 
   it('shows the default email for a new draft from the chosen sender and customer', async () => {
@@ -184,6 +184,44 @@ describe('InvoiceMaker', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(subject).toHaveProperty('value', SECOND_SUBJECT);
+      expect((subject as HTMLInputElement).disabled).toBe(false);
+      expect(screen.queryByText('Email saved. The issued PDF is unchanged.')).toBeNull();
     });
+
+    it('locks the email fields while the save is in flight', async () => {
+      let finishSave: (value: { invoice: Invoice }) => void = () => {};
+      api.invoices.updateEmail.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+      const { user, subject } = await editFirstInvoiceSubject();
+
+      await user.click(screen.getByRole('button', { name: 'Save email' }));
+
+      expect((subject as HTMLInputElement).disabled).toBe(true);
+      expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).disabled).toBe(true);
+      finishSave({ invoice: issuedInvoice({
+        email: { subject: 'Unsaved subject', body: BODY, default_subject: SUBJECT, default_body: BODY, subject_customized: true, body_customized: false },
+      }) });
+      expect(await screen.findByText('Email saved. The issued PDF is unchanged.')).toBeTruthy();
+      expect((subject as HTMLInputElement).disabled).toBe(false);
+      expect(subject).toHaveProperty('value', 'Unsaved subject');
+    });
+  });
+
+  it.each([
+    ['Subject', { email_subject: '', email_body: 'Custom message' }],
+    ['Message', { email_subject: 'Custom subject', email_body: '' }],
+  ])("clearing only an issued invoice's %s restores just that default", async (field, expected) => {
+    const custom = { subject: 'Custom subject', body: 'Custom message', default_subject: SUBJECT, default_body: BODY, subject_customized: true, body_customized: true };
+    api.invoices.get.mockResolvedValue({ invoice: issuedInvoice({ email: custom }) });
+    api.invoices.updateEmail.mockResolvedValue({ invoice: issuedInvoice() });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByText('07052'));
+    const input = await screen.findByRole('textbox', { name: field });
+    await waitFor(() => expect(input).toHaveProperty('value', field === 'Subject' ? 'Custom subject' : 'Custom message'));
+
+    await user.clear(input);
+    await user.click(screen.getByRole('button', { name: 'Save email' }));
+
+    await waitFor(() => expect(api.invoices.updateEmail).toHaveBeenCalledWith(7, expected));
   });
 });
