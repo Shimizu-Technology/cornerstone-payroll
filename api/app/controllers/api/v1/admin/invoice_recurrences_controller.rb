@@ -7,7 +7,8 @@ module Api
         before_action :require_admin!
 
         def index
-          rows = InvoiceRecurrence.where(finance_book_id: current_finance_book.id).order(:id)
+          rows = InvoiceRecurrence.where(finance_book_id: current_finance_book.id)
+                                  .includes(source_invoice: %i[invoice_billing_profile invoice_recipient]).order(:id)
           render json: { invoice_recurrences: rows.map { |row| payload(row) } }
         end
 
@@ -66,6 +67,7 @@ module Api
         def payload(row)
           row.as_json(only: %i[id organization_id source_invoice_id start_on next_on ends_on interval_unit interval_count
                                occurrence_index due_after_days time_zone active created_at])
+             .merge("due_terms" => InvoiceRecurrenceGenerator.recurring_terms(row.source_invoice))
         end
       end
     end

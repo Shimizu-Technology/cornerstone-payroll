@@ -33,9 +33,9 @@ RSpec.describe InvoiceAiPreviewService do
       "rate" => 1000.0
     )
     expect(preview["payment_terms"]).to be_nil
-    expect(preview["email_subject"]).to eq("Invoice from #{company.name}")
-    expect(preview["email_body"]).to include("Hi Shimizu Technology")
-    expect(preview["email_body"]).to end_with(company.name)
+    # Blank email text keeps the default email (InvoiceEmailContent).
+    expect(preview["email_subject"]).to be_nil
+    expect(preview["email_body"]).to be_nil
   end
 
   it "answers saved recipient questions without mixing in billing profiles" do
@@ -223,7 +223,7 @@ RSpec.describe InvoiceAiPreviewService do
       "payment_terms" => "Due on receipt",
       "template_type" => "hourly"
     )
-    expect(preview["email_body"]).to include("Hi Pacific Tech")
+    expect(preview["email_body"]).to be_nil
   end
 
   it "uses the smart invoice model default unless an environment override is present" do
@@ -294,7 +294,7 @@ RSpec.describe InvoiceAiPreviewService do
     expect(request_body.dig("messages", 1, "content")).to include("Active invoice-from billing profiles")
     expect(preview["invoice_billing_profile_id"]).to eq(profile.id)
     expect(preview["invoice_billing_profile_name"]).to eq("Shimizu Technology")
-    expect(preview["email_subject"]).to eq("Invoice from Shimizu Technology")
+    expect(preview["email_subject"]).to be_nil
   end
 
   it "bounds deterministic recipient matching to avoid scanning every recipient" do

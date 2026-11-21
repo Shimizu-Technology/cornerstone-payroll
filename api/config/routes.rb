@@ -752,6 +752,7 @@ Rails.application.routes.draw do
             post :issue
             get :download_artifact
             post :record_delivery
+            patch :email, action: :update_email
             patch "deliveries/:delivery_id", action: :correct_delivery, as: :correct_delivery
           end
           resources :payments, controller: :invoice_payments, only: [ :create ] do

@@ -20,6 +20,20 @@ RSpec.describe InvoiceNumberAllocator do
     expect(profile.reload.next_invoice_number).to eq(7057)
   end
 
+  it "previews the next number without reserving it, for continuing and yearly senders" do
+    profile.update!(invoice_number_width: 5)
+    existing_invoice("07055")
+    expect(described_class.preview(billing_profile: profile, invoice_date: "2026-11-22")).to eq("07056")
+    expect(profile.reload.next_invoice_number).to eq(7055)
+
+    yearly = create(:invoice_billing_profile, organization: profile.organization, numbering_style: "yearly", invoice_prefix: "ST")
+    expect(yearly.next_number_preview(Date.new(2026, 11, 22))).to eq("ST-2026-0001")
+    described_class.call(billing_profile: yearly, invoice_date: "2026-11-22")
+    expect(yearly.next_number_preview(Date.new(2026, 11, 22))).to eq("ST-2026-0002")
+    expect(yearly.next_number_preview(Date.new(2027, 1, 2))).to eq("ST-2027-0001")
+    expect(InvoiceNumberSequence.where(invoice_billing_profile: yearly).count).to eq(1)
+  end
+
   it "keeps today's unpadded numbers when no width is set, and never cuts a longer number" do
     expect(described_class.call(billing_profile: profile, invoice_date: "2026-11-22")).to eq("7055")
     profile.update!(invoice_number_width: 3)

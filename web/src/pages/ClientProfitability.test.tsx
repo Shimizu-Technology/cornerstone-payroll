@@ -90,6 +90,8 @@ describe('ClientProfitability', () => {
     expect(screen.getByText(/Still missing: CORNERSTONE_TAX_API_URL, PAYROLL_WORK_HOURS_SECRET/)).toBeTruthy();
     expect((screen.getByRole('button', { name: /Refresh hours from Tax/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(state.report).not.toHaveBeenCalled();
+    // The app layout supplies the one <main> landmark.
+    expect(screen.queryByRole('main')).toBeNull();
   });
 
   it('shows clients, drills into people and tasks, and re-asks with the toggles', async () => {

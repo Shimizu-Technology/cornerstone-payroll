@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_22_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_22_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2171,6 +2171,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_030000) do
     t.string "channel", null: false
     t.datetime "created_at", null: false
     t.datetime "delivered_at", null: false
+    t.text "email_body"
+    t.text "email_subject"
     t.bigint "invoice_artifact_id"
     t.bigint "invoice_id", null: false
     t.text "notes"

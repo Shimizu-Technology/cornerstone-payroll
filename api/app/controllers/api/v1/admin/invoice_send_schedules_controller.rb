@@ -18,6 +18,7 @@ module Api
           raise ArgumentError, "An issued PDF is required" unless invoice.primary_artifact&.content_type == "application/pdf"
 
           recipients = InvoiceSendSchedule.normalize_recipients(params[:recipients].presence || invoice.invoice_recipient.email)
+          content = email_content_params
           send_now = ActiveModel::Type::Boolean.new.cast(params[:send_now])
           send_at = send_now ? Time.current : Time.iso8601(params.require(:send_at))
           schedule = InvoiceSendSchedule.transaction do
@@ -27,10 +28,13 @@ module Api
               invoice: invoice,
               created_by: current_user,
               recipients: recipients,
-              send_at: send_at
+              send_at: send_at,
+              rendered_subject: content[:rendered_subject],
+              rendered_body: content[:rendered_body]
             )
             InvoiceEvent.record!(invoice: invoice, event_type: "email_scheduled", actor: current_user,
-                                 metadata: { send_schedule_id: row.id, send_at: send_at.iso8601, recipients: recipients })
+                                 metadata: { send_schedule_id: row.id, send_at: send_at.iso8601, recipients: recipients,
+                                             subject: row.rendered_subject }.compact)
             row
           end
           if send_now
@@ -73,11 +77,12 @@ module Api
               updates = {}
               updates[:send_at] = Time.iso8601(params[:send_at]) if params[:send_at].present?
               updates[:recipients] = InvoiceSendSchedule.normalize_recipients(params[:recipients]) if params.key?(:recipients)
+              updates.merge!(email_content_params)
               schedule.update!(updates)
               if updates.present?
                 InvoiceEvent.record!(invoice: schedule.invoice, event_type: "email_schedule_updated", actor: current_user,
                                      metadata: { send_schedule_id: schedule.id, send_at: schedule.send_at.iso8601,
-                                                 recipients: schedule.recipients })
+                                                 recipients: schedule.recipients, subject: schedule.rendered_subject }.compact)
               end
             end
           end
@@ -96,9 +101,21 @@ module Api
           InvoiceSendSchedule.where(finance_book_id: current_finance_book.id)
         end
 
+        # The subject and message reviewed in the send panel. A blank value
+        # sends the invoice's email as it stands when the send is claimed.
+        def email_content_params
+          content = {}
+          content[:rendered_subject] = params[:subject].to_s.squish.presence if params.key?(:subject)
+          content[:rendered_body] = params[:body].to_s.strip.presence if params.key?(:body)
+          content
+        end
+
+        # subject/body are null until the send is claimed when the schedule
+        # uses the invoice's email; after a send they are the text sent.
         def payload(row)
           row.as_json(only: %i[id organization_id invoice_id recipients send_at status attempts provider_reference
                                last_error claimed_at sent_at created_at])
+             .merge("subject" => row.rendered_subject, "body" => row.rendered_body)
         end
       end
     end

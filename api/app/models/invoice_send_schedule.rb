@@ -11,6 +11,8 @@ class InvoiceSendSchedule < ApplicationRecord
 
   validates :status, inclusion: { in: STATUSES }
   validates :send_at, presence: true
+  validates :rendered_subject, length: { maximum: Invoice::EMAIL_SUBJECT_MAX }
+  validates :rendered_body, length: { maximum: Invoice::EMAIL_BODY_MAX }
   validate :invoice_belongs_to_organization
   validate :invoice_belongs_to_book
   validate :recipients_are_valid
