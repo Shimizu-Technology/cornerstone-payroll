@@ -38,7 +38,7 @@ def verify(directory, count):
     actual = Counter(example for report in reports for example in ids(report))
     if actual != expected:
         raise ValueError(f'Coverage differs: missing={expected - actual}, extra={actual - expected}')
-    if any(report['summary']['failure_count'] or report.get('errors_outside_of_examples_count', 0) for report in reports):
+    if any(report['summary']['failure_count'] or report['summary'].get('errors_outside_of_examples_count', 0) for report in reports):
         raise ValueError('RSpec reported failures')
     timings = defaultdict(float)
     for report in reports:
