@@ -2,6 +2,7 @@ import { supportsSourceOperation } from '@/lib/time-tracking';
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { controlClassName } from '@/components/ui/field-styles';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, ShieldCheck, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
@@ -710,11 +711,11 @@ export function TimeTrackingImportModal({
                       <div className="grid gap-4 sm:grid-cols-2">
                         <label className="block text-xs font-medium text-neutral-600">
                           Start date
-                          <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-300 px-4 py-2 text-sm" />
+                          <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className={controlClassName('mt-2')} />
                         </label>
                         <label className="block text-xs font-medium text-neutral-600">
                           End date
-                          <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-300 px-4 py-2 text-sm" />
+                          <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className={controlClassName('mt-2')} />
                         </label>
                       </div>
                       <div className="rounded-xl border border-primary-200 bg-primary-50/60 p-4 text-sm leading-6 text-primary-800">
@@ -936,7 +937,7 @@ export function TimeTrackingImportModal({
                               });
                             }}
                             disabled={!included}
-                            className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-4 py-2 text-sm disabled:bg-neutral-100"
+                            className={controlClassName('mt-2')}
                           >
                             <option value="">Select employee</option>
                             {employees.map((employee) => (

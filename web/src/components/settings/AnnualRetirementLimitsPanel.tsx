@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { annualRetirementLimitsApi, ApiError } from '@/services/api';
 import type { AnnualRetirementLimit, AnnualRetirementLimitInput } from '@/types';
 import { Button } from '@/components/ui/button';
+import { controlClassName } from '@/components/ui/field-styles';
 import { NumericInput } from '@/components/ui/numeric-input';
 
 const amountFields = [
@@ -218,8 +219,8 @@ export function AnnualRetirementLimitsPanel() {
             <p id={`retirement-limit-${key}-help`} className="mt-1 text-xs text-neutral-600">{help}</p>
           </div>)}
           <div className="sm:col-span-2 lg:col-span-3 grid gap-4 sm:grid-cols-2">
-            <label className="text-sm font-medium text-neutral-800">Source name<input value={editor.draft.source_name} onChange={(event) => updateDraft('source_name', event.target.value)} required className="mt-1 block w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300" placeholder="IRS announcement or notice" /></label>
-            <label className="text-sm font-medium text-neutral-800">Source URL<input type="url" value={editor.draft.source_url} onChange={(event) => updateDraft('source_url', event.target.value)} required className="mt-1 block w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300" placeholder="https://www.irs.gov/…" /></label>
+            <label className="text-sm font-medium text-neutral-800">Source name<input value={editor.draft.source_name} onChange={(event) => updateDraft('source_name', event.target.value)} required className={controlClassName('mt-1 font-normal')} placeholder="IRS announcement or notice" /></label>
+            <label className="text-sm font-medium text-neutral-800">Source URL<input type="url" value={editor.draft.source_url} onChange={(event) => updateDraft('source_url', event.target.value)} required className={controlClassName('mt-1 font-normal')} placeholder="https://www.irs.gov/…" /></label>
             <label className="text-sm font-medium text-neutral-800 sm:col-span-2">Reason for change<textarea value={editor.draft.reason} onChange={(event) => updateDraft('reason', event.target.value)} required rows={2} className="mt-1 block w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300" placeholder="Verified annual limits against the linked IRS publication" /></label>
           </div>
         </fieldset>

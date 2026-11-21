@@ -2,6 +2,7 @@ import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/compo
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Badge } from '@/components/ui/badge';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { nonEmployeeChecksApi } from '@/services/api';
@@ -350,7 +351,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Payable To" required>
               <input
-                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                className={controlClassName()}
                 placeholder="e.g., Treasurer of Guam"
                 value={form.payable_to}
                 onChange={e => setForm(p => p && { ...p, payable_to: e.target.value })}
@@ -373,7 +374,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
             <Field label="Check Type">
               <select
-                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                className={controlClassName()}
                 value={form.check_type}
                 onChange={e => setForm(p => p && { ...p, check_type: e.target.value as NonEmployeeCheckType })}
               >
@@ -385,7 +386,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
             <Field label="Check Number">
               <input
-                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                className={controlClassName()}
                 placeholder="e.g., 1234"
                 value={form.check_number}
                 onChange={e => setForm(p => p && { ...p, check_number: e.target.value })}
@@ -396,7 +397,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
               <>
                 <Field label="Tax/reporting period">
                   <select
-                    className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                    className={controlClassName()}
                     value={form.payment_period_type}
                     onChange={e => setForm(p => p && handlePeriodTypeChange(p, e.target.value as PaymentPeriodType))}
                   >
@@ -409,7 +410,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                 {form.payment_period_type !== 'none' && (
                   <Field label="Tax year">
                     <input
-                      className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                      className={controlClassName()}
                       inputMode="numeric"
                       placeholder="e.g., 2026"
                       value={form.tax_year}
@@ -421,7 +422,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                 {form.payment_period_type === 'quarter' && (
                   <Field label="Tax quarter">
                     <select
-                      className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                      className={controlClassName()}
                       value={form.tax_quarter}
                       onChange={e => setForm(p => p && { ...p, tax_quarter: e.target.value })}
                     >
@@ -434,7 +435,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                 {form.payment_period_type === 'month' && (
                   <Field label="Tax month">
                     <select
-                      className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                      className={controlClassName()}
                       value={form.tax_month}
                       onChange={e => setForm(p => p && { ...p, tax_month: e.target.value })}
                     >
@@ -450,7 +451,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
                 <Field label="Payment date" hint="Date the check/payment is issued.">
                   <input
-                    className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                    className={controlClassName()}
                     type="date"
                     value={form.payment_date}
                     onChange={e => setForm(p => p && { ...p, payment_date: e.target.value })}
@@ -459,7 +460,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
                 <Field label="Due date" hint="Deadline for the tax bill or obligation.">
                   <input
-                    className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                    className={controlClassName()}
                     type="date"
                     value={form.due_date}
                     onChange={e => setForm(p => p && { ...p, due_date: e.target.value })}
@@ -468,7 +469,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
                 <Field label="Confirmation Number">
                   <input
-                    className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                    className={controlClassName()}
                     placeholder="e.g., GRT-2026-05"
                     value={form.confirmation_number}
                     onChange={e => setForm(p => p && { ...p, confirmation_number: e.target.value })}
@@ -479,7 +480,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
             <Field label="Memo" className="md:col-span-2">
               <input
-                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                className={controlClassName()}
                 placeholder="e.g., May GRT payment"
                 value={form.memo}
                 onChange={e => setForm(p => p && { ...p, memo: e.target.value })}
@@ -488,7 +489,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
             <Field label="Reference #" className="md:col-span-2">
               <input
-                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                className={controlClassName()}
                 placeholder="e.g., invoice or tax voucher #"
                 value={form.reference_number}
                 onChange={e => setForm(p => p && { ...p, reference_number: e.target.value })}
@@ -538,7 +539,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
               className="md:col-span-2"
             >
               <input
-                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                className={controlClassName()}
                 placeholder="e.g. Updated check number after re-run"
                 value={form.reason}
                 onChange={e => setForm(p => p && { ...p, reason: e.target.value })}

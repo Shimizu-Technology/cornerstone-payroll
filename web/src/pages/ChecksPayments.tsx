@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { NumericInput } from '@/components/ui/numeric-input';
+import { CONTROL_HEIGHT, controlClassName, FIELD_LABEL } from '@/components/ui/field-styles';
 import { nonEmployeeChecksApi, companiesApi, payrollLiabilityCenterApi, type CompanyDetail } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 import type { NonEmployeeCheck, NonEmployeeCheckType, OutgoingPaymentMethod, PaymentPeriodType, PayrollLiabilityCenter as PayrollLiabilityCenterData, PayrollLiabilityCenterObligation } from '@/types';
@@ -775,26 +776,27 @@ export function ChecksPayments() {
 
         <Card className="p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-1 items-center gap-2 rounded-lg border bg-white px-3 py-2">
-              <Search className="h-4 w-4 text-neutral-400" />
+            <div className={`flex flex-1 items-center gap-2 rounded-xl border border-neutral-300 bg-white px-3.5 shadow-sm focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-200 ${CONTROL_HEIGHT}`}>
+              <Search className="h-4 w-4 shrink-0 text-neutral-400" aria-hidden="true" />
               <input
-                className="w-full bg-transparent text-sm outline-none"
+                aria-label="Search payments"
+                className="w-full bg-transparent text-base outline-none sm:text-sm"
                 placeholder="Search payee, check number, memo, or confirmation"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
             <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap [&>*]:w-full sm:[&>*]:w-auto">
-              <select className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+              <select aria-label="Filter payments by type" className={controlClassName()} value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
                 <option value="all">All types</option>
                 {STANDALONE_TYPES.map(type => <option key={type} value={type}>{CHECK_TYPE_LABELS[type]}</option>)}
               </select>
-              <select className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <select aria-label="Filter payments by status" className={controlClassName()} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                 <option value="active">Active only</option>
                 <option value="all">Include voided and linked duplicates</option>
               </select>
               {company?.check_stock_type === 'first_hawaiian_4up' && (
-                <select className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm" value={startingSlot} onChange={e => setStartingSlot(Number(e.target.value))}>
+                <select aria-label="Starting check slot" className={controlClassName()} value={startingSlot} onChange={e => setStartingSlot(Number(e.target.value))}>
                   {[1, 2, 3, 4].map(slot => <option key={slot} value={slot}>Slot {slot}</option>)}
                 </select>
               )}
@@ -1032,10 +1034,10 @@ function FormField({
 }) {
   return (
     <div className={className}>
-      <label className="mb-1.5 block text-sm font-medium text-neutral-700">
-        {label}
+      <label className="block">
+        <span className={`${FIELD_LABEL} mb-1.5`}>{label}</span>
+        {children}
       </label>
-      {children}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Textarea } from '@/components/ui/textarea';
 import {
   invoiceRecipientsApi,
@@ -1550,7 +1551,7 @@ export function InvoiceMaker() {
 
         {showRecipientForm && (
           <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
-            <label className="text-sm">Payroll client (optional)<select aria-label="Customer payroll client" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value={recipientForm.company_id} onChange={(e) => setRecipientForm({ ...recipientForm, company_id: e.target.value })}><option value="">Unallocated</option>{companies.filter((c) => c.organization_id === activeOrganizationId && !isTestWorkspaceCompany(c)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+            <label className="block text-sm font-medium text-neutral-700">Payroll client (optional)<select aria-label="Customer payroll client" className={controlClassName('mt-1')} value={recipientForm.company_id} onChange={(e) => setRecipientForm({ ...recipientForm, company_id: e.target.value })}><option value="">Unallocated</option>{companies.filter((c) => c.organization_id === activeOrganizationId && !isTestWorkspaceCompany(c)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             <Input value={recipientForm.name} onChange={(event) => setRecipientForm((current) => ({ ...current, name: event.target.value }))} placeholder="Recipient name" />
             <Input value={recipientForm.email} onChange={(event) => setRecipientForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
             <Textarea value={recipientForm.address} onChange={(event) => setRecipientForm((current) => ({ ...current, address: event.target.value }))} placeholder="Address" rows={2} />
@@ -1561,7 +1562,7 @@ export function InvoiceMaker() {
             <select
               value={recipientForm.template_type}
               onChange={(event) => setRecipientForm((current) => ({ ...current, template_type: event.target.value as InvoiceTemplateType }))}
-              className="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-900 shadow-sm"
+              className={controlClassName()}
             >
               <option value="standard">Standard invoice</option>
               <option value="hourly">Hourly services</option>
@@ -1630,7 +1631,7 @@ export function InvoiceMaker() {
             <label className="block text-sm font-medium text-neutral-700">Remittance address<Textarea aria-label="Remittance address" className="mt-1" value={billingProfileForm.address} onChange={(event) => setBillingProfileForm((current) => ({ ...current, address: event.target.value }))} rows={2} /></label>
             <label className="block text-sm font-medium text-neutral-700">Payment instructions<Textarea aria-label="Payment instructions" className="mt-1" value={billingProfileForm.payment_instructions} onChange={(event) => setBillingProfileForm((current) => ({ ...current, payment_instructions: event.target.value }))} rows={2} /></label>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="text-sm font-medium text-neutral-700">Number format<select aria-label="Number format" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value={billingProfileForm.numbering_style} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, numbering_style: e.target.value as 'yearly' | 'continuing' })}><option value="yearly">Prefix and year (existing)</option><option value="continuing">Plain continuing sequence</option></select></label>
+              <label className="text-sm font-medium text-neutral-700">Number format<select aria-label="Number format" className={controlClassName('mt-1')} value={billingProfileForm.numbering_style} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, numbering_style: e.target.value as 'yearly' | 'continuing' })}><option value="yearly">Prefix and year (existing)</option><option value="continuing">Plain continuing sequence</option></select></label>
               {billingProfileForm.numbering_style === 'continuing' && <label className="text-sm font-medium text-neutral-700">Next invoice number<Input className="mt-1" aria-label="Next invoice number" type="number" min="1" step="1" value={billingProfileForm.next_invoice_number} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, next_invoice_number: Number(e.target.value) })} /></label>}
               {billingProfileForm.numbering_style === 'continuing' && (
                 <InvoiceNumberWidthField value={billingProfileForm.invoice_number_width} nextNumber={billingProfileForm.next_invoice_number}
@@ -1648,7 +1649,7 @@ export function InvoiceMaker() {
                   <label className="block text-xs font-medium text-neutral-600">Service {index + 1} name<Input className="mt-1" value={service.name} onChange={(e) => updateService({ name: e.target.value })} /></label>
                   <label className="block text-xs font-medium text-neutral-600">Description<Textarea aria-label="Description" className="mt-1" rows={2} value={service.description_template} onChange={(e) => updateService({ description_template: e.target.value })} /></label>
                   <div className="flex flex-wrap items-end gap-2">
-                    <label className="min-w-40 flex-1 text-xs font-medium text-neutral-600">Kind<select className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm" value={service.line_kind} onChange={(e) => updateService({ line_kind: e.target.value as 'service_fee' | 'reimbursement' })}><option value="service_fee">Service fee</option><option value="reimbursement">Reimbursement</option></select></label>
+                    <label className="min-w-40 flex-1 text-xs font-medium text-neutral-600">Kind<select className={controlClassName('mt-1')} value={service.line_kind} onChange={(e) => updateService({ line_kind: e.target.value as 'service_fee' | 'reimbursement' })}><option value="service_fee">Service fee</option><option value="reimbursement">Reimbursement</option></select></label>
                     <Button type="button" variant="outline" aria-label={`Remove service ${index + 1}`} onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.filter((_, i) => i !== index) })}>Remove</Button>
                   </div>
                 </div>;
@@ -1889,7 +1890,7 @@ export function InvoiceMaker() {
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">From</span>
                   <select
-                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500"
+                    className={controlClassName()}
                     value={invoiceForm.invoice_billing_profile_id}
                     disabled={selectedInvoiceReadOnly}
                     onChange={(event) => {
@@ -1912,7 +1913,7 @@ export function InvoiceMaker() {
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Bill To</span>
                   <select
-                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500"
+                    className={controlClassName()}
                     value={invoiceForm.invoice_recipient_id}
                     disabled={selectedInvoiceReadOnly}
                     onChange={(event) => applyRecipientDefaults(event.target.value)}
@@ -2014,7 +2015,7 @@ export function InvoiceMaker() {
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Type</span>
-                    <select value={invoiceForm.discount_type} onChange={(event) => setInvoiceForm((current) => ({ ...current, discount_type: event.target.value as InvoiceDiscountType, discount_value: '' }))} disabled={selectedInvoiceReadOnly} className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500">
+                    <select value={invoiceForm.discount_type} onChange={(event) => setInvoiceForm((current) => ({ ...current, discount_type: event.target.value as InvoiceDiscountType, discount_value: '' }))} disabled={selectedInvoiceReadOnly} className={controlClassName()}>
                       <option value="none">No discount</option>
                       <option value="percent">Percentage</option>
                       <option value="amount">Fixed amount</option>
@@ -2285,7 +2286,7 @@ export function InvoiceMaker() {
                   </div>
                 )}
                 {chatError && <ActionFeedback retryKey={chatErrorFeedbackAttempt} tone="error" message={chatError} />}
-                <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                   <label className="inline-flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
                     <ImagePlus className="h-5 w-5" />
                     <input

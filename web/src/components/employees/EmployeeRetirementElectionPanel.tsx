@@ -277,7 +277,9 @@ function Toggle({ checked, disabled, onChange, title, helper }: { checked: boole
 }
 
 function Field({ label, helper, children }: { label: string; helper?: string; children: ReactElement }): ReactElement {
-  return <label className="block"><span className="block text-sm font-medium text-neutral-700">{label}</span>{helper && <span className="mt-1 block text-xs leading-5 text-neutral-500">{helper}</span>}<span className="mt-2 block">{children}</span></label>;
+  // Column layout with the control pushed to the bottom: in a grid row, a longer label or helper
+  // no longer drops one control below its neighbour.
+  return <label className="flex h-full flex-col"><span className="block text-sm font-medium text-neutral-700">{label}</span>{helper && <span className="mt-1 block text-xs leading-5 text-neutral-500">{helper}</span>}<span className="mt-auto block pt-2">{children}</span></label>;
 }
 
 function SummaryItem({ label, value }: { label: string; value: string }): ReactElement {

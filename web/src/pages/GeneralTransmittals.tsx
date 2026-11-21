@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -451,7 +452,7 @@ export function GeneralTransmittals() {
               <select
                 value={selectedPayPeriodId}
                 onChange={(event) => setSelectedPayPeriodId(event.target.value)}
-                className="mt-2 h-11 w-full rounded-xl border border-white/20 bg-white px-3 text-sm text-neutral-900 outline-none ring-primary-300 focus:ring-2"
+                className={controlClassName('mt-2')}
               >
                 <option value="">Choose a pay period…</option>
                 {payPeriods.map((period) => (
@@ -516,7 +517,7 @@ export function GeneralTransmittals() {
                   <div className="flex flex-col gap-3 md:flex-row md:items-end">
                     <label className="flex-1 space-y-1.5">
                       <span className="text-sm font-medium">Add standalone check</span>
-                      <select value={selectedCheckId} onChange={(event) => setSelectedCheckId(event.target.value)} className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm">
+                      <select value={selectedCheckId} onChange={(event) => setSelectedCheckId(event.target.value)} className={controlClassName()}>
                         <option value="">Choose a check…</option>
                         {standaloneChecks.map((check) => <option key={check.id} value={check.id}>{check.payable_to} · {currency(check.amount)}</option>)}
                       </select>

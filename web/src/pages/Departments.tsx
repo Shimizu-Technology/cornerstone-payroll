@@ -199,7 +199,6 @@ export function Departments() {
                 />
               </div>
               <Button
-                size="sm"
                 onClick={handleAddNew}
                 disabled={isSavingNew}
               >
@@ -208,7 +207,7 @@ export function Departments() {
               </Button>
               <Button
                 variant="ghost"
-                size="sm"
+                className="sm:h-10 sm:w-10 sm:px-0"
                 onClick={handleCancelAdd}
                 disabled={isSavingNew}
                 aria-label="Cancel adding department"
@@ -314,8 +313,9 @@ export function Departments() {
                   <TableRow key={dept.id}>
                     <TableCell>
                       {editingId === dept.id ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-start gap-2">
                           <Input
+                            aria-label="Department name"
                             value={editName}
                             onChange={(e) => {
                               setEditName(e.target.value);
@@ -326,17 +326,19 @@ export function Departments() {
                             autoFocus
                           />
                           <Button
-                            size="sm"
+                            className="h-10 w-10 px-0"
                             onClick={handleSaveEdit}
                             disabled={isSavingEdit}
+                            aria-label="Save department name"
                           >
                             <Check className="w-4 h-4" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
+                            className="h-10 w-10 px-0"
                             onClick={handleCancelEdit}
                             disabled={isSavingEdit}
+                            aria-label="Cancel editing department"
                           >
                             <X className="w-4 h-4" />
                           </Button>

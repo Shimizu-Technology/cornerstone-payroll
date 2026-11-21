@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Header } from '@/components/layout/Header';
 import { employeeLoansApi, employeesApi } from '@/services/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
@@ -381,13 +382,13 @@ export default function EmployeeLoans() {
 
         {/* Filters */}
         <div className="grid grid-cols-1 gap-3 sm:flex sm:gap-4 [&>select]:w-full sm:[&>select]:w-auto">
-          <select className="border rounded px-3 py-2 text-sm" value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)}>
+          <select aria-label="Filter loans by employee" className={controlClassName()} value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)}>
             <option value="">All Employees</option>
             {employees.map(emp => (
               <option key={emp.id} value={emp.id}>{emp.last_name}, {emp.first_name}</option>
             ))}
           </select>
-          <select className="border rounded px-3 py-2 text-sm" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <select aria-label="Filter loans by status" className={controlClassName()} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
             <option value="active">Active</option>
             <option value="">All Statuses</option>
             <option value="paid_off">Paid Off</option>
@@ -438,7 +439,7 @@ export default function EmployeeLoans() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="space-y-1.5 text-sm font-semibold text-neutral-800">
                 Employee <span className="text-danger-600">*</span>
-                <select className="min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-normal" value={formData.employee_id} onChange={e => setFormData(p => ({ ...p, employee_id: e.target.value, schedule_key: 'new' }))}>
+                <select className={controlClassName('font-normal')} value={formData.employee_id} onChange={e => setFormData(p => ({ ...p, employee_id: e.target.value, schedule_key: 'new' }))}>
                   <option value="">Select an employee</option>
                   {employees.filter(e => e.status === 'active').map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.last_name}, {emp.first_name}</option>
@@ -451,7 +452,7 @@ export default function EmployeeLoans() {
               </label>
               <label className="space-y-1.5 text-sm font-semibold text-neutral-800">
                 Payroll deduction schedule
-                <select className="min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-normal" value={formData.schedule_key} onChange={e => setFormData(p => ({ ...p, schedule_key: e.target.value }))} disabled={!formData.employee_id}>
+                <select className={controlClassName('font-normal')} value={formData.schedule_key} onChange={e => setFormData(p => ({ ...p, schedule_key: e.target.value }))} disabled={!formData.employee_id}>
                   <option value="new">Create a payroll repayment schedule</option>
                   {formData.tracking_mode === 'balance_tracked' && <option value="">Track balance only — no payroll deductions</option>}
                   {selectedEmployeeSchedules.map((schedule) => (
@@ -476,7 +477,7 @@ export default function EmployeeLoans() {
                   </label>
                   <label className="space-y-1.5 text-sm font-semibold text-neutral-800">
                     Verification source
-                    <select className="min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-normal" value={formData.balance_source || ''} onChange={e => setFormData(p => ({ ...p, balance_source: e.target.value as EmployeeLoan['balance_source'] }))}>
+                    <select className={controlClassName('font-normal')} value={formData.balance_source || ''} onChange={e => setFormData(p => ({ ...p, balance_source: e.target.value as EmployeeLoan['balance_source'] }))}>
                       <option value="quickbooks">Verified in QuickBooks</option>
                       <option value="statement">Verified from a loan statement</option>
                       <option value="employee_confirmation">Confirmed by the employee</option>
@@ -651,15 +652,15 @@ export default function EmployeeLoans() {
                     {loan.status === 'active' && (
                       <div className="mb-4 grid grid-cols-1 gap-3 lg:flex lg:flex-wrap lg:gap-4">
                         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
-                          <Input className="w-full px-2 py-1 text-sm sm:w-28" type="text" inputMode="decimal" placeholder="Payment $" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
-                          <Button size="sm" onClick={() => handleRecordPayment(loan.id)} disabled={!paymentAmount || recordingPayment}>
+                          <Input className="sm:w-32" type="text" inputMode="decimal" aria-label="Payment amount" placeholder="Payment $" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
+                          <Button onClick={() => handleRecordPayment(loan.id)} disabled={!paymentAmount || recordingPayment}>
                             {recordingPayment ? 'Recording...' : expandedLoan.tracking_mode === 'balance_tracked' ? 'Record Payment' : 'Record Manual Deduction'}
                           </Button>
                         </div>
                         {expandedLoan.tracking_mode === 'balance_tracked' && <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
-                          <Input className="w-full px-2 py-1 text-sm sm:w-28" type="text" inputMode="decimal" placeholder="Addition $" value={additionAmount} onChange={e => setAdditionAmount(e.target.value)} />
-                          <Input className="w-full px-2 py-1 text-sm sm:w-32" placeholder="Notes" value={additionNotes} onChange={e => setAdditionNotes(e.target.value)} />
-                          <Button size="sm" variant="outline" onClick={() => handleRecordAddition(loan.id)} disabled={!additionAmount || recordingAddition}>
+                          <Input className="sm:w-32" type="text" inputMode="decimal" aria-label="Addition amount" placeholder="Addition $" value={additionAmount} onChange={e => setAdditionAmount(e.target.value)} />
+                          <Input className="sm:w-40" aria-label="Addition notes" placeholder="Notes" value={additionNotes} onChange={e => setAdditionNotes(e.target.value)} />
+                          <Button variant="outline" onClick={() => handleRecordAddition(loan.id)} disabled={!additionAmount || recordingAddition}>
                             {recordingAddition ? 'Adding...' : 'Add to Loan'}
                           </Button>
                         </div>}

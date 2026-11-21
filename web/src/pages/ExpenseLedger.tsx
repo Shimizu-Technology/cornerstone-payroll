@@ -6,6 +6,7 @@ import { ArrowDownToLine, CircleDollarSign, FileText, Plus, Receipt, Search, Upl
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { controlClassName } from '@/components/ui/field-styles';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -33,7 +34,7 @@ const emptyExpense = (): ExpenseForm => ({
   expense_vendor_id: '', category: '', description: '', expense_on: today(), due_on: '',
   total_amount: '', currency: 'USD', reference_number: '',
 });
-const inputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300';
+const inputClass = controlClassName('mt-1');
 
 function money(value: string | number, currency = 'USD') {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(value));
@@ -314,9 +315,9 @@ export function ExpenseLedger() {
           <section className="min-w-0 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm" aria-label="Bills and purchases">
             <div className="grid gap-4 border-b border-neutral-200 p-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="relative sm:col-span-2 lg:col-span-3"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-neutral-400" /><Input className="pl-9" placeholder="Search bills and purchases" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search bills and purchases" /></div>
-              <select className={inputClass + ' mt-0'} value={kindFilter} onChange={(event) => setKindFilter(event.target.value as typeof kindFilter)} aria-label="Filter bills and purchases"><option value="all">Bills & purchases</option><option value="bill">Bills</option><option value="purchase">Purchases</option></select>
-              <select className={inputClass + ' mt-0'} value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)} aria-label="Filter by vendor"><option value="all">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select>
-              <select className={inputClass + ' mt-0'} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter expenses by status"><option value="all">All statuses</option><option value="open">Open</option><option value="partial">Partial</option><option value="overdue">Overdue</option><option value="paid">Paid</option></select>
+              <select className={controlClassName()} value={kindFilter} onChange={(event) => setKindFilter(event.target.value as typeof kindFilter)} aria-label="Filter bills and purchases"><option value="all">Bills & purchases</option><option value="bill">Bills</option><option value="purchase">Purchases</option></select>
+              <select className={controlClassName()} value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)} aria-label="Filter by vendor"><option value="all">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select>
+              <select className={controlClassName()} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter expenses by status"><option value="all">All statuses</option><option value="open">Open</option><option value="partial">Partial</option><option value="overdue">Overdue</option><option value="paid">Paid</option></select>
             </div>
             {loading ? <p className="p-8 text-sm text-neutral-500">Loading bills and purchases…</p> : expenses.length === 0 ? <p className="p-8 text-sm text-neutral-500">No matching bills or purchases. Clear the filters or add the first record.</p> : <>
               <div className="divide-y divide-neutral-100">{expenses.map((expense) => <button key={expense.id} type="button" onClick={() => void openExpense(expense.id)} className={`w-full px-4 py-4 text-left hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 ${selected?.id === expense.id ? 'bg-primary-50' : ''}`}>
