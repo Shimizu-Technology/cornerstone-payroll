@@ -240,10 +240,13 @@ class Invoice < ApplicationRecord
 
   # Billed fees, net of the invoice-level discount, exclude pass-through reimbursements.
   # This is not cash revenue or a historical general ledger.
-  def service_fee_amount
+  # Issued service-fee value with the invoice discount spread proportionally.
+  # A block narrows which service-fee lines count (e.g. tax preparation).
+  def service_fee_amount(&only)
     return BigDecimal("0") if draft? || voided? || subtotal_amount.zero?
 
-    fees = line_items.select { |line| line.line_kind == "service_fee" }.sum(BigDecimal("0"), &:amount)
+    fees = line_items.select { |line| line.line_kind == "service_fee" && (only.nil? || only.call(line)) }
+                     .sum(BigDecimal("0"), &:amount)
     (fees * total_amount / subtotal_amount).round(2, :half_up)
   end
 

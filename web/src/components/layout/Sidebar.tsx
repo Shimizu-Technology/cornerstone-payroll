@@ -36,6 +36,7 @@ import {
   ArchiveRestore,
   Route,
   MessagesSquare,
+  PieChart,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
@@ -91,6 +92,7 @@ const toolsNavigation: NavItem[] = [
   { name: 'Timecard OCR', href: '/tools/timecard-ocr', icon: <ScanLine className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Transmittal Builder', href: '/tools/transmittals', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Finance Overview', href: '/tools/finance', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Client Profitability', href: '/reports/client-profitability', icon: <PieChart className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Invoice Center', href: '/tools/invoices', icon: <ReceiptText className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Bills & Purchases', href: '/tools/expenses', icon: <WalletCards className="h-[18px] w-[18px] shrink-0" /> },
 ];
@@ -183,7 +185,7 @@ function CollapsedNavLink({
       <NavLink
         ref={anchorRef}
         to={item.href}
-        end={item.href === '/app'}
+        end={item.href === '/app' || item.href === '/reports'}
         onClick={onNavigate}
         aria-label={item.count ? `${item.name}, ${item.count} ${item.href === '/messages' ? 'unread' : 'waiting on staff'}` : item.name}
         onMouseEnter={() => setTooltipVisible(true)}
@@ -288,6 +290,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const visibleToolsNavigation = toolsNavigation.filter((item) => {
     if (item.href === '/historical-payroll' || item.href === '/payroll-go-live') return historicalPayrollEnabled;
     if (item.href === '/tools/finance' || item.href === '/tools/invoices' || item.href === '/tools/expenses') return isAdmin;
+    if (item.href === '/reports/client-profitability') return hasCapability('view_client_profitability');
     return true;
   }).map((item) => item.href === '/payroll-go-live' && activeCompanyId
     ? { ...item, href: payrollGoLivePath(activeCompanyId) }
