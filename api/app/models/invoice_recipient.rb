@@ -4,6 +4,9 @@ class InvoiceRecipient < ApplicationRecord
   belongs_to :organization
   belongs_to :company, optional: true
   has_many :invoices, dependent: :restrict_with_error
+  # Client profitability links (active or not) keep their history: a linked
+  # customer is archived rather than deleted.
+  has_many :work_hour_client_links, dependent: :restrict_with_error
 
   before_validation :normalize_blanks
   before_validation :default_organization_from_company

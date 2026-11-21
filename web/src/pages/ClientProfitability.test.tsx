@@ -124,6 +124,7 @@ describe('ClientProfitability', () => {
         link: null, suggestion: { disposition: 'company', company_id: 2, label: 'Acme Bakery', match: 'exact' } }],
       staff: [{ tax_user_id: 12, email: 'mark@example.com', hours: '5.00', link: null, suggestion: null }],
       companies: [{ id: 2, name: 'Acme Bakery' }],
+      recipients: [],
       employees: [{ id: 5, name: 'Mark Santos', status: 'active' }],
     });
     state.linkClient.mockResolvedValue({ ok: true });
@@ -179,6 +180,7 @@ describe('ClientProfitability', () => {
       staff: [{ tax_user_id: 12, email: 'mark@example.com', hours: '5.00',
         link: staffLink ? { disposition: 'no_payroll' as const, employee_id: null, employee_name: null, in_practice_company: true } : null, suggestion: null }],
       companies: [{ id: 2, name: 'Acme Bakery' }],
+      recipients: [],
       employees: [],
     });
     let resolveOlder!: (value: ReturnType<typeof queue>) => void;
@@ -207,7 +209,7 @@ describe('ClientProfitability', () => {
 
   it('recovers the link queue after a failed load', async () => {
     state.overview.mockResolvedValue(overview());
-    state.links.mockRejectedValueOnce(new Error('Network down')).mockResolvedValueOnce({ clients: [], staff: [], companies: [], employees: [] });
+    state.links.mockRejectedValueOnce(new Error('Network down')).mockResolvedValueOnce({ clients: [], staff: [], companies: [], recipients: [], employees: [] });
     renderPage('/reports/client-profitability?tab=link');
     expect(await screen.findByText('Network down')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
@@ -250,10 +252,10 @@ describe('ClientProfitability', () => {
       pending_entries: 0, denied_entries: 0, open_clock_entries: 0, error_code: null, error_message: null };
     state.overview.mockResolvedValueOnce(overview({ imports: [running] })).mockResolvedValue(overview({ imports: [{ ...running, status: 'succeeded' }] }));
     state.importStatus.mockResolvedValue({ import: { ...running, status: 'succeeded' } });
-    state.links.mockResolvedValueOnce({ clients: [], staff: [], companies: [], employees: [] }).mockResolvedValue({
+    state.links.mockResolvedValueOnce({ clients: [], staff: [], companies: [], recipients: [], employees: [] }).mockResolvedValue({
       clients: [{ tax_client_id: 777, name: 'New Tax Client', hours: '3.00', last_worked_on: '2026-11-20', internal_in_tax: false,
         handled_automatically: false, link: null, suggestion: null }],
-      staff: [], companies: [{ id: 2, name: 'Acme Bakery' }], employees: [],
+      staff: [], companies: [{ id: 2, name: 'Acme Bakery' }], recipients: [], employees: [],
     });
     renderPage('/reports/client-profitability?tab=link');
 
@@ -323,5 +325,52 @@ describe('ClientProfitability', () => {
     render(<MemoryRouter><ReportView reloadKey={1} onGoTo={onGoTo} defaults={{ ...defaults, costBasis: 'work_period' }} /></MemoryRouter>);
     await waitFor(() => expect(state.report).toHaveBeenCalledTimes(3));
     expect(state.report.mock.lastCall?.[0]).toMatchObject({ cost_basis: 'work_period' });
+  });
+
+  it('names what a client or staff member was linked to right after saving, and links to an invoice customer', async () => {
+    state.overview.mockResolvedValue(overview());
+    const queue = {
+      clients: [
+        { tax_client_id: 880, name: 'Roland’s Watch Repair – Zenaida Ponce', hours: '2.00', last_worked_on: '2026-10-05', internal_in_tax: false,
+          handled_automatically: false, link: null,
+          suggestion: { disposition: 'recipient' as const, invoice_recipient_id: 41, label: 'Roland’s Watch Repair (Ponce)', match: 'similar' as const } },
+        { tax_client_id: 881, name: 'Acme Bakery', hours: '1.00', last_worked_on: null, internal_in_tax: false, handled_automatically: false,
+          link: null, suggestion: null },
+      ],
+      staff: [{ tax_user_id: 12, email: 'mark@example.com', hours: '5.00', link: null, suggestion: null }],
+      companies: [{ id: 2, name: 'Acme Bakery' }],
+      recipients: [{ id: 41, name: 'Roland’s Watch Repair (Ponce)' }],
+      employees: [{ id: 5, name: 'Mark Santos', status: 'active' }],
+    };
+    let finishReload!: (value: typeof queue) => void;
+    state.links.mockResolvedValueOnce(queue).mockImplementation(() => new Promise((resolve) => { finishReload = resolve; }));
+    state.linkClient.mockResolvedValue({ ok: true });
+    state.linkStaff.mockResolvedValue({ ok: true });
+    renderPage('/reports/client-profitability?tab=link');
+
+    // The dropdown groups Payroll clients and invoice customers.
+    const select = (await screen.findAllByLabelText('Count these hours for'))[1] as HTMLSelectElement;
+    const groups = Array.from(select.querySelectorAll('optgroup')).map((group) => group.label);
+    expect(groups).toEqual(['Payroll clients', 'Invoice customers (no payroll)']);
+
+    // The suggested invoice customer, saved: the confirmation names it while the queue reloads.
+    await userEvent.click(screen.getByRole('button', { name: 'Use suggestion' }));
+    expect(state.linkClient).toHaveBeenCalledWith(880, { disposition: 'recipient', invoice_recipient_id: 41, tax_client_name: 'Roland’s Watch Repair – Zenaida Ponce' });
+    expect(screen.getByText('Roland’s Watch Repair (Ponce)', { selector: 'strong' })).toBeTruthy();
+
+    await userEvent.selectOptions(select, 'company:2');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Save link' })[0]);
+    expect(state.linkClient).toHaveBeenLastCalledWith(881, { disposition: 'company', company_id: 2, tax_client_name: 'Acme Bakery' });
+    expect(screen.getByText('Acme Bakery', { selector: 'strong' })).toBeTruthy();
+
+    await userEvent.selectOptions(screen.getByLabelText('Their pay comes from'), '5');
+    await userEvent.click(screen.getByRole('button', { name: 'Save link' }));
+    expect(screen.getByText('Mark Santos', { selector: 'strong' })).toBeTruthy();
+    // No confirmation is left reading just "Linked to".
+    const confirmations = screen.getAllByRole('status').map((element) => element.textContent?.trim() ?? '');
+    expect(confirmations.filter((text) => text.startsWith('Linked to'))).toEqual([
+      'Linked to Roland’s Watch Repair (Ponce)', 'Linked to Acme Bakery',
+    ]);
+    finishReload(queue);
   });
 });

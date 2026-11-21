@@ -51,6 +51,13 @@ Until both environment variables are set, the page shows a "not connected" panel
 ## Linking (Payroll side only)
 
 - **Tax client → Payroll client.** Fees are keyed by the payroll client (`companies`) that an invoice is explicitly linked to, so each Tax client is linked to a company (`work_hour_client_links`) or marked **Internal / overhead**. Tax's own internal client (`system_kind: "internal"`) counts as overhead automatically. Suggestions compare names after removing punctuation and words like Inc, LLC and Corp. An exact match is marked "same name"; otherwise the best match sharing at least half its words is marked "similar name". Every suggestion must be confirmed.
+- **Tax client → invoice customer (no payroll).** Some clients are billed in Invoice Center but have no Payroll client, such as "Roland's Watch Repair (Ponce)". A Tax client can be linked straight to that invoice customer (disposition `recipient`, `invoice_recipient_id`).
+  - Fees on that customer's invoices with no payroll client count on that row instead of on "Fees not linked to a client", and the row's hours are costed as usual.
+  - Only customers in the report's financial book that have no Payroll client are offered, and saving a link to a customer from another book is refused. A link that points outside the report's book (for example after the book in Setup changes) is treated as not linked.
+  - If the customer is later given a Payroll client, the link counts as that client's row. Moving the Tax link to that Payroll client keeps the customer's earlier invoices (the ones with no Payroll client) on that client. Every invoice is counted once.
+  - Deleting a customer that a link points to (even an inactive one) archives the customer instead, so saved links keep their history.
+  - The dropdown groups the choices as "Payroll clients" and "Invoice customers (no payroll)", plus Internal / overhead. Suggestions look at both lists, Payroll clients first.
+  - The database check on dispositions allows exactly one target per link: a company, an invoice customer, or neither for internal.
 - **Tax user → employee.** Each Tax user is linked to an employee of the staff payroll client, or marked **Not on payroll**, for an owner paid by draw. Their hours are then shown with no cost. The suggestion is an exact email match, or a unique first-name match with the start of the email.
 - Links are saved, editable and reused for every period. **Unlink** keeps the row (marked inactive, with who changed it); linking again reactivates it.
 - Changing the staff payroll client sends people linked to the old client's employees back to "needs linking". An employee link must always point at the current staff payroll client.
@@ -97,7 +104,11 @@ Voided runs, reversed paychecks and legacy-disposition items are excluded, as in
 - uncollectible invoices still count
 - payments and credits don't change the value
 
-Invoices not linked to a payroll client are shown as **Fees not linked to a client**.
+Each invoice's fees go to exactly one line, only through explicit links, never by matching names:
+1. an invoice linked to a payroll client counts for that client;
+2. an invoice with no payroll client counts for its invoice customer's row when a Tax client is linked to that customer (or for the customer's Payroll client, once it has one);
+3. an invoice with no payroll client whose customer has since been given a Payroll client counts for that client, when a Tax client is linked to it;
+4. anything else is shown as **Fees not linked to a client**.
 
 **Columns.**
 - **Margin** = fees − cost.
@@ -117,7 +128,7 @@ This classification needs no change to issued invoices, which stay immutable, an
 - With the default pay-date basis, pay is matched by pay date and hours by work date. A paycheck that covers late-September work but is paid in October costs October's hours, so single months can look uneven. Quarters smooth this out, or switch **Count pay by** to work period.
 - Work-period spreading is by calendar days, not by the hours on the paycheck.
 - A Tax client links to exactly one Payroll client. If one Payroll client has several Tax clients, link each of them to it.
-- Fees can only be joined when the invoice is explicitly linked to a payroll client. Payroll doesn't guess a client from a recipient's name.
+- Fees can only be joined through explicit links: the invoice's payroll client, or a Tax client linked to the invoice customer (see the fee rules above). Payroll doesn't guess a client from a customer's name.
 - Owners or staff paid outside Payroll have no cost unless their pay runs through the staff payroll client.
 - The report uses whatever hours were last pulled. Refresh after Tax approvals change. Months that haven't been pulled are flagged at the top of the report.
 - **CSV export** (`/export`) holds the same lines as the screen, plus one row per person. It records which "Count pay by" basis was used and is recorded in Activity History.

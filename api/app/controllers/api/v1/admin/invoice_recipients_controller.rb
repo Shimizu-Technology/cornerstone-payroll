@@ -45,7 +45,7 @@ module Api
         end
 
         def destroy
-          if @recipient.invoices.exists?
+          if @recipient.invoices.exists? || @recipient.work_hour_client_links.exists?
             @recipient.update!(active: false)
             render json: { invoice_recipient: recipient_payload(@recipient), message: "Invoice recipient archived" }
           else
