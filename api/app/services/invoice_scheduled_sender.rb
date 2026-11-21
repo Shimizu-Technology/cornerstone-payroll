@@ -7,6 +7,7 @@ class InvoiceScheduledSender
   def self.send!(id)
     schedule = InvoiceSendSchedule.find(id)
     InvoiceSendSchedule.with_active_send_lock(id) do
+      claimed = false
       begin
         schedule.with_lock do
           return unless schedule.status.in?(%w[pending queued]) && schedule.send_at <= Time.current
@@ -17,11 +18,12 @@ class InvoiceScheduledSender
 
           invoice = schedule.invoice
           profile = invoice.invoice_billing_profile
-          business = profile.legal_name.presence || profile.name
-          details = invoice.snapshot.is_a?(Hash) && invoice.snapshot["invoice"].is_a?(Hash) ? invoice.snapshot["invoice"] : {}
-          subject = details["email_subject"].presence || "Invoice #{invoice.invoice_number} from #{business}"
-          body = details["email_body"].presence ||
-            "Please find invoice #{invoice.invoice_number} attached. The current balance is #{invoice.currency} #{format('%.2f', invoice.balance_due)}."
+          # Text reviewed in the send panel was stored on the schedule. Without
+          # it, send the invoice's current email (saved text or the default).
+          # The email is delivery content, so the issued snapshot isn't read.
+          content = InvoiceEmailContent.for(invoice)
+          subject = content[:subject]
+          body = content[:body]
           reply_to = profile.email if profile.email.present? && profile.email.match?(URI::MailTo::EMAIL_REGEXP)
           claimed_at = Time.current
           schedule.update!(status: "sending", attempts: schedule.attempts + 1, claimed_at: claimed_at,
@@ -30,6 +32,7 @@ class InvoiceScheduledSender
                            rendered_body: schedule.rendered_body.presence || body,
                            sender_email: schedule.sender_email.presence || ENV["INVOICE_MAILER_FROM_EMAIL"].presence,
                            reply_to_email: schedule.attempts.zero? ? reply_to : schedule.reply_to_email)
+          claimed = true
         end
 
         # The session advisory lock remains held during I/O. Recovery checks it,
@@ -76,6 +79,8 @@ class InvoiceScheduledSender
               recipient: recipient,
               delivered_at: sent_at,
               provider_reference: reference,
+              email_subject: schedule.rendered_subject,
+              email_body: schedule.rendered_body,
               notes: "Accepted by email provider; delivery to inbox is not confirmed",
               recorded_by: schedule.created_by
             )
@@ -83,14 +88,23 @@ class InvoiceScheduledSender
                                  occurred_at: sent_at, metadata: { delivery_id: delivery.id, send_schedule_id: schedule.id,
                                                                    recipient: recipient, provider_reference: reference })
           end
-          invoice.update!(sent_at: invoice.sent_at || sent_at)
+          # The provider has accepted the email. Record it without
+          # revalidating the whole invoice, so an unrelated validation can't
+          # roll back the delivery record.
+          invoice.update_columns(sent_at: sent_at, updated_at: Time.current) if invoice.sent_at.blank?
           schedule.update!(status: "sent", sent_at: sent_at, provider_reference: reference, last_error: nil)
         end
       rescue StandardError => e
         # A provider response may have been lost. Keep the same idempotency key
         # for an explicit retry after the operator checks provider delivery.
+        # A failed claim leaves unsaved changes on the record, and locking a
+        # changed record raises, which would hide this error; drop them first.
+        # A claim that failed is marked failed too, so it isn't retried forever.
+        schedule.restore_attributes
         schedule.with_lock do
-          schedule.update!(status: "failed", last_error: "#{e.class}: #{e.message}".truncate(500)) if schedule.status == "sending"
+          if schedule.status == "sending" || (!claimed && schedule.status.in?(%w[pending queued]))
+            schedule.update_columns(status: "failed", last_error: "#{e.class}: #{e.message}".truncate(500), updated_at: Time.current)
+          end
         end
         raise
       end

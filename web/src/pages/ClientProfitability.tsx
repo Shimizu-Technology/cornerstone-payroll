@@ -88,7 +88,8 @@ export function ClientProfitability() {
     <div className="min-h-screen bg-[#f8f7f4]">
       <Header title="Client profitability" contextLabel="Covers" contextValue="All clients"
         description="What each client paid, what the staff time cost, and the difference. Hours come from Cornerstone Tax." />
-      <main className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+      {/* The app layout already renders the page's <main> landmark. */}
+      <div className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">{error}</p>}
         {!overview && !error && <p role="status" className="text-sm text-neutral-600">Loading…</p>}
         {overview && (
@@ -120,7 +121,7 @@ export function ClientProfitability() {
             )}
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

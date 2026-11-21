@@ -42,6 +42,18 @@ export function formatDate(dateString: string, options?: Intl.DateTimeFormatOpti
   });
 }
 
+/**
+ * The calendar date of a timestamp in the business time zone (Guam), e.g.
+ * "Nov 21, 2026" for 2026-11-20T20:00:00Z. Use this, not a date-only
+ * formatter, for *_at values: slicing a UTC timestamp gives the wrong day.
+ */
+export function formatGuamDate(timestamp?: string | null, options?: Intl.DateTimeFormatOptions): string {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', ...options, timeZone: 'Pacific/Guam' }).format(date);
+}
+
 export function formatGuamDateTime(dateString?: string | null, options?: Intl.DateTimeFormatOptions): string {
   if (!dateString) return 'Not recorded';
 
