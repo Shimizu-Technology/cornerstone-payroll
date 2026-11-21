@@ -7,6 +7,10 @@ module TaxWorkHours
   class Importer
     LOCK_NAMESPACE = 72_604 # "work hours" import lock, combined with the organization id.
 
+    # Raised inside the replacement transaction when another worker has taken
+    # this import over; rolls the replacement back.
+    class Superseded < StandardError; end
+
     def self.call(import, client: Client.new)
       new(import, client:).call
     end
@@ -16,11 +20,21 @@ module TaxWorkHours
       @client = client
     end
 
+    # Returns the import. Does nothing when another worker holds it or it has
+    # already finished.
     def call
-      @import.update!(status: "running", started_at: Time.current, error_code: nil, error_message: nil)
-      payloads = month_ranges.map { |first, last| [ first, last, @client.fetch(start_date: first, end_date: last) ] }
+      @token = @import.claim!
+      return @import unless @token
+
+      payloads = []
+      month_ranges.each do |first, last|
+        payloads << [ first, last, @client.fetch(start_date: first, end_date: last) ]
+        return @import.reload unless @import.renew_lease!(@token)
+      end
       replace!(payloads)
-      @import
+      @import.reload
+    rescue Superseded
+      @import.reload
     rescue Error => e
       fail!(e.code, e.message)
     rescue StandardError => e
@@ -60,11 +74,19 @@ module TaxWorkHours
         WorkHourRow.connection.execute(
           WorkHourRow.sanitize_sql_array([ "SELECT pg_advisory_xact_lock(?, ?)", LOCK_NAMESPACE, @import.organization_id ])
         )
+        # Commit only while this worker still holds the import. A worker that
+        # lost its lease (and was replaced, or whose import was abandoned and
+        # superseded by a new refresh) must not overwrite newer hours.
+        current = WorkHourImport.lock.find(@import.id)
+        raise Superseded unless current.status == "running" && current.claim_token == @token
+
         WorkHourRow.where(organization_id: @import.organization_id, work_date: @import.range_start..@import.range_end).delete_all
         rows.each_slice(1_000) { |slice| WorkHourRow.insert_all!(slice) }
-        @import.update!(
+        current.update!(
           status: "succeeded",
           finished_at: Time.current,
+          claim_token: nil,
+          lease_expires_at: nil,
           row_count: rows.length,
           total_hours: rows.sum(BigDecimal("0")) { |row| row[:hours] },
           pending_entries: counts.sum { |count| count["pending_entries"].to_i },
@@ -119,9 +141,15 @@ module TaxWorkHours
       nil
     end
 
+    # Records the failure only while this worker still holds the import, so a
+    # superseded worker never marks its replacement as failed.
     def fail!(code, message)
-      @import.update!(status: "failed", finished_at: Time.current, error_code: code, error_message: message)
-      @import
+      if @token
+        WorkHourImport.where(id: @import.id, status: "running", claim_token: @token)
+                      .update_all(status: "failed", finished_at: Time.current, claim_token: nil, lease_expires_at: nil,
+                                  error_code: code, error_message: message, updated_at: Time.current)
+      end
+      @import.reload
     end
   end
 end

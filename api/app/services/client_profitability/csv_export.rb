@@ -31,6 +31,10 @@ module ClientProfitability
         @report[:unallocated_costs].each do |entry|
           csv << [ "Pay not matched to hours", text(entry[:name]), "", "", "", entry[:cost], "", "", "", "", "", "", "" ]
         end
+        if @report.dig(:imported_pay_not_linked, :paycheck_count).to_i.positive?
+          csv << [ "Imported pay not linked to an employee (not in totals)", "", "", "", "", @report.dig(:imported_pay_not_linked, :cost),
+                   "", "", "", "", "", "", "" ]
+        end
         if @report.dig(:unlinked_fees, :fees).to_d.nonzero?
           csv << [ "Fees not linked to a client", "", "", "", "", "", "", @report.dig(:unlinked_fees, :fees),
                    @report.dig(:unlinked_fees, :tax_prep_fees), "", "", "", "" ]

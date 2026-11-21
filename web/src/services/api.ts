@@ -156,6 +156,11 @@ class ApiClient {
   }
 
   private financeHeaders(endpoint: string): Record<string, string> {
+    // Client profitability is organization-wide but keeps its own saved
+    // financial book, so it gets the selected organization and nothing else.
+    if (/^\/admin\/client_profitability(\/|$)/.test(endpoint)) {
+      return this.activeOrganizationId ? { 'X-Organization-Id': String(this.activeOrganizationId) } : {};
+    }
     if (!/^\/admin\/(invoice|expense|finance_)/.test(endpoint)) return {};
     return {
       ...(this.activeOrganizationId ? { 'X-Organization-Id': String(this.activeOrganizationId) } : {}),

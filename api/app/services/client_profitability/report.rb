@@ -4,9 +4,9 @@ module ClientProfitability
   # Hours, cost, fees and margin per Payroll client for whole months.
   #
   # Cost: each practice-company employee's payroll cost for paychecks whose pay
-  # date falls in the period (gross pay, non-taxable pay, employer taxes and
-  # employer contributions: Annual Payroll Summary's "total payroll cost",
-  # including locked QuickBooks/prior-provider history) is split across the
+  # date falls in the period, taken from AnnualPayrollSummary#
+  # payroll_cost_by_employee so the total always equals that report's "total
+  # payroll cost" for the same client and dates. It is split across the
   # clients that person logged hours to in the period, in proportion to
   # approved hours (clock hours count as approved). Pending hours are shown
   # and only costed when cost_pending is on.
@@ -31,8 +31,15 @@ module ClientProfitability
 
     def call
       @rows = WorkHourRow.where(organization_id: @organization.id, work_date: @period.range).to_a
-      @client_links = WorkHourClientLink.where(organization_id: @organization.id).index_by(&:tax_client_id)
-      @staff_links = WorkHourStaffLink.where(organization_id: @organization.id).includes(:employee).index_by(&:tax_user_id)
+      @practice_company = @settings.effective_practice_company
+      # Only active links, and only to records that still belong here (a
+      # company can be transferred to another organization).
+      @client_links = WorkHourClientLink.active.where(organization_id: @organization.id)
+                                        .where("company_id IS NULL OR company_id IN (?)", Company.where(organization_id: @organization.id).select(:id))
+                                        .index_by(&:tax_client_id)
+      @staff_links = WorkHourStaffLink.active.where(organization_id: @organization.id).includes(:employee)
+                                      .select { |link| link.disposition == "no_payroll" || link.employee&.company_id == @practice_company&.id }
+                                      .index_by(&:tax_user_id)
 
       buckets = {}
       hours = Hash.new { |hash, key| hash[key] = new_hours }
@@ -64,7 +71,7 @@ module ClientProfitability
       {
         period: @period.as_json,
         options: { cost_pending: @cost_pending, spread_overhead: @spread_overhead },
-        practice_company: @settings.practice_company && { id: @settings.practice_company.id, name: @settings.practice_company.name },
+        practice_company: @practice_company && { id: @practice_company.id, name: @practice_company.name },
         finance_book: finance_book && { id: finance_book.id, name: finance_book.name },
         coverage: coverage,
         clients: clients.map { |line| present(line) },
@@ -72,6 +79,9 @@ module ClientProfitability
         unassigned: unassigned.map { |line| present(line) },
         unlinked_fees: { fees: money(unlinked_fees[:amount]), tax_prep_fees: money(unlinked_fees[:tax_prep_amount]) },
         unallocated_costs: unallocated.map { |entry| entry.merge(cost: money(entry[:cost])) },
+        # Shown for reference only: the Annual Payroll Summary leaves these
+        # imported paychecks out, so they are not in any total or allocation.
+        imported_pay_not_linked: { paycheck_count: @excluded_unlinked[:paycheck_count], cost: money(@excluded_unlinked[:total_payroll_cost]) },
         staff: staff_summary(hours),
         totals: totals(lines, unlinked_fees, unallocated)
       }
@@ -114,41 +124,20 @@ module ClientProfitability
       buckets.each { |bucket| bucket.name = names[bucket.company_id] || "Client ##{bucket.company_id}" if bucket.kind == "company" }
     end
 
-    # Employee payroll cost for the period, keyed by employee id.
+    # Employee payroll cost for the period, keyed by employee id (nil for
+    # imported adjustments whose paycheck has no employee).
     def employee_costs
       @employee_costs ||= begin
-        costs = Hash.new { |hash, key| hash[key] = { pay: ZERO, employer_taxes: ZERO, employer_contributions: ZERO, total: ZERO } }
-        @unlinked_paycheck_cost = ZERO
-        company = @settings.practice_company
-        if company
+        @excluded_unlinked = { paycheck_count: 0, total_payroll_cost: ZERO }
+        if @practice_company
           reporting_period = PayrollReportingPeriod.new(start_date: @period.start_date, end_date: @period.end_date)
-          summary = AnnualPayrollSummary.new(company: company)
-          summary.native_items_for(reporting_period).each do |item|
-            cost = summary.native_item_cost(item)
-            add_cost(costs[item.employee_id], cost[:gross_pay] + cost[:non_taxable_pay], cost[:employer_taxes],
-                     cost[:employer_contributions], cost[:total])
-          end
-          unified = UnifiedPayrollReporting.new(company_id: company.id, period: reporting_period)
-          unified.historical_paychecks.each { |paycheck| add_historical(costs[paycheck.employee_id], paycheck) }
-          unified.historical_adjustments.each do |adjustment|
-            employee_id = adjustment.historical_paycheck.employee_id
-            employee_id ? add_historical(costs[employee_id], adjustment) : @unlinked_paycheck_cost += adjustment.total_payroll_cost.to_d
-          end
-          @unlinked_paycheck_cost += unified.unlinked_historical_paychecks.sum(ZERO) { |paycheck| paycheck.total_payroll_cost.to_d }
+          result = AnnualPayrollSummary.new(company: @practice_company).payroll_cost_by_employee(reporting_period)
+          @excluded_unlinked = result[:excluded_unlinked]
+          result[:by_employee]
+        else
+          {}
         end
-        costs
       end
-    end
-
-    def add_historical(entry, row)
-      add_cost(entry, row.gross_pay.to_d, row.employer_taxes.to_d, row.employer_contributions.to_d, row.total_payroll_cost.to_d)
-    end
-
-    def add_cost(entry, pay, employer_taxes, employer_contributions, total)
-      entry[:pay] += pay
-      entry[:employer_taxes] += employer_taxes
-      entry[:employer_contributions] += employer_contributions
-      entry[:total] += total
     end
 
     # Returns { [bucket_key, tax_user_id] => cost } and records costs that
@@ -164,6 +153,12 @@ module ClientProfitability
       employee_costs.each do |employee_id, cost|
         next if cost[:total].zero?
 
+        if employee_id.nil?
+          @unallocated_costs << { employee_id: nil, name: "Adjustments to imported pay not linked to an employee",
+                                  reason: "unlinked_adjustments", cost: cost[:total] }
+          next
+        end
+
         tax_user_ids = tax_users_by_employee[employee_id]
         weights = hours.select { |(_bucket, tax_user_id), _entry| tax_user_ids.include?(tax_user_id) }
                        .transform_values { |entry| entry[:counted] }
@@ -175,15 +170,11 @@ module ClientProfitability
           parts.each { |key, amount| allocated[key] += amount }
         end
       end
-      if @unlinked_paycheck_cost.nonzero?
-        @unallocated_costs << { employee_id: nil, name: "Imported paychecks not linked to an employee", reason: "unlinked_paychecks",
-                                cost: @unlinked_paycheck_cost }
-      end
       allocated
     end
 
     def employee_name(employee_id)
-      @employee_names ||= Employee.where(id: employee_costs.keys).to_h { |employee| [ employee.id, employee.full_name ] }
+      @employee_names ||= Employee.where(id: employee_costs.keys.compact).to_h { |employee| [ employee.id, employee.full_name ] }
       @employee_names[employee_id] || "Employee ##{employee_id}"
     end
 
@@ -281,33 +272,35 @@ module ClientProfitability
       }
     end
 
+    # One row per paid employee (however many Tax identities point at them),
+    # and one row per Tax user who is not on payroll or not linked yet.
     def staff_summary(hours)
-      by_user = Hash.new { |hash, key| hash[key] = { counted: ZERO, pending: ZERO } }
+      groups = Hash.new { |hash, key| hash[key] = { counted: ZERO, pending: ZERO, tax_user_ids: [] } }
       hours.each do |(_bucket, tax_user_id), entry|
-        by_user[tax_user_id][:counted] += entry[:counted]
-        by_user[tax_user_id][:pending] += entry[:pending]
-      end
-      employee_hours = Hash.new(ZERO)
-      by_user.each do |tax_user_id, entry|
         link = @staff_links[tax_user_id]
-        employee_hours[link.employee_id] += entry[:counted] if link&.disposition == "employee"
+        key = link&.disposition == "employee" ? [ :employee, link.employee_id ] : [ :tax_user, tax_user_id ]
+        group = groups[key]
+        group[:counted] += entry[:counted]
+        group[:pending] += entry[:pending]
+        group[:tax_user_ids] |= [ tax_user_id ]
       end
 
-      by_user.map do |tax_user_id, entry|
-        link = @staff_links[tax_user_id]
+      groups.map do |(kind, id), entry|
+        link = kind == :employee ? @staff_links[entry[:tax_user_ids].first] : @staff_links[id]
         status = link ? link.disposition : "not_linked"
-        cost = status == "employee" ? employee_costs.fetch(link.employee_id, nil) : nil
-        per_hour = cost && employee_hours[link.employee_id].positive? ? cost[:total] / employee_hours[link.employee_id] : nil
+        cost = kind == :employee ? employee_costs.fetch(id, nil) : nil
+        per_hour = cost && entry[:counted].positive? ? cost[:total] / entry[:counted] : nil
         {
-          tax_user_id: tax_user_id,
-          name: person_name(tax_user_id),
+          key: "#{kind}:#{id}",
+          tax_user_ids: entry[:tax_user_ids].sort,
+          name: kind == :employee ? link.employee.full_name : person_name(id),
           status: status,
           hours: hours_string(entry[:counted]),
           pending_hours: hours_string(entry[:pending]),
           pay: cost && money(cost[:pay]),
           employer_taxes: cost && money(cost[:employer_taxes]),
           employer_contributions: cost && money(cost[:employer_contributions]),
-          cost: cost ? money(cost[:total]) : nil,
+          cost: cost ? money(cost[:total]) : (kind == :employee ? money(ZERO) : nil),
           cost_per_hour: per_hour && money(per_hour)
         }
       end.sort_by { |person| person[:name].downcase }

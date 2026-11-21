@@ -4606,6 +4606,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
   end
 
   create_table "work_hour_client_links", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
     t.bigint "company_id"
     t.datetime "created_at", null: false
     t.string "disposition", null: false
@@ -4621,11 +4622,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
   end
 
   create_table "work_hour_imports", force: :cascade do |t|
+    t.string "claim_token"
     t.datetime "created_at", null: false
     t.integer "denied_entries", default: 0, null: false
     t.string "error_code"
     t.text "error_message"
     t.datetime "finished_at"
+    t.datetime "lease_expires_at"
     t.integer "open_clock_entries", default: 0, null: false
     t.bigint "organization_id", null: false
     t.integer "pending_entries", default: 0, null: false
@@ -4641,6 +4644,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
     t.string "trigger", default: "manual", null: false
     t.datetime "updated_at", null: false
     t.index [ "organization_id" ], name: "index_work_hour_imports_on_organization_id"
+    t.index [ "organization_id" ], name: "index_work_hour_imports_one_active_per_organization", unique: true, where: "((status)::text = ANY ((ARRAY['queued'::character varying, 'running'::character varying])::text[]))"
     t.index [ "organization_id", "created_at" ], name: "index_work_hour_imports_on_organization_id_and_created_at"
     t.index [ "requested_by_id" ], name: "index_work_hour_imports_on_requested_by_id"
     t.check_constraint "range_end >= range_start", name: "work_hour_import_range_order"
@@ -4679,6 +4683,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_120000) do
   end
 
   create_table "work_hour_staff_links", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
     t.string "disposition", null: false
     t.string "email"

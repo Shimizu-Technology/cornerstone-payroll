@@ -1,7 +1,8 @@
-import api from './api';
+import api, { type BlobDownload } from './api';
 
 // Client profitability (api/app/controllers/api/v1/admin/client_profitability_controller.rb).
-// The report is organization-wide, so requests never carry the selected
+// The report is organization-wide: requests carry the selected organization
+// (X-Organization-Id, added by the API client) and never the selected
 // client's X-Company-Id.
 const NO_COMPANY = { companyId: null } as const;
 const BASE = '/admin/client_profitability';
@@ -138,9 +139,12 @@ export interface ProfitabilityReport {
   overhead: ProfitabilityLine | null;
   unassigned: ProfitabilityLine[];
   unlinked_fees: { fees: string; tax_prep_fees: string };
-  unallocated_costs: Array<{ employee_id: number | null; name: string; reason: 'not_linked' | 'no_hours' | 'unlinked_paychecks'; cost: string }>;
+  unallocated_costs: Array<{ employee_id: number | null; name: string; reason: 'not_linked' | 'no_hours' | 'unlinked_adjustments'; cost: string }>;
+  /** Imported paychecks with no employee: shown for reference, never in totals. */
+  imported_pay_not_linked: { paycheck_count: number; cost: string };
   staff: Array<{
-    tax_user_id: number;
+    key: string;
+    tax_user_ids: number[];
     name: string;
     status: 'employee' | 'no_payroll' | 'not_linked';
     hours: string;
@@ -163,19 +167,20 @@ export interface ReportQuery {
 }
 
 export const clientProfitabilityApi = {
-  overview: () => api.get<ProfitabilityOverview>(BASE, undefined, NO_COMPANY),
-  updateSettings: (data: { practice_company_id?: number | null; finance_book_id?: number | null; tax_prep_service_names?: string[] }) =>
+  overview: (): Promise<ProfitabilityOverview> => api.get<ProfitabilityOverview>(BASE, undefined, NO_COMPANY),
+  updateSettings: (data: { practice_company_id?: number | null; finance_book_id?: number | null; tax_prep_service_names?: string[] }): Promise<ProfitabilityOverview> =>
     api.patch<ProfitabilityOverview>(`${BASE}/settings`, data, NO_COMPANY),
-  refresh: (from: string, through: string) =>
+  refresh: (from: string, through: string): Promise<{ import: WorkHourImportStatus }> =>
     api.post<{ import: WorkHourImportStatus }>(`${BASE}/refresh`, { from, through }, NO_COMPANY),
-  importStatus: (id: number) => api.get<{ import: WorkHourImportStatus }>(`${BASE}/imports/${id}`, undefined, NO_COMPANY),
-  links: () => api.get<LinkQueueData>(`${BASE}/links`, undefined, NO_COMPANY),
-  linkClient: (taxClientId: number, data: { disposition: 'company' | 'internal'; company_id?: number; tax_client_name?: string }) =>
+  importStatus: (id: number): Promise<{ import: WorkHourImportStatus }> =>
+    api.get<{ import: WorkHourImportStatus }>(`${BASE}/imports/${id}`, undefined, NO_COMPANY),
+  links: (): Promise<LinkQueueData> => api.get<LinkQueueData>(`${BASE}/links`, undefined, NO_COMPANY),
+  linkClient: (taxClientId: number, data: { disposition: 'company' | 'internal'; company_id?: number; tax_client_name?: string }): Promise<{ ok: true }> =>
     api.put<{ ok: true }>(`${BASE}/client_links/${taxClientId}`, data, NO_COMPANY),
-  unlinkClient: (taxClientId: number) => api.delete<void>(`${BASE}/client_links/${taxClientId}`, NO_COMPANY),
-  linkStaff: (taxUserId: number, data: { disposition: 'employee' | 'no_payroll'; employee_id?: number; email?: string | null }) =>
+  unlinkClient: (taxClientId: number): Promise<void> => api.delete<void>(`${BASE}/client_links/${taxClientId}`, NO_COMPANY),
+  linkStaff: (taxUserId: number, data: { disposition: 'employee' | 'no_payroll'; employee_id?: number; email?: string | null }): Promise<{ ok: true }> =>
     api.put<{ ok: true }>(`${BASE}/staff_links/${taxUserId}`, data, NO_COMPANY),
-  unlinkStaff: (taxUserId: number) => api.delete<void>(`${BASE}/staff_links/${taxUserId}`, NO_COMPANY),
-  report: (query: ReportQuery) => api.get<ProfitabilityReport>(`${BASE}/report`, { ...query }, NO_COMPANY),
-  exportCsv: (query: ReportQuery) => api.getBlobWithParams(`${BASE}/export`, { ...query }, NO_COMPANY),
+  unlinkStaff: (taxUserId: number): Promise<void> => api.delete<void>(`${BASE}/staff_links/${taxUserId}`, NO_COMPANY),
+  report: (query: ReportQuery): Promise<ProfitabilityReport> => api.get<ProfitabilityReport>(`${BASE}/report`, { ...query }, NO_COMPANY),
+  exportCsv: (query: ReportQuery): Promise<BlobDownload> => api.getBlobWithParams(`${BASE}/export`, { ...query }, NO_COMPANY),
 };

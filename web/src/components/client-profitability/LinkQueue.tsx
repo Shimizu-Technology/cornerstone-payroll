@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link2, Unlink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { clientProfitabilityApi, type LinkQueueData, type TaxClientEntry, type TaxStaffEntry } from '@/services/clientProfitability';
@@ -179,15 +179,33 @@ export function LinkQueue({ onChanged }: { onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [showLinked, setShowLinked] = useState(false);
 
+  // Several cards can save at once; only the newest reload may update the
+  // queue, so an older response can't bring back a link that was changed.
+  const latestRequest = useRef(0);
   const load = useCallback(() => {
-    void clientProfitabilityApi.links().then(setData)
-      .catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : 'Couldn’t load Tax clients and staff.'));
+    const request = latestRequest.current + 1;
+    latestRequest.current = request;
+    void clientProfitabilityApi.links().then((next) => {
+      if (request !== latestRequest.current) return;
+      setData(next);
+      setError(null);
+    }).catch((loadError: unknown) => {
+      if (request !== latestRequest.current) return;
+      setError(loadError instanceof Error ? loadError.message : 'Couldn’t load Tax clients and staff.');
+    });
   }, []);
   useEffect(load, [load]);
 
   const saved = useCallback(() => { load(); onChanged(); }, [load, onChanged]);
 
-  if (error) return <p role="alert" className="text-sm text-red-800">{error}</p>;
+  if (error) {
+    return (
+      <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+        <span>{error}</span>
+        <Button variant="outline" onClick={load} className="min-h-11 sm:min-h-11">Try again</Button>
+      </div>
+    );
+  }
   if (!data) return <p role="status" className="text-sm text-neutral-600">Loading Tax clients and staff…</p>;
   if (data.clients.length === 0 && data.staff.length === 0) {
     return <p className="rounded-2xl border border-neutral-200 bg-white p-6 text-sm text-neutral-600">No hours have been pulled from Tax yet. Refresh hours in Setup first.</p>;
