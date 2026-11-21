@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_22_010100) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_22_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2385,6 +2385,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_010100) do
     t.index [ "finance_book_id" ], name: "index_invoices_on_finance_book_id"
     t.index [ "id", "finance_book_id" ], name: "index_invoices_on_id_and_finance_book_id", unique: true
     t.index [ "invoice_billing_profile_id", "invoice_number" ], name: "index_invoices_on_billing_profile_invoice_number", unique: true
+    t.index "invoice_billing_profile_id, ltrim((invoice_number)::text, '0'::text)", name: "index_invoices_on_billing_profile_normalized_number", unique: true, where: "((invoice_number)::text ~ '^[0-9]+$'::text)"
     t.index [ "invoice_billing_profile_id", "status", "due_date" ], name: "idx_invoices_on_profile_status_due_date"
     t.index [ "invoice_billing_profile_id" ], name: "index_invoices_on_invoice_billing_profile_id"
     t.index [ "invoice_recipient_id" ], name: "index_invoices_on_invoice_recipient_id"

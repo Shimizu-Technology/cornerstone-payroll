@@ -404,6 +404,25 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
       expect(response.body).to include("same number as 7055")
     end
 
+    it "answers a save that raced past validation with the same 422, on import and on issue" do
+      import_number("7055")
+      expect(response).to have_http_status(:created), response.body
+      # Simulate a concurrent save that passed validation before the other committed.
+      allow_any_instance_of(Invoice).to receive(:continuing_number_unique_ignoring_zeros)
+
+      expect { import_number("07055") }.not_to change(Invoice, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"]).to eq([ "Invoice number has already been taken" ])
+
+      draft = create(:invoice, :with_line_item, invoice_billing_profile: continuing, company: nil, organization: company.organization,
+                                                invoice_recipient: recipient, invoice_number: nil)
+      allow(InvoiceNumberAllocator).to receive(:call).and_return("07055")
+      post "/api/v1/admin/invoices/#{draft.id}/issue"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"]).to eq([ "Invoice number has already been taken" ])
+      expect(draft.reload.invoice_number).to start_with("DRAFT-")
+    end
+
     it "returns the sender's numbering settings on the invoice" do
       import_number("07055")
       invoice_id = response.parsed_body.dig("invoice", "id")
