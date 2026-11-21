@@ -11,6 +11,8 @@
 #   Body:    greeting, the invoice is attached, the amount and due date,
 #            then the sender's footer or thanks.
 class InvoiceEmailContent
+  SEPARATOR = " - "
+
   def self.for(invoice)
     new(invoice).to_h
   end
@@ -40,8 +42,20 @@ class InvoiceEmailContent
     }
   end
 
+  # Always fits Invoice::EMAIL_SUBJECT_MAX. A long customer name is
+  # shortened first, so "Invoice <number>" and the service month stay whole.
   def default_subject
-    [ "Invoice #{number}", invoice.invoice_recipient&.name.presence, service_label ].compact.join(" - ")
+    prefix = "Invoice #{number}"
+    customer = invoice.invoice_recipient&.name.to_s.squish.presence
+    service = service_label
+    subject = [ prefix, customer, service ].compact.join(SEPARATOR)
+    return subject if subject.length <= Invoice::EMAIL_SUBJECT_MAX
+
+    if customer
+      room = Invoice::EMAIL_SUBJECT_MAX - prefix.length - SEPARATOR.length - (service ? service.length + SEPARATOR.length : 0)
+      subject = [ prefix, (customer.truncate(room, omission: "…") if room >= 2), service ].compact.join(SEPARATOR)
+    end
+    subject.truncate(Invoice::EMAIL_SUBJECT_MAX, omission: "…")
   end
 
   def default_body

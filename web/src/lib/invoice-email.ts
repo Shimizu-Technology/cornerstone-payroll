@@ -54,9 +54,30 @@ function amount(value: number, currency?: string | null) {
   return code === 'USD' ? `$${formatted}` : `${code} ${formatted}`;
 }
 
+/** The API's limit on an email subject (Invoice::EMAIL_SUBJECT_MAX). */
+export const EMAIL_SUBJECT_MAX = 300;
+const SEPARATOR = ' - ';
+
+function truncate(text: string, length: number): string {
+  return text.length <= length ? text : `${text.slice(0, Math.max(0, length - 1))}…`;
+}
+
+/** Always fits EMAIL_SUBJECT_MAX; a long customer name is shortened first, keeping the number and month. */
+export function defaultInvoiceSubject(number: string, customerName: string | null | undefined, service: string | null): string {
+  const prefix = `Invoice ${number}`;
+  const customer = (customerName || '').replace(/\s+/g, ' ').trim() || null;
+  let subject = [prefix, customer, service].filter(Boolean).join(SEPARATOR);
+  if (subject.length <= EMAIL_SUBJECT_MAX) return subject;
+  if (customer) {
+    const room = EMAIL_SUBJECT_MAX - prefix.length - SEPARATOR.length - (service ? service.length + SEPARATOR.length : 0);
+    subject = [prefix, room >= 2 ? truncate(customer, room) : null, service].filter(Boolean).join(SEPARATOR);
+  }
+  return truncate(subject, EMAIL_SUBJECT_MAX);
+}
+
 export function defaultInvoiceEmail(input: InvoiceEmailInput): { subject: string; body: string } {
   const service = invoiceServiceLabel(input);
-  const subject = [`Invoice ${input.number}`, input.customer?.trim() || null, service].filter(Boolean).join(' - ');
+  const subject = defaultInvoiceSubject(input.number, input.customer, service);
   const due = (input.paymentTerms || '').trim().toLowerCase() === 'due on receipt'
     ? 'due on receipt'
     : input.dueDate ? `due by ${fullDate(input.dueDate)}` : null;

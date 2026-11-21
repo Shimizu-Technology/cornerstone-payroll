@@ -9,7 +9,7 @@ import type { Invoice, InvoiceBillingProfile } from '@/services/api';
 import { InvoiceCenter } from './InvoiceCenter';
 
 const api = vi.hoisted(() => ({
-  invoices: { list: vi.fn(), get: vi.fn(), updateEmail: vi.fn() },
+  invoices: { list: vi.fn(), get: vi.fn(), updateEmail: vi.fn(), create: vi.fn() },
   recipients: { list: vi.fn() },
   profiles: { list: vi.fn() },
   receivables: { summary: vi.fn() },
@@ -167,5 +167,92 @@ describe('InvoiceCenter', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Make recurring' }));
 
     expect(within(dialog).getByLabelText('Due after days')).toHaveProperty('value', '15');
+  });
+
+  it("doesn't carry one invoice's unsaved email edit into the next invoice it shows", async () => {
+    const B_SUBJECT = "Invoice 07055 - MoSa's Hot Box, Inc. - December 2026";
+    const draftB = issuedInvoice({
+      id: 9, invoice_number: 'DRAFT-b', status: 'draft', base_status: 'draft', artifacts: [], deliveries: [],
+      email: { subject: B_SUBJECT, body: BODY, default_subject: B_SUBJECT, default_body: BODY, subject_customized: false, body_customized: false },
+    });
+    api.recipients.list.mockResolvedValue({ invoice_recipients: [{ id: 3, name: "MoSa's Hot Box, Inc.", payment_terms: 'Net 15', active: true }] });
+    api.invoices.create.mockResolvedValue({ invoice: draftB });
+    const { user, dialog } = await openInvoice();
+
+    const card = within(dialog).getByRole('region', { name: 'Email message' });
+    await user.click(within(card).getByRole('button', { name: 'Edit email' }));
+    const subject = within(card).getByRole('textbox', { name: 'Subject' });
+    await user.clear(subject);
+    await user.type(subject, 'Unsaved text for 07052');
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await user.click(screen.getByRole('button', { name: 'New invoice' }));
+    const newDialog = await screen.findByRole('dialog', { name: 'New invoice' });
+    await user.selectOptions(within(newDialog).getByLabelText('Bill to'), '3');
+    await user.type(within(newDialog).getByRole('textbox', { name: 'Line 1 description' }), 'Payroll services');
+    await user.click(within(newDialog).getByRole('button', { name: 'Save draft' }));
+
+    const dialogB = await screen.findByRole('dialog', { name: /Draft/ });
+    const cardB = within(dialogB).getByRole('region', { name: 'Email message' });
+    expect(within(cardB).getByText(B_SUBJECT)).toBeTruthy();
+    expect(within(cardB).queryByRole('textbox', { name: 'Subject' })).toBeNull();
+    expect(within(dialogB).queryByDisplayValue('Unsaved text for 07052')).toBeNull();
+    expect(api.invoices.updateEmail).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Subject', { email_subject: '', email_body: 'Custom message' }],
+    ['Message', { email_subject: 'Custom subject', email_body: '' }],
+  ])('clearing only the %s restores just that default', async (field, expected) => {
+    const custom = { subject: 'Custom subject', body: 'Custom message', default_subject: SUBJECT, default_body: BODY, subject_customized: true, body_customized: true };
+    api.invoices.get.mockResolvedValue({ invoice: issuedInvoice({ email: custom }) });
+    api.invoices.updateEmail.mockResolvedValue({ invoice: issuedInvoice() });
+    const { user, dialog } = await openInvoice();
+
+    const card = within(dialog).getByRole('region', { name: 'Email message' });
+    await user.click(within(card).getByRole('button', { name: 'Edit email' }));
+    await user.clear(within(card).getByRole('textbox', { name: field }));
+    await user.click(within(card).getByRole('button', { name: 'Save email' }));
+
+    await waitFor(() => expect(api.invoices.updateEmail).toHaveBeenCalledWith(7, expected));
+  });
+
+  describe('keyboard focus in the invoice dialog', () => {
+    // jsdom has no layout, so offsetParent is always null; treat attached
+    // elements as visible so the dialog's Tab cycling sees its controls.
+    let restoreOffsetParent: () => void = () => {};
+    beforeEach(() => {
+      const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent');
+      Object.defineProperty(HTMLElement.prototype, 'offsetParent', { configurable: true, get() { return (this as HTMLElement).parentElement; } });
+      restoreOffsetParent = () => { if (original) Object.defineProperty(HTMLElement.prototype, 'offsetParent', original); };
+    });
+    afterEach(() => restoreOffsetParent());
+
+    it('moves focus in, keeps Tab inside, closes on Escape and returns focus to the invoice', async () => {
+      const user = userEvent.setup();
+      render(<MemoryRouter><InvoiceCenter /></MemoryRouter>);
+      const trigger = await screen.findByRole('button', { name: /07052/ });
+      await user.click(trigger);
+      const dialog = await screen.findByRole('dialog', { name: /07052/ });
+
+      await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+      const close = within(dialog).getByRole('button', { name: 'Close' });
+      expect(document.activeElement).toBe(close);
+
+      await user.tab({ shift: true });
+      expect(dialog.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement).not.toBe(close);
+      await user.tab();
+      expect(document.activeElement).toBe(close);
+      for (let step = 0; step < 25; step += 1) {
+        await user.tab();
+        expect(dialog.contains(document.activeElement)).toBe(true);
+      }
+
+      await user.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(document.activeElement).toBe(trigger);
+    });
   });
 });

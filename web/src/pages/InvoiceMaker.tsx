@@ -297,7 +297,11 @@ export function InvoiceMaker() {
   // An issued invoice's email is edited and saved on its own: it is delivery
   // content, so saving it leaves the issued PDF and snapshot alone.
   const [issuedEmail, setIssuedEmail] = useState<{ invoiceId: number; subject: string; body: string; content: InvoiceEmailContent } | null>(null);
-  const [savingEmail, setSavingEmail] = useState(false);
+  // The invoice whose email is being saved. Its email inputs are locked
+  // until the save finishes, so text typed meanwhile can't be overwritten.
+  const [savingEmailFor, setSavingEmailFor] = useState<number | null>(null);
+  const openInvoiceIdRef = useRef<number | undefined>(undefined);
+  useEffect(() => { openInvoiceIdRef.current = invoiceForm.id; }, [invoiceForm.id]);
   const [billingProfileForm, setBillingProfileForm] = useState<BillingProfileFormState>(emptyBillingProfileForm);
   const [billingLogoFile, setBillingLogoFile] = useState<File | null>(null);
   const billingProfileFormBaseline = useRef('');
@@ -801,14 +805,17 @@ export function InvoiceMaker() {
 
   // Saves an issued invoice's email. Text equal to the default is saved
   // blank so it keeps following the invoice (number, balance).
-  const saveIssuedEmail = async (reset = false) => {
-    if (!issuedEmail || !invoiceForm.id) return;
+  // A blank subject or message restores that field's default.
+  const saveIssuedEmail = async (reset = false): Promise<void> => {
+    if (!issuedEmail || !invoiceForm.id || savingEmailFor !== null) return;
     if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     const subject = reset ? '' : issuedEmail.subject.trim();
     const body = reset ? '' : issuedEmail.body.trim();
-    if (!reset && (!subject || !body)) { setError('Enter a subject and a message for the email'); return; }
     const invoiceId = invoiceForm.id;
-    setSavingEmail(true);
+    // A late response belongs to the invoice that was saved. If another
+    // invoice is open by then, it leaves that invoice's email and messages alone.
+    const stillOpen = (): boolean => openInvoiceIdRef.current === invoiceId;
+    setSavingEmailFor(invoiceId);
     setError(null);
     try {
       const response = await invoicesApi.updateEmail(invoiceId, {
@@ -823,16 +830,18 @@ export function InvoiceMaker() {
           ? { invoiceId, subject: content.subject, body: content.body, content }
           : current);
       }
-      setSuccess(reset ? 'Email set back to the default.' : 'Email saved. The issued PDF is unchanged.');
-      window.setTimeout(() => setSuccess(null), 3500);
+      if (stillOpen()) {
+        setSuccess(reset ? 'Email set back to the default.' : 'Email saved. The issued PDF is unchanged.');
+        window.setTimeout(() => setSuccess(null), 3500);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save the email');
+      if (stillOpen()) setError(err instanceof Error ? err.message : 'Failed to save the email');
     } finally {
-      setSavingEmail(false);
+      setSavingEmailFor((current) => current === invoiceId ? null : current);
     }
   };
 
-  const restoreDefaultEmail = () => {
+  const restoreDefaultEmail = (): void => {
     if (issuedEmailActive) { void saveIssuedEmail(true); return; }
     setInvoiceForm((current) => ({ ...current, email_subject: '', email_body: '', email_subject_custom: false, email_body_custom: false }));
   };
@@ -1755,7 +1764,8 @@ export function InvoiceMaker() {
   const selectedInvoiceArchived = Boolean(invoiceForm.archived);
   const selectedInvoiceReadOnly = selectedInvoiceArchived || Boolean(invoiceForm.status && invoiceForm.status !== 'draft');
   // An issued invoice's email stays editable; a voided or archived one's doesn't.
-  const emailDraftLocked = selectedInvoiceArchived || invoiceForm.status === 'voided' || (selectedInvoiceReadOnly && !issuedEmailActive);
+  const savingThisEmail = savingEmailFor !== null && savingEmailFor === invoiceForm.id;
+  const emailDraftLocked = selectedInvoiceArchived || invoiceForm.status === 'voided' || (selectedInvoiceReadOnly && !issuedEmailActive) || savingThisEmail;
   const selectedInvoiceCannotSaveDraft = selectedInvoiceReadOnly;
   const selectedInvoiceHasBlockedUnsavedChanges = selectedInvoiceCannotSaveDraft && hasUnsavedInvoiceChanges();
 
@@ -2055,9 +2065,9 @@ export function InvoiceMaker() {
                     <Textarea aria-label="Message" value={emailDraft.body} maxLength={10000} onChange={(event) => changeEmailDraft('body', event.target.value)} rows={7} disabled={emailDraftLocked} />
                   </label>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-neutral-500">{emailDraftCustomized ? 'Edited email' : 'Default email: updates with the invoice number, customer, month and amount.'}</span>
-                    {issuedEmailActive && <Button type="button" size="sm" onClick={() => void saveIssuedEmail()} disabled={!issuedEmailChanged || savingEmail || financeReadOnly || emailDraftLocked}>{savingEmail ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}Save email</Button>}
-                    {emailDraftCustomized && <Button type="button" size="sm" variant="ghost" onClick={restoreDefaultEmail} disabled={savingEmail || emailDraftLocked}>Use default</Button>}
+                    <span className="text-xs text-neutral-500">{emailDraftCustomized ? 'Edited email. Leave the subject or message blank to use its default.' : 'Default email: updates with the invoice number, customer, month and amount.'}</span>
+                    {issuedEmailActive && <Button type="button" size="sm" onClick={() => void saveIssuedEmail()} disabled={!issuedEmailChanged || financeReadOnly || emailDraftLocked}>{savingThisEmail ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}Save email</Button>}
+                    {emailDraftCustomized && <Button type="button" size="sm" variant="ghost" onClick={restoreDefaultEmail} disabled={emailDraftLocked}>Use default</Button>}
                   </div>
                 </div>
               </div>

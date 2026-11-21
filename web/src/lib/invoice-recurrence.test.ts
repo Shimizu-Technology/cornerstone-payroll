@@ -20,6 +20,15 @@ describe('nextRecurrenceStart', () => {
     expect(nextRecurrenceStart(november, 'week', 1, '2026-11-21')).toBe('2026-11-22');
     expect(nextRecurrenceStart(november, 'week', 1, '2026-11-23')).toBe('2026-11-29');
   });
+
+  it('reaches today from a very old anchor, never returning a past date', () => {
+    // 2000-01-03 is a Monday; 2026-11-21 is a Saturday, so the next Monday is 2026-11-23.
+    expect(nextRecurrenceStart({ invoice_date: '2000-01-03' }, 'week', 1, '2026-11-21')).toBe('2026-11-23');
+    expect(nextRecurrenceStart({ invoice_date: '2000-01-03' }, 'week', 3, '2026-11-21') >= '2026-11-21').toBe(true);
+    expect(nextRecurrenceStart({ invoice_date: '1990-01-31', service_period_start: '1990-01-31' }, 'month', 1, '2026-11-21')).toBe('2026-11-30');
+    expect(nextRecurrenceStart({ invoice_date: '1990-03-15' }, 'month', 12, '2026-11-21')).toBe('2027-03-15');
+    expect(nextRecurrenceStart({ invoice_date: '2026-11-21' }, 'month', 1, '2026-11-21')).toBe('2026-12-21');
+  });
 });
 
 describe('termsDueDays', () => {
