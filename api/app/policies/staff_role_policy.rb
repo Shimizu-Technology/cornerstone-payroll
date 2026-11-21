@@ -28,6 +28,9 @@ class StaffRolePolicy
     manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
     manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
     manage_organization: %w[super_admin org_admin admin],
+    # Cost and margin per client from the practice's own staff pay: owners
+    # and admins only, never managers or accountants.
+    view_client_profitability: %w[super_admin org_admin admin],
     manage_platform: %w[super_admin]
   }.freeze
 
@@ -51,6 +54,7 @@ class StaffRolePolicy
     manage_own_aire_account_link: "Payroll staff access required to connect your own AIRE account",
     manage_historical_time_reconciliation: "Historical time reconciliation access required",
     manage_organization: "Admin access required",
+    view_client_profitability: "Admin access required to see client profitability",
     manage_platform: "Super admin access required"
   }.freeze
 
@@ -92,7 +96,8 @@ class StaffRolePolicy
     "api/v1/admin/invoice_credit_notes" => :manage_organization,
     "api/v1/admin/invoice_payments" => :manage_organization,
     "api/v1/admin/invoice_receivables" => :manage_organization,
-    "api/v1/admin/invoice_recipients" => :manage_organization
+    "api/v1/admin/invoice_recipients" => :manage_organization,
+    "api/v1/admin/client_profitability" => :view_client_profitability
   }.freeze
 
   ACTION_CAPABILITIES = {

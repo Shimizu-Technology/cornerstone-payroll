@@ -38,19 +38,23 @@ vi.mock('@/services/api', () => ({
   },
 }));
 
-const companyScope = vi.hoisted(() => ({ activeCompanyId: 42, authCompanyId: 42 as number | null }));
+const companyScope = vi.hoisted(() => ({ activeCompanyId: 42, authCompanyId: 42 as number | null, capabilities: [] as string[] }));
 
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({ activeCompanyId: companyScope.activeCompanyId }),
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 1, organization_id: 1, company_id: companyScope.authCompanyId } }),
+  useAuth: () => ({
+    user: { id: 1, organization_id: 1, company_id: companyScope.authCompanyId },
+    hasCapability: (capability: string) => companyScope.capabilities.includes(capability),
+  }),
 }));
 
 beforeEach(() => {
   companyScope.activeCompanyId = 42;
   companyScope.authCompanyId = 42;
+  companyScope.capabilities = [];
   localStorage.clear();
 });
 
@@ -114,6 +118,16 @@ describe('Reports library navigation', () => {
     const section = await screen.findByRole('region', { name: 'Checks & Payments Register' });
     await waitFor(() => expect(document.activeElement).toBe(section));
     expect(section.querySelector('a[href="/checks-payments"]')).toBeTruthy();
+  });
+
+  it('links to client profitability only for people who can see it', () => {
+    const view = render(<MemoryRouter><Reports /></MemoryRouter>);
+    expect(screen.queryByRole('link', { name: /Client profitability/ })).toBeNull();
+    view.unmount();
+
+    companyScope.capabilities = ['view_client_profitability'];
+    render(<MemoryRouter><Reports /></MemoryRouter>);
+    expect(screen.getByRole('link', { name: /Client profitability/ }).getAttribute('href')).toBe('/reports/client-profitability');
   });
 
   it('returns focus to a report when its already selected library card is chosen again', async () => {

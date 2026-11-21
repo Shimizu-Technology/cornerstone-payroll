@@ -93,6 +93,47 @@ describe('ApiClient company identity', (): void => {
     expect(new Headers(fetchMock.mock.calls[1][1]?.headers).has('X-Organization-Id')).toBe(false);
   });
 
+  it('sends the selected organization, but not the finance book, for client profitability', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    apiClient.setActiveOrganizationId(2);
+    apiClient.setActiveFinanceBookId(9);
+    await apiClient.get('/admin/client_profitability/report', undefined, { companyId: null });
+    await apiClient.getBlobWithParams('/admin/client_profitability/export', undefined, { companyId: null });
+    await apiClient.put('/admin/client_profitability/client_links/1', { disposition: 'internal' }, { companyId: null });
+
+    for (const call of fetchMock.mock.calls) {
+      const headers = new Headers(call[1]?.headers);
+      expect(headers.get('X-Organization-Id')).toBe('2');
+      expect(headers.has('X-Finance-Book-Id')).toBe(false);
+      expect(headers.has('X-Company-Id')).toBe(false);
+    }
+  });
+
+  it('keeps the initiating organization on downloads while the auth token is pending', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('csv', { status: 200 }));
+    const releases: Array<() => void> = [];
+    setAuthTokenProvider(() => new Promise<string | null>((resolve) => { releases.push(() => resolve('test-token')); }));
+
+    apiClient.setActiveOrganizationId(2);
+    apiClient.setActiveFinanceBookId(9);
+    const exportA = apiClient.getBlobWithParams('/admin/client_profitability/export', { from: '2026-10' }, { companyId: null });
+    const invoicePdf = apiClient.getBlob('/admin/invoices/1/download_artifact');
+    const preview = apiClient.postBlob('/admin/invoices/1/preview_pdf', {});
+    const upload = apiClient.postFormBlob('/admin/expenses/1/preview', new FormData());
+    // The person switches to organization B while the token is still resolving.
+    apiClient.setActiveOrganizationId(3);
+    apiClient.setActiveFinanceBookId(10);
+    releases.forEach((release) => release());
+    await Promise.all([exportA, invoicePdf, preview, upload]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    for (const call of fetchMock.mock.calls) expect(new Headers(call[1]?.headers).get('X-Organization-Id')).toBe('2');
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).has('X-Finance-Book-Id')).toBe(false);
+    for (const call of fetchMock.mock.calls.slice(1)) expect(new Headers(call[1]?.headers).get('X-Finance-Book-Id')).toBe('9');
+  });
+
   it('sends the selected book on finance JSON, upload, and download requests', async (): Promise<void> => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
