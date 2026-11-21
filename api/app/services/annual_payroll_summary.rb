@@ -55,26 +55,59 @@ class AnnualPayrollSummary
     }
   end
 
-  # total_payroll_cost for a pay-date range, split by employee, using exactly
-  # the sources period_row counts: native paychecks, locked imported paychecks
-  # linked to an employee, and every locked imported adjustment. Adjustments
-  # whose imported paycheck has no employee are under by_employee[nil].
-  # Imported paychecks not linked to an employee are left out of the total,
-  # as in period_row's excluded_unlinked_*, and reported in :excluded_unlinked.
-  def payroll_cost_by_employee(period)
-    costs = Hash.new { |hash, key| hash[key] = { pay: 0.to_d, employer_taxes: 0.to_d, employer_contributions: 0.to_d, total: 0.to_d } }
-    native_items_for(period).each do |item|
-      cost = native_item_cost(item)
-      add_cost(costs[item.employee_id], cost[:gross_pay] + cost[:non_taxable_pay], cost[:employer_taxes], cost[:employer_contributions], cost[:total])
+  # How far outside the range a paycheck's pay date may fall and still have
+  # worked days inside it (basis: :work_period).
+  WORK_PERIOD_REACH = 120
+
+  # total_payroll_cost split by employee, using exactly the sources
+  # period_row counts: native paychecks, locked imported paychecks linked to
+  # an employee, and every locked imported adjustment. Adjustments whose
+  # imported paycheck has no employee are under by_employee[nil]. Imported
+  # paychecks not linked to an employee are left out of the total, as in
+  # period_row's excluded_unlinked_*, and reported in :excluded_unlinked.
+  #
+  # basis: :pay_date (default) counts each paycheck whole in the range that
+  # holds its pay date, so the total equals period_row's. basis:
+  # :work_period spreads each paycheck evenly over the days of its pay
+  # period (an adjustment follows its imported paycheck's period) and counts
+  # the days that fall in the range; the same paychecks are eligible, found
+  # by pay date up to WORK_PERIOD_REACH days either side.
+  def payroll_cost_by_employee(period, basis: :pay_date)
+    work_period = basis.to_s == "work_period"
+    source = if work_period
+      PayrollReportingPeriod.new(start_date: period.start_date - WORK_PERIOD_REACH, end_date: period.end_date + WORK_PERIOD_REACH)
+    else
+      period
     end
-    unified = UnifiedPayrollReporting.new(company_id: company.id, period: period)
-    unified.historical_paychecks.each { |row| add_historical_cost(costs[row.employee_id], row) }
-    unified.historical_adjustments.each { |row| add_historical_cost(costs[row.historical_paycheck.employee_id], row) }
-    unlinked = unified.unlinked_historical_paychecks
+    share = ->(first, last, pay_date) { work_period ? work_period_share(first, last, pay_date, period) : 1.to_d }
+
+    costs = Hash.new { |hash, key| hash[key] = { pay: 0.to_d, employer_taxes: 0.to_d, employer_contributions: 0.to_d, total: 0.to_d } }
+    native_items_for(source).includes(:pay_period).each do |item|
+      fraction = share.call(item.pay_period.start_date, item.pay_period.end_date, item.pay_period.pay_date)
+      next if fraction.zero?
+
+      cost = native_item_cost(item)
+      add_cost(costs[item.employee_id], (cost[:gross_pay] + cost[:non_taxable_pay]) * fraction, cost[:employer_taxes] * fraction,
+               cost[:employer_contributions] * fraction, cost[:total] * fraction)
+    end
+    unified = UnifiedPayrollReporting.new(company_id: company.id, period: source)
+    unified.historical_paychecks.each do |row|
+      add_historical_cost(costs[row.employee_id], row, share.call(row.period_start, row.period_end, row.pay_date))
+    end
+    unified.historical_adjustments.each do |row|
+      paycheck = row.historical_paycheck
+      add_historical_cost(costs[paycheck.employee_id], row, share.call(paycheck.period_start, paycheck.period_end, row.effective_pay_date))
+    end
+    costs.each_value { |cost| cost.transform_values! { |value| value.round(2, :half_up) } }
+    costs.reject! { |_employee_id, cost| cost.values.all?(&:zero?) }
+    unlinked = unified.unlinked_historical_paychecks.filter_map do |row|
+      fraction = share.call(row.period_start, row.period_end, row.pay_date)
+      row.total_payroll_cost.to_d * fraction unless fraction.zero?
+    end
     {
       by_employee: costs,
       total_payroll_cost: costs.values.sum(0.to_d) { |cost| cost[:total] },
-      excluded_unlinked: { paycheck_count: unlinked.length, total_payroll_cost: sum(unlinked, :total_payroll_cost) }
+      excluded_unlinked: { paycheck_count: unlinked.length, total_payroll_cost: unlinked.sum(0.to_d).round(2, :half_up) }
     }
   end
 
@@ -108,8 +141,22 @@ class AnnualPayrollSummary
 
   private
 
-  def add_historical_cost(entry, row)
-    add_cost(entry, row.gross_pay.to_d, row.employer_taxes.to_d, row.employer_contributions.to_d, row.total_payroll_cost.to_d)
+  def add_historical_cost(entry, row, fraction = 1.to_d)
+    return if fraction.zero?
+
+    add_cost(entry, row.gross_pay.to_d * fraction, row.employer_taxes.to_d * fraction, row.employer_contributions.to_d * fraction,
+             row.total_payroll_cost.to_d * fraction)
+  end
+
+  # The part of a pay period's days that fall inside the range. Without a
+  # usable pay period, the whole paycheck goes where its pay date falls.
+  def work_period_share(first, last, pay_date, period)
+    return (period.range.cover?(pay_date) ? 1.to_d : 0.to_d) if first.nil? || last.nil? || last < first
+
+    overlap = ([ last, period.end_date ].min - [ first, period.start_date ].max).to_i + 1
+    return 0.to_d unless overlap.positive?
+
+    overlap.to_d / ((last - first).to_i + 1)
   end
 
   def add_cost(entry, pay, employer_taxes, employer_contributions, total)

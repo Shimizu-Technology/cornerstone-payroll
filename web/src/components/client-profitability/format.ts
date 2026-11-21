@@ -77,3 +77,14 @@ export function formatDate(value: string | null): string {
   const [year, month, day] = value.split('-').map(Number);
   return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' }).format(new Date(year, month - 1, day));
 }
+
+/** Last month, or the quarter that holds it, per the saved default period. */
+export function defaultPeriod(mode: 'month' | 'quarter' | 'custom', today: Date = new Date()): { from: string; through: string } {
+  const previous = recentMonths(today, 2)[1];
+  if (mode === 'quarter') {
+    const quarter = recentQuarters(today).find((entry) => entry.from <= previous && previous <= entry.through);
+    if (quarter) return { from: quarter.from, through: quarter.through };
+  }
+  return { from: previous, through: previous };
+}
+

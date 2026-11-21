@@ -169,7 +169,8 @@ module Api
         end
 
         def settings_params
-          permitted = params.permit(:practice_company_id, :finance_book_id, tax_prep_service_names: [])
+          permitted = params.permit(:practice_company_id, :finance_book_id, :default_cost_pending, :default_spread_overhead,
+                                    :default_period, :cost_basis, tax_prep_service_names: [])
           permitted[:tax_prep_service_names] = [] if params.key?(:tax_prep_service_names) && params[:tax_prep_service_names].blank?
           permitted
         end
@@ -209,7 +210,11 @@ module Api
               practice_company_id: settings.practice_company_id,
               finance_book_id: settings.finance_book_id,
               effective_finance_book_id: book&.id,
-              tax_prep_service_names: settings.tax_prep_service_names
+              tax_prep_service_names: settings.tax_prep_service_names,
+              default_cost_pending: settings.default_cost_pending,
+              default_spread_overhead: settings.default_spread_overhead,
+              default_period: settings.default_period,
+              cost_basis: settings.cost_basis
             },
             options: {
               companies: queue[:companies],

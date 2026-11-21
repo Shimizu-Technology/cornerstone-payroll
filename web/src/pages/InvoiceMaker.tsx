@@ -1,4 +1,5 @@
 import { invoicePreviewLines, newManualInvoiceLine } from '@/lib/invoice-maker-lines';
+import { formatContinuingNumber, parseNumberWidth } from '@/lib/invoiceNumber';
 import { invoiceDraftDueDate } from '@/lib/invoice-defaults';
 import { invoiceBusinessDate } from '@/lib/invoice-defaults';
 import { INVOICE_THEMES } from '@/lib/invoiceStyle';
@@ -106,6 +107,8 @@ interface RecipientFormState {
 interface BillingProfileFormState {
   numbering_style: 'yearly' | 'continuing';
   next_invoice_number: number;
+  /** "Digits in invoice number"; blank means no leading zeros. */
+  invoice_number_width: string;
   service_catalog: import('@/services/api').InvoiceService[];
   id?: number;
   name: string;
@@ -168,6 +171,7 @@ const emptyBillingProfileForm = (): BillingProfileFormState => ({
   invoice_prefix: 'INV',
   numbering_style: 'yearly',
   next_invoice_number: 1,
+  invoice_number_width: '',
   service_catalog: [],
   remit_to: '',
   footer_note: '',
@@ -1196,6 +1200,7 @@ export function InvoiceMaker() {
   const buildBillingProfilePayload = (): InvoiceBillingProfilePayload => ({
     numbering_style: billingProfileForm.numbering_style,
     next_invoice_number: billingProfileForm.next_invoice_number,
+    invoice_number_width: parseNumberWidth(billingProfileForm.invoice_number_width),
     service_catalog: billingProfileForm.service_catalog,
     name: billingProfileForm.name.trim(),
     legal_name: billingProfileForm.legal_name.trim() || null,
@@ -1217,6 +1222,7 @@ export function InvoiceMaker() {
     const nextForm: BillingProfileFormState = {
       numbering_style: profile.numbering_style || 'yearly',
       next_invoice_number: profile.next_invoice_number || 1,
+      invoice_number_width: profile.invoice_number_width ? String(profile.invoice_number_width) : '',
       service_catalog: profile.service_catalog || [],
       id: profile.id,
       name: profile.name,
@@ -1516,6 +1522,18 @@ export function InvoiceMaker() {
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <label className="text-sm">Number format<select aria-label="Number format" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3" value={billingProfileForm.numbering_style} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, numbering_style: e.target.value as 'yearly' | 'continuing' })}><option value="yearly">Prefix and year (existing)</option><option value="continuing">Plain continuing sequence</option></select></label>
               {billingProfileForm.numbering_style === 'continuing' && <label className="text-sm">Next invoice number<Input aria-label="Next invoice number" type="number" min="1" step="1" value={billingProfileForm.next_invoice_number} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, next_invoice_number: Number(e.target.value) })} /></label>}
+              {billingProfileForm.numbering_style === 'continuing' && (
+                <div className="sm:col-span-2">
+                  <label htmlFor="invoice-number-width" className="text-sm">Digits in invoice number</label>
+                  <Input id="invoice-number-width" aria-describedby="invoice-number-width-hint invoice-number-width-example" type="number" min="1" max="12" step="1" inputMode="numeric"
+                    placeholder="Leave blank for no leading zeros" value={billingProfileForm.invoice_number_width}
+                    onChange={(e) => setBillingProfileForm({ ...billingProfileForm, invoice_number_width: e.target.value })} />
+                  <p id="invoice-number-width-hint" className="mt-1 text-xs text-neutral-600">Adds leading zeros so numbers line up with your past invoices: 5 digits turns 7055 into 07055. Issued invoices keep their numbers.</p>
+                  <p id="invoice-number-width-example" aria-live="polite" className="mt-1 text-sm font-semibold text-neutral-900">
+                    Next invoice: {formatContinuingNumber(billingProfileForm.next_invoice_number || 1, parseNumberWidth(billingProfileForm.invoice_number_width))}
+                  </p>
+                </div>
+              )}
               <div className="space-y-2 sm:col-span-2"><p className="text-sm font-medium">Saved services · use {'{month}'} for the service month</p>{billingProfileForm.service_catalog.map((service, index) => <div key={index} className="grid gap-2 sm:grid-cols-3"><Input aria-label={`Service ${index + 1} name`} value={service.name} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, name: e.target.value } : entry) })} /><Input aria-label={`Service ${index + 1} template`} value={service.description_template} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, description_template: e.target.value } : entry) })} /><select aria-label={`Service ${index + 1} kind`} value={service.line_kind} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.map((entry, i) => i === index ? { ...entry, line_kind: e.target.value as 'service_fee' | 'reimbursement' } : entry) })}><option value="service_fee">Service fee</option><option value="reimbursement">Reimbursement</option></select><Button type="button" variant="outline" onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: billingProfileForm.service_catalog.filter((_, i) => i !== index) })}>Remove service</Button></div>)}<Button type="button" variant="outline" onClick={() => setBillingProfileForm({ ...billingProfileForm, service_catalog: [...billingProfileForm.service_catalog, { name: 'Accounting Consulting', description_template: 'Accounting Services – {month}', line_kind: 'service_fee' }] })}>Add saved service</Button></div>
               <Input value={billingProfileForm.invoice_prefix} onChange={(event) => setBillingProfileForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Invoice prefix" />
               <Input value={billingProfileForm.remit_to} onChange={(event) => setBillingProfileForm((current) => ({ ...current, remit_to: event.target.value }))} placeholder="Checks payable to" />

@@ -4,6 +4,11 @@
 # payroll (the cost side), which financial book holds the practice's client
 # invoices (the fee side), and which saved services count as tax preparation.
 class ClientProfitabilitySetting < ApplicationRecord
+  PERIODS = %w[month quarter custom].freeze
+  # pay_date: a paycheck counts in the month it was paid (matches the Annual
+  # Payroll Summary). work_period: it is spread over its pay period's days.
+  COST_BASES = %w[pay_date work_period].freeze
+
   belongs_to :organization
   belongs_to :practice_company, class_name: "Company", optional: true
   belongs_to :finance_book, optional: true
@@ -12,6 +17,9 @@ class ClientProfitabilitySetting < ApplicationRecord
   before_validation :normalize_tax_prep_service_names
 
   validates :organization_id, uniqueness: true
+  validates :default_period, inclusion: { in: PERIODS, message: "must be month, quarter or custom" }
+  validates :cost_basis, inclusion: { in: COST_BASES, message: "must be pay date or work period" }
+  validates :default_cost_pending, :default_spread_overhead, inclusion: { in: [ true, false ] }
   validate :practice_company_is_live_in_organization
   validate :finance_book_is_shared_in_organization
   validate :tax_prep_service_names_are_strings
