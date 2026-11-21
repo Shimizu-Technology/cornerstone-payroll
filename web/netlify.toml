@@ -1,0 +1,8 @@
+
+# Opt-in replacement for the manual staging site; see docs/NETLIFY_STAGING.md.
+# No production build settings are overridden here.
+[context.branch-deploy]
+  command = "node scripts/netlify-staging-build.mjs"
+
+[context.deploy-preview]
+  command = "node scripts/netlify-staging-build.mjs"
