@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { controlClassName } from '@/components/ui/field-styles';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -1632,7 +1633,7 @@ export function InvoiceMaker() {
             <label className="block text-sm font-medium text-neutral-700">Payment instructions<Textarea aria-label="Payment instructions" className="mt-1" value={billingProfileForm.payment_instructions} onChange={(event) => setBillingProfileForm((current) => ({ ...current, payment_instructions: event.target.value }))} rows={2} /></label>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="text-sm font-medium text-neutral-700">Number format<select aria-label="Number format" className={controlClassName('mt-1')} value={billingProfileForm.numbering_style} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, numbering_style: e.target.value as 'yearly' | 'continuing' })}><option value="yearly">Prefix and year (existing)</option><option value="continuing">Plain continuing sequence</option></select></label>
-              {billingProfileForm.numbering_style === 'continuing' && <label className="text-sm font-medium text-neutral-700">Next invoice number<Input className="mt-1" aria-label="Next invoice number" type="number" min="1" step="1" value={billingProfileForm.next_invoice_number} onChange={(e) => setBillingProfileForm({ ...billingProfileForm, next_invoice_number: Number(e.target.value) })} /></label>}
+              {billingProfileForm.numbering_style === 'continuing' && <label className="text-sm font-medium text-neutral-700">Next invoice number<NumericInput className="mt-1" aria-label="Next invoice number" inputMode="numeric" min={1} value={billingProfileForm.next_invoice_number} emptyValue={billingProfileForm.next_invoice_number} onValueChange={(next) => setBillingProfileForm({ ...billingProfileForm, next_invoice_number: next ?? billingProfileForm.next_invoice_number })} /></label>}
               {billingProfileForm.numbering_style === 'continuing' && (
                 <InvoiceNumberWidthField value={billingProfileForm.invoice_number_width} nextNumber={billingProfileForm.next_invoice_number}
                   onChange={(value) => setBillingProfileForm({ ...billingProfileForm, invoice_number_width: value })} />
