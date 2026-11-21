@@ -12,8 +12,11 @@
 # - renew_lease!: the worker extends its lease between months; it fails once
 #   another worker has taken over.
 # - commit: rows are replaced only while the worker still holds claim_token
-#   (checked under the organization lock), so a superseded worker can never
-#   overwrite newer hours.
+#   and its lease has not expired (checked with the import row locked), so a
+#   superseded or late worker can never overwrite newer hours.
+#
+# Lock order, everywhere: the organization row, then the import row. reserve!
+# and the importer's save both follow it, so they can't deadlock.
 class WorkHourImport < ApplicationRecord
   STATUSES = %w[queued running succeeded failed].freeze
   TRIGGERS = %w[manual scheduled].freeze
@@ -72,9 +75,20 @@ class WorkHourImport < ApplicationRecord
     token
   end
 
+  # Extends a live lease. An expired lease can't be renewed, even by the
+  # worker that held it: once it ends, another worker may have taken over.
+  # The expiry is checked in the same UPDATE statement.
   def renew_lease!(token, now: Time.current)
-    self.class.where(id: id, status: "running", claim_token: token)
+    self.class.where(id: id, status: "running", claim_token: token).where("lease_expires_at > ?", now)
         .update_all(lease_expires_at: now + RUNNING_LEASE, updated_at: now) == 1
+  end
+
+  # Ends an import whose worker outlived its lease, unless another worker has
+  # already taken it over (then that worker owns the outcome).
+  def expire_lease!(token, now: Time.current)
+    self.class.where(id: id, status: "running", claim_token: token)
+        .update_all(status: "failed", finished_at: now, claim_token: nil, lease_expires_at: nil, error_code: "lease_expired",
+                    error_message: "This refresh took too long and was stopped. Nothing was changed. Try again.", updated_at: now)
   end
 
   # Seconds until a running import's lease ends; nil once it can be claimed.
