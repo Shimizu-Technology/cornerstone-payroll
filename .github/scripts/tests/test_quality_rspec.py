@@ -42,6 +42,18 @@ class QualityRspecTest(unittest.TestCase):
             quality.verify(directory, 3)
             self.assertEqual(json.loads((directory / 'timings.json').read_text()), {'spec/a_spec.rb': 3})
 
+    def test_coverage_rejects_suite_hook_errors_with_zero_example_failures(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            self.reports(directory, [[f'spec/a_spec.rb[1:{n}]'] for n in range(1, 4)])
+            path = directory / 'shard-1.json'
+            report = json.loads(path.read_text())
+            report['summary']['errors_outside_of_examples_count'] = 1
+            path.write_text(json.dumps(report))
+            with self.assertRaisesRegex(ValueError, 'RSpec reported failures'):
+                quality.verify(directory, 3)
+            self.assertFalse((directory / 'timings.json').exists())
+
     def test_coverage_rejects_missing_duplicate_inventory_drift_and_failures(self):
         for problem in ('missing', 'duplicate', 'inventory', 'failure'):
             with self.subTest(problem=problem), tempfile.TemporaryDirectory() as temp:
