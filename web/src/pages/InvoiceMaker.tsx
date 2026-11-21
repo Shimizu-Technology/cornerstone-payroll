@@ -2286,7 +2286,7 @@ export function InvoiceMaker() {
                   </div>
                 )}
                 {chatError && <ActionFeedback retryKey={chatErrorFeedbackAttempt} tone="error" message={chatError} />}
-                <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                   <label className="inline-flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
                     <ImagePlus className="h-5 w-5" />
                     <input

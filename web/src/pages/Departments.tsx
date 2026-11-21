@@ -207,7 +207,7 @@ export function Departments() {
               </Button>
               <Button
                 variant="ghost"
-                className="sm:w-10 sm:px-0"
+                className="sm:h-10 sm:w-10 sm:px-0"
                 onClick={handleCancelAdd}
                 disabled={isSavingNew}
                 aria-label="Cancel adding department"
@@ -326,7 +326,7 @@ export function Departments() {
                             autoFocus
                           />
                           <Button
-                            className="w-10 px-0"
+                            className="h-10 w-10 px-0"
                             onClick={handleSaveEdit}
                             disabled={isSavingEdit}
                             aria-label="Save department name"
@@ -335,7 +335,7 @@ export function Departments() {
                           </Button>
                           <Button
                             variant="ghost"
-                            className="w-10 px-0"
+                            className="h-10 w-10 px-0"
                             onClick={handleCancelEdit}
                             disabled={isSavingEdit}
                             aria-label="Cancel editing department"
