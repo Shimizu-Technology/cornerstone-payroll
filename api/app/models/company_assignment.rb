@@ -37,7 +37,8 @@ class CompanyAssignment < ApplicationRecord
   def audit_practice_client_grant
     return unless user&.practice_company_id?
 
-    AuditLog.record!(user: granted_by, organization_id: company.organization_id, company_id: company.id,
+    AuditLog.record!(user: granted_by, actor: Current.actor || AuditActor.system_job(self.class.name),
+      organization_id: company.organization_id, company_id: company.id,
       action: "test_workspace#portal_access_granted", record_type: "users", record_id: user_id,
       metadata: { practice_company_id: company.id, expires_at: expires_at }, event_category: "security")
   end

@@ -44,6 +44,10 @@ RSpec.describe "Api::V1::Integrations::Aire::Events", type: :request do
       "status" => "pending",
       "idempotent" => false
     )
+    audit = AuditLog.find_by!(action: "aire_payroll_event#received")
+    expect(audit).to have_attributes(user_id: nil, actor_type: "source_system", actor_id: source.id.to_s,
+      actor_name: "AIRE System", record_id: AirePayrollEvent.sole.id)
+    expect(Current.actor).to be_nil
     expect(AirePayrollEvent.sole.payload).to eq(event_payload)
     expect(AirePayrollEvent.sole.payload).not_to have_key("event")
     expect(AirePayrollEvent).to have_received(:dispatch_one!).with(AirePayrollEvent.sole.id, now: kind_of(Time)).once
@@ -51,6 +55,7 @@ RSpec.describe "Api::V1::Integrations::Aire::Events", type: :request do
     post "/api/v1/integrations/aire/events", params: event_payload.to_json, headers: headers
     expect(response).to have_http_status(:accepted)
     expect(response.parsed_body.fetch("idempotent")).to be(true)
+    expect(AuditLog.where(action: "aire_payroll_event#received").sole).to eq(audit)
     expect(AirePayrollEvent).to have_received(:dispatch_one!).once
   end
 

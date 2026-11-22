@@ -36,7 +36,7 @@ module AirePayrollCalendar
           historical_review = HistoricalImportBoundaryReview.new(source: @source).verify!(accepted_sha256: @historical_imports_sha256)
           @source.create_lock_rollout_selection!(starts_on: @starts_on, actor: @actor, reason: @reason,
             historical_import_review: historical_review)
-          AuditLog.create!(actor_name: @actor, actor_role: "operator", company_id: @source.company_id,
+          AuditLog.create!(actor_type: "operator", actor_name: @actor, actor_role: "operator", company_id: @source.company_id,
             organization_id: @source.company.organization_id, action: "time_tracking_source#initial_lock_rollout_selected",
             record_type: "TimeTrackingSource", record_id: @source.id, event_category: "integration",
             metadata: { old_starts_on: old_boundary.iso8601, new_starts_on: @starts_on.iso8601, reason: @reason,
@@ -46,7 +46,7 @@ module AirePayrollCalendar
           raise Error, "STARTS_ON must match the immutable configured boundary; a change requires a reviewed migration"
         end
         validate_inventory!
-        AuditLog.create!(user: nil, actor_name: @actor, actor_role: "operator",
+        AuditLog.create!(actor_type: "operator", actor_name: @actor, actor_role: "operator",
           company_id: @source.company_id, organization_id: @source.company.organization_id,
           action: "time_tracking_source#lock_rollout_gate_passed", record_type: "TimeTrackingSource", record_id: @source.id,
           event_category: "integration", metadata: { cutoff_enforcement_starts_on: @starts_on.iso8601, reason: @reason })

@@ -8,10 +8,12 @@ namespace :aire_lock_rollout do
 
   desc "Validate and audit the Payroll lock rollout gate, including every preactivation calendar/publication"
   task configure: :environment do
-    result = AirePayrollCalendar::LockRollout.new(
-      source: TimeTrackingSource.find(ENV.fetch("SOURCE_ID")), starts_on: ENV.fetch("STARTS_ON"),
-      actor: ENV.fetch("ACTOR"), reason: ENV.fetch("REASON"), historical_imports_sha256: ENV["HISTORICAL_IMPORTS_SHA256"]
-    ).configure!
-    puts result.to_json
+    Current.with_isolated_actor(AuditActor.operator(ENV.fetch("ACTOR"))) do
+      result = AirePayrollCalendar::LockRollout.new(
+        source: TimeTrackingSource.find(ENV.fetch("SOURCE_ID")), starts_on: ENV.fetch("STARTS_ON"),
+        actor: ENV.fetch("ACTOR"), reason: ENV.fetch("REASON"), historical_imports_sha256: ENV["HISTORICAL_IMPORTS_SHA256"]
+      ).configure!
+      puts result.to_json
+    end
   end
 end

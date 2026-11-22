@@ -31,15 +31,18 @@ module Api
             return invalid("Idempotency-Key must be a UUID") unless request_id.match?(UUID_FORMAT)
             return invalid("actor is required") unless body["actor"].is_a?(Hash)
 
-            result = AirePayrollCalendar::CutoffChange.new(
-              pay_period: calendar_period.pay_period,
-              action: body["action"],
-              cutoff_at: body["cutoff_at"],
-              reason: body["reason"],
-              source_actor: actor_from(body["actor"]),
-              source: calendar_period.time_tracking_source,
-              request_id: request_id
-            ).call
+            source = calendar_period.time_tracking_source
+            result = Current.with_isolated_actor(AuditActor.source_system(source: source)) do
+              AirePayrollCalendar::CutoffChange.new(
+                pay_period: calendar_period.pay_period,
+                action: body["action"],
+                cutoff_at: body["cutoff_at"],
+                reason: body["reason"],
+                source_actor: actor_from(body["actor"]),
+                source: source,
+                request_id: request_id
+              ).call
+            end
             render json: { cutoff_change: serialize(result) }, status: result.idempotent ? :ok : :created
           rescue AirePayrollCalendar::CutoffChange::Error => e
             render json: { error: e.message }, status: e.status
