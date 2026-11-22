@@ -53,6 +53,7 @@ module TimeTracking
       existing = AireHistoryReview.where(time_tracking_source: @source, company: @company).where.not(approved_at: nil).order(:id).last
       return response(existing) if existing
 
+      @proof_on = PayrollBusinessClock.today
       data = capture(mapping_selections: mapping_selections)
       review = AireHistoryReview.create!(company: @company, time_tracking_source: @source, actor: @actor,
         snapshot: data.fetch(:snapshot), summary: data.fetch(:summary), digest: checksum(data.fetch(:snapshot)))
@@ -70,6 +71,7 @@ module TimeTracking
       end
       validate_context!
       validate_review!(review)
+      @proof_on = PayrollBusinessClock.date_for(review.created_at)
       # The first full remote recapture holds no business-row locks.
       fresh = capture(mapping_selections: review.snapshot.fetch("mapping_selections"))
       changes = changed_sections(review.snapshot, fresh.fetch(:snapshot))
@@ -435,12 +437,9 @@ module TimeTracking
       end
     end
 
-    # A first-version-only compensation history adds nothing, so fingerprints
-    # recorded before effective dating (M3-4) still match.
     def employee_fingerprint(employee)
-      parts = [ employee.attributes, employee.employee_wage_rates.sort_by(&:id).map(&:attributes) ]
-      history = PayrollCalculationContext.compensation_history_fingerprint(employee)
-      history.present? ? parts + [ history ] : parts
+      [ PayrollCalculationContext.dated_employee_attributes(employee, @proof_on),
+        PayrollCalculationContext.dated_wage_rate_attributes(employee, @proof_on) ]
     end
 
     def local_fingerprint(inventory)

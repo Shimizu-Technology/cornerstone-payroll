@@ -310,13 +310,17 @@ class Employee < ApplicationRecord
     changes.find { |change| change.covers?(date) } || (changes.first if changes.first && date < changes.first.effective_on)
   end
 
+  def payroll_compensation_on(date)
+    compensation_on(date) || self
+  end
+
   def payroll_rate_on(date)
-    compensation_on(date)&.pay_rate || pay_rate
+    payroll_compensation_on(date).pay_rate
   end
 
   def default_payroll_rate_on(date)
-    rate = payroll_rate_on(date)
-    hourly_pay_basis? ? (primary_wage_rate_on(date)&.rate || rate) : rate
+    compensation = payroll_compensation_on(date)
+    compensation.hourly_pay_basis? ? (primary_wage_rate_on(date)&.rate || compensation.pay_rate) : compensation.pay_rate
   end
 
   # Wage rates as they stood on the date, as read-only EmployeeWageRate

@@ -651,7 +651,7 @@ class PayrollItem < ApplicationRecord
     variable_salary = if snapshot.key?("employment_type") && snapshot.key?("salary_type")
       snapshot["employment_type"] == "salary" && snapshot["salary_type"] == "variable"
     else
-      employee.variable_salary?
+      employee.payroll_compensation_on(pay_period.end_date).variable_salary?
     end
     return false unless variable_salary
 

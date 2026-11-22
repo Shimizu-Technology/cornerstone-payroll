@@ -114,7 +114,7 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
   it "holds changed hourly frequency before recalculation even though retained gross would stay the same" do
     original = frozen_financial_state
     expect(source_item.gross_pay).to eq(100)
-    employee.update!(pay_frequency: "semimonthly")
+    change_compensation!(employee, pay_frequency: "semimonthly")
     post "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}/recalculate", headers: headers
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body.fetch("errors")).to include(include("pay frequency differs"))
@@ -272,7 +272,7 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
     it "rejects biweekly to semimonthly frequency before worksheet or item input effects" do
       original = frozen_financial_state
       expect(source_item.gross_pay).to eq(2000)
-      employee.update!(pay_frequency: "semimonthly")
+      change_compensation!(employee, pay_frequency: "semimonthly")
       expect_any_instance_of(PayrollFieldInputApplier).not_to receive(:apply!)
       expect(NamedPayrollLoanInput).not_to receive(:apply!)
       post "/api/v1/admin/pay_periods/#{period.id}/run_payroll", headers: headers,

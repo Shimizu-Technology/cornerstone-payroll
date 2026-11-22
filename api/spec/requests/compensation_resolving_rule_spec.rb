@@ -132,7 +132,102 @@ RSpec.describe "Pay rates resolve on the pay period end date", type: :request do
       employee: employee, actor: actor, source: "staff", reason: "Promotion", effective_on: "2026-11-23", pay_rate: 16
     ).call!
     create(:payroll_item, company: company, pay_period: open_period, employee: employee, pay_rate: 16)
-    expect(open_period.compliance_warnings.join).to include("pay rate changes mid-period on 2026-11-23")
-    expect(next_period.compliance_warnings.join).not_to include("mid-period")
+    expect(open_period.mid_period_compensation_warnings.join).to include("pay rate changes mid-period on 2026-11-23")
+    expect(next_period.mid_period_compensation_warnings.join).not_to include("mid-period")
   end
+  def commit_money!(period, expected, before_commit: nil)
+    employee_ids = expected.keys
+    items = period.payroll_items.where(employee_id: employee_ids).index_by(&:employee_id)
+    actual = -> { items.transform_values { |item| item.reload.attributes.values_at("gross_pay", "net_pay") } }
+    expect(actual.call).to eq(expected)
+    lifecycle = PayPeriodLifecycleService.new(pay_period: period, actor: actor)
+    lifecycle.approve!
+    before_commit&.call
+    lifecycle.commit!
+    expect(period.reload).to be_committed
+    expect(actual.call).to eq(expected)
+  end
+
+  def run_manual!(period, employee_ids, hours)
+    controller = Api::V1::Admin::PayPeriodsController
+    allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
+    allow_any_instance_of(controller).to receive(:current_user_id).and_return(actor.id)
+    post "/api/v1/admin/pay_periods/#{period.id}/run_payroll",
+      params: { employee_ids: employee_ids, hours: hours }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("errors", [])).to be_empty
+  end
+
+  it "calculates, approves and commits manual multirate and salary pay before and after the raise" do
+    salary = create(:employee, :salary, company: company, pay_rate: 31_200)
+    EmployeeCompensationChangeService.new(employee: salary, actor: actor, source: "staff",
+      effective_on: "2026-12-01", pay_rate: 35_360).call!
+    hours = { employee.id.to_s => { wage_rates: [
+      { employee_wage_rate_id: regular.id, label: "Client-submitted label", rate: 99, regular_hours: 80 }
+    ] } }
+    [ [ open_period, 1200, "1040.56" ], [ next_period, 1360, "1169.12" ] ].each do |period, gross, net|
+      run_manual!(period, [ employee.id, salary.id ], hours)
+      expect(period.payroll_items.find_by!(employee: employee).wage_rate_hours.sole).to include("label" => "Regular", "rate" => gross / 80)
+      commit_money!(period, { employee.id => [ gross, net.to_d ], salary.id => [ gross, net.to_d ] })
+    end
+  end
+
+  it "keeps older manual gross, net and basis after a conversion, including a committed PDF after correction" do
+    EmployeeCompensationChangeService.new(employee: employee, actor: actor, source: "staff",
+      effective_on: "2026-12-01", reason: "Raise withdrawn", cancel: true).call!
+    change_wage_rate!(regular, effective_on: "2026-11-23", rate: 16)
+    run_manual!(open_period, [ employee.id ], { employee.id.to_s => { regular: 80 } })
+    expect(open_period.mid_period_compensation_warnings.sole).to include("mid-period on 2026-11-23")
+    allow(PayrollBusinessClock).to receive(:today).and_return(Date.new(2026, 12, 1))
+    aggregate_failures do
+      change_compensation!(employee, effective_on: "2026-12-01", employment_type: "salary", salary_type: "annual",
+        pay_rate: 52_000, pay_frequency: "semimonthly")
+      run_manual!(open_period, [ employee.id ], { employee.id.to_s => { regular: 80 } })
+      item = open_period.payroll_items.find_by!(employee: employee)
+      expect(item.calculation_context_snapshot.fetch("employee")).to include("employment_type" => "hourly", "pay_frequency" => "biweekly")
+      commit_money!(open_period, { employee.id => [ 1280, "1104.84".to_d ] })
+      pdf = PayStubGenerator.new(item.reload).generate
+      EmployeeCompensationChangeService.new(employee: employee, actor: actor, source: "staff",
+        effective_on: "2026-11-25", pay_rate: 21, historical_correction: true, reason: "Reconcile historical scalar rate").call!
+      SyncEffectiveCompensationJob.perform_now
+      expect(item.reload.attributes.values_at("gross_pay", "net_pay")).to eq([ 1280, "1104.84".to_d ])
+      expect(PayStubGenerator.new(item).generate).to eq(pdf)
+    end
+  end
+
+  it "applies and commits MoSa Revel hours with the reviewed dated job in both periods" do
+    [ [ open_period, 1200, "1040.56" ], [ next_period, 1360, "1169.12" ] ].each do |period, gross, net|
+      service = PayrollImport::ImportService.new(period, actor: actor)
+      preview = service.preview(pdf_records: [ { employee_name: "#{employee.last_name}, #{employee.first_name}", regular_hours: 80, overtime_hours: 0, total_hours: 80 } ], excel_records: [])
+      row = preview.fetch(:matched).sole
+      expect(service.apply!(matched: [ row.merge(selected_wage_rate_id: regular.id) ]).fetch(:errors)).to be_empty
+      commit_money!(period, { employee.id => [ gross, net.to_d ] })
+    end
+  end
+
+  it "applies Spike email intake and commits across cache activation with an intake exception" do
+    company.update!(payroll_intake_source_types: [ "spike_email" ])
+    open_period.update!(start_date: "2026-11-15", end_date: "2026-11-28")
+    next_period.update!(start_date: "2026-11-29", end_date: "2026-12-12")
+    employee.update_columns(intake_exception: { "reason" => "Deferred intake field" },
+      intake_payroll_confirmed_at: Time.current, intake_payroll_eligible_from: open_period.start_date)
+    workweek = CompanyWorkweek.create!(company: company, effective_on: Date.new(2026, 1, 1),
+      starts_on_weekday: 0, starts_at_minutes: 0, timezone: "Pacific/Guam",
+      confirmation_status: "confirmed", source: "operator_confirmed", confirmed_by: actor, confirmed_at: Time.current, notes: "Verified fictional workweek")
+    [ [ open_period, 1200, "1040.56" ], [ next_period, 1360, "1169.12" ] ].each do |period, gross, net|
+      period.update!(company_workweek: workweek)
+      session = create(:payroll_intake_session, company: company, pay_period: period, evidence_snapshot: {
+        "workweek" => PayrollIntake::WorkweekEvidence.new(pay_period: period).capture!,
+        "source_period" => { "start_date" => period.start_date.iso8601, "end_date" => period.end_date.iso8601 }
+      })
+      row = create(:payroll_intake_row, payroll_intake_session: session, employee: employee, regular_hours: 80,
+        week1_hours: 40, week2_hours: 40, week1_tips: 0, week2_tips: 0, reported_tips: 0, tips_paid_out: 0)
+      result = PayrollIntake::ApplyService.new(session: session, actor: actor,
+        row_overrides: [ { id: row.id, employee_id: employee.id, disposition: "included" } ]).call
+      expect(result.fetch(:errors)).to be_empty
+      commit_money!(period, { employee.id => [ gross, net.to_d ] }, before_commit: -> { SyncEffectiveCompensationJob.perform_now(as_of: "2026-12-01") })
+    end
+  end
+
 end

@@ -328,7 +328,7 @@ module PayrollIntake
 
       payroll_item.additional_withholding = employee.additional_withholding.to_f
       payroll_item.clear_wage_rate_hours!
-      payroll_item.employment_type = employee.employment_type
+      payroll_item.employment_type = employee.payroll_compensation_on(@pay_period.end_date).employment_type
       payroll_item.pay_rate = employee.default_payroll_rate_on(pay_period.end_date)
     end
 
@@ -354,7 +354,7 @@ module PayrollIntake
     end
 
     def salary_override_to_preserve(payroll_item, employee)
-      return payroll_item.salary_override if employee.variable_salary?
+      return payroll_item.salary_override if employee.payroll_compensation_on(@pay_period.end_date).variable_salary?
 
       nil
     end

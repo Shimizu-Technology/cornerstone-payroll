@@ -33,7 +33,7 @@ RSpec.describe "Variable salary finalization safety" do
 
   it "uses the saved variable classification even if the profile has since changed" do
     item.update!(calculation_context_snapshot: { "employee" => { "employment_type" => "salary", "salary_type" => "variable" } })
-    employee.update!(salary_type: "per_period")
+    change_compensation!(employee, salary_type: "per_period")
     expect { service.approve! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Pay this period/)
   end
 
