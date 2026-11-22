@@ -18,7 +18,7 @@ class BelowThresholdFicaContext
   end
 
   def applicable?
-    imported_paychecks.any? || unresolved_history?
+    imported_paychecks.any? || unresolved_history? || unverified_legacy_ids.any?
   end
 
   # Imported checks alone are not unresolved history on a verified annual path.
@@ -28,6 +28,17 @@ class BelowThresholdFicaContext
     PayrollItem.where(company: company, employee_id: candidate_employee_ids, pay_period_id: periods.select(:id))
       .where.not(employment_type: "contractor").left_joins(:legacy_disposition, :pay_period)
       .where("payroll_items.payroll_reversed_at IS NOT NULL OR pay_periods.correction_status = 'voided' OR (payroll_item_legacy_dispositions.id IS NOT NULL AND payroll_item_legacy_dispositions.reason != ?)", PayrollItemLegacyDisposition::REASON).exists?
+  end
+
+  # Reportable legacy paychecks saved before FICA bases were recorded, with no
+  # annual fingerprint or reviewed proof. The ordinary annual path always holds
+  # on these, so only the conservative bound can calculate the current check.
+  def unverified_legacy_ids
+    @unverified_legacy_ids ||= EmployeeYearFicaContext.reportable_items(company: company, employee_ids: candidate_employee_ids,
+      year: year, excluding_pay_period_id: excluding_pay_period_id).left_joins(:fica_basis_proof)
+      .where("payroll_items.social_security_taxable_wages IS NULL OR payroll_items.social_security_taxable_tips IS NULL OR payroll_items.additional_medicare_taxable_wages IS NULL")
+      .where("payroll_items.tax_rule_snapshot -> 'annual_fica_context' IS NULL")
+      .where(payroll_item_fica_basis_proofs: { id: nil }).order(:id).pluck(:id)
   end
 
   def snapshot(current_item:, rules:, lock_rules: false, reviewing_imports: false, include_imported_history: true)
@@ -60,7 +71,7 @@ class BelowThresholdFicaContext
     if PayrollGoLiveReview.where(company: company).exists?
       hold!("Successor/predecessor import mapping requires separately reviewed reconciliation")
     end
-    hold!("No disputed financial history for the below-threshold path") unless unresolved_history? || imported_paychecks.any?
+    hold!("No disputed financial history for the below-threshold path") unless applicable?
     bounds = { ss: 0.to_d, medicare: 0.to_d }
     candidates.each do |item|
       validate_candidate!(item, verified)
@@ -161,6 +172,7 @@ class BelowThresholdFicaContext
       result << "reversed paycheck ##{item.id}" if item.payroll_reversed_at.present?
       result << "voided pay period ##{item.pay_period_id}" if item.pay_period.voided?
       result << "unresolved legacy disposition for paycheck ##{item.id}" if unresolved_disposition?(item)
+      result << "legacy paycheck ##{item.id} has no verified FICA bases" if unverified_legacy_ids.include?(item.id)
       result
     end
     reasons << "imported paycheck history" if include_imported_history && imported_paychecks.any?
