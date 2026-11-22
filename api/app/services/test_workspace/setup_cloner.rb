@@ -25,6 +25,12 @@ module TestWorkspace
         CompanyWorkweek,
         company: target_company
       )
+      operating_profile_map = copy_collection(
+        source_company.client_operating_profiles,
+        ClientOperatingProfile,
+        company: target_company,
+        lock_version: 0
+      )
       copy_collection(source_company.pay_component_tax_rules, PayComponentTaxRule, company: target_company)
 
       employee_map = copy_employees!(department_map)
@@ -40,6 +46,7 @@ module TestWorkspace
         payroll_field_definitions: field_definition_map,
         pay_schedules: pay_schedule_map,
         workweeks: workweek_map,
+        operating_profiles: operating_profile_map,
         loans: loan_map
       }
     end

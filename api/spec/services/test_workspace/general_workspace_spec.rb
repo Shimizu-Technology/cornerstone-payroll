@@ -112,6 +112,58 @@ RSpec.describe "General test workspaces" do
     expect(employee.retirement_year_input_for(2026)).to eq(latest)
   end
 
+  it "copies effective-dated operating profile versions into the cloned test workspace" do
+    v1 = ClientOperatingProfile.create!(
+      company: source_company,
+      effective_on: Date.new(2026, 1, 1),
+      ends_on: Date.new(2026, 6, 30),
+      version: 1,
+      offering: "payroll_service",
+      hours_source: "manual",
+      client_portal_enabled: false,
+      employee_portal_enabled: false,
+      options: { "tips" => { "default" => "already_paid_out" } },
+      reason: "Initial version"
+    )
+    v2 = ClientOperatingProfile.create!(
+      company: source_company,
+      effective_on: Date.new(2026, 7, 1),
+      ends_on: nil,
+      version: 2,
+      offering: "payroll_service",
+      hours_source: "intake_adapter",
+      intake_adapter: "spike_email",
+      client_portal_enabled: false,
+      employee_portal_enabled: false,
+      options: { "tips" => { "default" => "already_paid_out" }, "overtime" => { "mode" => "weekly_split" } },
+      reason: "Adopted Spike email adapter"
+    )
+    v2.update!(reason: "Adopted Spike email adapter (confirmed)") # bumps lock_version
+
+    workspace = create_workspace(copy_mode: "setup_only")
+    TestWorkspace::Cloner.new(company: workspace, actor: actor).call
+
+    copied = workspace.client_operating_profiles.order(:version).to_a
+    expect(copied.map(&:version)).to eq([ 1, 2 ])
+    expect(copied.first).to have_attributes(
+      effective_on: v1.effective_on,
+      ends_on: v1.ends_on,
+      offering: "payroll_service",
+      hours_source: "manual",
+      lock_version: 0
+    )
+    expect(copied.second).to have_attributes(
+      effective_on: v2.effective_on,
+      ends_on: nil,
+      offering: "payroll_service",
+      hours_source: "intake_adapter",
+      intake_adapter: "spike_email",
+      lock_version: 0
+    )
+    expect(CompanyFeatures.for(workspace, on: Date.new(2026, 8, 1)).intake_adapter).to eq("spike_email")
+    expect(CompanyFeatures.for(workspace, on: Date.new(2026, 3, 1)).hours_source).to eq("manual")
+  end
+
   it "rolls an archive back when its audit record cannot be written" do
     workspace = create_workspace(copy_mode: "setup_only")
     allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid)

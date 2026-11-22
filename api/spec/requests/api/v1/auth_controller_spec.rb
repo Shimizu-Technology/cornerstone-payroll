@@ -63,6 +63,35 @@ RSpec.describe "Api::V1::Auth", type: :request do
         )
       )
       expect(response.parsed_body.fetch("user")).not_to have_key("super_admin")
+      expect(response.parsed_body.fetch("features")).to eq(
+        "offering" => "payroll_service",
+        "hours_source" => "manual",
+        "intake_adapter" => nil,
+        "client_portal_enabled" => false,
+        "employee_portal_enabled" => false,
+        "subdomain_enabled" => false,
+        "time_module_enabled" => false
+      )
+    end
+
+    it "returns the persisted operating profile summary in features on /auth/me" do
+      company = create(:company, payroll_intake_source_types: [ "mosa_revel" ], client_payroll_approval_required: true)
+      ClientOperatingProfiles::BackfillService.call(companies: Company.where(id: company.id))
+      user = create(:user, company: company, organization: company.organization, role: "admin")
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
+
+      get "/api/v1/auth/me"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("features")).to eq(
+        "offering" => "payroll_portals",
+        "hours_source" => "intake_adapter",
+        "intake_adapter" => "mosa_revel",
+        "client_portal_enabled" => true,
+        "employee_portal_enabled" => false,
+        "subdomain_enabled" => false,
+        "time_module_enabled" => false
+      )
     end
 
     it "exposes own AIRE account connection to accountants without configuration access" do
@@ -99,6 +128,7 @@ RSpec.describe "Api::V1::Auth", type: :request do
         "company_id" => nil,
         "home_company_id" => company.id
       )
+      expect(response.parsed_body.fetch("features")).to be_nil
     end
   end
 end
