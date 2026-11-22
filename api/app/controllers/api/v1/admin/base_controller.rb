@@ -167,7 +167,11 @@ module Api
 
         def capability_company
           # Company routes identify their resource independently of the header.
-          target_id = params[:id] if controller_path == "api/v1/admin/companies"
+          target_id = if controller_path == "api/v1/admin/companies"
+            params[:id]
+          elsif controller_path == "api/v1/admin/client_operating_profiles"
+            params[:company_id]
+          end
           target_id.present? ? Company.find_by(id: target_id) : current_company
         end
 
