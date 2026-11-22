@@ -1,0 +1,19 @@
+# Activate a client employee subdomain
+
+M3-6 adds the plumbing. Existing company slugs are empty and `subdomain_enabled` defaults to false. The enabled host serves a branded coming-soon page until the employee portal ships. Staff and client offices use `payroll.shimizu-technology.com`.
+
+1. Assign an active live company a unique `subdomain_slug`. Set its public display name in `name` and its optional `branding` keys `logo_url`, `primary_color` and `accent_color`. Use a publicly accessible HTTPS logo URL and six-digit hex colors. Use a stable public image URL with no query or fragment. Presigned URLs expose their signature in the public response and expire. Use a public asset hostname for R2 or S3 images. Keep `subdomain_enabled` false during infrastructure setup.
+2. Add `<slug>.shimizu-technology.com` as a domain alias on the Payroll Netlify project. Add the per-client CNAME to the Netlify target shown in the project. Set a Cloudflare CNAME to Netlify to **DNS only** (grey cloud). Wildcard TLS on Netlify requires Netlify DNS or a custom certificate. If using wildcard DNS, verify Netlify routing and TLS for the intended aliases and preserve existing service records. Check that the alias serves the Payroll build over HTTPS. [Netlify domain aliases](https://docs.netlify.com/manage/domains/configure-domains/add-a-domain-alias/)
+3. After the M3-0b Clerk production cutover on `shimizu-technology.com`, keep **Allowed subdomains** enabled and add the exact client hostname when preparing employee sign-in. Keep the payroll hostname on the list. Under the milestone's Clerk plan, sibling subdomains share the root instance without a paid satellite. Recheck plan availability during cutover. A client's own domain is deferred. [Clerk production setup](https://clerk.com/docs/guides/development/deployment/production) · [Clerk subdomain allowlist](https://clerk.com/docs/guides/dashboard/dns-domains/subdomain-allowlist)
+4. Set `subdomain_enabled` to true in the company's current operating profile after approval. Rails derives the exact HTTPS origin for CORS and JWT `azp` from the effective profile of a live, active company in an active organization. The registry refreshes after commits in the web process and has a 45-second cache lifetime. Keep the existing static `CORS_ORIGINS` and `CLERK_AUTHORIZED_PARTIES` entries for Payroll. Use the profile to manage tenant origins.
+5. Verify the branded page, the public branding response, and a CORS preflight from the exact alias. Verify a disabled host gets a branding 404 and a preflight without an allow-origin header. Branding and tenant-origin auth or employee requests share a 30-per-minute per-IP limit, including preflights. The branding response is credential-free. To roll back, switch the profile off and follow the hostname cleanup steps below.
+
+## Rename or retire an enabled slug
+
+1. Set `subdomain_enabled` to false in the effective profile and in any scheduled profile that would turn the old slug back on. Allow the registry cache to refresh, then confirm the old hostname gets a branding 404 and its origin is rejected.
+2. Remove the old hostname from the Clerk allowlist. Remove its dedicated DNS record, confirm it has stopped resolving after the DNS TTL, then remove the old Netlify alias. Check any wildcard routing for the old hostname and ensure it cannot resolve to an unclaimed alias.
+3. Save the new slug and complete the activation steps for the new hostname before turning it on. Tell the employer when the new link is ready. For retirement, clear the slug after cleanup.
+
+M4 moves employee aliases to a dedicated employee Netlify site. Move each existing alias and update its DNS target as part of that rollout.
+
+For local browser QA, a Vite dev server on loopback accepts `/?tenantHost=<slug>.shimizu-technology.com`. Point `VITE_API_URL` to your local Rails API and use isolated test fixtures. The override is available only in Vite development builds on loopback.
