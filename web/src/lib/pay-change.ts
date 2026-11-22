@@ -36,7 +36,7 @@ export function payChangeTouchesLockedPayroll(value: PayChangeEffectiveDateValue
 export function payChangeEffectiveDateErrors(
   value: PayChangeEffectiveDateValue,
   dates: PayChangeEffectiveDates,
-  { basisChanged }: { basisChanged: boolean },
+  { basisChanged, canCorrect }: { basisChanged: boolean; canCorrect: boolean },
 ): Record<string, string[]> {
   const errors: Record<string, string[]> = {};
   const effectiveOn = resolvePayChangeEffectiveOn(value, dates);
@@ -46,9 +46,9 @@ export function payChangeEffectiveDateErrors(
     errors.compensation_effective_on = ['Enter the date this pay change takes effect.'];
   } else if (basisChanged && effectiveOn > dates.today) {
     errors.compensation_effective_on = ['Pay type changes take effect immediately. Choose today or an earlier date.'];
-  } else if (payChangeTouchesLockedPayroll(value, dates) && !value.historicalCorrection) {
+  } else if (payChangeTouchesLockedPayroll(value, dates) && (!canCorrect || !value.historicalCorrection)) {
     errors.compensation_effective_on = [
-      `Payroll through ${formatDate(dates.locked_through as string)} is approved or committed. Choose a later date, or record this as a historical correction.`,
+      `Payroll through ${formatDate(dates.locked_through as string)} is approved or committed. Choose a later date${canCorrect ? ' or record a historical correction' : ''}.`,
     ];
   }
   if (!value.reason.trim()) errors.compensation_change_reason = ['Explain why the pay is changing.'];

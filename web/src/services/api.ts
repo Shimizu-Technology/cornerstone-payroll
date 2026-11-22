@@ -562,6 +562,10 @@ export const employeesApi = {
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
   update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
     api.patch<{ data: Employee; payment_method_review?: { reapproval_pay_period_ids: number[] }; compensation_warnings?: string[] }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
+  cancelScheduledCompensation: (id: number, date: string, reason: string, revision: string, companyId?: number) =>
+    api.post<{ data: Employee }>(`/admin/employees/${id}/cancel_scheduled_compensation`, {
+      employee: { compensation_effective_on: date, compensation_change_reason: reason, compensation_revision: revision },
+    }, { companyId }),
   deactivate: (id: number, deactivation: import('@/types').EmployeeTerminationInput) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/deactivate`, { deactivation }),
   terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>
@@ -4650,6 +4654,7 @@ export interface ClientPortalThread {
 }
 
 export interface EmployeeChangeRequest {
+  proposed_compensation_effective_on?: string | null;
   id: number;
   status: 'pending' | 'approved' | 'rejected';
   request_kind: 'create' | 'update';
@@ -4940,8 +4945,8 @@ export const adminEmployeeChangeRequestsApi = {
     api.get<{ data: EmployeeChangeRequest[] }>('/admin/employee_change_requests', params),
   get: (id: number) =>
     api.get<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}`),
-  approve: (id: number, reviewNotes?: string) =>
-    api.patch<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}/approve`, { review_notes: reviewNotes }),
+  approve: (id: number, reviewNotes?: string, effectiveOn?: string) =>
+    api.patch<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}/approve`, { review_notes: reviewNotes, effective_on: effectiveOn }),
   reject: (id: number, reviewNotes?: string) =>
     api.patch<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}/reject`, { review_notes: reviewNotes }),
 };

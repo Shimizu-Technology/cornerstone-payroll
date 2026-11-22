@@ -9,12 +9,13 @@ import { formatDate } from '@/lib/utils';
 
 interface PayChangeEffectiveDateProps {
   dates: PayChangeEffectiveDates;
+  canCorrect: boolean;
   value: PayChangeEffectiveDateValue;
   onChange: (value: PayChangeEffectiveDateValue) => void;
   errors?: Record<string, string[]>;
 }
 
-export function PayChangeEffectiveDate({ dates, value, onChange, errors = {} }: PayChangeEffectiveDateProps) {
+export function PayChangeEffectiveDate({ dates, canCorrect, value, onChange, errors = {} }: PayChangeEffectiveDateProps) {
   const update = (patch: Partial<PayChangeEffectiveDateValue>) => onChange({ ...value, ...patch });
   const choices: Array<{ timing: PayChangeTiming; label: string }> = [
     { timing: 'next_uncommitted_period', label: `Start of next uncommitted pay period (${formatDate(dates.next_uncommitted_period)})` },
@@ -39,13 +40,14 @@ export function PayChangeEffectiveDate({ dates, value, onChange, errors = {} }: 
             <label key={choice.timing} className="flex min-h-10 items-center gap-3 rounded-xl bg-white px-3 py-2 text-sm text-neutral-900 ring-1 ring-amber-200">
               <input
                 type="radio"
-                name="pay-change-timing"
+                name="compensation_effective_on"
+                className="shrink-0"
                 value={choice.timing}
                 checked={value.timing === choice.timing}
-                onChange={() => update({ timing: choice.timing })}
+                onChange={() => update({ timing: choice.timing, historicalCorrection: false })}
                 aria-invalid={Boolean(dateError)}
               />
-              <span>{choice.label}</span>
+              <span className="min-w-0 break-words">{choice.label}</span>
             </label>
           ))}
         </div>
@@ -54,27 +56,28 @@ export function PayChangeEffectiveDate({ dates, value, onChange, errors = {} }: 
             <label htmlFor="pay-change-custom-date" className="block text-xs font-medium text-amber-950">Pay change effective date</label>
             <Input
               id="pay-change-custom-date"
+              name="compensation_effective_on"
               type="date"
               className="mt-1 bg-white"
               value={value.customDate}
-              onChange={(event) => update({ customDate: event.target.value })}
+              onChange={(event) => update({ customDate: event.target.value, historicalCorrection: false })}
               aria-invalid={Boolean(dateError)}
             />
           </div>
         )}
       </fieldset>
 
-      {touchesLocked && (
+      {touchesLocked && canCorrect && (
         <label className="mt-3 flex items-start gap-3 rounded-xl bg-white px-3 py-2 text-sm text-neutral-900 ring-1 ring-amber-300">
           <input
             type="checkbox"
-            className="mt-1"
+            className="mt-1 shrink-0"
             checked={value.historicalCorrection}
             onChange={(event) => update({ historicalCorrection: event.target.checked })}
           />
           <span>
-            Record as a historical correction. Payroll through {formatDate(dates.locked_through as string)} is approved or committed;
-            this corrects the rate history only and does not change any paycheck.
+            Record as a historical correction. The correction ends at the next recorded change or by {formatDate(dates.locked_through as string)}.
+            Approved and paid amounts stay as saved. Open payroll ending after that date keeps its existing pay setup.
           </span>
         </label>
       )}

@@ -32,9 +32,11 @@ vi.mock('@/services/api', async (importOriginal) => {
 });
 
 const history: EmployeeCompensationHistory = {
+  revision: 'pay-revision',
+  can_correct: true,
   effective_dates: { next_uncommitted_period: '2026-11-16', today: '2026-11-22', locked_through: '2026-11-15' },
   pay_rate_changes: [
-    { id: 1, effective_on: '2024-01-01', ends_on: null, pay_rate: '15.0', employment_type: 'hourly', reason: 'Baseline recorded from the existing employee setup', source: 'backfill', historical_correction: false, status: 'current' },
+    { id: 1, effective_on: '2024-01-01', ends_on: '2026-11-30', pay_rate: '15.0', employment_type: 'hourly', reason: 'Baseline recorded from the existing employee setup', source: 'backfill', historical_correction: false, status: 'current' },
   ],
   wage_rate_versions: [
     { id: 10, employee_wage_rate_id: 101, effective_on: '2024-01-01', ends_on: '2026-11-30', label: 'Regular', rate: '15.0', is_primary: true, active: true, reason: 'Baseline recorded from the existing wage-rate setup', source: 'backfill', historical_correction: false, status: 'current' },
@@ -92,8 +94,8 @@ describe('pay changes with an effective date', () => {
     const card = screen.getByTestId('pay-rate-history');
     expect(within(card).getAllByText('Regular (primary): $17.00/hr').length).toBeGreaterThan(0);
     expect(within(card).getAllByText('Scheduled').length).toBeGreaterThan(0);
-    expect(within(card).getAllByText('Pay rate $15.00/hr').length).toBeGreaterThan(0);
-    expect(within(card).queryByRole('button')).toBeNull();
+    expect(within(card).queryByText('Pay rate $15.00/hr')).toBeNull();
+    expect(within(card).getByRole('button', { name: /Cancel change for/ })).toBeTruthy();
     expect(within(card).queryByRole('textbox')).toBeNull();
   });
 
@@ -106,6 +108,32 @@ describe('pay changes with an effective date', () => {
     expect(payload.compensation_effective_on).toBeUndefined();
     expect(payload.compensation_change_reason).toBeUndefined();
     for (const endpoint of [mocks.listRates, mocks.updateRate, mocks.createRate, mocks.deleteRate]) expect(endpoint).not.toHaveBeenCalled();
+  });
+
+  it('saves a scalar-only hourly profile without sending compensation', async () => {
+    await loadEmployee(employee({ wage_rates: [] }));
+    fireEvent.change(screen.getByLabelText(/^First Name/), { target: { value: 'Renamed' } });
+    expect(screen.queryByTestId('pay-change-effective-date')).toBeNull();
+    submit();
+    await waitFor(() => expect(mocks.updateEmployee).toHaveBeenCalled());
+    const payload = mocks.updateEmployee.mock.calls[0][1];
+    expect(payload.first_name).toBe('Renamed');
+    for (const key of ['pay_rate', 'wage_rates', 'pay_frequency', 'employment_type', 'compensation_effective_on']) {
+      expect(payload[key]).toBeUndefined();
+    }
+  });
+
+  it('clears a historical correction when changing back to an open date', async () => {
+    await loadEmployee(employee());
+    changeHourlyRate('16');
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom date' }));
+    fireEvent.change(screen.getByLabelText('Pay change effective date'), { target: { value: '2026-11-10' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Record as a historical correction/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Today/ }));
+    fireEvent.change(screen.getByLabelText(/Reason for this pay change/), { target: { value: 'Current raise' } });
+    submit();
+    await waitFor(() => expect(mocks.updateEmployee).toHaveBeenCalled());
+    expect(mocks.updateEmployee.mock.calls[0][1].compensation_historical_correction).toBeUndefined();
   });
 
   it('requires an explicit effective-date choice and a reason before saving a rate change', async () => {
@@ -136,7 +164,8 @@ describe('pay changes with an effective date', () => {
       pay_rate: 16.5,
       compensation_effective_on: '2026-11-16',
       compensation_change_reason: 'Annual raise',
-      wage_rates: [{ id: 101, label: 'Regular', rate: 16.5, is_primary: true, active: true }],
+      compensation_revision: 'pay-revision',
+      compensation_wage_rate_edits: [{ id: 101, rate: 16.5 }],
     });
     expect(mocks.updateEmployee.mock.calls[0][1].compensation_historical_correction).toBeUndefined();
     for (const endpoint of [mocks.listRates, mocks.updateRate, mocks.createRate, mocks.deleteRate]) expect(endpoint).not.toHaveBeenCalled();
