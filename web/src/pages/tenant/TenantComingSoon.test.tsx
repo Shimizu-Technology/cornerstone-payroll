@@ -26,10 +26,12 @@ describe('TenantComingSoon', () => {
     expect(screen.getByText('Example Employer')).toBeTruthy();
     expect(screen.getByText('Powered by Cornerstone Payroll')).toBeTruthy();
     expect(screen.getByAltText('').getAttribute('src')).toBe('https://example.test/logo.png');
+    expect(screen.queryAllByRole('link')).toEqual([]);
+    expect(screen.queryAllByRole('button')).toEqual([]);
     expect(screen.getByRole('main').style.borderTopColor).toBe('rgb(33, 79, 68)');
     expect(fetchBranding).toHaveBeenCalledWith(
-      expect.objectContaining({ pathname: '/api/v1/public/tenant_branding', search: `?host=${host}` }),
-      expect.objectContaining({ credentials: 'omit' }),
+      expect.stringContaining(`/api/v1/public/tenant_branding?host=${host}`),
+      expect.objectContaining({ credentials: 'omit', signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -41,6 +43,9 @@ describe('TenantComingSoon', () => {
     expect(await screen.findByRole('heading', { name: 'Employee portal unavailable' })).toBeTruthy();
     expect(screen.getByText('Please contact your employer if you need help.')).toBeTruthy();
     expect(screen.queryByText('Powered by Cornerstone Payroll')).toBeNull();
+    expect(document.title).toBe('Employee Portal');
+    expect(screen.queryAllByRole('link')).toEqual([]);
+    expect(screen.queryAllByRole('button')).toEqual([]);
   });
 
   it('shows the generic fallback when the browser cannot reach the API', async () => {

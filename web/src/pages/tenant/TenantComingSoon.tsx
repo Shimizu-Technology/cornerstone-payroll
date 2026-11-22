@@ -1,12 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getApiBaseUrl, resolveApiUrl } from '@/services/api';
-
-interface TenantBranding {
-  name: string;
-  logo_url: string | null;
-  primary_color: string | null;
-  accent_color: string | null;
-}
+import api, { type TenantBranding } from '@/services/api';
 
 export function TenantComingSoon({ host }: { host: string }) {
   const [branding, setBranding] = useState<TenantBranding | null>();
@@ -14,18 +7,9 @@ export function TenantComingSoon({ host }: { host: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    const url = resolveApiUrl(getApiBaseUrl(), '/public/tenant_branding');
-    url.searchParams.set('host', host);
-
     async function loadBranding() {
       try {
-        const response = await fetch(url, { credentials: 'omit', signal: controller.signal });
-        if (response.status === 404) {
-          if (!controller.signal.aborted) setBranding(null);
-          return;
-        }
-        if (!response.ok) throw new Error('Branding lookup failed');
-        const data: TenantBranding = await response.json();
+        const data = await api.getTenantBranding(host, controller.signal);
         if (!controller.signal.aborted) setBranding(data);
       } catch {
         if (!controller.signal.aborted) setRequestFailed(true);
@@ -37,8 +21,7 @@ export function TenantComingSoon({ host }: { host: string }) {
   }, [host]);
 
   useEffect(() => {
-    if (!branding) return;
-    document.title = `${branding.name} | Employee Portal`;
+    document.title = branding ? `${branding.name} | Employee Portal` : 'Employee Portal';
   }, [branding]);
 
   const unavailable = requestFailed || branding === null;

@@ -11,15 +11,13 @@ const tenantHost = clientSubdomainHost(window.location, import.meta.env.DEV);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <StagingContext />
     {tenantHost ? (
       <TenantComingSoon host={tenantHost} />
     ) : (
-      <>
-        <StagingContext />
-        <PostHogProvider>
-          <App />
-        </PostHogProvider>
-      </>
+      <PostHogProvider>
+        <App />
+      </PostHogProvider>
     )}
   </StrictMode>
 );

@@ -241,8 +241,13 @@ class ClerkTokenVerifier
   def valid_authorized_party?(payload)
     azp = payload["azp"]
     normalized_azp = self.class.normalize_origin(azp) if azp.is_a?(String)
-    client_origin = TenantSubdomainRegistry.client_origin?(normalized_azp)
-    return !client_origin unless authorized_parties_configured?
+    client_origin = TenantSubdomainRegistry.client_origin?(azp)
+    unless authorized_parties_configured?
+      if client_origin
+        Rails.logger.warn("Clerk JWT verification failed: client subdomain requires CLERK_AUTHORIZED_PARTIES")
+      end
+      return !client_origin
+    end
 
     parties = authorized_parties
     if parties.empty?
