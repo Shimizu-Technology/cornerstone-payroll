@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::ClientOperatingProfiles", type: :request do
+  include ActiveSupport::Testing::TimeHelpers
+
   let(:organization) { create(:organization) }
   let(:company) do
     create(
@@ -170,7 +172,50 @@ RSpec.describe "Api::V1::Admin::ClientOperatingProfiles", type: :request do
       expect(response).to have_http_status(:not_found)
     end
 
-    it "enforces test workspace access policy and reports empty editable_keys on read-only test workspaces" do
+    it "returns 403 when X-Company-Id differs from the path company and allows matching header" do
+      admin = create(:user, organization: organization, company: company, role: "admin")
+      sign_in_as(admin)
+
+      get "/api/v1/admin/companies/#{company.id}/operating_profile",
+          headers: { "X-Company-Id" => other_company.id.to_s }
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to include("Company context does not match")
+
+      get "/api/v1/admin/companies/#{company.id}/operating_profile",
+          headers: { "X-Company-Id" => foreign_company.id.to_s }
+      expect(response).to have_http_status(:forbidden)
+
+      get "/api/v1/admin/companies/#{company.id}/operating_profile",
+          headers: { "X-Company-Id" => company.id.to_s }
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "selects the same Guam business-date version on /auth/me and admin GET across the UTC/Guam date boundary" do
+      admin = create(:user, organization: organization, company: company, role: "admin")
+      sign_in_as(admin)
+
+      # 2026-06-30 16:00 UTC is 2026-06-30 in UTC but 2026-07-01 02:00 in Pacific/Guam.
+      travel_to(Time.utc(2026, 6, 30, 16, 0, 0)) do
+        get "/api/v1/admin/companies/#{company.id}/operating_profile"
+        expect(response).to have_http_status(:ok)
+        admin_body = response.parsed_body
+        expect(admin_body.fetch("as_of")).to eq("2026-07-01")
+        expect(admin_body.dig("effective", "version")).to eq(2)
+        expect(admin_body.dig("effective", "offering")).to eq("payroll_portals")
+
+        get "/api/v1/auth/me"
+        expect(response).to have_http_status(:ok)
+        auth_features = response.parsed_body.fetch("features")
+        expect(auth_features).to include(
+          "offering" => admin_body.dig("effective", "offering"),
+          "hours_source" => admin_body.dig("effective", "hours_source"),
+          "intake_adapter" => admin_body.dig("effective", "intake_adapter"),
+          "client_portal_enabled" => admin_body.dig("effective", "client_portal_enabled")
+        )
+      end
+    end
+
+    it "enforces test workspace access policy, applies overrides to effective and history, and reports empty editable_keys on read-only test workspaces" do
       admin = create(:user, organization: organization, company: company, role: "admin")
       accountant = create(:user, organization: organization, company: company, role: "accountant")
       create(:company_assignment, user: accountant, company: company)
@@ -184,6 +229,29 @@ RSpec.describe "Api::V1::Admin::ClientOperatingProfiles", type: :request do
         migration_source_company: company,
         migration_rehearsal_status: "ready"
       )
+      ClientOperatingProfile.create!(
+        company: workspace,
+        effective_on: Date.new(2026, 1, 1),
+        ends_on: Date.new(2026, 6, 30),
+        version: 1,
+        offering: "payroll_portals",
+        hours_source: "manual",
+        client_portal_enabled: true,
+        employee_portal_enabled: true,
+        options: { "subdomain_enabled" => true }
+      )
+      ClientOperatingProfile.create!(
+        company: workspace,
+        effective_on: Date.new(2026, 7, 1),
+        ends_on: nil,
+        version: 2,
+        offering: "payroll_portals",
+        hours_source: "intake_adapter",
+        intake_adapter: "mosa_revel",
+        client_portal_enabled: true,
+        employee_portal_enabled: true,
+        options: { "subdomain_enabled" => true }
+      )
 
       sign_in_as(accountant)
       get "/api/v1/admin/companies/#{workspace.id}/operating_profile"
@@ -192,8 +260,15 @@ RSpec.describe "Api::V1::Admin::ClientOperatingProfiles", type: :request do
       sign_in_as(admin)
       get "/api/v1/admin/companies/#{workspace.id}/operating_profile"
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.fetch("editable_keys")).to eq([])
-      expect(response.parsed_body.dig("effective", "employee_portal_enabled")).to be(false)
+      body = response.parsed_body
+      expect(body.fetch("editable_keys")).to eq([])
+      expect(body.dig("effective", "employee_portal_enabled")).to be(false)
+      expect(body.dig("effective", "options", "subdomain_enabled")).to be(false)
+      expect(body.fetch("history").length).to eq(2)
+      body.fetch("history").each do |row|
+        expect(row.fetch("employee_portal_enabled")).to be(false)
+        expect(row.dig("options", "subdomain_enabled")).to be(false)
+      end
     end
 
     it "does not expose a PATCH route in M3-5a" do

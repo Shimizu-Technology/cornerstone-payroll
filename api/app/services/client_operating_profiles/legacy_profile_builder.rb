@@ -13,7 +13,7 @@ module ClientOperatingProfiles
     end
 
     def self.build(company, effective_on: nil, active_aire_company_ids: nil)
-      company.client_operating_profiles.build(
+      ClientOperatingProfile.new(
         attributes_for(company, effective_on: effective_on, active_aire_company_ids: active_aire_company_ids)
       )
     end
@@ -68,15 +68,66 @@ module ClientOperatingProfiles
       active_client_portal_users?
     end
 
+    # Deploy-day snapshot of active client-portal posture (editable in M3-5b;
+    # nothing reads client_portal_enabled yet). Mirrors User#accessible_company_ids:
+    # practice-only logins count only on their open sandbox, while regular client
+    # users match organization-scoped unexpired assignments to unarchived companies
+    # or fall back to their home company when no such assignment exists.
     def active_client_portal_users?
-      return true if CompanyAssignment.active_access
-        .joins(:user)
-        .where(company_id: company.id, users: { role: User.roles.fetch("client"), active: true })
-        .exists?
+      now = Time.current
+      client_role = User.roles.fetch("client")
 
-      User.where(company_id: company.id, role: User.roles.fetch("client"), active: true)
-          .where.not(id: CompanyAssignment.active_access.select(:user_id))
+      if company.sandbox? && company.active? && company.test_workspace_ready? && !company.test_workspace_read_only?
+        practice_login_exists = CompanyAssignment.active_access
+          .joins(:user)
+          .where(
+            company_id: company.id,
+            users: {
+              role: client_role,
+              active: true,
+              company_id: company.id,
+              practice_company_id: company.id
+            }
+          )
           .exists?
+        return true if practice_login_exists
+      end
+
+      if company.test_workspace_archived_at.nil?
+        active_assignment_exists = CompanyAssignment.active_access
+          .joins(:user)
+          .where(
+            company_id: company.id,
+            users: {
+              role: client_role,
+              active: true,
+              practice_company_id: nil,
+              organization_id: company.organization_id
+            }
+          )
+          .exists?
+        return true if active_assignment_exists
+      end
+
+      User.where(
+        company_id: company.id,
+        organization_id: company.organization_id,
+        role: client_role,
+        active: true,
+        practice_company_id: nil
+      )
+        .where(
+          "NOT EXISTS (" \
+          "SELECT 1 FROM company_assignments " \
+          "INNER JOIN companies assigned_companies ON assigned_companies.id = company_assignments.company_id " \
+          "WHERE company_assignments.user_id = users.id " \
+          "AND (company_assignments.expires_at IS NULL OR company_assignments.expires_at > ?) " \
+          "AND assigned_companies.test_workspace_archived_at IS NULL " \
+          "AND assigned_companies.organization_id = users.organization_id" \
+          ")",
+          now
+        )
+        .exists?
     end
 
     def resolved_effective_on

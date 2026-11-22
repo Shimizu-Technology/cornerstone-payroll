@@ -164,6 +164,79 @@ RSpec.describe "General test workspaces" do
     expect(CompanyFeatures.for(workspace, on: Date.new(2026, 3, 1)).hours_source).to eq("manual")
   end
 
+  it "replaces an existing backfill-only operating profile during clone and retry without hitting unique constraints" do
+    ClientOperatingProfile.create!(
+      company: source_company,
+      effective_on: Date.new(2026, 1, 1),
+      ends_on: Date.new(2026, 6, 30),
+      version: 1,
+      offering: "payroll_service",
+      hours_source: "manual",
+      client_portal_enabled: false,
+      employee_portal_enabled: false,
+      reason: "Source baseline"
+    )
+    ClientOperatingProfile.create!(
+      company: source_company,
+      effective_on: Date.new(2026, 7, 1),
+      ends_on: nil,
+      version: 2,
+      offering: "payroll_service",
+      hours_source: "intake_adapter",
+      intake_adapter: "spike_email",
+      client_portal_enabled: false,
+      employee_portal_enabled: false,
+      reason: "Adopted Spike email adapter"
+    )
+
+    # Case 1: Pending workspace already has a backfilled v1 row -> Cloner replaces it cleanly.
+    pending_workspace = create_workspace(copy_mode: "setup_only")
+    ClientOperatingProfile.create!(
+      company: pending_workspace,
+      effective_on: Date.new(2026, 1, 1),
+      ends_on: nil,
+      version: 1,
+      offering: "payroll_service",
+      hours_source: "manual",
+      client_portal_enabled: false,
+      employee_portal_enabled: false,
+      changed_by: nil,
+      reason: ClientOperatingProfiles::LegacyProfileBuilder::BACKFILL_REASON
+    )
+
+    TestWorkspace::Cloner.new(company: pending_workspace, actor: actor).call
+    expect(pending_workspace.reload).to be_test_workspace_ready
+    expect(pending_workspace.client_operating_profiles.order(:version).pluck(:version, :hours_source, :intake_adapter)).to eq([
+      [ 1, "manual", nil ],
+      [ 2, "intake_adapter", "spike_email" ]
+    ])
+
+    # Case 2: Failed workspace already has a backfilled v1 row -> TestWorkspace::Retry recovers cleanly.
+    failed_workspace = create_workspace(copy_mode: "setup_only")
+    failed_workspace.update!(migration_rehearsal_status: "failed", migration_rehearsal_error: "Previous failure")
+    ClientOperatingProfile.create!(
+      company: failed_workspace,
+      effective_on: Date.new(2026, 1, 1),
+      ends_on: nil,
+      version: 1,
+      offering: "payroll_service",
+      hours_source: "manual",
+      client_portal_enabled: false,
+      employee_portal_enabled: false,
+      changed_by: nil,
+      reason: ClientOperatingProfiles::LegacyProfileBuilder::BACKFILL_REASON
+    )
+
+    perform_enqueued_jobs do
+      TestWorkspace::Retry.new(company: failed_workspace, actor: actor).call
+    end
+    expect(failed_workspace.reload).to be_test_workspace_ready
+    expect(failed_workspace.client_operating_profiles.order(:version).pluck(:version, :hours_source, :intake_adapter)).to eq([
+      [ 1, "manual", nil ],
+      [ 2, "intake_adapter", "spike_email" ]
+    ])
+  end
+
   it "rolls an archive back when its audit record cannot be written" do
     workspace = create_workspace(copy_mode: "setup_only")
     allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid)

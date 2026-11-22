@@ -1,14 +1,15 @@
 # frozen_string_literal: true
 
 module ClientOperatingProfiles
-  # Idempotently backfills version 1 of client_operating_profiles for any company
-  # that does not already have a profile row.
+  # Idempotently backfills version 1 of client_operating_profiles for any live
+  # company that does not already have a profile row. Test workspaces are skipped
+  # because read fallback covers them until SetupCloner copies source versions.
   class BackfillService
-    def self.call(companies: Company.all)
+    def self.call(companies: Company.live_payroll)
       new(companies: companies).call
     end
 
-    def initialize(companies: Company.all)
+    def initialize(companies: Company.live_payroll)
       @companies = companies
     end
 
@@ -23,7 +24,7 @@ module ClientOperatingProfiles
       skipped = 0
 
       companies.find_each do |company|
-        if ClientOperatingProfile.exists?(company_id: company.id)
+        if company.test_workspace? || ClientOperatingProfile.exists?(company_id: company.id)
           skipped += 1
           next
         end

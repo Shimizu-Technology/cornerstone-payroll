@@ -25,12 +25,7 @@ module TestWorkspace
         CompanyWorkweek,
         company: target_company
       )
-      operating_profile_map = copy_collection(
-        source_company.client_operating_profiles,
-        ClientOperatingProfile,
-        company: target_company,
-        lock_version: 0
-      )
+      operating_profile_map = copy_operating_profiles!
       copy_collection(source_company.pay_component_tax_rules, PayComponentTaxRule, company: target_company)
 
       employee_map = copy_employees!(department_map)
@@ -184,6 +179,24 @@ module TestWorkspace
             employee_loan: field.employee_loan_id && loan_map.fetch(field.employee_loan_id)
           )
         end
+    end
+
+    def copy_operating_profiles!
+      existing = ClientOperatingProfile.where(company_id: target_company.id)
+      if existing.exists?
+        non_backfill_exists = existing.where(
+          "reason IS DISTINCT FROM ? OR changed_by_id IS NOT NULL",
+          ClientOperatingProfiles::LegacyProfileBuilder::BACKFILL_REASON
+        ).exists?
+        existing.delete_all unless non_backfill_exists
+      end
+
+      copy_collection(
+        source_company.client_operating_profiles,
+        ClientOperatingProfile,
+        company: target_company,
+        lock_version: 0
+      )
     end
 
     def copy_collection(scope, target_class, **overrides)

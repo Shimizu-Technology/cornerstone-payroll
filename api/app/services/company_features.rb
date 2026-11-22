@@ -6,10 +6,10 @@
 class CompanyFeatures
   attr_reader :company, :as_of, :profile
 
-  def self.for(company, on: Date.current)
+  def self.for(company, on: PayrollBusinessClock.today)
     raise ArgumentError, "company is required" unless company.is_a?(Company)
 
-    date = (on || Date.current).to_date
+    date = (on || PayrollBusinessClock.today).to_date
     persisted = ClientOperatingProfile.for_date(company.id, date)
     resolved = persisted || ClientOperatingProfiles::LegacyProfileBuilder.build(company, effective_on: date)
     new(company: company, profile: resolved, as_of: date)

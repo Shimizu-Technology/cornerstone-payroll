@@ -12,11 +12,11 @@ module Api
           return unless as_of
 
           features = CompanyFeatures.for(@target_company, on: as_of)
-          history = @target_company.client_operating_profiles.history_order.map(&:serialize_payload)
+          history = @target_company.client_operating_profiles.history_order.map { |profile| serialize_profile(profile) }
 
           render json: {
             as_of: as_of.iso8601,
-            effective: serialize_effective(features),
+            effective: serialize_profile(features.profile),
             history: history,
             catalog: OperatingProfileCatalog.serialize,
             editable_keys: OperatingProfileCatalog.editable_keys_for(user: current_user, company: @target_company)
@@ -38,6 +38,11 @@ module Api
           @target_company = Company.find_by(id: raw_company_id.to_i)
           unless @target_company
             return render json: { error: "Company not found" }, status: :not_found
+          end
+
+          header_company_id = request.headers["X-Company-Id"].presence
+          if header_company_id.present? && header_company_id.to_i != @target_company.id
+            return render json: { error: "Company context does not match the requested client" }, status: :forbidden
           end
 
           unless current_user&.can_access_company?(@target_company.id)
@@ -79,13 +84,13 @@ module Api
           nil
         end
 
-        def serialize_effective(features)
-          payload = features.profile.serialize_payload
+        def serialize_profile(profile)
+          payload = profile.serialize_payload
           return payload unless @target_company.test_workspace?
 
           payload.merge(
-            employee_portal_enabled: features.employee_portal_enabled?,
-            options: payload.fetch(:options).merge("subdomain_enabled" => features.subdomain_enabled?)
+            employee_portal_enabled: false,
+            options: payload.fetch(:options).merge("subdomain_enabled" => false)
           )
         end
       end
