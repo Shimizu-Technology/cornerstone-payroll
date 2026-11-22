@@ -135,9 +135,7 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     expect(service.proposals.last[:error]).to be_nil
   end
 
-  it "normalizes extra hours with preloaded employee rates" do
-    worker.employee_wage_rates.load
-    allow(Employee).to receive(:where).with(company_id: company.id, id: [ worker.id ]).and_return([ worker ])
+  it "normalizes extra hours with the employee's dated job rate" do
     result = PayrollSubmissions::ChangeRows.normalize!([ changes.last ], company_id: company.id)
     expect(result.sole).to include("employee_wage_rate_id" => rate.id, "hours" => "68")
   end
