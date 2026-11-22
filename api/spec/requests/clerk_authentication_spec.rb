@@ -31,7 +31,7 @@ RSpec.describe "Clerk Authentication", type: :request do
     end
 
     it "rejects requests with invalid token" do
-      allow_any_instance_of(ApplicationController).to receive(:fetch_jwks).and_return([])
+      allow_any_instance_of(ClerkTokenVerifier).to receive(:fetch_jwks).and_return([])
 
       get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer invalid.token.here" }
       expect(response).to have_http_status(:unauthorized)
