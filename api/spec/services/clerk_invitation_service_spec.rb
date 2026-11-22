@@ -78,6 +78,19 @@ RSpec.describe ClerkInvitationService do
     expect(described_class.new.invitation_status("inv_exact")).to eq("accepted")
   end
 
+  it "fails the lookup when more pages remain at the pagination cap" do
+    endpoint = "https://api.clerk.com/v1/invitations"
+    query = { query: "inv_exact", limit: "10" }
+    page = { total_count: 101, data: Array.new(10) { |i| { id: "inv_exact#{i}" } } }.to_json
+    requests = (0...100).step(10).map do |offset|
+      page_query = offset.zero? ? query : query.merge(offset: offset.to_s)
+      stub_request(:get, endpoint).with(query: page_query).to_return(status: 200, body: page)
+    end
+
+    expect(described_class.new.invitation_status("inv_exact")).to be_nil
+    requests.each { |request| expect(request).to have_been_requested.once }
+  end
+
   it "exposes verified addresses separately from the primary address and display name" do
     stub_request(:get, "https://api.clerk.com/v1/users/user_account")
       .to_return(status: 200, body: {

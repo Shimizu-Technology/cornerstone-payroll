@@ -271,8 +271,8 @@ class StagingOutboundPolicy
       if request.method == "GET" && path == "/v1/invitations"
         query = URI.decode_www_form(URI.parse(request.path).query.to_s)
         invitation_id = query.assoc("query")&.last
-        unless query.count { |key, _| key == "query" } == 1 &&
-          query.all? { |key, value| key == "query" || [ %w[limit 10], %w[status revoked] ].include?([ key, value ]) } &&
+        unless query.map(&:first).uniq.size == query.size &&
+          query.all? { |key, value| clerk_invitation_lookup_param?(key, value) } &&
           invitation_id&.match?(/\Ainv_[a-zA-Z0-9_-]+\z/)
           raise Blocked, "Only an exact named tester invitation lookup is allowed in staging"
         end
@@ -284,12 +284,25 @@ class StagingOutboundPolicy
         clerk_target!(id: match[1], env: env)
       elsif request.method == "POST" && (match = path.match(%r{\A/v1/invitations/([^/]+)/revoke\z}))
         user = User.find_by(clerk_invitation_id: match[1]) if User.column_names.include?("clerk_invitation_id")
-        clerk_target!(email: user&.email, env: env)
+        target = Thread.current[:staging_clerk_revoke_target]
+        email = user&.email
+        email = target.fetch(:email) if user.nil? && target&.fetch(:invitation_id) == match[1]
+        clerk_target!(email: email, env: env)
       else
         raise Blocked, "Clerk operation blocked in staging"
       end
     rescue JSON::ParserError, ArgumentError
       raise Blocked, "Invalid staging Clerk operation"
+    end
+
+    def clerk_invitation_lookup_param?(key, value)
+      case key
+      when "query" then true
+      when "limit" then value == "10"
+      when "status" then %w[revoked expired].include?(value)
+      when "offset" then value.match?(/\A[1-9][0-9]*\z/)
+      else false
+      end
     end
   end
 end

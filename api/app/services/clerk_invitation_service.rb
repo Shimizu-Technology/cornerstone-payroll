@@ -2,6 +2,7 @@
 
 class ClerkInvitationService
   BASE_URL = "https://api.clerk.com/v1"
+  INVITATION_LOOKUP_OFFSET_LIMIT = 100
   SUBJECT_PATTERN = /\Auser_[a-zA-Z0-9_-]+\z/
 
   def initialize
@@ -82,12 +83,7 @@ class ClerkInvitationService
   end
 
   def revoke_invitation(invitation_id, email: nil)
-    if StagingOutboundPolicy.staging?
-      StagingOutboundPolicy.clerk_target!(email: email || User.find_by(clerk_invitation_id: invitation_id)&.email)
-    end
-    raise "CLERK_SECRET_KEY not configured" unless configured?
-
-    response = post_json("/invitations/#{invitation_id}/revoke", {})
+    response = request_revocation(invitation_id, email: email)
 
     if response.is_a?(Net::HTTPSuccess)
       { success: true }
@@ -102,10 +98,27 @@ class ClerkInvitationService
 
   private
 
+  def request_revocation(invitation_id, email:)
+    previous = Thread.current[:staging_clerk_revoke_target]
+    if StagingOutboundPolicy.staging?
+      unless invitation_id.to_s.match?(/\Ainv_[a-zA-Z0-9_-]+\z/)
+        raise StagingOutboundPolicy::Blocked, "Invalid staging Clerk invitation ID"
+      end
+      email ||= User.find_by(clerk_invitation_id: invitation_id)&.email
+      StagingOutboundPolicy.clerk_target!(email: email)
+      Thread.current[:staging_clerk_revoke_target] = { invitation_id: invitation_id, email: email }
+    end
+    raise "CLERK_SECRET_KEY not configured" unless configured?
+
+    post_json("/invitations/#{invitation_id}/revoke", {})
+  ensure
+    Thread.current[:staging_clerk_revoke_target] = previous
+  end
+
   def find_invitation(id, status:)
     limit = 10
     offset = 0
-    loop do
+    while offset < INVITATION_LOOKUP_OFFSET_LIMIT
       filters = { query: id, limit: limit, status: status }.compact
       filters[:offset] = offset if offset.positive?
       data = get_json("/invitations?#{URI.encode_www_form(filters)}")

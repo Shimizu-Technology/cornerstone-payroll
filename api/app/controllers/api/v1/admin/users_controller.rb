@@ -87,14 +87,15 @@ module Api
           permitted = user_params
           role_provided = params.dig(:user, :role).present?
           requested_role = role_provided ? requested_user_role : @user.role
-          unless role_manageable?(requested_role)
+          role_changing = requested_role != @user.role
+          if role_changing && !role_manageable?(requested_role)
             return render json: { error: "Cannot assign that role" }, status: :forbidden
           end
 
           company_ids_provided = permitted.key?(:company_ids)
           company_ids = permitted.delete(:company_ids)
 
-          if @user.id == current_user_id && role_provided && requested_role != @user.role
+          if @user.id == current_user_id && role_changing
             return render json: { error: "Cannot change your own role" }, status: :unprocessable_entity
           end
 
@@ -112,7 +113,7 @@ module Api
             end
 
             @user.assign_attributes(permitted)
-            @user.role = requested_role if role_provided
+            @user.role = requested_role if role_changing
             sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
             @user.save!
             @user.association(:company_assignments).reset
