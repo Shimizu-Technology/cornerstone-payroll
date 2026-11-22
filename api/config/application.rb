@@ -1,5 +1,6 @@
 require_relative "boot"
 require_relative "../lib/canonical_proxy_headers"
+require_relative "../lib/write_maintenance"
 
 # Load environment variables from .env
 require "dotenv"
@@ -52,6 +53,9 @@ module Api
     initializer "canonical_proxy_headers", after: :load_config_initializers, before: :build_middleware_stack do |app|
       app.middleware.insert_before 0, CanonicalProxyHeaders
     end
+
+    # Keep CORS outside this middleware so the browser can read maintenance responses.
+    config.middleware.insert_before Rails::Rack::Logger, WriteMaintenance
 
     trusted_proxy_cidrs = ENV.fetch("TRUSTED_PROXY_CIDRS", "")
                                .split(",")

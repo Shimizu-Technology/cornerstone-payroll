@@ -35,6 +35,27 @@ RSpec.describe "Api::V1::Integrations::Aire::Events", type: :request do
     expect(response.parsed_body).to include("error" => "Connected payroll is paused")
   end
 
+  it "rejects valid webhook deliveries on both routes without persisting or dispatching a verification job" do
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("WRITE_MAINTENANCE").and_return("true")
+
+    %w[/api/v1/integrations/aire/events /api/v1/integrations/time_payroll/events].each do |path|
+      expect do
+        post path, params: event_payload.to_json, headers: headers
+      end.not_to change(AirePayrollEvent, :count)
+
+      expect(response).to have_http_status(:service_unavailable)
+      expect(response.headers["Retry-After"]).to eq("60")
+      expect(response.parsed_body["code"]).to eq("write_maintenance")
+    end
+    expect(AirePayrollEvent).not_to have_received(:dispatch_one!)
+
+    allow(ENV).to receive(:[]).with("WRITE_MAINTENANCE").and_return("false")
+    post "/api/v1/integrations/aire/events", params: event_payload.to_json, headers: headers
+    expect(response).to have_http_status(:accepted)
+    expect(AirePayrollEvent).to have_received(:dispatch_one!).once
+  end
+
   it "accepts and idempotently acknowledges a valid event without Clerk authentication" do
     post "/api/v1/integrations/aire/events", params: event_payload.to_json, headers: headers
 

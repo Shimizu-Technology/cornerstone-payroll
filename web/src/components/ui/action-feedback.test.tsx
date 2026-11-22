@@ -13,6 +13,48 @@ function NotifyButton({ tone = 'error' }: { tone?: 'error' | 'success' }) {
 }
 
 describe('shared action feedback', () => {
+  it('shows a calm notice from a blocked save without resetting the form', async () => {
+    const { departmentsApi } = await import('@/services/api');
+    const message = 'Payroll is in a short maintenance window. Changes are paused.';
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
+      JSON.stringify({ code: 'write_maintenance', error: message }),
+      { status: 503 },
+    ));
+    const saveFailed = vi.fn();
+    render(<FeedbackProvider>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const name = String(new FormData(form).get('department'));
+        void departmentsApi.create({ name, company_id: 1 }).then(() => form.reset()).catch(saveFailed);
+      }}>
+        <label>Department<input name="department" /></label>
+        <button type="submit">Save</button>
+      </form>
+    </FeedbackProvider>);
+
+    const name = screen.getByRole<HTMLInputElement>('textbox', { name: 'Department' });
+    fireEvent.change(name, { target: { value: 'Operations' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect((await screen.findByRole('status')).textContent).toContain(message);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(name.value).toBe('Operations');
+    expect(saveFailed).toHaveBeenCalledWith(expect.objectContaining({ status: 503, message }));
+  });
+
+  it('keeps background ticket failures quiet and passes along the retry interval', async () => {
+    const { authApi } = await import('@/services/api');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ code: 'write_maintenance', error: 'Maintenance' }),
+      { status: 503, headers: { 'Retry-After': '75' } },
+    ));
+    render(<FeedbackProvider>{null}</FeedbackProvider>);
+
+    await expect(authApi.createCableTicket(1)).rejects.toMatchObject({ status: 503, retryAfterMs: 75_000 });
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('keeps a failed legacy check action above its still-open overlay', async () => {
     const { checksApi } = await import('@/services/api');
     const { VoidCheckModal } = await import('@/components/payroll/VoidCheckModal');
