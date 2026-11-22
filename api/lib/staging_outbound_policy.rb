@@ -268,7 +268,17 @@ class StagingOutboundPolicy
     def clerk_request!(request, path, env)
       return true if request.method == "GET" && path.match?(%r{\A/v1/(?:users(?:/[^/]+)?|instance)\z})
       raise Blocked, "Clerk mutations are disabled with shared production credentials" if shared_production_credentials?(env)
-      if request.method == "POST" && path == "/v1/invitations"
+      if request.method == "GET" && path == "/v1/invitations"
+        query = URI.decode_www_form(URI.parse(request.path).query.to_s)
+        invitation_id = query.assoc("query")&.last
+        unless query.count { |key, _| key == "query" } == 1 &&
+          query.all? { |key, value| key == "query" || [ %w[limit 10], %w[status revoked] ].include?([ key, value ]) } &&
+          invitation_id&.match?(/\Ainv_[a-zA-Z0-9_-]+\z/)
+          raise Blocked, "Only an exact named tester invitation lookup is allowed in staging"
+        end
+
+        clerk_target!(email: User.find_by(clerk_invitation_id: invitation_id)&.email, env: env)
+      elsif request.method == "POST" && path == "/v1/invitations"
         clerk_target!(email: JSON.parse(request.body.to_s)["email_address"], env: env)
       elsif request.method == "PATCH" && (match = path.match(%r{\A/v1/users/([^/]+)\z}))
         clerk_target!(id: match[1], env: env)
@@ -278,7 +288,7 @@ class StagingOutboundPolicy
       else
         raise Blocked, "Clerk operation blocked in staging"
       end
-    rescue JSON::ParserError
+    rescue JSON::ParserError, ArgumentError
       raise Blocked, "Invalid staging Clerk operation"
     end
   end

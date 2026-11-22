@@ -214,7 +214,6 @@ if Rails.env.development?
   # Admin user for development
   platform_owner = User.find_or_initialize_by(email: User::PRIMARY_PLATFORM_OWNER_EMAIL)
   platform_owner.name = "Leon Shimizu" if platform_owner.name.blank?
-  platform_owner.clerk_id = "user_3A6fIlTloHIiJxXCDqEnqzO0ogg" if platform_owner.clerk_id.blank?
   platform_owner.company ||= company
   platform_owner.organization ||= company.organization
   platform_owner.role = :super_admin

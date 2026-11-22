@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth as useClerkAuth } from '@clerk/clerk-react';
 import { ApiError, authApi, setAuthToken, setAuthTokenProvider } from '@/services/api';
 import { clearAllDrafts } from '@/components/client-portal/messageDrafts';
@@ -21,6 +21,7 @@ interface User {
 /** Why the backend refused to open an account, kept so the sign-in screen can explain it. */
 export interface AuthProblem {
   status: number | null;
+  code?: string;
   message: string;
 }
 
@@ -42,7 +43,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function authProblemFrom(err: unknown): AuthProblem {
-  if (err instanceof ApiError) return { status: err.status, message: err.message };
+  if (err instanceof ApiError) {
+    const { data } = err;
+    const code = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string' ? data.code : undefined;
+    return { status: err.status, code, message: err.message };
+  }
   return { status: null, message: err instanceof Error ? err.message : 'Could not load your account' };
 }
 type AuthResponseUser = Awaited<ReturnType<typeof authApi.me>>['user'];
@@ -131,7 +136,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [authProblem, setAuthProblem] = useState<AuthProblem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [backendUnauthorized, setBackendUnauthorized] = useState(false);
+  const backendUnauthorized = useRef(false);
 
   useEffect(() => {
     if (!isSignedIn) {
@@ -147,12 +152,12 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async () => {
     if (!isSignedIn) {
       setUser(null);
-      setBackendUnauthorized(false);
+      backendUnauthorized.current = false;
       setIsLoading(false);
       return;
     }
 
-    if (backendUnauthorized) {
+    if (backendUnauthorized.current) {
       setIsLoading(false);
       return;
     }
@@ -169,20 +174,21 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
       setAuthProblem(null);
     } catch (err) {
       setAuthProblem(authProblemFrom(err));
+      setUser(null);
       if (err instanceof ApiError && err.status === 401) {
-        // Clerk session exists but backend rejected user (e.g. not provisioned/invited).
-        // Sign out locally to prevent redirect/auth polling loops.
-        setBackendUnauthorized(true);
-        setAuthToken(null);
-        await clerkSignOut();
+        // One rejected Clerk session should trigger one sign-out.
+        if (!backendUnauthorized.current) {
+          backendUnauthorized.current = true;
+          setAuthToken(null);
+          await clerkSignOut().catch(() => undefined);
+        }
       } else {
         console.error('Failed to load user:', err);
       }
-      setUser(null);
     } finally {
       setIsLoading(false);
     }
-  }, [backendUnauthorized, isSignedIn, getToken, clerkSignOut]);
+  }, [isSignedIn, getToken, clerkSignOut]);
 
   // Refresh user when Clerk auth state changes
   useEffect(() => {

@@ -5,6 +5,11 @@ module InvitationDeliveryOutcome
 
   private
 
+  def invitation_redirect_url
+    frontend = ENV.fetch("FRONTEND_URL") { ENV.fetch("ALLOWED_ORIGINS", "http://localhost:5173").split(",").first.strip }
+    "#{frontend}/login"
+  end
+
   def invitation_delivery_response(user, clerk_result)
     return invitation_status_response("not_requested") unless user
     unless clerk_result[:success]

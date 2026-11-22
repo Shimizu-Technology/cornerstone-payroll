@@ -42,4 +42,18 @@ RSpec.describe "staging transport boundaries" do
     expect { ClerkInvitationService.new.create_invitation(email: "employee@example.test") }.to raise_error(StagingOutboundPolicy::Blocked)
     expect { ClerkInvitationService.new.revoke_invitation("copied-invitation") }.to raise_error(StagingOutboundPolicy::Blocked)
   end
+
+  it "limits Clerk invitation status lookups to a named tester's exact invitation ID" do
+    tester = create(:user, email: "leon@example.test", clerk_id: "user_leon", clerk_invitation_id: "inv_tester")
+    ENV["STAGING_TESTER_BINDINGS"] = [ { user_id: tester.id, email: tester.email, clerk_subject: tester.clerk_id } ].to_json
+
+    endpoint = "/v1/invitations"
+    allowed = Net::HTTP::Get.new("#{endpoint}?query=inv_tester&limit=10")
+    expect { StagingOutboundPolicy.clerk_request!(allowed, endpoint, ENV) }.not_to raise_error
+
+    [ "", "?query=inv_other&limit=10", "?query=leon@example.test", "?query=inv_tester&query=inv_other" ].each do |query|
+      request = Net::HTTP::Get.new(endpoint + query)
+      expect { StagingOutboundPolicy.clerk_request!(request, endpoint, ENV) }.to raise_error(StagingOutboundPolicy::Blocked)
+    end
+  end
 end
