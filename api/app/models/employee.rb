@@ -103,6 +103,7 @@ class Employee < ApplicationRecord
   has_many :employee_w4_elections, dependent: :restrict_with_error
   has_many :employee_retirement_elections, dependent: :restrict_with_error
   has_many :employee_retirement_year_inputs, dependent: :restrict_with_error
+  has_many :historical_workers, dependent: :restrict_with_error
   # Compensation history is removed before the wage rates it references.
   has_many :employee_compensation_changes, dependent: :restrict_with_error
   has_many :employee_wage_rate_versions, dependent: :restrict_with_error
@@ -115,7 +116,6 @@ class Employee < ApplicationRecord
   has_many :employee_change_requests, dependent: :restrict_with_error
   has_many :employee_document_requirements, dependent: :restrict_with_error
   has_many :employee_document_requirement_events, dependent: :restrict_with_error
-  has_many :historical_workers, dependent: :restrict_with_error
   has_many :historical_paychecks, dependent: :restrict_with_error
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
   has_many :employee_configuration_review_resolutions, dependent: :restrict_with_error
