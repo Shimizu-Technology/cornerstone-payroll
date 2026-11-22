@@ -250,7 +250,9 @@ module Api
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: false)
           data["ssn_last_four"] = employee.ssn_last_four
           data["contractor_ein_last_four"] = employee.contractor_ein.to_s.gsub(/\D/, "").last(4).presence
-          data["wage_rates"] = employee.wage_rates_on(PayrollBusinessClock.today).map do |rate|
+          rates_on = PayrollBusinessClock.today
+          data.merge!(EmployeeCompensationChangeService.snapshot(employee, rates_on).as_json)
+          data["wage_rates"] = employee.wage_rates_on(rates_on).map do |rate|
             {
               id: rate.id,
               employee_id: rate.employee_id,

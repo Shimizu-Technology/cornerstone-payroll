@@ -32,9 +32,11 @@ RSpec.describe "QuickBooks bootstrap authorization at delayed boundaries", :post
     HistoricalImportSourceFile.where(historical_import_batch_id: batch.id).delete_all
     HistoricalImportBatch.where(id: batch.id).delete_all
     EmployeeW4Election.where(employee_id: employee_ids).delete_all
+    EmployeeWageRateVersion.where(employee_id: employee_ids).delete_all
     EmployeeWageRate.where(employee_id: employee_ids).delete_all
     EmployeePayrollField.where(employee_id: employee_ids).delete_all
     PayrollFieldDefinition.where(company_id: company.id).delete_all
+    EmployeeCompensationChange.where(employee_id: employee_ids).delete_all
     Employee.where(id: employee_ids).delete_all
     AuditLog.where(company_id: company.id).delete_all
     CompanyAssignment.where(company_id: company.id).delete_all

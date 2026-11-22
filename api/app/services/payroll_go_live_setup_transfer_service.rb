@@ -181,7 +181,7 @@ class PayrollGoLiveSetupTransferService
         adjustment
       end
     end
-    pay_rate = attributes.delete("pay_rate")
+    attributes.except!(*EmployeeCompensationChangeService::COMPENSATION_ATTRIBUTES)
     target.update!(attributes.merge(
       department: source.department && department_map.fetch(source.department),
       configuration_source: "quickbooks_history"
@@ -189,11 +189,11 @@ class PayrollGoLiveSetupTransferService
     flag_loan_reconciliation!(target) if held_loan_adjustments
     copy_w4!(source, target, review, actor)
     copy_retirement!(source, target, review, actor)
-    copy_compensation!(source, target, review, actor, pay_rate)
+    copy_compensation!(source, target, review, actor)
     copy_deductions!(source, target, deduction_type_map)
     copy_payroll_fields!(source, target, definition_map)
     copy_work_profile!(source, target, review, actor)
-    flag_configuration_certifications!(source, target)
+    flag_configuration_certifications!(source, target, review.effective_on)
   end
 
   def self.copy_w4!(source, target, review, actor)
@@ -228,9 +228,11 @@ class PayrollGoLiveSetupTransferService
 
   # The reviewed pay rate and wage rates start on the go-live date, like the
   # copied W-4 and retirement elections.
-  def self.copy_compensation!(source, target, review, actor, pay_rate)
-    existing = target.employee_wage_rates.index_by(&:label)
-    edits = source.employee_wage_rates.map do |source_rate|
+  def self.copy_compensation!(source, target, review, actor)
+    date = review.effective_on
+    compensation = EmployeeCompensationChangeService.snapshot(source, date)
+    existing = target.wage_rates_on(date, include_inactive: true).index_by(&:label)
+    edits = source.wage_rates_on(date, include_inactive: true).map do |source_rate|
       { id: existing[source_rate.label]&.id, label: source_rate.label, rate: source_rate.rate,
         active: source_rate.active, is_primary: source_rate.is_primary }
     end
@@ -240,7 +242,8 @@ class PayrollGoLiveSetupTransferService
       source: "go_live_setup_transfer",
       reason: "Reviewed successor setup copied from #{review.source_company.name}",
       effective_on: review.effective_on,
-      pay_rate: pay_rate,
+      pay_rate: compensation.fetch("pay_rate"),
+      basis: compensation.slice(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES),
       wage_rate_edits: edits
     ).call!
   end
@@ -296,11 +299,11 @@ class PayrollGoLiveSetupTransferService
     target.update!(configuration_review_status: "needs_review", configuration_review_items: items)
   end
 
-  def self.flag_configuration_certifications!(source, target)
+  def self.flag_configuration_certifications!(source, target, date)
     codes = [ "certify_employee_profile" ]
-    codes << "certify_variable_salary_pay" if source.variable_salary?
+    codes << "certify_variable_salary_pay" if EmployeeCompensationChangeService.snapshot(source, date).values_at("employment_type", "salary_type") == %w[salary variable]
     codes << "certify_retirement_configuration" if retirement_configuration?(source)
-    codes << "certify_multiple_wage_rates" if source.employee_wage_rates.active.count > 1
+    codes << "certify_multiple_wage_rates" if source.wage_rates_on(date).size > 1
     codes << "certify_tipped_pay" if source.employee_tipped_occupations.exists?
     codes << "certify_contractor_setup" if source.contractor?
 

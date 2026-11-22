@@ -32,7 +32,7 @@ module Api
             acknowledgement: params[:acknowledgement].to_s
           )
           render json: payload(review.reload)
-        rescue ArgumentError, ActiveRecord::RecordInvalid, CompanyPayScheduleChangeService::ChangeError,
+        rescue ArgumentError, ActiveRecord::RecordInvalid, CompanyPayScheduleChangeService::ChangeError, EmployeeCompensationChangeService::Error,
                EmployeeW4ElectionChangeService::Error, EmployeeWorkProfileChangeService::Error => e
           render_go_live_error(e)
         end

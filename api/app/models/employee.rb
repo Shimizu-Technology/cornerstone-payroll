@@ -104,8 +104,8 @@ class Employee < ApplicationRecord
   has_many :employee_retirement_elections, dependent: :restrict_with_error
   has_many :employee_retirement_year_inputs, dependent: :restrict_with_error
   # Compensation history is removed before the wage rates it references.
-  has_many :employee_compensation_changes, dependent: :delete_all
-  has_many :employee_wage_rate_versions, dependent: :delete_all
+  has_many :employee_compensation_changes, dependent: :restrict_with_error
+  has_many :employee_wage_rate_versions, dependent: :restrict_with_error
   has_many :employee_wage_rates, dependent: :destroy
   has_many :employee_tipped_occupations, dependent: :destroy
   has_many :employee_work_profiles, dependent: :restrict_with_error
@@ -326,6 +326,8 @@ class Employee < ApplicationRecord
     date = date.to_date
     rates = employee_wage_rates.to_a.filter_map do |row|
       if wage_rate_versions_by_row.fetch(row.id, []).empty?
+        next if row.label.start_with?(EmployeeCompensationChangeService::RESERVED_LABEL_PREFIX)
+
         next (include_inactive || row.active?) ? row : nil
       end
 
@@ -348,8 +350,8 @@ class Employee < ApplicationRecord
     covering = versions.find { |version| version.covers?(date) }
     return covering if covering
 
-    first = versions.first
-    baseline = compensation_change_timeline.first&.effective_on
+    first = versions.find { |version| !version.historical_correction? }
+    baseline = compensation_change_timeline.find { |version| !version.historical_correction? }&.effective_on
     first if first && date < first.effective_on && baseline && first.effective_on <= baseline
   end
 
@@ -918,7 +920,7 @@ class Employee < ApplicationRecord
   end
 
   def guard_compensation_mutation
-    return unless will_save_change_to_pay_rate?
+    return if (changes_to_save.keys & EmployeeCompensationChangeService::COMPENSATION_ATTRIBUTES).empty?
     return if EmployeeCompensationChangeService.writing?(id)
 
     raise EmployeeCompensationChangeService::CompensationMutationError,
