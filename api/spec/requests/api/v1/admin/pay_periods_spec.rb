@@ -1698,7 +1698,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
     it "resynchronizes a stale contractor snapshot before recalculating a W-2 employee" do
       employee.allow_tax_classification_change = true
-      employee.update!(
+      change_compensation!(employee,
         employment_type: "contractor",
         contractor_type: "individual",
         contractor_pay_type: "flat_fee"
