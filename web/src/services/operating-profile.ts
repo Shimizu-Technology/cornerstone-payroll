@@ -15,6 +15,7 @@ export interface CatalogEntry {
   example: string;
   effect: string;
   requires: string[];
+  locked_until_milestone?: number | null;
 }
 
 export interface OperatingProfileVersion {
@@ -36,6 +37,7 @@ export interface OperatingProfileResponse {
   as_of: string;
   client_name: string;
   lock_version: number;
+  available_effective_dates: string[];
   effective: OperatingProfileVersion;
   history: OperatingProfileVersion[];
   catalog: CatalogEntry[];

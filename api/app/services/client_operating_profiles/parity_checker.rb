@@ -62,26 +62,60 @@ module ClientOperatingProfiles
     attr_reader :companies, :as_of
 
     def compare_company(company, persisted, legacy)
-      expected = OperatingProfileCatalog.values_for(legacy).merge(audited_overrides(company, persisted))
-      OperatingProfileCatalog.values_for(persisted).filter_map do |key, value|
-        next if value == expected.fetch(key)
-
-        Difference.new(company_id: company.id, company_name: company.name, field: key)
-      end
-    end
-
-    def audited_overrides(company, persisted)
-      return {} if persisted.version == 1
-
-      versions = company.client_operating_profiles.where(version: 2..persisted.version).select(:id)
-      AuditLog.where(
+      profiles = company.client_operating_profiles.order(:version).to_a
+      audits = AuditLog.where(
         company_id: company.id,
         action: UpdateService::AUDIT_ACTION,
+        actor_type: "staff_user",
         record_type: ClientOperatingProfile.name,
-        record_id: versions
-      ).order(:id).pluck(:metadata).each_with_object({}) do |metadata, values|
-        values.merge!(metadata.fetch("after_values"))
+        record_id: profiles.drop(1).map(&:id)
+      ).order(:id).group_by(&:record_id)
+
+      differences = []
+      baseline = profiles.first
+      values = OperatingProfileCatalog.values_for(baseline)
+      overrides = {}
+      effective_overrides = {}
+      differences << "profile.version" unless baseline.version == 1
+
+      profiles.each_cons(2) do |previous, profile|
+        differences << "profile.version" unless profile.version == previous.version + 1
+        rows = audits.fetch(profile.id, [])
+        differences << "profile.audit.v#{profile.version}" if rows.empty?
+        rows.each do |audit|
+          changes = audited_changes(profile, audit.metadata, values)
+          if changes
+            values.merge!(changes)
+            overrides.merge!(changes)
+          else
+            differences << "profile.audit.v#{profile.version}"
+          end
+        end
+        differences.concat(changed_keys(OperatingProfileCatalog.values_for(profile), values))
+        effective_overrides = overrides.dup if profile.id == persisted.id
       end
+
+      expected = OperatingProfileCatalog.values_for(legacy).merge(effective_overrides)
+      differences.concat(changed_keys(OperatingProfileCatalog.values_for(persisted), expected))
+      differences.uniq.map { |field| Difference.new(company_id: company.id, company_name: company.name, field: field) }
+    end
+
+    def changed_keys(actual, expected)
+      actual.keys.reject { |key| actual.fetch(key) == expected.fetch(key) }
+    end
+
+    def audited_changes(profile, metadata, values)
+      return unless metadata.is_a?(Hash)
+      return unless metadata["version"] == profile.version && metadata["effective_on"] == profile.effective_on.iso8601
+
+      before = metadata["before_values"]
+      after = metadata["after_values"]
+      fields = metadata["changed_fields"]
+      return unless before.is_a?(Hash) && after.is_a?(Hash) && fields.is_a?(Array) && fields.present?
+      return unless fields.tally == before.keys.tally && fields.tally == after.keys.tally
+      return unless before == values.slice(*fields) && fields.all? { |key| before[key] != after[key] }
+
+      after
     end
   end
 end
