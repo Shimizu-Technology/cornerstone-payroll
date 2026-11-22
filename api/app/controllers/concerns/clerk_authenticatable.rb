@@ -67,82 +67,11 @@ module ClerkAuthenticatable
   end
 
   def verify_clerk_token(token)
-    jwks = fetch_jwks
-    return nil unless jwks
-
-    # Decode without verification first to get the key ID
-    unverified = JWT.decode(token, nil, false)
-    kid = unverified[1]["kid"]
-
-    # Find the matching key
-    jwk = jwks.find { |k| k["kid"] == kid }
-    return nil unless jwk
-
-    # Build the RSA key and verify
-    key = JWT::JWK.new(jwk).public_key
-    options = {
-      algorithm: "RS256",
-      verify_iss: true,
-      iss: clerk_issuer,
-      verify_expiration: true
-    }
-    if clerk_audience.present?
-      options[:verify_aud] = true
-      options[:aud] = clerk_audience
-    else
-      # Keep compatibility with Clerk setups that don't emit aud.
-      options[:verify_aud] = false
-    end
-
-    decoded = JWT.decode(token, key, true, options)
-    decoded[0]
-  rescue JWT::DecodeError, JWT::ExpiredSignature, JWT::InvalidIssuerError => e
-    Rails.logger.warn("Clerk JWT verification failed: #{e.message}")
-    nil
+    clerk_token_verifier.verify(token)
   end
 
-  def fetch_jwks
-    RequestPathCache.store.fetch("clerk_jwks", expires_in: 1.hour, skip_nil: true) do
-      uri = URI("#{clerk_api_base}/.well-known/jwks.json")
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = true
-      http.open_timeout = 5
-      http.read_timeout = 5
-      response = http.get(uri.path)
-      if response.is_a?(Net::HTTPSuccess)
-        JSON.parse(response.body)["keys"]
-      else
-        Rails.logger.error("Failed to fetch Clerk JWKS: #{response.code}")
-        nil
-      end
-    rescue Timeout::Error, Errno::ECONNREFUSED => e
-      Rails.logger.error("Network error fetching Clerk JWKS: #{e.message}")
-      nil
-    end
-  end
-
-  def clerk_issuer
-    # Use explicit env var if set (supports custom domains / production instances)
-    # Falls back to constructing from instance ID for dev environments
-    ENV.fetch("CLERK_ISSUER") { "https://#{clerk_instance_id}.clerk.accounts.dev" }
-  end
-
-  def clerk_api_base
-    ENV.fetch("CLERK_API_BASE") { "https://#{clerk_instance_id}.clerk.accounts.dev" }
-  end
-
-  def clerk_audience
-    ENV["CLERK_AUDIENCE"]
-  end
-
-  def clerk_instance_id
-    # Extract from publishable key or use env var
-    ENV.fetch("CLERK_INSTANCE_ID") do
-      pk = ENV["CLERK_PUBLISHABLE_KEY"] || ""
-      # pk_test_<base64 of instance>.clerk.accounts.dev$
-      decoded = Base64.decode64(pk.sub(/^pk_(test|live)_/, ""))
-      decoded.split(".clerk.accounts.dev").first
-    end
+  def clerk_token_verifier
+    @clerk_token_verifier ||= ClerkTokenVerifier.new
   end
 
   def provision_user_from_clerk(payload)

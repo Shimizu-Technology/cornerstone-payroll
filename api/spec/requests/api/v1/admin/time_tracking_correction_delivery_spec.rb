@@ -19,8 +19,8 @@ RSpec.describe "Authenticated accounting receipt delivery", type: :request do
   end
   before do
     actor.update!(clerk_id: "receipt-operator-#{SecureRandom.uuid}")
-    allow_any_instance_of(ApplicationController).to receive(:fetch_jwks).and_return([ jwk.export.deep_stringify_keys ])
-    allow_any_instance_of(ApplicationController).to receive(:clerk_issuer).and_return("https://delivery-auth.test")
+    allow_any_instance_of(ClerkTokenVerifier).to receive(:fetch_jwks).and_return([ jwk.export.deep_stringify_keys ])
+    allow_any_instance_of(ClerkTokenVerifier).to receive(:clerk_issuer).and_return("https://delivery-auth.test")
     delivery_params
   end
   def read_delivery(params = delivery_params, period = next_period)

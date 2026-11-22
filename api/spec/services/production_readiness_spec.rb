@@ -30,6 +30,7 @@ RSpec.describe ProductionReadiness do
       "FRONTEND_URL" => "https://payroll.example.com",
       "CLERK_PUBLISHABLE_KEY" => "pk_live_publishable",
       "CLERK_SECRET_KEY" => "sk_live_secret",
+      "CLERK_AUTHORIZED_PARTIES" => "https://payroll.example.com",
       "R2_ACCESS_KEY_ID" => "r2-access",
       "R2_SECRET_ACCESS_KEY" => "r2-secret",
       "R2_ACCOUNT_ID" => "r2-account",
@@ -138,7 +139,7 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: true)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(29)
+    expect(report.checks.length).to eq(30)
     expect(cache.values).to be_empty
     expect(cache.deleted.length).to eq(1)
     expect(storage.objects).to be_empty
@@ -152,7 +153,7 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: false)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(18)
+    expect(report.checks.length).to eq(19)
   end
 
   it "fails closed when complete production encryption sources conflict" do
@@ -192,6 +193,58 @@ RSpec.describe ProductionReadiness do
       "allowed frontend origins are explicit production HTTPS origins",
       "production Clerk keys are configured"
     )
+  end
+
+  it "fails closed when CLERK_AUTHORIZED_PARTIES is unset or blank in production" do
+    [ nil, "", "   " ].each do |value|
+      if value.nil?
+        env.delete("CLERK_AUTHORIZED_PARTIES")
+      else
+        env["CLERK_AUTHORIZED_PARTIES"] = value
+      end
+
+      report = readiness.run(live: false)
+
+      expect(report.failures.map(&:name)).to include(
+        "Clerk authorized parties are explicit production HTTPS origins"
+      )
+    end
+  end
+
+  it "rejects invalid, wildcard, HTTP, path, or non-standard-port CLERK_AUTHORIZED_PARTIES values" do
+    [
+      "*",
+      "http://payroll.example.com",
+      "https://payroll.example.com/admin",
+      "https://payroll.example.com:8443",
+      "https://payroll.example.com, http://insecure.example.com"
+    ].each do |value|
+      env["CLERK_AUTHORIZED_PARTIES"] = value
+
+      report = readiness.run(live: false)
+
+      expect(report.failures.map(&:name)).to include(
+        "Clerk authorized parties are explicit production HTTPS origins"
+      )
+    end
+  end
+
+  it "accepts multiple explicit HTTPS origins in CLERK_AUTHORIZED_PARTIES" do
+    env["CLERK_AUTHORIZED_PARTIES"] = "https://payroll.shimizu-technology.com, https://mosa.shimizu-technology.com"
+
+    report = readiness.run(live: false)
+
+    expect(report).to be_passed
+  end
+
+  it "reports live production Clerk keys and authorized parties passing when REQUIRE_MFA is false while keeping MFA attestation failing" do
+    env["REQUIRE_MFA"] = "false"
+
+    report = readiness.run(live: false)
+
+    expect(report.checks.find { |check| check.name == "production Clerk keys are configured" }.passed).to be(true)
+    expect(report.checks.find { |check| check.name == "Clerk authorized parties are explicit production HTTPS origins" }.passed).to be(true)
+    expect(report.failures.map(&:name)).to contain_exactly("MFA enforcement has instance-bound evidence")
   end
 
   it "requires instance-bound MFA evidence in addition to the attestation flag" do
