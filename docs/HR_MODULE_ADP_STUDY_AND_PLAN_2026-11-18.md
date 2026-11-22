@@ -250,7 +250,7 @@ MoSa's is a restaurant. Its staff are hourly, earn tips and clock in on Revel, a
 | Profile | <ul><li>Contact details and emergency contacts</li><li>changes go through approval rules</li></ul> | Changes waiting for approval | Emergency contacts are new |
 | Time off | <ul><li>Balance per policy with the equation and ledger</li><li>request form with review step</li><li>request status</li><li>calendar with paydays and holidays</li></ul> | <ul><li>Approve or decline</li><li>team calendar</li><li>who is off</li></ul> | Only if MoSa's has a PTO or sick policy. Payroll owns balances (spec F1). |
 | Policies | <ul><li>Read and acknowledge the handbook</li><li>tip-pool and other policies</li><li>due dates</li></ul> | Upload a policy, set who must acknowledge it, see who hasn't | New |
-| Documents | Their own documents; upload a requested one | Request a document, review it | Extends today's document requirements; malware scanning must be on first |
+| Documents | Their own documents; upload a requested one | Request a document, review it | Extends today's document requirements; pilot uploads are allowed with existing `ClientDocumentFileValidator` type/byte/size checks and no malware scanner, with scanning added before wider rollout (Leon, Nov 22, 2026) |
 | Credentials | Their own permits and expiry dates | Expiring-soon list and reminders | Health certificates for food workers if Guam requires them (question 4) |
 | Task inbox | Everything waiting on them | Everything waiting on managers | Email first; text after the SMS decision |
 | New-hire packet | <ul><li>Personal info and W-4</li><li>direct deposit (approval rules apply)</li><li>emergency contacts</li><li>policies to acknowledge</li><li>documents</li></ul> | Start a packet, track completion | Could slip to after the pilot starts. I-9 Section 1 comes later. |
@@ -321,7 +321,7 @@ New PRs to add to the [spec's sequence](PLATFORM_OFFERINGS_IMPLEMENTATION_SPEC_2
 | # | PR | Notes |
 |---|---|---|
 | H1 | Emergency contacts (table, staff, client and employee views; changes through the approval rules) | Small; good first HR PR |
-| H2 | Policies and acknowledgements (upload, audience, due date, acknowledgement record with version and time, client report) | Needs file scanning on |
+| H2 | Policies and acknowledgements (upload, audience, due date, acknowledgement record with version and time, client report) | Pilot uploads allowed without a malware scanner using `ClientDocumentFileValidator`; add malware scanning before wider rollout (Leon, Nov 22, 2026) |
 | H3 | Credentials with expiry (type catalog per client, dates, document link, reminders, expiring report) | Covers health certificates now and H-2B dates later |
 | H4 | Task inbox and notification preferences for employees and client managers | Email first; text after spec N1 |
 | H5 | Client holiday calendars, shown in the portal calendar and fed to time apps | Guam's legal holidays as the default |

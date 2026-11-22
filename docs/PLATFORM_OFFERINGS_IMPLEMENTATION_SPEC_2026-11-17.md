@@ -402,7 +402,7 @@ The employee always comes from the session plus an `X-Employee-Link-Id` header, 
    - Each client turns PTO on in its profile.
 2. **Documents.**
    - Employee-visible documents, handbook and policy acknowledgments with an e-signature, and employee uploads against a requirement.
-   - Uploads reuse the client document pipeline. **Malware scanning must be switched on first**, because today's scanner is `Noop`.
+   - Uploads reuse the client document pipeline (`ClientDocumentFileValidator` type/byte/size checks). **Pilot uploads are allowed without a malware scanner** (`ClientDocumentScanner::Noop`), trusting pilot companies; add malware scanning before wider rollout beyond the pilot (Leon, Nov 22, 2026).
 3. **Electronic W-4,** meeting 26 CFR 31.3402(f)(5)-1: confirmation of the signer's identity, the perjury jurat, and the signature as the final entry. It feeds `EmployeeW4ElectionChangeService`.
 4. **Bank changes** from the employee portal and time apps, using the Workstream D rules.
 5. **Benefits view:** effective-dated deductions linked to a light `benefit_plans` table (plan name, carrier contact, summary PDF).
@@ -441,7 +441,7 @@ Year-end forms (the W-2GU plan, steps 0–5) take priority over everything here 
 | C5 | Generalize history approval, category mapping and evidence; remove the company-2 check; neutral namespace | Payroll | C3 | No for AIRE | AIRE regression suite |
 | C6 | Employee API v1 reads (ytd, tax forms, profile, documents) | Payroll | C3, E4 | New only | Contract fixtures extended |
 | C7 | Employee API v1 change requests with Payroll OTP and required signed worker assertions | Payroll + AIRE | D1, D4, N1, C6 | New only | Approval only inside Payroll |
-| F1–F5 | PTO, documents and acknowledgments (after scanning is on), e-W-4, bank changes (needs D4), benefits view | Payroll + AIRE | D1–D4, E3 | Yes | Per-feature acceptance |
+| F1–F5 | PTO, documents and acknowledgments (pilot uploads allowed without scanner; add scanning before wider rollout — Leon, Nov 22, 2026), e-W-4, bank changes (needs D4), benefits view | Payroll + AIRE | D1–D4, E3 | Yes | Per-feature acceptance |
 | W1–W2 | Configuration readiness in the AIRE codebase, then the second client's deployment | AIRE | C5 | No for AIRE | AIRE production unchanged |
 | B8–B9 | Universal workbook adapter; merge the two apply paths | Payroll | B7 | Yes | Parity run |
 
