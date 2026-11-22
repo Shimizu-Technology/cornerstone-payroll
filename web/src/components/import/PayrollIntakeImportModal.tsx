@@ -17,7 +17,7 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { employeeWageRatesApi, employeesApi, payrollIntakeImportsApi } from '@/services/api';
+import { employeesApi, payrollIntakeImportsApi } from '@/services/api';
 import type {
   PayrollIntakeApplyRowPayload,
   PayrollIntakeDispositionTarget,
@@ -390,6 +390,12 @@ export function PayrollIntakeImportModal({
       contractor_type: newEmployeeForm.contractor_type,
       contractor_pay_type: newEmployeeForm.contractor_pay_type,
       pay_rate: Number.isFinite(payRate) ? payRate : 0,
+      wage_rates: hourlyRateMode ? cleanedWageRates.map((rate) => ({
+        label: rate.label,
+        rate: rate.numericRate,
+        is_primary: rate === primaryRate,
+        active: true,
+      })) : undefined,
       pay_frequency: newEmployeeForm.pay_frequency,
       payment_delivery_method: null,
       filing_status: 'single',
@@ -408,20 +414,7 @@ export function PayrollIntakeImportModal({
     try {
       setCreatingEmployee(true);
       setCreateEmployeeError(null);
-      const response = await employeesApi.create(payload);
-      const createdRates = hourlyRateMode
-        ? await Promise.all(cleanedWageRates.map((rate) => employeeWageRatesApi.create({
-            employee_id: response.data.id,
-            label: rate.label,
-            rate: rate.numericRate,
-            is_primary: rate.is_primary,
-            active: true,
-          })))
-        : [];
-      const employee = {
-        ...response.data,
-        wage_rates: createdRates.map((result) => result.wage_rate),
-      };
+      const { data: employee } = await employeesApi.create(payload);
       setLocalEmployees((current) => [...current.filter((candidate) => candidate.id !== employee.id), employee]);
       onEmployeeCreated?.(employee);
       updateRow(createEmployeeRow.id, { employee_id: employee.id, disposition: 'included', include: true });

@@ -1060,13 +1060,15 @@ export function EmployeeForm() {
             .map((rate) => [rate.id as number, rate])
         );
 
-        await Promise.all(
-          existingRates
-            // Removing a displayed row must not delete hidden or newly added definitions.
-            .filter((rate) => rate.active !== false && displayedSavedRateIds.has(rate.id as number) && !normalizedById.has(rate.id as number))
-            .map((rate) => employeeWageRatesApi.delete(rate.id as number, requestedCompanyId))
-        );
-        if (!isCurrentSubmission()) return;
+        let revision = existingRatesResponse.compensation_revision;
+        // Keep the revision tied to the preceding successful write. A fresh
+        // list mid-save could adopt a concurrent editor's revision.
+        for (const rate of existingRates) {
+          if (rate.active === false || !rate.id || !displayedSavedRateIds.has(rate.id) || normalizedById.has(rate.id)) continue;
+          const result = await employeeWageRatesApi.delete(rate.id, revision, requestedCompanyId);
+          revision = result.compensation_revision;
+          if (!isCurrentSubmission()) return;
+        }
 
         for (const rate of normalizedWageRates) {
           const payload = {
@@ -1074,16 +1076,13 @@ export function EmployeeForm() {
             rate: roundCurrencyValue(Number(rate.rate) || 0),
             is_primary: rate.is_primary,
             active: rate.active !== false,
+            compensation_revision: revision,
           };
 
-          if (rate.id) {
-            await employeeWageRatesApi.update(rate.id, payload, requestedCompanyId);
-          } else {
-            await employeeWageRatesApi.create({
-              employee_id: savedEmployeeId,
-              ...payload,
-            }, requestedCompanyId);
-          }
+          const result = rate.id
+            ? await employeeWageRatesApi.update(rate.id, payload, requestedCompanyId)
+            : await employeeWageRatesApi.create({ employee_id: savedEmployeeId, ...payload }, requestedCompanyId);
+          revision = result.compensation_revision;
           if (!isCurrentSubmission()) return;
         }
       }

@@ -341,13 +341,14 @@ class EmployeeCompensationChangeService
   def initialize(employee:, actor:, source:, reason: nil, effective_on: nil, pay_rate: UNCHANGED,
                  wage_rates: nil, replace_missing_wage_rates: false, wage_rate_edits: [],
                  historical_correction: false, basis: {}, expected_revision: UNCHANGED, cancel: false,
-                 reject_scheduled_conflict: false)
+                 reject_scheduled_conflict: false, require_revision: false)
     @employee = employee
     @actor = actor
     @source = source.to_s
     @reason = reason.to_s.strip
     @basis = basis.stringify_keys.slice(*BASIS_ATTRIBUTES)
     @expected_revision = expected_revision
+    @require_revision = require_revision
     @cancel = cancel
     @reject_scheduled_conflict = reject_scheduled_conflict
     @requested_effective_on = effective_on
@@ -385,10 +386,9 @@ class EmployeeCompensationChangeService
     requested["pay_rate"] = normalized_pay_rate unless pay_rate.equal?(UNCHANGED)
     changes = requested.reject { |key, value| self.class.comparable(current[key]) == self.class.comparable(value) }
     edits = desired_wage_rate_edits(before_rates)
-    if changes.any? || edits.any? || @historical_correction
-      validate_revision!
-      validate_effective_on!(effective_on)
-    end
+    changing = changes.any? || edits.any? || @historical_correction
+    validate_revision! if changing || @require_revision
+    validate_effective_on!(effective_on) if changing
     self.class.validate_basis_transition!(employee, effective_on, changes.slice(*BASIS_ATTRIBUTES),
                                          historical_correction: @historical_correction)
     validate_scheduled_conflict!(effective_on) if @reject_scheduled_conflict && (changes.any? || edits.any?)

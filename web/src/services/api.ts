@@ -739,15 +739,20 @@ export const employeePayrollFieldsApi = {
     api.post<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields/bulk_update`, { employee_payroll_fields: data }, { companyId }),
 };
 
+type WageRateRevision = { compensation_revision: string };
+type WageRateWriteResponse = WageRateRevision & { wage_rate: EmployeeWageRate };
+
 export const employeeWageRatesApi = {
-  list: (employeeId: number, companyId?: number): Promise<{ wage_rates: EmployeeWageRate[] }> =>
-    api.get<{ wage_rates: EmployeeWageRate[] }>('/admin/employee_wage_rates', { employee_id: employeeId }, { companyId }),
-  create: (data: EmployeeWageRate & { employee_id: number }, companyId?: number): Promise<{ wage_rate: EmployeeWageRate }> =>
-    api.post<{ wage_rate: EmployeeWageRate }>('/admin/employee_wage_rates', { employee_wage_rate: data }, { companyId }),
-  update: (id: number, data: Partial<EmployeeWageRate>, companyId?: number): Promise<{ wage_rate: EmployeeWageRate }> =>
-    api.patch<{ wage_rate: EmployeeWageRate }>(`/admin/employee_wage_rates/${id}`, { employee_wage_rate: data }, { companyId }),
-  delete: (id: number, companyId?: number): Promise<{ message: string }> =>
-    api.delete<{ message: string }>(`/admin/employee_wage_rates/${id}`, { companyId }),
+  list: (employeeId: number, companyId?: number) =>
+    api.get<WageRateRevision & { wage_rates: EmployeeWageRate[] }>('/admin/employee_wage_rates', { employee_id: employeeId }, { companyId }),
+  create: (data: EmployeeWageRate & WageRateRevision & { employee_id: number }, companyId?: number) =>
+    api.post<WageRateWriteResponse>('/admin/employee_wage_rates', { employee_wage_rate: data }, { companyId }),
+  update: (id: number, data: Partial<EmployeeWageRate> & WageRateRevision, companyId?: number) =>
+    api.patch<WageRateWriteResponse>(`/admin/employee_wage_rates/${id}`, { employee_wage_rate: data }, { companyId }),
+  delete: (id: number, revision: string, companyId?: number) =>
+    api.delete<WageRateRevision & { message: string }>(`/admin/employee_wage_rates/${id}`, {
+      companyId, data: { employee_wage_rate: { compensation_revision: revision } },
+    }),
 };
 
 // Departments (Admin API)
