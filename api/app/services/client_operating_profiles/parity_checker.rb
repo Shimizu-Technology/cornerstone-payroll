@@ -2,7 +2,7 @@
 
 module ClientOperatingProfiles
   # Read-only parity check comparing each live company's persisted current
-  # operating profile against LegacyProfileBuilder.attributes_for.
+  # operating profile against legacy configuration plus intentional audited edits.
   # Makes zero database writes and exposes only company_id, company_name, and
   # field names (never personal data values).
   class ParityChecker
@@ -12,14 +12,6 @@ module ClientOperatingProfiles
         differences.empty?
       end
     end
-
-    CORE_FIELDS = %i[
-      offering
-      hours_source
-      intake_adapter
-      client_portal_enabled
-      employee_portal_enabled
-    ].freeze
 
     def self.call(companies: Company.all, on: PayrollBusinessClock.today)
       new(companies: companies, on: on).call
@@ -54,8 +46,8 @@ module ClientOperatingProfiles
           next
         end
 
-        expected = LegacyProfileBuilder.attributes_for(company, active_aire_company_ids: active_aire_company_ids)
-        differences.concat(compare_company(company, persisted, expected))
+        legacy = LegacyProfileBuilder.build(company, active_aire_company_ids: active_aire_company_ids)
+        differences.concat(compare_company(company, persisted, legacy))
       end
 
       Result.new(
@@ -69,27 +61,27 @@ module ClientOperatingProfiles
 
     attr_reader :companies, :as_of
 
-    def compare_company(company, persisted, expected)
-      diffs = []
+    def compare_company(company, persisted, legacy)
+      expected = OperatingProfileCatalog.values_for(legacy).merge(audited_overrides(company, persisted))
+      OperatingProfileCatalog.values_for(persisted).filter_map do |key, value|
+        next if value == expected.fetch(key)
 
-      CORE_FIELDS.each do |field|
-        next if persisted.public_send(field) == expected.fetch(field)
-
-        diffs << Difference.new(company_id: company.id, company_name: company.name, field: field.to_s)
+        Difference.new(company_id: company.id, company_name: company.name, field: key)
       end
+    end
 
-      expected_options = expected.fetch(:options)
-      OperatingProfileCatalog.entries.each do |entry|
-        next unless entry.option?
+    def audited_overrides(company, persisted)
+      return {} if persisted.version == 1
 
-        actual_value = persisted.option_value(entry.id)
-        expected_value = OperatingProfileCatalog.option_value(expected_options, entry.id)
-        next if actual_value == expected_value
-
-        diffs << Difference.new(company_id: company.id, company_name: company.name, field: entry.id)
+      versions = company.client_operating_profiles.where(version: 2..persisted.version).select(:id)
+      AuditLog.where(
+        company_id: company.id,
+        action: UpdateService::AUDIT_ACTION,
+        record_type: ClientOperatingProfile.name,
+        record_id: versions
+      ).order(:id).pluck(:metadata).each_with_object({}) do |metadata, values|
+        values.merge!(metadata.fetch("after_values"))
       end
-
-      diffs
     end
   end
 end

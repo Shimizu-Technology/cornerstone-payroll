@@ -198,7 +198,9 @@ Rails.application.routes.draw do
         delete "printer_profile_selections/:check_stock_type", to: "printer_profile_selections#destroy"
 
         resources :companies, only: [ :index, :show, :create, :update ] do
-          resource :operating_profile, only: [ :show ], controller: :client_operating_profiles
+          resource :operating_profile, only: [ :show ], controller: :client_operating_profiles do
+            patch :update, on: :member, path: ""
+          end
           member do
             get :migration_rehearsal_preview
             post :migration_rehearsal, action: :create_migration_rehearsal
