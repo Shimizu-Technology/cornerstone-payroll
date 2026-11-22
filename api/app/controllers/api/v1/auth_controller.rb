@@ -26,7 +26,8 @@ module Api
             company_capabilities: Company.where(id: current_user.accessible_company_ids).order(:id).to_h do |company|
               [ company.id.to_s, StaffRolePolicy.capabilities_for(current_user, company: company) ]
             end
-          }
+          },
+          features: current_company ? CompanyFeatures.for(current_company).summary : nil
         }
       end
     end
