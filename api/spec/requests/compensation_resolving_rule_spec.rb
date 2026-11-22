@@ -125,7 +125,7 @@ RSpec.describe "Pay rates resolve on the pay period end date", type: :request do
     allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
 
     get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id, start_date: "2026-11-01", end_date: "2026-11-30" }
-    expect(response.parsed_body.dig("report", "employee", "pay_rate")).to eq(15.0)
+    expect(response.parsed_body.dig("report", "employee")).to include("employment_type" => "hourly", "pay_rate" => 15.0)
   end
 
   it "warns on an open period that a change starts in the middle of" do
@@ -212,6 +212,10 @@ RSpec.describe "Pay rates resolve on the pay period end date", type: :request do
       SyncEffectiveCompensationJob.perform_now
       expect(item.reload.attributes.values_at("gross_pay", "net_pay")).to eq([ 1280, "1104.84".to_d ])
       expect(PayStubGenerator.new(item).generate).to eq(pdf)
+
+      run_manual!(next_period, [ employee.id ], {})
+      expect(next_period.payroll_items.find_by!(employee: employee).attributes.values_at("gross_pay", "net_pay"))
+        .to eq([ "2166.67".to_d, "1817.28".to_d ])
     end
   end
 

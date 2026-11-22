@@ -280,8 +280,8 @@ class EmployeeCompensationChangeService
       return if changed.empty?
 
       future_basis_allowed = source == ROLLOUT_SOURCE ||
-      (source == GO_LIVE_SOURCE && (changed.keys - %w[pay_frequency salary_type]).empty?)
-    if date > today && !future_basis_allowed
+        (source == GO_LIVE_SOURCE && (changed.keys - %w[pay_frequency salary_type]).empty?)
+      if date > today && !future_basis_allowed
         raise Error, "Pay type changes take effect immediately. Choose today or an earlier date when the pay type also changes."
       end
       if !historical_correction && employee.employee_compensation_changes.where("effective_on > ?", today).exists?

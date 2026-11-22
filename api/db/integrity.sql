@@ -868,3 +868,39 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS retained_client_documents_delete ON client_documents;
 CREATE TRIGGER retained_client_documents_delete BEFORE DELETE ON client_documents
   FOR EACH ROW EXECUTE FUNCTION protect_retained_client_documents();
+
+-- 20261122113000_create_employee_notes.rb
+CREATE OR REPLACE FUNCTION protect_employee_notes_update()
+RETURNS trigger AS $$
+BEGIN
+  IF OLD.hidden_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Hidden employee notes cannot be modified'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  IF NEW.body IS DISTINCT FROM OLD.body
+    OR NEW.company_id IS DISTINCT FROM OLD.company_id
+    OR NEW.employee_id IS DISTINCT FROM OLD.employee_id
+    OR NEW.created_by_id IS DISTINCT FROM OLD.created_by_id
+    OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'Employee notes are append-only; immutable columns cannot be updated'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS employee_notes_prevent_immutable_update ON employee_notes;
+CREATE TRIGGER employee_notes_prevent_immutable_update
+BEFORE UPDATE ON employee_notes
+FOR EACH ROW EXECUTE FUNCTION protect_employee_notes_update();
+
+CREATE OR REPLACE FUNCTION protect_employee_notes_delete()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'Employee notes cannot be deleted; hide the note instead'
+    USING ERRCODE = 'integrity_constraint_violation';
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS employee_notes_prevent_delete ON employee_notes;
+CREATE TRIGGER employee_notes_prevent_delete
+BEFORE DELETE ON employee_notes
+FOR EACH ROW EXECUTE FUNCTION protect_employee_notes_delete();
