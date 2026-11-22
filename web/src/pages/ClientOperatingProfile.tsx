@@ -41,11 +41,16 @@ function draftFor(data: OperatingProfileResponse): Settings {
 
 function readValue(field: CatalogEntry, draft: SettingValue): SettingValue {
   if (typeof draft !== 'string') return draft;
-  if (field.type === 'nullable_string_array') return draft.trim() ? draft.split(',').map((value) => value.trim()) : null;
+  if (field.type === 'nullable_string_array') return commaSeparatedItems(draft);
   if (field.type === 'uploaders' && draft !== 'all_client_users') {
-    return draft.trim() ? draft.split(',').map((value) => Number(value.trim())) : 'all_client_users';
+    const items = commaSeparatedItems(draft);
+    return items.length ? items.map(Number) : 'all_client_users';
   }
   return draft;
+}
+
+function commaSeparatedItems(value: string) {
+  return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
 function Help({ field }: { field: CatalogEntry }) {
@@ -88,7 +93,7 @@ function SettingControl({ field, value, editable, locked, onChange }: {
   const props = { id, className: 'min-h-11 text-base sm:text-sm', disabled: !editable };
   const text = Array.isArray(value) ? value.join(', ') : field.type === 'uploaders' && value === 'all_client_users' ? '' : String(value ?? '');
   const allowed = field.allowed;
-  const list = field.type === 'uploaders' || field.type === 'nullable_string_array';
+  const sourceMode = value === null ? 'inherit' : Array.isArray(value) && !value.length ? 'single' : 'list';
 
   return (
     <div className="min-w-0">
@@ -99,7 +104,23 @@ function SettingControl({ field, value, editable, locked, onChange }: {
       {locked ? (
         <div className="flex min-h-11 items-center gap-2 text-sm text-neutral-600">
           <LockKeyhole className="size-4 shrink-0" aria-hidden="true" />
-          <span>Off · Available in Milestone {field.id === 'time_module_enabled' ? '6' : '4'}</span>
+          <span>{field.type === 'boolean' ? 'Off' : text} · Available in Milestone {field.locked_until_milestone}</span>
+        </div>
+      ) : field.type === 'nullable_string_array' ? (
+        <div className="space-y-2">
+          <Select {...props} value={sourceMode} onChange={(event) => {
+            const mode = event.target.value;
+            onChange(mode === 'inherit' ? null : mode === 'single' ? [] : '');
+          }}>
+            <option value="inherit">Inherit adapter defaults</option>
+            <option value="single">Allow a single file</option>
+            <option value="list">Require specific source roles</option>
+          </Select>
+          {sourceMode === 'list' && (
+            <Input label="Source roles" className={props.className} disabled={!editable} value={text} required
+              pattern={String.raw`.*[^,\s].*`} helperText="Separate source roles with commas."
+              onChange={(event) => onChange(event.target.value)} />
+          )}
         </div>
       ) : field.type === 'boolean' ? (
         <Select {...props} value={value ? 'on' : 'off'} onChange={(event) => onChange(event.target.value === 'on')}>
@@ -116,11 +137,11 @@ function SettingControl({ field, value, editable, locked, onChange }: {
           min={allowed && 'min' in allowed ? allowed.min : undefined}
           max={allowed && 'max' in allowed ? allowed.max : undefined}
           required={field.type === 'integer'}
-          pattern={field.type === 'uploaders' ? '[ ]*[1-9][0-9]*([ ]*,[ ]*[1-9][0-9]*)*[ ]*' : undefined}
-          helperText={list ? (field.type === 'uploaders' ? 'Comma-separated user IDs. Blank allows all client users.' : 'Comma-separated source roles. Blank uses adapter defaults.') : undefined}
+          pattern={field.type === 'uploaders' ? '([ ]*([1-9][0-9]*)?[ ]*,)*[ ]*([1-9][0-9]*)?[ ]*' : undefined}
+          helperText={field.type === 'uploaders' ? 'Comma-separated user IDs. Blank allows all client users.' : undefined}
           onChange={(event) => {
             const input = event.target.value;
-            onChange(field.type === 'integer' && input ? event.target.valueAsNumber : (list || field.type === 'integer') ? input : input || null);
+            onChange(field.type === 'integer' && input ? event.target.valueAsNumber : (field.type === 'uploaders' || field.type === 'integer') ? input : input || null);
           }}
         />
       )}
@@ -152,6 +173,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
   const [effectiveOn, setEffectiveOn] = useState('');
   const [reason, setReason] = useState('');
   const reasonId = useId();
+  const dateHelpId = useId();
   const [presetNote, setPresetNote] = useState('');
   const [saved, setSaved] = useState('');
   const [error, setError] = useState<{ message: string; stale: boolean } | null>(null);
@@ -169,6 +191,9 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
     fields: profile.catalog.filter((field) => field.section === section),
   })).filter((section) => section.fields.length > 0);
   const hasEdits = profile.catalog.some((field) => editable(field.id));
+  const earliestDate = profile.available_effective_dates[0];
+  const latest = profile.history[0];
+  const correctionDate = latest?.version > 1 && latest.effective_on > profile.as_of ? latest.effective_on : null;
 
   function changeSetting(field: CatalogEntry, value: SettingValue) {
     setSaved('');
@@ -194,7 +219,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving || error?.stale || !Object.keys(changes).length) return;
+    if (saving || error?.stale || !profile.available_effective_dates.includes(effectiveOn) || !Object.keys(changes).length) return;
     setSaving(true);
     setError(null);
     try {
@@ -203,7 +228,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
       });
       setProfile(response);
       setDraft(draftFor(response));
-      setSaved(`Version ${response.saved.version} saved, effective ${response.saved.effective_on}.`);
+      setSaved(`Version ${response.saved.version} ${effectiveOn === correctionDate ? 'corrected' : 'saved'}, effective ${response.saved.effective_on}.`);
       setEffectiveOn('');
       setReason('');
       setPresetNote('');
@@ -250,10 +275,18 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
             ))}
             {hasEdits && (
               <Card>
-                <CardHeader><CardTitle>Save a new version</CardTitle></CardHeader>
+                <CardHeader><CardTitle>Save operating profile</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
-                  <Input label="Effective date" type="date" required value={effectiveOn} className="min-h-11 text-base sm:max-w-xs sm:text-sm"
-                    helperText="Use the start date of a draft pay period." onChange={(event) => setEffectiveOn(event.target.value)} />
+                  <Select label="Effective date" required value={effectiveOn} className="min-h-11 text-base sm:max-w-xs sm:text-sm"
+                    disabled={!earliestDate} aria-describedby={dateHelpId}
+                    placeholder="Select a draft pay period" onChange={(event) => setEffectiveOn(event.target.value)}>
+                    {profile.available_effective_dates.map((date) => (
+                      <option key={date} value={date}>{date}{date === correctionDate ? ' (correct scheduled version)' : ''}</option>
+                    ))}
+                  </Select>
+                  <p id={dateHelpId} className="text-sm text-neutral-600">
+                    {earliestDate ? `Earliest available draft period starts ${earliestDate}.` : 'No draft pay periods are available for a profile change.'}
+                  </p>
                   <div className="space-y-1.5">
                     <Label htmlFor={reasonId}>Reason for change</Label>
                     <Textarea id={reasonId} required value={reason} onChange={(event) => setReason(event.target.value)} />

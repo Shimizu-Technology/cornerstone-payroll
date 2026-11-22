@@ -40,7 +40,8 @@ class OperatingProfileCatalog
         what: what,
         example: example,
         effect: effect,
-        requires: requires
+        requires: requires,
+        locked_until_milestone: OperatingProfileCatalog.locked_milestone_for(self)
       }
     end
   end
@@ -64,11 +65,19 @@ class OperatingProfileCatalog
   KIND_OF_EMPLOYER_VALUES = %w[N F S T Y].freeze
   FORMER_ACCESS_YEARS_RANGE = (1..10).freeze
 
-  M4_TO_M6_TOGGLE_IDS = (
-    [ "employee_portal_enabled" ] +
-    EMPLOYEE_PORTAL_FEATURES.map { |feature| "employee_portal.features.#{feature}" } +
-    [ "subdomain_enabled", "time_module_enabled" ]
-  ).freeze
+  LOCKED_TOGGLE_MILESTONES = {
+    "employee_portal_enabled" => 4,
+    "employee_portal.features.stubs" => 4,
+    "employee_portal.features.tax_forms" => 4,
+    "employee_portal.features.profile_requests" => 4,
+    "employee_portal.features.documents" => 5,
+    "employee_portal.features.pto" => 5,
+    "employee_portal.features.bank_requests" => 4,
+    "employee_portal.features.w4_requests" => 5,
+    "subdomain_enabled" => 4,
+    "time_module_enabled" => 6
+  }.freeze
+  M4_TO_M6_TOGGLE_IDS = LOCKED_TOGGLE_MILESTONES.keys.freeze
 
   OFFERING_PRESETS = {
     "payroll_service" => { "hours_source" => "manual", "intake_adapter" => nil, "client_portal_enabled" => false },
@@ -630,6 +639,18 @@ class OperatingProfileCatalog
       errors = []
       validate_node(raw_options, OPTION_TREE, [], errors, intake_adapter: intake_adapter)
       errors
+    end
+
+    def locked_milestone_for(entry)
+      milestones = [ LOCKED_TOGGLE_MILESTONES[entry.id] ]
+      entry.requires.each do |requirement|
+        milestones << LOCKED_TOGGLE_MILESTONES[requirement.split("=", 2).first]
+      end
+      milestones.compact.max
+    end
+
+    def locked_keys
+      ENTRIES.select { |entry| locked_milestone_for(entry) }.map(&:id)
     end
 
     def editable_keys_for(user:, company:)

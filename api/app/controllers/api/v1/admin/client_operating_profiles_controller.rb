@@ -37,17 +37,18 @@ module Api
 
         def profile_payload(as_of)
           features = CompanyFeatures.for(@target_company, on: as_of)
-          history = @target_company.client_operating_profiles.history_order.map { |profile| serialize_profile(profile) }
+          profiles = @target_company.client_operating_profiles.history_order.to_a
 
           {
             as_of: as_of.iso8601,
             effective: serialize_profile(features.profile),
-            history: history,
-            lock_version: history.first&.fetch(:lock_version) || 0,
+            history: profiles.map { |profile| serialize_profile(profile) },
+            lock_version: profiles.first&.lock_version || 0,
+            available_effective_dates: ClientOperatingProfiles::EffectiveDates.new(company: @target_company, latest: profiles.first).available.map(&:iso8601),
             catalog: OperatingProfileCatalog.serialize,
             client_name: @target_company.name,
             offering_presets: OperatingProfileCatalog::OFFERING_PRESETS,
-            locked_keys: OperatingProfileCatalog::M4_TO_M6_TOGGLE_IDS,
+            locked_keys: OperatingProfileCatalog.locked_keys,
             connected_source_active: @target_company.time_tracking_sources.active.where(source_type: "aire_services").exists?,
             editable_keys: OperatingProfileCatalog.editable_keys_for(user: current_user, company: @target_company)
           }
