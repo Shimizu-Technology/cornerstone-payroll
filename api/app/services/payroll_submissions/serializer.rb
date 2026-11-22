@@ -87,7 +87,7 @@ module PayrollSubmissions
       record = entry.record
       payload = summary(entry).merge(
         schedule_note: schedule_note,
-        standing_changes: StandingChanges.new(company: @catalog.company, before_pay_date: @catalog.pay_date_for(entry)).rows.reject { |row| !@staff && row[:availability_error].present? },
+        standing_changes: StandingChanges.new(company: @catalog.company, before_pay_date: @catalog.pay_date_for(entry), rates_on: entry.end_date).rows.reject { |row| !@staff && row[:availability_error].present? },
         thread_id: record&.client_portal_thread_id,
         file_requests: record ? file_requests(record) : [],
         submissions: [], drafts: [], history: [],

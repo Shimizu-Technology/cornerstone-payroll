@@ -11,13 +11,15 @@ class PayrollExpectedEntries
     return { fields: [], missing_regulars: [], outstanding: [], added_back: [] } unless @period.regular_cycle? && @period.regular_run? &&
       @period.status.in?(%w[draft calculated approved])
 
-    fields = PayrollStandingChange.where(company_id: @period.company_id).active.ordered.includes(:employee, :employee_wage_rate).map do |field|
+    fields = PayrollStandingChange.where(company_id: @period.company_id).active.ordered
+      .preload(:employee_wage_rate, employee: %i[employee_wage_rates employee_wage_rate_versions employee_compensation_changes]).map do |field|
       value = field_value(field)
+      period_rate = period_wage_rate(field)
       exclusion = exclusions.find { |row| row.employee_id == field.employee_id }
       resolution = resolutions.find { |row| row.payroll_standing_change_id == field.id && row.employee_id == field.employee_id }
       status = exclusion ? "excluded" : value.to_d.positive? ? "filled" : resolution && field.allow_none? ? "none" : "missing"
       { id: field.id, employee_id: field.employee_id, employee_wage_rate_id: field.employee_wage_rate_id,
-        wage_rate: field.employee_wage_rate&.rate, wage_rate_label: field.employee_wage_rate&.label, label: field.display_label, help_text: field.help_text, kind: field.kind, required: field.required?,
+        wage_rate: period_rate&.rate, wage_rate_label: period_rate&.label, label: field.display_label, help_text: field.help_text, kind: field.kind, required: field.required?,
         saved_wage_rate_hours: items.select { |item| item.employee_id == field.employee_id }.flat_map(&:wage_rate_hours),
         allow_none: field.allow_none?, availability_error: field.availability_error, status: status, value: value,
         source_revision: client_revision(field, status, resolution),
@@ -53,8 +55,20 @@ class PayrollExpectedEntries
     @exclusions ||= @period.pay_period_excluded_employees.to_a
   end
 
+  # Wage rates as they stand on the pay period end date (M3-4).
+  def period_rates(employee)
+    (@period_rates ||= {})[employee.id] ||= employee.wage_rates_on(@period.end_date)
+  end
+
+  def period_wage_rate(field)
+    return unless field.employee_wage_rate
+
+    field.employee.wage_rates_on(@period.end_date, include_inactive: true).find { |rate| rate.id == field.employee_wage_rate_id } ||
+      field.employee_wage_rate
+  end
+
   def inline_save_error(field)
-    return unless field.kind == "extra_hours" && field.employee.active_wage_rates.many?
+    return unless field.kind == "extra_hours" && period_rates(field.employee).many?
     return unless items.any? { |item| item.employee_id == field.employee_id && item.wage_rate_hours.blank? &&
       (item.hours_worked.to_d + item.overtime_hours.to_d + item.holiday_hours.to_d + item.pto_hours.to_d).positive? }
 
@@ -73,7 +87,7 @@ class PayrollExpectedEntries
       if item.wage_rate_hours.present?
         Array(item.wage_rate_hours).select { |row| row["employee_wage_rate_id"].to_s == field.employee_wage_rate_id.to_s }
           .sum { |row| %w[regular_hours overtime_hours holiday_hours pto_hours].sum { |key| row[key].to_d } }
-      elsif field.employee.active_wage_rates.one? && field.employee.active_wage_rates.first.id == field.employee_wage_rate_id
+      elsif period_rates(field.employee).one? && period_rates(field.employee).first.id == field.employee_wage_rate_id
         item.hours_worked.to_d + item.overtime_hours.to_d + item.holiday_hours.to_d + item.pto_hours.to_d
       else
         0.to_d

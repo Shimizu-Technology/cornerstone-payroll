@@ -38,13 +38,16 @@ module PayrollSubmissions
       end
     end
 
-    def self.normalize!(rows, company_id:)
-      new(rows, company_id: company_id).normalize!
+    # rates_on: the submission period's end date; extra hours are checked
+    # against the job rates in effect on it (M3-4).
+    def self.normalize!(rows, company_id:, rates_on: nil)
+      new(rows, company_id: company_id, rates_on: rates_on).normalize!
     end
 
-    def initialize(rows, company_id:)
+    def initialize(rows, company_id:, rates_on: nil)
       @rows = rows
       @company_id = company_id
+      @rates_on = rates_on || PayrollBusinessClock.today
       @errors = Hash.new { |hash, key| hash[key] = [] }
     end
 
@@ -134,7 +137,7 @@ module PayrollSubmissions
         @errors[key] << "Choose an active employee with variable salary for owner pay."
       end
       if kind == "extra_hours" && employee
-        rate = employee.active_wage_rates.find { |rate| rate.id == integer(row["employee_wage_rate_id"]) }
+        rate = employee.wage_rates_on(@rates_on).find { |rate| rate.id == integer(row["employee_wage_rate_id"]) }
         unless employee.active? && employee.hourly_pay_basis? && rate && !rate.rate.nil?
           @errors[key] << "Choose an active employee and their saved job and rate for extra hours."
         else

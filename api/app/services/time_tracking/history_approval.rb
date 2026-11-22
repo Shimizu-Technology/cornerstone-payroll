@@ -175,7 +175,7 @@ module TimeTracking
     end
 
     def refresh_local_inputs!
-      @employees = @company.employees.includes(:employee_wage_rates).order(:id).to_a
+      @employees = @company.employees.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes).order(:id).to_a
       @saved_mappings = @source.time_tracking_employee_mappings.order(:id).to_a
       @saved_mapping_fingerprint = checksum(@saved_mappings.map(&:attributes))
     end
@@ -384,7 +384,8 @@ module TimeTracking
         entries.map { |entry| entry["category"] }.uniq.filter_map do |category|
           policy = policies.find { |row| row.source_category_key == TimeTrackingCategoryMapping.category_key(category) }
           next unless policy
-          rate = policy.matching_rate(employee.employee_wage_rates.to_a)
+          # The review confirms today's setup for future imports (M3-4: rates on today).
+          rate = policy.matching_rate(employee.wage_rates_on(PayrollBusinessClock.today, include_inactive: true))
           { "employee" => employee.full_name, "employee_id" => employee.id, "source_category" => category&.fetch("name", nil),
             "configured_components" => policy.required_rate_description, "resolved_component" => rate&.label,
             "employee_wage_rate_id" => rate&.id, "rate" => rate&.rate&.to_s("F"),
@@ -411,7 +412,7 @@ module TimeTracking
         employee = @employees.find { |record| record.id == mapping&.employee_id }
         { "source_user_uuid" => uuid, "employee_id" => employee&.id, "employee" => employee&.full_name,
           "hours" => entries.sum { |entry| BigDecimal(entry.fetch("hours").to_s) }.to_s("F"),
-          "options" => employee ? employee.active_wage_rates.filter_map do |rate|
+          "options" => employee ? employee.wage_rates_on(PayrollBusinessClock.today).filter_map do |rate|
             { "id" => rate.id, "label" => rate.label, "rate" => rate.rate.to_s } if rate.rate&.positive?
           end : [] }
       end
@@ -434,6 +435,14 @@ module TimeTracking
       end
     end
 
+    # A first-version-only compensation history adds nothing, so fingerprints
+    # recorded before effective dating (M3-4) still match.
+    def employee_fingerprint(employee)
+      parts = [ employee.attributes, employee.employee_wage_rates.sort_by(&:id).map(&:attributes) ]
+      history = PayrollCalculationContext.compensation_history_fingerprint(employee)
+      history.present? ? parts + [ history ] : parts
+    end
+
     def local_fingerprint(inventory)
       run_ids = inventory.flat_map { |entry| entry.dig("history_evidence", "baseline_lines").to_a.map { |line| line.dig("processing", "external_pay_period_id") } }.compact.uniq
       { "source" => checksum(@source.attributes.except("shared_secret", "last_synced_at", "updated_at")),
@@ -441,7 +450,7 @@ module TimeTracking
         "category_configuration" => checksum(TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).map(&:attributes)),
         "company" => checksum(@company.attributes),
         "mappings" => @saved_mapping_fingerprint,
-        "employees" => checksum(@employees.map { |employee| [ employee.attributes, employee.employee_wage_rates.sort_by(&:id).map(&:attributes) ] }),
+        "employees" => checksum(@employees.map { |employee| employee_fingerprint(employee) }),
         "runs" => @company.pay_periods.where(id: run_ids).order(:id).to_h do |run|
           items = run.payroll_items.includes(:payroll_item_earnings).order(:id)
           [ run.id.to_s, checksum([ run.attributes, items.map { |item| [ item.attributes, item.payroll_item_earnings.sort_by(&:id).map(&:attributes) ] } ]) ]

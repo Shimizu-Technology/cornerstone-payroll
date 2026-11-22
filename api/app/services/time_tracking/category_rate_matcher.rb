@@ -20,7 +20,10 @@ module TimeTracking
       if source.source_type == "aire_services" && TimeTrackingEarningChoice.solo_category?(category)
         choice = TimeTrackingEarningChoice.find_by(time_tracking_source: source, employee_id: employee_id, source_category_key: "solo")
         rate = choice&.current_rate
-        return rate && rates.any? { |candidate| candidate.id == rate.id } ? [ rate, "accountant_choice" ] : [ nil, nil ]
+        # Pay the chosen earning at the rate the caller resolved for its pay
+        # period (M3-4), not the row's current rate.
+        period_rate = rate && rates.find { |candidate| candidate.id == rate.id }
+        return period_rate ? [ period_rate, "accountant_choice" ] : [ nil, nil ]
       end
       candidates = [ category[:key], category[:name] ].compact_blank
       matches = labels_matching(rates, candidates) { |value| normalize(value) }

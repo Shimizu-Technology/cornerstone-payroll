@@ -2727,7 +2727,9 @@ module Api
               first_name: employee.first_name,
               last_name: employee.last_name,
               employment_type: employee.employment_type,
-              pay_rate: employee.pay_rate.to_f
+              # The rate in effect at the end of the report range, or today
+              # when the range has not ended yet (M3-4).
+              pay_rate: employee.payroll_rate_on([ period.end_date, PayrollBusinessClock.today ].min).to_f
             },
             history: history,
             summary: summary,

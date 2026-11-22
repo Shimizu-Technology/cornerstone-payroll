@@ -64,7 +64,7 @@ module TimeTracking
         current_import_source = import_source_key
         excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
-        employees_by_id = Employee.active.includes(:employee_wage_rates).where(id: employee_ids, company_id: @company.id).index_by(&:id)
+        employees_by_id = Employee.active.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes).where(id: employee_ids, company_id: @company.id).index_by(&:id)
 
         rows.each do |row|
           source_user_id = row["source_user_id"].to_s
@@ -142,7 +142,7 @@ module TimeTracking
           if item.new_record?
             item.company_id = @company.id
             item.employment_type = employee.employment_type
-            item.pay_rate = employee.default_payroll_rate
+            item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
           end
           item.sync_default_payroll_adjustments!(employee)
           preserved_holiday_hours = item.holiday_hours.to_f
@@ -330,7 +330,7 @@ module TimeTracking
           category.merge("source_lines" => frozen["source_lines"])
         end
       end
-      active_rates = @pay_period.late_hours_run&.wage_rates_for(employee) || employee.active_wage_rates.to_a
+      active_rates = @pay_period.late_hours_run&.wage_rates_for(employee) || employee.wage_rates_on(@pay_period.end_date)
       if finalized_batch?
         supplied_keys = wage_rate_overrides_by_category_key(override).keys
         known_keys = categories.flat_map { |category| category_override_keys(category) }

@@ -180,7 +180,7 @@ module Api
               if item.new_record?
                 item.company_id = current_company_id
                 item.employment_type = employee.employment_type
-                item.pay_rate = employee.default_payroll_rate
+                item.pay_rate = employee.default_payroll_rate_on(pay_period.end_date)
               end
 
               multi_rate_error = apply_timecard_hours_to_payroll_item(item, employee, total_hours)
@@ -285,7 +285,7 @@ module Api
         end
 
         def apply_timecard_hours_to_payroll_item(item, employee, total_hours)
-          active_rates = employee.active_wage_rates.to_a
+          active_rates = employee.wage_rates_on(item.pay_period.end_date)
           rounded_hours = total_hours.round(2)
           uses_rate_selection = (employee.hourly? || employee.contractor_pay_type == "hourly") && active_rates.length > 1
 

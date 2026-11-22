@@ -202,7 +202,7 @@ module PayrollImport
     def apply_employment!(payroll_item, employee)
       payroll_item.employment_type = employee.employment_type
       payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
-      payroll_item.pay_rate = employee.pay_rate
+      payroll_item.pay_rate = employee.payroll_rate_on(pay_period.end_date)
       payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
     end
 
@@ -501,7 +501,7 @@ module PayrollImport
         period_pay_source: source_period_pay(excel_data) ? "change_workbook" : (existing_manual_period_pay(existing_item).present? ? "payroll_worksheet" : nil),
         period_pay_missing: period_pay_missing?(employee, existing_item, excel_data),
         overwrite_required: self.class.overwrite_required?(existing_item, source_period_pay: excel_data&.dig(:period_pay)),
-        pay_rate: employee.pay_rate.to_f,
+        pay_rate: employee.payroll_rate_on(pay_period.end_date).to_f,
         confidence: match[:confidence],
         matched_name: match[:matched_name],
         # PDF data
@@ -532,11 +532,16 @@ module PayrollImport
       row
     end
 
+    # Job rates as they stand on the pay period end date (M3-4).
+    def period_wage_rates(employee)
+      employee.wage_rates_on(pay_period.end_date)
+    end
+
     def apply_wage_rate_choice!(item, employee, row)
       choice = WageRateChoice.new(employee: employee, pay_period: pay_period).preview
       if row[:wage_rate_options].present? || choice[:wage_rate_options].present?
         selected_id = row[:selected_wage_rate_id]
-        rate = employee.active_wage_rates.find { |candidate| candidate.id.to_s == selected_id.to_s }
+        rate = period_wage_rates(employee).find { |candidate| candidate.id.to_s == selected_id.to_s }
         raise ArgumentError, "Choose an active job and rate for #{employee.full_name}, then apply again." unless rate
 
         reviewed = Array(row[:wage_rate_options]).find { |option| option[:id].to_s == selected_id.to_s }
@@ -564,7 +569,7 @@ module PayrollImport
 
     def apply_client_hours!(item, employee, row)
       input = row.fetch(:client_extra_hours)
-      rate = employee.active_wage_rates.find { |candidate| candidate.id.to_s == input[:employee_wage_rate_id].to_s }
+      rate = period_wage_rates(employee).find { |candidate| candidate.id.to_s == input[:employee_wage_rate_id].to_s }
       unless rate && rate.rate == input[:rate].to_d
         raise ArgumentError, "Saved job and rate changed for #{employee.full_name}. Review the client change again."
       end
@@ -573,8 +578,8 @@ module PayrollImport
       baseline_allocations = item.wage_rate_hours.deep_dup
       allocations = item.wage_rate_hours
       if allocations.empty? && [ item.hours_worked, item.overtime_hours, item.holiday_hours, item.pto_hours ].any? { |hours| hours.to_d.positive? }
-        base = employee.primary_wage_rate
-        unless base && base.rate == item.pay_rate && employee.active_wage_rates.map(&:rate).uniq.one?
+        base = employee.primary_wage_rate_on(pay_period.end_date)
+        unless base && base.rate == item.pay_rate && period_wage_rates(employee).map(&:rate).uniq.one?
           raise ArgumentError, "Choose a saved job for the existing hours for #{employee.full_name}."
         end
         allocations << { "employee_wage_rate_id" => base.id, "label" => base.label, "rate" => base.rate.to_f,

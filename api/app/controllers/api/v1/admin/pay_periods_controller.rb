@@ -373,6 +373,7 @@ module Api
             .eligible_for_payroll_run(@pay_period, explicitly_selected: params[:employee_ids].present?)
           employees_by_id = eligible_scope
                                      .includes(:company, :employee_deductions, :deduction_types, :employee_loans, :employee_w4_elections, :employee_wage_rates, :employee_ytd_totals, employee_payroll_fields: :payroll_field_definition)
+                                     .preload(:employee_compensation_changes, :employee_wage_rate_versions)
                                      .index_by(&:id)
 
           history_errors = preload_ytd_caches!(employees_by_id.values, @pay_period)
@@ -424,7 +425,7 @@ module Api
 
               sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
               if pay_basis_changed && !@pay_period.correction_run? && payroll_item.timekeeping_source != "correction_reference"
-                payroll_item.pay_rate = employee.default_payroll_rate
+                payroll_item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
               end
               payroll_item.sync_default_custom_earnings!(employee)
               payroll_item.sync_default_payroll_adjustments!(employee)
@@ -1746,15 +1747,16 @@ module Api
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
           unless payroll_item.timekeeping_source == "correction_reference"
-            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.payroll_rate_on(@pay_period.end_date)
           end
         end
 
+        # Open payroll pays the rate in effect on the pay period end date (M3-4).
         def sync_pay_rate_from_employee(payroll_item, employee)
           return if payroll_item.timekeeping_source == "correction_reference"
           return if employee.hourly_pay_basis? && payroll_item.wage_rate_hours.present?
 
-          payroll_item.pay_rate = employee.default_payroll_rate
+          payroll_item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
         end
 
         # Compact summary of a corrective payroll_item — shipped back to the
