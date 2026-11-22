@@ -25,6 +25,14 @@ import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
 import { intakeAllowsBlank, intakeFieldLabels } from '@/lib/employee-intake';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { filingStatusLabels, formatCurrency } from '@/lib/utils';
+import { PayChangeEffectiveDate } from '@/components/employees/PayChangeEffectiveDate';
+import {
+  emptyPayChangeEffectiveDate,
+  payChangeEffectiveDateErrors,
+  resolvePayChangeEffectiveOn,
+  type PayChangeEffectiveDateValue,
+} from '@/lib/pay-change';
+import { PayRateHistory } from '@/components/employees/PayRateHistory';
 import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, PaymentDeliveryMethod, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
@@ -232,6 +240,7 @@ export function EmployeeForm() {
     w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
   });
   const [w4ChangeReason, setW4ChangeReason] = useState('');
+  const [payChangeTiming, setPayChangeTiming] = useState<PayChangeEffectiveDateValue>(emptyPayChangeEffectiveDate);
   const [w4ElectionReceived, setW4ElectionReceived] = useState(false);
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   // Bringing back a terminated worker is a rehire, which stays with client configuration.
@@ -297,6 +306,7 @@ export function EmployeeForm() {
       if (!isCurrentRequest()) return;
       const employee = response.data;
       setLoadedEmployee(employee);
+      setPayChangeTiming(emptyPayChangeEffectiveDate());
 
       const loadedSsn = isClient ? '' : formatSSN(employee.ssn || '');
       const nextForm = {
@@ -675,6 +685,32 @@ export function EmployeeForm() {
     return activeRates.map((rate) => ({ ...rate, is_primary: rate.temp_id === primaryId }));
   };
 
+  // A pay change (M3-4) needs an explicit effective date and a reason. It is
+  // the difference between the form and the saved pay setup: the pay rate,
+  // the active hourly rates, or the pay type.
+  const compensationHistory = !isClient && isEditing ? loadedEmployee?.compensation_history : undefined;
+  const formWageRates = supportsMultipleHourlyRates ? normalizeWageRates() : [];
+  const formPrimaryRate = formWageRates.find((rate) => rate.is_primary) || formWageRates[0];
+  const formPayRate = supportsMultipleHourlyRates && formPrimaryRate
+    ? roundCurrencyValue(Number(formPrimaryRate.rate) || 0)
+    : roundCurrencyValue(form.pay_rate);
+  const wageRateSignature = (rates: Array<Pick<EmployeeWageRate, 'id' | 'label' | 'rate' | 'is_primary'>>): string => JSON.stringify(
+    rates.map((rate) => [rate.id ?? null, rate.label.trim(), roundCurrencyValue(Number(rate.rate) || 0), Boolean(rate.is_primary)])
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
+  );
+  const payBasisChanged = Boolean(loadedEmployee && (
+    loadedEmployee.employment_type !== form.employment_type
+    || (form.employment_type === 'salary' && (loadedEmployee.salary_type || 'annual') !== (form.salary_type || 'annual'))
+    || loadedEmployee.pay_frequency !== form.pay_frequency
+    || (form.employment_type === 'contractor' && (loadedEmployee.contractor_pay_type || 'flat_fee') !== (form.contractor_pay_type || 'flat_fee'))
+  ));
+  const payHasChanged = Boolean(compensationHistory && loadedEmployee && (
+    payBasisChanged
+    || formPayRate !== roundCurrencyValue(toNumberOrZero(loadedEmployee.pay_rate))
+    || (supportsMultipleHourlyRates && wageRateSignature(formWageRates)
+      !== wageRateSignature((loadedEmployee.wage_rates || []).filter((rate) => rate.active !== false)))
+  ));
+
   const focusFirstInvalidField = (fieldName: string | undefined) => {
     if (!fieldName) return;
     requestAnimationFrame(() => {
@@ -789,6 +825,9 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && !form.w4_effective_on && !allowsUnverifiedBlank('withholding_election')) {
       newErrors.w4_effective_on = ['Enter the date this W-4 became effective'];
     }
+    if (payHasChanged && compensationHistory) {
+      Object.assign(newErrors, payChangeEffectiveDateErrors(payChangeTiming, compensationHistory.effective_dates, { basisChanged: payBasisChanged }));
+    }
     if (isEditing && !isClient && form.employment_type !== 'contractor' && (w4HasChanged || w4ElectionReceived) && !w4ChangeReason.trim()) {
       newErrors.w4_change_reason = ['Explain why this W-4 election is changing'];
     }
@@ -892,11 +931,23 @@ export function EmployeeForm() {
       let portalNotice: string | null = null;
       let portalChangeRequestId: number | null = null;
       let aireMappingNotice: string | null = null;
+      let compensationWarnings: string[] = [];
       if (isEditing && id) {
         // Don't send SSN if it's empty (user didn't update it)
         // Recurring items save through their own endpoints. A stale profile must
         // not restore a legacy allowance another operator has already converted.
-        const updateData = { ...employeePayload, default_payroll_adjustments: undefined, default_custom_earnings: undefined };
+        const updateData = {
+          ...employeePayload,
+          default_payroll_adjustments: undefined,
+          default_custom_earnings: undefined,
+          // Staff pay changes save the pay rate and hourly rates together,
+          // with their effective date and reason, through the employee update.
+          ...(!isClient && payHasChanged && compensationHistory ? {
+            compensation_effective_on: resolvePayChangeEffectiveOn(payChangeTiming, compensationHistory.effective_dates) || undefined,
+            compensation_change_reason: payChangeTiming.reason.trim(),
+            compensation_historical_correction: payChangeTiming.historicalCorrection || undefined,
+          } : {}),
+        };
         if (!updateData.ssn) {
           delete updateData.ssn;
         }
@@ -912,6 +963,7 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.update(parseInt(id, 10), updateData);
           savedEmployeeId = response.data.id;
+          compensationWarnings = response.compensation_warnings || [];
         }
       } else {
         if (isClient) {
@@ -931,7 +983,10 @@ export function EmployeeForm() {
       }
       if (!isCurrentSubmission()) return;
 
-      if (!isClient && supportsMultipleHourlyRates) {
+      // A new employee's hourly rates are added after the profile exists. An
+      // edit with pay history saved them with the profile above, together with
+      // their effective date; without it the per-rate endpoints still apply.
+      if (!isClient && (!isEditing || !compensationHistory) && supportsMultipleHourlyRates) {
         const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
@@ -994,6 +1049,9 @@ export function EmployeeForm() {
 
       if (!isCurrentSubmission()) return;
       notify({ tone: 'success', message: portalNotice || (isEditing ? 'Employee updated.' : 'Employee created.') });
+      // Warnings owned by this form are cleared when it navigates away; an
+      // info notice stays with the employee list.
+      compensationWarnings.forEach((message) => notify({ tone: 'info', message }));
       const saveDestination = isClient && portalChangeRequestId
         ? '/change-requests'
         : !isEditing && airePayPeriodId && aireSourceUserId && aireSourceUserUuid
@@ -1571,8 +1629,19 @@ export function EmployeeForm() {
                 </div>
               </div>
             )}
+
+            {payHasChanged && compensationHistory && (
+              <PayChangeEffectiveDate
+                dates={compensationHistory.effective_dates}
+                value={payChangeTiming}
+                onChange={setPayChangeTiming}
+                errors={errors}
+              />
+            )}
           </CardContent>
         </Card>
+
+        {compensationHistory && <PayRateHistory history={compensationHistory} />}
 
         {isEditing && form.employment_type === 'salary' && loadedEmployee && !isClient && (
           <EmployeeWorkProfilePanel
