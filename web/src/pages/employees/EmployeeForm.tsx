@@ -997,7 +997,7 @@ export function EmployeeForm() {
           } : {}),
           ...(payHasChanged && compensationHistory ? {
             ...basisEdits,
-            pay_rate: scalarPayChanged || payBasisChanged ? formPayRate : undefined,
+            pay_rate: scalarPayChanged ? formPayRate : undefined,
             compensation_wage_rate_edits: wageRateEdits.length ? wageRateEdits : undefined,
             compensation_revision: compensationHistory.revision,
             compensation_effective_on: resolvePayChangeEffectiveOn(payChangeTiming, compensationHistory.effective_dates) || undefined,
