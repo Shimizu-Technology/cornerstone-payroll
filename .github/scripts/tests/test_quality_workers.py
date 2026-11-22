@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import time
@@ -45,19 +46,21 @@ exit 23
             # pipes, so pipe completion would not prove the parent waited.
             log = root / 'parent.log'
             with open(log, 'w') as output:
-                parent = subprocess.Popen(['bash', str(script)], cwd=root,
+                parent = subprocess.Popen(['bash', '-x', str(script)], cwd=root,
                                           env={**os.environ, 'PATH': f'{commands}:/usr/bin:/bin',
                                                'MARKERS': temp, 'FAIL_SHARD': fail_shard,
                                                'HOLD_SHARD': hold_shard},
                                           stdout=output, stderr=subprocess.STDOUT)
                 try:
                     if hold_shard != 'none':
+                        # The xtrace shows each `wait` as the parent reaches it, so the
+                        # third one proves it handled the failed shard and is now
+                        # blocked on the held shard. Exiting first fails the test.
                         deadline = time.monotonic() + 10
-                        while not (root / f'done-{fail_shard}').exists():
+                        while len(re.findall(r'^\++ wait \d+$', log.read_text(), re.M)) < 3:
+                            self.assertIsNone(parent.poll(), log.read_text())
                             self.assertLess(time.monotonic(), deadline, log.read_text())
                             time.sleep(0.05)
-                        time.sleep(0.3)
-                        # The failed shard has exited; the parent must still wait.
                         self.assertIsNone(parent.poll(), log.read_text())
                         (root / 'release').touch()
                     returncode = parent.wait(timeout=10)
