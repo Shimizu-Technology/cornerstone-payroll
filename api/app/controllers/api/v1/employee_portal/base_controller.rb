@@ -15,7 +15,8 @@ module Api
             return head :not_found
           end
 
-          subject = ClerkTokenVerifier.new.verify(token)&.fetch("sub", nil)
+          payload = ClerkTokenVerifier.new.verify(token)
+          subject = payload&.fetch("sub", nil)
           return head :not_found unless subject.is_a?(String) && subject.present? && !subject.start_with?("pending_")
 
           user = User.find_by(clerk_id: subject)
@@ -23,7 +24,13 @@ module Api
           return head :not_found unless user.payroll_access_allowed?
 
           @employee_link = user.employee_account_links.portal_eligible.find_by(id: link_id)
-          head :not_found unless @employee_link&.portal_enabled?
+          return head :not_found unless @employee_link&.portal_enabled?
+
+          azp = payload["azp"]
+          if TenantSubdomainRegistry.client_origin?(azp) &&
+              TenantSubdomainRegistry.enabled_origin_company_id(azp) != @employee_link.company_id
+            head :not_found
+          end
         end
       end
     end
