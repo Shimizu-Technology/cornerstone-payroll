@@ -70,6 +70,12 @@ class OperatingProfileCatalog
     [ "subdomain_enabled", "time_module_enabled" ]
   ).freeze
 
+  OFFERING_PRESETS = {
+    "payroll_service" => { "hours_source" => "manual", "intake_adapter" => nil, "client_portal_enabled" => false },
+    "payroll_portals" => { "hours_source" => "manual", "intake_adapter" => nil, "client_portal_enabled" => true },
+    "workforce_suite" => { "hours_source" => "connected_app", "intake_adapter" => nil, "client_portal_enabled" => false }
+  }.freeze
+
   ENTRIES = [
     Entry.new(
       id: "offering",
@@ -580,6 +586,42 @@ class OperatingProfileCatalog
         return deep_dup_value(value) if found
       end
       deep_dup_value(entry.default)
+    end
+
+    def values_for(profile)
+      ENTRIES.to_h do |entry|
+        [ entry.id, entry.column? ? profile.public_send(entry.id) : profile.option_value(entry.id) ]
+      end
+    end
+
+    def attributes_from(values)
+      columns = values.slice(*column_ids)
+      options = {}
+      OPTION_ENTRIES.each { |entry| write_nested_value(options, entry.path, values.fetch(entry.id)) }
+      columns.merge("options" => options).symbolize_keys
+    end
+
+    def change_errors(values)
+      ENTRIES.flat_map do |entry|
+        value = values.fetch(entry.id)
+
+        if entry.type.in?(%w[boolean enum nullable_enum]) && !entry.allowed.include?(value) &&
+            !(entry.type == "nullable_enum" && value.nil?)
+          next [ "#{entry.label} has an invalid value." ]
+        end
+
+        # Defaults can be stored while a parent feature is off. They remain
+        # dormant until its prerequisites are met.
+        next [] if value == entry.default
+
+        entry.requires.filter_map do |requirement|
+          prerequisite, expected = requirement.split("=", 2)
+          next if values[prerequisite] == (expected || true)
+
+          label = find(prerequisite)&.label || prerequisite
+          "#{entry.label} requires #{[ label, expected ].compact.join(' = ')}."
+        end
+      end
     end
 
     def validate_options(raw_options, intake_adapter: nil)

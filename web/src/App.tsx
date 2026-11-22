@@ -12,6 +12,7 @@ import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
 
+const ClientOperatingProfile = lazy(() => import('@/pages/ClientOperatingProfile').then(module => ({ default: module.ClientOperatingProfile })));
 const ClientInbox = lazy(() => import('@/pages/ClientInbox').then(module => ({ default: module.ClientInbox })));
 const ClientMessages = lazy(() => import('@/pages/client/ClientMessages').then(module => ({ default: module.ClientMessages })));
 const PayrollPeriodsList = lazy(() => import('@/pages/payroll-submissions/PayrollPeriodsList').then(module => ({ default: module.PayrollPeriodsList })));
@@ -356,6 +357,7 @@ function AppRoutes() {
         <Route path="pay-periods" element={<LegacyCompanyRedirect destination="pay-runs" />} />
         <Route path="pay-periods/:id" element={<LegacyCompanyRedirect destination="pay-run" clientMode={isClient} />} />
         <Route path="companies/:companyId" element={<CompanyScopedRoute />}>
+          <Route path="operating-profile" element={<StaffOnlyRoute><ClientOperatingProfile /></StaffOnlyRoute>} />
           <Route path="client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
           <Route path="client-messages" element={<StaffOnlyRoute><AdminClientMessagesPage /></StaffOnlyRoute>} />
           <Route path="payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />

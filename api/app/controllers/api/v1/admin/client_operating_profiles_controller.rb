@@ -11,19 +11,47 @@ module Api
           as_of = parse_as_of_date
           return unless as_of
 
-          features = CompanyFeatures.for(@target_company, on: as_of)
-          history = @target_company.client_operating_profiles.history_order.map { |profile| serialize_profile(profile) }
+          render json: profile_payload(as_of)
+        end
 
-          render json: {
-            as_of: as_of.iso8601,
-            effective: serialize_profile(features.profile),
-            history: history,
-            catalog: OperatingProfileCatalog.serialize,
-            editable_keys: OperatingProfileCatalog.editable_keys_for(user: current_user, company: @target_company)
-          }
+        def update
+          profile = ClientOperatingProfiles::UpdateService.new(
+            company: @target_company,
+            actor: current_user,
+            effective_on: params[:effective_on],
+            changes: params[:changes].try(:to_unsafe_h),
+            reason: params[:reason],
+            lock_version: params[:lock_version]
+          ).call
+
+          render json: profile_payload(PayrollBusinessClock.today).merge(saved: serialize_profile(profile))
+        rescue ClientOperatingProfiles::UpdateService::Forbidden => error
+          render json: { error: error.message }, status: :forbidden
+        rescue ClientOperatingProfiles::UpdateService::Conflict, ActiveRecord::StaleObjectError => error
+          render json: { error: error.message }, status: :conflict
+        rescue ClientOperatingProfiles::UpdateService::Invalid, ActiveRecord::RecordInvalid => error
+          render json: { error: error.message }, status: :unprocessable_entity
         end
 
         private
+
+        def profile_payload(as_of)
+          features = CompanyFeatures.for(@target_company, on: as_of)
+          history = @target_company.client_operating_profiles.history_order.map { |profile| serialize_profile(profile) }
+
+          {
+            as_of: as_of.iso8601,
+            effective: serialize_profile(features.profile),
+            history: history,
+            lock_version: history.first&.fetch(:lock_version) || 0,
+            catalog: OperatingProfileCatalog.serialize,
+            client_name: @target_company.name,
+            offering_presets: OperatingProfileCatalog::OFFERING_PRESETS,
+            locked_keys: OperatingProfileCatalog::M4_TO_M6_TOGGLE_IDS,
+            connected_source_active: @target_company.time_tracking_sources.active.where(source_type: "aire_services").exists?,
+            editable_keys: OperatingProfileCatalog.editable_keys_for(user: current_user, company: @target_company)
+          }
+        end
 
         def audit_company_id
           @target_company&.id || super

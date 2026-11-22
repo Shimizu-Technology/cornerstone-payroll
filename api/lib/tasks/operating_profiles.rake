@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 namespace :operating_profiles do
-  desc "Read-only parity check comparing persisted current operating profiles with legacy company configuration"
+  desc "Read-only parity check comparing current operating profiles with legacy configuration and audited edits"
   task parity: :environment do
     result = ClientOperatingProfiles::ParityChecker.call
     result.differences.each do |diff|
