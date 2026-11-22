@@ -149,11 +149,11 @@ module Api
         end
 
         def create_body_param
-          params.require(:note).permit(:body)[:body]
+          params.expect(note: [ :body ])[:body]
         end
 
         def hide_reason_param
-          permitted = params.require(:note).permit(:reason, :hidden_reason)
+          permitted = params.expect(note: [ :reason, :hidden_reason ])
           permitted[:reason].presence || permitted[:hidden_reason]
         end
 

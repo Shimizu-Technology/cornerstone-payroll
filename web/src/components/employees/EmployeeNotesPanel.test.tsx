@@ -315,6 +315,26 @@ describe('EmployeeNotesPanel', () => {
     expect(notesApiMocks.list).toHaveBeenCalledTimes(2);
   });
 
+  it('does not duplicate a created note that the list already returned', async () => {
+    let resolveCreate!: (value: { data: EmployeeNote }) => void;
+    notesApiMocks.list.mockResolvedValueOnce({
+      data: [visibleNote],
+      meta: { returned_count: 1, total_count: 1, limit: 200, truncated: false },
+    });
+    notesApiMocks.create.mockReturnValueOnce(new Promise<{ data: EmployeeNote }>((resolve) => { resolveCreate = resolve; }));
+
+    render(<EmployeeNotesPanel companyId={1} employeeId={42} />);
+    expect(await screen.findByText(visibleNote.body!)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Add a staff note'), { target: { value: visibleNote.body! } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+    resolveCreate({ data: visibleNote });
+
+    await waitFor(() => expect((screen.getByLabelText('Add a staff note') as HTMLTextAreaElement).value).toBe(''));
+    expect(screen.getAllByText(visibleNote.body!)).toHaveLength(1);
+    expect(notesApiMocks.list).toHaveBeenCalledTimes(1);
+  });
+
   it('resets submitting and hideSubmitting when employeeId changes during pending mutations', async () => {
     let resolveFirstCreate!: (value: { data: EmployeeNote }) => void;
     const firstCreatePromise = new Promise<{ data: EmployeeNote }>((resolve) => {

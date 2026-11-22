@@ -5,9 +5,9 @@ class EmployeeNote < ApplicationRecord
   MAX_HIDDEN_REASON_LENGTH = 500
 
   # Separated SSN (3-2-4 with one consistent separator: hyphen, space, or dot).
-  # Digit/hyphen lookarounds avoid matching embedded fragments, ZIP+4 (5-4),
-  # EINs (2-7), or phone numbers (3-3-4).
-  SSN_SEPARATED_PATTERN = /(?<![\d-])\d{3}([- .])\d{2}\1\d{4}(?![\d-])/
+  # Lookarounds avoid matching embedded fragments, ZIP+4 (5-4), EINs (2-7), or
+  # phone numbers (3-3-4), while still catching a hyphenated label (SSN-123-45-6789).
+  SSN_SEPARATED_PATTERN = /(?<!\d)(?<!\d-)\d{3}([- .])\d{2}\1\d{4}(?![\d-])/
 
   # Bare 9-digit runs are ambiguous with unformatted EINs (e.g. 660970313) and
   # reference IDs, so flag them as SSNs only when adjacent to SSN/TIN wording

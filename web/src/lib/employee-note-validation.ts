@@ -6,7 +6,7 @@ export interface SensitiveNoteMatch {
 // Mirrors api/app/models/employee_note.rb as an early client-side warning.
 // The backend remains authoritative and enforces the same rules on note bodies
 // (on create) and hide reasons.
-const SSN_SEPARATED_PATTERN = /(?<![\d-])\d{3}([- .])\d{2}\1\d{4}(?![\d-])/;
+const SSN_SEPARATED_PATTERN = /(?<!\d)(?<!\d-)\d{3}([- .])\d{2}\1\d{4}(?![\d-])/;
 const SSN_CONTEXT_BEFORE_PATTERN =
   /\b(?:ssn|social\s+security|ss#|itin|tin|tax\s*id)(?=\d|[^a-zA-Z])[^0-9\r\n;]{0,20}?(?:\r?\n[^0-9\r\n;]{0,10}?)?(?<!\d)\d{9}(?!\d)/i;
 const SSN_CONTEXT_AFTER_PATTERN =
