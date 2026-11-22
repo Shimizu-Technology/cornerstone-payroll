@@ -30,6 +30,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import {
   employeeStatusConfig,
@@ -59,6 +60,7 @@ import { SavedHours } from '@/components/employees/SavedHours';
 import { EmployeeHoursPayroll } from '@/components/employees/EmployeeHoursPayroll';
 import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
 import { EmployeeIntakePanel } from '@/components/employees/EmployeeIntakePanel';
+import { EmployeeNotesPanel } from '@/components/employees/EmployeeNotesPanel';
 import { EmployeePaymentMethodPanel } from '@/components/employees/EmployeePaymentMethodPanel';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
 import { EmployeeRetirementYearPanel } from '@/components/employees/EmployeeRetirementYearPanel';
@@ -98,6 +100,10 @@ export function EmployeeWorkspace(): ReactElement {
   }>();
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const employeeId = parsePositiveRouteId(idParam) ?? 0;
+  const { user, isSuperAdmin, hasCapability } = useAuth();
+  const canRevealHiddenNotes = Boolean(
+    hasCapability?.('reveal_hidden_employee_notes') || isSuperAdmin || user?.role === 'org_admin',
+  );
   const { activeCompanyId, activeCompany } = useCompany();
   const readOnly = !canWriteCompany(activeCompany);
   const activeTab = (tabParam ?? 'overview') as EmployeeWorkspaceTab;
@@ -338,13 +344,24 @@ export function EmployeeWorkspace(): ReactElement {
         )}
         <EmployeeIntakePanel key={`${companyId}:${employee.id}`} companyId={companyId} employee={employee} onUpdated={setEmployee} />
         {activeTab === 'overview' && (
-          <EmployeeOverview
-            companyId={companyId}
-            employee={employee}
-            latestPay={latestPay}
-            summary={summary}
-            returnTo={currentPath}
-          />
+          <>
+            <EmployeeOverview
+              companyId={companyId}
+              employee={employee}
+              latestPay={latestPay}
+              summary={summary}
+              returnTo={currentPath}
+            />
+            {employee.company_id === companyId && employee.id === employeeId && (
+              <EmployeeNotesPanel
+                key={`${companyId}:${employee.id}`}
+                companyId={companyId}
+                employeeId={employee.id}
+                readOnly={readOnly}
+                canRevealHidden={canRevealHiddenNotes}
+              />
+            )}
+          </>
         )}
         {activeTab === 'pay-setup' && (
           <PaySetup

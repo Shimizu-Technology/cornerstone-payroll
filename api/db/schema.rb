@@ -1049,6 +1049,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
     t.check_constraint "tracking_mode::text = ANY (ARRAY['balance_tracked'::character varying::text, 'recurring_no_balance'::character varying::text])", name: "employee_loans_tracking_mode_check"
   end
 
+  create_table "employee_notes", force: :cascade do |t|
+    t.text "body", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.bigint "employee_id", null: false
+    t.datetime "hidden_at"
+    t.bigint "hidden_by_id"
+    t.text "hidden_reason"
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "employee_id", "created_at", "id" ], name: "index_employee_notes_on_company_employee_created"
+    t.index [ "created_by_id" ], name: "index_employee_notes_on_created_by_id"
+    t.index [ "employee_id" ], name: "index_employee_notes_on_employee_id"
+    t.index [ "hidden_by_id" ], name: "index_employee_notes_on_hidden_by_id"
+    t.check_constraint "char_length(btrim(body)) >= 1 AND char_length(body) <= 2000", name: "employee_notes_body_length"
+    t.check_constraint "hidden_at IS NULL AND hidden_by_id IS NULL AND hidden_reason IS NULL OR hidden_at IS NOT NULL AND hidden_by_id IS NOT NULL AND hidden_reason IS NOT NULL AND char_length(btrim(hidden_reason)) >= 1 AND char_length(hidden_reason) <= 500", name: "employee_notes_hidden_fields_consistent"
+  end
+
   create_table "employee_payroll_fields", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.decimal "amount", precision: 10, scale: 2
@@ -4941,6 +4959,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
   add_foreign_key "employee_loans", "employees"
   add_foreign_key "employee_loans", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_loans", "users", column: "stopped_by_id", on_delete: :nullify
+  add_foreign_key "employee_notes", "companies"
+  add_foreign_key "employee_notes", "employees"
+  add_foreign_key "employee_notes", "users", column: "created_by_id"
+  add_foreign_key "employee_notes", "users", column: "hidden_by_id"
   add_foreign_key "employee_payroll_fields", "employee_loans"
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
