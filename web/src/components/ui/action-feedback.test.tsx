@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { ActionFeedback, FeedbackProvider, useFeedback, useFeedbackState } from './action-feedback';
 import { Dialog, DialogContent, DialogTitle } from './dialog';
@@ -13,6 +14,81 @@ function NotifyButton({ tone = 'error' }: { tone?: 'error' | 'success' }) {
 }
 
 describe('shared action feedback', () => {
+  it.each(['component', 'imperative'])('shows one maintenance notice and retains the form (%s feedback)', async (style) => {
+    const { departmentsApi } = await import('@/services/api');
+    const message = 'Payroll is in a short maintenance window. Changes are paused.';
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
+      JSON.stringify({ code: 'write_maintenance', error: message }),
+      { status: 503 },
+    ));
+    function Form() {
+      const [error, setError] = useState('');
+      const { notify } = useFeedback();
+      return <form onSubmit={(event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const name = String(new FormData(form).get('department'));
+        void departmentsApi.create({ name, company_id: 1 }).then(() => form.reset()).catch((error: Error) => {
+          if (style === 'imperative') notify({ tone: 'error', message: error.message });
+          else setError(error.message);
+        });
+      }}>
+        <label>Department<input name="department" /></label>
+        <button type="submit">Save</button>
+        {error && <ActionFeedback tone="error" message={error}><p>{error}</p></ActionFeedback>}
+      </form>;
+    }
+    render(<FeedbackProvider><Form /></FeedbackProvider>);
+
+    const name = screen.getByRole<HTMLInputElement>('textbox', { name: 'Department' });
+    fireEvent.change(name, { target: { value: 'Operations' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect((await screen.findByRole('status')).textContent).toContain(message);
+    expect(screen.getAllByText(message)).toHaveLength(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(name.value).toBe('Operations');
+  });
+
+  it('keeps all passive read receipts silent', async () => {
+    const { adminClientDocumentsApi, adminPortalThreadsApi, clientDocumentsApi, clientPortalThreadsApi } = await import('@/services/api');
+    const { adminPayrollSubmissionsApi } = await import('@/services/payrollSubmissions');
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
+      JSON.stringify({ code: 'write_maintenance', error: 'Maintenance' }),
+      { status: 503, headers: { 'Retry-After': '75' } },
+    ));
+    render(<FeedbackProvider>{null}</FeedbackProvider>);
+    const display = { foreground: true as const, displayed_message_ids: [6], display_token: 'display' };
+
+    await act(async () => {
+      for (const operation of [
+        () => adminClientDocumentsApi.opened(4),
+        () => clientDocumentsApi.opened(4),
+        () => adminPortalThreadsApi.markRead(4, display),
+        () => clientPortalThreadsApi.markRead(4, display),
+        () => adminPayrollSubmissionsApi.seen('4', 6),
+      ]) {
+        await expect(operation()).rejects.toMatchObject({ isWriteMaintenance: true, retryAfterMs: 75_000 });
+      }
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(5);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps background ticket failures quiet and passes along the retry interval', async () => {
+    const { authApi } = await import('@/services/api');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ code: 'write_maintenance', error: 'Maintenance' }),
+      { status: 503, headers: { 'Retry-After': '75' } },
+    ));
+    render(<FeedbackProvider>{null}</FeedbackProvider>);
+
+    await expect(authApi.createCableTicket(1)).rejects.toMatchObject({ status: 503, retryAfterMs: 75_000 });
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('keeps a failed legacy check action above its still-open overlay', async () => {
     const { checksApi } = await import('@/services/api');
     const { VoidCheckModal } = await import('@/components/payroll/VoidCheckModal');

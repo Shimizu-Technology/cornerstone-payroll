@@ -49,6 +49,8 @@ module Api
         rescue_from PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError,
           with: :render_component_history_error
 
+        before_action :pause_persisted_reports, only: %i[transmittal_log_pdf full_print_package_pdf check_signoff_sheet], prepend: true
+
         # GET /api/v1/admin/reports/dashboard
         # Dashboard stats and metrics
         def dashboard
@@ -1255,6 +1257,10 @@ module Api
         end
 
         private
+
+        def pause_persisted_reports
+          render_write_maintenance if WriteMaintenance.enabled?
+        end
 
         def render_component_history_error(error)
           render json: { error: error.message }, status: :unprocessable_entity

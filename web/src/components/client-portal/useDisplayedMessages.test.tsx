@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 import { CommandPalette } from '@/components/layout/CommandPalette';
-import type { ClientPortalThread } from '@/services/api';
+import { ApiError, type ClientPortalThread } from '@/services/api';
 import { useDisplayedMessages } from './useDisplayedMessages';
 vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: () => false }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAdmin: false, isSuperAdmin: false, isAccountant: true, isClient: false, hasCapability: () => false }) }));
@@ -99,4 +99,32 @@ it('reports every message shown so far, so seeing 12, then 11, then 12 again rea
   show([12]);
   await new Promise(resolve => setTimeout(resolve, 300));
   expect(mark).toHaveBeenCalledTimes(2);
+});
+
+
+it('backs off when a receipt is paused, even if the page mutates or refetches the thread', async () => {
+  vi.useFakeTimers();
+  try {
+    const error = new ApiError('Maintenance', 503, undefined, { code: 'write_maintenance' });
+    error.retryAfterMs = 60_000;
+    mark.mockRejectedValueOnce(error);
+    const view = render(<View />);
+    intersect(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(mark).toHaveBeenCalledOnce();
+
+    view.rerender(<View thread={{ ...topic, display_token: 'refetched' }} />);
+    intersect(true);
+    act(() => window.dispatchEvent(new Event('focus')));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(mark).toHaveBeenCalledOnce();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mark).toHaveBeenCalledOnce();
+    act(() => window.dispatchEvent(new Event('focus')));
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(mark).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });

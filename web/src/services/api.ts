@@ -69,6 +69,7 @@ export function apiErrorMessage(data: unknown, status: number, options: { readOn
 // ========================================
 
 import type { ConnectorHealth } from '@/lib/connector-health';
+import { WRITE_MAINTENANCE_EVENT } from './write-maintenance';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
@@ -79,6 +80,7 @@ export function resolveApiUrl(baseUrl: string, endpoint: string, origin = global
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
   companyId?: number | null;
+  notifyMaintenance?: boolean;
 }
 
 export interface BlobDownload {
@@ -116,6 +118,22 @@ async function fetchWithFeedback(input: RequestInfo | URL, init?: RequestInit): 
       0,
     );
   }
+}
+
+async function readApiError(response: Response, options?: { readOnly?: boolean; notifyMaintenance?: boolean }): Promise<ApiError> {
+  const data: unknown = await response.json().catch(() => ({}));
+  const payload = record(data);
+  const message = apiErrorMessage(data, response.status, options);
+  const error = new ApiError(message, response.status, payload.details as ApiError['details'], data);
+  if (error.isWriteMaintenance) {
+    const seconds = Number(response.headers.get('Retry-After'));
+    error.retryAfterMs = Number.isSafeInteger(seconds) && seconds > 0 ? seconds * 1000 : 60_000;
+    if (options?.notifyMaintenance !== false) {
+      globalThis.window?.dispatchEvent(new CustomEvent(WRITE_MAINTENANCE_EVENT, { detail: message }));
+    }
+  }
+
+  return error;
 }
 
 class ApiClient {
@@ -203,7 +221,7 @@ class ApiClient {
   }
 
   private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const { params, companyId, ...fetchOptions } = options;
+    const { params, companyId, notifyMaintenance, ...fetchOptions } = options;
     const initiatingCompanyId = companyId === undefined ? this.activeCompanyId : companyId;
     const financeHeaders = this.financeHeaders(endpoint);
     const url = this.buildUrl(endpoint, params);
@@ -229,15 +247,7 @@ class ApiClient {
       headers,
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new ApiError(
-        apiErrorMessage(errorData, response.status),
-        response.status,
-        errorData.details,
-        errorData
-      );
-    }
+    if (!response.ok) throw await readApiError(response, { notifyMaintenance });
 
     // Handle 204 No Content
     if (response.status === 204) {
@@ -250,12 +260,12 @@ class ApiClient {
   async get<T>(
     endpoint: string,
     params?: Record<string, string | number | boolean | undefined>,
-    options: Pick<RequestOptions, 'companyId' | 'signal'> = {},
+    options: Pick<RequestOptions, 'companyId' | 'signal' | 'notifyMaintenance'> = {},
   ): Promise<T> {
     return this.request<T>(endpoint, { method: 'GET', params, ...options });
   }
 
-  async post<T>(endpoint: string, data?: unknown, options: Pick<RequestOptions, 'companyId'> = {}): Promise<T> {
+  async post<T>(endpoint: string, data?: unknown, options: Pick<RequestOptions, 'companyId' | 'notifyMaintenance'> = {}): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
@@ -281,15 +291,7 @@ class ApiClient {
       body: formData,
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new ApiError(
-        apiErrorMessage(errorData, response.status),
-        response.status,
-        errorData.details,
-        errorData
-      );
-    }
+    if (!response.ok) throw await readApiError(response);
 
     return response.json() as Promise<T>;
   }
@@ -306,10 +308,7 @@ class ApiClient {
 
     const response = await fetchWithFeedback(this.buildUrl(endpoint), { method: 'POST', headers, body: formData });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new ApiError(apiErrorMessage(errorData, response.status), response.status, errorData.details, errorData);
-    }
+    if (!response.ok) throw await readApiError(response);
 
     return {
       blob: await response.blob(),
@@ -330,15 +329,7 @@ class ApiClient {
       headers,
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new ApiError(
-        apiErrorMessage(errorData, response.status, { readOnly: true }),
-        response.status,
-        errorData.details,
-        errorData
-      );
-    }
+    if (!response.ok) throw await readApiError(response, { readOnly: true });
 
     return response.blob();
   }
@@ -357,15 +348,7 @@ class ApiClient {
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new ApiError(
-        apiErrorMessage(errorData, response.status),
-        response.status,
-        errorData.details,
-        errorData
-      );
-    }
+    if (!response.ok) throw await readApiError(response);
 
     const filename = parseContentDispositionFilename(response.headers.get('Content-Disposition'));
     const generatedHeader = response.headers.get('X-Pay-Stubs-Generated');
@@ -383,7 +366,7 @@ class ApiClient {
   async getBlobWithParams(
     endpoint: string,
     params?: Record<string, string | number | boolean | undefined>,
-    options: Pick<RequestOptions, "companyId"> = {},
+    options: Pick<RequestOptions, "companyId" | "notifyMaintenance"> = {},
   ): Promise<BlobDownload> {
     const initiatingCompanyId = options.companyId === undefined ? this.activeCompanyId : options.companyId;
     const headers: Record<string, string> = this.financeHeaders(endpoint);
@@ -396,15 +379,7 @@ class ApiClient {
       headers,
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new ApiError(
-        apiErrorMessage(errorData, response.status, { readOnly: true }),
-        response.status,
-        errorData.details,
-        errorData
-      );
-    }
+    if (!response.ok) throw await readApiError(response, { readOnly: true, notifyMaintenance: options.notifyMaintenance });
 
     const filename = parseContentDispositionFilename(response.headers.get('content-disposition'));
     return { blob: await response.blob(), filename };
@@ -444,6 +419,7 @@ export type PayrollCommitSnapshot = {
 
 export class ApiError extends Error {
   status: number;
+  retryAfterMs?: number;
   details?: Record<string, string[] | Record<string, unknown>[] | number>;
   data?: unknown;
 
@@ -458,6 +434,10 @@ export class ApiError extends Error {
     this.status = status;
     this.details = details;
     this.data = data;
+  }
+
+  get isWriteMaintenance(): boolean {
+    return this.status === 503 && record(this.data).code === 'write_maintenance';
   }
 
   get fieldErrors(): Record<string, string[]> {
@@ -4832,8 +4812,8 @@ export const clientDocumentsApi = {
   upload: (formData: FormData, companyId?: number) =>
     api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData, { companyId }),
   preview: (id: number) =>
-    api.getBlobWithParams(`/client/documents/${id}/preview`),
-  opened: (id: number): Promise<void> => api.post<void>(`/client/documents/${id}/opened`),
+    api.getBlobWithParams(`/client/documents/${id}/preview`, undefined, { notifyMaintenance: false }),
+  opened: (id: number): Promise<void> => api.post<void>(`/client/documents/${id}/opened`, undefined, { notifyMaintenance: false }),
   activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/client/documents/${id}/activity`, { page }),
   download: (id: number) =>
     api.getBlobWithParams(`/client/documents/${id}/download`),
@@ -4858,7 +4838,7 @@ export const clientPortalThreadsApi = {
     api.patch<{ data: ClientPortalThread }>(`/client/portal_threads/${id}`, data),
   activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/client/portal_threads/${id}/activity`, { page }),
   markRead: (id: number, data: PortalReadDisplay): Promise<{ data: ClientPortalThread }> =>
-    api.post<{ data: ClientPortalThread }>(`/client/portal_threads/${id}/mark_read`, data),
+    api.post<{ data: ClientPortalThread }>(`/client/portal_threads/${id}/mark_read`, data, { notifyMaintenance: false }),
   createMessage: (threadId: number, data: { body?: string; document_id?: number; document_ids?: number[]; idempotency_key: string }): Promise<{ data: ClientPortalMessage }> =>
     api.post<{ data: ClientPortalMessage }>(`/client/portal_threads/${threadId}/messages`, data),
 };
@@ -4871,8 +4851,8 @@ export const adminClientDocumentsApi = {
   upload: (formData: FormData, companyId?: number) =>
     api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData, { companyId }),
   preview: (id: number) =>
-    api.getBlobWithParams(`/admin/client_documents/${id}/preview`),
-  opened: (id: number): Promise<void> => api.post<void>(`/admin/client_documents/${id}/opened`),
+    api.getBlobWithParams(`/admin/client_documents/${id}/preview`, undefined, { notifyMaintenance: false }),
+  opened: (id: number): Promise<void> => api.post<void>(`/admin/client_documents/${id}/opened`, undefined, { notifyMaintenance: false }),
   activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/admin/client_documents/${id}/activity`, { page }),
   download: (id: number, companyId?: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/download`, undefined, { companyId }),
@@ -4912,7 +4892,7 @@ export const adminPortalThreadsApi = {
     api.patch<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}`, data),
   activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/admin/portal_threads/${id}/activity`, { page }),
   markRead: (id: number, data: PortalReadDisplay): Promise<{ data: ClientPortalThread }> =>
-    api.post<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}/mark_read`, data),
+    api.post<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}/mark_read`, data, { notifyMaintenance: false }),
   createMessage: (threadId: number, data: { body?: string; document_id?: number; document_ids?: number[]; idempotency_key: string }): Promise<{ data: ClientPortalMessage }> =>
     api.post<{ data: ClientPortalMessage }>(`/admin/portal_threads/${threadId}/messages`, data),
 };
@@ -6807,11 +6787,11 @@ export function clearPriorProviderDrafts(): void {
 }
 
 export const authApi = {
-  me: () => api.get<{ user: AuthApiUser }>('/auth/me'),
-  createCableTicket: (companyId: number) => api.post<{ ticket: string; expires_in: number }>('/cable_ticket', undefined, { companyId }),
+  me: () => api.get<{ user: AuthApiUser }>('/auth/me', undefined, { notifyMaintenance: false }),
+  createCableTicket: (companyId: number) => api.post<{ ticket: string; expires_in: number }>('/cable_ticket', undefined, { companyId, notifyMaintenance: false }),
   login: (token: string) => {
     api.setAuthToken(token);
-    return api.get<{ user: AuthApiUser }>('/auth/me');
+    return api.get<{ user: AuthApiUser }>('/auth/me', undefined, { notifyMaintenance: false });
   },
   logout: () => {
     clearPriorProviderDrafts();
