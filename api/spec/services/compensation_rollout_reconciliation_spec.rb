@@ -7,8 +7,10 @@ RSpec.describe "compensation:reconcile_rollout" do
   include ActiveSupport::Testing::TimeHelpers
 
   it "records newer legacy caches as dated history, prints only IDs/counts, and is safe to rerun" do
-    load Rails.root.join("lib/tasks/compensation.rake") unless Rake::Task.task_defined?("compensation:reconcile_rollout")
-    Rake::Task.define_task(:environment) unless Rake::Task.task_defined?("environment")
+    previous_application = Rake.application
+    Rake.application = Rake::Application.new
+    load Rails.root.join("lib/tasks/compensation.rake")
+    Rake::Task.define_task(:environment)
     task = Rake::Task["compensation:reconcile_rollout"]
     employee = create(:employee, pay_rate: 15, hire_date: PayrollBusinessClock.today - 60)
     wage_rate = employee.employee_wage_rates.create!(label: "Regular", rate: 15, is_primary: true)
@@ -30,7 +32,7 @@ RSpec.describe "compensation:reconcile_rollout" do
     expect(employee.employee_compensation_changes.count).to eq(2)
     expect(wage_rate.employee_wage_rate_versions.count).to eq(2)
   ensure
-    task&.reenable
+    Rake.application = previous_application
   end
   it "records legacy basis drift after a future locked period without changing its pay basis" do
     today = PayrollBusinessClock.today
