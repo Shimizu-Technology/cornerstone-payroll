@@ -128,7 +128,7 @@ export const adminPayrollSubmissionsApi = {
   postDraft: (ref: string, draftId: number) => api.post<Detail>(`/admin/payroll_submission_periods/${encode(ref)}/drafts/${draftId}/post`),
   // Only after the page was shown in the foreground, through the latest client update it displayed.
   seen: (ref: string, displayedEventId: number) =>
-    api.post<void>(`/admin/payroll_submission_periods/${encode(ref)}/seen`, { foreground: true, displayed_event_id: displayedEventId }),
+    api.post<void>(`/admin/payroll_submission_periods/${encode(ref)}/seen`, { foreground: true, displayed_event_id: displayedEventId }, { notifyMaintenance: false }),
   threads: adminPortalThreadsApi,
   documents: adminClientDocumentsApi,
   employees: (): Promise<PickerEmployee[]> =>
