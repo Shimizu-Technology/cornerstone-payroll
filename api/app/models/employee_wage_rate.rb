@@ -17,7 +17,7 @@ class EmployeeWageRate < ApplicationRecord
 
   validates :label, presence: true
   validates :label, uniqueness: { scope: :employee_id }
-  validates :rate, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validates :rate, numericality: { greater_than_or_equal_to: 0, less_than: 1_000_000 }, allow_nil: true
 
   scope :active, -> { where(active: true) }
   scope :primary, -> { where(is_primary: true) }

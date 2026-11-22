@@ -108,6 +108,16 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(AirePayrollAcknowledgement.count).to eq(0)
   end
 
+  it "approves retained history after the activation job refreshes a newer wage rate" do
+    activation = PayrollBusinessClock.today + 2
+    change_compensation!(employee, effective_on: activation, pay_rate: 33)
+    page = history_service.prepare!
+    SyncEffectiveCompensationJob.perform_now(as_of: activation)
+    expect(employee.reload.pay_rate).to eq(33)
+    allow(PayrollBusinessClock).to receive(:today).and_return(activation)
+    expect(approve_review(page)["approved_at"]).to be_present
+  end
+
   it "rolls back the receipt, mappings and audit if fresh ensure_complete refuses" do
     source.time_tracking_employee_mappings.delete_all
     page = history_service.prepare!

@@ -145,7 +145,7 @@ module TimeTracking
       employee = mapping&.employee
       reasons = []
       reasons << "Link this AIRE employee to an active Payroll employee first" unless employee&.active? && employee.company_id == origin.company_id
-      reasons << "These hours require an hourly payroll employee" if employee && !employee.payroll_compensation_on(origin.end_date).hourly? && !employee.payroll_compensation_on(origin.end_date).contractor_hourly?
+      reasons << "These hours require an hourly payroll employee" if employee && !employee.payroll_compensation_on(origin.end_date).hourly_pay_basis?
       # Late hours pay at the rates in effect at the end of their origin period (M3-4).
       rates = employee ? employee.wage_rates_on(origin.end_date).reject { |rate| rate.rate.nil? } : []
       lines = Array(row["adjustments"]).map do |line|

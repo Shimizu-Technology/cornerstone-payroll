@@ -55,7 +55,7 @@ class PayrollCalculationContext
       {
         "version" => VERSION,
         "intake_setup_fingerprint" => employee.intake_exception.present? ? intake_setup_fingerprint(employee: employee, rates_on: rates_on) : nil,
-        "employee" => employee_snapshot(employee, w4_election: w4_election).merge(employee_basis || EmployeeCompensationChangeService.snapshot(employee, rates_on).slice(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES)),
+        "employee" => employee_snapshot(employee, w4_election: w4_election).merge(employee_basis || EmployeeCompensationChangeService.snapshot(employee, rates_on)),
         "employee_deductions" => deduction_snapshots(employee_deductions),
         "payroll_field_assignments" => payroll_field_snapshots(payroll_field_assignments),
         "retirement_election" => retirement_election&.snapshot_attributes&.deep_stringify_keys
