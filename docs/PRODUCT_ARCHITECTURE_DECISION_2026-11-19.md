@@ -208,7 +208,7 @@ Today Payroll serves only Cornerstone staff and client offices. Employee logins 
 3. **MFA enforced** for staff and client users. It's configured but nothing checks it.
 4. **Audit for actions with no staff user,** such as employees, kiosks and system jobs.
 5. **Effective-dated pay.** Pay rates are overwritten in place today.
-6. **Document scanning.** It's a placeholder that marks every file "not scanned".
+6. **Document scanning.** It's a placeholder that marks every file "not scanned". *Leon, November 22, 2026: not a gate for the pilot. Pilot uploads use the existing file-type and size checks without malware scanning, trusting the pilot companies; scanning must be added before wider rollout beyond the pilot clients.*
 7. **Capacity kept for payroll.**
    - Rate limits and monitoring on the employee API.
    - Separate web processes and background workers for employee and kiosk traffic, with their own database connection limits, so a rush of clock-ins can't slow a payroll run.
