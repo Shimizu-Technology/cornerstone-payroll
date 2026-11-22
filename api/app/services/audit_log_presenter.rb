@@ -23,6 +23,7 @@ class AuditLogPresenter
   }.freeze
   VERBS = {
     "companies#create" => "created",
+    "client_operating_profile.update" => "updated the operating profile for",
     "test_workspace#create" => "created the test workspace",
     "companies#created" => "created",
     "employees#created" => "created the employee record for",
