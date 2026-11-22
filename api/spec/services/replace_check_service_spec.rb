@@ -84,7 +84,7 @@ RSpec.describe ReplaceCheckService do
         corrected_inputs: { hours_worked: 80 }
       )
 
-      employee.update!(
+      change_compensation!(employee,
         pay_frequency: "monthly",
         filing_status: "married",
         allowances: 5,

@@ -14,7 +14,7 @@ class EmployeeWageRateVersion < ApplicationRecord
   belongs_to :created_by, class_name: "User", optional: true
 
   validates :label, presence: true
-  validates :rate, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validates :rate, numericality: { greater_than_or_equal_to: 0, less_than: 1_000_000 }, allow_nil: true
   validates :effective_on, uniqueness: { scope: :employee_wage_rate_id }
 
   validate :wage_rate_matches_employee
