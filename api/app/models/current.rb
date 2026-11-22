@@ -1,5 +1,11 @@
 # frozen_string_literal: true
 
 class Current < ActiveSupport::CurrentAttributes
-  attribute :user, :organization_id, :company_id, :request_id, :ip_address, :user_agent, :domain_audit_recorded
+  attribute :user, :actor, :organization_id, :company_id, :request_id, :ip_address, :user_agent, :domain_audit_recorded, default: nil
+
+  # Inline jobs and invoked tasks can share a thread with their caller. Restore
+  # that caller's context on exit, including when work raises.
+  def self.with_isolated_actor(actor, &block)
+    set(attributes.transform_values { nil }.merge(actor: actor), &block)
+  end
 end

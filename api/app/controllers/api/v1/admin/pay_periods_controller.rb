@@ -1950,7 +1950,7 @@ module Api
 
           lifecycle_event_json(
             timestamp: log.created_at,
-            actor_name: log.user&.name
+            actor_name: log.user ? log.user.name : log.actor_name
           )
         end
 
