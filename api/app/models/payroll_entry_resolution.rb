@@ -22,7 +22,8 @@ class PayrollEntryResolution < ApplicationRecord
   end
 
   def audit_resolution
-    AuditLog.record!(company_id: pay_period.company_id, action: "payroll_entry_resolutions##{destroyed? ? 'destroy' : 'save'}",
+    AuditLog.record!(user: Current.user, actor: Current.actor || AuditActor.system_job(self.class.name),
+      company_id: pay_period.company_id, action: "payroll_entry_resolutions##{destroyed? ? 'destroy' : 'save'}",
       record_type: "PayPeriod", record_id: pay_period_id, subject_name: employee&.full_name,
       metadata: { resolution: attributes, changes: saved_changes, pay_period_status: pay_period.status,
         employee_name: employee&.full_name, field_kind: payroll_standing_change&.kind, field_label: payroll_standing_change&.label.presence,

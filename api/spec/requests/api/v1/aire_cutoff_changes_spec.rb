@@ -83,9 +83,12 @@ RSpec.describe "AIRE lock-time changes", type: :request do
       override = AirePayrollCutoffOverride.sole
       expect(override.source_actor).to eq(aire_actor.merge("payroll_user_id" => org_admin.id))
       expect(override.request_id).to eq(request_id)
-      expect(AuditLog.find_by!(action: "aire_payroll_calendar#cutoff_changed").metadata).to include(
+      audit = AuditLog.find_by!(action: "aire_payroll_calendar#cutoff_changed")
+      expect(audit).to have_attributes(actor_type: "source_system", actor_id: source.id.to_s, actor_name: "AIRE System", user_id: nil)
+      expect(audit.metadata).to include(
         "requested_via" => "aire_services", "source_actor" => include("name" => "Chels Admin", "role" => "admin")
       )
+      expect(Current.actor).to be_nil
 
       post path, params: body.to_json, headers: headers
       expect(response).to have_http_status(:ok)

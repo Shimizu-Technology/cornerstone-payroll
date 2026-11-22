@@ -23,6 +23,7 @@ import type { CompanyListItem, InvitationDeliveryResponse } from '@/services/api
 import { useAuth } from '@/contexts/AuthContext';
 import { ClientManagementDialog } from '@/components/users/ClientManagementDialog';
 import { UserActivityPanel } from '@/components/users/UserActivityPanel';
+import { RecoverClerkLoginDialog } from '@/components/users/RecoverClerkLoginDialog';
 import { MovePracticeLoginDialog } from '@/components/users/MovePracticeLoginDialog';
 import { RoleGuide, RoleHint, type RoleOption } from '@/components/users/RoleGuide';
 import {
@@ -72,7 +73,7 @@ export function Users() {
   const roleOptions = currentUser?.role === 'super_admin'
     ? allRoleOptions
     : allRoleOptions.filter((role) => role.value !== 'super_admin');
-  const invitationRoleOptions = roleOptions.filter((role) => !role.legacy);
+  const invitationRoleOptions = roleOptions.filter((role) => !role.legacy && role.value !== 'employee');
   const roleGuideOptions = roleOptions.filter((role) => !role.legacy);
   const roleLabel = (role: UserRole) => allRoleOptions.find((option) => option.value === role)?.label || role;
 
@@ -111,12 +112,16 @@ export function Users() {
   const [editClientIds, setEditClientIds] = useState<number[]>([]);
   const [editError, setEditError, editErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
-  const editRoleOptions = roleOptions.filter((role) => !role.legacy || editRole === role.value);
+  const editRoleOptions = roleOptions.filter((role) =>
+    (!role.legacy && role.value !== 'employee') || editRole === role.value);
 
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [managementUser, setManagementUser] = useState<User | null>(null);
+  const [recoveryUser, setRecoveryUser] = useState<User | null>(null);
+  const recoveryAction = (user: User) => user.can_recover_clerk_invitation
+    ? <Button size="sm" variant="outline" onClick={() => setRecoveryUser(user)}>Recover login</Button> : null;
   const [moveUser, setMoveUser] = useState<User | null>(null);
   const canDelegate = ['admin', 'org_admin', 'super_admin'].includes(currentUser?.role ?? '');
   const managementAction = (user: User) => canDelegate && user.role === 'accountant' && user.id !== currentUser?.id
@@ -734,6 +739,7 @@ export function Users() {
                           <MobileCardActions>
                             <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
                             {managementAction(user)}
+                            {recoveryAction(user)}
                             {moveAction(user, 'compact')}
                             {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
@@ -825,6 +831,7 @@ export function Users() {
                           <div className="ml-auto flex min-w-[15rem] max-w-[24rem] flex-wrap justify-end gap-1.5 [&_button]:text-xs">
                             <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
                             {managementAction(user)}
+                            {recoveryAction(user)}
                             {moveAction(user, 'compact')}
                             {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
@@ -912,6 +919,19 @@ export function Users() {
           onRefreshCompanies={() => void loadCompanies()}
           onClose={() => setMoveUser(null)}
           onMoved={handleMoved}
+        />
+      )}
+      {recoveryUser && (
+        <RecoverClerkLoginDialog
+          user={recoveryUser}
+          onClose={() => setRecoveryUser(null)}
+          onBound={(updated) => {
+            setUsers((rows) => rows.map((row) => row.id === updated.id ? updated : row));
+            setInviteWarning((warning) => warning?.user.id === updated.id ? null : warning);
+            setError(null);
+            setSuccessMessage(`Clerk account linked for ${updated.name}.`);
+            setRecoveryUser(null);
+          }}
         />
       )}
       {activityUser && <UserActivityPanel user={activityUser} onClose={handleCloseActivity} />}

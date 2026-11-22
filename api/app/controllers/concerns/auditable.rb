@@ -45,7 +45,7 @@ module Auditable
   def write_audit_log
     return unless audit_worthy_request?
     return unless response.successful?
-    return unless current_user
+    return unless current_audit_actor
     return if @skip_default_audit_log
     return if Current.domain_audit_recorded
 
@@ -89,8 +89,8 @@ module Auditable
     }.compact
 
     AuditLog.record!(
-      user: current_user,
-      organization_id: controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense") ? current_organization_id : current_user.organization_id,
+      actor: current_audit_actor,
+      organization_id: controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense") ? current_organization_id : Current.user&.organization_id,
       company_id: audit_company_id,
       action: action_label,
       record_type: record_type,
@@ -104,6 +104,10 @@ module Auditable
     )
   rescue => e
     Rails.logger.warn("[Auditable] Failed to write audit log: #{e.message}")
+  end
+
+  def current_audit_actor
+    Current.actor
   end
 
   def audit_worthy_request?

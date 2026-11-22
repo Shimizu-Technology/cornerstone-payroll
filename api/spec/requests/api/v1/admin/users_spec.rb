@@ -202,6 +202,24 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
   end
 
   describe "PATCH /api/v1/admin/users/:id" do
+    %w[employee portal_employee].each do |role|
+      it "allows a name-only edit for an existing #{role}" do
+        legacy_user = create(:user, organization: organization, company: company, role: role)
+
+        patch "/api/v1/admin/users/#{legacy_user.id}", params: { user: { name: "Updated Name" } }
+
+        expect(response).to have_http_status(:ok)
+        expect(legacy_user.reload).to have_attributes(name: "Updated Name", role: role)
+      end
+    end
+
+    it "keeps super admin rows outside an organization admin's update scope" do
+      patch "/api/v1/admin/users/#{super_admin_user.id}", params: { user: { name: "Updated Name" } }
+
+      expect(response).to have_http_status(:not_found)
+      expect(super_admin_user.reload.name).to eq("Users Super Admin")
+    end
+
     it "updates role and client assignments together" do
       patch "/api/v1/admin/users/#{managed_user.id}",
         params: {
@@ -236,13 +254,13 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       patch "/api/v1/admin/users/#{managed_user.id}",
         params: {
           user: {
-            role: "employee"
+            role: "org_admin"
           }
         }
 
       expect(response).to have_http_status(:ok)
       managed_user.reload
-      expect(managed_user.role).to eq("employee")
+      expect(managed_user.role).to eq("org_admin")
       expect(managed_user.company_assignments).to be_empty
 
       payload = response.parsed_body.fetch("data")
@@ -291,14 +309,14 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
         params: {
           user: {
             name: "Renamed Other Company User",
-            role: "employee"
+            role: "org_admin"
           }
         }
 
       expect(response).to have_http_status(:ok)
       switched_company_user.reload
       expect(switched_company_user.name).to eq("Renamed Other Company User")
-      expect(switched_company_user.role).to eq("employee")
+      expect(switched_company_user.role).to eq("org_admin")
       expect(switched_company_user.company_assignments).to be_empty
     end
 

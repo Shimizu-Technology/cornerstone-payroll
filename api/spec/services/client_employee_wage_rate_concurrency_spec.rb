@@ -10,6 +10,7 @@ RSpec.describe ClientEmployeeUpdateService, :postgres_concurrency, type: :servic
   let!(:company) { create(:company, organization: organization, name: "Client wage concurrency #{SecureRandom.hex(4)}") }
   let!(:department) { Department.create!(company: company, name: "Concurrency") }
   let!(:client_user) { create(:user, company: company, organization: organization, role: "client") }
+  let!(:admin) { create(:user, company: company, organization: organization) }
   let!(:employee) { create(:employee, company: company, department: department) }
   let!(:wage_rate) do
     employee.employee_wage_rates.create!(
@@ -29,7 +30,7 @@ RSpec.describe ClientEmployeeUpdateService, :postgres_concurrency, type: :servic
     Department.where(id: department.id).delete_all
     # The admin's wage-rate edit records a compensation audit entry (M3-4).
     AuditLog.where(company_id: company.id).delete_all
-    User.where(id: client_user.id).delete_all
+    User.where(id: [ client_user.id, admin.id ]).delete_all
     Company.where(id: company.id).delete_all
     Organization.where(id: organization.id).delete_all
   end
@@ -82,7 +83,7 @@ RSpec.describe ClientEmployeeUpdateService, :postgres_concurrency, type: :servic
         # M3-4: staff wage-rate edits go through the compensation service,
         # which takes the same company and employee locks.
         EmployeeCompensationChangeService.new(
-          employee: Employee.find(employee.id), actor: nil, source: "staff", reason: "Competing admin edit",
+          employee: Employee.find(employee.id), actor: User.find(admin.id), source: "staff", reason: "Competing admin edit",
           wage_rate_edits: [ { id: wage_rate.id, rate: 20 } ]
         ).call!
         results << [ :admin, :updated ]
@@ -98,6 +99,8 @@ RSpec.describe ClientEmployeeUpdateService, :postgres_concurrency, type: :servic
     expect(admin_was_blocked).to eq(true)
     outcomes = 2.times.map { results.pop }
     expect(outcomes.map(&:first)).to contain_exactly(:client, :admin)
+    audit = AuditLog.find_by!(action: "employee#compensation_changed", record_id: employee.id)
+    expect(audit).to have_attributes(user_id: admin.id, actor_type: "staff_user", actor_id: admin.id.to_s)
     request_id = outcomes.find { |kind, _| kind == :client }.last
     request = EmployeeChangeRequest.find(request_id)
 

@@ -75,16 +75,20 @@ RSpec.describe "Moving a practice-only login between practice copies", type: :re
 
   it "replaces a pending invitation when the moved login is activated" do
     archive_old_copy!
-    login.update_columns(invitation_status: "pending", clerk_invitation_id: "inv_old")
+    login.update_columns(clerk_id: "pending_practice", invitation_status: "pending", clerk_invitation_id: "inv_old")
     clerk = instance_double(ClerkInvitationService, configured?: true)
     allow(ClerkInvitationService).to receive(:new).and_return(clerk)
+    allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:create_clerk_invitation).and_call_original
+    allow(clerk).to receive(:invitation_status).with("inv_old").and_return("pending")
     expect(clerk).to receive(:revoke_invitation).with("inv_old").and_return(success: true)
+    expect(clerk).to receive(:create_invitation).and_return(success: true, invitation_id: "inv_reissued")
 
     move!
 
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body["invitation_delivery_status"]).to eq("failed")
-    expect(login.reload.practice_company_id).to eq(new_copy.id)
+    expect(login.reload).to have_attributes(practice_company_id: new_copy.id, clerk_invitation_id: "inv_reissued",
+      invite_nonce_digest: be_present)
   end
 
   it "denies a user who is not an organization administrator" do
@@ -180,7 +184,7 @@ RSpec.describe "Moving a practice-only login between practice copies", type: :re
 
   it "revokes a pending invitation when the login is moved without activating" do
     archive_old_copy!
-    login.update_columns(invitation_status: "pending", clerk_invitation_id: "inv_old")
+    login.update_columns(clerk_id: "pending_practice", invitation_status: "pending", clerk_invitation_id: "inv_old")
     clerk = instance_double(ClerkInvitationService, configured?: true)
     allow(ClerkInvitationService).to receive(:new).and_return(clerk)
     expect(clerk).to receive(:revoke_invitation).with("inv_old").and_return(success: true)

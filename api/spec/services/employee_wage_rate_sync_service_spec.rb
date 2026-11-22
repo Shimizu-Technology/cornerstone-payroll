@@ -30,7 +30,7 @@ RSpec.describe EmployeeWageRateSyncService do
 
     def sync!(replace_missing: false)
       EmployeeCompensationChangeService.new(
-        employee: employee, actor: nil, source: "staff", reason: "Spec sync",
+        employee: employee, actor: AuditActor.system_job("Wage rate sync spec"), source: "staff", reason: "Spec sync",
         wage_rates: [ { id: regular_rate.id, label: "Regular", rate: 19.5, is_primary: true, active: true } ],
         replace_missing_wage_rates: replace_missing
       ).call!

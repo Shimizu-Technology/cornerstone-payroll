@@ -23,9 +23,12 @@ class ApplicationController < ActionController::API
 
   def set_current_context
     authenticated_user = current_user
-    Current.user = authenticated_user if authenticated_user.is_a?(User)
-    Current.organization_id = current_organization_id if authenticated_user.is_a?(User)
-    Current.company_id = current_company_id if authenticated_user.is_a?(User)
+    if authenticated_user.is_a?(User)
+      Current.user = authenticated_user
+      Current.actor = AuditActor.for_user(authenticated_user)
+      Current.organization_id = current_organization_id
+      Current.company_id = current_company_id
+    end
     Current.request_id = request.request_id
     Current.ip_address = request.remote_ip
     Current.user_agent = request.user_agent
@@ -161,6 +164,8 @@ class ApplicationController < ActionController::API
   # writing another client's business records.
   def resolve_company_id
     return current_user&.company_id unless current_user
+
+    return if current_user.employee? || current_user.portal_employee?
 
     requested_company = request.headers["X-Company-Id"]
     unless requested_company.nil?

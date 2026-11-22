@@ -136,7 +136,7 @@ module ClerkCutover
             )
 
             AuditLog.record!(
-              user: nil,
+              actor: @operator ? AuditActor.operator(@operator) : AuditActor.system_job(self.class.name),
               organization_id: user.organization_id,
               company_id: user.company_id,
               action: "users#clerk_production_relinked",
@@ -205,7 +205,7 @@ module ClerkCutover
             )
 
             AuditLog.record!(
-              user: nil,
+              actor: @operator ? AuditActor.operator(@operator) : AuditActor.system_job(self.class.name),
               organization_id: user.organization_id,
               company_id: user.company_id,
               action: "users#clerk_production_relink_rolled_back",

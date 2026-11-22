@@ -148,6 +148,7 @@ module AirePayrollCalendar
     def record_audit!(calendar_period, publication)
       AuditLog.record!(
         user: @actor,
+        actor: (AuditActor.source_system(source: @source) if @integration_authorized),
         company_id: @pay_period.company_id,
         action: "aire_payroll_calendar#published",
         record_type: "AirePayrollCalendarPublication",
