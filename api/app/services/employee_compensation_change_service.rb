@@ -34,6 +34,9 @@ class EmployeeCompensationChangeService
   # correction runs keep their source's snapshot, so they do not lock it.
   LOCKING_RUN_PURPOSES = %w[regular final].freeze
   EFFECTIVE_DATE_CHOICES = %w[next_uncommitted_period today custom].freeze
+  ROLLOUT_SOURCE = "rollout_reconciliation".freeze
+  ROLLOUT_ACTOR_NAME = "Compensation rollout reconciliation".freeze
+  GO_LIVE_SOURCE = "go_live_setup_transfer".freeze
   RESERVED_LABEL_PREFIX = "__compensation_cache__".freeze
   UNCHANGED = Object.new.freeze
   WRITE_CONTEXT_KEY = :employee_compensation_write_ids
@@ -74,9 +77,9 @@ class EmployeeCompensationChangeService
         end
         next if !new_employee && missing_rates.empty? && changes.empty? && edits.empty?
 
-        record_initial!(employee, source: "rollout_reconciliation") if new_employee
+        record_initial!(employee, source: ROLLOUT_SOURCE) if new_employee
         missing_rates.each { |row| record_wage_rate_created!(row, sync: false) }
-        result = new(employee: employee, actor: nil, source: "rollout_reconciliation", pay_rate: changes.fetch("pay_rate", UNCHANGED),
+        result = new(employee: employee, actor: nil, source: ROLLOUT_SOURCE, pay_rate: changes.fetch("pay_rate", UNCHANGED),
           effective_on: reconciliation_date(employee, as_of), basis: changes.slice(*BASIS_ATTRIBUTES), wage_rate_edits: edits).call!
         sync_cache!(employee, as_of: as_of)
         { employee_id: employee.id, wage_rate_ids: (missing_rates.map(&:id) + result.wage_rate_versions.map(&:employee_wage_rate_id)).uniq }
@@ -197,7 +200,7 @@ class EmployeeCompensationChangeService
           )
         end
         rate_map.each_value do |target_rate|
-          next if target_rate.employee_wage_rate_versions.exists?
+          next if target_rate.employee_wage_rate_versions.exists? || target_rate.label.start_with?(RESERVED_LABEL_PREFIX)
 
           record_wage_rate_created!(target_rate)
         end
@@ -270,13 +273,15 @@ class EmployeeCompensationChangeService
       employee.compensation_on(date)&.snapshot || employee.attributes.slice(*COMPENSATION_ATTRIBUTES)
     end
 
-    def validate_basis_transition!(employee, date, basis, historical_correction: false)
+    def validate_basis_transition!(employee, date, basis, historical_correction: false, source: nil)
       today = PayrollBusinessClock.today
       current = snapshot(employee, date)
       changed = basis.stringify_keys.select { |key, value| current[key] != value }
       return if changed.empty?
 
-      if date > today
+      future_basis_allowed = source == ROLLOUT_SOURCE ||
+      (source == GO_LIVE_SOURCE && (changed.keys - %w[pay_frequency salary_type]).empty?)
+    if date > today && !future_basis_allowed
         raise Error, "Pay type changes take effect immediately. Choose today or an earlier date when the pay type also changes."
       end
       if !historical_correction && employee.employee_compensation_changes.where("effective_on > ?", today).exists?
@@ -390,7 +395,7 @@ class EmployeeCompensationChangeService
     validate_revision! if changing || @require_revision
     validate_effective_on!(effective_on) if changing
     self.class.validate_basis_transition!(employee, effective_on, changes.slice(*BASIS_ATTRIBUTES),
-                                         historical_correction: @historical_correction)
+                                         historical_correction: @historical_correction, source: source)
     validate_scheduled_conflict!(effective_on) if @reject_scheduled_conflict && (changes.any? || edits.any?)
 
     compensation_change = if changes.any?
@@ -405,7 +410,12 @@ class EmployeeCompensationChangeService
       apply_version!(row.employee_wage_rate_versions, effective_on, desired.merge(owners), restore: restore.merge(owners))
     end
 
-    finish!(effective_on, current, before_rates) if changes.any? || edits.any?
+    if compensation_change || wage_rate_versions.any?
+      if @historical_correction
+        @correction_ends_on = [ compensation_change, *wage_rate_versions ].compact.map(&:ends_on).max
+      end
+      finish!(effective_on, current, before_rates)
+    end
     result(effective_on, compensation_change, wage_rate_versions)
   end
 
@@ -453,9 +463,10 @@ class EmployeeCompensationChangeService
   end
 
   def validate_scheduled_conflict!(effective_on)
-    dates = [ effective_on, PayrollBusinessClock.today ].min
-    return unless employee.employee_compensation_changes.where(effective_on: dates..).where.not(source: %w[backfill employee_creation client_portal]).exists? ||
-      employee.employee_wage_rate_versions.where(effective_on: dates..).where.not(source: %w[backfill wage_rate_created]).exists?
+    conflict = "effective_on >= :proposed OR effective_on > :today"
+    dates = { proposed: effective_on, today: PayrollBusinessClock.today }
+    return unless employee.employee_compensation_changes.where(conflict, dates).where.not(source: %w[backfill employee_creation client_portal]).exists? ||
+      employee.employee_wage_rate_versions.where(conflict, dates).where.not(source: %w[backfill wage_rate_created]).exists?
 
     raise ConflictError, "The employee already has a compensation change on or after the proposed date. Review their pay history."
   end
@@ -616,8 +627,7 @@ class EmployeeCompensationChangeService
   end
 
   def audit!(effective_on, previous, before_rates, warnings, cancelled:)
-    AuditLog.record!(
-      user: actor || Current.user,
+    attributes = {
       company_id: employee.company_id,
       action: "employee#compensation_changed",
       record_type: "Employee",
@@ -629,12 +639,22 @@ class EmployeeCompensationChangeService
         source: source,
         historical_correction: @historical_correction,
         cancelled: cancelled,
-        correction_ends_on: @restore_on&.prev_day&.iso8601,
+        correction_ends_on: @correction_ends_on&.iso8601,
         before: previous.merge(wage_rates: printable_rates(before_rates)),
         after: self.class.snapshot(employee, effective_on).merge(wage_rates: printable_rates(wage_rate_snapshots(effective_on))),
         warnings: warnings
       }
-    )
+    }
+    if source != ROLLOUT_SOURCE
+      AuditLog.record!(user: actor || Current.user, **attributes)
+    elsif defined?(AuditActor)
+      AuditLog.record!(actor: AuditActor.system_job(ROLLOUT_ACTOR_NAME), **attributes)
+    else
+      # Before M3-3 the audit API only accepts real users. Store the system
+      # identity in the existing actor snapshot without creating a login.
+      AuditLog.create!(**attributes, organization_id: employee.company.organization_id,
+        actor_name: ROLLOUT_ACTOR_NAME, actor_role: "system_job")
+    end
   end
 
   def printable_rates(rates)

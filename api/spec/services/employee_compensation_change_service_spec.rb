@@ -98,6 +98,32 @@ RSpec.describe EmployeeCompensationChangeService do
     end
   end
 
+  it "allows a future client change after a staff edit effective today" do
+    change!(effective_on: PayrollBusinessClock.today, pay_rate: 16)
+    date = PayrollBusinessClock.today + 10
+    change!(effective_on: date, pay_rate: 17, reject_scheduled_conflict: true)
+
+    expect(employee.payroll_rate_on(date)).to eq(17)
+    expect { change!(effective_on: date + 1, pay_rate: 18, reject_scheduled_conflict: true) }
+      .to raise_error(described_class::ConflictError)
+  end
+
+  it "does not turn a cancelled future-only wage row into copied history" do
+    date = PayrollBusinessClock.today + 10
+    change!(effective_on: date, wage_rate_edits: [ { label: "Night Shift", rate: 22 } ])
+    change!(effective_on: date, cancel: true)
+    orphan = employee.employee_wage_rates.sole
+    expect(orphan.label).to start_with(described_class::RESERVED_LABEL_PREFIX)
+
+    target = create(:employee)
+    described_class.copy_history!(source: employee, target: target) do
+      { orphan.id => target.employee_wage_rates.create!(label: orphan.label, active: false) }
+    end
+
+    expect(target.employee_wage_rate_versions).to be_empty
+    expect(target.wage_rates_on(date, include_inactive: true)).to be_empty
+  end
+
   describe "approved and committed payroll" do
     let!(:committed) { period(Date.new(2026, 11, 1), Date.new(2026, 11, 15), status: "committed") }
     let!(:paid_item) { create(:payroll_item, company: company, pay_period: committed, employee: employee, pay_rate: 15, gross_pay: 1200) }
@@ -118,6 +144,14 @@ RSpec.describe EmployeeCompensationChangeService do
       change!(effective_on: "2026-11-10", pay_rate: 18, historical_correction: true)
       expect(paid_item.reload.attributes).to eq(before_item)
       expect(employee.reload.employee_compensation_changes.find_by(effective_on: Date.new(2026, 11, 10))).to have_attributes(pay_rate: 18, historical_correction: true)
+    end
+
+    it "reports the actual last corrected day when a closer version already exists" do
+      change!(effective_on: "2026-11-13", pay_rate: 17, historical_correction: true)
+      result = change!(effective_on: "2026-11-10", pay_rate: 18, historical_correction: true)
+      expect(result.compensation_change.ends_on).to eq(Date.new(2026, 11, 12))
+      audit = AuditLog.where(action: "employee#compensation_changed", record_id: employee.id).order(:id).last
+      expect(audit.metadata.fetch("correction_ends_on")).to eq("2026-11-12")
     end
 
     it "requires a reason for a historical correction" do

@@ -409,6 +409,7 @@ module Api
             begin
               # Find or create payroll item for this employee
               payroll_item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+              payroll_item.employee = employee
               PayrollCorrectionPayBasisGuard.validate!(payroll_item)
               pay_basis_changed = payroll_item.persisted? && payroll_item.employment_type != employee.payroll_compensation_on(@pay_period.end_date).employment_type
               # Draft/calculated rows must reflect the employee classification used by
@@ -449,7 +450,7 @@ module Api
 
               # Reject altered frozen inputs before field/loan draft writes can
               # persist; the calculator and finalization recheck independently.
-              TimeTracking::SourceEarningsConservation.validate!(payroll_item)
+              TimeTracking::SourceEarningsConservation.validate!(payroll_item, employee: employee)
 
               # Apply salary override for variable-salary employees
               if params[:salary_overrides] && params[:salary_overrides][employee_id.to_s]

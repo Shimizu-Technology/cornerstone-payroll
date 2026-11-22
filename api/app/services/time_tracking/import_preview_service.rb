@@ -126,10 +126,12 @@ module TimeTracking
         period_end: end_date,
         workweek_start_weekday: workweek.starts_on_weekday
       )
-      rows = Array(raw["employees"]).filter_map do |source_employee|
-        match = matcher.match(source_employee)
+      matches = Array(raw["employees"]).map { |row| [ row, matcher.match(row) ] }
+      ids = matches.filter_map { |_, match| match[:employee_id] }.uniq
+      employees = Employee.where(id: ids, company_id: pay_period.company_id).with_compensation_history.index_by(&:id)
+      rows = matches.filter_map do |source_employee, match|
         split = overtime.split_days(source_employee["days"])
-        wage_rate_match = match_wage_rate_buckets(category_buckets_for(split[:days]), match[:employee_id])
+        wage_rate_match = match_wage_rate_buckets(category_buckets_for(split[:days]), employees[match[:employee_id]])
         categories = wage_rate_match[:categories]
         issues = source_employee["issues"] || {}
         warnings = warnings_for(source_employee, issues, match, split, categories, wage_rate_match[:multi_rate_employee])
@@ -218,13 +220,9 @@ module TimeTracking
       ].map(&:to_s).map(&:strip).join("|")
     end
 
-    def match_wage_rate_buckets(categories, employee_id)
+    def match_wage_rate_buckets(categories, employee)
       match = { categories: categories, multi_rate_employee: false }
-      return match if categories.blank? || employee_id.blank?
-
-      employee = Employee.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes)
-        .find_by(id: employee_id, company_id: pay_period.company_id)
-      return match unless employee&.hourly? || employee&.contractor_hourly?
+      return match if categories.blank? || !employee&.payroll_compensation_on(pay_period.end_date)&.hourly_pay_basis?
 
       active_rates = employee.wage_rates_on(pay_period.end_date)
       return match if active_rates.length <= 1 && active_rates.none? { |rate| rate.rate.nil? }

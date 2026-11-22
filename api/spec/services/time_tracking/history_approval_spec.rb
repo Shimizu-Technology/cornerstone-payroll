@@ -368,14 +368,14 @@ RSpec.describe TimeTracking::HistoryApproval do
 
   it "never guesses a Solo or Solo Hours earning rate from a matching label" do
     rate = create(:employee_wage_rate, employee: employee, label: "Solo", rate: 12.34)
-    instance = TimeTracking::BatchImportPreviewService.new(pay_period: run, source: source)
+    instance = TimeTracking::CategoryRateMatcher.new(source: source)
     category = { key: "solo_hours", name: "Solo Hours" }
-    expect(instance.send(:find_wage_rate, category, [ rate ], employee_id: employee.id)).to eq([ nil, nil ])
+    expect(instance.call(category, [ rate ], employee_id: employee.id)).to eq([ nil, nil ])
     TimeTrackingEarningChoice.create!(time_tracking_source: source, employee: employee, employee_wage_rate: rate,
       reviewed_by: actor, source_category_key: "solo", rate_snapshot: rate.attributes.slice("id", "employee_id", "label", "rate", "active").as_json)
-    expect(instance.send(:find_wage_rate, category, [ rate ], employee_id: employee.id)).to eq([ rate, "accountant_choice" ])
+    expect(instance.call(category, [ rate ], employee_id: employee.id)).to eq([ rate, "accountant_choice" ])
     change_wage_rate!(rate, rate: 12.35)
-    expect(instance.send(:find_wage_rate, category, [ rate ], employee_id: employee.id)).to eq([ nil, nil ])
+    expect(instance.call(category, [ rate ], employee_id: employee.id)).to eq([ nil, nil ])
   end
 
   context "with authenticated legacy frozen evidence" do
@@ -434,6 +434,23 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(choice.current_rate).to eq(rate)
     change_wage_rate!(rate, rate: 12.35)
     expect(choice.reload.current_rate).to be_nil
+  end
+
+  it "persists the reviewed Solo rate after the activation job changes the cache" do
+    row["category"] = { "id" => "3", "key" => "solo", "name" => "Solo" }
+    row["state"]["approval_status"] = nil
+    row["history_evidence"]["baseline_lines"] = []
+    rate = create(:employee_wage_rate, employee: employee, label: "Solo", rate: 30)
+    activation = PayrollBusinessClock.today + 2
+    change_wage_rate!(rate, effective_on: activation, rate: 34)
+    page = history_service.prepare!
+    expect(page.fetch("solo_decisions").sole.fetch("options")).to include(include("id" => rate.id, "rate" => "30.0"))
+
+    SyncEffectiveCompensationJob.perform_now(as_of: activation)
+    expect(rate.reload.rate).to eq(34)
+    allow(PayrollBusinessClock).to receive(:today).and_return(activation)
+    approve_review(page, solo_choices: [ { "employee_id" => employee.id, "employee_wage_rate_id" => rate.id } ])
+    expect(TimeTrackingEarningChoice.sole.rate_snapshot).to include("rate" => "30.0")
   end
 
   it "rejects an earning choice for a mapped person without an attested Solo item" do

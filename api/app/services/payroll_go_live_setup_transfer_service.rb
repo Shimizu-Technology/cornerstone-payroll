@@ -239,7 +239,7 @@ class PayrollGoLiveSetupTransferService
     EmployeeCompensationChangeService.new(
       employee: target,
       actor: actor,
-      source: "go_live_setup_transfer",
+      source: EmployeeCompensationChangeService::GO_LIVE_SOURCE,
       reason: "Reviewed successor setup copied from #{review.source_company.name}",
       effective_on: review.effective_on,
       pay_rate: compensation.fetch("pay_rate"),

@@ -108,8 +108,12 @@ module TimeTracking
 
     def process(raw, workweek:)
       matcher = EmployeeMatcher.new(company: pay_period.company, source: source)
-      rows = Array(raw["employees"]).map do |source_employee|
-        build_row(source_employee, matcher)
+      matches = Array(raw["employees"]).map { |row| [ row, matcher.match(row) ] }
+      ids = matches.filter_map { |_, match| match[:employee_id] }.uniq
+      employees = Employee.where(id: ids, company_id: pay_period.company_id).with_compensation_history.index_by(&:id)
+      rate_matcher = CategoryRateMatcher.new(source: source, employee_ids: ids)
+      rows = matches.map do |row, match|
+        build_row(row, match, employees[match[:employee_id]], rate_matcher)
       end
       issues = raw.fetch("issues")
 
@@ -140,17 +144,15 @@ module TimeTracking
       }
     end
 
-    def build_row(source_employee, matcher)
-      match = matcher.match(source_employee)
+    def build_row(source_employee, match, employee, rate_matcher)
+      basis = employee&.payroll_compensation_on(pay_period.end_date)
       categories = category_buckets(source_employee.fetch("adjustments"))
-      wage_rate_match = match_wage_rate_buckets(categories, match[:employee_id])
+      wage_rate_match = match_wage_rate_buckets(categories, employee, basis, rate_matcher)
       categories = wage_rate_match.fetch(:categories)
       regular_hours = decimal(source_employee.fetch("regular_hours"))
       overtime_hours = decimal(source_employee.fetch("overtime_hours"))
       total_hours = decimal(source_employee.fetch("total_hours"))
-      employee = Employee.find_by(id: match[:employee_id], company_id: pay_period.company_id) if match[:employee_id]
-      employment_type = employee&.payroll_compensation_on(pay_period.end_date)&.employment_type
-      estimated_gross_delta_cents = payroll_gross_delta_cents(categories, OvertimePremium.multiplier(employment_type))
+      estimated_gross_delta_cents = payroll_gross_delta_cents(categories, OvertimePremium.multiplier(basis&.employment_type))
       warnings = warnings_for(
         source_employee,
         match,
@@ -192,18 +194,14 @@ module TimeTracking
       SourceCategoryBuckets.call(adjustments)
     end
 
-    def match_wage_rate_buckets(categories, employee_id)
+    def match_wage_rate_buckets(categories, employee, basis, rate_matcher)
       result = { categories: categories, requires_category_mapping: false }
-      return result if categories.blank? || employee_id.blank?
-
-      employee = Employee.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes)
-        .find_by(id: employee_id, company_id: pay_period.company_id)
-      return result unless employee&.hourly? || employee&.contractor_hourly?
+      return result if categories.blank? || !basis&.hourly_pay_basis?
 
       active_rates = (pay_period.late_hours_run&.wage_rates_for(employee) || employee.wage_rates_on(pay_period.end_date)).reject { |rate| rate.rate.nil? }
       result[:requires_category_mapping] = categories.any?(&:present?)
       result[:categories] = categories.map do |category|
-        rate, method, mapping_error = find_wage_rate(category, active_rates, employee_id: employee_id)
+        rate, method, mapping_error = rate_matcher.call(category, active_rates, employee_id: employee.id)
         category.merge(
           employee_wage_rate_id: rate&.id,
           wage_rate_label: rate&.label,
@@ -213,10 +211,6 @@ module TimeTracking
         )
       end
       result
-    end
-
-    def find_wage_rate(category, rates, employee_id: nil)
-      TimeTracking::CategoryRateMatcher.new(source: source).call(category, rates, employee_id: employee_id)
     end
 
     def warnings_for(source_employee, match, categories, requires_category_mapping, total_hours:, regular_hours:, overtime_hours:, estimated_gross_delta_cents:)

@@ -56,8 +56,9 @@ module PayrollSubmissions
       raise Invalid, { "changes" => [ "List no more than #{MAX_ROWS} changes" ] } if rows.size > MAX_ROWS
 
       employee_ids = rows.flat_map { |row| Array(row["employee_ids"]) + [ row["employee_id"] ] }.compact.map { |id| integer(id) }.compact.uniq
-      @employees = Employee.where(company_id: @company_id, id: employee_ids).index_by(&:id)
-      @defaults = PayrollStandingChange.where(company_id: @company_id).index_by(&:id)
+      @employees = Employee.where(company_id: @company_id, id: employee_ids).with_compensation_history.index_by(&:id)
+      @defaults = PayrollStandingChange.where(company_id: @company_id)
+        .preload(employee: %i[employee_compensation_changes employee_wage_rates employee_wage_rate_versions]).index_by(&:id)
       normalized = rows.each_with_index.map { |row, index| normalize_row(row, index) }
       missing = @defaults.values.select { |item| item.active? && item.availability_error(rates_on: @rates_on).nil? && item.required? }.reject { |item| normalized.any? { |row| row["standing_change_id"] == item.id } }
       @errors["changes"] << "Every period defaults changed. Reload and fill in or skip every default." if missing.any?
@@ -107,7 +108,8 @@ module PayrollSubmissions
           return result
         end
         result.merge!("standing_change_id" => item.id, "employee_id" => item.employee_id, "label" => item.display_label)
-        @errors[key] << item.availability_error(rates_on: @rates_on) if item.availability_error(rates_on: @rates_on)
+        availability_error = item.availability_error(rates_on: @rates_on)
+        @errors[key] << availability_error if availability_error
         if ActiveModel::Type::Boolean.new.cast(row["skipped"])
           @errors[key] << "#{item.display_label}: enter a value; None this period is not allowed." unless item.allow_none?
           return result.merge("skipped" => true, "employee_wage_rate_id" => item.employee_wage_rate_id).compact
