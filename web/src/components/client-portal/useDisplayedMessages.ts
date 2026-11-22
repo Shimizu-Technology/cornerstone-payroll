@@ -1,10 +1,11 @@
 import { useEffect, useRef, type RefObject } from 'react';
-import type { ClientPortalThread, PortalReadDisplay } from '@/services/api';
+import { ApiError, type ClientPortalThread, type PortalReadDisplay } from '@/services/api';
 
 // DOM visibility, focus and the server-issued fetched range are all required.
 // Cable/prefetch can update data, but cannot themselves acknowledge a message.
 export function useDisplayedMessages(thread: ClientPortalThread | null, enabled: boolean,
   markRead: (id: number, data: PortalReadDisplay) => Promise<unknown>): RefObject<HTMLDivElement | null> {
+  const pausedUntil = useRef(0);
   const container = useRef<HTMLDivElement>(null);
   // Every message shown in the foreground so far, per conversation. The server
   // advances the cursor only through a contiguous shown run, so reporting just
@@ -24,13 +25,19 @@ export function useDisplayedMessages(thread: ClientPortalThread | null, enabled:
       clearTimeout(timer);
       timer = setTimeout(() => {
         if (!active || document.visibilityState !== 'visible' || !document.hasFocus() || node.closest('[inert]') || document.querySelector('[role="dialog"][aria-modal="true"]') || !node.getClientRects().length) return;
+        if (Date.now() < pausedUntil.current) return;
         visible.forEach(id => shown.add(id));
         const ids = [...shown].filter(id => loaded.has(id)).sort((a, b) => a - b);
         const key = ids.join(',');
         if (!visible.size || !ids.length || sent.has(key)) return;
         sent.add(key);
         void markRead(thread.id, { foreground: true, display_token: thread.display_token!, displayed_message_ids: ids })
-          .catch(() => { sent.delete(key); });
+          .catch((error: unknown) => {
+            if (error instanceof ApiError && error.isWriteMaintenance) {
+              pausedUntil.current = Date.now() + (error.retryAfterMs ?? 60_000);
+            }
+            sent.delete(key);
+          });
       }, 200);
     };
     const observer = new IntersectionObserver(entries => {

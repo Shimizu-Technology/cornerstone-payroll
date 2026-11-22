@@ -1,3 +1,4 @@
+import { ApiError } from '@/services/api';
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -89,7 +90,9 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
     const mark = (): void => {
       if (sent || document.visibilityState !== 'visible' || !document.hasFocus()) return;
       sent = true;
-      void adminPayrollSubmissionsApi.seen(String(id), displayed).catch(() => { sent = false; });
+      void adminPayrollSubmissionsApi.seen(String(id), displayed).catch((error: unknown) => {
+        if (!(error instanceof ApiError && error.isWriteMaintenance)) sent = false;
+      });
     };
     mark();
     window.addEventListener('focus', mark);

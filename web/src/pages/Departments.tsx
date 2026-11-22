@@ -87,6 +87,7 @@ export function Departments() {
       setIsAddingNew(false);
       fetchDepartments();
     } catch (err) {
+      if (err instanceof ApiError && err.isWriteMaintenance) return;
       if (err instanceof ApiError && err.fieldErrors.name) {
         setNewDeptError(err.fieldErrors.name[0]);
       } else {
@@ -128,6 +129,7 @@ export function Departments() {
       setEditName('');
       fetchDepartments();
     } catch (err) {
+      if (err instanceof ApiError && err.isWriteMaintenance) return;
       if (err instanceof ApiError && err.fieldErrors.name) {
         setEditError(err.fieldErrors.name[0]);
       } else {

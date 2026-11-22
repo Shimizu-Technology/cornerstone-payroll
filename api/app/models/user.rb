@@ -107,7 +107,13 @@ class User < ApplicationRecord
   # authority for access. Platform super admins retain recovery access when a
   # customer organization is inactive; every user must still be active.
   def payroll_access_allowed?
-    TestWorkspace::PortalAccess.deactivate_if_closed!(self) if active? && practice_company_id?
+    if active? && practice_company_id?
+      if WriteMaintenance.enabled?
+        return false unless practice_portal_open?
+      else
+        TestWorkspace::PortalAccess.deactivate_if_closed!(self)
+      end
+    end
     active? && (super_admin? || organization&.active?)
   end
 
