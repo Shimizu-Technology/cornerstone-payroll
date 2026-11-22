@@ -19,6 +19,8 @@ const BANK_ACCOUNT_AFTER_PATTERN =
   /(?<!\d)(\d{10,17})(?!\d)[^0-9\r\n;]{0,15}?(?:\r?\n[^0-9\r\n;]{0,8}?)?\b(?:acct\.?|account|routing|aba|dd|direct\s+deposit|bank|checking|savings)(?![a-zA-Z])/gi;
 const DIRECT_ACCOUNT_BEFORE_PATTERN =
   /\b(?:acct\.?|account|routing|aba|checking|savings)(?:(?=\d)|(?:[ \t]*(?:no\.?|num\.?|number|ending(?:[ \t]+in)?))?[ \t:#-]{0,5}(?:\r?\n[ \t:#-]{0,5})?)(?<!\d)\d{10,17}(?!\d)/i;
+const DIRECT_ACCOUNT_AFTER_PATTERN =
+  /(?<!\d)\d{10,17}(?!\d)[ \t]{0,3}(?:(?:is|was)[ \t]+(?:the|my|her|his|their|our)[ \t]+)?(?:acct\.?|account|routing|aba|checking|savings)(?![a-zA-Z])/i;
 const ROUTING_BEFORE_PATTERN =
   /\b(?:routing|aba)(?=\d|[^a-zA-Z])[^0-9\r\n;]{0,20}?(?:\r?\n[^0-9\r\n;]{0,10}?)?(?<!\d)\d{9}(?!\d)/i;
 const ROUTING_AFTER_PATTERN =
@@ -26,7 +28,7 @@ const ROUTING_AFTER_PATTERN =
 
 const CARD_BARE_PATTERN = /(?<![\d-])\d{13,19}(?![\d-])/;
 const CARD_GROUPED_PATTERN =
-  /(?<![\d-])(?:\d{4}([- ])\d{4}\1\d{4}\1\d{4}(?:\1\d{3})?|\d{4}([- ])\d{6}\2\d{5})(?![\d-])/;
+  /(?<![\d-])(?:\d{4}([- ])\d{4}\1\d{4}\1\d{4}(?:\1\d{3})?|\d{4}([- ])\d{6}\2\d{4,5})(?![\d-])/;
 
 function containsSsn(text: string): boolean {
   return (
@@ -49,6 +51,7 @@ function matchesNonGuamPhoneBankAccount(text: string, pattern: RegExp): boolean 
 function containsBankAccount(text: string): boolean {
   return (
     DIRECT_ACCOUNT_BEFORE_PATTERN.test(text)
+    || DIRECT_ACCOUNT_AFTER_PATTERN.test(text)
     || ROUTING_BEFORE_PATTERN.test(text)
     || ROUTING_AFTER_PATTERN.test(text)
     || matchesNonGuamPhoneBankAccount(text, BANK_ACCOUNT_BEFORE_PATTERN)
@@ -61,10 +64,12 @@ function containsCardNumber(text: string): boolean {
 }
 
 export function detectSensitiveNoteContent(
-  text: string,
+  rawText: string,
   subject = 'This draft',
 ): SensitiveNoteMatch | null {
-  if (!text.trim()) return null;
+  if (!rawText.trim()) return null;
+  // Match the backend, which normalizes no-break and narrow spaces.
+  const text = rawText.replace(/[\u00A0\u2007\u202F]/g, ' ');
 
   if (containsSsn(text)) {
     return {

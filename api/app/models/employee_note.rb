@@ -30,17 +30,21 @@ class EmployeeNote < ApplicationRecord
     /(?<!\d)(\d{10,17})(?!\d)[^0-9\r\n;]{0,15}?(?:\r?\n[^0-9\r\n;]{0,8}?)?\b(?:acct\.?|account|routing|aba|dd|direct\s+deposit|bank|checking|savings)(?![a-zA-Z])/i
   DIRECT_ACCOUNT_BEFORE_PATTERN =
     /\b(?:acct\.?|account|routing|aba|checking|savings)(?:(?=\d)|(?:[ \t]*(?:no\.?|num\.?|number|ending(?:[ \t]+in)?))?[ \t:#-]{0,5}(?:\r?\n[ \t:#-]{0,5})?)(?<!\d)\d{10,17}(?!\d)/i
+  # An account keyword right after the number ("6715551234 is the account
+  # number") counts even for a Guam-phone-shaped number.
+  DIRECT_ACCOUNT_AFTER_PATTERN =
+    /(?<!\d)\d{10,17}(?!\d)[ \t]{0,3}(?:(?:is|was)[ \t]+(?:the|my|her|his|their|our)[ \t]+)?(?:acct\.?|account|routing|aba|checking|savings)(?![a-zA-Z])/i
   ROUTING_BEFORE_PATTERN =
     /\b(?:routing|aba)(?=\d|[^a-zA-Z])[^0-9\r\n;]{0,20}?(?:\r?\n[^0-9\r\n;]{0,10}?)?(?<!\d)\d{9}(?!\d)/i
   ROUTING_AFTER_PATTERN =
     /(?<!\d)\d{9}(?!\d)[^0-9\r\n;]{0,12}?(?:\r?\n[^0-9\r\n;]{0,8}?)?\b(?:routing|aba)(?![a-zA-Z])/i
 
   # Card-number shapes: 13-19 bare digits, or standard grouped card layouts
-  # (4-4-4-4, 4-4-4-4-3, and Amex 4-6-5) using one consistent separator so
+  # (4-4-4-4, 4-4-4-4-3, Amex 4-6-5, and Diners 4-6-4) using one consistent separator so
   # year lists, ZIP lists, 4-4-4 refs, and ISO dates do not false-positive.
   CARD_BARE_PATTERN = /(?<![\d-])\d{13,19}(?![\d-])/
   CARD_GROUPED_PATTERN =
-    /(?<![\d-])(?:\d{4}([- ])\d{4}\1\d{4}\1\d{4}(?:\1\d{3})?|\d{4}([- ])\d{6}\2\d{5})(?![\d-])/
+    /(?<![\d-])(?:\d{4}([- ])\d{4}\1\d{4}\1\d{4}(?:\1\d{3})?|\d{4}([- ])\d{6}\2\d{4,5})(?![\d-])/
 
   IMMUTABLE_ATTRIBUTES = %w[company_id employee_id body created_by_id created_at].freeze
 
@@ -65,7 +69,9 @@ class EmployeeNote < ApplicationRecord
   def self.sensitive_data_kind(value)
     return nil if value.blank?
 
-    text = value.to_s
+    # Treat no-break and narrow spaces as ordinary spaces so Ruby's \s matches
+    # what JavaScript's \s already matches.
+    text = value.to_s.tr("\u00A0\u2007\u202F", "   ")
     return :ssn if contains_ssn?(text)
     return :bank_or_card if contains_bank_account?(text) || contains_card_number?(text)
 
@@ -80,6 +86,7 @@ class EmployeeNote < ApplicationRecord
 
   def self.contains_bank_account?(text)
     return true if text.match?(DIRECT_ACCOUNT_BEFORE_PATTERN) ||
+                   text.match?(DIRECT_ACCOUNT_AFTER_PATTERN) ||
                    text.match?(ROUTING_BEFORE_PATTERN) ||
                    text.match?(ROUTING_AFTER_PATTERN)
 
