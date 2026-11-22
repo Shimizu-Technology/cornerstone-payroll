@@ -15,6 +15,12 @@ class ApplicationController < ActionController::API
 
   private
 
+  def render_write_maintenance(message = nil)
+    response.headers["Retry-After"] = WriteMaintenance::RETRY_AFTER.to_s
+    response.headers["Cache-Control"] = "no-store"
+    render json: WriteMaintenance.payload(message), status: :service_unavailable
+  end
+
   def reset_current_context
     yield
   ensure

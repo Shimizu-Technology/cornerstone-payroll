@@ -37,6 +37,10 @@ rescue ActiveRecord::PendingMigrationError => e
   abort e.to_s.strip
 end
 RSpec.configure do |config|
+  # Reset request-scoped Current attributes so state set outside a request
+  # (e.g. a model callback's audit flag) can't leak into later examples.
+  config.after { Current.reset }
+
   # FactoryBot configuration
   config.include FactoryBot::Syntax::Methods
 

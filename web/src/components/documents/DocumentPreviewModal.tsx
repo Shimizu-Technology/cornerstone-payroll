@@ -1,3 +1,4 @@
+import { ApiError } from '@/services/api';
 import { ResourceActivity, type ResourceActivityApi } from '@/components/client-portal/ResourceActivity';
 import { useEffect } from 'react';
 import { Download, FileText, Image as ImageIcon, Loader2, X } from 'lucide-react';
@@ -39,7 +40,9 @@ export function DocumentPreviewModal({
     const record = () => {
       if (recorded || window.document.visibilityState !== 'visible' || !window.document.hasFocus()) return;
       recorded = true;
-      void activityApi.opened(document.id).then(() => window.dispatchEvent(new Event('portal-work-changed'))).catch(() => { recorded = false; });
+      void activityApi.opened(document.id).then(() => window.dispatchEvent(new Event('portal-work-changed'))).catch((error: unknown) => {
+        if (!(error instanceof ApiError && error.isWriteMaintenance)) recorded = false;
+      });
     };
     record();
     window.addEventListener('focus', record);

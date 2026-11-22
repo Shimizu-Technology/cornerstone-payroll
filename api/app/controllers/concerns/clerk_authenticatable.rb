@@ -42,6 +42,10 @@ module ClerkAuthenticatable
       return
     end
 
+    if !@current_user && WriteMaintenance.enabled?
+      return render_write_maintenance("New Payroll sign-ins are paused during maintenance. Try again shortly using this same sign-in.")
+    end
+
     @current_user ||= PayrollInvitation.new.bind_from_metadata(clerk_id, request: request)
     unless @current_user
       render json: { error: "This Clerk account is not linked to Payroll. Use your invitation or contact your administrator.",
