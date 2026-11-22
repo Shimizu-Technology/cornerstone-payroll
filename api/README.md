@@ -21,16 +21,20 @@ bin/rails db:encryption:init
 bin/rails s -p 3000
 ```
 
-## Authentication (WorkOS)
-- OAuth endpoints live under `/api/v1/auth/*`
-- Set `AUTH_ENABLED=false` to bypass auth locally
-- When auth is disabled, `USER_ID` and `COMPANY_ID` are used for scoping
-- Configure `JWT_SECRET` (or rely on `SECRET_KEY_BASE`) and `JWT_ISSUER` for JWT verification
-- Users are persisted in the database and assigned roles (`admin`, `manager`, `employee`)
-- `DEFAULT_USER_ROLE` is used for new users (first user per company becomes `admin`)
-- User invitations are sent via email from `/api/v1/admin/user_invitations`
-- Set `FRONTEND_URL` for the invite link base
-- Resend email delivery uses `RESEND_API_KEY` and `MAILER_FROM_EMAIL`
+## Authentication (Clerk)
+
+Set `AUTH_ENABLED=false` to bypass authentication locally. `USER_ID` and `COMPANY_ID` scope requests in this mode.
+
+To test real sign-in locally, configure the API and web app with keys from the same Clerk development instance. Set `AUTH_ENABLED=true` in the API and `VITE_AUTH_ENABLED=true` in the web app. Create your test account in Clerk, then copy its exact `user_…` ID from the Clerk Dashboard. Bind that ID to your intended existing local admin before signing in. In the local development console (`RAILS_ENV=development bin/rails console`), use the local Payroll user ID:
+
+```ruby
+admin = User.find(123) # Replace with the ID of your local admin row.
+raise "Expected a local admin" unless admin.organization_admin?
+admin.update!(clerk_id: "user_REPLACE_WITH_CLERK_DEV_ID", invitation_status: "accepted",
+  clerk_invitation_id: nil, invite_nonce_digest: nil, invite_nonce_expires_at: nil)
+```
+
+This console bootstrap is for a local development database. Once signed in, use Settings → Users for invitations and recovery. `FRONTEND_URL` sets the invitation redirect base. Email delivery uses `RESEND_API_KEY` and `MAILER_FROM_EMAIL`.
 
 ## CORS
 - Set `CORS_ORIGINS` to a comma-separated list of allowed frontend origins

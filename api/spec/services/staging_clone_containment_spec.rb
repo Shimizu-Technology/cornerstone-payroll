@@ -83,6 +83,18 @@ RSpec.describe StagingCloneContainment do
     expect(StagingQuarantine.complete?).to eq(false)
   end
 
+  it "refuses to redirect a tester's subject to a different row even when the email exists" do
+    intended = create(:user, email: "intended@example.test", clerk_id: "user_original")
+    wrong = create(:user, email: "wrong@example.test", clerk_id: "user_wrong")
+    ENV["STAGING_TESTER_BINDINGS"] = [ { user_id: wrong.id, email: intended.email, clerk_subject: "user_tester" } ].to_json
+    allow(StagingTesterIdentity).to receive(:verify!).and_return(StagingOutboundPolicy.tester_records)
+    service = described_class.new
+    service.quarantine(apply: true)
+
+    expect { service.configure(apply: true) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /email changed/)
+    expect([ intended.reload.clerk_id, wrong.reload.clerk_id ]).to eq(%w[user_original user_wrong])
+  end
+
   it "rebinds the two existing tester identities, preserves local IDs, and is repeatable" do
     leon = create(:user, email: "leon@example.test")
     chels = create(:user, email: "chels@example.test")
