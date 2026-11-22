@@ -27,9 +27,9 @@ module Api
           end
 
           label = rate_params[:label].to_s.strip
-          result = change_wage_rates!(employee, rate_params.except(:employee_id).to_h.merge(label: label))
+          result, revision = change_wage_rates!(employee, rate_params.except(:employee_id).to_h.merge(label: label))
           rate = result.wage_rate_versions.first&.as_wage_rate || employee.wage_rates_on(result.effective_on, include_inactive: true).find { |row| row.label == label }
-          render json: { wage_rate: rate_payload(rate), compensation_warnings: result.warnings }, status: :created
+          render json: { wage_rate: rate_payload(rate), compensation_warnings: result.warnings, compensation_revision: revision }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue EmployeeCompensationChangeService::Error => e
@@ -43,8 +43,8 @@ module Api
             return render json: { error: "Wage rate not found" }, status: :not_found
           end
 
-          result = change_wage_rates!(rate.employee, rate_update_params.to_h.merge(id: rate.id))
-          render json: { wage_rate: rate_payload(result.wage_rate_versions.first&.as_wage_rate || rate.reload), compensation_warnings: result.warnings }
+          result, revision = change_wage_rates!(rate.employee, rate_update_params.to_h.merge(id: rate.id))
+          render json: { wage_rate: rate_payload(result.wage_rate_versions.first&.as_wage_rate || rate.reload), compensation_warnings: result.warnings, compensation_revision: revision }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue EmployeeCompensationChangeService::Error => e
@@ -60,8 +60,8 @@ module Api
             return render json: { error: "Wage rate not found" }, status: :not_found
           end
 
-          result = change_wage_rates!(rate.employee, { id: rate.id, remove: true })
-          render json: { message: "Wage rate ended", compensation_warnings: result.warnings }
+          result, revision = change_wage_rates!(rate.employee, { id: rate.id, remove: true })
+          render json: { message: "Wage rate ended", compensation_warnings: result.warnings, compensation_revision: revision }
         rescue EmployeeCompensationChangeService::Error => e
           render_compensation_error(e)
         end
@@ -77,16 +77,22 @@ module Api
         end
 
         def change_wage_rates!(employee, edit)
-          EmployeeCompensationChangeService.new(
-            employee: employee,
-            actor: current_user,
-            source: "staff",
-            reason: compensation_params[:reason],
-            effective_on: compensation_params[:effective_on],
-            historical_correction: compensation_params[:historical_correction],
-            expected_revision: compensation_params[:compensation_revision],
-            wage_rate_edits: [ edit.symbolize_keys ]
-          ).call!
+          # Keep the company and employee locks held until we have the
+          # revision for this write, even when the requested edit is a no-op.
+          Employee.transaction do
+            result = EmployeeCompensationChangeService.new(
+              employee: employee,
+              actor: current_user,
+              source: "staff",
+              reason: compensation_params[:reason],
+              effective_on: compensation_params[:effective_on],
+              historical_correction: compensation_params[:historical_correction],
+              expected_revision: compensation_params[:compensation_revision],
+              require_revision: true,
+              wage_rate_edits: [ edit.symbolize_keys ]
+            ).call!
+            [ result, EmployeeCompensationChangeService.revision(employee) ]
+          end
         end
 
         def render_compensation_error(error)
