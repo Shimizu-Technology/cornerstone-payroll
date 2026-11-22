@@ -17,6 +17,15 @@ class EmployeeWageRateVersion < ApplicationRecord
   validates :rate, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :effective_on, uniqueness: { scope: :employee_wage_rate_id }
 
+  validate :wage_rate_matches_employee
+
+  def wage_rate_matches_employee
+    return unless employee_wage_rate && employee_wage_rate.employee_id != employee_id
+
+    errors.add(:employee_wage_rate, "must belong to the employee")
+  end
+  private :wage_rate_matches_employee
+
   def snapshot
     SNAPSHOT_ATTRIBUTES.index_with { |attribute| public_send(attribute) }
   end

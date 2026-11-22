@@ -455,6 +455,7 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     expect { missing.preview }.to raise_error(ArgumentError, /exact negative/)
     create(:employee_wage_rate, employee: employee, rate: 30)
     expect { service.preview }.to raise_error(ArgumentError, /rate or hours/)
+    EmployeeWageRateVersion.where(employee_wage_rate_id: employee.employee_wage_rates.where.not(id: rate.id).select(:id)).delete_all
     employee.employee_wage_rates.where.not(id: rate.id).delete_all
     IssueCorrectivePaycheckService.issue!(original_pay_period: original_period, employee: employee,
       corrected_inputs: { hours_worked: 3 }, pay_date: next_period.pay_date, reason: 'earlier correction')

@@ -38,6 +38,7 @@ RSpec.describe "Api::V1::Admin::EmployeeWageRates", type: :request do
         params: {
           employee_wage_rate: {
             employee_id: employee.id,
+            compensation_revision: EmployeeCompensationChangeService.revision(employee.reload),
             label: "Regular",
             rate: 18.00,
             is_primary: true,
@@ -74,7 +75,7 @@ RSpec.describe "Api::V1::Admin::EmployeeWageRates", type: :request do
       expect_any_instance_of(Employee).to receive(:with_lock).and_call_original
 
       patch "/api/v1/admin/employee_wage_rates/#{rate.id}",
-        params: { employee_wage_rate: { rate: 20.00 } },
+        params: { employee_wage_rate: { rate: 20.00, compensation_revision: EmployeeCompensationChangeService.revision(employee.reload) } },
         as: :json
 
       expect(response).to have_http_status(:ok)
@@ -105,7 +106,8 @@ RSpec.describe "Api::V1::Admin::EmployeeWageRates", type: :request do
       rate = employee.employee_wage_rates.create!(label: "Regular", rate: 18, is_primary: true, active: true)
       expect_any_instance_of(Employee).to receive(:with_lock).and_call_original
 
-      delete "/api/v1/admin/employee_wage_rates/#{rate.id}"
+      delete "/api/v1/admin/employee_wage_rates/#{rate.id}", as: :json,
+        params: { employee_wage_rate: { compensation_revision: EmployeeCompensationChangeService.revision(employee.reload) } }
 
       expect(response).to have_http_status(:ok)
       expect(rate.reload).to have_attributes(active: false, is_primary: false)

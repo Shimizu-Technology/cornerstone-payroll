@@ -145,7 +145,7 @@ module TimeTracking
       employee = mapping&.employee
       reasons = []
       reasons << "Link this AIRE employee to an active Payroll employee first" unless employee&.active? && employee.company_id == origin.company_id
-      reasons << "These hours require an hourly payroll employee" if employee && !employee.hourly? && !employee.contractor_hourly?
+      reasons << "These hours require an hourly payroll employee" if employee && !employee.payroll_compensation_on(origin.end_date).hourly? && !employee.payroll_compensation_on(origin.end_date).contractor_hourly?
       # Late hours pay at the rates in effect at the end of their origin period (M3-4).
       rates = employee ? employee.wage_rates_on(origin.end_date).reject { |rate| rate.rate.nil? } : []
       lines = Array(row["adjustments"]).map do |line|
@@ -224,8 +224,8 @@ module TimeTracking
         employee = Employee.lock.find_by(id: row.fetch("payroll_employee_id"), company_id: origin.company_id)
         mapping = source.time_tracking_employee_mappings.find_by(source_user_uuid: row.dig("employee", "payroll_integration_id"))
         unless employee&.active? && mapping&.employee_id == employee.id &&
-            employee.employment_type == row.fetch("payroll_employment_type") &&
-            employee.contractor_pay_type == row["payroll_contractor_pay_type"]
+            employee.payroll_compensation_on(origin.end_date).employment_type == row.fetch("payroll_employment_type") &&
+            employee.payroll_compensation_on(origin.end_date).contractor_pay_type == row["payroll_contractor_pay_type"]
           raise Error, "The selected employee's mapping or pay basis changed. Review the saved late-hours adjustment before resuming"
         end
       end

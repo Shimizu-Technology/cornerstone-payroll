@@ -572,7 +572,6 @@ class PayPeriod < ApplicationRecord
       payroll_items.includes(:employee).each do |item|
         item.deduction_review_warnings.each { |message| warnings << "#{item.employee.full_name}: #{message}" }
       end
-      warnings.concat(mid_period_compensation_warnings)
     end
     note = annual_fica_review_note
     warnings << note if note
@@ -591,7 +590,7 @@ class PayPeriod < ApplicationRecord
   # inside an open period pays every hour of it at the new rate. Say so before
   # the payroll is approved instead of silently using one rate.
   def mid_period_compensation_warnings
-    return [] if correction_run? || start_date.nil? || end_date.nil?
+    return [] unless run_purpose.in?(%w[regular final]) && !correction_run? && start_date && end_date && !committed?
 
     payroll_items.preload(employee: %i[employee_compensation_changes employee_wage_rate_versions employee_wage_rates]).filter_map do |item|
       next if item.timekeeping_source == "correction_reference"

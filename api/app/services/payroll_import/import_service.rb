@@ -95,7 +95,7 @@ module PayrollImport
         eligible_ids = Employee.where(company_id: company_id)
           .eligible_for_period(pay_period.start_date, pay_period.end_date).pluck(:id).to_set
         employees_by_id.each_value do |employee|
-          next unless employee.variable_salary?
+          next unless employee.payroll_compensation_on(pay_period.end_date).variable_salary?
           next if excluded_ids.include?(employee.id)
           next unless eligible_ids.include?(employee.id)
           next if matched.any? { |row| row[:employee_id] == employee.id }
@@ -200,7 +200,7 @@ module PayrollImport
     private
 
     def apply_employment!(payroll_item, employee)
-      payroll_item.employment_type = employee.employment_type
+      payroll_item.employment_type = employee.payroll_compensation_on(pay_period.end_date).employment_type
       payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
       payroll_item.pay_rate = employee.payroll_rate_on(pay_period.end_date)
       payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
@@ -249,7 +249,7 @@ module PayrollImport
       # for the period pay of a variable-salary employee on a regular run.
       missing_salary_names = employees_by_id.values.filter_map do |employee|
         next if excluded_employee_ids.include?(employee.id)
-        next unless employee.variable_salary? && pay_period.includes_base_salary?
+        next unless employee.payroll_compensation_on(pay_period.end_date).variable_salary? && pay_period.includes_base_salary?
 
         item = pay_period.payroll_items.find_by(employee_id: employee.id) || PayrollItem.new(pay_period: pay_period, employee: employee)
         source_period_pay = decimal_or_zero(rows_by_employee_id.dig(employee.id, :period_pay))
@@ -489,8 +489,8 @@ module PayrollImport
         bonus_keeps_manual: !!retained_bonus,
         employee_id: employee.id,
         employee_name: employee.full_name,
-        employment_type: employee.employment_type,
-        period_pay_required: employee.variable_salary? && pay_period.includes_base_salary?,
+        employment_type: employee.payroll_compensation_on(pay_period.end_date).employment_type,
+        period_pay_required: employee.payroll_compensation_on(pay_period.end_date).variable_salary? && pay_period.includes_base_salary?,
         # Keep the authoritative workbook value and its evidence in the
         # server-retained preview. `current_period_pay` is presentation data;
         # apply! must receive the original amount and proof after the browser
@@ -663,7 +663,7 @@ module PayrollImport
     end
 
     def period_pay_missing?(employee, existing_item, excel_data)
-      return false unless employee.variable_salary? && pay_period.includes_base_salary?
+      return false unless employee.payroll_compensation_on(pay_period.end_date).variable_salary? && pay_period.includes_base_salary?
 
       source_period_pay(excel_data).blank? &&
         existing_manual_period_pay(existing_item).blank?
@@ -689,7 +689,7 @@ module PayrollImport
         return
       end
       raise ArgumentError, "Pay this employee must be a positive amount." unless amount.positive?
-      raise ArgumentError, "Pay this employee is only allowed for variable-pay salary employees." unless employee.variable_salary?
+      raise ArgumentError, "Pay this employee is only allowed for variable-pay salary employees." unless employee.payroll_compensation_on(pay_period.end_date).variable_salary?
 
       evidence = row[:period_pay_evidence].to_h.deep_symbolize_keys
       raise ArgumentError, "Pay this employee must confirm THIS EMPLOYEE ONLY." unless evidence[:scope] == "THIS EMPLOYEE ONLY"

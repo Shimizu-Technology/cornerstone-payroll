@@ -22,7 +22,9 @@ RSpec.describe ClientEmployeeUpdateService, :postgres_concurrency, type: :servic
 
   after do
     EmployeeChangeRequest.where(employee_id: employee.id).delete_all
+    EmployeeWageRateVersion.where(employee_id: employee.id).delete_all
     EmployeeWageRate.where(employee_id: employee.id).delete_all
+    EmployeeCompensationChange.where(employee_id: employee.id).delete_all
     Employee.where(id: employee.id).delete_all
     Department.where(id: department.id).delete_all
     # The admin's wage-rate edit records a compensation audit entry (M3-4).

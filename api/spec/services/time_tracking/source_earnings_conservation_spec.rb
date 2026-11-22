@@ -93,7 +93,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     end
 
     it "pays every hour at the contract rate through calculation, approval and commitment" do
-      employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly") # fixture starts W-2
+      change_compensation!(employee, employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly") # fixture starts W-2
       item = apply!(same_rate: true, source_kinds: %w[current])
       item.calculate!
 
@@ -108,7 +108,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     end
 
     it "saves one contract-rate row per rate and keeps the source REG/OT split for receipts" do
-      employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
+      change_compensation!(employee, employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
       item = apply!(same_rate: true, source_kinds: %w[current])
       item.calculate!
       label = item.reload.wage_rate_hours.sole.fetch("label")
@@ -138,7 +138,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     end
 
     it "keeps a committed contractor item paid with a 1.5x OT row readable, printable and unrecalculated" do
-      employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
+      change_compensation!(employee, employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
       item = apply!(same_rate: true, source_kinds: %w[current])
       item.calculate!
       label = item.reload.wage_rate_hours.sole.fetch("label")
@@ -183,7 +183,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     end
 
     it "accepts a contractor's positive contract-rate gross (+$10) through commit" do
-      employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
+      change_compensation!(employee, employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
       item = apply_signed!
       item.calculate!
 

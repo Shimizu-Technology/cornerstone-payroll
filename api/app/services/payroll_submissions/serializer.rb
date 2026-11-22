@@ -152,7 +152,7 @@ module PayrollSubmissions
         workbook_choice: submission.workbook_choice, no_changes: submission.no_changes, notes: submission.notes, changes_link_url: submission.changes_link_url,
         changes: submission.change_rows.map do |row|
           row.except("availability_error").merge(
-            "availability_error" => (@standing_fields[row["standing_change_id"]]&.availability_error if @staff),
+            "availability_error" => (@standing_fields[row["standing_change_id"]]&.availability_error(rates_on: submission.period.end_date) if @staff),
             "label" => row["label"].presence || ChangeRows::LABELS[row["kind"]],
             "employee_name" => row["employee_id"] && employee_names[row["employee_id"]],
             "employee_names" => row["employee_ids"] && row["employee_ids"].map { |id| employee_names[id] }

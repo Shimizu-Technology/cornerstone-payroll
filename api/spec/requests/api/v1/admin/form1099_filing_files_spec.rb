@@ -184,7 +184,7 @@ RSpec.describe "1099 filing files", type: :request do
   end
   it "exports real payroll TIN/name fields and blocks a real unidentified check" do
     allow_any_instance_of(Form1099NecAggregator).to receive(:generate).and_call_original
-    employee.update!(employment_type: "contractor", contractor_type: "business", contractor_ein: "66-2345678", business_name: "ABC Services")
+    change_compensation!(employee, employment_type: "contractor", contractor_type: "business", contractor_ein: "66-2345678", business_name: "ABC Services")
     period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 5, 15))
     create(:payroll_item, company: company, employee: employee, pay_period: period,
       employment_type: "contractor", gross_pay: 1500, net_pay: 1400, withholding_tax: 100)

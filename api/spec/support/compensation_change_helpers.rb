@@ -9,10 +9,11 @@ module CompensationChangeHelpers
   def change_compensation!(employee, effective_on: nil, historical_correction: false, **attributes)
     attributes = attributes.stringify_keys
     pay_rate = attributes.key?("pay_rate") ? attributes.delete("pay_rate") : EmployeeCompensationChangeService::UNCHANGED
+    basis = attributes.extract!(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES)
     employee.update!(attributes) if attributes.any?
     EmployeeCompensationChangeService.new(
       employee: employee, actor: nil, source: "staff", reason: "Spec setup", effective_on: effective_on,
-      historical_correction: historical_correction, pay_rate: pay_rate
+      historical_correction: historical_correction, pay_rate: pay_rate, basis: basis
     ).call!
     employee
   end

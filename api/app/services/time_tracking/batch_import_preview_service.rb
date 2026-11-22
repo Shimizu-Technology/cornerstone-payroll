@@ -148,7 +148,8 @@ module TimeTracking
       regular_hours = decimal(source_employee.fetch("regular_hours"))
       overtime_hours = decimal(source_employee.fetch("overtime_hours"))
       total_hours = decimal(source_employee.fetch("total_hours"))
-      employment_type = Employee.where(id: match[:employee_id], company_id: pay_period.company_id).pick(:employment_type) if match[:employee_id]
+      employee = Employee.find_by(id: match[:employee_id], company_id: pay_period.company_id) if match[:employee_id]
+      employment_type = employee&.payroll_compensation_on(pay_period.end_date)&.employment_type
       estimated_gross_delta_cents = payroll_gross_delta_cents(categories, OvertimePremium.multiplier(employment_type))
       warnings = warnings_for(
         source_employee,
