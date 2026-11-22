@@ -280,8 +280,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
   create_table "audit_logs", force: :cascade do |t|
     t.string "action", null: false
     t.string "actor_email"
+    t.string "actor_id"
     t.string "actor_name"
     t.string "actor_role"
+    t.string "actor_type"
     t.bigint "company_id"
     t.datetime "created_at", null: false
     t.string "event_category", default: "activity", null: false
@@ -295,6 +297,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
     t.string "user_agent"
     t.bigint "user_id"
     t.index "company_id, ((metadata ->> 'pay_period_id'::text))", name: "idx_audit_logs_company_pay_period"
+    t.index [ "company_id", "actor_type", "created_at" ], name: "idx_audit_logs_company_actor_type_created_at"
     t.index [ "company_id" ], name: "index_audit_logs_on_company_id"
     t.index [ "created_at" ], name: "index_audit_logs_on_created_at"
     t.index [ "organization_id", "created_at", "id" ], name: "idx_audit_logs_org_history"
@@ -666,6 +669,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
     t.integer "regular_pay_threshold", default: 3, null: false
     t.index [ "active_printer_profile_id" ], name: "index_companies_on_active_printer_profile_id"
     t.index [ "created_by_id" ], name: "index_companies_on_created_by_id"
+    t.index [ "id", "payroll_environment" ], name: "idx_companies_payroll_environment_key", unique: true
     t.index [ "ein" ], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
     t.index [ "employee_intake_enabled_by_id" ], name: "index_companies_on_employee_intake_enabled_by_id"
     t.index [ "id", "organization_id" ], name: "index_companies_on_id_and_organization_id", unique: true
@@ -871,6 +875,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
     t.bigint "user_id", null: false
     t.index [ "payroll_item_id" ], name: "index_direct_deposit_payment_confirmations_on_payroll_item_id", unique: true
     t.index [ "user_id" ], name: "index_direct_deposit_payment_confirmations_on_user_id"
+  end
+
+  create_table "employee_account_links", force: :cascade do |t|
+    t.bigint "user_id"
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.string "payroll_environment", default: "live", null: false
+    t.string "status", default: "invited", null: false
+    t.string "invite_token_digest"
+    t.datetime "invite_expires_at"
+    t.bigint "invited_by_id"
+    t.datetime "activated_at"
+    t.datetime "former_at"
+    t.datetime "former_access_until"
+    t.datetime "revoked_at"
+    t.bigint "revoked_by_id"
+    t.string "revoked_reason"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
+    t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY ((ARRAY['invited'::character varying, 'active'::character varying])::text[]))"
+    t.index [ "employee_id" ], name: "index_employee_account_links_on_employee_id"
+    t.index [ "invite_token_digest" ], name: "index_employee_account_links_on_invite_token_digest", unique: true
+    t.index [ "invited_by_id" ], name: "index_employee_account_links_on_invited_by_id"
+    t.index [ "revoked_by_id" ], name: "index_employee_account_links_on_revoked_by_id"
+    t.index [ "user_id" ], name: "index_employee_account_links_on_user_id"
+    t.check_constraint "payroll_environment::text = 'live'::text", name: "employee_account_links_live_only"
+    t.check_constraint "status::text = ANY (ARRAY['invited'::character varying, 'active'::character varying, 'former'::character varying, 'revoked'::character varying]::text[])", name: "employee_account_links_status_check"
   end
 
   create_table "employee_change_requests", force: :cascade do |t|
@@ -4686,6 +4718,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
     t.integer "role", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "workos_id"
+    t.string "invite_nonce_digest"
+    t.datetime "invite_nonce_expires_at"
     t.index [ "clerk_id" ], name: "index_users_on_clerk_id", unique: true
     t.index [ "company_id" ], name: "index_users_on_company_id"
     t.index [ "email" ], name: "index_users_on_email", unique: true
@@ -4932,6 +4966,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
   add_foreign_key "departments", "companies"
   add_foreign_key "direct_deposit_payment_confirmations", "payroll_items"
   add_foreign_key "direct_deposit_payment_confirmations", "users"
+  add_foreign_key "employee_account_links", "companies", column: [ "company_id", "payroll_environment" ], primary_key: [ "id", "payroll_environment" ], name: "fk_employee_account_links_live_company"
+  add_foreign_key "employee_account_links", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_account_links_employee"
+  add_foreign_key "employee_account_links", "users"
+  add_foreign_key "employee_account_links", "users", column: "invited_by_id"
+  add_foreign_key "employee_account_links", "users", column: "revoked_by_id"
   add_foreign_key "employee_change_requests", "companies"
   add_foreign_key "employee_change_requests", "employees"
   add_foreign_key "employee_change_requests", "users", column: "requested_by_id"

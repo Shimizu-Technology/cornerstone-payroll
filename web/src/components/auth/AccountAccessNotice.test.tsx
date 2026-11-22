@@ -26,3 +26,10 @@ it('shows the server detail and offers only the actions it is given', () => {
   expect(retry).toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: 'Sign in with a different account' })).toBeNull();
 });
+
+it('explains how to recover an unbound Clerk sign-in', () => {
+  const problem = { status: 401, code: 'payroll_account_unbound', message: 'Clerk account is not linked' };
+  render(<AccountAccessNotice problem={problem} />);
+  expect(screen.getByRole('alert').textContent).toMatch(/Open your Payroll invitation/);
+  expect(screen.getByRole('alert').textContent).toMatch(/ask your Payroll administrator/);
+});

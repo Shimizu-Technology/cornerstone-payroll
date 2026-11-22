@@ -53,7 +53,6 @@ class StagingCloneContainment
       raise StagingOutboundPolicy::ConfigurationError, "Migrate the quarantined clone with db:safe_prepare before staging:clone:configure"
     end
     verified_testers = StagingTesterIdentity.verify!(env: env)
-    testers = verified_testers.to_h { |tester| [ tester.fetch("email"), tester.fetch("clerk_subject") ] }
     url = StagingOutboundPolicy.require_setting!("STAGING_AIRE_BASE_URL", env)
     StagingOutboundPolicy.integration!(url, env: env)
     authorization_origin = StagingOutboundPolicy.require_setting!("STAGING_AIRE_FRONTEND_ORIGIN", env)
@@ -72,9 +71,14 @@ class StagingCloneContainment
           source.update_columns(active: false) if source.active?
         end
       end
-      connection.execute("UPDATE users SET clerk_id = NULL, clerk_invitation_id = NULL, workos_id = NULL, last_session_id_digest = NULL WHERE clerk_id IS NOT NULL OR clerk_invitation_id IS NOT NULL OR workos_id IS NOT NULL OR last_session_id_digest IS NOT NULL")
-      testers.each do |email, clerk_id|
-        User.unscoped.where("lower(email) = ?", email).update_all(clerk_id: clerk_id)
+      User.unscoped.update_all(clerk_id: nil, clerk_invitation_id: nil, workos_id: nil, last_session_id_digest: nil,
+        invite_nonce_digest: nil, invite_nonce_expires_at: nil)
+      verified_testers.each do |tester|
+        user = User.unscoped.lock.find(tester.fetch("user_id"))
+        unless user.email.to_s.downcase == tester.fetch("email")
+          raise StagingOutboundPolicy::ConfigurationError, "Staging tester email changed during clone configuration"
+        end
+        user.update_columns(clerk_id: tester.fetch("clerk_subject"))
       end
       mark!("__containment_complete__")
     end

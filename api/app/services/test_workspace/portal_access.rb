@@ -17,9 +17,13 @@ module TestWorkspace
         # update_columns skips the model callback, so dispatch revocation explicitly.
         user.update_columns(active: false, updated_at: Time.current)
         PayrollAccess::RevocationDispatcher.call(user)
-        AuditLog.record!(user: nil, organization_id: user.organization_id, company_id: user.practice_company_id,
-          action: "test_workspace#portal_access_deactivated", record_type: "users", record_id: user.id,
-          metadata: { reason: "practice_copy_unavailable_or_access_revoked" }, event_category: "security")
+        actor = Current.actor
+        actor = AuditActor.system_job(name) unless actor&.type == "system_job"
+        Current.set(domain_audit_recorded: nil) do
+          AuditLog.record!(actor: actor, organization_id: user.organization_id, company_id: user.practice_company_id,
+            action: "test_workspace#portal_access_deactivated", record_type: "users", record_id: user.id,
+            metadata: { reason: "practice_copy_unavailable_or_access_revoked" }, event_category: "security")
+        end
         true
       end
       revoke_pending_invitation!(user) if closed
@@ -33,7 +37,15 @@ module TestWorkspace
 
       invitation_id = user.clerk_invitation_id
       result = service.revoke_invitation(invitation_id)
-      if result[:success] || invitation_already_closed?(result)
+      # Accepted metadata must survive a close/move so the recipient can bind
+      # after an admin reactivates the login in an open practice copy.
+      if result[:error_code] == "invitation_already_accepted"
+        return
+      end
+
+      closed = result[:success] || result[:error_code] == "invitation_already_revoked" ||
+        (user.invite_nonce_digest.blank? && invitation_already_closed?(result))
+      if closed
         clear_invitation!(user, invitation_id)
       else
         Rails.logger.error("[PracticePortalAccess] Invitation revocation failed for user=#{user.id}")
@@ -41,6 +53,7 @@ module TestWorkspace
     rescue StagingOutboundPolicy::Blocked
       # Staging refuses this Clerk target, so a retry every minute can never succeed.
       Rails.logger.warn("[PracticePortalAccess] Staging blocked invitation revocation for user=#{user.id}")
+      # Staging uses explicit tester bindings and never accepts invitation metadata.
       clear_invitation!(user, invitation_id)
     rescue StandardError => error
       # Retain the invitation id so the next sweep can retry independently.
@@ -58,7 +71,7 @@ module TestWorkspace
     def self.clear_invitation!(user, invitation_id)
       return if invitation_id.blank?
 
-      User.where(id: user.id, clerk_invitation_id: invitation_id).update_all(clerk_invitation_id: nil, updated_at: Time.current)
+      User.where(id: user.id, clerk_invitation_id: invitation_id).update_all(clerk_invitation_id: nil, invite_nonce_digest: nil, invite_nonce_expires_at: nil, updated_at: Time.current)
       user.reload
     end
   end

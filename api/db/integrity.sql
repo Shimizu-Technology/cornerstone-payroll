@@ -641,9 +641,9 @@ FOR EACH ROW EXECUTE FUNCTION protect_time_tracking_lock_rollout();
 CREATE OR REPLACE FUNCTION audit_time_tracking_lock_rollout() RETURNS trigger AS $$
 BEGIN
   IF NEW.source_type = 'aire_services' THEN
-    INSERT INTO audit_logs (action, actor_name, actor_role, company_id, organization_id,
+    INSERT INTO audit_logs (action, actor_name, actor_role, actor_type, company_id, organization_id,
       record_type, record_id, event_category, metadata, created_at)
-    SELECT 'time_tracking_source#lock_rollout_configured', 'Approved lock rollout', 'system',
+    SELECT 'time_tracking_source#lock_rollout_configured', 'Approved lock rollout', 'system', 'system_job',
       NEW.company_id, companies.organization_id, 'TimeTrackingSource', NEW.id, 'integration',
       jsonb_build_object('cutoff_enforcement_starts_on', NEW.cutoff_enforcement_starts_on,
         'reason', 'Approved rollout: periods before October 16, 2026 lock only on explicit operator request'),

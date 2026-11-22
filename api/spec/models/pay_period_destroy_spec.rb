@@ -38,7 +38,8 @@ RSpec.describe PayPeriod, "deletion", type: :model do
 
   it "retains a run with historical approval audit evidence even when timestamps are absent" do
     period = create(:pay_period, :calculated)
-    AuditLog.record!(company_id: period.company_id, action: "pay_periods#approve", record_type: "pay_periods", record_id: period.id)
+    AuditLog.record!(user: create(:user, company: period.company, role: :admin),
+      company_id: period.company_id, action: "pay_periods#approve", record_type: "pay_periods", record_id: period.id)
 
     expect(period.destroy).to be(false)
     expect(period.errors.full_messages.to_sentence).to include("approved before")

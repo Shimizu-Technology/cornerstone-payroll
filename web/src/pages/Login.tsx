@@ -104,8 +104,7 @@ export function Login() {
             <AccountAccessNotice
               className="mb-6"
               problem={authProblem}
-              // A refused 401 has already signed the person out, so the form below is the way forward.
-              onRetry={authProblem.status === 401 ? undefined : () => { void refreshUser().catch(() => undefined); }}
+              onRetry={authProblem.status !== 401 || authProblem.signOutFailed ? () => { void refreshUser().catch(() => undefined); } : undefined}
               onSignOut={authProblem.status === 401 ? undefined : () => { void signOut(); }}
             />
           )}
