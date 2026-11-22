@@ -25,6 +25,10 @@ module ClerkAuthenticatable
       return
     end
 
+    if TenantSubdomainRegistry.client_origin?(@clerk_token_payload["azp"]) && !allow_client_subdomain_token?
+      return render json: { error: "This sign-in is limited to the employee portal" }, status: :forbidden
+    end
+
     clerk_id = @clerk_token_payload["sub"]
     unless clerk_id.is_a?(String) && clerk_id.present? && !clerk_id.start_with?("pending_")
       render json: { error: "Invalid Clerk identity" }, status: :unauthorized
@@ -63,6 +67,10 @@ module ClerkAuthenticatable
       @current_user = nil
       render json: { error: "Account inactive" }, status: :unauthorized
     end
+  end
+
+  def allow_client_subdomain_token?
+    false
   end
 
   def extract_token

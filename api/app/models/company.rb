@@ -130,6 +130,10 @@ class Company < ApplicationRecord
             exclusion: { in: TenantSubdomainRegistry::RESERVED_SLUGS },
             uniqueness: { case_sensitive: false, conditions: -> { live_payroll } },
             allow_nil: true
+  validate :subdomain_slug_change_requires_disabled_profile, if: -> { persisted? && will_save_change_to_subdomain_slug? }
+  validate :valid_public_branding
+  after_commit { TenantSubdomainRegistry.invalidate! }
+
   validate :subdomain_requires_live_payroll, if: -> { !subdomain_slug.nil? && !live_payroll? }
   validates :ein, uniqueness: { conditions: -> { where(payroll_environment: "live") } }, allow_blank: true, unless: :test_workspace?
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
@@ -354,6 +358,33 @@ class Company < ApplicationRecord
       next if required.is_a?(Array) && unknown.empty?
 
       errors.add(:payroll_intake_settings, "lists unknown #{source_type} source files: #{Array(required).join(', ')}")
+    end
+  end
+
+  def subdomain_slug_change_requires_disabled_profile
+    profile = ClientOperatingProfile.for_date(id)
+    if profile&.option_value("subdomain_enabled") == true
+      errors.add(:subdomain_slug, "cannot change while the current operating profile enables the subdomain")
+    end
+  end
+
+  def valid_public_branding
+    unless branding.is_a?(Hash)
+      errors.add(:branding, "must be an object")
+      return
+    end
+
+    values = branding.stringify_keys
+    if (values.keys - TenantSubdomainRegistry::BRANDING_KEYS).any?
+      errors.add(:branding, "has unsupported keys")
+    end
+    if values["logo_url"] != nil && !TenantSubdomainRegistry.https_url(values["logo_url"])
+      errors.add(:branding, "logo_url must be a public HTTPS URL without credentials, query parameters or a fragment")
+    end
+    %w[primary_color accent_color].each do |key|
+      if values[key] != nil && !TenantSubdomainRegistry.hex_color(values[key])
+        errors.add(:branding, "#{key} must be a six-digit hex color")
+      end
     end
   end
 

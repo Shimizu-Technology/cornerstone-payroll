@@ -12,8 +12,7 @@ RSpec.describe "Client subdomains", type: :request do
   let(:issuer) { "https://clerk.shimizu-technology.com" }
   let(:enabled) do
     create(:company, subdomain_slug: "mosas", name: "Example Employer", ein: "12-3456789", branding: {
-      logo_url: "https://example.test/mark.png", primary_color: "#214F44", accent_color: "#FAD625",
-      contact_email: "internal@example.test", company_id: 123
+      logo_url: "https://example.test/mark.png", primary_color: "#214F44", accent_color: "#FAD625"
     })
   end
   let(:disabled) { create(:company, subdomain_slug: "disabled") }
@@ -27,14 +26,29 @@ RSpec.describe "Client subdomains", type: :request do
     )
   end
 
-  def preflight(origin)
-    options path, headers: { "Origin" => origin, "Access-Control-Request-Method" => "GET" }
+  def preflight(origin, request_path: path, method: "GET")
+    options request_path, headers: { "Origin" => origin, "Access-Control-Request-Method" => method }
     response.headers["Access-Control-Allow-Origin"]
+  end
+
+  def malformed_client_origins
+    [
+      "https://#{enabled_host}.", "https://#{enabled_host.upcase}",
+      "https://mоsas.shimizu-technology.com", "https://#{enabled_host}:8443",
+      "https://#{enabled_host}:443", "https://#{enabled_host}/"
+    ]
+  end
+
+  def malformed_origins
+    [ "null", "https://www.shimizu-technology.com", *malformed_client_origins ]
   end
 
   it "allows only the exact HTTPS enabled client origin in CORS preflights" do
     origin = "https://#{enabled_host}"
     expect(preflight(origin)).to eq(origin)
+    expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
+    expect(response.headers["Access-Control-Allow-Methods"].split(", ")).to match_array(%w[GET HEAD OPTIONS])
+    expect(preflight(origin, method: "POST")).to be_nil
 
     [
       "https://#{disabled_host}",
@@ -44,17 +58,22 @@ RSpec.describe "Client subdomains", type: :request do
       "https://nested.#{enabled_host}",
       "http://#{enabled_host}",
       "https://#{enabled_host}:444",
-      "https://*.shimizu-technology.com"
+      "https://*.shimizu-technology.com",
+      *malformed_origins
     ].each do |refused|
       expect(preflight(refused)).to be_nil, "unexpected CORS approval for #{refused}"
     end
   end
 
   it "serves the four public branding fields for either lookup form without authentication" do
+    # The public response also filters legacy rows written outside validations.
+    enabled.update_columns(branding: enabled.branding.merge("contact_email" => "internal@example.test", "company_id" => 123))
+
     [ { host: enabled_host }, { slug: "mosas" } ].each do |lookup|
       get path, params: lookup, headers: { "Origin" => "https://#{enabled_host}" }
       expect(response).to have_http_status(:ok)
       expect(response.headers["Access-Control-Allow-Origin"]).to eq("https://#{enabled_host}")
+      expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
       expect(response.headers["Cache-Control"]).to eq("no-store")
       expect(response.parsed_body).to eq(
         "name" => "Example Employer", "logo_url" => "https://example.test/mark.png",
@@ -78,7 +97,7 @@ RSpec.describe "Client subdomains", type: :request do
   end
 
   it "drops unusable logo and color values from the public payload" do
-    enabled.update!(branding: { logo_url: "javascript:alert(1)", primary_color: {}, accent_color: "red" })
+    enabled.update_columns(branding: { logo_url: "https://public.example.test/mark.png?X-Amz-Signature=test", primary_color: {}, accent_color: "red" })
 
     get path, params: { host: enabled_host }
 
@@ -88,11 +107,10 @@ RSpec.describe "Client subdomains", type: :request do
   it "uses the effective profile and sees slug, flag and active-status changes on the next request" do
     expect(preflight("https://#{enabled_host}")).to eq("https://#{enabled_host}")
 
+    enabled_profile.update!(options: { subdomain_enabled: false })
     enabled.update!(subdomain_slug: "renamed")
     expect(preflight("https://#{enabled_host}")).to be_nil
-    expect(preflight("https://renamed.shimizu-technology.com")).to eq("https://renamed.shimizu-technology.com")
-
-    enabled_profile.update!(options: { subdomain_enabled: false })
+    expect(preflight("https://renamed.shimizu-technology.com")).to be_nil
     get path, params: { slug: "renamed" }
     expect(response).to have_http_status(:not_found)
 
@@ -111,22 +129,103 @@ RSpec.describe "Client subdomains", type: :request do
     end
   end
 
-  it "rate-limits lookups per IP across different slugs and includes Retry-After" do
+  it "scopes credentialed tenant CORS to auth and employee paths" do
+    origin = "https://#{enabled_host}"
+    %w[/api/v1/auth/me /api/v1/employee/context].each do |request_path|
+      expect(preflight(origin, request_path: request_path)).to eq(origin)
+      expect(response.headers["Access-Control-Allow-Credentials"]).to eq("true")
+    end
+
+    %w[/api/v1/admin/employees /api/v1/client/employees].each do |request_path|
+      expect(preflight(origin, request_path: request_path)).to be_nil
+      get request_path, headers: { "Origin" => origin }
+      expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+    end
+  end
+
+  it "excludes an inactive organization from CORS and branding" do
+    origin = "https://#{enabled_host}"
+    expect(preflight(origin)).to eq(origin)
+
+    enabled.organization.update!(status: "inactive")
+
+    expect(preflight(origin)).to be_nil
+    get path, params: { host: enabled_host }, headers: { "Origin" => origin }
+    expect(response).to have_http_status(:not_found)
+    expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+  end
+
+  def sql_during
+    queries = []
+    listener = ->(_name, _start, _finish, _id, payload) { queries << payload[:sql] }
+    ActiveSupport::Notifications.subscribed(listener, "sql.active_record") { yield }
+    queries
+  end
+
+  it "loads the registry in one query and serves later origin checks with no queries" do
+    origin = "https://#{enabled_host}"
+    create(:company, subdomain_slug: "without-profile")
+    first = sql_during { expect(preflight(origin)).to eq(origin) }
+    expect(first.grep(/SELECT.*"(?:client_operating_profiles|companies)"/i).size).to eq(1)
+
+    expect(sql_during {
+      expect(preflight(origin)).to eq(origin)
+      expect(preflight("https://without-profile.shimizu-technology.com")).to be_nil
+    }).to be_empty
+
+    enabled_profile.update!(options: { subdomain_enabled: false })
+    expect(preflight(origin)).to be_nil
+    expect(TenantSubdomainRegistry.allowed_origin?(nil)).to be(false)
+  end
+
+  it "keeps /up DB-free for both enabled and disabled origins even with a cold cache" do
+    [ enabled_host, disabled_host ].each do |host|
+      expect(sql_during {
+        get "/up", headers: { "Origin" => "https://#{host}" }
+        expect(response).to have_http_status(:ok)
+        expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+      }).to be_empty
+    end
+  end
+
+  it "shares the per-IP limit across branding GETs, double slashes and client preflights" do
     previously_enabled = Rack::Attack.enabled
     Rack::Attack.enabled = true
     limit = Rack::Attack.throttles.fetch("tenant_branding/ip").limit
+    enabled_origin = "https://#{enabled_host}"
+    disabled_origin = "https://#{disabled_host}"
+    address = { "REMOTE_ADDR" => "203.0.113.61" }
+    double_slash_path = "/api//v1/public/tenant_branding"
 
     freeze_time do
-      limit.times do |index|
-        get path, params: { slug: "missing-#{index}" }, env: { "REMOTE_ADDR" => "203.0.113.61" }
+      options path, headers: { "Origin" => enabled_origin, "Access-Control-Request-Method" => "GET" }, env: address
+      expect(response.headers["Access-Control-Allow-Origin"]).to eq(enabled_origin)
+
+      (limit - 1).times do |index|
+        get double_slash_path, params: { slug: "missing-#{index}" }, env: address
         expect(response).to have_http_status(:not_found)
       end
 
-      get path, params: { slug: "mosas" }, env: { "REMOTE_ADDR" => "203.0.113.61" }
-      expect(response).to have_http_status(:too_many_requests)
-      expect(response.headers["Retry-After"]).to eq("60")
+      [ enabled_origin, disabled_origin ].each do |origin|
+        get double_slash_path, params: { slug: "mosas" }, headers: { "Origin" => origin }, env: address
+        expect(response).to have_http_status(:too_many_requests)
+        expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+        expect(response.headers["Retry-After"]).to eq("60")
 
-      get path, params: { slug: "mosas" }, env: { "REMOTE_ADDR" => "203.0.113.62" }
+        [ path, "/api/v1/auth/me", "/api/v1/employee/context" ].each do |request_path|
+          options request_path, headers: { "Origin" => origin, "Access-Control-Request-Method" => "GET" }, env: address
+          expect(response).to have_http_status(:too_many_requests)
+          expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+        end
+      end
+
+      stub_const("PayrollCors::STATIC_ORIGINS", [ payroll_origin ])
+      get path, params: { slug: "mosas" }, headers: { "Origin" => payroll_origin }, env: address
+      expect(response).to have_http_status(:too_many_requests)
+      expect(response.headers["Access-Control-Allow-Origin"]).to eq(payroll_origin)
+      expect(response.headers["Access-Control-Expose-Headers"]).to include("Retry-After")
+
+      get double_slash_path, params: { slug: "mosas" }, env: { "REMOTE_ADDR" => "203.0.113.62" }
       expect(response).to have_http_status(:ok)
     end
   ensure
@@ -157,13 +256,70 @@ RSpec.describe "Client subdomains", type: :request do
       expect(verifier.verify(token_for("https://#{enabled_host}"))).to include("azp" => "https://#{enabled_host}")
       [
         "https://#{disabled_host}", "https://unknown.shimizu-technology.com", "https://evil-shimizu-technology.com",
-        "https://#{enabled_host}.evil.com", "http://#{enabled_host}", "https://#{enabled_host}:444"
+        "https://#{enabled_host}.evil.com", "http://#{enabled_host}", "https://#{enabled_host}:444",
+        *malformed_origins
       ].each do |origin|
         expect(verifier.verify(token_for(origin))).to be_nil, "unexpected Clerk approval for #{origin}"
       end
 
       enabled_profile.update!(options: { subdomain_enabled: false })
       expect(verifier.verify(token_for("https://#{enabled_host}"))).to be_nil
+    end
+
+    it "rejects a previously enabled origin when the organization becomes inactive" do
+      token = token_for("https://#{enabled_host}")
+      expect(verifier.verify(token)).to be_present
+      enabled.organization.update!(status: "inactive")
+      expect(verifier.verify(token)).to be_nil
+    end
+
+    it "rejects tenant origins when the static Clerk allowlist is unset and logs why" do
+      verifier_env.delete("CLERK_AUTHORIZED_PARTIES")
+      expect(Rails.logger).to receive(:warn).with(/client subdomain requires CLERK_AUTHORIZED_PARTIES/).at_least(:once)
+      [ "https://#{enabled_host}", *malformed_client_origins ].each do |origin|
+        expect(verifier.verify(token_for(origin))).to be_nil
+      end
+      expect(verifier.verify(token_for(payroll_origin))).to be_present
+    end
+
+    it "rejects a tenant token on admin and client endpoints before account binding" do
+      allow_any_instance_of(ApplicationController).to receive(:auth_disabled?).and_return(false)
+      allow(ClerkTokenVerifier).to receive(:new).and_return(verifier)
+      token = token_for("https://#{enabled_host}")
+
+      %w[/api/v1/admin/employees /api/v1/client/employees /api/v1/admin/client_inbox/counts].each do |request_path|
+        get request_path, headers: { "Authorization" => "Bearer #{token}" }
+        expect(response).to have_http_status(:forbidden)
+        expect(response.parsed_body["error"]).to eq("This sign-in is limited to the employee portal")
+      end
+    end
+
+    it "only lets a tenant token open an employee link for that tenant" do
+      allow(ClerkTokenVerifier).to receive(:new).and_return(verifier)
+      enabled_profile.update!(employee_portal_enabled: true)
+      disabled_profile.update!(employee_portal_enabled: true)
+      company_links = [ enabled, disabled ].map do |company|
+        EmployeeAccountLink.create!(user: user, company: company, employee: create(:employee, company: company), status: :active)
+      end
+      token = token_for("https://#{enabled_host}")
+
+      company_links.zip([ :no_content, :not_found ]).each do |link, status|
+        get "/api/v1/employee/context", headers: {
+          "Authorization" => "Bearer #{token}", "X-Employee-Link-Id" => link.id.to_s
+        }
+        expect(response).to have_http_status(status)
+      end
+    end
+
+    it "accepts an enabled tenant token on the auth entry point" do
+      allow_any_instance_of(ApplicationController).to receive(:auth_disabled?).and_return(false)
+      allow(ClerkTokenVerifier).to receive(:new).and_return(verifier)
+      origin = "https://#{enabled_host}"
+
+      get "/api/v1/auth/me", headers: { "Origin" => origin, "Authorization" => "Bearer #{token_for(origin)}" }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Access-Control-Allow-Origin"]).to eq(origin)
     end
 
     it "continues to authenticate staff on the configured Payroll origin" do

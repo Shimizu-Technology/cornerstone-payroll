@@ -7,8 +7,16 @@ describe('clientSubdomainHost', () => {
       .toBe('mosas.shimizu-technology.com');
   });
 
+  it('normalizes mixed case and a trailing dot on a client host', () => {
+    expect(clientSubdomainHost({ hostname: 'MOSAS.Shimizu-Technology.COM.', search: '' }))
+      .toBe('mosas.shimizu-technology.com');
+  });
+
   it.each([
     'payroll.shimizu-technology.com',
+    'staging.shimizu-technology.com.',
+    'CLkMail.shimizu-technology.com.',
+    'xn--mosas.shimizu-technology.com',
     'shimizu-technology.com',
     'evil-shimizu-technology.com',
     'mosas.shimizu-technology.com.evil.com',

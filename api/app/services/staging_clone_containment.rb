@@ -41,6 +41,14 @@ class StagingCloneContainment
       connection.execute("UPDATE payroll_reminder_configs SET enabled = FALSE WHERE enabled = TRUE")
       connection.execute("UPDATE finance_api_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE revoked_at IS NULL") if table?("finance_api_tokens")
       connection.execute("UPDATE user_invitations SET token = md5(random()::text || id::text) WHERE accepted_at IS NULL") if table?("user_invitations")
+      if table?("client_operating_profiles")
+        connection.execute(<<~SQL)
+          UPDATE client_operating_profiles
+          SET options = jsonb_set(options, '{subdomain_enabled}', 'false'::jsonb)
+          WHERE options @> '{"subdomain_enabled":true}'::jsonb
+        SQL
+        ActiveRecord.after_all_transactions_commit { TenantSubdomainRegistry.invalidate! }
+      end
       mark!("__quarantine_complete__")
     end
     counts
