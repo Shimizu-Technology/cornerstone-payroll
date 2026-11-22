@@ -86,7 +86,8 @@ class EmployeeChangeRequest < ApplicationRecord
   def proposed_compensation_effective_on
     return unless compensation_requested?
 
-    [ PayrollBusinessClock.today, EmployeeCompensationChangeService.default_effective_on(employee) ].max
+    default = EmployeeCompensationChangeService.default_effective_on(employee)
+    request_kind == "create" ? default : [ PayrollBusinessClock.today, default ].max
   end
 
   def apply!(actor:, review_notes: nil, effective_on: nil)

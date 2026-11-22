@@ -72,6 +72,7 @@ RSpec.describe PayrollWageRateInput do
     entry = submitted.merge("employee_wage_rate_id" => rate.id, "label" => "Captured")
     source_item.update!(wage_rate_hours: [ entry.merge("active" => false) ])
     # Wage rates are ended, not deleted, since M3-4; this replays one deleted before then.
+    EmployeeWageRateVersion.where(employee_wage_rate_id: rate.id).delete_all
     EmployeeWageRate.where(id: rate.id).delete_all
     expect(normalize(entry.merge("regular_hours" => 2, "active" => true))).to include("rate" => 25.0, "active" => source_item.reload.wage_rate_hours.sole["active"], "regular_hours" => 2)
   end

@@ -310,8 +310,6 @@ class EmployeeCompensationChangeService
     end
 
     def legacy_changes(cache, version)
-      return {} if cache.updated_at <= version.created_at
-
       cache.attributes.slice(*version.snapshot.keys).reject do |field, value|
         comparable(value) == comparable(version[field])
       end
