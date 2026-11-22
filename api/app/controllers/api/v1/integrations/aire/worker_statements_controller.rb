@@ -13,6 +13,7 @@ module Api
           before_action :authenticate_source!
           before_action :set_employee!
           before_action :set_statement_item!, only: %i[show pdf]
+          around_action :with_worker_actor
 
           UUID_FORMAT = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
 
@@ -77,6 +78,10 @@ module Api
 
           # Load the statement as the staff pay stub route does, not from the
           # list preload, so rows print and serialize in the same order.
+          def with_worker_actor(&action)
+            Current.with_isolated_actor(AuditActor.source_worker(id: source_user_uuid), &action)
+          end
+
           def set_statement_item!
             listed = statement_scope.find_by(id: params[:id])
             return not_found unless listed && statement?(listed)
@@ -192,7 +197,7 @@ module Api
 
           def record_access!(action, record_type:, record_id:, count: nil)
             AuditLog.record!(
-              user: nil,
+              actor: Current.actor,
               company_id: @source.company_id,
               action: action,
               record_type: record_type,

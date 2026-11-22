@@ -58,13 +58,16 @@ class PayRunActivityPhrase
 
   # A worker opening their own pay stub in the AIRE app has no staff actor.
   WORKER_STATEMENT_HEADLINES = {
-    "worker_statement#viewed" => "viewed their pay stub in the AIRE app",
-    "worker_statement#pdf_downloaded" => "downloaded their pay stub PDF from the AIRE app"
+    "worker_statement#viewed" => "viewed their pay stub in",
+    "worker_statement#pdf_downloaded" => "downloaded their pay stub PDF from"
   }.freeze
 
   def self.worker_headline(log)
     phrase = WORKER_STATEMENT_HEADLINES[log.action]
-    "#{log.subject_name.presence || 'A worker'} #{phrase}" if phrase
+    return unless phrase
+
+    source_name = log.metadata&.fetch("source_name", nil).presence || "the AIRE app"
+    "#{log.subject_name.presence || 'A worker'} #{phrase} #{source_name}"
   end
 
   def self.handles?(action)

@@ -20,14 +20,17 @@ module AirePayrollEvents
     def call
       validate_shape!
       calendar_period = find_and_authenticate_period!
-      publication = find_publication!(calendar_period)
-      validate_contract!(calendar_period, publication)
-      checksum = TimeTracking::CanonicalPayload.checksum(@payload)
+      source = calendar_period.time_tracking_source
+      Current.with_isolated_actor(AuditActor.source_system(source: source)) do
+        publication = find_publication!(calendar_period)
+        validate_contract!(calendar_period, publication)
+        checksum = TimeTracking::CanonicalPayload.checksum(@payload)
 
-      result = persist!(calendar_period, publication, checksum)
-      reconcile_source_state(calendar_period.time_tracking_source)
-      queue_verification(result.event.id) if result.created
-      result
+        result = persist!(calendar_period, publication, checksum)
+        reconcile_source_state(source)
+        queue_verification(result.event.id) if result.created
+        result
+      end
     end
 
     private
@@ -168,7 +171,7 @@ module AirePayrollEvents
 
     def record_audit!(calendar_period, event)
       AuditLog.record!(
-        user: nil,
+        actor: Current.actor,
         organization_id: calendar_period.company.organization_id,
         company_id: calendar_period.company_id,
         action: "aire_payroll_event#received",
