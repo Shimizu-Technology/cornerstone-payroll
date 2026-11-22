@@ -120,6 +120,7 @@ class ProductionReadiness
       check("allowed frontend origins are explicit production HTTPS origins") { production_origins_valid? },
       check("mailer URL is a production HTTPS URL") { production_https_url?(env["FRONTEND_URL"]) },
       check("production Clerk keys are configured") { production_clerk_keys? },
+      check("Clerk authorized parties are explicit production HTTPS origins") { clerk_authorized_parties_valid? },
       check("R2 credentials and bucket are configured") { r2_configuration_present? },
       check("Resend credentials and sender are configured") { resend_configuration_present? },
       check("time tracking destinations are allowlisted") { time_tracking_configuration_valid? },
@@ -200,6 +201,11 @@ class ProductionReadiness
   def production_clerk_keys?
     env["CLERK_PUBLISHABLE_KEY"].to_s.start_with?("pk_live_") &&
       env["CLERK_SECRET_KEY"].to_s.start_with?("sk_live_")
+  end
+
+  def clerk_authorized_parties_valid?
+    parties = env.fetch("CLERK_AUTHORIZED_PARTIES", "").split(",").map(&:strip).reject(&:empty?)
+    parties.present? && parties.all? { |party| ClerkTokenVerifier.valid_production_https_origin?(party) }
   end
 
   def mfa_attestation_recorded?

@@ -23,8 +23,8 @@ RSpec.describe "Authenticated exact source correction routes", type: :request do
 
   before do
     actor.update!(clerk_id: "bridge-operator-#{SecureRandom.uuid}")
-    allow_any_instance_of(ApplicationController).to receive(:fetch_jwks).and_return([ jwk.export.deep_stringify_keys ])
-    allow_any_instance_of(ApplicationController).to receive(:clerk_issuer).and_return("https://bridge-auth.test")
+    allow_any_instance_of(ClerkTokenVerifier).to receive(:fetch_jwks).and_return([ jwk.export.deep_stringify_keys ])
+    allow_any_instance_of(ClerkTokenVerifier).to receive(:clerk_issuer).and_return("https://bridge-auth.test")
     identity_params
   end
 
