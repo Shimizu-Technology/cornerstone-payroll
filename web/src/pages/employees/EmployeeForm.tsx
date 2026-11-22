@@ -979,7 +979,14 @@ export function EmployeeForm() {
       let aireMappingNotice: string | null = null;
       let compensationWarnings: string[] = [];
       let initialWageRatesSaved = false;
+      let fallbackRates: Awaited<ReturnType<typeof employeeWageRatesApi.list>> | undefined;
+      let fallbackRevision: string | undefined;
       if (isEditing && id) {
+        if (!isClient && !compensationHistory && supportsMultipleHourlyRates) {
+          fallbackRates = await employeeWageRatesApi.list(Number(id), requestedCompanyId);
+          if (!isCurrentSubmission()) return;
+          fallbackRevision = fallbackRates.compensation_revision;
+        }
         // Don't send SSN if it's empty (user didn't update it)
         // Recurring items save through their own endpoints. A stale profile must
         // not restore a legacy allowance another operator has already converted.
@@ -987,13 +994,18 @@ export function EmployeeForm() {
           ...employeePayload,
           default_payroll_adjustments: undefined,
           default_custom_earnings: undefined,
-          ...(compensationHistory ? {
+          ...(compensationHistory || fallbackRevision ? {
             pay_rate: undefined,
             employment_type: undefined,
             salary_type: undefined,
             pay_frequency: undefined,
             contractor_pay_type: undefined,
             wage_rates: undefined,
+          } : {}),
+          ...(fallbackRevision ? {
+            ...basisEdits,
+            pay_rate: scalarPayChanged ? formPayRate : undefined,
+            compensation_revision: fallbackRevision,
           } : {}),
           ...(payHasChanged && compensationHistory ? {
             ...basisEdits,
@@ -1022,6 +1034,7 @@ export function EmployeeForm() {
           const response = await employeesApi.update(parseInt(id, 10), updateData, requestedCompanyId);
           savedEmployeeId = response.data.id;
           compensationWarnings = response.compensation_warnings || [];
+          fallbackRevision = response.data.compensation_history?.revision || fallbackRevision;
         }
       } else {
         if (isClient) {
@@ -1046,7 +1059,7 @@ export function EmployeeForm() {
       // edit with pay history saved them with the profile above, together with
       // their effective date; without it the per-rate endpoints still apply.
       if (!isClient && (!isEditing || !compensationHistory) && !initialWageRatesSaved && supportsMultipleHourlyRates) {
-        const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
+        const existingRatesResponse = fallbackRates || await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
         const displayedSavedRateIds = new Set(
@@ -1060,7 +1073,7 @@ export function EmployeeForm() {
             .map((rate) => [rate.id as number, rate])
         );
 
-        let revision = existingRatesResponse.compensation_revision;
+        let revision = fallbackRevision || existingRatesResponse.compensation_revision;
         // Keep the revision tied to the preceding successful write. A fresh
         // list mid-save could adopt a concurrent editor's revision.
         for (const rate of existingRates) {
@@ -1070,7 +1083,11 @@ export function EmployeeForm() {
           if (!isCurrentSubmission()) return;
         }
 
-        for (const rate of normalizedWageRates) {
+        for (const rate of [...normalizedWageRates].sort((left, right) => {
+          const demotesPrimary = (candidate: typeof left) =>
+            !candidate.is_primary && existingRates.some((existing) => existing.id === candidate.id && existing.is_primary);
+          return Number(demotesPrimary(right)) - Number(demotesPrimary(left));
+        })) {
           const payload = {
             label: rate.label,
             rate: roundCurrencyValue(Number(rate.rate) || 0),

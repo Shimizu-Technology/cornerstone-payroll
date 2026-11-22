@@ -99,6 +99,29 @@ RSpec.describe "Api::V1::Admin::EmployeeWageRates", type: :request do
     end
   end
 
+  it "chains revisions through create, update and end and rejects a stale no-op" do
+    get "/api/v1/admin/employee_wage_rates", params: { employee_id: employee.id }
+    original = response.parsed_body.fetch("compensation_revision")
+    post "/api/v1/admin/employee_wage_rates", params: { employee_wage_rate: {
+      employee_id: employee.id, label: "Regular", rate: 18, compensation_revision: original
+    } }, as: :json
+    expect(response).to have_http_status(:created)
+    created = response.parsed_body.fetch("compensation_revision")
+    expect(created).not_to eq(original)
+    id = response.parsed_body.dig("wage_rate", "id")
+    endpoint = "/api/v1/admin/employee_wage_rates/#{id}"
+
+    patch endpoint, params: { employee_wage_rate: { rate: 18, compensation_revision: original } }, as: :json
+    expect(response).to have_http_status(:conflict)
+    patch endpoint, params: { employee_wage_rate: { rate: 20, compensation_revision: created } }, as: :json
+    expect(response).to have_http_status(:ok)
+    updated = response.parsed_body.fetch("compensation_revision")
+    expect(updated).not_to eq(created)
+    delete endpoint, params: { employee_wage_rate: { compensation_revision: updated } }, as: :json
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("compensation_revision")).not_to eq(updated)
+  end
+
   describe "DELETE /api/v1/admin/employee_wage_rates/:id" do
     # M3-4: a removed rate is ended on its effective date, never deleted, so
     # its history and the payroll buckets that used it stay intact.
