@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_22_040000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -990,6 +990,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_040000) do
     t.check_constraint "status::text = ANY (ARRAY['active'::character varying::text, 'paid_off'::character varying::text, 'suspended'::character varying::text, 'stopped'::character varying::text])", name: "employee_loans_status_check"
     t.check_constraint "tracking_mode::text = 'balance_tracked'::text AND original_amount IS NOT NULL AND original_amount > 0::numeric AND opening_balance IS NOT NULL AND opening_balance > 0::numeric AND current_balance IS NOT NULL AND current_balance >= 0::numeric AND balance_as_of IS NOT NULL AND balance_source IS NOT NULL AND status::text <> 'stopped'::text OR tracking_mode::text = 'recurring_no_balance'::text AND original_amount IS NULL AND opening_balance IS NULL AND current_balance IS NULL AND balance_as_of IS NULL AND balance_source IS NULL AND principal_amount_known = false AND status::text <> 'paid_off'::text", name: "employee_loans_tracking_shape"
     t.check_constraint "tracking_mode::text = ANY (ARRAY['balance_tracked'::character varying::text, 'recurring_no_balance'::character varying::text])", name: "employee_loans_tracking_mode_check"
+  end
+
+  create_table "employee_notes", force: :cascade do |t|
+    t.text "body", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.bigint "employee_id", null: false
+    t.datetime "hidden_at"
+    t.bigint "hidden_by_id"
+    t.text "hidden_reason"
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "employee_id", "created_at", "id" ], name: "index_employee_notes_on_company_employee_created"
+    t.index [ "company_id" ], name: "index_employee_notes_on_company_id"
+    t.index [ "created_by_id" ], name: "index_employee_notes_on_created_by_id"
+    t.index [ "employee_id" ], name: "index_employee_notes_on_employee_id"
+    t.index [ "hidden_by_id" ], name: "index_employee_notes_on_hidden_by_id"
   end
 
   create_table "employee_payroll_fields", force: :cascade do |t|
@@ -4852,6 +4869,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_040000) do
   add_foreign_key "employee_loans", "employees"
   add_foreign_key "employee_loans", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_loans", "users", column: "stopped_by_id", on_delete: :nullify
+  add_foreign_key "employee_notes", "companies"
+  add_foreign_key "employee_notes", "employees"
+  add_foreign_key "employee_notes", "users", column: "created_by_id"
+  add_foreign_key "employee_notes", "users", column: "hidden_by_id"
   add_foreign_key "employee_payroll_fields", "employee_loans"
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"

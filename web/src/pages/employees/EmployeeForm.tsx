@@ -15,6 +15,7 @@ import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocuments
 import { EmployeeClassificationTransitionDialog } from '@/components/employees/EmployeeClassificationTransitionDialog';
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
+import { EmployeeNotesPanel } from '@/components/employees/EmployeeNotesPanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
@@ -2287,6 +2288,18 @@ export function EmployeeForm() {
               </p>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {isEditing && id && !isClient && (
+        <div className="px-6 pb-8 lg:px-8">
+          <EmployeeNotesPanel
+            key={`${companyId}:${id}`}
+            companyId={companyId}
+            employeeId={parseInt(id, 10)}
+            readOnly={!canWriteCompany(activeCompany)}
+            className="max-w-4xl"
+          />
         </div>
       )}
 

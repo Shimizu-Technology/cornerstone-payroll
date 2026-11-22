@@ -59,6 +59,7 @@ import { SavedHours } from '@/components/employees/SavedHours';
 import { EmployeeHoursPayroll } from '@/components/employees/EmployeeHoursPayroll';
 import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
 import { EmployeeIntakePanel } from '@/components/employees/EmployeeIntakePanel';
+import { EmployeeNotesPanel } from '@/components/employees/EmployeeNotesPanel';
 import { EmployeePaymentMethodPanel } from '@/components/employees/EmployeePaymentMethodPanel';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
 import { EmployeeRetirementYearPanel } from '@/components/employees/EmployeeRetirementYearPanel';
@@ -338,13 +339,16 @@ export function EmployeeWorkspace(): ReactElement {
         )}
         <EmployeeIntakePanel key={`${companyId}:${employee.id}`} companyId={companyId} employee={employee} onUpdated={setEmployee} />
         {activeTab === 'overview' && (
-          <EmployeeOverview
-            companyId={companyId}
-            employee={employee}
-            latestPay={latestPay}
-            summary={summary}
-            returnTo={currentPath}
-          />
+          <>
+            <EmployeeOverview
+              companyId={companyId}
+              employee={employee}
+              latestPay={latestPay}
+              summary={summary}
+              returnTo={currentPath}
+            />
+            <EmployeeNotesPanel key={`${companyId}:${employee.id}`} companyId={companyId} employeeId={employee.id} readOnly={readOnly} />
+          </>
         )}
         {activeTab === 'pay-setup' && (
           <PaySetup
