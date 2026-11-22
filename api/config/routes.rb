@@ -354,6 +354,12 @@ Rails.application.routes.draw do
           resources :retirement_elections, only: [ :index, :create ], controller: :employee_retirement_elections
           resources :retirement_year_inputs, only: [ :index, :create ], controller: :employee_retirement_year_inputs
           resources :document_requirements, only: [ :index, :update ], controller: :employee_document_requirements
+          resources :notes, only: [ :index, :create ], controller: :employee_notes do
+            member do
+              patch :hide
+              get :original
+            end
+          end
           resources :time_records, only: [ :index, :create, :update ], controller: :employee_time_records
           resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
             collection do
