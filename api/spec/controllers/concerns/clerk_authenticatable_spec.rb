@@ -7,18 +7,18 @@ RSpec.describe ClerkAuthenticatable do
     Class.new(ActionController::API) do
       include ClerkAuthenticatable
 
-      public :fetch_jwks
+      public :verify_clerk_token
     end
   end
 
-  it "reads JWKS from the request-path cache without caching failed lookups" do
-    request_store = instance_double(ActiveSupport::Cache::Store)
-    allow(RequestPathCache).to receive(:store).and_return(request_store)
-    allow(request_store).to receive(:fetch)
-      .with("clerk_jwks", expires_in: 1.hour, skip_nil: true)
-      .and_return([])
-    expect(Rails).not_to receive(:cache)
+  it "delegates token verification exclusively to ClerkTokenVerifier" do
+    verifier = instance_double(ClerkTokenVerifier)
+    allow(ClerkTokenVerifier).to receive(:new).and_return(verifier)
+    allow(verifier).to receive(:verify).with("signed.jwt.token").and_return({ "sub" => "user_123" })
 
-    expect(controller_class.new.fetch_jwks).to eq([])
+    controller = controller_class.new
+    expect(controller.verify_clerk_token("signed.jwt.token")).to eq({ "sub" => "user_123" })
+    expect(controller.respond_to?(:fetch_jwks, true)).to be(false)
+    expect(controller.respond_to?(:clerk_issuer, true)).to be(false)
   end
 end
