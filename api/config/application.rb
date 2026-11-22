@@ -54,8 +54,8 @@ module Api
       app.middleware.insert_before 0, CanonicalProxyHeaders
     end
 
-    # Keep CORS outside this middleware so the browser can read maintenance responses.
-    config.middleware.insert_before Rails::Rack::Logger, WriteMaintenance
+    # Preserve CORS and the request ID. Gate before the logger can print signed paths.
+    config.middleware.insert_after ActionDispatch::RequestId, WriteMaintenance
 
     trusted_proxy_cidrs = ENV.fetch("TRUSTED_PROXY_CIDRS", "")
                                .split(",")

@@ -10,7 +10,7 @@ export const ACTION_OVERLAY_LAYERS = { legacyDialog: 'z-[9999]', feedback: 'z-[1
 
 export type FeedbackTone = 'error' | 'success' | 'warning' | 'info';
 type FeedbackInput = { tone: FeedbackTone; message: string; children?: ReactNode };
-type FeedbackEntry = FeedbackInput & { id: string; scope: string; owners: string[]; content?: () => ReactNode };
+type FeedbackEntry = FeedbackInput & { id: string; scope: string; owners: string[]; content?: () => ReactNode; writeMaintenance?: boolean };
 interface FeedbackContextValue {
   notify: (input: FeedbackInput, owner?: string) => void;
   publish: (input: FeedbackInput, owner: string, content: () => ReactNode) => void;
@@ -31,20 +31,23 @@ export function FeedbackProvider({ children, scopeKey = 'default' }: { children:
   const sequence = useRef(0);
   const currentScope = useRef(scopeKey);
   currentScope.current = scopeKey;
-  const enqueue = useCallback((input: FeedbackInput, owner?: string, content?: () => ReactNode, replaceOwner = false) => {
+  const enqueue = useCallback((input: FeedbackInput & { writeMaintenance?: boolean }, owner?: string, content?: () => ReactNode, replaceOwner = false) => {
     if (!input.message.trim() || currentScope.current !== scopeKey) return;
     setEntries((current) => {
       if (currentScope.current !== scopeKey) return current;
       const scoped = current.filter((entry) => entry.scope === scopeKey).flatMap((entry) => {
+        if (input.writeMaintenance && entry.message === input.message && entry.tone === 'error') return [];
         if (!replaceOwner || !owner || !entry.owners.includes(owner) || (entry.tone !== 'error' && entry.tone !== 'warning')) return [entry];
         const owners = entry.owners.filter((value) => value !== owner);
         return owners.length ? [{ ...entry, owners }] : [];
       });
+      // API errors can also be published by a form's catch or by ActionFeedback.
+      if (input.tone === 'error' && scoped.some(entry => entry.writeMaintenance && entry.message === input.message)) return scoped;
       const rich = Boolean(input.children || content?.());
       const existing = scoped.find((entry) => entry.tone === input.tone && entry.message === input.message &&
         ((!rich && !entry.children && !entry.content?.()) || (owner && entry.owners.includes(owner))));
       if (existing) return scoped.map((entry) => entry.id === existing.id
-        ? { ...entry, ...input, content: content || entry.content, owners: owner ? [...new Set([...entry.owners, owner])] : entry.owners }
+        ? { ...entry, ...input, content: content || entry.content, writeMaintenance: input.writeMaintenance || entry.writeMaintenance, owners: owner ? [...new Set([...entry.owners, owner])] : entry.owners }
         : entry);
       return [{ ...input, scope: scopeKey, id: `feedback-${++sequence.current}`, owners: owner ? [owner] : [], content }, ...scoped];
     });
@@ -53,12 +56,12 @@ export function FeedbackProvider({ children, scopeKey = 'default' }: { children:
   useEffect(() => {
     const onMaintenance = (event: Event) => {
       if (event instanceof CustomEvent && typeof event.detail === 'string') {
-        notify({ tone: 'info', message: event.detail });
+        enqueue({ tone: 'info', message: event.detail, writeMaintenance: true });
       }
     };
     window.addEventListener(WRITE_MAINTENANCE_EVENT, onMaintenance);
     return () => window.removeEventListener(WRITE_MAINTENANCE_EVENT, onMaintenance);
-  }, [notify]);
+  }, [enqueue]);
   const publish = useCallback((input: FeedbackInput, owner: string, content: () => ReactNode) => enqueue(input, owner, content), [enqueue]);
   const release = useCallback((owner: string) => {
     setEntries((current) => current.flatMap((entry) => {
