@@ -25,6 +25,7 @@ RSpec.describe EmployeeLoan, :postgres_concurrency, type: :model do
   after do
     LoanTransaction.where(employee_loan_id: loan.id).delete_all
     EmployeeLoan.where(id: loan.id).delete_all
+    EmployeeCompensationChange.where(employee_id: employee.id).delete_all
     Employee.where(id: employee.id).delete_all
     Department.where(id: department.id).delete_all
     AuditLog.where(company_id: company.id).delete_all

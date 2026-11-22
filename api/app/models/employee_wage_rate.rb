@@ -5,12 +5,12 @@ class EmployeeWageRate < ApplicationRecord
 
   belongs_to :employee
   # Rows are ended (active: false), never deleted; see guard_compensation_destroy.
-  has_many :employee_wage_rate_versions
+  has_many :employee_wage_rate_versions, dependent: :restrict_with_error
 
   around_save :persist_under_employee_lock
   around_destroy :destroy_under_employee_lock
   before_update :guard_compensation_mutation
-  before_destroy :guard_compensation_destroy
+  before_destroy :guard_compensation_destroy, prepend: true
   after_create :record_initial_version, unless: -> { EmployeeCompensationChangeService.writing?(employee_id) }
 
   before_validation :normalize_rate_precision

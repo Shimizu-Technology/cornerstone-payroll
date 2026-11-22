@@ -66,6 +66,7 @@ class AuditLogPresenter
     "portal_notification_recipients#update" => "updated portal alert recipients for",
     "employees#create" => "added",
     "employees#update" => "updated",
+    "employee#compensation_changed" => "changed compensation for",
     "employees#destroy" => "terminated",
     "employees#reactivate" => "reactivated",
     "client_employees#create" => "added",

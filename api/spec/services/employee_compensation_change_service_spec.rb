@@ -162,9 +162,48 @@ RSpec.describe EmployeeCompensationChangeService do
 
   describe "pay type changes" do
     it "refuses to schedule a pay type change ahead" do
-      employee.update!(employment_type: "salary", salary_type: "annual")
-      expect { change!(effective_on: "2026-12-01", pay_rate: 52_000) }.to raise_error(described_class::Error, /Pay type changes take effect immediately/)
+      expect do
+        change!(effective_on: "2026-12-01", pay_rate: 52_000, basis: { employment_type: "salary", salary_type: "annual" })
+      end.to raise_error(described_class::Error, /Pay type changes take effect immediately/)
     end
+  end
+
+  it "replaces the version on the requested date even if the amount equals today's" do
+    date = Date.new(2026, 12, 1)
+    change!(effective_on: date, pay_rate: 17)
+    change!(effective_on: date, pay_rate: 15)
+    expect(employee.compensation_on(date).pay_rate).to eq(15)
+  end
+
+  it "cancels an entire date, closes the timeline gap, and permits a basis conversion" do
+    rate = employee.employee_wage_rates.create!(label: "Regular", rate: 15, is_primary: true)
+    date = Date.new(2026, 12, 1)
+    change!(effective_on: date, pay_rate: 17, wage_rate_edits: [ { id: rate.id, rate: 17 } ])
+    change!(effective_on: date, cancel: true)
+    expect(employee.default_payroll_rate_on(date)).to eq(15)
+    expect(rate.employee_wage_rate_versions.sole.ends_on).to be_nil
+    expect(AuditLog.where(record_id: employee.id, action: "employee#compensation_changed").last.metadata["cancelled"]).to be(true)
+    change!(effective_on: "2026-11-20", pay_rate: 52_000, basis: { employment_type: "salary", salary_type: "annual" })
+    expect(employee.reload.employment_type).to eq("salary")
+  end
+
+  it "activates a label swap without violating the cache index" do
+    a = employee.employee_wage_rates.create!(label: "Regular", rate: 15, is_primary: true)
+    b = employee.employee_wage_rates.create!(label: "Weekend", rate: 20)
+    change!(effective_on: "2026-12-01", wage_rate_edits: [ { id: a.id, label: b.label }, { id: b.id, label: a.label } ])
+    expect(a.reload.label).to eq("Regular")
+    SyncEffectiveCompensationJob.perform_now(as_of: "2026-12-01")
+    expect([ a.reload.label, b.reload.label ]).to eq(%w[Weekend Regular])
+  end
+
+  it "rejects duplicate labels introduced at a later boundary" do
+    a = employee.employee_wage_rates.create!(label: "Regular", rate: 15, is_primary: true)
+    b = employee.employee_wage_rates.create!(label: "Weekend", rate: 20)
+    change!(effective_on: "2026-12-01", wage_rate_edits: [ { id: a.id, label: "Holiday" } ])
+    expect do
+      change!(effective_on: "2026-11-20", wage_rate_edits: [ { id: b.id, label: "Holiday" } ])
+    end.to raise_error(described_class::Error, /unique on 2026-12-01/)
+    expect(b.reload.label).to eq("Weekend")
   end
 
   it "warns when the change starts in the middle of an open payroll" do

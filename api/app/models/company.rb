@@ -50,6 +50,7 @@ class Company < ApplicationRecord
 
   has_many :departments, dependent: :destroy
   has_many :company_assignments, dependent: :destroy
+  before_destroy :purge_test_workspace_compensation_history, if: :test_workspace?, prepend: true
   has_many :employees, dependent: :destroy
   has_many :time_tracking_sources, dependent: :destroy
   has_many :time_tracking_delegations, dependent: :destroy
@@ -376,4 +377,9 @@ class Company < ApplicationRecord
 
     Set.new(payroll_numbers + non_employee_numbers + historical_numbers)
   end
+  def purge_test_workspace_compensation_history
+    EmployeeCompensationChangeService.purge_test_workspace_history!(self)
+  end
+  private :purge_test_workspace_compensation_history
+
 end
