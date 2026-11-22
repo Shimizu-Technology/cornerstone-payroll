@@ -17,6 +17,7 @@ class User < ApplicationRecord
   has_many :portal_notification_recipients, dependent: :delete_all
   has_many :user_sessions, dependent: :destroy
   has_many :audit_logs, dependent: :nullify
+  has_many :employee_account_links, dependent: :restrict_with_error
   has_many :user_invitations, foreign_key: :invited_by_id, dependent: :nullify
   has_many :company_assignments, dependent: :destroy
   has_many :assigned_companies, through: :company_assignments, source: :company
@@ -35,7 +36,7 @@ class User < ApplicationRecord
   has_many :created_invoice_chat_sessions, class_name: "InvoiceChatSession", foreign_key: :created_by_id, dependent: :nullify
   has_many :updated_invoice_chat_sessions, class_name: "InvoiceChatSession", foreign_key: :updated_by_id, dependent: :nullify
 
-  enum :role, { admin: 0, manager: 1, employee: 2, accountant: 3, client: 4, super_admin: 5, org_admin: 6 }
+  enum :role, { admin: 0, manager: 1, employee: 2, accountant: 3, client: 4, super_admin: 5, org_admin: 6, portal_employee: 7 }
 
   validates :email, presence: true, uniqueness: true, format: { with: URI::MailTo::EMAIL_REGEXP }
   validates :name, presence: true
@@ -86,6 +87,10 @@ class User < ApplicationRecord
     invitation_status == "pending"
   end
 
+  def awaiting_clerk_binding?
+    invitation_pending? && clerk_id.to_s.start_with?("pending_")
+  end
+
   def invitation_accepted?
     invitation_status == "accepted"
   end
@@ -118,10 +123,12 @@ class User < ApplicationRecord
   # - super admins: all companies across all organizations
   # - org admins / legacy admins: every company in their organization
   # - managers/accountants/clients: explicitly assigned companies (or home company)
-  # - everyone else: just their home company
+  # - employee-only identities: no staff/client company access
   def accessible_company_ids
     @accessible_company_ids ||= begin
-      if practice_company_id?
+      if employee? || portal_employee?
+        []
+      elsif practice_company_id?
         practice_portal_open? ? [ practice_company_id ] : []
       elsif super_admin?
         Company.ids
@@ -150,13 +157,7 @@ class User < ApplicationRecord
         end
         assigned_ids &= organization_company_ids
 
-        if accountant? || manager? || client?
-          # Client-facing users and scoped staff only see explicitly assigned
-          # companies (falling back to their home company when none exist yet).
-          assigned_ids.presence || Array(company_id)
-        else
-          ([ company_id ] + assigned_ids).uniq
-        end
+        assigned_ids.presence || Array(company_id)
       end
     end
   end

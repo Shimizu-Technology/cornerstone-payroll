@@ -13,6 +13,6 @@
 # (`payee[contractor][tin]`) or URL-encoded (`payee%5Bcontractor%5D%5Btin%5D`).
 Rails.application.config.filter_parameters += [
   :passw, :email, :secret, :token, :ticket, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc,
-  :code, :state, :upload, /\Afiles?\z/i, /\A(tin|contractor_ein)\z/i,
+  :invite_nonce, :code, :state, :upload, /\Afiles?\z/i, /\A(tin|contractor_ein)\z/i,
   /(?:\[|%5B)(?:tin|contractor_ein)(?:\]|%5D)/i
 ]

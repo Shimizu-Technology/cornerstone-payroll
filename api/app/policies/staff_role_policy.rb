@@ -27,6 +27,7 @@ class StaffRolePolicy
     manage_employee_status: %w[super_admin org_admin admin manager accountant],
     manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
     manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
+    recover_clerk_invitation: %w[super_admin org_admin],
     manage_organization: %w[super_admin org_admin admin],
     # Cost and margin per client from the practice's own staff pay: owners
     # and admins only, never managers or accountants.
@@ -53,6 +54,7 @@ class StaffRolePolicy
     manage_employee_status: "Payroll staff access required to change a worker's status",
     manage_own_aire_account_link: "Payroll staff access required to connect your own AIRE account",
     manage_historical_time_reconciliation: "Historical time reconciliation access required",
+    recover_clerk_invitation: "Organization or platform admin access required",
     manage_organization: "Admin access required",
     view_client_profitability: "Admin access required to see client profitability",
     manage_platform: "Super admin access required"
@@ -102,6 +104,7 @@ class StaffRolePolicy
   }.freeze
 
   ACTION_CAPABILITIES = {
+    "api/v1/admin/users#bind_clerk_id" => :recover_clerk_invitation,
     "api/v1/admin/pay_periods#corrected_hours" => :payroll_operations,
     "api/v1/admin/pay_periods#connect_corrected_hours" => :payroll_operations,
     "api/v1/admin/annual_retirement_limits#create" => :manage_platform,

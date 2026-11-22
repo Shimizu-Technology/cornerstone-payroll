@@ -162,6 +162,8 @@ class ApplicationController < ActionController::API
   def resolve_company_id
     return current_user&.company_id unless current_user
 
+    return if current_user.employee? || current_user.portal_employee?
+
     requested_company = request.headers["X-Company-Id"]
     unless requested_company.nil?
       return unless requested_company.match?(/\A[1-9]\d*\z/)
