@@ -50,5 +50,4 @@ RSpec.describe "compensation:reconcile_rollout" do
     expect(period.payroll_items.sole.gross_pay).to eq(1200)
     expect(service.reconcile_rollout!(employee.id, as_of: today)).to be_nil
   end
-
 end

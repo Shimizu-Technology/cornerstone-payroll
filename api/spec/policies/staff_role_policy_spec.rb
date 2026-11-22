@@ -23,6 +23,7 @@ RSpec.describe StaffRolePolicy do
       manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
       manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
       manage_organization: %w[super_admin org_admin admin],
+      reveal_hidden_employee_notes: %w[super_admin org_admin],
       manage_platform: %w[super_admin]
     }
 
@@ -197,6 +198,13 @@ RSpec.describe StaffRolePolicy do
       %w[index preview create save_draft discard_draft activate reverse source_file].each do |action|
         expect(described_class.capability_for(controller_path: "api/v1/admin/prior_provider_histories", action_name: action)).to eq(:payroll_operations)
       end
+    end
+
+    it "gates employee notes on payroll_operations and restricts hidden note reveal to super_admin and org_admin" do
+      %w[index create hide].each do |action|
+        expect(described_class.capability_for(controller_path: "api/v1/admin/employee_notes", action_name: action)).to eq(:payroll_operations)
+      end
+      expect(described_class.capability_for(controller_path: "api/v1/admin/employee_notes", action_name: "original")).to eq(:reveal_hidden_employee_notes)
     end
   end
 end
