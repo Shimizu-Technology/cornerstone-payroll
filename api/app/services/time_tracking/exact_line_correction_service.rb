@@ -165,7 +165,7 @@ module TimeTracking
         !original.voided? &&
         allocation.time_tracking_import.status == "applied" &&
         mapping&.employee_id == original.employee_id && mapping.source_user_id == @identity[0] &&
-        original.employee.active? && original.employee.hourly? && original.employee.active_wage_rates.count == 1 &&
+        original.employee.active? && original.employee.hourly? && original.employee.wage_rates_on(@import.pay_period.end_date).one? &&
         rates.size <= 1 && (rates.empty? || single_rate_hours_reconcile?(rates.first, original)) &&
         OriginalAllocationProof.earning_identity(line) == OriginalAllocationProof.earning_identity(original_line) &&
         line["original_work_date"] == original_line["original_work_date"] &&
@@ -240,7 +240,15 @@ module TimeTracking
         original_batches_and_allocations: context[:original_proof], original_payment: context[:payment_proof],
         financial_succession: context[:target_proof],
         employee: context[:original].employee.attributes, wage_rates: context[:original].employee.employee_wage_rates.order(:id).map(&:attributes),
-        money: money, pay_date: @import.pay_period.pay_date.to_s }.deep_stringify_keys)
+        money: money, pay_date: @import.pay_period.pay_date.to_s }
+        .merge(compensation_history_proof(context[:original].employee)).deep_stringify_keys)
+    end
+
+    # Dated pay changes (M3-4) belong in the proof; a first-version-only
+    # history adds nothing, so proofs taken before effective dating still match.
+    def compensation_history_proof(employee)
+      history = PayrollCalculationContext.compensation_history_fingerprint(employee)
+      history.present? ? { compensation_history: history } : {}
     end
 
     def verifier

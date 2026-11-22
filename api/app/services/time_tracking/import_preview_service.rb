@@ -222,10 +222,11 @@ module TimeTracking
       match = { categories: categories, multi_rate_employee: false }
       return match if categories.blank? || employee_id.blank?
 
-      employee = Employee.includes(:employee_wage_rates).find_by(id: employee_id, company_id: pay_period.company_id)
+      employee = Employee.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes)
+        .find_by(id: employee_id, company_id: pay_period.company_id)
       return match unless employee&.hourly? || employee&.contractor_hourly?
 
-      active_rates = employee.active_wage_rates.to_a
+      active_rates = employee.wage_rates_on(pay_period.end_date)
       return match if active_rates.length <= 1 && active_rates.none? { |rate| rate.rate.nil? }
 
       active_rates = active_rates.reject { |rate| rate.rate.nil? }

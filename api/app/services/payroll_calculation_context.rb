@@ -83,7 +83,28 @@ class PayrollCalculationContext
         "retirement_year_inputs" => stable_rows.call(employee.employee_retirement_year_inputs),
         "loans" => stable_rows.call(employee.employee_loans)
       }
+      history = compensation_history_fingerprint(employee)
+      setup["compensation_history"] = history if history.present?
       Digest::SHA256.hexdigest(JSON.generate(canonicalize(setup)))
+    end
+
+    # Effective-dated pay changes (M3-4), including ones scheduled after today
+    # that the cache columns above do not show yet. A timeline holding only its
+    # first version adds nothing, so fingerprints recorded before effective
+    # dating stay valid until a pay change is actually made.
+    def compensation_history_fingerprint(employee)
+      dated = lambda do |rows, attributes|
+        rows.map { |row| row.attributes.slice("effective_on", "ends_on", *attributes) }
+      end
+      changes = employee.employee_compensation_changes.reorder(:effective_on, :id).to_a
+      versions = employee.employee_wage_rate_versions.reorder(:employee_wage_rate_id, :effective_on, :id).to_a
+        .group_by(&:employee_wage_rate_id).select { |_id, rows| rows.many? }
+      history = {}
+      history["pay_rate"] = dated.call(changes, %w[pay_rate]) if changes.many?
+      versions.each do |id, rows|
+        history["wage_rate_#{id}"] = dated.call(rows, EmployeeWageRateVersion::SNAPSHOT_ATTRIBUTES)
+      end
+      history
     end
 
     def valid_for_correction?(snapshot)

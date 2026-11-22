@@ -146,7 +146,8 @@ module TimeTracking
       reasons = []
       reasons << "Link this AIRE employee to an active Payroll employee first" unless employee&.active? && employee.company_id == origin.company_id
       reasons << "These hours require an hourly payroll employee" if employee && !employee.hourly? && !employee.contractor_hourly?
-      rates = employee ? employee.active_wage_rates.reject { |rate| rate.rate.nil? } : []
+      # Late hours pay at the rates in effect at the end of their origin period (M3-4).
+      rates = employee ? employee.wage_rates_on(origin.end_date).reject { |rate| rate.rate.nil? } : []
       lines = Array(row["adjustments"]).map do |line|
         category = line["category"] || {}
         rate, _method, mapping_error = employee ? rate_matcher.call(category, rates, employee_id: employee.id) : nil
@@ -187,7 +188,9 @@ module TimeTracking
         row
       end
       rate_ids = selected.flat_map { |row| row.fetch("adjustments").pluck("employee_wage_rate_id") }.uniq
-      captured_rates = EmployeeWageRate.where(id: rate_ids).lock.map(&:attributes)
+      captured_rates = EmployeeWageRate.where(id: rate_ids).lock.includes(:employee).map do |row|
+        (row.employee.wage_rates_on(origin.end_date, include_inactive: true).find { |rate| rate.id == row.id } || row).attributes
+      end
       workweek = origin.resolved_company_workweek
       raise Error, "Confirm the legal workweek before paying late hours" unless workweek&.confirmed?
       PayrollGoLiveGate.new(company: origin.company, pay_date: request.fetch("pay_date")).require_live_payroll!(parallel_run: false)

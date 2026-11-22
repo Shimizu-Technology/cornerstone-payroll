@@ -610,15 +610,16 @@ module Api
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
           unless payroll_item.timekeeping_source == "correction_reference"
-            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.payroll_rate_on(payroll_item.pay_period.end_date)
           end
         end
 
+        # Open payroll pays the rate in effect on the pay period end date (M3-4).
         def sync_pay_rate_from_employee(payroll_item, employee)
           return if payroll_item.timekeeping_source == "correction_reference"
           return if employee.hourly_pay_basis? && payroll_item.wage_rate_hours.present?
 
-          payroll_item.pay_rate = employee.default_payroll_rate
+          payroll_item.pay_rate = employee.default_payroll_rate_on(payroll_item.pay_period.end_date)
         end
       end
     end

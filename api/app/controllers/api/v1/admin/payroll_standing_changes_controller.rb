@@ -51,9 +51,10 @@ module Api
 
         def payload
           { regular_pay_rule: { lookback: current_company.regular_pay_lookback, threshold: current_company.regular_pay_threshold }, defaults: PayrollStandingChange.where(company: current_company).ordered.map { |item| item.as_json(only: %i[id kind employee_id employee_wage_rate_id position active label help_text required allow_none]).merge(availability_error: item.availability_error) },
-            employees: Employee.where(company: current_company).order(:last_name, :first_name).includes(:employee_wage_rates).map do |employee|
+            employees: Employee.where(company: current_company).order(:last_name, :first_name).preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes).map do |employee|
+              # Settings show today's rates; each payroll resolves its own period end date.
               { id: employee.id, name: employee.full_name, status: employee.status, variable_salary: employee.variable_salary?,
-                hourly: employee.hourly_pay_basis?, wage_rates: employee.active_wage_rates.map { |rate| { id: rate.id, label: rate.label, rate: rate.rate } } }
+                hourly: employee.hourly_pay_basis?, wage_rates: employee.wage_rates_on(PayrollBusinessClock.today).map { |rate| { id: rate.id, label: rate.label, rate: rate.rate } } }
             end }
         end
       end

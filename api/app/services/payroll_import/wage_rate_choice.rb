@@ -15,13 +15,14 @@ module PayrollImport
     end
 
     def preview
-      rates = @employee.active_wage_rates.to_a
+      # Jobs and the profile rate as they stand on the pay period end date (M3-4).
+      rates = @employee.wage_rates_on(@pay_period.end_date)
       return {} unless @employee.hourly_pay_basis? && rates.many?
 
       same_rate = rates.map(&:rate).uniq.one?
       # Without allocations, calculation pays the profile rate. A job choice
       # must not change pay, so a profile rate that differs keeps that path.
-      return {} if same_rate && rates.first.rate != @employee.pay_rate.to_d
+      return {} if same_rate && rates.first.rate != @employee.payroll_rate_on(@pay_period.end_date).to_d
 
       history = PayPeriod.committed
       if @pay_period.company.test_workspace?

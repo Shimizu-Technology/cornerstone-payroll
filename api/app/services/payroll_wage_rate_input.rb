@@ -42,7 +42,8 @@ class PayrollWageRateInput
       end
       rate = employee.employee_wage_rates.find_by(id: id)
       raise ArgumentError, "Wage rate does not belong to this employee" unless saved || rate
-      unless saved || rate.active?
+      # Active means active on the pay period end date (M3-4).
+      unless saved || employee.wage_rates_on(payroll_item.pay_period.end_date).any? { |current| current.id == rate.id }
         raise ArgumentError, "Inactive wage rate was not part of this payroll's original rate snapshot"
       end
       if saved && BigDecimal(data["rate"].to_s) != saved["rate"].to_d

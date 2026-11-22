@@ -195,10 +195,11 @@ module TimeTracking
       result = { categories: categories, requires_category_mapping: false }
       return result if categories.blank? || employee_id.blank?
 
-      employee = Employee.includes(:employee_wage_rates).find_by(id: employee_id, company_id: pay_period.company_id)
+      employee = Employee.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes)
+        .find_by(id: employee_id, company_id: pay_period.company_id)
       return result unless employee&.hourly? || employee&.contractor_hourly?
 
-      active_rates = (pay_period.late_hours_run&.wage_rates_for(employee) || employee.active_wage_rates).reject { |rate| rate.rate.nil? }
+      active_rates = (pay_period.late_hours_run&.wage_rates_for(employee) || employee.wage_rates_on(pay_period.end_date)).reject { |rate| rate.rate.nil? }
       result[:requires_category_mapping] = categories.any?(&:present?)
       result[:categories] = categories.map do |category|
         rate, method, mapping_error = find_wage_rate(category, active_rates, employee_id: employee_id)

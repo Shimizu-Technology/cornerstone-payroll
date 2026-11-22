@@ -308,8 +308,9 @@ module PayrollSubmissions
         change_index: change[:change_index], submitted_amount: change[:amount] }
     end
 
+    # Job rates in effect on the pay period end date (M3-4).
     def active_rate(employee, id)
-      employee&.active_wage_rates&.find { |rate| rate.id.to_s == id.to_s }
+      employee&.wage_rates_on(@period.end_date)&.find { |rate| rate.id.to_s == id.to_s }
     end
 
     def legacy_manual_row?(row)
