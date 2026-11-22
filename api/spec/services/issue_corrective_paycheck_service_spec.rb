@@ -502,7 +502,7 @@ RSpec.describe IssueCorrectivePaycheckService do
         net_pay: 175.00
       )
       contractor.allow_tax_classification_change = true
-      contractor.update!(
+      change_compensation!(contractor,
         employment_type: "hourly",
         pay_rate: 15.00,
         hire_date: Date.new(2024, 1, 1),
@@ -596,7 +596,7 @@ RSpec.describe IssueCorrectivePaycheckService do
         corrected_inputs: { hours_worked: 80 }
       )
 
-      employee.update!(
+      change_compensation!(employee,
         pay_frequency: "monthly",
         filing_status: "married",
         allowances: 5,

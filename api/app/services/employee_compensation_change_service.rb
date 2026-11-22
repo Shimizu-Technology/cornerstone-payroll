@@ -283,10 +283,12 @@ class EmployeeCompensationChangeService
         raise Error, "A pay change is already scheduled. Cancel it before changing the pay type."
       end
 
-      proposed = Employee.instantiate(employee.attributes.merge(current).merge(changed))
+      proposed = Employee.find(employee.id)
+      proposed.allow_tax_classification_change = employee.allow_tax_classification_change
+      proposed.assign_attributes(current.merge(changed))
       return if proposed.valid?
 
-      raise Error, proposed.errors.full_messages.to_sentence
+      raise ActiveRecord::RecordInvalid, proposed
     end
 
     def reserved_label

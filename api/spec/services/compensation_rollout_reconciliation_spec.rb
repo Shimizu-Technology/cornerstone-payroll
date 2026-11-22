@@ -7,7 +7,8 @@ RSpec.describe "compensation:reconcile_rollout" do
   include ActiveSupport::Testing::TimeHelpers
 
   it "records newer legacy caches as dated history, prints only IDs/counts, and is safe to rerun" do
-    Rails.application.load_tasks unless Rake::Task.task_defined?("compensation:reconcile_rollout")
+    load Rails.root.join("lib/tasks/compensation.rake") unless Rake::Task.task_defined?("compensation:reconcile_rollout")
+    Rake::Task.define_task(:environment) unless Rake::Task.task_defined?("environment")
     task = Rake::Task["compensation:reconcile_rollout"]
     employee = create(:employee, pay_rate: 15, hire_date: PayrollBusinessClock.today - 60)
     wage_rate = employee.employee_wage_rates.create!(label: "Regular", rate: 15, is_primary: true)

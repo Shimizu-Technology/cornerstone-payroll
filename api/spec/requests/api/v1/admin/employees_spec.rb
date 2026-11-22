@@ -876,7 +876,8 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           employee: {
             employment_type: "contractor",
             contractor_type: "individual",
-            contractor_pay_type: "flat_fee"
+            contractor_pay_type: "flat_fee",
+            compensation_revision: EmployeeCompensationChangeService.revision(employee)
           }
         }
 
