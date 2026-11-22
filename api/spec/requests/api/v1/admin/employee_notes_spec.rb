@@ -259,6 +259,30 @@ RSpec.describe "Api::V1::Admin::EmployeeNotes", type: :request do
       expect(note.reload).not_to be_hidden
     end
 
+    it "rejects hiding when the reason contains an SSN or bank account number" do
+      expect {
+        patch "/api/v1/admin/employees/#{employee.id}/notes/#{note.id}/hide",
+              params: { note: { reason: "Contained SSN 987-65-4321, acct 1234567890" } },
+              headers: headers,
+              as: :json
+      }.not_to change(AuditLog, :count)
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.dig("details", "hidden_reason").join(" ")).to match(/SSN/i)
+      expect(note.reload).not_to be_hidden
+
+      expect {
+        patch "/api/v1/admin/employees/#{employee.id}/notes/#{note.id}/hide",
+              params: { note: { reason: "Acct no. 1234567890" } },
+              headers: headers,
+              as: :json
+      }.not_to change(AuditLog, :count)
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.dig("details", "hidden_reason").join(" ")).to match(/bank account or card number/i)
+      expect(note.reload).not_to be_hidden
+    end
+
     it "requires nested note params and rejects top-level reason fallback" do
       patch "/api/v1/admin/employees/#{employee.id}/notes/#{note.id}/hide",
             params: { reason: "Top-level reason should not be accepted" },

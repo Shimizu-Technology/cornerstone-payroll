@@ -212,6 +212,27 @@ describe('EmployeeNotesPanel', () => {
     expect(await screen.findByText(/Hidden by Dafne Admin: Resolved after verifying signed W-4/)).toBeTruthy();
   });
 
+  it('shows an early client-side sensitive-data warning on the hide form and surfaces server validation errors', async () => {
+    notesApiMocks.list.mockResolvedValue({ data: [visibleNote] });
+    notesApiMocks.hide.mockRejectedValue(
+      new Error('Validation failed; hidden_reason: appears to contain an SSN or 9-digit tax ID.'),
+    );
+
+    render(<EmployeeNotesPanel companyId={1} employeeId={42} />);
+    await screen.findByText(visibleNote.body!);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+    fireEvent.change(screen.getByLabelText('Reason for hiding'), {
+      target: { value: 'Contained SSN 987-65-4321, acct 1234567890' },
+    });
+
+    expect(screen.getByRole('status').textContent).toMatch(/This hide reason looks like it contains an SSN/i);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide note' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/appears to contain an SSN/i);
+  });
+
   it('shows a retryable inline error state when loading notes fails and shows truncation notice when meta is truncated', async () => {
     notesApiMocks.list
       .mockRejectedValueOnce(new Error('Could not reach notes service.'))
