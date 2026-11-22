@@ -23,7 +23,7 @@ class ClientOperatingProfile < ApplicationRecord
   validate :no_overlapping_versions
   validate :options_valid_against_catalog
 
-  scope :effective_on, ->(date) {
+  scope :active_on, ->(date) {
     resolved_date = date.to_date
     where("effective_on <= ? AND (ends_on IS NULL OR ends_on >= ?)", resolved_date, resolved_date)
       .order(effective_on: :desc, version: :desc)
@@ -32,7 +32,7 @@ class ClientOperatingProfile < ApplicationRecord
   scope :history_order, -> { order(effective_on: :desc, version: :desc, id: :desc) }
 
   def self.for_date(company_id, date = PayrollBusinessClock.today)
-    effective_on(date).find_by(company_id: company_id)
+    active_on(date).find_by(company_id: company_id)
   end
 
   def option_value(key)

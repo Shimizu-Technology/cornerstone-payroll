@@ -88,13 +88,14 @@ class CreateClientOperatingProfiles < ActiveRecord::Migration[8.1]
       .pluck(:company_id)
       .to_set
 
-    MigrationCompany.find_each do |company|
+    MigrationCompany.where(payroll_environment: "live").find_each do |company|
       next if MigrationClientOperatingProfile.exists?(company_id: company.id)
 
       offering, hours_source, intake_adapter = classify_company(company, active_aire_company_ids)
+      # Deploy-day snapshot of client-portal posture (editable in M3-5b; nothing reads it yet).
       client_portal_enabled = offering == "payroll_portals" ||
         company.client_payroll_approval_required == true ||
-        active_client_portal_users?(company.id)
+        active_client_portal_users?(company)
 
       effective_on = earliest_effective_date_for(company, today)
 
@@ -124,23 +125,45 @@ class CreateClientOperatingProfiles < ActiveRecord::Migration[8.1]
     [ "payroll_service", "manual", nil ]
   end
 
-  def active_client_portal_users?(company_id)
+  # Mirrors User#accessible_company_ids for non-practice client users:
+  # organization-scoped, excluding archived companies, with home-company fallback
+  # only when no effective assignment exists.
+  def active_client_portal_users?(company)
     now = Time.current
-    active_assignment_exists = MigrationCompanyAssignment
-      .joins("INNER JOIN users ON users.id = company_assignments.user_id")
-      .where(company_id: company_id)
-      .where("company_assignments.expires_at IS NULL OR company_assignments.expires_at > ?", now)
-      .where("users.role = ? AND users.active = TRUE", CLIENT_ROLE_ENUM)
-      .exists?
-    return true if active_assignment_exists
 
-    assigned_user_ids = MigrationCompanyAssignment
-      .where("expires_at IS NULL OR expires_at > ?", now)
-      .select(:user_id)
+    if company.test_workspace_archived_at.nil?
+      active_assignment_exists = MigrationCompanyAssignment
+        .joins("INNER JOIN users ON users.id = company_assignments.user_id")
+        .where(company_id: company.id)
+        .where("company_assignments.expires_at IS NULL OR company_assignments.expires_at > ?", now)
+        .where(
+          "users.role = ? AND users.active = TRUE AND users.practice_company_id IS NULL AND users.organization_id = ?",
+          CLIENT_ROLE_ENUM,
+          company.organization_id
+        )
+        .exists?
+      return true if active_assignment_exists
+    end
 
     MigrationUser
-      .where(company_id: company_id, role: CLIENT_ROLE_ENUM, active: true)
-      .where.not(id: assigned_user_ids)
+      .where(
+        company_id: company.id,
+        organization_id: company.organization_id,
+        role: CLIENT_ROLE_ENUM,
+        active: true,
+        practice_company_id: nil
+      )
+      .where(
+        "NOT EXISTS (" \
+        "SELECT 1 FROM company_assignments " \
+        "INNER JOIN companies assigned_companies ON assigned_companies.id = company_assignments.company_id " \
+        "WHERE company_assignments.user_id = users.id " \
+        "AND (company_assignments.expires_at IS NULL OR company_assignments.expires_at > ?) " \
+        "AND assigned_companies.test_workspace_archived_at IS NULL " \
+        "AND assigned_companies.organization_id = users.organization_id" \
+        ")",
+        now
+      )
       .exists?
   end
 
