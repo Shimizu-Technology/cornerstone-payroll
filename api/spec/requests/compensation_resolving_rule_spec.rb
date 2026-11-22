@@ -213,6 +213,7 @@ RSpec.describe "Pay rates resolve on the pay period end date", type: :request do
       expect(item.reload.attributes.values_at("gross_pay", "net_pay")).to eq([ 1280, "1104.84".to_d ])
       expect(PayStubGenerator.new(item).generate).to eq(pdf)
 
+      create(:tax_table, tax_year: 2026, pay_frequency: "semimonthly")
       run_manual!(next_period, [ employee.id ], {})
       expect(next_period.payroll_items.find_by!(employee: employee).attributes.values_at("gross_pay", "net_pay"))
         .to eq([ "2166.67".to_d, "1817.28".to_d ])
