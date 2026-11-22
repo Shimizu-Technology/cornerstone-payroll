@@ -44,45 +44,80 @@ RSpec.describe EmployeeNote do
       expect(note.errors[:company]).to include("must match the employee's company")
     end
 
-    it "rejects SSN-like patterns with or without dashes" do
-      dashed = build(:employee_note, company: company, employee: employee, created_by: staff_user, body: "Employee SSN is 123-45-6789")
-      expect(dashed).not_to be_valid
-      expect(dashed.errors[:body].join(" ")).to match(/SSN/i)
+    describe "sensitive-data detection (table-driven)" do
+      [
+        [ "dashed SSN", "Employee SSN is 123-45-6789.", /SSN/i ],
+        [ "space-separated SSN", "Verified 123 45 6789 on form", /SSN/i ],
+        [ "dot-separated SSN", "Listed as 123.45.6789 on intake", /SSN/i ],
+        [ "glued SSN prefix + 9 digits", "SSN123456789", /SSN/i ],
+        [ "SSN label + bare 9 digits", "SSN: 123456789", /SSN/i ],
+        [ "Tax ID label + bare 9 digits", "Tax ID 123456789 on W-4", /SSN/i ],
+        [ "bare 9 digits followed by SSN label", "123456789 (SSN)", /SSN/i ],
+        [ "10-digit account near acct", "Direct deposit acct 1234567890", /bank account or card number/i ],
+        [ "12-digit account near account", "Direct deposit account 123456789012", /bank account or card number/i ],
+        [ "17-digit account near DD", "DD #12345678901234567", /bank account or card number/i ],
+        [ "11-digit account near bank", "Bank 12345678901", /bank account or card number/i ],
+        [ "9-digit routing near routing", "Routing 021000021 for payroll", /bank account or card number/i ],
+        [ "10-digit number near routing", "routing # 1234567890", /bank account or card number/i ],
+        [ "card 4-4-4-4 hyphenated", "Card 4111-1111-1111-1111 on file", /bank account or card number/i ],
+        [ "card 4-4-4-4 spaced", "Card 4111 1111 1111 1111 on file", /bank account or card number/i ],
+        [ "card 4-6-5 hyphenated (Amex)", "Amex 3782-822463-10005", /bank account or card number/i ],
+        [ "card 4-6-5 spaced (Amex)", "Amex 3782 822463 10005", /bank account or card number/i ],
+        [ "card 4-4-4 hyphenated", "Partial 4111-1111-1111", /bank account or card number/i ],
+        [ "card 4-4-4 spaced", "Partial 4111 1111 1111", /bank account or card number/i ],
+        [ "card 4-4-4-1 (13 digits)", "4111-1111-1111-1", /bank account or card number/i ],
+        [ "card 4-4-4-4-3 (19 digits)", "4111-1111-1111-1111-123", /bank account or card number/i ],
+        [ "bare 13-digit card", "4111111111111", /bank account or card number/i ],
+        [ "bare 16-digit card", "4111111111111111", /bank account or card number/i ],
+        [ "bare 19-digit card", "4111111111111111111", /bank account or card number/i ]
+      ].each do |label, sample_body, expected_error|
+        it "rejects #{label}" do
+          note = build(:employee_note, company: company, employee: employee, created_by: staff_user, body: sample_body)
 
-      plain = build(:employee_note, company: company, employee: employee, created_by: staff_user, body: "Tax ID 123456789 on form")
-      expect(plain).not_to be_valid
-      expect(plain.errors[:body].join(" ")).to match(/SSN/i)
+          expect(note).not_to be_valid
+          expect(note.errors[:body].join(" ")).to match(expected_error)
+        end
+      end
+
+      [
+        [ "Guam ZIP+4", "Mailing address Tamuning, GU 96913-2716." ],
+        [ "generic ZIP+4", "Updated ZIP to 12345-6789 per employee." ],
+        [ "dashed EIN", "Employer EIN 66-0970313 confirmed on W-2." ],
+        [ "bare EIN without dash", "Company EIN 660970313 verified on notice." ],
+        [ "standalone bare 9-digit reference", "Reference 660970313 confirmed with client." ],
+        [ "hyphenated Guam phone", "Call 671-555-1234 about missing hours." ],
+        [ "parenthesized Guam phone", "Phone (671) 555-1234 confirmed." ],
+        [ "bare 10-digit Guam phone", "Reached employee at 6715551234." ],
+        [ "ISO dates and adjacent date range", "Pay period 2026-11-22 2026-11-29 reviewed on 11/22/2026." ],
+        [ "money amounts", "Bonus $1,234,567.89 adjusted by $45.50 after review." ],
+        [ "check number", "Reissued check #1042 after stop-payment." ],
+        [ "mixed separator 3-2-4", "Code 123-45 6789 is not an SSN format." ]
+      ].each do |label, sample_body|
+        it "accepts #{label}" do
+          note = build(:employee_note, company: company, employee: employee, created_by: staff_user, body: sample_body)
+
+          expect(note).to be_valid
+        end
+      end
     end
 
-    it "rejects long digit runs that look like bank account or card numbers" do
-      account_number = build(
-        :employee_note,
-        company: company,
-        employee: employee,
-        created_by: staff_user,
-        body: "Direct deposit account 123456789012"
-      )
-      expect(account_number).not_to be_valid
-      expect(account_number.errors[:body].join(" ")).to match(/bank account or card number/i)
+    it "runs the sensitive-data check on create only, not when hiding" do
+      note = create(:employee_note, company: company, employee: employee, created_by: staff_user, body: "Initial payroll note")
 
-      card_number = build(
-        :employee_note,
-        company: company,
-        employee: employee,
-        created_by: staff_user,
-        body: "Card 4111-1111-1111-1111 on file"
-      )
-      expect(card_number).not_to be_valid
-      expect(card_number.errors[:body].join(" ")).to match(/bank account or card number/i)
+      expect {
+        note.hide!(actor: staff_user, reason: "Replaced per call about 123-45-6789 policy")
+      }.not_to raise_error
+
+      expect(note.reload).to be_hidden
     end
   end
 
-  describe "append-only behavior and hiding" do
+  describe "append-only behavior, hiding, and PostgreSQL integrity guards" do
     let!(:note) do
       create(:employee_note, company: company, employee: employee, created_by: staff_user, body: "Original note")
     end
 
-    it "prevents editing the body or core ownership attributes" do
+    it "prevents editing the body or core ownership attributes at the model layer" do
       expect(note.update(body: "Edited note")).to be(false)
       expect(note.errors[:body]).to include("cannot be edited; add a new note instead")
       expect(note.reload.body).to eq("Original note")
@@ -92,7 +127,7 @@ RSpec.describe EmployeeNote do
       expect(note.errors[:created_by_id]).to include("cannot be changed after creation")
     end
 
-    it "prevents hard deletion" do
+    it "prevents hard deletion at the model layer" do
       expect(note.destroy).to be(false)
       expect(note.errors[:base]).to include("Employee notes cannot be deleted; hide the note instead")
       expect(described_class.exists?(note.id)).to be(true)
@@ -115,6 +150,81 @@ RSpec.describe EmployeeNote do
       }.to raise_error(ActiveRecord::RecordInvalid)
       expect(note.update(hidden_reason: "Changed reason")).to be(false)
       expect(note.reload.hidden_reason).to eq("Posted to wrong employee")
+    end
+
+    it "enforces append-only updates and no deletes via PostgreSQL triggers even when bypassing validations" do
+      other_company = create(:company, organization: company.organization)
+      other_employee = create(:employee, company: company, department: nil)
+      other_user = create(:user, company: company, organization: company.organization, role: :manager)
+
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { note.update_columns(body: "Tampered body") }
+      }.to raise_error(ActiveRecord::StatementInvalid, /append-only/i)
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { note.update_columns(company_id: other_company.id) }
+      }.to raise_error(ActiveRecord::StatementInvalid, /append-only/i)
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { note.update_columns(employee_id: other_employee.id) }
+      }.to raise_error(ActiveRecord::StatementInvalid, /append-only/i)
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { note.update_columns(created_by_id: other_user.id) }
+      }.to raise_error(ActiveRecord::StatementInvalid, /append-only/i)
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { note.update_columns(created_at: 1.day.ago) }
+      }.to raise_error(ActiveRecord::StatementInvalid, /append-only/i)
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { described_class.where(id: note.id).delete_all }
+      }.to raise_error(ActiveRecord::StatementInvalid, /cannot be deleted/i)
+
+      note.reload
+      note.hide!(actor: staff_user, reason: "Duplicate")
+
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { note.update_columns(hidden_reason: "Altered reason") }
+      }.to raise_error(ActiveRecord::StatementInvalid, /Hidden employee notes cannot be modified/i)
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { note.update_columns(hidden_at: nil, hidden_by_id: nil, hidden_reason: nil) }
+      }.to raise_error(ActiveRecord::StatementInvalid, /Hidden employee notes cannot be modified/i)
+      expect(note.reload.body).to eq("Original note")
+      expect(note.hidden_reason).to eq("Duplicate")
+    end
+
+    it "enforces body length and hidden-field consistency CHECK constraints in PostgreSQL" do
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) do
+          described_class.insert!(
+            {
+              company_id: company.id,
+              employee_id: employee.id,
+              created_by_id: staff_user.id,
+              body: "   ",
+              created_at: Time.current,
+              updated_at: Time.current
+            }
+          )
+        end
+      }.to raise_error(ActiveRecord::StatementInvalid, /employee_notes_body_length/)
+
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) do
+          described_class.insert!(
+            {
+              company_id: company.id,
+              employee_id: employee.id,
+              created_by_id: staff_user.id,
+              body: "a" * 2001,
+              created_at: Time.current,
+              updated_at: Time.current
+            }
+          )
+        end
+      }.to raise_error(ActiveRecord::StatementInvalid, /employee_notes_body_length/)
+
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) do
+          note.update_columns(hidden_at: Time.current, hidden_by_id: nil, hidden_reason: nil)
+        end
+      }.to raise_error(ActiveRecord::StatementInvalid, /employee_notes_hidden_fields_consistent/)
     end
   end
 

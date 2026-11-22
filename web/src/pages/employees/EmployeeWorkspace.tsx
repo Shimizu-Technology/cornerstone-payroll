@@ -30,6 +30,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import {
   employeeStatusConfig,
@@ -99,6 +100,10 @@ export function EmployeeWorkspace(): ReactElement {
   }>();
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const employeeId = parsePositiveRouteId(idParam) ?? 0;
+  const { user, isSuperAdmin, hasCapability } = useAuth();
+  const canRevealHiddenNotes = Boolean(
+    hasCapability?.('reveal_hidden_employee_notes') || isSuperAdmin || user?.role === 'org_admin',
+  );
   const { activeCompanyId, activeCompany } = useCompany();
   const readOnly = !canWriteCompany(activeCompany);
   const activeTab = (tabParam ?? 'overview') as EmployeeWorkspaceTab;
@@ -347,7 +352,15 @@ export function EmployeeWorkspace(): ReactElement {
               summary={summary}
               returnTo={currentPath}
             />
-            <EmployeeNotesPanel key={`${companyId}:${employee.id}`} companyId={companyId} employeeId={employee.id} readOnly={readOnly} />
+            {employee.company_id === companyId && employee.id === employeeId && (
+              <EmployeeNotesPanel
+                key={`${companyId}:${employee.id}`}
+                companyId={companyId}
+                employeeId={employee.id}
+                readOnly={readOnly}
+                canRevealHidden={canRevealHiddenNotes}
+              />
+            )}
           </>
         )}
         {activeTab === 'pay-setup' && (

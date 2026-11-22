@@ -4,18 +4,31 @@ module Api
   module V1
     module Admin
       class EmployeeNotesController < BaseController
+        INDEX_LIMIT = 200
+
         before_action :skip_default_audit_log!
         before_action :set_employee
-        before_action :set_note, only: :hide
+        before_action :set_note, only: %i[hide original]
 
         # GET /api/v1/admin/employees/:employee_id/notes
         def index
-          notes = @employee.employee_notes
-            .where(company_id: current_company_id)
+          scope = @employee.employee_notes.where(company_id: current_company_id)
+          notes = scope
             .includes(:created_by, :hidden_by)
             .newest_first
+            .limit(INDEX_LIMIT)
+            .to_a
+          total_count = scope.count
 
-          render json: { data: notes.map { |note| serialize_note(note) } }
+          render json: {
+            data: notes.map { |note| serialize_note(note) },
+            meta: {
+              limit: INDEX_LIMIT,
+              returned_count: notes.length,
+              total_count: total_count,
+              truncated: total_count > notes.length
+            }
+          }
         end
 
         # POST /api/v1/admin/employees/:employee_id/notes
@@ -49,6 +62,8 @@ module Api
           end
 
           render json: { data: serialize_note(note) }, status: :created
+        rescue ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :bad_request
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -83,11 +98,38 @@ module Api
           end
 
           render json: { data: serialize_note(@note) }
+        rescue ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :bad_request
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
             details: e.record.errors.messages
           }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/employees/:employee_id/notes/:id/original
+        def original
+          unless @note.hidden?
+            return render json: { error: "Note is not hidden" }, status: :unprocessable_entity
+          end
+
+          AuditLog.record!(
+            user: current_user,
+            company_id: current_company_id,
+            action: "employee_notes#reveal",
+            record_type: "employee_notes",
+            record_id: @note.id,
+            subject_name: @employee.full_name,
+            metadata: {
+              employee_id: @employee.id,
+              note_id: @note.id
+            },
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent,
+            request_id: request.request_id
+          )
+
+          render json: { data: serialize_note(@note, include_hidden_body: true) }
         end
 
         private
@@ -107,22 +149,20 @@ module Api
         end
 
         def create_body_param
-          source = params[:note].is_a?(ActionController::Parameters) ? params.require(:note) : params
-          source.permit(:body)[:body]
+          params.require(:note).permit(:body)[:body]
         end
 
         def hide_reason_param
-          source = params[:note].is_a?(ActionController::Parameters) ? params.require(:note) : params
-          permitted = source.permit(:reason, :hidden_reason)
+          permitted = params.require(:note).permit(:reason, :hidden_reason)
           permitted[:reason].presence || permitted[:hidden_reason]
         end
 
-        def serialize_note(note)
+        def serialize_note(note, include_hidden_body: false)
           {
             id: note.id,
             company_id: note.company_id,
             employee_id: note.employee_id,
-            body: note.body,
+            body: (note.hidden? && !include_hidden_body) ? nil : note.body,
             created_by_id: note.created_by_id,
             created_by_name: note.created_by&.name.presence || "Staff",
             created_at: note.created_at&.iso8601,

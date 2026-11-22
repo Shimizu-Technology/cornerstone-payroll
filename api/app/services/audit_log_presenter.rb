@@ -70,6 +70,7 @@ class AuditLogPresenter
     "employees#reactivate" => "reactivated",
     "employee_notes#create" => "added a staff note for",
     "employee_notes#hide" => "hid a staff note for",
+    "employee_notes#reveal" => "viewed a hidden staff note for",
     "client_employees#create" => "added",
     "client_employees#update" => "updated",
     "users#created" => "created the user account for",

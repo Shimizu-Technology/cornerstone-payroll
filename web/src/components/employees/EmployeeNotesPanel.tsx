@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
-import { ChevronDown, ChevronRight, EyeOff, RefreshCw, StickyNote } from 'lucide-react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from 'react';
+import { AlertTriangle, ChevronDown, ChevronRight, EyeOff, RefreshCw, StickyNote } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { detectSensitiveNoteContent } from '@/lib/employee-note-validation';
 import {
   EMPLOYEE_NOTE_HIDE_REASON_MAX_LENGTH,
   EMPLOYEE_NOTE_MAX_LENGTH,
   employeeNotesApi,
   type EmployeeNote,
+  type EmployeeNotesListMeta,
 } from '@/services/employee-notes-api';
 import { cn, formatGuamDateTime } from '@/lib/utils';
 
@@ -17,6 +19,7 @@ export interface EmployeeNotesPanelProps {
   companyId: number;
   employeeId: number;
   readOnly?: boolean;
+  canRevealHidden?: boolean;
   className?: string;
 }
 
@@ -24,14 +27,17 @@ export function EmployeeNotesPanel({
   companyId,
   employeeId,
   readOnly = false,
+  canRevealHidden = false,
   className,
 }: EmployeeNotesPanelProps): ReactElement {
   const noteInputId = useId();
   const helperTextId = useId();
   const scope = `${companyId}:${employeeId}`;
   const scopeRef = useRef(scope);
+  const listGenerationRef = useRef(0);
 
   const [notes, setNotes] = useState<EmployeeNote[]>([]);
+  const [listMeta, setListMeta] = useState<EmployeeNotesListMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -45,6 +51,9 @@ export function EmployeeNotesPanel({
   const [hideError, setHideError] = useState<string | null>(null);
 
   const [expandedHiddenIds, setExpandedHiddenIds] = useState<Record<number, boolean>>({});
+  const [revealedBodies, setRevealedBodies] = useState<Record<number, string>>({});
+  const [revealingIds, setRevealingIds] = useState<Record<number, boolean>>({});
+  const [revealErrors, setRevealErrors] = useState<Record<number, string>>({});
 
   useLayoutEffect(() => {
     scopeRef.current = scope;
@@ -55,30 +64,42 @@ export function EmployeeNotesPanel({
 
   const loadNotes = useCallback(async (): Promise<void> => {
     const requestScope = `${companyId}:${employeeId}`;
+    const requestGeneration = ++listGenerationRef.current;
     setLoading(true);
     setLoadError(null);
     try {
       const response = await employeeNotesApi.list(companyId, employeeId);
-      if (scopeRef.current !== requestScope) return;
+      if (scopeRef.current !== requestScope || listGenerationRef.current !== requestGeneration) return;
       setNotes(response.data);
+      setListMeta(response.meta ?? null);
     } catch (caught) {
-      if (scopeRef.current !== requestScope) return;
+      if (scopeRef.current !== requestScope || listGenerationRef.current !== requestGeneration) return;
       setLoadError(caught instanceof Error ? caught.message : 'Could not load staff notes.');
     } finally {
-      if (scopeRef.current === requestScope) setLoading(false);
+      if (scopeRef.current === requestScope && listGenerationRef.current === requestGeneration) {
+        setLoading(false);
+      }
     }
   }, [companyId, employeeId]);
 
   useEffect(() => {
     setNotes([]);
+    setListMeta(null);
     setDraftBody('');
     setSubmitError(null);
+    setSubmitting(false);
     setHidingNoteId(null);
     setHideReason('');
     setHideError(null);
+    setHideSubmitting(false);
     setExpandedHiddenIds({});
+    setRevealedBodies({});
+    setRevealingIds({});
+    setRevealErrors({});
     void loadNotes();
   }, [loadNotes]);
+
+  const sensitiveWarning = useMemo(() => detectSensitiveNoteContent(draftBody), [draftBody]);
 
   const handleAddNote = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -96,7 +117,19 @@ export function EmployeeNotesPanel({
     try {
       const response = await employeeNotesApi.create(companyId, employeeId, trimmed);
       if (scopeRef.current !== requestScope) return;
+      listGenerationRef.current += 1;
+      setLoading(false);
+      setLoadError(null);
       setNotes((current) => [response.data, ...current]);
+      setListMeta((current) => (
+        current
+          ? {
+            ...current,
+            returned_count: current.returned_count + 1,
+            total_count: current.total_count + 1,
+          }
+          : current
+      ));
       setDraftBody('');
     } catch (caught) {
       if (scopeRef.current !== requestScope) return;
@@ -133,6 +166,9 @@ export function EmployeeNotesPanel({
     try {
       const response = await employeeNotesApi.hide(companyId, employeeId, noteId, trimmedReason);
       if (scopeRef.current !== requestScope) return;
+      listGenerationRef.current += 1;
+      setLoading(false);
+      setLoadError(null);
       setNotes((current) => current.map((item) => (item.id === noteId ? response.data : item)));
       setHidingNoteId(null);
       setHideReason('');
@@ -144,8 +180,45 @@ export function EmployeeNotesPanel({
     }
   };
 
-  const toggleHiddenNote = (noteId: number): void => {
-    setExpandedHiddenIds((current) => ({ ...current, [noteId]: !current[noteId] }));
+  const toggleHiddenNote = async (noteId: number): Promise<void> => {
+    if (!canRevealHidden) return;
+
+    if (expandedHiddenIds[noteId]) {
+      setExpandedHiddenIds((current) => ({ ...current, [noteId]: false }));
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(revealedBodies, noteId)) {
+      setExpandedHiddenIds((current) => ({ ...current, [noteId]: true }));
+      return;
+    }
+
+    if (revealingIds[noteId]) return;
+
+    const requestScope = `${companyId}:${employeeId}`;
+    setRevealingIds((current) => ({ ...current, [noteId]: true }));
+    setRevealErrors((current) => {
+      const next = { ...current };
+      delete next[noteId];
+      return next;
+    });
+
+    try {
+      const response = await employeeNotesApi.original(companyId, employeeId, noteId);
+      if (scopeRef.current !== requestScope) return;
+      setRevealedBodies((current) => ({ ...current, [noteId]: response.data.body ?? '' }));
+      setExpandedHiddenIds((current) => ({ ...current, [noteId]: true }));
+    } catch (caught) {
+      if (scopeRef.current !== requestScope) return;
+      setRevealErrors((current) => ({
+        ...current,
+        [noteId]: caught instanceof Error ? caught.message : 'Could not load the original note.',
+      }));
+    } finally {
+      if (scopeRef.current === requestScope) {
+        setRevealingIds((current) => ({ ...current, [noteId]: false }));
+      }
+    }
   };
 
   const remaining = EMPLOYEE_NOTE_MAX_LENGTH - draftBody.length;
@@ -205,6 +278,16 @@ export function EmployeeNotesPanel({
               </div>
             </div>
 
+            {sensitiveWarning && (
+              <div
+                role="status"
+                className="flex items-start gap-2 rounded-xl border border-warning-200 bg-warning-50 px-3.5 py-2.5 text-sm leading-5 text-warning-900"
+              >
+                <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" />
+                <span>{sensitiveWarning.message}</span>
+              </div>
+            )}
+
             {submitError && (
               <p
                 role="alert"
@@ -257,132 +340,153 @@ export function EmployeeNotesPanel({
               </p>
             </div>
           ) : (
-            <ol className="space-y-3" aria-label="Staff notes">
-              {notes.map((note) => {
-                if (note.hidden) {
-                  const isExpanded = Boolean(expandedHiddenIds[note.id]);
-                  const hiddenByLabel = note.hidden_by_name || 'Staff';
+            <div className="space-y-3">
+              {listMeta?.truncated && (
+                <p className="text-xs text-neutral-500">
+                  Showing the newest {listMeta.returned_count.toLocaleString()} of {listMeta.total_count.toLocaleString()} notes.
+                </p>
+              )}
+              <ol className="space-y-3" aria-label="Staff notes">
+                {notes.map((note) => {
+                  if (note.hidden) {
+                    const isExpanded = Boolean(expandedHiddenIds[note.id]);
+                    const isRevealing = Boolean(revealingIds[note.id]);
+                    const revealError = revealErrors[note.id];
+                    const revealedBody = revealedBodies[note.id];
+                    const hiddenByLabel = note.hidden_by_name || 'Staff';
+                    return (
+                      <li
+                        key={note.id}
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/90 px-4 py-3 text-sm text-neutral-600"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0 space-y-1">
+                            <p className="break-words font-medium text-neutral-700">
+                              <span className="inline-flex items-center gap-1.5">
+                                <EyeOff aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
+                                <span>
+                                  Hidden by {hiddenByLabel}: {note.hidden_reason}
+                                </span>
+                              </span>
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Hidden {formatGuamDateTime(note.hidden_at)}
+                            </p>
+                          </div>
+                          {canRevealHidden && (
+                            <button
+                              type="button"
+                              aria-expanded={isExpanded}
+                              disabled={isRevealing}
+                              onClick={() => void toggleHiddenNote(note.id)}
+                              className="inline-flex min-h-11 items-center gap-1 self-start rounded-lg px-2 text-xs font-semibold text-neutral-600 hover:bg-neutral-200/70 hover:text-neutral-900 disabled:opacity-60 sm:self-center"
+                            >
+                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              {isRevealing ? 'Loading…' : isExpanded ? 'Collapse' : 'Show original'}
+                            </button>
+                          )}
+                        </div>
+                        {revealError && (
+                          <p
+                            role="alert"
+                            className="mt-2 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-xs font-medium text-danger-800"
+                          >
+                            {revealError}
+                          </p>
+                        )}
+                        {canRevealHidden && isExpanded && revealedBody !== undefined && (
+                          <div className="mt-3 border-t border-neutral-200 pt-3">
+                            <p className="text-xs font-medium text-neutral-500">
+                              Originally added by {note.created_by_name} · {formatGuamDateTime(note.created_at)}
+                            </p>
+                            <p className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-6 text-neutral-700">
+                              {revealedBody}
+                            </p>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  }
+
+                  const isHiding = hidingNoteId === note.id;
                   return (
                     <li
                       key={note.id}
-                      className="rounded-xl border border-neutral-200 bg-neutral-50/90 px-4 py-3 text-sm text-neutral-600"
+                      className="rounded-xl border border-neutral-200 bg-white px-4 py-3.5 shadow-xs"
                     >
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0 space-y-1">
-                          <p className="break-words font-medium text-neutral-700">
-                            <span className="inline-flex items-center gap-1.5">
-                              <EyeOff aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
-                              <span>
-                                Hidden by {hiddenByLabel}: {note.hidden_reason}
-                              </span>
-                            </span>
-                          </p>
-                          <p className="text-xs text-neutral-500">
-                            Hidden {formatGuamDateTime(note.hidden_at)}
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-neutral-700">
+                            {note.created_by_name}
+                            <span className="font-normal text-neutral-500"> · {formatGuamDateTime(note.created_at)}</span>
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          aria-expanded={isExpanded}
-                          onClick={() => toggleHiddenNote(note.id)}
-                          className="inline-flex min-h-11 items-center gap-1 self-start rounded-lg px-2 text-xs font-semibold text-neutral-600 hover:bg-neutral-200/70 hover:text-neutral-900 sm:self-center"
-                        >
-                          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          {isExpanded ? 'Collapse' : 'Show original'}
-                        </button>
+                        {!readOnly && !isHiding && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="min-h-11 self-start px-2.5 text-xs font-semibold text-neutral-600 hover:text-neutral-900 sm:min-h-9"
+                            onClick={() => openHideForm(note.id)}
+                          >
+                            <EyeOff className="mr-1.5 h-3.5 w-3.5" />
+                            Hide
+                          </Button>
+                        )}
                       </div>
-                      {isExpanded && (
-                        <div className="mt-3 border-t border-neutral-200 pt-3">
-                          <p className="text-xs font-medium text-neutral-500">
-                            Originally added by {note.created_by_name} · {formatGuamDateTime(note.created_at)}
-                          </p>
-                          <p className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-6 text-neutral-700">
-                            {note.body}
-                          </p>
+
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-neutral-900">
+                        {note.body}
+                      </p>
+
+                      {isHiding && (
+                        <div className="mt-3 space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3.5">
+                          <Input
+                            id={`hide-note-reason-${note.id}`}
+                            label="Reason for hiding"
+                            value={hideReason}
+                            maxLength={EMPLOYEE_NOTE_HIDE_REASON_MAX_LENGTH}
+                            disabled={hideSubmitting}
+                            placeholder="Explain why this note is being hidden"
+                            onChange={(event) => {
+                              setHideReason(event.target.value);
+                              if (hideError) setHideError(null);
+                            }}
+                          />
+                          {hideError && (
+                            <p role="alert" className="text-xs font-medium text-danger-700">
+                              {hideError}
+                            </p>
+                          )}
+                          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="min-h-11 w-full sm:w-auto"
+                              disabled={hideSubmitting}
+                              onClick={cancelHideForm}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="danger"
+                              size="sm"
+                              className="min-h-11 w-full sm:w-auto"
+                              disabled={hideSubmitting}
+                              onClick={() => void handleConfirmHide(note.id)}
+                            >
+                              {hideSubmitting ? 'Hiding…' : 'Hide note'}
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </li>
                   );
-                }
-
-                const isHiding = hidingNoteId === note.id;
-                return (
-                  <li
-                    key={note.id}
-                    className="rounded-xl border border-neutral-200 bg-white px-4 py-3.5 shadow-xs"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-neutral-700">
-                          {note.created_by_name}
-                          <span className="font-normal text-neutral-500"> · {formatGuamDateTime(note.created_at)}</span>
-                        </p>
-                      </div>
-                      {!readOnly && !isHiding && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="min-h-11 self-start px-2.5 text-xs font-semibold text-neutral-600 hover:text-neutral-900 sm:min-h-9"
-                          onClick={() => openHideForm(note.id)}
-                        >
-                          <EyeOff className="mr-1.5 h-3.5 w-3.5" />
-                          Hide
-                        </Button>
-                      )}
-                    </div>
-
-                    <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-neutral-900">
-                      {note.body}
-                    </p>
-
-                    {isHiding && (
-                      <div className="mt-3 space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3.5">
-                        <Input
-                          id={`hide-note-reason-${note.id}`}
-                          label="Reason for hiding"
-                          value={hideReason}
-                          maxLength={EMPLOYEE_NOTE_HIDE_REASON_MAX_LENGTH}
-                          disabled={hideSubmitting}
-                          placeholder="Explain why this note is being hidden"
-                          onChange={(event) => {
-                            setHideReason(event.target.value);
-                            if (hideError) setHideError(null);
-                          }}
-                        />
-                        {hideError && (
-                          <p role="alert" className="text-xs font-medium text-danger-700">
-                            {hideError}
-                          </p>
-                        )}
-                        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="min-h-11 w-full sm:w-auto"
-                            disabled={hideSubmitting}
-                            onClick={cancelHideForm}
-                          >
-                            Cancel
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="danger"
-                            size="sm"
-                            className="min-h-11 w-full sm:w-auto"
-                            disabled={hideSubmitting}
-                            onClick={() => void handleConfirmHide(note.id)}
-                          >
-                            {hideSubmitting ? 'Hiding…' : 'Hide note'}
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ol>
+                })}
+              </ol>
+            </div>
           )}
         </div>
       </CardContent>
