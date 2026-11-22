@@ -3,6 +3,13 @@
 require "rails_helper"
 
 RSpec.describe TimeTrackingSource do
+  it "records AIRE lock rollout configuration through the database trigger" do
+    source = create(:time_tracking_source, source_type: "aire_services")
+
+    expect(AuditLog.find_by!(action: "time_tracking_source#lock_rollout_configured", record_id: source.id))
+      .to have_attributes(actor_type: "system_job", actor_name: "Approved lock rollout", user_id: nil)
+  end
+
   describe "validations" do
     it "assigns a stable external connection UUID" do
       source = create(:time_tracking_source)

@@ -255,7 +255,9 @@ class IssueCorrectivePaycheckService
 
       commit_supplemental!(supplemental)
       if @legacy_employer_evidence.present?
-        AuditLog.record!(user: @actor, company_id: supplemental.company_id, action: "payroll#corrective_paycheck_issued",
+        user = @actor || Current.user
+        audit_actor = Current.actor || AuditActor.operator("Corrective paycheck issuance")
+        AuditLog.record!(user: user, actor: audit_actor, company_id: supplemental.company_id, action: "payroll#corrective_paycheck_issued",
           record_type: "PayrollItem", record_id: corrective_item.id,
           metadata: { legacy_unposted_employer_component: @legacy_employer_omissions, legacy_employer_posting_compatibility: @legacy_employer_evidence })
       end

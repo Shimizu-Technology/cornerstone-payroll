@@ -100,7 +100,7 @@ module MigrationPromotion
     def copy_employee_setup!(employee_map, deduction_type_map)
       rehearsal.employees.order(:id).each do |source|
         target = employee_map.fetch(source.id)
-        EmployeeCompensationChangeService.copy_history!(source: source, target: target) do
+        EmployeeCompensationChangeService.copy_history!(source: source, target: target, actor: actor) do
           copy_collection(source.employee_wage_rates, EmployeeWageRate, employee: target)
         end
         copy_collection(source.employee_w4_elections, EmployeeW4Election, company: target_company, employee: target)

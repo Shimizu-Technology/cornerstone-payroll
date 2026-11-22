@@ -41,7 +41,7 @@ module QuickbooksHistory
         created_employee_count = 0
         plan.profiles.each do |profile|
           employee = bootstrap.company.employees.create!(
-            profile.employee_attributes.merge(created_by: actor, initial_compensation_source: "quickbooks_history")
+            profile.employee_attributes.merge(created_by: actor, initial_compensation_source: "quickbooks_history", initial_compensation_actor: actor)
           )
           create_w4_election!(employee)
           create_wage_rates!(employee, profile.wage_rates)

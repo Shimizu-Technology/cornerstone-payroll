@@ -5,6 +5,7 @@ require "rails_helper"
 RSpec.describe SyncEffectiveCompensationJob do
   include ActiveSupport::Testing::TimeHelpers
 
+  let(:staff) { create(:user, company: company) }
   let(:company) { create(:company) }
   let(:employee) { create(:employee, company: company, pay_rate: 15, hire_date: Date.new(2026, 1, 1)) }
   let!(:rate) { employee.employee_wage_rates.create!(label: "Regular", rate: 15, is_primary: true) }
@@ -13,7 +14,7 @@ RSpec.describe SyncEffectiveCompensationJob do
 
   before do
     EmployeeCompensationChangeService.new(
-      employee: employee, actor: nil, source: "staff", reason: "Annual raise", effective_on: "2026-12-01",
+      employee: employee, actor: staff, source: "staff", reason: "Annual raise", effective_on: "2026-12-01",
       pay_rate: 17, wage_rate_edits: [ { id: rate.id, rate: 17 } ]
     ).call!
   end
@@ -49,6 +50,7 @@ RSpec.describe SyncEffectiveCompensationJob do
     allow(EmployeeCompensationChangeService).to receive(:sync_cache!).and_wrap_original do |original, row, as_of:|
       raise ActiveRecord::RecordInvalid, row if row.id == employee.id
 
+      expect(Current.actor).to have_attributes(type: "system_job", name: "SyncEffectiveCompensationJob")
       original.call(row, as_of: as_of)
     end
     expect(Rails.error).to receive(:report).with(an_instance_of(ActiveRecord::RecordInvalid),

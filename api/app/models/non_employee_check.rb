@@ -288,6 +288,7 @@ class NonEmployeeCheck < ApplicationRecord
       reason: reason
     )
     AuditLog.record!(
+      user: Current.user, actor: Current.actor || AuditActor.system_job(self.class.name),
       organization_id: company.organization_id, company_id: company_id,
       action: "year_end_one_off_payees#unlinked", record_type: "non_employee_checks", record_id: id,
       subject_name: "#{company.name} #{effective_payment_date.year} 1099: unlinked 1 one-off check (payee renamed)",
