@@ -8,6 +8,7 @@ RSpec.describe "Client employee portal safety", type: :request do
   let!(:client_user) { create(:user, company: company, role: "client", email: "safety-client@example.com") }
   let!(:hourly) do
     create(:employee, company: company, department: department, first_name: "Lino", last_name: "Quinata",
+      contractor_type: nil, contractor_pay_type: nil, business_name: nil,
       employment_type: "hourly", pay_rate: 12.00, address_line1: "1 Main St", city: "Hagåtña", state: "GU", zip: "96910")
   end
   let!(:business) do
@@ -71,11 +72,6 @@ RSpec.describe "Client employee portal safety", type: :request do
   end
 
   describe "contractor settings on W-2 workers" do
-    before do
-      # Older records predate the column defaults; the form fills these in.
-      hourly.update_columns(contractor_type: nil, contractor_pay_type: nil, business_name: nil)
-    end
-
     let(:form_payload) do
       {
         pay_rate: 13.50,

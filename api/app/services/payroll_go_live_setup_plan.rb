@@ -108,7 +108,8 @@ class PayrollGoLiveSetupPlan
           begin
             proposed = EmployeeCompensationChangeService.snapshot(source, effective_on)
             EmployeeCompensationChangeService.validate_basis_transition!(
-              target, effective_on, proposed.slice(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES)
+              target, effective_on, proposed.slice(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES),
+              source: EmployeeCompensationChangeService::GO_LIVE_SOURCE
             )
             locked = EmployeeCompensationChangeService.locked_through(target)
             errors << "#{target.full_name}: transfer date overlaps locked payroll through #{locked}" if locked && effective_on <= locked
