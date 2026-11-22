@@ -1,21 +1,22 @@
 # Milestone 3 ("Foundations") build plan
 
-**Status:** Proposed build plan. No application code has changed.
+**Status:** Decisions recorded (Leon, November 22, 2026 — §9). No application code has changed.
 **Date:** November 22, 2026.
-**Codebase baseline:** `Shimizu-Technology/cornerstone-payroll` `origin/main` at `68d28cda`, plus Leon's November 22, 2026 decisions on branch `docs/milestone3-decisions` (PR #520).
+**Codebase baseline:** `Shimizu-Technology/cornerstone-payroll` `origin/main` at `68d28cda`, plus Leon's November 22, 2026 decisions on branch `docs/milestone3-decisions` (PR #520) and PR #521 review.
 **Builds on:** [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) (§0, §4, §6, §8), [Platform offerings implementation spec](PLATFORM_OFFERINGS_IMPLEMENTATION_SPEC_2026-11-17.md), [Full build plan](WORKFORCE_PLATFORM_FULL_BUILD_PLAN_2026-11-18.md) (R1), [HR module study and plan](HR_MODULE_ADP_STUDY_AND_PLAN_2026-11-18.md), [Guam legal compliance research](GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md), [Gate 0 trust and release plan](GATE_0_TRUST_AND_RELEASE_PLAN_2026-08-23.md), [Employee portal plan](EMPLOYEE_PORTAL_AND_PLATFORM_PLAN_2026-11-17.md), and [Production identity cutover runbook](PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md).
 
 ## Summary
 
-Milestone 3 puts the safety, isolation, and configuration plumbing under Cornerstone Payroll before any client employee ever signs in. It moves Payroll off its Clerk development instance (`pk_test_`) onto a Clerk production instance on the free plan, ends email-based auto-provisioning, separates login identity from area-specific roles, adds Postgres row-level security (RLS) on employee-facing and sensitive tables with an automated cross-company isolation suite, builds and tests MFA session verification (`fva`) behind `REQUIRE_MFA=false`, introduces effective-dated pay-rate history, extends audit logging to non-staff actors, adds per-client feature switches (`client_operating_profiles`) and `<client>.shimizu-technology.com` subdomain plumbing, and prepares rate limits and process isolation so employee traffic cannot slow payroll runs. Outside the code, it starts the Guam law-firm review and the written information security plan (WISP). Milestone 3 adds **$0/month** in hosting costs today; paid upgrades (**$32–$39/month** baseline, excluding optional virus scanning) wait until the Milestone 4 gate or first platform revenue.
+Milestone 3 puts the safety, isolation, and configuration plumbing under Cornerstone Payroll before any client employee ever signs in. It builds and tests the hardened Clerk verifier and cutover tooling (`M3-0a`), ends email-based auto-provisioning, separates login identity from area-specific roles, adds Postgres row-level security (RLS) on employee-facing and sensitive tables with an automated cross-company isolation suite, builds and tests MFA session verification (`fva`) against the Clerk development instance behind `REQUIRE_MFA=false`, introduces effective-dated pay-rate history, extends audit logging to non-staff actors, adds per-client feature switches (`client_operating_profiles`) and `<client>.shimizu-technology.com` subdomain plumbing, and prepares rate limits and process isolation so employee traffic cannot slow payroll runs. Near the end of Milestone 3 — after staging rehearsal and just before the Milestone 4 gate — Payroll cuts over live from Clerk development (`pk_test_`) to a Clerk production instance on the free plan (`M3-0b`), using `shimizu-technology.com` as its root domain. Milestone 3 adds **$0/month** in hosting costs today; the Milestone 4 gate adds **$32/month** (Clerk Pro $25 + Render Starter employee web $7; $27/month if Clerk Pro is billed annually). Legal review and WISP work are deferred out of Milestone 3 and remain a Milestone 4 go-live prerequisite (§5).
 
 ### What milestone 3 deliberately does not do
 
 - **No employee-facing UI or invites.** Pay stubs, W-2 downloads, profile edits, bank changes, and employee onboarding are Milestone 4. The `employee/*` namespace ships scaffolded and switched off.
 - **No production MFA enforcement yet.** MFA verification is built and tested against Clerk's development instance (free), then deployed with `REQUIRE_MFA=false`. Clerk Pro ($25/month) and production MFA enforcement turn on at the Milestone 4 gate or once the platform earns revenue, whichever comes first (Leon, Nov 22, 2026).
 - **No SMS provider.** Sign-in and MFA codes come from Clerk. ClickSend or Twilio is chosen only when text notifications are built (Leon, Nov 22, 2026).
-- **No extra paid Render instances running idle.** Separate employee web/worker process roles, DB pool caps, and rate limits are coded in Milestone 3, but the extra Render Starter service ($7/month) only spins up at the Milestone 4 gate.
-- **No decision on malware scanning.** Options, costs, and risks are laid out in §1.11 for Leon to decide.
+- **No extra paid Render instances running idle, and no separate employee worker until Milestone 6.** Separate employee web/worker process roles, DB pool caps, and rate limits are coded in Milestone 3. The Render Starter employee web service ($7/month) spins up at the Milestone 4 gate; employee background jobs stay capped on the existing Payroll worker until Milestone 6 (Leon, Nov 22, 2026).
+- **No virus scanner in Milestone 3 or the pilot.** Uploads continue with the existing `ClientDocumentFileValidator` byte/type/size checks and `ClientDocumentScanner::Noop`, trusting pilot companies; scanning is revisited before wider rollout (Leon, Nov 22, 2026 — §1.11).
+- **No legal review or WISP work in Milestone 3.** Deferred by Leon (Nov 22, 2026); both remain a **Milestone 4 go-live prerequisite** per §6 of the architecture decision (§5).
 - **No changes to AIRE's production app or My Pay contract.** Existing AIRE routes, audit action strings, and payloads remain byte-for-byte compatible.
 - **No Year-End (Milestone 1) or Tax profitability (Milestone 2) work.** Year-end filing (February 1, 2027 deadline) keeps priority whenever schedules compete.
 
@@ -27,7 +28,7 @@ Every code claim below was verified against `origin/main` (`68d28cda`) on Novemb
 
 ### 1.1 Clerk production instance
 
-- **Live status:** Production Payroll still uses Clerk development keys (`pk_test_` / `sk_test_`). The September 14 readiness run passed 26 of 29 controls, failing only production Clerk keys, MFA attestation, and instance-bound Clerk API match (`docs/PRODUCTION_READINESS_EVIDENCE_2026-09-14.md:19-22`).
+- **Live status:** Production Payroll still uses Clerk development keys (`pk_test_` / `sk_test_`). The September 14 readiness run passed 26 of 29 controls, failing only production Clerk keys, MFA attestation, and instance-bound Clerk API match (`docs/PRODUCTION_READINESS_EVIDENCE_2026-09-14.md:19-22`). Under Leon's November 22 decision, the Clerk development instance remains in use for local and staging work (including all MFA testing), and the live production cutover (`M3-0b`) happens near the end of Milestone 3, right before the Milestone 4 gate.
 - **Staged instance:** An unused Clerk production instance was created earlier for `payroll.shimizu-technology.com` in invite-only mode (`docs/PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md:14-18`). A public DNS lookup on November 22, 2026 showed `payroll.shimizu-technology.com` CNAMEd to `cornerstone-payroll.netlify.app`, with **no** CNAME records yet on `clerk.shimizu-technology.com`, `accounts.shimizu-technology.com`, `clerk.payroll.shimizu-technology.com`, or `accounts.payroll.shimizu-technology.com`.
 - **How Payroll stores and depends on Clerk user IDs:**
   - `users.clerk_id` is a nullable unique string (`api/db/schema.rb:4569,4587`), alongside `users.clerk_invitation_id` (`api/db/schema.rb:4570`).
@@ -39,7 +40,7 @@ Every code claim below was verified against `origin/main` (`68d28cda`) on Novemb
   - `clerk_invitation_id` is referenced only in `users_controller.rb:173-175,208-210,308-310,466`, `organizations_controller.rb:212`, `clerk_invitation_service.rb:46`, `test_workspace/portal_access.rb:29,34,61`, `expire_practice_portal_access_job.rb:7`, and `staging_outbound_policy.rb:276`.
   - **Consequence:** Re-linking `users.clerk_id` to new production Clerk user IDs preserves every audit log, approval, payroll run, document upload, and company assignment intact. Only active browser sessions (`users.last_session_id_digest`) and pending Clerk invitations reset.
 - **Latent production JWT bugs in current code:**
-  - `clerk_authenticatable.rb:138-146` and `clerk_token_verifier.rb:68-74` duplicate JWT verification logic. Both derive `clerk_instance_id` by splitting the decoded publishable key on `.clerk.accounts.dev` and fall back to `https://<id>.clerk.accounts.dev`. That fallback breaks on a `pk_live_` key (which encodes `clerk.shimizu-technology.com$` or `clerk.payroll.shimizu-technology.com$`).
+  - `clerk_authenticatable.rb:138-146` and `clerk_token_verifier.rb:68-74` duplicate JWT verification logic. Both derive `clerk_instance_id` by splitting the decoded publishable key on `.clerk.accounts.dev` and fall back to `https://<id>.clerk.accounts.dev`. That fallback breaks on a `pk_live_` key (which encodes `clerk.shimizu-technology.com$`).
   - Neither verifier checks the `azp` (authorized party) claim or `nbf` (not-before) explicitly beyond `JWT.decode` defaults.
 
 ### 1.2 Invitation-only logins and role separation
@@ -103,30 +104,27 @@ Every code claim below was verified against `origin/main` (`68d28cda`) on Novemb
 - **Clerk subdomain vs. satellite-domain verification (verified against Clerk docs, 2026-11-22):**
   - Per [Clerk's production deployment guide](https://clerk.com/docs/guides/development/deployment/production), when a production instance is configured on a **root domain** (`shimizu-technology.com`, creating `clerk.shimizu-technology.com`), authentication and sessions work across **all subdomains of that root domain** (`payroll.shimizu-technology.com`, `mosas.shimizu-technology.com`, `aire.shimizu-technology.com`) by default at **$0**.
   - Per [Clerk's satellite domains guide](https://clerk.com/docs/guides/dashboard/dns-domains/satellite-domains) and [Clerk pricing](https://clerk.com/pricing), **satellite domains ($10/month each, Pro plan required)** are needed only across *different* root domains (for example, if a client later wants `hr.mosasguam.com`).
-  - **Two security requirements when using the root domain:** (1) Enable Clerk's [Allowed subdomains](https://clerk.com/docs/guides/dashboard/dns-domains/subdomain-allowlist) in the Clerk Dashboard so only explicitly listed subdomains (`payroll.shimizu-technology.com`, `mosas.shimizu-technology.com`, etc.) can call Clerk's Frontend API, blocking every other `*.shimizu-technology.com` subdomain; and (2) validate the JWT `azp` claim (`authorizedParties`) in Rails (`ClerkTokenVerifier`) against the same explicit origin list to prevent subdomain cookie-leaking attacks.
-  - **Important conflict check with the September 14 staged instance:** The unused production instance created in September used a *secondary-application* domain on `payroll.shimizu-technology.com` (`PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md:14,81`). A secondary-application instance scoped to `payroll.shimizu-technology.com` covers `*.payroll.shimizu-technology.com`, **not** sibling subdomains like `mosas.shimizu-technology.com`. To get free `<client>.shimizu-technology.com` subdomains, Payroll's production instance must claim `shimizu-technology.com` as its root domain (see Question 2 for Leon; neither Cornerstone Tax on `cornerstone-accounting.tax` nor AIRE on `aireservicesguam.com` uses `shimizu-technology.com`, and `dig` on 2026-11-22 confirmed `clerk.shimizu-technology.com` is currently unused).
-  - **Passkeys caveat:** Clerk's production guide notes that due to WebAuthn RP ID rules, passkeys do not share across two sibling subdomains (`payroll.shimizu-technology.com` and `mosas.shimizu-technology.com`). That does not affect TOTP authenticator apps or email/SMS codes in Milestones 3–4, and is noted before passkeys are considered later.
+  - **Decided (Leon, Nov 22, 2026):** Cornerstone Payroll's production Clerk root domain is **`shimizu-technology.com`** (the Shimizu Technology marketing site does not use auth; neither Cornerstone Tax on `cornerstone-accounting.tax` nor AIRE on `aireservicesguam.com` uses `shimizu-technology.com`, and `dig` on 2026-11-22 confirmed `clerk.shimizu-technology.com` is unused). Reconfigure or replace the unused September 14 secondary-application instance (`payroll.shimizu-technology.com`, `PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md:14,81`) with root domain `shimizu-technology.com` before `M3-0b`.
+  - **Architectural limit to record:** Because Clerk ties one production Frontend API (`clerk.shimizu-technology.com`) to the root domain, **no other Shimizu app can run its own separate Clerk production instance on `shimizu-technology.com`** (any future separate app must use its own domain or a secondary-application subdomain).
+  - **Two security requirements on the root domain:** (1) Enable Clerk's [Allowed subdomains](https://clerk.com/docs/guides/dashboard/dns-domains/subdomain-allowlist) in the Clerk Dashboard so only explicitly listed subdomains (`payroll.shimizu-technology.com`, `mosas.shimizu-technology.com`, etc.) can call Clerk's Frontend API, blocking every other `*.shimizu-technology.com` subdomain; and (2) validate the JWT `azp` claim (`authorizedParties`) in Rails (`ClerkTokenVerifier`) against the same explicit origin list to prevent subdomain cookie-leaking attacks.
+  - **Passkeys caveat:** Clerk's production guide notes that due to WebAuthn RP ID rules, passkeys do not share across two sibling subdomains (`payroll.shimizu-technology.com` and `mosas.shimizu-technology.com`). That does not affect password, email code, Google sign-in, or TOTP authenticator apps in Milestones 3–4, and is noted before passkeys are considered later.
 
-### 1.10 Outside the code: legal review and WISP
+### 1.10 Outside the code: legal review and WISP (deferred to Milestone 4 go-live)
 
-- **Legal research brief exists:** `docs/GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md` lists 12 "Needed before launch" questions for a Guam law firm (Part 3, `lines 737-750`) plus agency questions for Guam DRT, Guam DOL Wage & Hour, and the AG's Child Support Enforcement Division (Part 4, `lines 770-796`). None have been sent to counsel yet.
-- **WISP status unknown:** Dafne attended IRS WISP training in March 2026; whether Cornerstone finished its WISP is an open question (`PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md:283`). Shimizu Technology has no platform security addendum or service-provider DPA yet.
+- **Legal research brief exists:** `docs/GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md` lists 12 "Needed before launch" questions for a Guam law firm (Part 3, `lines 737-750`) plus agency questions for Guam DRT, Guam DOL Wage & Hour, and the AG's Child Support Enforcement Division (Part 4, `lines 770-796`).
+- **WISP status unknown:** Dafne attended IRS WISP training in March 2026; whether Cornerstone finished its WISP is unconfirmed (`PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md:283`). Shimizu Technology has no platform security addendum or service-provider DPA yet.
+- **Decided (Leon, Nov 22, 2026):** Not part of Milestone 3 work or acceptance. Both stay in this document (§5) as a **Milestone 4 go-live prerequisite** per §6 of [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) ("the lawyer review must be finished before it goes live").
 
-### 1.11 Open question for Leon: file scanning vs. November 12 "no virus scanner"
+### 1.11 File scanning (decided: no virus scanner for Milestone 3 and pilot)
 
 - **What exists today:**
   - `ClientDocumentUploadService` (`api/app/services/client_document_upload_service.rb:44-50,78`) uploads bytes synchronously to Cloudflare R2 (`api/app/services/r2_storage_service.rb`) after running `ClientDocumentFileValidator` (`api/app/services/client_document_file_validator.rb:1-263`).
   - `ClientDocumentFileValidator` already enforces a 25 MB per-file / 50 MB per-request cap, magic-byte validation (`Marcel`), OOXML central-directory/entry-count (1,000) and expanded-size (100 MB) zip-bomb caps, blocks VBA/Excel 4 macros, ActiveX, embedded executables (MZ/ELF/Mach-O/shebangs), and external OOXML links, and inspects legacy OLE/BIFF containers.
   - `ClientDocumentScanner` (`api/app/services/client_document_scanner.rb:5-47`) is wired into `ClientDocument`, `ScanClientDocumentJob`, `ClientDocumentScanRecoveryJob`, and all four download/preview/attachment/intake gates, with `ClientDocumentScanner::Noop` as the default adapter (leaving `scan_status = "not_scanned"`).
-- **The tension:** On November 12, 2026, Leon chose **no virus scanner** (`ClientDocumentScanner::Noop`) for the client portal (`docs/qa/portal-mosa-import-bridge-pr6-2026-11-12.md:107-125`). However, the architecture decision (`PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md:211,261`) and implementation spec (`PLATFORM_OFFERINGS_IMPLEMENTATION_SPEC_2026-11-17.md:405`) still list malware scanning because Milestone 4–5 opens uploads to untrusted employee phones.
-- **Options for Leon (not decided here):**
-
-| Option | How it works | Monthly cost (as of 2026-11-22) | Security / compliance trade-off |
-|---|---|---|---|
-| **1. Keep static validator + `Noop` (no AV scanner)** | Keep `ClientDocumentFileValidator` + `Noop`. For future employee uploads, restrict extensions to `pdf, jpg, jpeg, png, webp` (no Office docs), serve all downloads as `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`, and render previews via sandboxed PDF/image viewers. | **$0/mo** | No signature detection for malicious PDFs (embedded JS/reader exploits) or polyglot images. Cornerstone staff rely on local endpoint AV. Law-firm / WISP / pen-test reviewers may flag the absence of AV once untrusted employee uploads go live. |
-| **2. Managed Virus Scan API (Cloudmersive)** | Wire a `ClientDocumentScanner::Cloudmersive` adapter into existing `ScanClientDocumentJob` (`pending` → `clean`/`infected`/`error`). | **$0/mo** Free tier (600 calls/mo, **3.5 MB max file size** — incompatible with current 25 MB limit) or **$19.99/mo** Basic (10,000 calls/mo, 1 GB max) ([Cloudmersive Small Business Pricing](https://cloudmersive.com/pricing-small-business)). *(AttachmentScanner starts at $249/mo — ruled out on cost: [AttachmentScanner](https://www.attachmentscanner.com/plans-and-pricing)).* | Low ops overhead; runs on existing Render Starter worker. **Privacy/legal catch:** raw employee IDs, W-4s, and payroll files leave Shimizu/R2 for a third-party cloud API, so Cloudmersive must be disclosed as a sub-processor in the DPA, privacy notice, and WISP (and checked against IRC § 7216 in the legal review). |
-| **3. Self-hosted ClamAV (`clamd`) on Render** | Run a private Render Docker service running `clamd` + `freshclam`, called from `ScanClientDocumentJob`. | **$25/mo** on Render Standard (2 GB RAM — tight; risks OOM during signature reloads) or **$85/mo** on Render Pro (4 GB RAM — matches [ClamAV's 3–4 GiB recommendation](https://docs.clamav.net/Introduction.html)), plus ~$0.25–$1/mo persistent disk ([Render Pricing](https://render.com/pricing)). | Files stay inside Shimizu's own Render network (cleanest for DPA and IRC § 7216). Open-source signatures only (weaker on zero-days than commercial engines) and $25–$85/mo fixed cost before revenue. |
-| **4. Two-stage: Option 1 now, revisit Option 2 vs. 3 at M4/M5 upload gate** | Keep `Noop` + `ClientDocumentFileValidator` through Milestone 3 (client-office uploads only, matching Nov 12). Ask the Guam law firm whether FTC Safeguards / § 7216 requires AV scanning or bars third-party scanning APIs, then ship the chosen adapter before employee uploads open in M4/M5. | **$0/mo now**; $19.99–$85/mo only when untrusted employee uploads launch | Zero wasted spend before revenue and aligns legal/DPA input before adding a sub-processor or 4 GB container. Client portal files stay unscanned by AV in the interim. |
+- **Decided (Leon, Nov 22, 2026):** Allow uploads now using the existing `ClientDocumentFileValidator` type, byte, container, and size checks with **no virus scanner** (`ClientDocumentScanner::Noop`, **$0/month**). Trust the pilot companies; keep the `ClientDocumentScanner` adapter seam intact; **revisit adding a malware scanner before wider rollout beyond the pilot**.
+- **Future reference when revisiting before wider rollout (prices verified 2026-11-22):**
+  - *Managed API (Cloudmersive Basic):* **$19.99/month** for 10,000 calls/month, 1 GB max file size ([Cloudmersive Small Business Pricing](https://cloudmersive.com/pricing-small-business); Free tier is capped at 3.5 MB, below our 25 MB limit; AttachmentScanner starts at $249/mo — [AttachmentScanner](https://www.attachmentscanner.com/plans-and-pricing)). Requires adding the vendor as a sub-processor in the DPA, privacy notice, and WISP (and checking IRC § 7216).
+  - *Self-hosted ClamAV (`clamd`) on Render:* **$25/month** on Render Standard (2 GB RAM — tight on signature reloads) or **$85/month** on Render Pro (4 GB RAM — matches [ClamAV's 3–4 GiB recommendation](https://docs.clamav.net/Introduction.html)), plus persistent disk ([Render Pricing](https://render.com/pricing)). Files never leave Shimizu's Render network.
 
 ---
 
@@ -207,7 +205,7 @@ Per [Clerk's session tokens documentation](https://clerk.com/docs/guides/session
    - When `REQUIRE_MFA` is `true` and the caller is accessing `/api/v1/admin/*`, `/api/v1/client/*`, or `/api/v1/auth/me` with a staff or client role (not an employee-only account), require `MfaPolicy.verified_second_factor?(@clerk_token_payload)`.
    - On failure, return HTTP `403` with `{ error: "Multi-factor authentication is required before accessing payroll.", code: "mfa_required" }` and record a `security` `AuditLog` event (`authentication#mfa_required_denied`).
    - When `REQUIRE_MFA` is `false` (production during Milestone 3), log nothing noisy and allow the request, while keeping `ProductionReadiness#mfa_attestation_recorded?` failing as designed until the Milestone 4 gate so production readiness never silently turns green without MFA.
-5. **Testing in Milestone 3 (free):** Clerk's [sign-up/sign-in options docs](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options) confirm all Pro features — including MFA (TOTP authenticator apps and backup codes) — are **free in Clerk development instances**. In Milestone 3 we verify live `fva` JWT claims against Clerk's development instance in staging/local, plus deterministic RSpec tests with locally signed RS256 JWTs covering `fva: [5, 0]`, `fva: [5, 15]`, `fva: [5, -1]`, missing `fva`, malformed `fva`, and `REQUIRE_MFA` on vs. off.
+5. **Testing in Milestone 3 (free):** Clerk's [sign-up/sign-in options docs](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options) confirm all Pro features — including MFA (TOTP authenticator apps and backup codes) — are **free in Clerk development instances**. Because the Clerk development instance stays active for local and staging work throughout Milestone 3, we verify live `fva` JWT claims against Clerk dev, plus deterministic RSpec tests with locally signed RS256 JWTs covering `fva: [5, 0]`, `fva: [5, 15]`, `fva: [5, -1]`, missing `fva`, malformed `fva`, and `REQUIRE_MFA` on vs. off.
 
 ### 2.3 One login, separate roles (`users` + `employee_account_links`)
 
@@ -227,13 +225,13 @@ Leon's November 19 & 22 decisions specify **one Clerk app for everyone**, invita
 
 ## 3. Ordered PR breakdown
 
-Clerk production cutover comes first. PRs marked **Parallel** can be built and reviewed concurrently on separate worktrees once their listed dependency merges.
+`M3-0a` (verifier, `azp`, cutover tooling — no live change) lands early so `M3-1`, `M3-2`, and `M3-6` build on one verifier against the Clerk development instance and staging. The live Clerk production cutover (`M3-0b`) runs near the **end of Milestone 3, after staging rehearsal and just before the Milestone 4 gate**. PRs marked **Parallel** can be built and reviewed concurrently on separate worktrees once their code dependency merges.
 
 ```mermaid
 flowchart LR
-  M30["M3-0: Clerk verifier, azp, cutover tooling + live prod cutover"]
+  M30a["M3-0a: Clerk verifier, azp, cutover tooling (dev/staging)"]
   M31["M3-1: Invitation-only auth, end email match, role separation"]
-  M32["M3-2: MFA fva check (REQUIRE_MFA=false)"]
+  M32["M3-2: MFA fva check (tested on dev; REQUIRE_MFA=false)"]
   M33["M3-3: Non-staff audit actors"]
   M34["M3-4: Effective-dated pay rates"]
   M35a["M3-5a: Operating profile backend (A1)"]
@@ -241,47 +239,52 @@ flowchart LR
   M36["M3-6: Client subdomains plumbing"]
   M37["M3-7: Postgres RLS + Neon role + isolation suite"]
   M38["M3-8: Capacity roles, rate limits, telemetry, netlify.toml"]
+  M30b["M3-0b: Live Clerk production cutover (ops step, end of M3)"]
 
-  M30 --> M31
-  M30 --> M32
-  M30 --> M36
+  M30a --> M31
+  M30a --> M32
+  M30a --> M36
   M35a --> M35b
   M35a --> M36
   M31 --> M37
   M34 --> M37
   M35a --> M37
+  M31 --> M30b
+  M32 --> M30b
+  M36 --> M30b
+  M37 --> M30b
 ```
 
-| Order | PR | Parallelizable? | Depends on | Ships switched off? |
-|---|---|---|---|---|
-| 1 | **M3-0:** Clerk JWT verifier consolidation, `azp` check, cutover re-link tasks, and Clerk production cutover | First (gate) | None | N/A (live Clerk prod cutover) |
-| 2 | **M3-1:** Invitation-only login, remove email auto-linking, `employee_account_links`, `Employee::BaseController` scaffold | After M3-0 | M3-0 | `employee/*` routes gated off; invitation token redemption active |
-| 3 | **M3-2:** MFA `fva` verification + step-up helper | Parallel with M3-1, M3-3, M3-4, M3-5a, M3-8 | M3-0 | `REQUIRE_MFA=false` in prod |
-| 4 | **M3-3:** Non-staff audit actors (`actor_type`, `AuditActor`, job auditing) | Parallel from day 1 | None | Additive (no user-facing change) |
-| 5 | **M3-4:** Effective-dated pay rates & wage-rate history | Parallel from day 1 | None | Additive backfill; UI shows effective date cleanly |
-| 6 | **M3-5a:** Client operating profile backend (Spec A1: table, catalog, `CompanyFeatures`, backfill, read API) | Parallel from day 1 | None | Dual-read; all M4–M6 flags default `false` |
-| 7 | **M3-5b:** Operating profile PATCH + "How this client runs" admin settings page (Spec A2) | Parallel after M3-5a | M3-5a | Admin settings only; all M4–M6 switches default `false` |
-| 8 | **M3-6:** Client subdomains (`subdomain_slug`, dynamic CORS/`azp`, public branding endpoint) | Parallel after M3-0 + M3-5a | M3-0, M3-5a | `subdomain_enabled=false` for all clients → 404 |
-| 9 | **M3-7:** Postgres RLS (`payroll_app` role, `TenantScope`, `rls_policies.sql`, cross-company isolation suite) | After schema-adding PRs | M3-1, M3-4, M3-5a | Staged rollout: app code + role first, then `ENABLE/FORCE RLS` migration |
-| 10 | **M3-8:** Reserved capacity (`APP_PROCESS_ROLE`, queue/pool limits, employee/kiosk `Rack::Attack`, telemetry, `netlify.toml`) | Parallel from day 1 | None | `APP_PROCESS_ROLE=all` (existing Render topology unchanged) |
-| Opt | **M3-9:** File-scanner adapter (only if Leon chooses Option 2 or 3 in §1.11) | Parallel after decision | Leon's decision | Adapter flag off until verified on staging |
+| Order | Slice | Type | Parallelizable? | Depends on | Ships switched off? |
+|---|---|---|---|---|---|
+| 1 | **M3-0a:** Clerk JWT verifier consolidation, `azp` check, cutover/re-link tooling | Code PR | First auth PR (parallel with M3-3, M3-4, M3-5a, M3-8) | None | Dev keys unchanged; zero live impact |
+| 2 | **M3-1:** Invitation-only login, remove email auto-linking, `employee_account_links`, `Employee::BaseController` scaffold | Code PR | Parallel after M3-0a | M3-0a (code); M3-0b (live prod verification) | `employee/*` routes gated off; works on existing dev `clerk_id`s immediately |
+| 3 | **M3-2:** MFA `fva` verification + step-up helper | Code PR | Parallel after M3-0a | M3-0a (code); M4 gate (prod enforcement) | `REQUIRE_MFA=false` in prod; tested on Clerk dev |
+| 4 | **M3-3:** Non-staff audit actors (`actor_type`, `AuditActor`, job auditing) | Code PR | Parallel from day 1 | None | Additive (no user-facing change) |
+| 5 | **M3-4:** Effective-dated pay rates & wage-rate history | Code PR | Parallel from day 1 | None | Additive backfill; UI shows effective date cleanly |
+| 6 | **M3-5a:** Client operating profile backend (Spec A1: table, catalog, `CompanyFeatures`, backfill, read API) | Code PR | Parallel from day 1 | None | Dual-read; all M4–M6 flags default `false` |
+| 7 | **M3-5b:** Operating profile PATCH + "How this client runs" admin settings page (Spec A2) | Code PR | Parallel after M3-5a | M3-5a | Admin settings only; all M4–M6 switches default `false` |
+| 8 | **M3-6:** Client subdomains (`subdomain_slug`, dynamic CORS/`azp`, public branding endpoint) | Code PR | Parallel after M3-0a + M3-5a | M3-0a, M3-5a (code); M3-0b (live prod subdomain verification) | `subdomain_enabled=false` for all clients → 404 |
+| 9 | **M3-7:** Postgres RLS (`payroll_app` role, `TenantScope`, `rls_policies.sql`, cross-company isolation suite) | Code PR | After schema-adding PRs | M3-1, M3-4, M3-5a | Staged rollout: app code + role first, then `ENABLE/FORCE RLS` migration |
+| 10 | **M3-8:** Reserved capacity (`APP_PROCESS_ROLE`, queue/pool limits, employee/kiosk `Rack::Attack`, telemetry, `netlify.toml`) | Code PR | Parallel from day 1 | None | `APP_PROCESS_ROLE=all` (existing Render topology unchanged) |
+| 11 | **M3-0b:** Live Clerk production cutover on `shimizu-technology.com` (free plan) | Ops step | End of M3, before M4 gate | M3-0a, M3-1, M3-2, M3-6, M3-7 + staging rehearsal | N/A (live cutover; `REQUIRE_MFA` stays `false`) |
 
 ---
 
-### PR M3-0: Clerk verifier hardening, cutover re-linking tooling, and production cutover
+### PR M3-0a: Clerk verifier hardening, `azp` check, and cutover re-linking tooling
 
-- **Purpose:** Fix `pk_live_` issuer derivation, remove duplicated JWT verification, add `azp` (`authorizedParties`) validation, and add controlled one-time cutover rake tasks (`clerk:cutover:inventory`, `clerk:cutover:dry_run`, `clerk:cutover:apply`) that re-link `users.clerk_id` strictly from an operator-reviewed manifest (`user_id` + verified `new_clerk_id`). Execute the staging rehearsal and production Clerk cutover (§4) right after merge.
+- **Purpose:** Fix `pk_live_` issuer derivation, remove duplicated JWT verification, add `azp` (`authorizedParties`) validation, and add controlled one-time cutover rake tasks (`clerk:cutover:inventory`, `clerk:cutover:dry_run`, `clerk:cutover:apply`, `clerk:cutover:rollback`) that re-link `users.clerk_id` strictly from an operator-reviewed manifest (`user_id` + verified `new_clerk_id`). Built and tested against the Clerk development instance and staging; **makes no live production key change**.
 - **Main files:**
   - `api/app/services/clerk_token_verifier.rb` (single verifier, custom-domain `pk_live_` parser, `azp` allowlist via `CLERK_AUTHORIZED_PARTIES` / `CORS_ORIGINS`, JWKS cache keyed by issuer, `nbf` check)
   - `api/app/controllers/concerns/clerk_authenticatable.rb` (delegate JWT verification to `ClerkTokenVerifier`)
   - `api/lib/tasks/clerk_cutover.rake` and `api/app/services/clerk_cutover/relink_service.rb` (validates exact-one mapping, refuses duplicate/unknown/inactive mismatches, clears `last_session_id_digest` and stale `clerk_invitation_id`, writes `AuditLog` security events, prints counts only — never secrets or PII to stdout logs)
-  - `api/app/services/production_readiness.rb` (ensure `production_clerk_keys?` and `clerk_ready?` behave cleanly when `REQUIRE_MFA=false` on a real production instance — report live keys as passing while keeping MFA control explicitly failing until M4)
+  - `api/app/services/production_readiness.rb` (ensure `production_clerk_keys?` and `clerk_ready?` behave cleanly when `REQUIRE_MFA=false` on a real production instance — report live keys as passing after `M3-0b` while keeping MFA control explicitly failing until M4)
 - **Migration:** None.
-- **Dependencies:** None (first PR in Milestone 3).
+- **Dependencies:** None (first auth PR; parallel with M3-3, M3-4, M3-5a, M3-8).
 - **Acceptance tests:**
-  - *Automated (RSpec):* `clerk_token_verifier_spec.rb` (RS256 `pk_live_` custom domain issuer, valid/invalid `azp`, expired/future `nbf`, JWKS rotation miss), `clerk_cutover_relink_service_spec.rb` (exact-one relink, rejects email-only fuzzy match, rejects duplicate target `clerk_id`, idempotent re-run, transactional rollback on any single row error), `production_readiness_spec.rb`.
-  - *Manual / browser QA:* Full staging rehearsal of §4 runbook, then production cutover verification matrix (two recovery admins sign in on `payroll.shimizu-technology.com`, old dev session rejected cleanly, API + ActionCable work).
-- **Ships switched off:** Code is backward-compatible with dev keys until the maintenance-window env-var switch in Render and Netlify.
+  - *Automated (RSpec):* `clerk_token_verifier_spec.rb` (RS256 `pk_live_` custom domain issuer and `pk_test_` dev issuer, valid/invalid `azp`, expired/future `nbf`, JWKS rotation miss), `clerk_cutover_relink_service_spec.rb` (exact-one relink, rejects email-only fuzzy match, rejects duplicate target `clerk_id`, idempotent re-run, transactional rollback on any single row error, clean rollback task), `production_readiness_spec.rb`.
+  - *Manual / browser QA:* Test dev-instance sign-in on local and staging; run `clerk:cutover:inventory` and `clerk:cutover:dry_run` on staging to prove zero regressions against the existing Clerk dev instance.
+- **Ships switched off:** Backward-compatible with existing dev keys in production until `M3-0b`.
 
 ### PR M3-1: Invitation-only logins and login/role separation
 
@@ -298,13 +301,13 @@ flowchart LR
 - **Migration:**
   - Create `employee_account_links` table with composite FK `(employee_id, company_id) REFERENCES employees(id, company_id)` (adding unique index on `employees(id, company_id)` if absent) and partial unique index on `employee_id WHERE status IN ('invited', 'active')`.
   - Add `token_digest` to `user_invitations` (backfill from existing `token`, then null out raw `token` for consumed/expired rows).
-- **Dependencies:** M3-0 (must deploy only **after** all existing live users have real production `clerk_id` values populated by the M3-0 cutover).
+- **Dependencies:** `M3-0a` for code. Works safely on production **before** `M3-0b` because every active production user already has their current dev `clerk_id` stored on `users`, and any pending/new invites redeem via explicit token. When `M3-0b` later runs `clerk:cutover:apply`, it updates `users.clerk_id` directly from the sealed manifest, so email matching is never needed during or after cutover. Final production-instance verification runs as part of `M3-0b`.
 - **Acceptance tests:**
   - *Automated (RSpec + Vitest):* Uninvited Clerk user with an email matching an existing staff `User` receives `401` and does **not** overwrite `clerk_id`; valid invite token binds once and rejects replay; expired/revoked invite rejected; `employee_account_link` to a test workspace fails DB + model validation; an employee-only user calling `/api/v1/admin/*` or `/api/v1/client/*` gets `403`; a staff-only user calling `/api/v1/employee/*` gets `403`/`404`; Vitest for `Invite.tsx` & `AuthContext`.
-  - *Manual / browser QA:* Create a test client user invite on staging → accept via invite link → verify sign-in; attempt sign-in with an uninvited Clerk account whose email matches a seeded user → verify denial and no `clerk_id` change.
+  - *Manual / browser QA:* Create a test client user invite on staging → accept via invite link → verify sign-in; attempt sign-in with an uninvited Clerk account whose email matches a seeded user → verify denial and no `clerk_id` change; re-verify on production Clerk after `M3-0b`.
 - **Ships switched off:** `Api::V1::Employee::BaseController` returns `404` while `employee_portal_enabled` is `false`. Staff and client invite flows work identically for real invite links.
 
-### PR M3-2: MFA `fva` verification (built and tested, shipped off)
+### PR M3-2: MFA `fva` verification (built and tested on dev, shipped off)
 
 - **Purpose:** Enforce Clerk's `fva` second-factor claim on staff and client API/Cable requests whenever `REQUIRE_MFA=true`, plus provide a step-up freshness helper for Milestone 4.
 - **Main files:**
@@ -314,7 +317,7 @@ flowchart LR
   - `api/app/controllers/api/v1/auth_controller.rb` (include `mfa_verified: bool` and `mfa_required: bool` in `/auth/me`)
   - `web/src/contexts/AuthContext.tsx` and `web/src/pages/Login.tsx` (handle `403 code: "mfa_required"` cleanly by guiding user to enroll/complete MFA in Clerk rather than signing out in a loop)
 - **Migration:** None.
-- **Dependencies:** M3-0. (Can run in parallel with M3-1, M3-3, M3-4, M3-5a, M3-8.)
+- **Dependencies:** `M3-0a` for code. (Can run in parallel with M3-1, M3-3, M3-4, M3-5a, M3-8.) Tested end-to-end against the Clerk development instance (free MFA); production enforcement turns on only at the Milestone 4 gate (after `M3-0b` + Clerk Pro).
 - **Acceptance tests:**
   - *Automated (RSpec + Vitest):* Signed RS256 JWT fixtures testing `fva: [5, 2]` (pass), `fva: [5, 0]` (pass), `fva: [5, -1]` (403 `mfa_required` + security audit event), missing/malformed `fva` (403), `REQUIRE_MFA=false` (pass regardless of `fva`), `REQUIRE_MFA=true` on `admin`/`accountant`/`client` (enforced) vs. employee-only account (exempt from global gate; tested with `require_recent_mfa!`), Cable ticket denied when `REQUIRE_MFA=true` and `fva[1] == -1`. Vitest for `mfa_required` UI state.
   - *Manual / browser QA (against Clerk dev instance where MFA is free):* Enable TOTP + backup codes in Clerk dev, set `REQUIRE_MFA=true` on local/staging, confirm non-MFA session gets `403 mfa_required`, enroll authenticator app, verify full payroll navigation succeeds, confirm backup-code login sets `fva[1] >= 0`.
@@ -406,7 +409,7 @@ flowchart LR
   - `api/app/controllers/api/v1/public/tenant_branding_controller.rb` (unauthenticated, rate-limited `GET /api/v1/public/tenant_branding?host=` returning `{ name, logo_url, primary_color, accent_color }` **only** when `subdomain_enabled` is `true` and `payroll_environment == 'live'`; returns uniform `404` otherwise)
   - `api/app/services/operating_profile_catalog.rb` (add `subdomain_enabled` switch, default `false`, `capability: :manage_organization`)
 - **Migration:** Add `subdomain_slug` (string, nullable, partial unique index on `lower(subdomain_slug) WHERE payroll_environment = 'live'`) and `branding` (jsonb, default `{}`) to `companies`.
-- **Dependencies:** M3-0 (`azp` verifier) and M3-5a (`CompanyFeatures`).
+- **Dependencies:** `M3-0a` (`azp` verifier) and `M3-5a` (`CompanyFeatures`) for code and staging QA; live production subdomain verification happens after `M3-0b` brings up Clerk on `shimizu-technology.com`.
 - **Acceptance tests:**
   - *Automated (RSpec):* Reserved slugs rejected, duplicate live slugs rejected, test workspace cannot claim a live slug, `GET /api/v1/public/tenant_branding` returns `404` when `subdomain_enabled` is `false` (no tenant enumeration), CORS preflight allows enabled client subdomain and rejects disabled or arbitrary `evil.shimizu-technology.com`, `ClerkTokenVerifier` rejects `azp` from disabled subdomain.
   - *Manual / browser QA:* On staging, set a test slug on a non-live/staging company, verify `404` while disabled, flip `subdomain_enabled=true` in staging, verify branding JSON and CORS headers, flip back off.
@@ -432,10 +435,10 @@ flowchart LR
 
 ### PR M3-8: Reserved capacity plumbing, rate limits, monitoring, and Netlify build-ignore
 
-- **Purpose:** Make the Rails codebase split-ready for separate employee web/worker processes with independent DB connection caps, add employee/kiosk rate limits and latency/pool monitoring, and add a tested `netlify.toml` ignore rule to protect Netlify credits.
+- **Purpose:** Make the Rails codebase split-ready for separate employee web processes (and later worker processes in Milestone 6) with independent DB connection caps, cap employee background jobs on the existing Payroll worker so they cannot starve payroll jobs, add employee/kiosk rate limits and latency/pool monitoring, and add a tested `netlify.toml` ignore rule to protect Netlify credits.
 - **Main files:**
   - `api/config/routes.rb` and `api/lib/process_role.rb` (new `APP_PROCESS_ROLE`: `all` default today; `payroll_web` mounts `/api/v1/admin/*`, `/api/v1/client/*`, `/api/v1/auth/*`, `/api/v1/integrations/*`, `/up`; `employee_web` mounts only `/api/v1/employee/*`, `/api/v1/kiosk/*`, `/api/v1/public/tenant_branding`, `/api/v1/auth/*`, `/up`)
-  - `api/config/queue.yml` (allow `SOLID_QUEUE_QUEUES` env override so `payroll_worker` runs `default,solid_queue_recurring,ocr` and `employee_worker` runs `employee,notifications`, while single-worker mode caps `employee` queue to 1 thread so payroll jobs stay prioritized)
+  - `api/config/queue.yml` (cap `employee` queue to 1 thread on the existing Payroll worker through Milestone 4–5 so `default`/`solid_queue_recurring` payroll jobs always stay prioritized; also allow `SOLID_QUEUE_QUEUES` env override so Milestone 6 can split off a dedicated `employee_worker`)
   - `api/config/database.yml` (support explicit `DB_POOL_MAX` separate from `RAILS_MAX_THREADS`, bounded so employee processes cannot starve Neon connections)
   - `api/config/initializers/rack_attack.rb` (add throttles: `employee/ip` 120/min, `employee/activation_ip` 10/15min, `employee/activation_token` 5/15min, `employee/pdf` 15/min, `kiosk/ip` 60/min; emit structured log + metric on every 429)
   - `api/config/initializers/telemetry.rb` (structured JSON logs for request duration, DB pool checkout wait time, slow-query warnings > 1s, and 429 counters — keeping `/up` boot-only and DB-free per `PRODUCTION_RUNTIME_AND_COST_GUIDE.md`)
@@ -446,30 +449,37 @@ flowchart LR
 - **Acceptance tests:**
   - *Automated (RSpec + Vitest + shell):* `process_role_spec.rb` (proves `employee_web` returns 404 for `/api/v1/admin/*` and `payroll_web` returns 404 for `/api/v1/employee/*`), `rack_attack_spec.rb` (proves all new employee/activation/PDF/kiosk throttles return 429 with `Retry-After` and never throttle normal payroll traffic), shell test of `netlify.toml` ignore command proving docs-only / `api/`-only diff exits `0` (skip) and `web/` diff exits `1` (build).
   - *Manual / browser QA:* Boot local API with `APP_PROCESS_ROLE=employee_web` and verify `/up` returns 200 without DB query while `/api/v1/admin/companies` returns 404; verify normal `APP_PROCESS_ROLE=all` leaves production behavior unchanged.
-- **Ships switched off:** `APP_PROCESS_ROLE=all` and `VITE_APP_SURFACE=staff` keep today's Render and Netlify topology untouched until Milestone 4 spins up the second web service and employee Netlify site.
+- **Ships switched off:** `APP_PROCESS_ROLE=all` and `VITE_APP_SURFACE=staff` keep today's Render and Netlify topology untouched until Milestone 4 spins up the $7/month employee web service and employee Netlify site.
+
+### Step M3-0b: Live Clerk production cutover (ops step, end of Milestone 3)
+
+- **Purpose:** Move live Cornerstone Payroll off Clerk development (`pk_test_`) onto the Clerk production instance on `shimizu-technology.com` (Hobby Free plan), re-linking all existing users from an operator-reviewed manifest (`clerk:cutover:apply`) with zero email auto-matching. Runs near the **end of Milestone 3, after all M3 code PRs merge and the staging rehearsal passes, and just before the Milestone 4 gate**.
+- **Dependencies:** `M3-0a`, `M3-1`, `M3-2`, `M3-6`, `M3-7` merged and deployed; staging rehearsal (§4.3) passed; maintenance window chosen.
+- **Acceptance tests:** Full verification matrix in §4.5 on `payroll.shimizu-technology.com` (including `M3-1` no-email-match denial, `M3-6` `azp`/CORS check, and `production:readiness` passing production Clerk keys while `REQUIRE_MFA` stays `false`), followed by Cornerstone's normal live payroll acceptance run (§8).
 
 ---
 
-## 4. Clerk production migration runbook (Payroll only)
+## 4. Clerk production migration runbook (Step M3-0b — Payroll only)
 
-This runbook updates [PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md](PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md) for Leon's November 22, 2026 decisions: **Payroll only** (AIRE stays untouched), **Clerk Hobby (Free) plan** (up to 50,000 MRU, custom domain included — [Clerk pricing](https://clerk.com/pricing)), **`REQUIRE_MFA=false`** until the Milestone 4 gate, **one-time controlled user re-linking** (never matching by email at login), and **everyone signs in again**.
+This runbook updates [PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md](PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md) for Leon's November 22, 2026 decisions: **Payroll only** (AIRE stays untouched), executed near the **end of Milestone 3, just before the Milestone 4 gate**, on **Clerk Hobby (Free) plan** (up to 50,000 MRU, custom domain included — [Clerk pricing](https://clerk.com/pricing)), **`shimizu-technology.com` root domain**, **`REQUIRE_MFA=false`** until the Milestone 4 gate, **one-time controlled user re-linking** (never matching by email at login), and **everyone signs in again**.
 
 ### 4.1 Preconditions (no-go if any box is unchecked)
 
-- [ ] PR M3-0 is merged and deployed to both staging and production.
-- [ ] Leon confirmed **domain choice** (Question 2): `shimizu-technology.com` as Clerk root domain (`clerk.shimizu-technology.com`, covering `<client>.shimizu-technology.com` for free) vs. secondary domain `payroll.shimizu-technology.com`. *(Steps below assume `shimizu-technology.com` with Allowed Subdomains enabled; adjust CNAME hostnames if secondary domain is chosen.)*
-- [ ] Leon confirmed **sign-in methods** (Question 3): verified email-code sign-in (enabled), Google OAuth with Shimizu-owned production Google OAuth web client credentials (if retained; never dev `clerk.shared.lcl.dev` callbacks), and password policy (disabled recommended, or strong policy approved).
-- [ ] **Two named recovery administrators** (e.g., Leon + one active Cornerstone admin) and a **maintenance window + rollback deadline in ChST** are scheduled when Cornerstone, MoSa's, and KPI are not running payroll.
+- [ ] `M3-0a`, `M3-1`, `M3-2`, `M3-6`, and `M3-7` are merged and deployed to both staging and production.
+- [ ] Staging rehearsal (§4.3) has passed on a fresh production clone and its SHA/result are recorded.
+- [ ] Clerk production instance is configured on root domain **`shimizu-technology.com`** (`clerk.shimizu-technology.com`) with **Allowed Subdomains** enabled (`payroll.shimizu-technology.com` only for Milestone 3) and DNS/TLS verified.
+- [ ] All three approved sign-in methods are configured and tested: **email + password** (with compromised-password rejection and strong minimum policy), **verified email codes**, and **Google sign-in** (using a Shimizu-owned production Google OAuth web client — never dev `clerk.shared.lcl.dev` callbacks).
+- [ ] Recovery administrators **Leon (`lmshimizu@gmail.com`)** and **Dafne (`dmshimizucpa@gmail.com`)** are available during the chosen ChST maintenance window (scheduled closer to the date, outside Cornerstone, MoSa's, and KPI payroll windows) with a fixed rollback deadline.
 - [ ] Current dev keys (`VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `CLERK_ISSUER`, `CLERK_API_BASE`) are backed up in Shimizu's secret manager (never in Git or chat).
 
 ### 4.2 Provider & DNS setup (zero user impact; do days before cutover)
 
 1. **Create / configure the Clerk production instance (Free / Hobby plan):**
-   - In Clerk Dashboard → select Cornerstone Payroll → switch/create **Production** instance on the **Hobby ($0)** plan. *(If the unused September 14 production instance was scoped to `payroll.shimizu-technology.com` as a secondary app and Leon approves `shimizu-technology.com`, reconfigure or replace it with root domain `shimizu-technology.com` before adding any users.)*
+   - In Clerk Dashboard → select Cornerstone Payroll → switch/create **Production** instance on the **Hobby ($0)** plan with root domain **`shimizu-technology.com`**. *(Reconfigure or replace the unused September 14 production instance that was scoped as a secondary app on `payroll.shimizu-technology.com` before adding any users.)*
    - Set **Access mode → Invite-only** ([Clerk restricting access docs](https://clerk.com/docs/guides/secure/restricting-access), checked 2026-11-22).
    - Keep **Clerk Organizations** disabled (tenancy stays in Postgres).
    - Keep **MFA** off in the production instance for now (Pro is not purchased until the M4 gate).
-   - Configure approved sign-in methods (email code + production Google OAuth client if retained).
+   - Enable **email + password** (compromised-password rejection on), **verified email codes**, and **Google sign-in**.
 2. **Add DNS records on `shimizu-technology.com`:**
    - Copy the exact records from Clerk Dashboard → **Configure → Domains** (typically five CNAME records: Frontend API `clerk.shimizu-technology.com`, Account Portal `accounts.shimizu-technology.com`, plus three email/DKIM CNAMEs `clkmail`, `clk._domainkey`, `clk2._domainkey`).
    - If DNS is on Cloudflare, set every Clerk CNAME to **DNS only (grey cloud)** — proxying causes Clerk DNS/TLS checks to fail ([Clerk production deployment docs](https://clerk.com/docs/guides/development/deployment/production)).
@@ -477,20 +487,20 @@ This runbook updates [PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md](PRODUCTION_IDENTIT
    - Wait for Clerk Dashboard to show **DNS verified** and **SSL certificate issued** (up to 48 hours; usually minutes).
 3. **Lock down Allowed Subdomains:**
    - In Clerk Dashboard → **Domains → Allowed subdomains**, toggle **Enable allowed subdomains** ON and add **only** `payroll.shimizu-technology.com` for Milestone 3 ([Clerk subdomain allowlist docs](https://clerk.com/docs/guides/dashboard/dns-domains/subdomain-allowlist)). Later milestones add `mosas.shimizu-technology.com`, etc. here as each client enables its subdomain.
-4. **Verify Google OAuth (if retained):**
-   - Create/update Shimizu's production Google OAuth web client with the exact authorized JavaScript origin and redirect URI shown in Clerk production (`https://clerk.shimizu-technology.com/v1/oauth_callback`).
+4. **Configure production Google OAuth:**
+   - Create a production Google OAuth web client owned by Shimizu Technology with the exact authorized JavaScript origin and redirect URI shown in Clerk production (`https://clerk.shimizu-technology.com/v1/oauth_callback`). Store the client secret only in Google and Clerk.
 
 ### 4.3 Staging rehearsal (mandatory before production)
 
 1. Clone production DB into staging via the standard `staging:clone:quarantine` → `db:safe_prepare` → `staging:clone:configure` flow (`docs/STAGING_ENVIRONMENT.md:82-91`).
 2. Run `bundle exec rails clerk:cutover:inventory` on staging to verify the manifest generator produces exact-one user rows with counts only.
 3. Run `bundle exec rails clerk:cutover:dry_run MANIFEST=/secure/path/staging_manifest.json` and confirm zero errors.
-4. Run `APPLY=true bundle exec rails clerk:cutover:apply MANIFEST=/secure/path/staging_manifest.json`, switch staging to test keys for the second instance, verify both recovery testers can sign in, old session fails safely, and rollback restores the prior binding cleanly.
+4. Run `APPLY=true bundle exec rails clerk:cutover:apply MANIFEST=/secure/path/staging_manifest.json`, switch staging to test keys for the second instance, verify both recovery testers can sign in, old session fails safely, and `clerk:cutover:rollback` restores the prior binding cleanly.
 5. Record the staging rehearsal SHA, timestamp, and pass result.
 
 ### 4.4 User inventory & controlled one-time re-linking (never match by email)
 
-Per [Clerk's instance migration docs](https://clerk.com/docs/guides/development/migrating/clerk-to-clerk) (checked 2026-11-22), a new production instance starts with **zero users**, and Clerk's API never exports passwords or TOTP secrets, so every user signs in fresh (with email code or Google OAuth).
+Per [Clerk's instance migration docs](https://clerk.com/docs/guides/development/migrating/clerk-to-clerk) (checked 2026-11-22), a new production instance starts with **zero users**, and Clerk's API never exports passwords or TOTP secrets, so every user signs in fresh (via email code, Google sign-in, or setting a new password).
 
 1. **Freeze user admin changes** in Cornerstone Payroll at the start of the maintenance window.
 2. **Export and reconcile inventory (private/local, never committed):**
@@ -498,8 +508,8 @@ Per [Clerk's instance migration docs](https://clerk.com/docs/guides/development/
    - Export active users from the Clerk **development** instance.
    - Assign every local `users` row one explicit disposition: `migrate`, `re-invite` (if still pending), `deactivate`, or `skip_inactive`. Require an independent reviewer check on every `super_admin`, `org_admin`, `admin`, and cross-company account.
 3. **Create production Clerk accounts in controlled batches:**
-   - **Batch 0 (Recovery admins first):** Create the two named recovery admins in Clerk production (via Clerk Backend API / CLI `POST /v1/users` with verified email or controlled invite — no bulk email blast yet). Record each pair `{ user_id, old_clerk_id, new_clerk_id }` in the sealed cutover manifest.
-   - **Batch 1 (Remaining active Cornerstone staff + active MoSa's/KPI client users):** Create each user in Clerk production with their verified email address (no password required if using email-code + Google sign-in), recording exact `{ user_id, new_clerk_id }` in the sealed manifest. For any `invitation_pending` user, revoke the old dev invite and queue a fresh production invite after cutover.
+   - **Batch 0 (Recovery admins first):** Create **Leon (`lmshimizu@gmail.com`)** and **Dafne (`dmshimizucpa@gmail.com`)** in Clerk production (via Clerk Backend API / CLI `POST /v1/users` with verified email — no bulk email blast yet). Record each pair `{ user_id, old_clerk_id, new_clerk_id }` in the sealed cutover manifest.
+   - **Batch 1 (Remaining active Cornerstone staff + active MoSa's/KPI client users):** Create each user in Clerk production with their verified email address, recording exact `{ user_id, new_clerk_id }` in the sealed manifest. For any `invitation_pending` user, revoke the old dev invite and queue a fresh production invite after cutover.
 4. **Dry-run and apply re-link inside a single DB transaction:**
    - Run `bundle exec rails clerk:cutover:dry_run MANIFEST=/secure/path/prod_manifest.json` (verifies every `user_id` exists, every `new_clerk_id` exists in Clerk production via `GET /v1/users/:id` with matching verified primary email, no duplicate `new_clerk_id`, and no active user is unaccounted for).
    - Keep `REQUIRE_MFA=false`.
@@ -523,39 +533,39 @@ Perform as one maintenance window (~15–30 minutes):
    - Trigger a clean production build and publish.
 5. **Live verification matrix (must pass before rollback deadline):**
    - [ ] Signed-out `https://payroll.shimizu-technology.com/app` redirects to sign-in.
-   - [ ] Both recovery admins sign in fresh (email code and, if enabled, Google OAuth) and load `/api/v1/auth/me` with exact expected roles and companies.
+   - [ ] Recovery admins **Leon (`lmshimizu@gmail.com`)** and **Dafne (`dmshimizucpa@gmail.com`)** sign in fresh, verifying email code, Google sign-in, and password sign-in, and load `/api/v1/auth/me` with exact expected roles and companies.
    - [ ] An existing browser holding an old `pk_test_` session fails cleanly (401 → signed out → prompted to sign in again; no redirect loop).
-   - [ ] An uninvited email cannot sign up (`Invite-only` enforced by Clerk) and an unlinked Clerk account cannot log in.
+   - [ ] An uninvited email cannot sign up (`Invite-only` enforced by Clerk) and an unlinked Clerk account matching an existing user's email is rejected (`401`) without altering `users.clerk_id` (`M3-1`).
    - [ ] Inactive local user is rejected even with a valid Clerk session.
    - [ ] Client user cannot reach `/api/v1/admin/*` or another company's `X-Company-Id`.
    - [ ] ActionCable connects cleanly on a live page.
-   - [ ] `/up` returns `200` with HSTS; `bin/rails production:readiness` passes **production Clerk keys** (expected remaining failures: MFA attestation + MFA-bound instance check only, intentionally deferred to Milestone 4).
+   - [ ] `/up` returns `200` with HSTS; `bin/rails production:readiness` passes **production Clerk keys**, runtime `NOBYPASSRLS` role, and `FORCE ROW LEVEL SECURITY` (expected remaining failures: MFA attestation + MFA-bound instance check only, intentionally deferred to Milestone 4).
 6. Send the "cutover complete, please sign in again" notice (§4.6) and re-send any pending invitations from the new Clerk production instance.
 
 ### 4.6 User communications
 
 - **48 hours before cutover (to Cornerstone staff — Dafne, Mark, Benjo, Chels — and active client portal users at MoSa's and KPI):**
-  - Plain notice: maintenance window date/time (ChST), ~30 minutes of downtime, everyone will be signed out and will sign back in using their existing email address (via emailed one-time code or Google sign-in), and no payroll data or history changes. Include Leon's direct contact if anyone has trouble signing in.
+  - Plain notice: maintenance window date/time (ChST), ~30 minutes of downtime, everyone will be signed out and will sign back in using their existing email address (via emailed one-time code, Google sign-in, or setting a new password), and no payroll data or history changes. Include Leon's direct contact if anyone has trouble signing in.
 - **At completion:** Short confirmation that `payroll.shimizu-technology.com` is back up and ready for fresh sign-in.
 
 ### 4.7 Rollback plan
 
-**Trigger rollback immediately** if either recovery admin cannot sign in, any user resolves to the wrong local account, cross-company or inactive access succeeds, or frontend/backend issuers disagree past the rollback deadline:
+**Trigger rollback immediately** if either Leon or Dafne cannot sign in, any user resolves to the wrong local account, cross-company or inactive access succeeds, or frontend/backend issuers disagree past the rollback deadline:
 
 1. Freeze user edits and stop sending invitations.
 2. Restore the saved dev `VITE_CLERK_PUBLISHABLE_KEY` in Netlify and republish the prior production deploy.
 3. Restore the saved dev `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `CLERK_ISSUER`, `CLERK_API_BASE` on Render web and worker and redeploy.
 4. Run `APPLY=true bundle exec rails clerk:cutover:rollback MANIFEST=/secure/path/prod_manifest.json` (restores `old_clerk_id` per `user_id` from the sealed manifest inside a single transaction).
-5. Verify both recovery admins can sign in again and `/api/v1/auth/me` responds normally.
+5. Verify both Leon and Dafne can sign in again and `/api/v1/auth/me` responds normally.
 6. Leave the Clerk production instance intact for post-mortem; do not delete it.
 
 ---
 
-## 5. Outside the code: legal review & WISP preparation
+## 5. Milestone 4 go-live prerequisites (deferred from Milestone 3)
 
-Both start in Milestone 3 so the legal review is finished **before Milestone 4 goes live** (`PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md:262`).
+**Deferred by Leon (November 22, 2026):** Legal review and WISP work are **not** part of Milestone 3 work or Milestone 3 acceptance. They stay documented here because §6 of [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) (`line 262`) requires **the lawyer review to be finished before Milestone 4 goes live**.
 
-### 5.1 Guam law-firm review packet
+### 5.1 Guam law-firm review packet (complete before Milestone 4 goes live)
 
 Prepare and send one bundled brief containing:
 1. `docs/GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md` — specifically the **12 "Needed before launch" questions** (Part 3, `lines 737-750`):
@@ -564,7 +574,7 @@ Prepare and send one bundled brief containing:
    - Meal waivers (§ 3107(c)) and 5:00 vs. >5:00 trigger,
    - 6-year retention regulatory basis vs. 3-year § 3212 stub copy rule,
    - FTC Safeguards Rule applicability to Shimizu Technology vs. Cornerstone's payroll work,
-   - IRC § 7216 (and Guam mirror) applicability to payroll/W-2GU data and third-party scanning/sub-processors,
+   - IRC § 7216 (and Guam mirror) applicability to payroll/W-2GU data,
    - Breach-notice "owner or licensee" split under 9 GCA § 48.30,
    - Client service agreement liability/penalty allocation + Guam Board of Accountancy rules,
    - TCPA FCC 26-67 (effective Nov 25, 2026) informational texts & caller identity,
@@ -572,11 +582,11 @@ Prepare and send one bundled brief containing:
    - FUTA non-applicability exceptions in Guam.
 2. **Documents to commission from counsel:**
    - Client Service Agreement + Data Processing Addendum (mapped to 16 CFR 314.4 and AICPA ET § 1.700.040 confidentiality between Cornerstone and Shimizu),
-   - Employee App Terms of Service and Privacy Notice (listing sub-processors: Render, Neon, Cloudflare R2, Netlify, Clerk, Resend, plus AV scanner if chosen),
+   - Employee App Terms of Service and Privacy Notice (listing sub-processors: Render, Neon, Cloudflare R2, Netlify, Clerk, Resend),
    - Electronic Pay Stub consent (Guam UETA) and Electronic W-2GU consent disclosure text (26 CFR 31.6051-1(j)).
 3. **Parallel agency inquiries (through Dafne):** Written confirmation requests to Guam DRT (Part 4B), Guam DOL Wage & Hour (Part 4D), and AG Child Support Enforcement Division (Part 4C) so counsel can rely on agency answers.
 
-### 5.2 Written Information Security Plan (WISP)
+### 5.2 Written Information Security Plan (WISP) (complete before Milestone 4 goes live)
 
 Per IRS Pub 5708 / Pub 4557 and FTC Safeguards Rule (16 CFR 314.4, `GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md:467-498`):
 1. Confirm with Dafne whether Cornerstone's March 2026 WISP is complete and add Cornerstone Payroll as a covered system.
@@ -598,10 +608,11 @@ Per IRS Pub 5708 / Pub 4557 and FTC Safeguards Rule (16 CFR 314.4, `GUAM_PAYROLL
 | **RLS silently bypassed on Neon** | `neondb_owner` inherits `neon_superuser` (`BYPASSRLS`), which overrides even `FORCE ROW LEVEL SECURITY`. | Runtime `DATABASE_URL` connects as SQL-created `payroll_app` (`NOSUPERUSER NOBYPASSRLS`); `production:readiness` and CI fail if `rolbypassrls` is true. |
 | **DB transactions pinned across external HTTP I/O** | Wrapping entire controller actions in a transaction for `SET LOCAL` would hold PgBouncer backends open during R2, Clerk, Resend, and AIRE calls and delay `after_commit` jobs. | `CompanyRlsScoped` opts out external-I/O actions; those actions wrap only DB read/write blocks in `TenantScope.with_company`. |
 | **Test DB loads without RLS** | Rails `db/schema.rb` strips Postgres RLS policies on `db:schema:load`. | Commit `api/db/rls_policies.sql` hooked into `db:schema:load` / `db:test:prepare` (or switch to `structure.sql`) plus a CI assertion checking `pg_class.relrowsecurity` and `relforcerowsecurity` on every protected table. |
-| **Lockout during Clerk production cutover** | Swapping keys with a wrong `clerk_id` mapping or broken `pk_live_` issuer parser locks staff out of payroll. | Fix `pk_live_` parser in M3-0 first, rehearse full cutover on staging, re-link two recovery admins first from a reviewed manifest, keep dev keys + rollback task ready inside the maintenance window. |
-| **Subdomain cookie leaking on `shimizu-technology.com`** | Clerk root domain accepts cross-origin FAPI calls from all subdomains by default. | Enable Clerk **Allowed subdomains** (explicit list only), enforce `azp` allowlist in `ClerkTokenVerifier`, and keep `Rack::Cors` restricted to explicitly enabled client subdomains. |
+| **Lockout during Clerk production cutover (`M3-0b`)** | Swapping keys with a wrong `clerk_id` mapping or broken `pk_live_` issuer parser locks staff out of payroll. | Fix `pk_live_` parser in `M3-0a` early, rehearse full cutover on staging, re-link Leon and Dafne first from a reviewed manifest at `M3-0b`, keep dev keys + `clerk:cutover:rollback` ready inside the maintenance window. |
+| **Single Clerk instance on `shimizu-technology.com` & subdomain cookie leaking** | Root domain `shimizu-technology.com` can host only one Clerk production instance (`clerk.shimizu-technology.com`), and accepts cross-origin FAPI calls from all subdomains by default. | Record the root-domain limit for future Shimizu apps; enable Clerk **Allowed subdomains** (explicit list only); enforce `azp` allowlist in `ClerkTokenVerifier`; keep `Rack::Cors` restricted to explicitly enabled client subdomains. |
 | **Effective-dated pay rates shift a live/committed payroll** | Backdated edit or import bug changes an approved/committed run or breaks MoSa/AIRE import parity. | Committed `payroll_items` keep immutable snapshots; reject backdating onto approved/committed periods; run existing MoSa/Spike/AIRE regression suites + staging parity check before prod deploy. |
-| **Netlify credit exhaustion (`usage_exceeded`)** | Adding a second frontend build or triggering deploys on docs/API commits burns 15 credits/deploy (caused Nov 20 outage). | Ship tested `netlify.toml` ignore rule in M3-8; keep deploy previews off (`skip_prs`); don't create the employee Netlify site until M4 is ready to deploy UI. |
+| **Netlify credit exhaustion (`usage_exceeded`)** | Adding a second frontend build or triggering deploys on docs/API commits burns 15 credits/deploy (caused Nov 20 outage). | Ship tested `netlify.toml` ignore rule in `M3-8`; keep deploy previews off (`skip_prs`); don't create the employee Netlify site until M4 is ready to deploy UI. |
+| **Unscanned uploads once moving beyond pilot** | `ClientDocumentFileValidator` blocks macros, executables, and container mismatches, but does not run AV signatures on PDFs/images. | Accepted for trusted pilot companies (Leon, Nov 22); keep `ClientDocumentScanner` adapter boundary intact and revisit before wider rollout. |
 | **AIRE My Pay breaks silently** | Changing worker-statement audit action strings or payload shapes breaks AIRE's strict presenter allowlist. | Keep `worker_statement#*` action strings and JSON/PDF shapes unchanged; run `integrations/aire/worker_statements_spec.rb` and `pay_run_activity_spec.rb` on every PR. |
 | **Year-end filing delayed** | Milestone 1 has a fixed legal deadline (Jan 29 / Feb 1, 2027). | Milestone 1 keeps priority; M3 PRs merge incrementally switched off and never block year-end releases. |
 
@@ -613,14 +624,14 @@ All vendor prices verified directly from official pricing pages on **November 22
 
 | Component | Milestone 3 (now, pre-revenue) | At Milestone 4 gate (MoSa's employee pilot) | At Milestone 6 (kiosk & time traffic) | Notes |
 |---|---|---|---|---|
-| **Clerk** (one app for staff, clients, employees) | **$0/mo** (Hobby Free: up to 50,000 MRU, custom domain + subdomains) | **+$25/mo** ($20/mo billed annually) — **Pro plan** for MFA enforcement, custom session lifetime, branding removal | Same ($25/mo) | Subdomains of `shimizu-technology.com` cost **$0** (no satellite domains needed). Only a client's own custom root domain later adds $10/mo each. |
-| **Render — Employee Web Service** | **$0/mo** (code split-ready via `APP_PROCESS_ROLE`; not provisioned yet) | **+$7/mo** (Starter: 0.5 CPU, 512 MB RAM, single Puma process, `DB_POOL_MAX=3`) | Same ($7/mo; upgrade to Standard $25/mo only if metrics justify) | Cheapest safe isolation so employee traffic cannot stall payroll web requests. Render Free spins down and is unsuitable for production. |
-| **Render — Employee Background Worker** | **$0/mo** (existing payroll worker stays as-is) | **$0/mo** (recommended: cap `employee` queue to 1 thread on existing worker while M4 volume is small) *or* **+$7/mo** (Starter worker for strict worker isolation from day 1) | **+$7/mo** (Starter dedicated `employee_worker` for kiosk/timecard jobs) | Render Background Workers have no free tier; Starter is $7/mo. |
+| **Clerk** (one app for staff, clients, employees on `shimizu-technology.com`) | **$0/mo** (Hobby Free: up to 50,000 MRU, custom domain + subdomains) | **+$25/mo** ($20/mo billed annually) — **Pro plan** for MFA enforcement, custom session lifetime, branding removal | Same ($25/mo) | Subdomains of `shimizu-technology.com` cost **$0** (no satellite domains needed). Only a client's own custom root domain later adds $10/mo each. |
+| **Render — Employee Web Service** | **$0/mo** (code split-ready via `APP_PROCESS_ROLE`; not provisioned yet) | **+$7/mo** (Starter: 0.5 CPU, 512 MB RAM, single Puma process, `DB_POOL_MAX=3`) | Same ($7/mo; upgrade to Standard $25/mo only if metrics justify) | Isolates employee HTTP traffic from payroll runs. Render Free spins down and is unsuitable for production. |
+| **Render — Employee Background Worker** | **$0/mo** (existing Payroll worker stays as-is) | **$0/mo** (decided: employee jobs capped at 1 thread on existing Payroll worker through M4–M5) | **+$7/mo** (Starter dedicated `employee_worker` for kiosk/timecard jobs) | Render Background Workers have no free tier; Starter is $7/mo. |
 | **Netlify — Separate Employee Site** | **$0/mo** (add `netlify.toml` ignore rule; don't create second site yet) | **$0/mo base** (shares existing team credit pool: 15 credits/prod deploy, 20 credits/GB, 2 credits/10k requests; domain aliases free up to ~50/site) | Same ($0/mo base unless traffic pushes past plan credits → Personal $9/mo = 1,000 credits or Pro $20/mo = 3,000 credits) | Keep deploy previews off and `netlify.toml` ignore rule active. |
 | **Neon Postgres** | **$0/mo incremental** (`payroll_app` role and RLS are built-in Postgres features) | **$0/mo incremental** (adds 3 pooled connections from employee web; well within Neon's pooler limits) | Monitor compute hours when kiosk punches run continuously | Preserve scale-to-zero rules from `PRODUCTION_RUNTIME_AND_COST_GUIDE.md`. |
 | **SMS provider** | **$0/mo** (deferred per Nov 22 decision) | **$0/mo** (Clerk handles auth/MFA; TOTP + backup codes primary) | Usage-based only when text notices are built | ClickSend/Twilio chosen later. |
-| **File scanner** *(open question)* | **$0/mo** (Option 1 or 4) — *or* **$19.99/mo** (Cloudmersive Basic) — *or* **$25–$85/mo** (Render ClamAV) | Per Leon's decision (§1.11) | Per Leon's decision | Not added to totals below until Leon decides. |
-| **Total incremental hosting** | **$0/mo** | **$32/mo** recommended (**$39/mo** with dedicated M4 worker; **$27/mo** if Clerk Pro billed annually) | **$39/mo** (+$7/mo dedicated worker) | Excludes optional AV scanner and one-time Guam law-firm fee. |
+| **File scanner** | **$0/mo** (decided: `ClientDocumentFileValidator` + `Noop` for M3 and pilot) | **$0/mo** (pilot trusts pilot companies) | Revisit before wider rollout ($19.99/mo Cloudmersive Basic or $25–$85/mo Render ClamAV) | Adapter seam stays in place (§1.11). |
+| **Total incremental hosting** | **$0/mo** | **$32/mo** (**$27/mo** if Clerk Pro billed annually) | **$39/mo** (+$7/mo dedicated worker) | Excludes one-time Guam law-firm fee at M4 go-live. |
 
 ---
 
@@ -636,10 +647,10 @@ Milestone 3 is operationally closed only when every checkbox below passes on pro
 - [ ] Deterministic Playwright release lane (`test:e2e:release`) passes with zero skips.
 - [ ] `netlify.toml` ignore rule verified on both a docs/API-only diff (skipped) and a `web/` diff (built).
 
-### Identity & security proof
-- [ ] Clerk production cutover verification matrix (§4.5) passed on `payroll.shimizu-technology.com`; `production:readiness` passes production Clerk keys, runtime `NOBYPASSRLS` DB role, and `FORCE ROW LEVEL SECURITY` checks (only MFA attestation/enforcement intentionally remains off until M4).
+### Identity, RLS & switch-off proof (after staging rehearsal and Step M3-0b cutover)
+- [ ] Step `M3-0b` Clerk production cutover verification matrix (§4.5) passed on `payroll.shimizu-technology.com` (root domain `shimizu-technology.com` with Allowed Subdomains enabled; Leon and Dafne signed in fresh verifying email + password, email code, and Google sign-in); `production:readiness` passes production Clerk keys, runtime `NOBYPASSRLS` DB role, and `FORCE ROW LEVEL SECURITY` checks (only MFA attestation/enforcement intentionally remains off until M4).
 - [ ] Uninvited Clerk account with an email matching an existing user is rejected (`401`) without modifying `users.clerk_id`.
-- [ ] MFA `fva` enforcement verified in staging/dev with `REQUIRE_MFA=true` (non-MFA session gets `403 mfa_required`; TOTP + backup code sessions pass), while production confirms `REQUIRE_MFA=false`.
+- [ ] MFA `fva` enforcement verified in staging/dev against the Clerk development instance with `REQUIRE_MFA=true` (non-MFA session gets `403 mfa_required`; TOTP + backup code sessions pass), while production confirms `REQUIRE_MFA=false`.
 - [ ] Every M4–M6 feature (`employee_portal_enabled`, `subdomain_enabled`, `time_module_enabled`) is `false` on all live companies; `/api/v1/employee/*` and `/api/v1/public/tenant_branding` return `404`.
 
 ### Live normal payroll run (Mark, Benjo, and a client office; signed off by Dafne)
@@ -648,24 +659,27 @@ Milestone 3 is operationally closed only when every checkbox below passes on pro
 - [ ] Audit log and pay-run Activity feed display staff, client, system-job, and AIRE source-worker entries with non-null `actor_type`.
 - [ ] AIRE production smoke test passes: an AIRE worker opens My Pay list, statement detail, and PDF download with zero errors and unchanged formatting.
 
-### Governance started
-- [ ] Legal review packet (§5.1) delivered to chosen Guam counsel; target completion date set before Milestone 4 launch.
-- [ ] Dafne's WISP status confirmed and Shimizu Technology's platform WISP addendum draft started (§5.2).
+*(Legal review and WISP are Milestone 4 go-live prerequisites per §5, not Milestone 3 acceptance items.)*
 
 ---
 
-## 9. Questions for Leon
+## 9. Decisions (Leon, Nov 22)
 
-1. **File scanning (§1.11):** Which option do you want?
-   - **Option 1:** Keep `ClientDocumentFileValidator` + `Noop` ($0/mo) and restrict future employee uploads to PDF/images.
-   - **Option 2:** Wire Cloudmersive Basic ($19.99/mo, 10k scans, 1 GB max) and add Cloudmersive as a sub-processor in the DPA/WISP.
-   - **Option 3:** Self-host ClamAV on Render ($25/mo Standard tight / $85/mo Pro 4 GB recommended).
-   - **Option 4:** Keep `Noop` through Milestone 3 ($0/mo), ask the Guam law firm about AV/sub-processor rules, and decide before Milestone 4/5 employee uploads turn on.
-2. **Clerk root domain on `shimizu-technology.com` (§1.9):** Can Cornerstone Payroll claim `shimizu-technology.com` as its Clerk root domain (`clerk.shimizu-technology.com`, locked down with Clerk Allowed Subdomains) so `<client>.shimizu-technology.com` works at $0 without satellite domains? Confirm no other separate Shimizu Clerk app needs `clerk.shimizu-technology.com`. If another app does, do you prefer `<client>.payroll.shimizu-technology.com` or a dedicated product domain?
-3. **Production sign-in methods (§4.1):** On the new Clerk production instance, should we keep Google sign-in (requires setting up a production Google OAuth client) alongside verified email codes, or use email codes only? Keep or disable passwords?
-4. **Clerk cutover owners and window (§4.1):** Who are the two named recovery administrators, and what ChST maintenance window works for the 30-minute cutover?
-5. **Employee background worker timing at Milestone 4 (§7):** For the MoSa's pilot, do you want the cheapest safe setup (**+$32/mo** total: Clerk Pro $25 + Employee Web Starter $7, capping employee jobs to 1 thread on the existing worker until Milestone 6), or a dedicated Employee Worker from day one of Milestone 4 (**+$39/mo**)?
-6. **Guam law firm & WISP (§5):** Which Guam law firm/attorney should receive the legal brief, and should Shimizu draft the platform WISP addendum in parallel with Dafne's WISP?
+These decisions from PR #520 and PR #521 review govern Milestone 3:
+
+| Area | Decision |
+|---|---|
+| **Clerk production cutover timing** | Keep the Clerk *development* instance for local and staging work, including all MFA testing. Split `M3-0` into `M3-0a` (verifier, `azp`, cutover/re-link tooling — early, no live change) and `M3-0b` (live production cutover — near the end of Milestone 3, after staging rehearsal and just before the Milestone 4 gate). Never match by email. |
+| **File scanning** | Allow uploads now with the existing `ClientDocumentFileValidator` type/byte/size checks and no virus scanner (`ClientDocumentScanner::Noop`, $0/mo). Trust pilot companies; revisit adding a scanner before wider rollout. No `M3-9` PR. |
+| **Clerk production domain** | Root domain **`shimizu-technology.com`** (`clerk.shimizu-technology.com`, Allowed Subdomains enabled). Covers `payroll.shimizu-technology.com` and `<client>.shimizu-technology.com` at **$0** (no satellite domains). Limit: no other Shimizu app can run its own Clerk production instance on `shimizu-technology.com` (the marketing site uses no auth). |
+| **Sign-in methods** | Offer all three: **email + password**, **verified email codes**, and **Google sign-in** (requires configuring a Shimizu production Google OAuth client). |
+| **Recovery administrators** | **Leon (`lmshimizu@gmail.com`)** and **Dafne (`dmshimizucpa@gmail.com`)**. |
+| **Background worker & M4 cost** | Keep the existing Payroll worker with employee jobs capped on it (`threads: 1` for `employee` queue). No separate employee worker until Milestone 6. Milestone 4 gate cost is **$32/mo** (Clerk Pro $25 + Render Starter employee web $7; $27/mo with annual Clerk). |
+| **Legal review & WISP** | Deferred out of Milestone 3. Kept as a **Milestone 4 go-live prerequisite** (§5) per §6 of the architecture decision. |
+
+### Remaining open item
+
+1. **Cutover window (ChST):** Choose the 30-minute maintenance window and rollback deadline for Step `M3-0b` closer to the end of Milestone 3, outside Cornerstone, MoSa's, and KPI payroll windows.
 
 ---
 
@@ -673,9 +687,9 @@ Milestone 3 is operationally closed only when every checkbox below passes on pro
 
 ### Rough estimate
 
-- **Size:** **10 core PRs** (`M3-0` through `M3-8`, with `M3-5` split into `5a`/`5b`), plus **1 optional PR** (`M3-9`) if Leon selects an AV scanner now.
-- **Calendar duration:** **4–6 weeks** (roughly 2.5–3.5 weeks of implementation using parallel worktrees for `M3-2`/`M3-3`/`M3-4`/`M3-5`/`M3-8`, plus 1–2 weeks for staging rehearsal, the Clerk production cutover window, and Cornerstone's live-payroll acceptance cycle).
-- **Sequencing with Milestone 1:** Year-end filing (February 1, 2027 deadline) stays first priority. Independent M3 PRs (`M3-0`, `M3-3`, `M3-4`, `M3-5a`, `M3-8`) can merge alongside year-end work where capacity allows, with the Clerk cutover and RLS rollout scheduled outside active filing/payday windows.
+- **Size:** **10 code PRs** (`M3-0a`, `M3-1`, `M3-2`, `M3-3`, `M3-4`, `M3-5a`, `M3-5b`, `M3-6`, `M3-7`, `M3-8`) plus **1 live cutover ops step** (`M3-0b`, near the end of Milestone 3 before the Milestone 4 gate).
+- **Calendar duration:** **4–6 weeks** (roughly 2.5–3.5 weeks of code PRs using parallel worktrees after `M3-0a`, followed by 1–2 weeks for staging rehearsal, the `M3-0b` Clerk production cutover window, and Cornerstone's live-payroll acceptance cycle).
+- **Sequencing with Milestone 1:** Year-end filing (February 1, 2027 deadline) stays first priority. Independent M3 PRs (`M3-0a`, `M3-3`, `M3-4`, `M3-5a`, `M3-8`) can merge alongside year-end work where capacity allows, with the RLS rollout (`M3-7`) and Clerk cutover (`M3-0b`) scheduled outside active filing/payday windows.
 
 ### External sources (all opened and verified as of November 22, 2026)
 
