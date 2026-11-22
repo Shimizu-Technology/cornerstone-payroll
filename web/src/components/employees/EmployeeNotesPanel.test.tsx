@@ -234,7 +234,9 @@ describe('EmployeeNotesPanel', () => {
     const initialListPromise = new Promise<{ data: EmployeeNote[] }>((resolve) => {
       resolveInitialList = resolve;
     });
-    notesApiMocks.list.mockReturnValueOnce(initialListPromise);
+    notesApiMocks.list
+      .mockReturnValueOnce(initialListPromise)
+      .mockResolvedValueOnce({ data: [visibleNote] });
     notesApiMocks.create.mockResolvedValueOnce({ data: visibleNote });
 
     render(<EmployeeNotesPanel companyId={1} employeeId={42} />);
@@ -268,6 +270,24 @@ describe('EmployeeNotesPanel', () => {
 
     expect(await screen.findByText(visibleNote.body!)).toBeTruthy();
     resolveInitialList({ data: [existingNote] });
+
+    expect(await screen.findByText(existingNote.body!)).toBeTruthy();
+    expect(screen.getByText(visibleNote.body!)).toBeTruthy();
+    expect(notesApiMocks.list).toHaveBeenCalledTimes(2);
+  });
+
+  it('reloads the list after creating a note when the initial list failed', async () => {
+    const existingNote: EmployeeNote = { ...visibleNote, id: 9, body: 'Asked AIRE for her I-9 documents.' };
+    notesApiMocks.list
+      .mockRejectedValueOnce(new Error('Could not reach notes service.'))
+      .mockResolvedValueOnce({ data: [visibleNote, existingNote] });
+    notesApiMocks.create.mockResolvedValueOnce({ data: visibleNote });
+
+    render(<EmployeeNotesPanel companyId={1} employeeId={42} />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not reach notes service.');
+
+    fireEvent.change(screen.getByLabelText('Add a staff note'), { target: { value: visibleNote.body! } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
 
     expect(await screen.findByText(existingNote.body!)).toBeTruthy();
     expect(screen.getByText(visibleNote.body!)).toBeTruthy();
