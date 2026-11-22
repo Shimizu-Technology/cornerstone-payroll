@@ -11,6 +11,10 @@ Rails.application.routes.draw do
   # API v1 routes
   namespace :api do
     namespace :v1 do
+      namespace :public do
+        get :tenant_branding, to: "tenant_branding#show", format: false
+      end
+
       namespace :finance do
         get :context, to: "access#context"
         get :overview, to: "access#overview"
