@@ -122,7 +122,7 @@ module ClerkCutover
     def check_verifier_issuer
       verifier = ClerkTokenVerifier.new(env: @env)
       issuer = verifier.clerk_issuer
-      passed = issuer.present? && valid_https_origin?(issuer)
+      passed = issuer.present? && ClerkTokenVerifier.valid_production_https_origin?(issuer)
 
       Check.new(
         name: "ClerkTokenVerifier resolves a valid HTTPS issuer",
@@ -133,15 +133,14 @@ module ClerkCutover
     end
 
     def check_authorized_parties
-      verifier = ClerkTokenVerifier.new(env: @env)
-      parties = verifier.authorized_parties
-      passed = parties.present? && parties.all? { |origin| valid_https_origin?(origin) }
+      raw_parties = @env.fetch("CLERK_AUTHORIZED_PARTIES", "").split(",").map(&:strip).reject(&:empty?)
+      passed = raw_parties.present? && raw_parties.all? { |origin| ClerkTokenVerifier.valid_production_https_origin?(origin) }
 
       Check.new(
         name: "CLERK_AUTHORIZED_PARTIES is configured with explicit HTTPS origins",
         passed: passed,
-        detail: passed ? "#{parties.length} HTTPS origin(s) configured" : "CLERK_AUTHORIZED_PARTIES is unset or contains invalid origins",
-        metadata: { count: parties.length }
+        detail: passed ? "#{raw_parties.length} HTTPS origin(s) configured" : "CLERK_AUTHORIZED_PARTIES is unset or contains invalid origins",
+        metadata: { count: raw_parties.length }
       )
     end
 
@@ -308,24 +307,24 @@ module ClerkCutover
     def totp_enrolled?(clerk_user)
       clerk_user["totp_enabled"] == true ||
         clerk_user["two_factor_enabled"] == true ||
-        clerk_user["backup_code_enabled"] == true
+        clerk_user["backup_code_enabled"] == true ||
+        non_empty_mfa_material?(clerk_user["totp_secret"]) ||
+        non_empty_mfa_material?(clerk_user["backup_codes"]) ||
+        non_empty_mfa_material?(clerk_user["backup_code_digests"])
+    end
+
+    def non_empty_mfa_material?(value)
+      return false if value.nil? || value == false
+      return value.reject(&:blank?).any? if value.is_a?(Array)
+
+      stripped = value.to_s.strip
+      return false if stripped.empty?
+
+      !%w[[] {} null false].include?(stripped.downcase)
     end
 
     def pending_or_blank_clerk_id?(clerk_id)
       clerk_id.blank? || clerk_id.to_s.start_with?("pending_")
-    end
-
-    def valid_https_origin?(value)
-      uri = URI.parse(value.to_s)
-      uri.is_a?(URI::HTTPS) &&
-        uri.host.present? &&
-        uri.port == 443 &&
-        uri.userinfo.blank? &&
-        [ "", "/" ].include?(uri.path) &&
-        uri.query.blank? &&
-        uri.fragment.blank?
-    rescue URI::InvalidURIError
-      false
     end
   end
 end

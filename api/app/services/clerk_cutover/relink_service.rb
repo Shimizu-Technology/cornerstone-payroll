@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "json"
 
 module ClerkCutover
@@ -7,13 +8,18 @@ module ClerkCutover
   # re-linking from Clerk development IDs to Clerk production IDs.
   #
   # Matches strictly by local `user_id` + `old_clerk_id` / `external_id`.
-  # Never matches by email, never writes in dry-run mode, and refuses to write
-  # unless `confirm: true` (APPLY=true) is explicitly passed.
+  # Verifies the manifest's SHA-256 `manifest_digest`, requires live target
+  # Clerk verification on `apply!`, guards against running while the API still
+  # trusts the source dev issuer with email auto-provisioning active, never
+  # writes in dry-run mode, and refuses to write unless `confirm: true`
+  # (APPLY=true) is explicitly passed.
   class RelinkService
     class WriteRefusedError < StandardError; end
     class ValidationError < StandardError; end
 
-    Entry = Data.define(:user_id, :old_clerk_id, :new_clerk_id, :external_id)
+    DIGEST_PATTERN = /\A[0-9a-f]{64}\z/i
+
+    Entry = Data.define(:user_id, :old_clerk_id, :new_clerk_id, :external_id, :old_clerk_invitation_id)
 
     Result = Data.define(
       :mode,
@@ -48,15 +54,43 @@ module ClerkCutover
       end
     end
 
-    def initialize(manifest:, user_scope: User, target_client: nil, allow_partial: false)
+    def self.compute_manifest_digest(entries)
+      canonical = Array(entries).map do |entry|
+        row = entry.is_a?(Entry) ? entry.to_h.transform_keys(&:to_s) : entry.transform_keys(&:to_s)
+        old_clerk_id = row["old_clerk_id"].to_s.strip
+        {
+          "user_id" => row["user_id"],
+          "old_clerk_id" => old_clerk_id,
+          "new_clerk_id" => row["new_clerk_id"].to_s.strip,
+          "external_id" => row["external_id"].to_s.strip.presence || old_clerk_id,
+          "old_clerk_invitation_id" => row["old_clerk_invitation_id"].presence
+        }
+      end
+      Digest::SHA256.hexdigest(JSON.generate(canonical))
+    end
+
+    def initialize(
+      manifest:,
+      user_scope: User,
+      target_client: nil,
+      allow_partial: false,
+      env: ENV,
+      source_issuer: nil,
+      confirm_m3_1_deployed: false,
+      operator: nil
+    )
       @raw_manifest = manifest
       @user_scope = user_scope
       @target_client = target_client
       @allow_partial = allow_partial
+      @env = env
+      @source_issuer = source_issuer
+      @confirm_m3_1_deployed = confirm_m3_1_deployed
+      @operator = operator.presence || env["OPERATOR"].presence
     end
 
     def dry_run
-      plan = build_apply_plan
+      plan = build_apply_plan(require_target_client: false)
       Result.new(
         mode: "dry_run",
         passed: plan[:errors].empty?,
@@ -76,62 +110,55 @@ module ClerkCutover
         raise WriteRefusedError, "Refusing to apply Clerk re-link without explicit confirm: true (APPLY=true)"
       end
 
-      plan = build_apply_plan
+      plan = build_apply_plan(require_target_client: true, enforce_sequencing_guard: true)
       if plan[:errors].any?
-        return Result.new(
-          mode: "apply",
-          passed: false,
-          total_entries: plan[:entries].length,
-          to_relink: plan[:to_relink].length,
-          already_relinked: plan[:already_relinked].length,
-          relinked: 0,
-          to_rollback: 0,
-          already_rolled_back: 0,
-          rolled_back: 0,
-          errors: plan[:errors]
-        )
+        return failed_apply_result(plan, plan[:errors])
       end
 
       relinked_count = 0
-      @user_scope.transaction do
-        plan[:to_relink].each do |item|
-          user = @user_scope.lock.find(item[:entry].user_id)
-          if user.clerk_id == item[:entry].new_clerk_id
-            next
+      begin
+        @user_scope.transaction do
+          plan[:to_relink].each do |item|
+            user = @user_scope.lock.find(item[:entry].user_id)
+            next if user.clerk_id == item[:entry].new_clerk_id
+
+            unless user.clerk_id == item[:entry].old_clerk_id
+              raise ValidationError, "user_id=#{user.id}: clerk_id changed concurrently before apply"
+            end
+
+            cleared_session = user.last_session_id_digest.present?
+            cleared_invitation = user.clerk_invitation_id.present?
+
+            user.update!(
+              clerk_id: item[:entry].new_clerk_id,
+              last_session_id_digest: nil,
+              clerk_invitation_id: nil
+            )
+
+            AuditLog.record!(
+              user: nil,
+              organization_id: user.organization_id,
+              company_id: user.company_id,
+              action: "users#clerk_production_relinked",
+              record_type: "User",
+              record_id: user.id,
+              subject_name: "User ##{user.id}",
+              metadata: {
+                matching_strategy: "external_id",
+                operator: @operator,
+                old_clerk_id: item[:entry].old_clerk_id,
+                new_clerk_id: item[:entry].new_clerk_id,
+                cleared_session: cleared_session,
+                cleared_invitation: cleared_invitation
+              }.compact,
+              event_category: "security"
+            )
+
+            relinked_count += 1
           end
-          unless user.clerk_id == item[:entry].old_clerk_id
-            raise ValidationError, "user_id=#{user.id}: clerk_id changed concurrently before apply"
-          end
-
-          cleared_session = user.last_session_id_digest.present?
-          cleared_invitation = user.clerk_invitation_id.present?
-
-          user.update!(
-            clerk_id: item[:entry].new_clerk_id,
-            last_session_id_digest: nil,
-            clerk_invitation_id: nil
-          )
-
-          AuditLog.record!(
-            user: nil,
-            organization_id: user.organization_id,
-            company_id: user.company_id,
-            action: "users#clerk_production_relinked",
-            record_type: "User",
-            record_id: user.id,
-            subject_name: "User ##{user.id}",
-            metadata: {
-              matching_strategy: "external_id",
-              old_clerk_id: item[:entry].old_clerk_id,
-              new_clerk_id: item[:entry].new_clerk_id,
-              cleared_session: cleared_session,
-              cleared_invitation: cleared_invitation
-            },
-            event_category: "security"
-          )
-
-          relinked_count += 1
         end
+      rescue ValidationError => e
+        return failed_apply_result(plan, [ e.message ])
       end
 
       Result.new(
@@ -155,55 +182,52 @@ module ClerkCutover
 
       plan = build_rollback_plan
       if plan[:errors].any?
-        return Result.new(
-          mode: "rollback",
-          passed: false,
-          total_entries: plan[:entries].length,
-          to_relink: 0,
-          already_relinked: 0,
-          relinked: 0,
-          to_rollback: plan[:to_rollback].length,
-          already_rolled_back: plan[:already_rolled_back].length,
-          rolled_back: 0,
-          errors: plan[:errors]
-        )
+        return failed_rollback_result(plan, plan[:errors])
       end
 
       rolled_back_count = 0
-      @user_scope.transaction do
-        plan[:to_rollback].each do |item|
-          user = @user_scope.lock.find(item[:entry].user_id)
-          next if user.clerk_id == item[:entry].old_clerk_id
+      begin
+        @user_scope.transaction do
+          plan[:to_rollback].each do |item|
+            user = @user_scope.lock.find(item[:entry].user_id)
+            next if user.clerk_id == item[:entry].old_clerk_id
 
-          unless user.clerk_id == item[:entry].new_clerk_id
-            raise ValidationError, "user_id=#{user.id}: clerk_id changed concurrently before rollback"
+            unless user.clerk_id == item[:entry].new_clerk_id
+              raise ValidationError, "user_id=#{user.id}: clerk_id changed concurrently before rollback"
+            end
+
+            cleared_session = user.last_session_id_digest.present?
+            restored_invitation = item[:entry].old_clerk_invitation_id.present?
+            user.update!(
+              clerk_id: item[:entry].old_clerk_id,
+              clerk_invitation_id: item[:entry].old_clerk_invitation_id,
+              last_session_id_digest: nil
+            )
+
+            AuditLog.record!(
+              user: nil,
+              organization_id: user.organization_id,
+              company_id: user.company_id,
+              action: "users#clerk_production_relink_rolled_back",
+              record_type: "User",
+              record_id: user.id,
+              subject_name: "User ##{user.id}",
+              metadata: {
+                matching_strategy: "external_id",
+                operator: @operator,
+                restored_clerk_id: item[:entry].old_clerk_id,
+                reverted_clerk_id: item[:entry].new_clerk_id,
+                cleared_session: cleared_session,
+                restored_invitation: restored_invitation
+              }.compact,
+              event_category: "security"
+            )
+
+            rolled_back_count += 1
           end
-
-          cleared_session = user.last_session_id_digest.present?
-          user.update!(
-            clerk_id: item[:entry].old_clerk_id,
-            last_session_id_digest: nil
-          )
-
-          AuditLog.record!(
-            user: nil,
-            organization_id: user.organization_id,
-            company_id: user.company_id,
-            action: "users#clerk_production_relink_rolled_back",
-            record_type: "User",
-            record_id: user.id,
-            subject_name: "User ##{user.id}",
-            metadata: {
-              matching_strategy: "external_id",
-              restored_clerk_id: item[:entry].old_clerk_id,
-              reverted_clerk_id: item[:entry].new_clerk_id,
-              cleared_session: cleared_session
-            },
-            event_category: "security"
-          )
-
-          rolled_back_count += 1
         end
+      rescue ValidationError => e
+        return failed_rollback_result(plan, [ e.message ])
       end
 
       Result.new(
@@ -222,9 +246,43 @@ module ClerkCutover
 
     private
 
+    def failed_apply_result(plan, errors)
+      Result.new(
+        mode: "apply",
+        passed: false,
+        total_entries: plan[:entries].length,
+        to_relink: plan[:to_relink].length,
+        already_relinked: plan[:already_relinked].length,
+        relinked: 0,
+        to_rollback: 0,
+        already_rolled_back: 0,
+        rolled_back: 0,
+        errors: errors
+      )
+    end
+
+    def failed_rollback_result(plan, errors)
+      Result.new(
+        mode: "rollback",
+        passed: false,
+        total_entries: plan[:entries].length,
+        to_relink: 0,
+        already_relinked: 0,
+        relinked: 0,
+        to_rollback: plan[:to_rollback].length,
+        already_rolled_back: plan[:already_rolled_back].length,
+        rolled_back: 0,
+        errors: errors
+      )
+    end
+
     def parse_manifest
       parsed = @raw_manifest.is_a?(String) ? JSON.parse(@raw_manifest) : @raw_manifest
-      raw_entries = parsed.is_a?(Hash) ? parsed["entries"] : parsed
+      unless parsed.is_a?(Hash)
+        return [ [], [ "Manifest must be a JSON object containing 'manifest_digest' and 'entries'" ] ]
+      end
+
+      raw_entries = parsed["entries"]
       return [ [], [ "Manifest must contain a non-empty 'entries' array" ] ] unless raw_entries.is_a?(Array) && raw_entries.any?
 
       entries = []
@@ -244,6 +302,7 @@ module ClerkCutover
         old_clerk_id = row["old_clerk_id"].to_s.strip
         new_clerk_id = row["new_clerk_id"].to_s.strip
         external_id = row["external_id"].to_s.strip
+        old_clerk_invitation_id = row["old_clerk_invitation_id"].presence
 
         unless user_id.is_a?(Integer) && user_id.positive?
           errors << "entry #{index}: user_id must be a positive integer"
@@ -276,8 +335,19 @@ module ClerkCutover
           user_id: user_id,
           old_clerk_id: old_clerk_id,
           new_clerk_id: new_clerk_id,
-          external_id: external_id.presence || old_clerk_id
+          external_id: external_id.presence || old_clerk_id,
+          old_clerk_invitation_id: old_clerk_invitation_id
         )
+      end
+
+      provided_digest = parsed["manifest_digest"].to_s.strip.downcase
+      if provided_digest.empty? || !provided_digest.match?(DIGEST_PATTERN)
+        errors << "Manifest is unsealed: missing or invalid SHA-256 manifest_digest"
+      elsif errors.empty?
+        expected_digest = self.class.compute_manifest_digest(entries)
+        unless ActiveSupport::SecurityUtils.secure_compare(provided_digest, expected_digest)
+          errors << "Manifest digest mismatch (manifest appears tampered or unsealed)"
+        end
       end
 
       [ entries, errors ]
@@ -285,8 +355,18 @@ module ClerkCutover
       [ [], [ "Invalid manifest JSON: #{e.message}" ] ]
     end
 
-    def build_apply_plan
+    def build_apply_plan(require_target_client:, enforce_sequencing_guard: false)
       entries, errors = parse_manifest
+
+      if enforce_sequencing_guard
+        guard_error = sequencing_guard_error
+        errors << guard_error if guard_error
+      end
+
+      if require_target_client && @target_client.nil?
+        errors << "Target Clerk client (TARGET_CLERK_SECRET_KEY) is required for apply to verify every new_clerk_id external_id"
+      end
+
       return { entries: entries, to_relink: [], already_relinked: [], errors: errors } if errors.any?
 
       users_by_id = @user_scope.where(id: entries.map(&:user_id)).index_by(&:id)
@@ -382,6 +462,26 @@ module ClerkCutover
       end
 
       { entries: entries, to_rollback: to_rollback, already_rolled_back: already_rolled_back, errors: errors }
+    end
+
+    def sequencing_guard_error
+      return nil if @confirm_m3_1_deployed == true
+
+      configured_issuer = ClerkTokenVerifier.new(env: @env).clerk_issuer
+      normalized_source = ClerkTokenVerifier.normalize_origin(@source_issuer || @env["SOURCE_CLERK_ISSUER"])
+
+      if normalized_source.present? && configured_issuer == normalized_source
+        return "Refusing to apply while configured Clerk issuer (#{configured_issuer}) equals source issuer; " \
+               "switch issuer first or pass confirm_m3_1_deployed: true (CONFIRM_M3_1_DEPLOYED=true) once M3-1 is deployed"
+      end
+
+      if configured_issuer.present? && configured_issuer.end_with?(".clerk.accounts.dev")
+        return "Refusing to apply while configured Clerk issuer (#{configured_issuer}) is a Clerk dev issuer; " \
+               "email auto-provisioning could overwrite relinked clerk_ids. Switch issuer first or pass " \
+               "confirm_m3_1_deployed: true (CONFIRM_M3_1_DEPLOYED=true) once M3-1 is deployed"
+      end
+
+      nil
     end
 
     def load_target_users_by_id(errors)

@@ -229,8 +229,8 @@ RSpec.describe ProductionReadiness do
     end
   end
 
-  it "accepts multiple explicit HTTPS origins in CLERK_AUTHORIZED_PARTIES" do
-    env["CLERK_AUTHORIZED_PARTIES"] = "https://payroll.shimizu-technology.com, https://mosa.shimizu-technology.com"
+  it "accepts multiple explicit HTTPS origins in CLERK_AUTHORIZED_PARTIES including mixed-case and default :443" do
+    env["CLERK_AUTHORIZED_PARTIES"] = "https://Payroll.Shimizu-Technology.com:443, https://mosa.shimizu-technology.com"
 
     report = readiness.run(live: false)
 

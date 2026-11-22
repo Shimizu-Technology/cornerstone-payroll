@@ -13,15 +13,38 @@ class ClerkTokenVerifier
   PUBLISHABLE_KEY_PATTERN = /\Apk_(?:test|live)_([A-Za-z0-9+_\-\/=]+)\z/
   HOSTNAME_PATTERN = /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\z/i
 
+  def self.normalize_origin(value)
+    trimmed = value.to_s.strip
+    return nil if trimmed.empty?
+
+    uri = URI.parse(trimmed)
+    return nil unless uri.is_a?(URI::HTTP) && uri.host.present?
+    return nil if uri.userinfo.present? || uri.query.present? || uri.fragment.present?
+    return nil unless [ "", "/" ].include?(uri.path)
+
+    scheme = uri.scheme.downcase
+    host = uri.host.downcase
+    default_port = (scheme == "https" ? 443 : 80)
+    port_suffix = uri.port && uri.port != default_port ? ":#{uri.port}" : ""
+    "#{scheme}://#{host}#{port_suffix}"
+  rescue URI::InvalidURIError
+    nil
+  end
+
+  def self.valid_production_https_origin?(value)
+    normalized = normalize_origin(value)
+    return false unless normalized
+
+    uri = URI.parse(normalized)
+    uri.is_a?(URI::HTTPS) && uri.port == 443
+  end
+
   def self.jwks_cache_key(issuer)
     "clerk_jwks:#{Digest::SHA256.hexdigest(issuer.to_s)}"
   end
 
-  def self.clear_jwks_cache!(env: ENV, cache: nil, include_rails_cache: false, extra_issuers: [])
-    new(env: env, cache: cache).clear_jwks_cache!(
-      include_rails_cache: include_rails_cache,
-      extra_issuers: extra_issuers
-    )
+  def self.clear_jwks_cache!(env: ENV, cache: nil, extra_issuers: [])
+    new(env: env, cache: cache).clear_jwks_cache!(extra_issuers: extra_issuers)
   end
 
   def initialize(env: ENV, cache: nil, http_get: nil)
@@ -81,7 +104,7 @@ class ClerkTokenVerifier
   end
 
   def clerk_issuer
-    explicit = normalize_origin(@env["CLERK_ISSUER"])
+    explicit = self.class.normalize_origin(@env["CLERK_ISSUER"])
     return explicit if explicit.present?
 
     host = publishable_key_frontend_api_host
@@ -91,14 +114,14 @@ class ClerkTokenVerifier
     return nil if instance_id.empty?
 
     if instance_id.include?(".")
-      "https://#{instance_id}"
+      self.class.normalize_origin("https://#{instance_id}")
     else
-      "https://#{instance_id}.clerk.accounts.dev"
+      self.class.normalize_origin("https://#{instance_id}.clerk.accounts.dev")
     end
   end
 
   def clerk_api_base
-    explicit = normalize_origin(@env["CLERK_API_BASE"])
+    explicit = self.class.normalize_origin(@env["CLERK_API_BASE"])
     return explicit if explicit.present?
 
     clerk_issuer
@@ -110,7 +133,7 @@ class ClerkTokenVerifier
 
   def authorized_parties
     raw = @env["CLERK_AUTHORIZED_PARTIES"].to_s
-    raw.split(",").filter_map { |origin| normalize_origin(origin) }
+    raw.split(",").filter_map { |origin| self.class.normalize_origin(origin) }.uniq
   end
 
   def authorized_parties_configured?
@@ -118,8 +141,8 @@ class ClerkTokenVerifier
     !raw.nil? && !raw.empty?
   end
 
-  def clear_jwks_cache!(include_rails_cache: false, extra_issuers: [])
-    issuers = ([ clerk_issuer ] + Array(extra_issuers)).filter_map { |value| normalize_origin(value) }.uniq
+  def clear_jwks_cache!(extra_issuers: [])
+    issuers = ([ clerk_issuer ] + Array(extra_issuers)).filter_map { |value| self.class.normalize_origin(value) }.uniq
     keys = [ LEGACY_JWKS_CACHE_KEY ]
     issuers.each do |issuer|
       keys << self.class.jwks_cache_key(issuer)
@@ -135,15 +158,10 @@ class ClerkTokenVerifier
       end
     end
 
-    if include_rails_cache
-      rails_keys = [ LEGACY_JWKS_CACHE_KEY ] + issuers.map { |issuer| self.class.jwks_cache_key(issuer) }
-      rails_keys.each { |key| Rails.cache.delete(key) }
-    end
-
     {
       issuer: clerk_issuer,
       cleared_keys: keys.uniq,
-      cleared_rails_cache: include_rails_cache
+      in_process_only: true
     }
   end
 
@@ -235,7 +253,8 @@ class ClerkTokenVerifier
       return false
     end
 
-    unless parties.include?(azp.strip)
+    normalized_azp = self.class.normalize_origin(azp)
+    unless normalized_azp && parties.include?(normalized_azp)
       Rails.logger.warn("Clerk JWT verification failed: unauthorized azp claim")
       return false
     end
@@ -263,12 +282,5 @@ class ClerkTokenVerifier
     host.downcase
   rescue ArgumentError
     nil
-  end
-
-  def normalize_origin(value)
-    trimmed = value.to_s.strip
-    return nil if trimmed.empty?
-
-    trimmed.sub(%r{/+\z}, "")
   end
 end

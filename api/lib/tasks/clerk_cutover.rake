@@ -4,16 +4,13 @@ require "json"
 
 namespace :clerk do
   namespace :jwks do
-    desc "Purge cached Clerk JWKS entries (current issuer, optional ISSUER/OLD_ISSUER, and legacy clerk_jwks)"
+    desc "Clear this process's RequestPathCache Clerk JWKS entries (cannot flush running Puma workers; restart/redeploy Puma to flush in-memory JWKS)"
     task clear: :environment do
       extra_issuers = [ ENV["ISSUER"], ENV["OLD_ISSUER"] ].compact_blank
-      result = ClerkTokenVerifier.clear_jwks_cache!(
-        include_rails_cache: true,
-        extra_issuers: extra_issuers
-      )
+      result = ClerkTokenVerifier.clear_jwks_cache!(extra_issuers: extra_issuers)
       puts JSON.generate(
         result.merge(
-          note: "Cleared Rails.cache (Solid Cache) and this process's RequestPathCache. Restart/redeploy Puma if in-process caches must flush immediately."
+          note: "JWKS is cached in RequestPathCache (process-local MemoryStore), not Rails.cache. This task only clears the current process and cannot flush running Puma workers; restart or redeploy Puma to flush in-memory JWKS caches."
         )
       )
     end
@@ -108,7 +105,7 @@ namespace :clerk do
       abort "Re-link manifest build failed: #{e.message}"
     end
 
-    desc "Dry-run Clerk user re-link from a reviewed MANIFEST (read-only; never writes)"
+    desc "Dry-run Clerk user re-link from a sealed MANIFEST (read-only; never writes)"
     task dry_run: :environment do
       manifest_path = ENV["MANIFEST"].presence || abort("MANIFEST=/path/to/prod_manifest.json is required")
       target_client = ENV["TARGET_CLERK_SECRET_KEY"].present? ? ClerkCutover::ClerkClient.new(secret_key: ENV["TARGET_CLERK_SECRET_KEY"]) : nil
@@ -123,16 +120,21 @@ namespace :clerk do
       abort "Clerk cutover dry-run failed (#{result.errors.length} error(s))." unless result.passed?
     end
 
-    desc "Apply Clerk user re-link atomically from a reviewed MANIFEST (refuses to write unless APPLY=true)"
+    desc "Apply Clerk user re-link atomically from a sealed MANIFEST (requires APPLY=true and TARGET_CLERK_SECRET_KEY)"
     task apply: :environment do
       abort "Refusing to apply Clerk re-link without APPLY=true." unless ENV["APPLY"] == "true"
       manifest_path = ENV["MANIFEST"].presence || abort("MANIFEST=/path/to/prod_manifest.json is required")
-      target_client = ENV["TARGET_CLERK_SECRET_KEY"].present? ? ClerkCutover::ClerkClient.new(secret_key: ENV["TARGET_CLERK_SECRET_KEY"]) : nil
+      target_secret = ENV["TARGET_CLERK_SECRET_KEY"].presence || abort("TARGET_CLERK_SECRET_KEY is required to verify target Clerk external_id before apply.")
+      target_client = ClerkCutover::ClerkClient.new(secret_key: target_secret)
 
       result = ClerkCutover::RelinkService.new(
         manifest: File.read(manifest_path),
         target_client: target_client,
-        allow_partial: ENV["ALLOW_PARTIAL"] == "true"
+        allow_partial: ENV["ALLOW_PARTIAL"] == "true",
+        env: ENV,
+        source_issuer: ENV["SOURCE_CLERK_ISSUER"].presence,
+        confirm_m3_1_deployed: ENV["CONFIRM_M3_1_DEPLOYED"] == "true",
+        operator: ENV["OPERATOR"].presence
       ).apply!(confirm: true)
 
       puts JSON.generate(result.as_json)
@@ -145,7 +147,8 @@ namespace :clerk do
       manifest_path = ENV["MANIFEST"].presence || abort("MANIFEST=/path/to/prod_manifest.json is required")
 
       result = ClerkCutover::RelinkService.new(
-        manifest: File.read(manifest_path)
+        manifest: File.read(manifest_path),
+        operator: ENV["OPERATOR"].presence
       ).rollback!(confirm: true)
 
       puts JSON.generate(result.as_json)

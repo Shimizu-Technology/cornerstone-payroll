@@ -208,6 +208,32 @@ RSpec.describe ClerkTokenVerifier do
       expect(verifier.verify(token)).to include("sub" => "user_live_2")
     end
 
+    it "normalizes mixed-case hosts and default :443 ports across CLERK_AUTHORIZED_PARTIES and azp claims" do
+      verifier = described_class.new(
+        env: {
+          "CLERK_PUBLISHABLE_KEY" => pk_live,
+          "CLERK_AUTHORIZED_PARTIES" => "HTTPS://Payroll.Shimizu-Technology.COM:443/"
+        },
+        cache: cache,
+        http_get: http_get
+      )
+      lowercase_azp_token = encode_token(
+        sub: "user_live_norm_1",
+        iss: "https://#{live_host}",
+        azp: "https://payroll.shimizu-technology.com",
+        exp: 10.minutes.from_now.to_i
+      )
+      mixed_port_azp_token = encode_token(
+        sub: "user_live_norm_2",
+        iss: "https://#{live_host}",
+        azp: "https://Payroll.Shimizu-Technology.com:443",
+        exp: 10.minutes.from_now.to_i
+      )
+
+      expect(verifier.verify(lowercase_azp_token)).to include("sub" => "user_live_norm_1")
+      expect(verifier.verify(mixed_port_azp_token)).to include("sub" => "user_live_norm_2")
+    end
+
     it "fails closed and rejects tokens with a missing azp claim when CLERK_AUTHORIZED_PARTIES is configured" do
       verifier = described_class.new(
         env: {
