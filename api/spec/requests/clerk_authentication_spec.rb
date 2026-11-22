@@ -110,6 +110,22 @@ RSpec.describe "Clerk Authentication", type: :request do
         user_id: user.id, record_id: user.id, event_category: "security")
     end
 
+    it "leaves the invitation intact during maintenance and binds the same sign-in afterward" do
+      issue_pending_invite!
+      allow(WriteMaintenance).to receive(:enabled?).and_return(true)
+      audit = AuditLog.where(action: "authentication#clerk_identity_bound")
+
+      expect { authenticate }.not_to change { [ user.reload.attributes, audit.count ] }
+      expect(response).to have_http_status(:service_unavailable)
+      expect(response.parsed_body).to include("code" => "write_maintenance", "error" => /Try again shortly/)
+      expect(provider).not_to have_received(:fetch_user)
+
+      allow(WriteMaintenance).to receive(:enabled?).and_return(false)
+      expect { authenticate }.to change(audit, :count).by(1)
+      expect(response).to have_http_status(:ok)
+      expect(user.reload).to have_attributes(clerk_id: subject_id, invitation_status: "accepted")
+    end
+
     it "also records the domain audit when a first request binds and performs a write" do
       issue_pending_invite!
 
@@ -156,6 +172,7 @@ RSpec.describe "Clerk Authentication", type: :request do
     end
 
     it "leaves a bound user signed in without reading Clerk user metadata" do
+      allow(WriteMaintenance).to receive(:enabled?).and_return(true)
       allow_any_instance_of(ApplicationController).to receive(:verify_clerk_token).and_return("sub" => user.clerk_id)
       expect(provider).not_to receive(:fetch_user)
 

@@ -283,6 +283,15 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
       document = ClientDocument.find(created_id)
       expect(document.preview_status).to eq("pending")
 
+      allow(WriteMaintenance).to receive(:enabled?).and_return(true)
+      allow(ClientDocumentPreviewGenerator).to receive(:new).and_call_original
+      expect { get "/api/v1/client/documents/#{created_id}/preview" }.not_to change { document.reload.attributes }
+      expect(response).to have_http_status(:service_unavailable)
+      expect(response.parsed_body).to include("code" => "write_maintenance", "error" => /Download the original/)
+
+      expect(ClientDocumentPreviewGenerator).not_to have_received(:new)
+      allow(WriteMaintenance).to receive(:enabled?).and_return(false)
+
       allow_any_instance_of(ClientDocumentPreviewGenerator).to receive(:generate!) do
         preview_key = "client_documents/company_#{company.id}/previews/test-preview.pdf"
         R2StorageService.new.upload(preview_key, StringIO.new("%PDF-1.4\npreview"), content_type: "application/pdf")

@@ -103,6 +103,17 @@ RSpec.describe "Practice portal identity" do
       .to have_attributes(actor_type: "system_job", actor_name: "TestWorkspace::PortalAccess", user_id: nil)
   end
 
+  it "denies a closed practice login without deactivating it during write maintenance" do
+    client.update_columns(clerk_invitation_id: "inv_practice", invitation_status: "pending")
+    allow(WriteMaintenance).to receive(:enabled?).and_return(true)
+    expect(client.payroll_access_allowed?).to be(true)
+
+    workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
+    expect(ClerkInvitationService).not_to receive(:new)
+    expect { expect(client.payroll_access_allowed?).to be(false) }.not_to change(AuditLog, :count)
+    expect(client.reload).to have_attributes(active: true, clerk_invitation_id: "inv_practice")
+  end
+
   it "memoizes practice company ids until the user is reloaded" do
     expect(client).to receive(:practice_portal_open?).once.and_call_original
     2.times { expect(client.accessible_company_ids).to eq([ workspace.id ]) }

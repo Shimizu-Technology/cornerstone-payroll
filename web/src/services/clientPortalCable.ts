@@ -107,7 +107,7 @@ export async function subscribeToClientPortalThreads(companyId: number, callback
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(() => {
           void connect();
-        }, 2000);
+        }, error instanceof ApiError ? error.retryAfterMs ?? 2000 : 2000);
       }
     } finally {
       connecting = false;

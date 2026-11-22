@@ -105,6 +105,10 @@ module Api
           @document.ensure_usable_for!(:preview, staff_read: true)
           return preview_sheet if @document.sheet_preview?
 
+          if WriteMaintenance.enabled? && @document.preview_generation_required? && !@document.preview_ready?
+            return render_write_maintenance("Preview generation is paused during maintenance. Download the original or try the preview again shortly.")
+          end
+
           ensure_generated_preview!(@document)
           data, content_type, filename = preview_payload_for(@document)
           return render json: { error: @document.preview_error.presence || "Preview is unavailable for this file" }, status: :unprocessable_entity unless data
