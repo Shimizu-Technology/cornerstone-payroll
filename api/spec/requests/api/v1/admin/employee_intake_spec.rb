@@ -122,6 +122,21 @@ RSpec.describe "Employee incomplete intake", type: :request do
     end
   end
 
+  it "creates an inline hourly intake profile and both dated wage rates in one request" do
+    enable_window
+    rates = [ { label: "Regular", rate: 15, is_primary: true, active: true },
+      { label: "Weekend", rate: 19, is_primary: false, active: true } ]
+    post "/api/v1/admin/employees", params: { employee: minimal.merge(pay_rate: 15, wage_rates: rates) }, as: :json
+
+    expect(response).to have_http_status(:created), response.body
+    data = response.parsed_body.fetch("data")
+    worker = company.employees.find(data.fetch("id"))
+    expect(worker.wage_rates_on(PayrollBusinessClock.today).map { |rate| [ rate.label, rate.rate, rate.is_primary ] })
+      .to eq([ [ "Regular", 15, true ], [ "Weekend", 19, false ] ])
+    expect(data.fetch("wage_rates").pluck("label")).to contain_exactly("Regular", "Weekend")
+    expect(data.dig("compensation_history", "revision")).to be_present
+  end
+
   it "runs the enable, create, disable, incremental-complete workflow" do
     enable_window
     post "/api/v1/admin/employees", params: { employee: minimal }

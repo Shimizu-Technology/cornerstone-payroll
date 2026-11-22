@@ -308,9 +308,30 @@ test('PayrollIntakeImportModal guards preview, apply, and nested employee creati
   } finally {
     await createFailure.cleanup();
   }
-  await page.keyboard.press('Escape');
+  await createDialog.getByRole('button', { name: 'Add rate' }).click();
+  await createDialog.locator('input[type="number"]').nth(1).fill('18');
+  await createDialog.getByRole('radio', { name: 'Primary' }).nth(1).check();
+  let wageWrites = 0;
+  await page.route('**/admin/employee_wage_rates**', async (route) => {
+    wageWrites += 1;
+    await route.fulfill({ status: 409, json: { error: 'Unexpected separate wage-rate request' } });
+  });
+  await page.route('**/admin/employees', async (route) => {
+    const { employee } = route.request().postDataJSON();
+    expect(employee.pay_rate).toBe(18);
+    expect(employee.wage_rates).toEqual([
+      expect.objectContaining({ rate: 12.5, is_primary: false, active: true }),
+      expect.objectContaining({ rate: 18, is_primary: true, active: true }),
+    ]);
+    await route.fulfill({ status: 201, json: { data: {
+      ...employee, id: 802, full_name: 'New Person',
+      wage_rates: employee.wage_rates.map((rate: object, index: number) => ({ ...rate, id: index + 1 })),
+    } } });
+  });
+  await createDialog.getByRole('button', { name: 'Create and map employee' }).click();
   await expect(createDialog).not.toBeVisible();
-  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Apply Reviewed Rows' })).toBeEnabled();
+  expect(wageWrites).toBe(0);
 });
 
 test('MoSa import takes missing period pay in the review and requires review before replacing saved hours', async ({ page }): Promise<void> => {
