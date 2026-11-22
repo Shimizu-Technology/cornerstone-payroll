@@ -370,8 +370,8 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       intervening_update_applied = false
       allow_any_instance_of(Employee).to receive(:lock!).and_wrap_original do |method, *args|
         unless intervening_update_applied
-          Employee.where(id: employee.id).update_all(pay_rate: 19.25)
           intervening_update_applied = true
+          change_compensation!(employee, pay_rate: 19.25)
         end
         method.call(*args)
       end

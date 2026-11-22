@@ -12,7 +12,7 @@ class EmployeeCompensationChange < ApplicationRecord
   belongs_to :employee
   belongs_to :created_by, class_name: "User", optional: true
 
-  validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0, less_than: 1_000_000_000_000 }
   validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
   validates :effective_on, uniqueness: { scope: :employee_id }
 
