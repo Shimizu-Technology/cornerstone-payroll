@@ -37,6 +37,8 @@ export function EmployeeNotesPanel({
   const listGenerationRef = useRef(0);
   // True while the newest list request is still in flight.
   const listPendingRef = useRef(false);
+  // True once the full list has loaded for the current scope.
+  const listLoadedRef = useRef(false);
 
   const [notes, setNotes] = useState<EmployeeNote[]>([]);
   const [listMeta, setListMeta] = useState<EmployeeNotesListMeta | null>(null);
@@ -75,6 +77,7 @@ export function EmployeeNotesPanel({
       if (scopeRef.current !== requestScope || listGenerationRef.current !== requestGeneration) return;
       setNotes(response.data);
       setListMeta(response.meta ?? null);
+      listLoadedRef.current = true;
     } catch (caught) {
       if (scopeRef.current !== requestScope || listGenerationRef.current !== requestGeneration) return;
       setLoadError(caught instanceof Error ? caught.message : 'Could not load staff notes.');
@@ -87,6 +90,7 @@ export function EmployeeNotesPanel({
   }, [companyId, employeeId]);
 
   useEffect(() => {
+    listLoadedRef.current = false;
     setNotes([]);
     setListMeta(null);
     setDraftBody('');
@@ -121,8 +125,8 @@ export function EmployeeNotesPanel({
     try {
       const response = await employeeNotesApi.create(companyId, employeeId, trimmed);
       if (scopeRef.current !== requestScope) return;
-      // A list request still in flight was superseded; reload so existing notes aren't lost.
-      const reloadList = listPendingRef.current;
+      // A pending or failed list load was superseded; reload so existing notes aren't lost.
+      const reloadList = listPendingRef.current || !listLoadedRef.current;
       listGenerationRef.current += 1;
       listPendingRef.current = false;
       setLoading(false);
@@ -174,7 +178,7 @@ export function EmployeeNotesPanel({
     try {
       const response = await employeeNotesApi.hide(companyId, employeeId, noteId, trimmedReason);
       if (scopeRef.current !== requestScope) return;
-      const reloadList = listPendingRef.current;
+      const reloadList = listPendingRef.current || !listLoadedRef.current;
       listGenerationRef.current += 1;
       listPendingRef.current = false;
       setLoading(false);
