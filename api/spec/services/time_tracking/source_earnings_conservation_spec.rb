@@ -37,6 +37,13 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     item.payroll_item_earnings.reload.map { |earning| [ earning.category, earning.label, earning.hours.to_d, earning.rate.to_d, earning.amount.to_d ] }
   end
 
+  it "reuses the preloaded compensation during calculator validation" do
+    item = apply!(same_rate: true)
+    worker = Employee.with_compensation_history.find(employee.id)
+    queries = compensation_read_queries("employees") { PayrollCalculator.for(worker, item) }
+    expect(queries).to be_empty
+  end
+
   context "fractional-cent source buckets" do
     let(:next_import) do
       make_import(next_period, 0.02, "current", "CENTS", daily_lines: [

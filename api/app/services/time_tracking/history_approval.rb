@@ -386,8 +386,7 @@ module TimeTracking
         entries.map { |entry| entry["category"] }.uniq.filter_map do |category|
           policy = policies.find { |row| row.source_category_key == TimeTrackingCategoryMapping.category_key(category) }
           next unless policy
-          # The review confirms today's setup for future imports (M3-4: rates on today).
-          rate = policy.matching_rate(employee.wage_rates_on(PayrollBusinessClock.today, include_inactive: true))
+          rate = policy.matching_rate(employee.wage_rates_on(@proof_on, include_inactive: true))
           { "employee" => employee.full_name, "employee_id" => employee.id, "source_category" => category&.fetch("name", nil),
             "configured_components" => policy.required_rate_description, "resolved_component" => rate&.label,
             "employee_wage_rate_id" => rate&.id, "rate" => rate&.rate&.to_s("F"),
@@ -414,7 +413,7 @@ module TimeTracking
         employee = @employees.find { |record| record.id == mapping&.employee_id }
         { "source_user_uuid" => uuid, "employee_id" => employee&.id, "employee" => employee&.full_name,
           "hours" => entries.sum { |entry| BigDecimal(entry.fetch("hours").to_s) }.to_s("F"),
-          "options" => employee ? employee.wage_rates_on(PayrollBusinessClock.today).filter_map do |rate|
+          "options" => employee ? employee.wage_rates_on(@proof_on).filter_map do |rate|
             { "id" => rate.id, "label" => rate.label, "rate" => rate.rate.to_s } if rate.rate&.positive?
           end : [] }
       end
@@ -425,15 +424,15 @@ module TimeTracking
       raise Error, "Solo choices contain duplicates" unless choices.map { |row| row["employee_id"] }.uniq.length == choices.length
       choices.each do |row|
         next if row["employee_wage_rate_id"].blank?
-        mapping = @mappings.find { |record| record.employee_id == row["employee_id"].to_i }
-        rate = mapping && EmployeeWageRate.active.find_by(employee_id: mapping.employee_id, id: row["employee_wage_rate_id"])
+        employee = @employees.find { |record| record.id == row["employee_id"].to_i }
+        rate = employee&.wage_rates_on(@proof_on)&.find { |candidate| candidate.id == row["employee_wage_rate_id"].to_i }
         raise Error, "The selected Solo earning component or rate is no longer available for this employee" unless rate&.rate&.positive?
-        choice = TimeTrackingEarningChoice.find_or_initialize_by(time_tracking_source: @source, employee_id: mapping.employee_id, source_category_key: "solo")
+        choice = TimeTrackingEarningChoice.find_or_initialize_by(time_tracking_source: @source, employee_id: employee.id, source_category_key: "solo")
         choice.update!(employee_wage_rate: rate, reviewed_by: @actor,
           rate_snapshot: rate.attributes.slice("id", "employee_id", "label", "rate", "active").as_json)
         AuditLog.record!(user: @actor, company_id: @company.id, action: "time_tracking_earning_choice#confirmed",
           record_type: "TimeTrackingEarningChoice", record_id: choice.id, event_category: "payroll",
-          metadata: { employee_id: mapping.employee_id, employee_wage_rate_id: rate.id, source_category_key: "solo", rate: rate.rate.to_s })
+          metadata: { employee_id: employee.id, employee_wage_rate_id: rate.id, source_category_key: "solo", rate: rate.rate.to_s })
       end
     end
 
