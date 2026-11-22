@@ -35,6 +35,8 @@ export function EmployeeNotesPanel({
   const scope = `${companyId}:${employeeId}`;
   const scopeRef = useRef(scope);
   const listGenerationRef = useRef(0);
+  // True while the newest list request is still in flight.
+  const listPendingRef = useRef(false);
 
   const [notes, setNotes] = useState<EmployeeNote[]>([]);
   const [listMeta, setListMeta] = useState<EmployeeNotesListMeta | null>(null);
@@ -65,6 +67,7 @@ export function EmployeeNotesPanel({
   const loadNotes = useCallback(async (): Promise<void> => {
     const requestScope = `${companyId}:${employeeId}`;
     const requestGeneration = ++listGenerationRef.current;
+    listPendingRef.current = true;
     setLoading(true);
     setLoadError(null);
     try {
@@ -77,6 +80,7 @@ export function EmployeeNotesPanel({
       setLoadError(caught instanceof Error ? caught.message : 'Could not load staff notes.');
     } finally {
       if (scopeRef.current === requestScope && listGenerationRef.current === requestGeneration) {
+        listPendingRef.current = false;
         setLoading(false);
       }
     }
@@ -117,7 +121,10 @@ export function EmployeeNotesPanel({
     try {
       const response = await employeeNotesApi.create(companyId, employeeId, trimmed);
       if (scopeRef.current !== requestScope) return;
+      // A list request still in flight was superseded; reload so existing notes aren't lost.
+      const reloadList = listPendingRef.current;
       listGenerationRef.current += 1;
+      listPendingRef.current = false;
       setLoading(false);
       setLoadError(null);
       setNotes((current) => [response.data, ...current]);
@@ -131,6 +138,7 @@ export function EmployeeNotesPanel({
           : current
       ));
       setDraftBody('');
+      if (reloadList) void loadNotes();
     } catch (caught) {
       if (scopeRef.current !== requestScope) return;
       setSubmitError(caught instanceof Error ? caught.message : 'Could not save this note.');
@@ -166,12 +174,15 @@ export function EmployeeNotesPanel({
     try {
       const response = await employeeNotesApi.hide(companyId, employeeId, noteId, trimmedReason);
       if (scopeRef.current !== requestScope) return;
+      const reloadList = listPendingRef.current;
       listGenerationRef.current += 1;
+      listPendingRef.current = false;
       setLoading(false);
       setLoadError(null);
       setNotes((current) => current.map((item) => (item.id === noteId ? response.data : item)));
       setHidingNoteId(null);
       setHideReason('');
+      if (reloadList) void loadNotes();
     } catch (caught) {
       if (scopeRef.current !== requestScope) return;
       setHideError(caught instanceof Error ? caught.message : 'Could not hide this note.');

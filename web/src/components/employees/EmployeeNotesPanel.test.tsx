@@ -254,6 +254,26 @@ describe('EmployeeNotesPanel', () => {
     });
   });
 
+  it('reloads the list after creating a note while the initial list is loading, keeping existing notes', async () => {
+    const existingNote: EmployeeNote = { ...visibleNote, id: 9, body: 'Asked AIRE for her I-9 documents.' };
+    let resolveInitialList!: (value: { data: EmployeeNote[] }) => void;
+    notesApiMocks.list
+      .mockReturnValueOnce(new Promise<{ data: EmployeeNote[] }>((resolve) => { resolveInitialList = resolve; }))
+      .mockResolvedValueOnce({ data: [visibleNote, existingNote] });
+    notesApiMocks.create.mockResolvedValueOnce({ data: visibleNote });
+
+    render(<EmployeeNotesPanel companyId={1} employeeId={42} />);
+    fireEvent.change(screen.getByLabelText('Add a staff note'), { target: { value: visibleNote.body! } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+
+    expect(await screen.findByText(visibleNote.body!)).toBeTruthy();
+    resolveInitialList({ data: [existingNote] });
+
+    expect(await screen.findByText(existingNote.body!)).toBeTruthy();
+    expect(screen.getByText(visibleNote.body!)).toBeTruthy();
+    expect(notesApiMocks.list).toHaveBeenCalledTimes(2);
+  });
+
   it('resets submitting and hideSubmitting when employeeId changes during pending mutations', async () => {
     let resolveFirstCreate!: (value: { data: EmployeeNote }) => void;
     const firstCreatePromise = new Promise<{ data: EmployeeNote }>((resolve) => {
