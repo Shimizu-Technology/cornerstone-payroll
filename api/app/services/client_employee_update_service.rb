@@ -200,7 +200,7 @@ class ClientEmployeeUpdateService
   end
 
   def attribute_changed?(key, value)
-    current = key.to_sym == :w4_election_received ? false : employee.public_send(key)
+    current = key.to_sym == :w4_election_received ? false : current_employee_value(key)
     type = employee.class.attribute_types[key.to_s]
     if type&.type == :date && value.present?
       cast_date = type.cast(value)
@@ -230,6 +230,14 @@ class ClientEmployeeUpdateService
     end
   end
 
+  def current_employee_value(key)
+    if EmployeeCompensationChangeService::COMPENSATION_ATTRIBUTES.include?(key.to_s)
+      EmployeeCompensationChangeService.snapshot(employee, PayrollBusinessClock.today).fetch(key.to_s)
+    else
+      employee.public_send(key)
+    end
+  end
+
   def original_values_for(keys)
     keys.each_with_object({}) do |key, values|
       values[key] = if key == WAGE_RATES_KEY
@@ -237,7 +245,7 @@ class ClientEmployeeUpdateService
       elsif key.to_sym == :w4_election_received
         false
       else
-        employee.public_send(key)
+        current_employee_value(key)
       end
     end
   end
@@ -265,7 +273,7 @@ class ClientEmployeeUpdateService
   end
 
   def current_wage_rates_payload
-    employee.active_wage_rates.map do |rate|
+    employee.wage_rates_on(PayrollBusinessClock.today).map do |rate|
       {
         id: rate.id,
         label: rate.label,

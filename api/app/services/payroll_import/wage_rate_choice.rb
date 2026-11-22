@@ -17,7 +17,7 @@ module PayrollImport
     def preview
       # Jobs and the profile rate as they stand on the pay period end date (M3-4).
       rates = @employee.wage_rates_on(@pay_period.end_date)
-      return {} unless @employee.hourly_pay_basis? && rates.many?
+      return {} unless @employee.payroll_compensation_on(@pay_period.end_date).hourly_pay_basis? && rates.many?
 
       same_rate = rates.map(&:rate).uniq.one?
       # Without allocations, calculation pays the profile rate. A job choice

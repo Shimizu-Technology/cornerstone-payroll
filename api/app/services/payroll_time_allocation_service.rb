@@ -13,6 +13,7 @@ class PayrollTimeAllocationService
     @payroll_item = payroll_item
     @employee = payroll_item.employee
     @pay_period = payroll_item.pay_period
+    @basis = @employee.payroll_compensation_on(@pay_period.end_date)
     @ledger_key = ledger_key
     @generated_source = generated_source
   end
@@ -64,7 +65,7 @@ class PayrollTimeAllocationService
 
   def allocatable_profile?(profile)
     timekeeping_run = @pay_period.regular_run? || @pay_period.correction_run?
-    @employee.salary? && profile&.confirmed? && profile.pay_basis == "salary" &&
+    @basis.employment_type == "salary" && profile&.confirmed? && profile.pay_basis == "salary" &&
       timekeeping_run && @pay_period.includes_base_salary?
   end
 
@@ -203,8 +204,8 @@ class PayrollTimeAllocationService
       "employee_work_profile_id" => profile.id,
       "effective_on" => profile.effective_on.iso8601,
       "pay_basis" => profile.pay_basis,
-      "salary_type" => @employee.salary_type,
-      "pay_frequency" => @employee.pay_frequency,
+      "salary_type" => @basis.salary_type,
+      "pay_frequency" => @basis.pay_frequency,
       "overtime_status" => profile.overtime_status,
       "exemption_category" => profile.exemption_category,
       "standard_weekly_hours" => profile.standard_weekly_hours&.to_f,

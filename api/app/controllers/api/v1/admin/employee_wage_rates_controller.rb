@@ -15,8 +15,8 @@ module Api
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
-          rates = employee.employee_wage_rates.order(:label)
-          render json: { wage_rates: rates.map { |r| rate_payload(r) } }
+          rates = employee.wage_rates_on(PayrollBusinessClock.today, include_inactive: true).sort_by(&:label)
+          render json: { wage_rates: rates.map { |r| rate_payload(r) }, compensation_revision: EmployeeCompensationChangeService.revision(employee) }
         end
 
         # POST /api/v1/admin/employee_wage_rates
@@ -28,7 +28,7 @@ module Api
 
           label = rate_params[:label].to_s.strip
           result = change_wage_rates!(employee, rate_params.except(:employee_id).to_h.merge(label: label))
-          rate = employee.employee_wage_rates.reload.find_by!(label: label)
+          rate = result.wage_rate_versions.first&.as_wage_rate || employee.wage_rates_on(result.effective_on, include_inactive: true).find { |row| row.label == label }
           render json: { wage_rate: rate_payload(rate), compensation_warnings: result.warnings }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -44,7 +44,7 @@ module Api
           end
 
           result = change_wage_rates!(rate.employee, rate_update_params.to_h.merge(id: rate.id))
-          render json: { wage_rate: rate_payload(rate.reload), compensation_warnings: result.warnings }
+          render json: { wage_rate: rate_payload(result.wage_rate_versions.first&.as_wage_rate || rate.reload), compensation_warnings: result.warnings }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue EmployeeCompensationChangeService::Error => e
@@ -73,7 +73,7 @@ module Api
         end
 
         def compensation_params
-          params.fetch(:employee_wage_rate, {}).permit(:effective_on, :reason, :historical_correction)
+          params.fetch(:employee_wage_rate) { ActionController::Parameters.new }.permit(:effective_on, :reason, :historical_correction, :compensation_revision)
         end
 
         def change_wage_rates!(employee, edit)
@@ -84,13 +84,16 @@ module Api
             reason: compensation_params[:reason],
             effective_on: compensation_params[:effective_on],
             historical_correction: compensation_params[:historical_correction],
+            expected_revision: compensation_params[:compensation_revision],
             wage_rate_edits: [ edit.symbolize_keys ]
           ).call!
         end
 
         def render_compensation_error(error)
           code = error.is_a?(EmployeeCompensationChangeService::LockedPeriodError) ? "compensation_locked_period" : "compensation_change_invalid"
-          render json: { error: error.message, code: code, errors: [ error.message ] }, status: :unprocessable_entity
+          conflict = error.is_a?(EmployeeCompensationChangeService::ConflictError)
+          render json: { error: error.message, code: conflict ? "compensation_conflict" : code, errors: [ error.message ] },
+                 status: conflict ? :conflict : :unprocessable_entity
         end
 
         def rate_update_params

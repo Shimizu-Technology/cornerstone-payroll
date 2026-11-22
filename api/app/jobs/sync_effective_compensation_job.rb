@@ -15,12 +15,20 @@ class SyncEffectiveCompensationJob < ApplicationJob
 
   def perform(as_of: nil)
     as_of = as_of.present? ? Date.iso8601(as_of.to_s) : PayrollBusinessClock.today
-    employee_ids_needing_sync(as_of).each do |employee_id|
-      Employee.transaction do
+    failures = employee_ids_needing_sync(as_of).filter_map do |employee_id|
+      Employee.transaction(requires_new: true) do
+        company_id = Employee.where(id: employee_id).pick(:company_id)
+        Company.lock.find_by(id: company_id)
         employee = Employee.lock.find_by(id: employee_id)
         EmployeeCompensationChangeService.sync_cache!(employee, as_of: as_of) if employee
       end
+      nil
+    rescue StandardError => error
+      Rails.logger.error("Compensation cache sync failed for employee_id=#{employee_id} (#{error.class})")
+      Rails.error.report(error, handled: true, context: { employee_id: employee_id })
+      employee_id
     end
+    raise "Compensation cache sync failed for employee IDs: #{failures.join(', ')}" if failures.any?
   end
 
   private
@@ -33,7 +41,9 @@ class SyncEffectiveCompensationJob < ApplicationJob
       EmployeeWageRateVersion.where(effective_on: (as_of - 7)..as_of).distinct.pluck(:employee_id)
     stale_pay = EmployeeCompensationChange.joins(:employee)
       .covering(as_of)
-      .where("employees.pay_rate <> employee_compensation_changes.pay_rate")
+      .where(EmployeeCompensationChange::SNAPSHOT_ATTRIBUTES.map do |field|
+        "employees.#{field} IS DISTINCT FROM employee_compensation_changes.#{field}"
+      end.join(" OR "))
       .distinct.pluck(:employee_id)
     stale_rates = EmployeeWageRateVersion.joins(:employee_wage_rate)
       .covering(as_of)

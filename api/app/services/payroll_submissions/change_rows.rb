@@ -59,7 +59,7 @@ module PayrollSubmissions
       @employees = Employee.where(company_id: @company_id, id: employee_ids).index_by(&:id)
       @defaults = PayrollStandingChange.where(company_id: @company_id).index_by(&:id)
       normalized = rows.each_with_index.map { |row, index| normalize_row(row, index) }
-      missing = @defaults.values.select { |item| item.active? && item.availability_error.nil? && item.required? }.reject { |item| normalized.any? { |row| row["standing_change_id"] == item.id } }
+      missing = @defaults.values.select { |item| item.active? && item.availability_error(rates_on: @rates_on).nil? && item.required? }.reject { |item| normalized.any? { |row| row["standing_change_id"] == item.id } }
       @errors["changes"] << "Every period defaults changed. Reload and fill in or skip every default." if missing.any?
       duplicates = normalized.select { |row| %w[owner_pay extra_hours].include?(row["kind"]) && !row["skipped"] }
         .group_by { |row| [ row["kind"], row["employee_id"] ] }.values.any?(&:many?)
@@ -107,7 +107,7 @@ module PayrollSubmissions
           return result
         end
         result.merge!("standing_change_id" => item.id, "employee_id" => item.employee_id, "label" => item.display_label)
-        @errors[key] << item.availability_error if item.availability_error
+        @errors[key] << item.availability_error(rates_on: @rates_on) if item.availability_error(rates_on: @rates_on)
         if ActiveModel::Type::Boolean.new.cast(row["skipped"])
           @errors[key] << "#{item.display_label}: enter a value; None this period is not allowed." unless item.allow_none?
           return result.merge("skipped" => true, "employee_wage_rate_id" => item.employee_wage_rate_id).compact
@@ -133,12 +133,12 @@ module PayrollSubmissions
       end
 
       employee = @employees[result["employee_id"]]
-      if kind == "owner_pay" && employee && (!employee.active? || !employee.variable_salary?)
+      if kind == "owner_pay" && employee && (!employee.active? || !employee.payroll_compensation_on(@rates_on).variable_salary?)
         @errors[key] << "Choose an active employee with variable salary for owner pay."
       end
       if kind == "extra_hours" && employee
         rate = employee.wage_rates_on(@rates_on).find { |rate| rate.id == integer(row["employee_wage_rate_id"]) }
-        unless employee.active? && employee.hourly_pay_basis? && rate && !rate.rate.nil?
+        unless employee.active? && employee.payroll_compensation_on(@rates_on).hourly_pay_basis? && rate && !rate.rate.nil?
           @errors[key] << "Choose an active employee and their saved job and rate for extra hours."
         else
           result.merge!("employee_wage_rate_id" => rate.id, "wage_rate_label" => rate.label, "wage_rate" => rate.rate.to_s("F"))
