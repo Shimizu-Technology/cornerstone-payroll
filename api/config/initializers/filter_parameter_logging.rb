@@ -11,8 +11,14 @@
 # The second covers the query string in the request-start log line, which
 # Rails filters key by key as written in the URL: bracketed
 # (`payee[contractor][tin]`) or URL-encoded (`payee%5Bcontractor%5D%5Btin%5D`).
+# Staff note bodies and hide reasons may accidentally contain rejected SSNs or
+# account numbers. Filter nested note params (dot-joined paths for parsed JSON
+# and form bodies, plus bracketed query-string keys) without hiding unrelated
+# `body` or `reason` keys on other endpoints.
 Rails.application.config.filter_parameters += [
   :passw, :email, :secret, :token, :ticket, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc,
   :invite_nonce, :code, :state, :upload, /\Afiles?\z/i, /\A(tin|contractor_ein)\z/i,
-  /(?:\[|%5B)(?:tin|contractor_ein)(?:\]|%5D)/i
+  /(?:\[|%5B)(?:tin|contractor_ein)(?:\]|%5D)/i,
+  /(?:\A|\.)(?:employee_)?note\.(?:body|reason|hidden_reason)\z/i,
+  /(?:\A|\[|%5B)(?:employee_)?note(?:\]|%5D)?(?:\[|%5B)(?:body|reason|hidden_reason)(?:\]|%5D)/i
 ]
