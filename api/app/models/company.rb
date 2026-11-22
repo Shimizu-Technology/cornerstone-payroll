@@ -381,5 +381,4 @@ class Company < ApplicationRecord
     EmployeeCompensationChangeService.purge_test_workspace_history!(self)
   end
   private :purge_test_workspace_compensation_history
-
 end
