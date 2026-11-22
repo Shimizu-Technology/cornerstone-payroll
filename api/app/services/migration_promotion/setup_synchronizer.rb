@@ -52,7 +52,7 @@ module MigrationPromotion
       LoanTransaction.where(employee_loan_id: loan_ids).delete_all
       EmployeePayrollField.where(employee_id: all_employee_ids).delete_all
       EmployeeDeduction.where(employee_id: all_employee_ids).delete_all
-      EmployeeWageRate.where(employee_id: mapped_employee_ids).delete_all
+      EmployeeCompensationChangeService.purge_compensation_setup!(mapped_employee_ids)
       EmployeeW4Election.where(employee_id: mapped_employee_ids).delete_all
       EmployeeWorkProfile.where(employee_id: mapped_employee_ids).delete_all
       EmployeeStatusEvent.where(employee_id: mapped_employee_ids).delete_all
@@ -83,9 +83,10 @@ module MigrationPromotion
         target = employee_map[source.id]
         if target
           target.allow_tax_classification_change = true
-          target.update!(attributes)
+          # The rehearsal's compensation history replaces the target's below.
+          EmployeeCompensationChangeService.writing_for(target.id) { target.update!(attributes) }
         else
-          target = Employee.create!(attributes.merge(created_by: actor))
+          target = Employee.create!(attributes.merge(created_by: actor, skip_initial_compensation_history: true))
           employee_map[source.id] = target
         end
       end
@@ -99,7 +100,9 @@ module MigrationPromotion
     def copy_employee_setup!(employee_map, deduction_type_map)
       rehearsal.employees.order(:id).each do |source|
         target = employee_map.fetch(source.id)
-        copy_collection(source.employee_wage_rates, EmployeeWageRate, employee: target)
+        EmployeeCompensationChangeService.copy_history!(source: source, target: target) do
+          copy_collection(source.employee_wage_rates, EmployeeWageRate, employee: target)
+        end
         copy_collection(source.employee_w4_elections, EmployeeW4Election, company: target_company, employee: target)
         copy_collection(source.employee_work_profiles, EmployeeWorkProfile, company: target_company, employee: target)
         copy_collection(source.employee_status_events, EmployeeStatusEvent, company: target_company, employee: target)

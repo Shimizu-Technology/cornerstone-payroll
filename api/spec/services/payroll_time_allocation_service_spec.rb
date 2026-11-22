@@ -152,7 +152,7 @@ RSpec.describe PayrollTimeAllocationService do
   end
 
   it "uses the current per-period override for variable nonexempt salary overtime" do
-    employee.update!(salary_type: "variable", pay_rate: 0)
+    change_compensation!(employee, salary_type: "variable", pay_rate: 0)
     payroll_item.update!(pay_rate: 0, salary_override: 2_000)
     schedule = {
       "sunday" => 0, "monday" => 9, "tuesday" => 9, "wednesday" => 9,

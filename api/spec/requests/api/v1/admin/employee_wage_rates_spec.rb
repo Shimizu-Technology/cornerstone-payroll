@@ -99,14 +99,17 @@ RSpec.describe "Api::V1::Admin::EmployeeWageRates", type: :request do
   end
 
   describe "DELETE /api/v1/admin/employee_wage_rates/:id" do
-    it "deletes the wage rate under the employee lock" do
+    # M3-4: a removed rate is ended on its effective date, never deleted, so
+    # its history and the payroll buckets that used it stay intact.
+    it "ends the wage rate under the employee lock instead of deleting it" do
       rate = employee.employee_wage_rates.create!(label: "Regular", rate: 18, is_primary: true, active: true)
       expect_any_instance_of(Employee).to receive(:with_lock).and_call_original
 
       delete "/api/v1/admin/employee_wage_rates/#{rate.id}"
 
       expect(response).to have_http_status(:ok)
-      expect(EmployeeWageRate.exists?(rate.id)).to eq(false)
+      expect(rate.reload).to have_attributes(active: false, is_primary: false)
+      expect(rate.employee_wage_rate_versions.chronological.last).to have_attributes(active: false, ends_on: nil)
     end
 
     it "returns 404 for a wage rate in another company" do

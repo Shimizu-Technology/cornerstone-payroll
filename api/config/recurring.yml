@@ -24,6 +24,13 @@ production:
     command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
     schedule: every hour at minute 12
 
+  # Activates scheduled pay-rate changes at 00:05 Guam time. Payroll resolves
+  # rates by pay period end date; this refreshes the "today" cache columns.
+  sync_effective_compensation:
+    class: SyncEffectiveCompensationJob
+    queue: default
+    schedule: "5 0 * * * Pacific/Guam"
+
   send_payroll_reminders:
     class: SendPayrollRemindersJob
     queue: default

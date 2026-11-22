@@ -37,7 +37,7 @@ RSpec.describe MigrationPromotion::TargetFingerprint do
     employee
     original = described_class.call(company)
 
-    employee.update!(pay_rate: employee.pay_rate + 1)
+    change_compensation!(employee, pay_rate: employee.pay_rate + 1)
 
     expect(described_class.call(company)).not_to eq(original)
   end

@@ -47,7 +47,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
       ])
     end
 
-    before { rate.update!(rate: "10.50") }
+    before { change_wage_rate!(rate, rate: "10.50") }
 
     it "conserves each frozen tuple and gross through approval and commit" do
       item = apply!(same_rate: true)
@@ -175,7 +175,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
       ])
     end
 
-    before { rate.update!(rate: 100) }
+    before { change_wage_rate!(rate, rate: 100) }
 
     def apply_signed!(**options)
       apply!(source_kinds: %w[correction current], signed_acknowledgement: true,
@@ -252,7 +252,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     end
 
     it "retains three frozen tuples while summing their signed cents through commit" do
-      rate.update!(rate: "10.50")
+      change_wage_rate!(rate, rate: "10.50")
       item = apply!(same_rate: true, source_kinds: %w[current carryover correction], signed_acknowledgement: true)
       captured = item.reload.wage_rate_hours.deep_dup
       item.calculate!
@@ -330,7 +330,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
 
   it "retains captured imported rates when current profiles change" do
     item = apply!
-    carry_rate.update!(rate: 99)
+    change_wage_rate!(carry_rate, rate: 99)
     entry = item.wage_rate_hours.first
     normalized = PayrollWageRateInput.normalize(payroll_item: item, entries: [ entry ])
     expect(normalized.first["rate"]).to eq(entry["rate"])
@@ -364,7 +364,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
       item = apply!
       item.calculate!
       item.employee # A loaded old association cannot hide the changed setup.
-      employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      change_compensation!(employee, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
       assert_source_hold(item, "captured pay basis")
     end
 
@@ -378,7 +378,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
       lifecycle.approve!
       lifecycle.commit!
       saved = item.reload.attributes
-      employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      change_compensation!(employee, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
       expect(described_class.hold_reason(item)).to be_nil
       expect(item.reload.attributes).to eq(saved)
     end
@@ -398,7 +398,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
         item.calculate!
         expect(item.time_tracking_entry_allocations.map(&:earning_snapshot))
           .to all(include("employment_type" => "contractor", "contractor_pay_type" => "hourly"))
-        employee.update!(contractor_pay_type: "flat_fee", pay_rate: 500)
+        change_compensation!(employee, contractor_pay_type: "flat_fee", pay_rate: 500)
         assert_source_hold(item, "captured pay basis")
       end
     end
@@ -418,7 +418,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     item.calculate!
     original = item.reload.attributes
     original_earnings = item.payroll_item_earnings.order(:id).map(&:attributes)
-    employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+    change_compensation!(employee, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
     item.employment_type = employee.employment_type
     item.pay_rate = employee.pay_rate
     expect { item.calculate! }.to raise_error(ArgumentError, /captured pay basis/)
@@ -448,7 +448,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
       item.calculate!
       original = item.reload.attributes
       original_earnings = item.payroll_item_earnings.order(:id).map(&:attributes)
-      employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      change_compensation!(employee, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
       allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(actor)
       expect_any_instance_of(PayrollFieldInputApplier).not_to receive(:apply!)
       expect(NamedPayrollLoanInput).not_to receive(:apply!)
@@ -513,7 +513,7 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
       let(:signed_correction_hours) { -0.01 }
 
       it "conserves the native zero-cent reversal without treating negative zero as changed money" do
-        carry_rate.update!(rate: 0.01)
+        change_wage_rate!(carry_rate, rate: 0.01)
         item = apply!(source_kinds: %w[correction current], mapping_change: { employee_wage_rate_id: carry_rate.id },
           signed_acknowledgement: true)
         item.calculate!

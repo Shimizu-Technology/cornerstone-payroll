@@ -157,7 +157,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         category = import.processed_payload.fetch("rows").first.fetch("categories").first
         if match_path == "saved_preview"
           expect(category.fetch("employee_wage_rate_id")).to eq(rate.id)
-          rate.update!(rate: nil)
+          change_wage_rate!(rate, rate: nil)
         end
         mappings = if match_path == "override"
           [ { source_user_id: "aire-user-1", employee_id: employee.id, wage_rate_mappings: [

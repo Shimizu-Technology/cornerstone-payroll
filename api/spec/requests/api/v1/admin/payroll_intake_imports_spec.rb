@@ -529,7 +529,7 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
     end
 
     it "preserves required variable salary overrides when force overwriting" do
-      alice.update!(employment_type: "salary", salary_type: "variable", pay_rate: 0)
+      change_compensation!(alice, employment_type: "salary", salary_type: "variable", pay_rate: 0)
       create(
         :payroll_item,
         :salary,

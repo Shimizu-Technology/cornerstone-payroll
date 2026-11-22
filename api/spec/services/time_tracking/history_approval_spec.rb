@@ -364,7 +364,7 @@ RSpec.describe TimeTracking::HistoryApproval do
     TimeTrackingEarningChoice.create!(time_tracking_source: source, employee: employee, employee_wage_rate: rate,
       reviewed_by: actor, source_category_key: "solo", rate_snapshot: rate.attributes.slice("id", "employee_id", "label", "rate", "active").as_json)
     expect(instance.send(:find_wage_rate, category, [ rate ], employee_id: employee.id)).to eq([ rate, "accountant_choice" ])
-    rate.update!(rate: 12.35)
+    change_wage_rate!(rate, rate: 12.35)
     expect(instance.send(:find_wage_rate, category, [ rate ], employee_id: employee.id)).to eq([ nil, nil ])
   end
 
@@ -422,7 +422,7 @@ RSpec.describe TimeTracking::HistoryApproval do
     approve_review(page, solo_choices: [ { "employee_id" => employee.id, "employee_wage_rate_id" => rate.id } ])
     choice = TimeTrackingEarningChoice.sole
     expect(choice.current_rate).to eq(rate)
-    rate.update!(rate: 12.35)
+    change_wage_rate!(rate, rate: 12.35)
     expect(choice.reload.current_rate).to be_nil
   end
 

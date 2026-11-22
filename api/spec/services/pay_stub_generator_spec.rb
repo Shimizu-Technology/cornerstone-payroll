@@ -369,7 +369,7 @@ RSpec.describe PayStubGenerator do
     it "keeps earlier components on the statement when they are absent from this paycheck" do
       worker = hourly_worker
       calculated_item(worker, "hourly", Date.new(2026, 1, 15), hours_worked: 80, reported_tips: 150, bonus: 300)
-      worker.update!(employment_type: "salary", pay_rate: 41_234.56, salary_type: "annual", pay_frequency: "biweekly")
+      change_compensation!(worker, employment_type: "salary", pay_rate: 41_234.56, salary_type: "annual", pay_frequency: "biweekly")
       item = calculated_item(worker, "salary", Date.new(2026, 1, 29))
 
       rows = statement_rows(item)
