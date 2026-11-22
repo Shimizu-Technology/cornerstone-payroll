@@ -27,10 +27,14 @@ class StaffRolePolicy
     manage_employee_status: %w[super_admin org_admin admin manager accountant],
     manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
     manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
+    recover_clerk_invitation: %w[super_admin org_admin],
     manage_organization: %w[super_admin org_admin admin],
     # Cost and margin per client from the practice's own staff pay: owners
     # and admins only, never managers or accountants.
     view_client_profitability: %w[super_admin org_admin admin],
+    # Viewing the original body of a hidden staff note is restricted to
+    # platform and organization admins.
+    reveal_hidden_employee_notes: %w[super_admin org_admin],
     manage_platform: %w[super_admin]
   }.freeze
 
@@ -53,8 +57,10 @@ class StaffRolePolicy
     manage_employee_status: "Payroll staff access required to change a worker's status",
     manage_own_aire_account_link: "Payroll staff access required to connect your own AIRE account",
     manage_historical_time_reconciliation: "Historical time reconciliation access required",
+    recover_clerk_invitation: "Organization or platform admin access required",
     manage_organization: "Admin access required",
     view_client_profitability: "Admin access required to see client profitability",
+    reveal_hidden_employee_notes: "Only super admins and organization admins can view hidden staff notes",
     manage_platform: "Super admin access required"
   }.freeze
 
@@ -65,6 +71,7 @@ class StaffRolePolicy
     "api/v1/admin/aire_history_approvals" => :payroll_operations,
     "api/v1/admin/time_tracking_source_health" => :payroll_operations,
     "api/v1/admin/employee_hours_evidence" => :payroll_operations,
+    "api/v1/admin/employee_notes" => :payroll_operations,
     "api/v1/admin/organizations" => :manage_platform,
     "api/v1/admin/users" => :manage_organization,
     "api/v1/admin/user_invitations" => :manage_organization,
@@ -102,6 +109,8 @@ class StaffRolePolicy
   }.freeze
 
   ACTION_CAPABILITIES = {
+    "api/v1/admin/users#lookup_clerk_id" => :recover_clerk_invitation,
+    "api/v1/admin/users#bind_clerk_id" => :recover_clerk_invitation,
     "api/v1/admin/pay_periods#corrected_hours" => :payroll_operations,
     "api/v1/admin/pay_periods#connect_corrected_hours" => :payroll_operations,
     "api/v1/admin/annual_retirement_limits#create" => :manage_platform,
@@ -206,6 +215,7 @@ class StaffRolePolicy
     "api/v1/admin/employees#deactivate" => :manage_employee_status,
     "api/v1/admin/employees#reactivate" => :manage_employee_status,
     "api/v1/admin/employees#transition_tax_classification" => :manage_platform,
+    "api/v1/admin/employee_notes#original" => :reveal_hidden_employee_notes,
     "api/v1/admin/employee_work_profiles#create" => :manage_client_configuration,
     "api/v1/admin/historical_imports#preview" => :manage_client_configuration,
     "api/v1/admin/historical_imports#apply" => :manage_client_configuration,

@@ -53,6 +53,10 @@ Rails.application.routes.draw do
         end
       end
 
+      namespace :employee, module: :employee_portal do
+        get :context, to: "context#show"
+      end
+
       namespace :client do
         resource :employee_intake_settings, only: :show
         resources :employees, only: [ :index, :show, :create, :update ] do
@@ -231,6 +235,8 @@ Rails.application.routes.draw do
             post :activate
             post :deactivate
             post :resend_invitation
+            post :lookup_clerk_id
+            post :bind_clerk_id
             post :move_practice_copy
           end
         end
@@ -354,6 +360,12 @@ Rails.application.routes.draw do
           resources :retirement_elections, only: [ :index, :create ], controller: :employee_retirement_elections
           resources :retirement_year_inputs, only: [ :index, :create ], controller: :employee_retirement_year_inputs
           resources :document_requirements, only: [ :index, :update ], controller: :employee_document_requirements
+          resources :notes, only: [ :index, :create ], controller: :employee_notes do
+            member do
+              patch :hide
+              get :original
+            end
+          end
           resources :time_records, only: [ :index, :create, :update ], controller: :employee_time_records
           resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
             collection do

@@ -94,6 +94,7 @@ class Employee < ApplicationRecord
           dependent: :restrict_with_error
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
+  has_many :employee_account_links, dependent: :restrict_with_error
   has_many :employee_deductions, dependent: :destroy
   has_many :deduction_types, through: :employee_deductions
   has_many :employee_payroll_fields, dependent: :destroy
@@ -112,6 +113,7 @@ class Employee < ApplicationRecord
   has_many :employee_change_requests, dependent: :restrict_with_error
   has_many :employee_document_requirements, dependent: :restrict_with_error
   has_many :employee_document_requirement_events, dependent: :restrict_with_error
+  has_many :employee_notes, dependent: :restrict_with_error
   has_many :historical_workers, dependent: :restrict_with_error
   has_many :historical_paychecks, dependent: :restrict_with_error
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error

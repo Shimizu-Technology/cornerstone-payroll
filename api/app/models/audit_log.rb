@@ -68,7 +68,8 @@ class AuditLog < ApplicationRecord
       actor_email: actor&.email,
       actor_role: actor&.role
     )
-    Current.domain_audit_recorded = true unless action == "authentication#signed_in"
+    # Authentication can happen before a separate domain action in the same request.
+    Current.domain_audit_recorded = true unless action.start_with?("authentication#")
     log
   end
 

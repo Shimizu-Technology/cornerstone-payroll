@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_22_060003) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -669,6 +669,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_060003) do
     t.integer "regular_pay_threshold", default: 3, null: false
     t.index [ "active_printer_profile_id" ], name: "index_companies_on_active_printer_profile_id"
     t.index [ "created_by_id" ], name: "index_companies_on_created_by_id"
+    t.index [ "id", "payroll_environment" ], name: "idx_companies_payroll_environment_key", unique: true
     t.index [ "ein" ], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
     t.index [ "employee_intake_enabled_by_id" ], name: "index_companies_on_employee_intake_enabled_by_id"
     t.index [ "id", "organization_id" ], name: "index_companies_on_id_and_organization_id", unique: true
@@ -876,6 +877,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_060003) do
     t.index [ "user_id" ], name: "index_direct_deposit_payment_confirmations_on_user_id"
   end
 
+  create_table "employee_account_links", force: :cascade do |t|
+    t.bigint "user_id"
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.string "payroll_environment", default: "live", null: false
+    t.string "status", default: "invited", null: false
+    t.string "invite_token_digest"
+    t.datetime "invite_expires_at"
+    t.bigint "invited_by_id"
+    t.datetime "activated_at"
+    t.datetime "former_at"
+    t.datetime "former_access_until"
+    t.datetime "revoked_at"
+    t.bigint "revoked_by_id"
+    t.string "revoked_reason"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
+    t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY ((ARRAY['invited'::character varying, 'active'::character varying])::text[]))"
+    t.index [ "employee_id" ], name: "index_employee_account_links_on_employee_id"
+    t.index [ "invite_token_digest" ], name: "index_employee_account_links_on_invite_token_digest", unique: true
+    t.index [ "invited_by_id" ], name: "index_employee_account_links_on_invited_by_id"
+    t.index [ "revoked_by_id" ], name: "index_employee_account_links_on_revoked_by_id"
+    t.index [ "user_id" ], name: "index_employee_account_links_on_user_id"
+    t.check_constraint "payroll_environment::text = 'live'::text", name: "employee_account_links_live_only"
+    t.check_constraint "status::text = ANY (ARRAY['invited'::character varying, 'active'::character varying, 'former'::character varying, 'revoked'::character varying]::text[])", name: "employee_account_links_status_check"
+  end
+
   create_table "employee_change_requests", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -1025,6 +1054,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_060003) do
     t.check_constraint "status::text = ANY (ARRAY['active'::character varying::text, 'paid_off'::character varying::text, 'suspended'::character varying::text, 'stopped'::character varying::text])", name: "employee_loans_status_check"
     t.check_constraint "tracking_mode::text = 'balance_tracked'::text AND original_amount IS NOT NULL AND original_amount > 0::numeric AND opening_balance IS NOT NULL AND opening_balance > 0::numeric AND current_balance IS NOT NULL AND current_balance >= 0::numeric AND balance_as_of IS NOT NULL AND balance_source IS NOT NULL AND status::text <> 'stopped'::text OR tracking_mode::text = 'recurring_no_balance'::text AND original_amount IS NULL AND opening_balance IS NULL AND current_balance IS NULL AND balance_as_of IS NULL AND balance_source IS NULL AND principal_amount_known = false AND status::text <> 'paid_off'::text", name: "employee_loans_tracking_shape"
     t.check_constraint "tracking_mode::text = ANY (ARRAY['balance_tracked'::character varying::text, 'recurring_no_balance'::character varying::text])", name: "employee_loans_tracking_mode_check"
+  end
+
+  create_table "employee_notes", force: :cascade do |t|
+    t.text "body", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.bigint "employee_id", null: false
+    t.datetime "hidden_at"
+    t.bigint "hidden_by_id"
+    t.text "hidden_reason"
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "employee_id", "created_at", "id" ], name: "index_employee_notes_on_company_employee_created"
+    t.index [ "created_by_id" ], name: "index_employee_notes_on_created_by_id"
+    t.index [ "employee_id" ], name: "index_employee_notes_on_employee_id"
+    t.index [ "hidden_by_id" ], name: "index_employee_notes_on_hidden_by_id"
+    t.check_constraint "char_length(btrim(body)) >= 1 AND char_length(body) <= 2000", name: "employee_notes_body_length"
+    t.check_constraint "hidden_at IS NULL AND hidden_by_id IS NULL AND hidden_reason IS NULL OR hidden_at IS NOT NULL AND hidden_by_id IS NOT NULL AND hidden_reason IS NOT NULL AND char_length(btrim(hidden_reason)) >= 1 AND char_length(hidden_reason) <= 500", name: "employee_notes_hidden_fields_consistent"
   end
 
   create_table "employee_payroll_fields", force: :cascade do |t|
@@ -4619,6 +4666,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_060003) do
     t.integer "role", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "workos_id"
+    t.string "invite_nonce_digest"
+    t.datetime "invite_nonce_expires_at"
     t.index [ "clerk_id" ], name: "index_users_on_clerk_id", unique: true
     t.index [ "company_id" ], name: "index_users_on_company_id"
     t.index [ "email" ], name: "index_users_on_email", unique: true
@@ -4865,6 +4914,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_060003) do
   add_foreign_key "departments", "companies"
   add_foreign_key "direct_deposit_payment_confirmations", "payroll_items"
   add_foreign_key "direct_deposit_payment_confirmations", "users"
+  add_foreign_key "employee_account_links", "companies", column: [ "company_id", "payroll_environment" ], primary_key: [ "id", "payroll_environment" ], name: "fk_employee_account_links_live_company"
+  add_foreign_key "employee_account_links", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_account_links_employee"
+  add_foreign_key "employee_account_links", "users"
+  add_foreign_key "employee_account_links", "users", column: "invited_by_id"
+  add_foreign_key "employee_account_links", "users", column: "revoked_by_id"
   add_foreign_key "employee_change_requests", "companies"
   add_foreign_key "employee_change_requests", "employees"
   add_foreign_key "employee_change_requests", "users", column: "requested_by_id"
@@ -4889,6 +4943,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_060003) do
   add_foreign_key "employee_loans", "employees"
   add_foreign_key "employee_loans", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_loans", "users", column: "stopped_by_id", on_delete: :nullify
+  add_foreign_key "employee_notes", "companies"
+  add_foreign_key "employee_notes", "employees"
+  add_foreign_key "employee_notes", "users", column: "created_by_id"
+  add_foreign_key "employee_notes", "users", column: "hidden_by_id"
   add_foreign_key "employee_payroll_fields", "employee_loans"
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
