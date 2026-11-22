@@ -42,7 +42,7 @@ module PayrollImport
     # @param excel_records [Array<Hash>, nil] pre-parsed Excel rows (optional)
     # @return [Hash] preview data with matched employees
     def preview(pdf_file: nil, excel_file: nil, pdf_records: nil, excel_records: nil)
-      employees = Employee.active.where(company_id: company_id)
+      employees = Employee.active.where(company_id: company_id).with_compensation_history
       employees_by_id = employees.index_by(&:id)
       matcher = NameMatcher.new(employees)
 
@@ -241,7 +241,7 @@ module PayrollImport
       results = { success: [], skipped: [], errors: [] }
 
       employee_ids = matched.map { |row| row[:employee_id] }.compact.uniq
-      employees_by_id = Employee.where(id: employee_ids, company_id: company_id).index_by(&:id)
+      employees_by_id = Employee.where(id: employee_ids, company_id: company_id).with_compensation_history.index_by(&:id)
       rows_by_employee_id = matched.index_by { |row| row[:employee_id].to_i }
       excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 

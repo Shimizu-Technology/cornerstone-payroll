@@ -359,6 +359,8 @@ class Employee < ApplicationRecord
     first if first && date < first.effective_on && (first.source == "backfill" || (baseline && first.effective_on <= baseline))
   end
 
+  scope :with_compensation_history, -> { preload(:employee_compensation_changes, :employee_wage_rates, :employee_wage_rate_versions) }
+
   # Pay-rate or wage-rate versions that start after the first day of the
   # range and on or before its last day: a change in the middle of a period.
   # The initial setup (a timeline's first version from the employee's start)
@@ -366,11 +368,12 @@ class Employee < ApplicationRecord
   def compensation_changes_within(start_date, end_date)
     range = (start_date.to_date + 1)..end_date.to_date
     timeline = compensation_change_timeline
-    baseline = timeline.first&.effective_on
+    baseline = timeline.find { |version| !version.historical_correction? }
     wage_changes = wage_rate_versions_by_row.values.flat_map do |versions|
-      versions.first.effective_on <= baseline.to_date ? versions.drop(1) : versions if baseline
-    end.compact
-    (timeline.drop(1) + wage_changes).select { |version| range.cover?(version.effective_on) }.sort_by(&:effective_on)
+      initial_wage = versions.find { |version| !version.historical_correction? }
+      initial_wage && baseline && initial_wage.effective_on <= baseline.effective_on ? versions - [ initial_wage ] : versions
+    end
+    (timeline.reject { |version| version == baseline } + wage_changes).select { |version| range.cover?(version.effective_on) }.sort_by(&:effective_on)
   end
 
   def hourly_pay_basis?

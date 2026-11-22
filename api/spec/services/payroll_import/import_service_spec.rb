@@ -7,6 +7,19 @@ RSpec.describe PayrollImport::ImportService do
   let(:pay_period) { create(:pay_period, company: company) }
   let(:service) { described_class.new(pay_period) }
 
+  it "bulk loads compensation for a 100-person Revel preview" do
+    records = 100.times.map do |index|
+      employee = create(:employee, company: company, first_name: "Revel", last_name: "Worker#{index}", pay_rate: 18)
+      employee.employee_wage_rates.create!(label: "Regular", rate: 18, is_primary: true)
+      { employee_name: "#{employee.last_name}, #{employee.first_name}", regular_hours: 8, overtime_hours: 0 }
+    end
+
+    queries = compensation_read_queries do
+      expect(service.preview(pdf_records: records, excel_records: [])[:matched].size).to eq(100)
+    end
+    expect(queries.size).to eq(3)
+  end
+
   describe "variable pay absent from source files" do
     let!(:owner) { create(:employee, company: company, employment_type: "salary", salary_type: "variable", pay_rate: 225_000) }
 

@@ -217,6 +217,8 @@ RSpec.describe TimeTracking::ImportPreviewService do
       }
       allow_any_instance_of(TimeTracking::Client).to receive(:time_summary).and_return(raw_payload)
 
+      change_compensation!(employee, effective_on: pay_period.end_date + 1, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      expect(employee.reload).to be_salary
       import = described_class.new(pay_period: pay_period, source: source).call
       category = import.processed_payload.dig("rows", 0, "categories", 0)
 

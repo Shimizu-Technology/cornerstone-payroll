@@ -49,7 +49,7 @@ module TimeTracking
       end
     end
 
-    def self.validate!(item, calculated: false)
+    def self.validate!(item, calculated: false, employee: nil)
       rows = item.persisted? ? item.time_tracking_entry_allocations.includes(:time_tracking_import).to_a : []
       if rows.empty? && item.pay_period&.run_purpose == "adjustment" &&
           TimeTrackingLateHoursRun.where(adjustment_pay_period_id: item.pay_period_id).where.not(applied_at: nil).exists?
@@ -73,7 +73,12 @@ module TimeTracking
         return true
       end
       raise ArgumentError, MESSAGE unless captured.size == rows.size
-      raise ArgumentError, PAY_BASIS_MESSAGE if pay_basis_changed?(item, captured)
+      current = if employee
+        pay_basis_on(employee, item.pay_period.end_date) if employee.id == item.employee_id && employee.company_id == item.company_id
+      else
+        current_pay_basis(item)
+      end
+      raise ArgumentError, PAY_BASIS_MESSAGE if pay_basis_changed?(item, captured, current: current)
       captured.map(&:time_tracking_import).uniq(&:id).each do |import|
         raw = import.raw_payload
         source = import.time_tracking_source
