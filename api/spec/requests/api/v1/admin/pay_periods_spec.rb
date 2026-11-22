@@ -54,6 +54,19 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(1)
   end
 
+  it "keeps the non-user current actor in automatic audit logs for a dual-role request" do
+    actor = AuditActor.kiosk(id: "lobby", name: "Lobby kiosk")
+    allow(Current).to receive(:actor).and_return(actor)
+
+    post "/api/v1/admin/pay_periods", params: { pay_period: {
+      start_date: pay_period.end_date + 1.day, end_date: pay_period.end_date + 14.days, pay_date: pay_period.end_date + 17.days
+    } }
+
+    expect(response).to have_http_status(:created)
+    expect(AuditLog.find_by!(action: "pay_periods#create", company: company))
+      .to have_attributes(user_id: nil, actor_type: "kiosk", actor_id: "lobby", actor_name: "Lobby kiosk")
+  end
+
   describe "check numbering permissions and summary" do
     it "rejects a starting number from an accountant without changing the company" do
       admin_user.update!(role: "accountant")
@@ -112,6 +125,21 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(period.dig("lifecycle", "committed", "actor_name")).to eq("Pay Period Admin")
       expect(period.dig("lifecycle", "committed")).not_to have_key("actor_id")
       expect(period.dig("lifecycle", "committed")).not_to have_key("actor_email")
+    end
+
+    it "shows the snapshot actor for lifecycle and pay-date corrections without a user" do
+      actor = AuditActor.system_job("Payroll maintenance")
+      AuditLog.record!(actor: actor, company_id: company.id, action: "pay_periods#commit",
+        record_type: "pay_periods", record_id: pay_period.id)
+      AuditLog.record!(actor: actor, company_id: company.id, action: "correct_committed_pay_date",
+        record_type: "PayPeriod", record_id: pay_period.id)
+
+      get "/api/v1/admin/pay_periods"
+
+      expect(response).to have_http_status(:ok)
+      period = response.parsed_body.fetch("pay_periods").first
+      expect(period.dig("lifecycle", "committed", "actor_name")).to eq(actor.name)
+      expect(period.dig("pay_date_corrections", 0, "corrected_by_name")).to eq(actor.name)
     end
 
     it "does not expose creator names from unrelated companies" do

@@ -1901,7 +1901,7 @@ module Api
             payroll_items_updated: metadata["payroll_items_updated"],
             non_employee_checks_updated: metadata["non_employee_checks_updated"],
             corrected_at: log.created_at,
-            corrected_by_name: log.user&.name
+            corrected_by_name: log.user&.name || log.actor_name
           }
         end
 

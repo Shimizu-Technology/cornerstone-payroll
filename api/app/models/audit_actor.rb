@@ -4,7 +4,12 @@ class AuditActor < Data.define(:type, :id, :name, :email, :role)
   TYPES = %w[staff_user client_user employee operator source_system source_worker kiosk system_job].freeze
 
   def self.for_user(user)
-    new(type: user.client? ? "client_user" : "staff_user", id: user.id.to_s, name: user.name,
+    type = case user.role
+    when "client" then "client_user"
+    when "employee" then "employee"
+    else "staff_user"
+    end
+    new(type: type, id: user.id.to_s, name: user.name,
       email: user.email, role: user.role)
   end
 

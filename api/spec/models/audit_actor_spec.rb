@@ -13,6 +13,12 @@ RSpec.describe AuditActor do
     expect(described_class.for_user(client)).to have_attributes(type: "client_user", role: "client")
   end
 
+  it "classifies an employee-role user as an employee" do
+    user = create(:user, role: :employee)
+
+    expect(described_class.for_user(user)).to have_attributes(type: "employee", id: user.id.to_s, role: "employee")
+  end
+
   it "identifies employees and kiosks without a User" do
     employee = create(:employee)
 

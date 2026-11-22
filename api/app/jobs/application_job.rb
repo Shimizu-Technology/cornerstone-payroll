@@ -1,6 +1,7 @@
 class ApplicationJob < ActiveJob::Base
-  around_perform do |job, perform|
-    Current.with_isolated_actor(AuditActor.system_job(job), &perform)
+  def perform_now
+    # Active Job handles retries and discards after the perform callbacks unwind.
+    Current.with_isolated_actor(AuditActor.system_job(self)) { super }
   end
 
   # Automatically retry jobs that encountered a deadlock

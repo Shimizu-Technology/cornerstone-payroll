@@ -38,6 +38,17 @@ RSpec.describe "Clerk Authentication", type: :request do
       expect(JSON.parse(response.body)["error"]).to eq("Invalid or expired token")
     end
 
+    it "audits unauthenticated portal failures as system events without resource details" do
+      get "/api/v1/client/portal_threads/123456", headers: { "X-Request-Id" => "unauthenticated-portal" }
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(AuditLog.find_by!(action: "portal_access#failed", request_id: "unauthenticated-portal")).to have_attributes(
+        user_id: nil, company_id: nil, record_id: nil, subject_name: nil,
+        actor_type: "system_job", actor_name: "Portal Access", event_category: "security",
+        metadata: { "status" => 401, "reason" => "request_failed", "operation" => "show" }
+      )
+    end
+
     it "rejects requests with malformed Authorization header" do
       get "/api/v1/admin/employees", headers: { "Authorization" => "NotBearer token" }
       expect(response).to have_http_status(:unauthorized)

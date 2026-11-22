@@ -17,9 +17,13 @@ module TestWorkspace
         # update_columns skips the model callback, so dispatch revocation explicitly.
         user.update_columns(active: false, updated_at: Time.current)
         PayrollAccess::RevocationDispatcher.call(user)
-        AuditLog.record!(actor: Current.actor || AuditActor.system_job(name), organization_id: user.organization_id, company_id: user.practice_company_id,
-          action: "test_workspace#portal_access_deactivated", record_type: "users", record_id: user.id,
-          metadata: { reason: "practice_copy_unavailable_or_access_revoked" }, event_category: "security")
+        actor = Current.actor
+        actor = AuditActor.system_job(name) unless actor&.type == "system_job"
+        Current.set(domain_audit_recorded: nil) do
+          AuditLog.record!(actor: actor, organization_id: user.organization_id, company_id: user.practice_company_id,
+            action: "test_workspace#portal_access_deactivated", record_type: "users", record_id: user.id,
+            metadata: { reason: "practice_copy_unavailable_or_access_revoked" }, event_category: "security")
+        end
         true
       end
       revoke_pending_invitation!(user) if closed
