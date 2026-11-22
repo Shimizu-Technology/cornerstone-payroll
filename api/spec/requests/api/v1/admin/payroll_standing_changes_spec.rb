@@ -21,6 +21,30 @@ RSpec.describe "Every-period client change settings", type: :request do
     expect(AuditLog.where(record_type: "PayrollStandingChange", record_id: id).last).to have_attributes(company_id: company.id)
   end
 
+  it "loads dated compensation and wage rates in batches for standing defaults" do
+    6.times do
+      employee = create(:employee, company: company)
+      wage_rate = employee.employee_wage_rates.create!(label: "Regular", rate: 15, is_primary: true)
+      PayrollStandingChange.create!(company: company, employee: employee, employee_wage_rate: wage_rate, kind: "extra_hours")
+    end
+
+    queries = []
+    observer = lambda do |*args|
+      event = args.last
+      sql = event.fetch(:sql)
+      queries << sql if sql.match?(/\bFROM "(employees|employee_compensation_changes|employee_wage_rates|employee_wage_rate_versions)"/)
+    end
+
+    ActiveSupport::Notifications.subscribed(observer, "sql.active_record") { get url }
+
+    expect(response).to have_http_status(:ok)
+    defaults = response.parsed_body.fetch("defaults")
+    expect(defaults.size).to eq(6)
+    expect(defaults.pluck("availability_error")).to all(be_nil)
+    # One batch per table for defaults and one for the employee picker.
+    expect(queries.size).to be <= 8
+  end
+
   it "keeps legacy defaults optional and requires newly configured fields only when requested" do
     legacy = PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay")
     expect(legacy).not_to be_required
