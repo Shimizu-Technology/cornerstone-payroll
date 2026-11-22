@@ -132,6 +132,8 @@ export interface EmployeeWageRateVersion {
 }
 
 export interface EmployeeCompensationHistory {
+  revision?: string;
+  can_correct?: boolean;
   effective_dates: {
     next_uncommitted_period: string;
     today: string;
@@ -647,6 +649,8 @@ export interface EmployeeFormData {
   compensation_effective_on?: string;
   compensation_change_reason?: string;
   compensation_historical_correction?: boolean;
+  compensation_revision?: string;
+  compensation_wage_rate_edits?: Array<Partial<Pick<EmployeeWageRate, 'id' | 'label' | 'rate' | 'is_primary' | 'active'>> & { remove?: boolean }>;
   retirement_rate: number;
   roth_retirement_rate: number;
   employer_retirement_match_rate?: number;
@@ -1387,6 +1391,7 @@ export interface PayPeriod {
   company_pay_schedule_id?: number | null;
   company_workweek_id?: number | null;
   compliance_warnings?: string[];
+  compensation_warnings?: string[];
   annual_fica_review_note?: string | null;
   confirmed_workweek_adoption?: {
     available: boolean;

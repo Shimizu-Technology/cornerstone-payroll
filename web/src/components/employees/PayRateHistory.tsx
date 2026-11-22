@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
@@ -18,6 +21,7 @@ const SOURCE_LABELS: Record<string, string> = {
   classification_transition: 'Classification change',
   one_off_payee: '1099 payee',
   copied_setup: 'Copied setup',
+  rollout_reconciliation: 'Release reconciliation',
   data_config_task: 'Data setup',
 };
 
@@ -57,7 +61,18 @@ function wageRateText(version: EmployeeWageRateVersion): string {
 
 function payRateHistoryRows(history: EmployeeCompensationHistory): HistoryRow[] {
   const rows: HistoryRow[] = [
-    ...history.pay_rate_changes.map((change) => ({
+    ...history.pay_rate_changes.filter((change, index) => {
+      const prior = history.pay_rate_changes[index + 1];
+      const sameBasis = !prior || (prior.employment_type === change.employment_type && prior.salary_type === change.salary_type
+        && prior.pay_frequency === change.pay_frequency && prior.contractor_pay_type === change.contractor_pay_type);
+      const hourly = change.employment_type === 'hourly' || (change.employment_type === 'contractor' && change.contractor_pay_type === 'hourly');
+      const active = history.wage_rate_versions.filter((rate) => rate.active && rate.effective_on <= change.effective_on
+        && (!rate.ends_on || rate.ends_on >= change.effective_on));
+      const duplicate = active.length === 1 && active[0].effective_on === change.effective_on
+        && active[0].rate !== null && Number(active[0].rate) === Number(change.pay_rate)
+        && (active[0].reason === change.reason || (active[0].source === 'backfill' && change.source === 'backfill'));
+      return !(sameBasis && hourly && duplicate);
+    }).map((change) => ({
       key: `pay-${change.id}`,
       effectiveOn: change.effective_on,
       endsOn: change.ends_on,
@@ -101,7 +116,29 @@ function StatusBadges({ row }: { row: HistoryRow }) {
   );
 }
 
-export function PayRateHistory({ history }: { history: EmployeeCompensationHistory }) {
+export function PayRateHistory({ history, onCancel }: {
+  history: EmployeeCompensationHistory;
+  onCancel?: (date: string, reason: string) => Promise<void>;
+}) {
+  const [cancellation, setCancellation] = useState<{ date: string; reason: string } | null>(null);
+  const [cancelError, setCancelError] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const scheduledDates = [...new Set([...history.pay_rate_changes, ...history.wage_rate_versions]
+    .filter((version) => version.status === 'scheduled').map((version) => version.effective_on))].sort();
+
+  const confirmCancellation = async () => {
+    if (!onCancel || !cancellation?.reason.trim()) return;
+    setCancelling(true);
+    setCancelError('');
+    try {
+      await onCancel(cancellation.date, cancellation.reason.trim());
+      setCancellation(null);
+    } catch (error) {
+      setCancelError(error instanceof Error ? error.message : 'Unable to cancel this scheduled change.');
+    } finally {
+      setCancelling(false);
+    }
+  };
   const rows = payRateHistoryRows(history);
   if (rows.length === 0) return null;
 
@@ -114,16 +151,41 @@ export function PayRateHistory({ history }: { history: EmployeeCompensationHisto
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {onCancel && scheduledDates.length > 0 && (
+          <div className="mb-4 flex flex-wrap gap-2">
+            {scheduledDates.map((date) => (
+              <Button key={date} type="button" variant="outline" size="sm" disabled={cancelling}
+                onClick={() => { setCancelError(''); setCancellation({ date, reason: '' }); }}>
+                Cancel change for {formatDate(date)}
+              </Button>
+            ))}
+          </div>
+        )}
+        {cancellation && (
+          <fieldset className="mb-4 space-y-2 rounded-lg border border-neutral-200 p-3">
+            <legend className="px-1 text-sm font-semibold">Cancel all pay changes for {formatDate(cancellation.date)}</legend>
+            <label className="block text-sm" htmlFor="scheduled-pay-cancellation-reason">Reason for cancelling</label>
+            <Input id="scheduled-pay-cancellation-reason" value={cancellation.reason} disabled={cancelling}
+              onChange={(event) => setCancellation({ ...cancellation, reason: event.target.value })} />
+            {cancelError && <p className="text-sm text-danger-600" role="alert">{cancelError}</p>}
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" disabled={!cancellation.reason.trim() || cancelling} onClick={() => void confirmCancellation()}>
+                {cancelling ? 'Cancelling…' : 'Confirm cancellation'}
+              </Button>
+              <Button type="button" variant="outline" disabled={cancelling} onClick={() => setCancellation(null)}>Keep scheduled change</Button>
+            </div>
+          </fieldset>
+        )}
         <div className="space-y-3 sm:hidden">
           {rows.map((row) => (
             <MobileRecordCard key={row.key} tone={row.status === 'current' ? 'primary' : 'default'}>
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <p className="text-sm font-semibold text-neutral-900">{row.change}</p>
+                <p className="min-w-0 break-words text-sm font-semibold text-neutral-900">{row.change}</p>
                 <StatusBadges row={row} />
               </div>
               <div className="mt-3 grid grid-cols-1 gap-3">
                 <MobileField label="In effect" value={dates(row)} />
-                <MobileField label="Reason" value={row.reason} />
+                <MobileField label="Reason" value={<span className="break-words">{row.reason}</span>} />
                 <MobileField label="Recorded by" value={sourceText(row)} />
               </div>
             </MobileRecordCard>
