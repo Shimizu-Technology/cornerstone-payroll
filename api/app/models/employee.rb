@@ -307,7 +307,7 @@ class Employee < ApplicationRecord
   def compensation_on(date)
     date = date.to_date
     changes = compensation_change_timeline
-    changes.find { |change| change.covers?(date) } || (changes.first if changes.first && date < changes.first.effective_on)
+    changes.find { |change| change.covers?(date) } || changes.find { |change| !change.historical_correction? && date < change.effective_on }
   end
 
   def payroll_rate_on(date)
@@ -352,7 +352,7 @@ class Employee < ApplicationRecord
 
     first = versions.find { |version| !version.historical_correction? }
     baseline = compensation_change_timeline.find { |version| !version.historical_correction? }&.effective_on
-    first if first && date < first.effective_on && baseline && first.effective_on <= baseline
+    first if first && date < first.effective_on && (first.source == "backfill" || (baseline && first.effective_on <= baseline))
   end
 
   # Pay-rate or wage-rate versions that start after the first day of the
