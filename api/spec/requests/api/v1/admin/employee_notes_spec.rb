@@ -208,6 +208,19 @@ RSpec.describe "Api::V1::Admin::EmployeeNotes", type: :request do
 
       expect(response).to have_http_status(:bad_request)
     end
+
+    it "rejects a note param that is a string or an array" do
+      [ "just a string", [ "array" ] ].each do |malformed|
+        expect {
+          post "/api/v1/admin/employees/#{employee.id}/notes",
+               params: { note: malformed },
+               headers: headers,
+               as: :json
+        }.not_to change(EmployeeNote, :count)
+
+        expect(response).to have_http_status(:bad_request)
+      end
+    end
   end
 
   describe "PATCH /api/v1/admin/employees/:employee_id/notes/:id/hide" do
@@ -291,6 +304,18 @@ RSpec.describe "Api::V1::Admin::EmployeeNotes", type: :request do
 
       expect(response).to have_http_status(:bad_request)
       expect(note.reload).not_to be_hidden
+    end
+
+    it "rejects a note param that is a string or an array" do
+      [ "just a string", [ "array" ] ].each do |malformed|
+        patch "/api/v1/admin/employees/#{employee.id}/notes/#{note.id}/hide",
+              params: { note: malformed },
+              headers: headers,
+              as: :json
+
+        expect(response).to have_http_status(:bad_request)
+        expect(note.reload).not_to be_hidden
+      end
     end
   end
 

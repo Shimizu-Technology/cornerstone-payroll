@@ -39,6 +39,8 @@ export function EmployeeNotesPanel({
   const listPendingRef = useRef(false);
   // True once the full list has loaded for the current scope.
   const listLoadedRef = useRef(false);
+  // Mirrors the rendered list so a create response can be deduplicated against it.
+  const notesRef = useRef<EmployeeNote[]>([]);
 
   const [notes, setNotes] = useState<EmployeeNote[]>([]);
   const [listMeta, setListMeta] = useState<EmployeeNotesListMeta | null>(null);
@@ -58,6 +60,10 @@ export function EmployeeNotesPanel({
   const [revealedBodies, setRevealedBodies] = useState<Record<number, string>>({});
   const [revealingIds, setRevealingIds] = useState<Record<number, boolean>>({});
   const [revealErrors, setRevealErrors] = useState<Record<number, string>>({});
+
+  useLayoutEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
 
   useLayoutEffect(() => {
     scopeRef.current = scope;
@@ -135,16 +141,19 @@ export function EmployeeNotesPanel({
       listPendingRef.current = false;
       setLoading(false);
       setLoadError(null);
-      setNotes((current) => [response.data, ...current]);
-      setListMeta((current) => (
-        current
-          ? {
-            ...current,
-            returned_count: current.returned_count + 1,
-            total_count: current.total_count + 1,
-          }
-          : current
-      ));
+      // The list may already include the new note if it loaded after the create committed.
+      if (!notesRef.current.some((item) => item.id === response.data.id)) {
+        setNotes((current) => [response.data, ...current]);
+        setListMeta((current) => (
+          current
+            ? {
+              ...current,
+              returned_count: current.returned_count + 1,
+              total_count: current.total_count + 1,
+            }
+            : current
+        ));
+      }
       setDraftBody('');
       if (reloadList) void loadNotes();
     } catch (caught) {
