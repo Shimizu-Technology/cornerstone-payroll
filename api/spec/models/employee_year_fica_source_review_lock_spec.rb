@@ -15,7 +15,7 @@ RSpec.describe EmployeeYearFicaSourceReview do
   end
 
   after(:context) do
-    @employee.employee_compensation_changes.delete_all
+    EmployeeCompensationChange.where(employee_id: @employee.id).delete_all
     @employee.destroy!
     @department.destroy!
     @actor.destroy!
