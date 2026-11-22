@@ -6,7 +6,7 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
   let!(:actor) { create(:user, role: "super_admin", email: "actor@example.test", clerk_id: "user_actor") }
   let!(:invitee) do
     create(:user, company: actor.company, organization: actor.organization,
-      email: "invitee@example.test", clerk_id: "user_invitee", invitation_status: "pending")
+      email: "invitee@example.test", clerk_id: "pending_invitee", invitation_status: "pending")
   end
 
   around do |example|
@@ -35,7 +35,7 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
   def request_invitation(path)
     case path
     when :create_user
-      post "/api/v1/admin/users", params: { user: { email: "new@example.test", name: "New User", role: "employee" } }
+      post "/api/v1/admin/users", params: { user: { email: "new@example.test", name: "New User", role: "accountant" } }
     when :resend
       post "/api/v1/admin/users/#{invitee.id}/resend_invitation"
     when :create_organization
@@ -56,7 +56,7 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
 
     it "reports actual staging capture for #{path}, without queueing or contacting Resend" do
       ENV["DEPLOYMENT_ENV"] = "staging"
-      ENV["STAGING_TESTER_BINDINGS"] = [ actor, invitee ].map { |user| { user_id: user.id, email: user.email, clerk_subject: user.clerk_id } }.to_json
+      ENV["STAGING_TESTER_BINDINGS"] = [ actor, invitee ].map { |user| { user_id: user.id, email: user.email, clerk_subject: user == invitee ? "user_invitee" : user.clerk_id } }.to_json
       expect(SendUserInviteEmailJob).not_to receive(:perform_later)
       request_invitation(path)
       expect(response.parsed_body).to include("invitation_delivery_status" => "captured", "invitation_sent" => false, "invitation_error" => nil)
