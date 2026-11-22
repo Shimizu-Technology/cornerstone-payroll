@@ -90,7 +90,7 @@ RSpec.describe "Api::V1::Admin::EmployeeChangeRequests", type: :request do
       expect(response).to have_http_status(:ok)
       expect(employee.reload.pay_rate.to_f).to eq(23.5)
 
-      change_compensation!(employee, pay_rate: 31.25)
+      change_compensation!(employee, effective_on: PayrollBusinessClock.today, pay_rate: 31.25)
 
       patch "/api/v1/admin/employee_change_requests/#{change_request.id}/approve",
         params: { review_notes: "Second review" }

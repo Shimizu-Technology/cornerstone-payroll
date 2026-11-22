@@ -59,7 +59,10 @@ class PayrollWageRateInput
       end
       rate = rated_jobs[id.to_s]
       unless saved || rate
-        raise ArgumentError, "Wage rate is missing or inactive for this employee on the pay period end date"
+        unless employee.employee_wage_rates.exists?(id: id)
+          raise ArgumentError, "Wage rate does not belong to this employee"
+        end
+        raise ArgumentError, "Inactive wage rate was not part of this payroll's original rate snapshot"
       end
       if saved && BigDecimal(data["rate"].to_s) != saved["rate"].to_d
         raise ArgumentError, "Retain this payroll's saved original wage rates; a rate change requires a reviewed wage-rate correction"
