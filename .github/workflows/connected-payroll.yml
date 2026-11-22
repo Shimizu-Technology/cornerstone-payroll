@@ -37,9 +37,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
-          ruby-version: "3.3.7"
+          ruby-version: "3.3.14"
       - name: Check certification clock startup and guards
         run: |
           ruby scripts/local_certification/test_clock.rb
@@ -118,14 +118,14 @@ jobs:
           [[ "$aire_ruby" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "payroll=$payroll_ruby" >> "$GITHUB_OUTPUT"
           echo "aire=$aire_ruby" >> "$GITHUB_OUTPUT"
-      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: ${{ steps.versions.outputs.payroll }}
           working-directory: payroll/api
           bundler-cache: true
       - name: Record payroll Ruby runtime
         run: echo "PAYROLL_RUBY_BIN_DIR=$(dirname "$(command -v ruby)")" >> "$GITHUB_ENV"
-      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: ${{ steps.versions.outputs.aire }}
           working-directory: aire/backend

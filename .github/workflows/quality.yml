@@ -110,7 +110,7 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_ci_${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: .ruby-version
           bundler-cache: true
@@ -133,7 +133,7 @@ jobs:
           if-no-files-found: error
 
   backend-checks:
-    # Ruby3.3.7 is available on24.04, but not the newer ubuntu-latest image.
+    # Keep the Ruby runner on Ubuntu 24.04 for consistent build availability.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     services:
@@ -159,7 +159,7 @@ jobs:
       AUTH_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: .ruby-version
           bundler-cache: true
@@ -274,9 +274,9 @@ jobs:
       E2E_FIXTURE_PATH: ${{ github.workspace }}/web/.e2e-fixtures/release.json
     steps:
       - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
-          ruby-version: "3.3.7"
+          ruby-version: "3.3.14"
           bundler-cache: true
           working-directory: api
       - uses: actions/setup-node@v4
