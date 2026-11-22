@@ -53,7 +53,7 @@ def run(shard, count, directory, timing_path):
     # Never allow Rails' implicit DATABASE_URL to override the disposable test DB.
     for name in ('DATABASE_URL', 'TEST_DATABASE_URL'):
         url = urlparse(os.environ.get(name, ''))
-        if url.hostname != '127.0.0.1' or url.path != f'/cornerstone_payroll_ci_{shard}':
+        if url.hostname != '127.0.0.1' or url.path != f'/cornerstone_payroll_ci_{shard}_test':
             raise ValueError(f'{name} must name this shard\'s disposable loopback database')
     if os.environ.get('RAILS_ENV') != 'test':
         raise ValueError('RAILS_ENV must be test')
