@@ -16,7 +16,7 @@ class ExpandAuditLogActors < ActiveRecord::Migration[8.1]
         add_column :audit_logs, column, :string, if_not_exists: true
       end
     end
-    replace_rollout_audit_function(typed: true)
+    install_rollout_audit_function
 
     HistoricalAuditLog.reset_column_information
     # Limit this pass to the existing inventory. Old instances can keep
@@ -62,7 +62,7 @@ class ExpandAuditLogActors < ActiveRecord::Migration[8.1]
     remove_index :audit_logs, name: INDEX_NAME, algorithm: :concurrently, if_exists: true
     transaction do
       execute "SET LOCAL lock_timeout = '5s'"
-      replace_rollout_audit_function(typed: false)
+      restore_legacy_rollout_audit_function
       remove_column :audit_logs, :actor_id, if_exists: true
       remove_column :audit_logs, :actor_type, if_exists: true
     end
@@ -70,14 +70,35 @@ class ExpandAuditLogActors < ActiveRecord::Migration[8.1]
 
   private
 
-  def replace_rollout_audit_function(typed:)
-    execute <<~SQL
+  def restore_legacy_rollout_audit_function
+    execute <<~'SQL'
       CREATE OR REPLACE FUNCTION audit_time_tracking_lock_rollout() RETURNS trigger AS $$
       BEGIN
         IF NEW.source_type = 'aire_services' THEN
-          INSERT INTO audit_logs (action, actor_name, actor_role#{", actor_type" if typed}, company_id, organization_id,
+          INSERT INTO audit_logs (action, actor_name, actor_role, company_id, organization_id,
             record_type, record_id, event_category, metadata, created_at)
-          SELECT 'time_tracking_source#lock_rollout_configured', 'Approved lock rollout', 'system'#{", 'system_job'" if typed},
+          SELECT 'time_tracking_source#lock_rollout_configured', 'Approved lock rollout', 'system',
+            NEW.company_id, companies.organization_id, 'TimeTrackingSource', NEW.id, 'integration',
+            jsonb_build_object('cutoff_enforcement_starts_on', NEW.cutoff_enforcement_starts_on,
+              'reason', 'Approved rollout: periods before October 16, 2026 lock only on explicit operator request'),
+            CURRENT_TIMESTAMP
+          FROM companies WHERE companies.id = NEW.company_id;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+    SQL
+  end
+
+  # Keep the current definition last for the integrity snapshot spec.
+  def install_rollout_audit_function
+    execute <<~'SQL'
+      CREATE OR REPLACE FUNCTION audit_time_tracking_lock_rollout() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.source_type = 'aire_services' THEN
+          INSERT INTO audit_logs (action, actor_name, actor_role, actor_type, company_id, organization_id,
+            record_type, record_id, event_category, metadata, created_at)
+          SELECT 'time_tracking_source#lock_rollout_configured', 'Approved lock rollout', 'system', 'system_job',
             NEW.company_id, companies.organization_id, 'TimeTrackingSource', NEW.id, 'integration',
             jsonb_build_object('cutoff_enforcement_starts_on', NEW.cutoff_enforcement_starts_on,
               'reason', 'Approved rollout: periods before October 16, 2026 lock only on explicit operator request'),
