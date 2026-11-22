@@ -12,6 +12,7 @@
 
 ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
   # These are extensions that must be enabled in order to support this database
+  enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
 
   create_table "aire_history_operations", force: :cascade do |t|
@@ -505,6 +506,37 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
     t.index [ "reviewed_by_id" ], name: "index_client_documents_on_reviewed_by_id"
     t.index [ "uploaded_by_id" ], name: "index_client_documents_on_uploaded_by_id"
     t.check_constraint "scan_status::text = ANY (ARRAY['not_scanned'::character varying::text, 'pending'::character varying::text, 'clean'::character varying::text, 'infected'::character varying::text, 'error'::character varying::text])", name: "client_document_scan_status"
+  end
+
+  create_table "client_operating_profiles", force: :cascade do |t|
+    t.bigint "changed_by_id"
+    t.boolean "client_portal_enabled", default: false, null: false
+    t.bigint "company_id", null: false
+    t.datetime "confirmed_at"
+    t.datetime "created_at", null: false
+    t.date "effective_on", null: false
+    t.boolean "employee_portal_enabled", default: false, null: false
+    t.date "ends_on"
+    t.string "hours_source", null: false
+    t.string "intake_adapter"
+    t.integer "lock_version", default: 0, null: false
+    t.string "offering", null: false
+    t.jsonb "options", default: {}, null: false
+    t.text "reason"
+    t.datetime "updated_at", null: false
+    t.integer "version", default: 1, null: false
+    t.index [ "changed_by_id" ], name: "index_client_operating_profiles_on_changed_by_id"
+    t.index [ "company_id", "effective_on" ], name: "idx_client_operating_profiles_company_effective_on", unique: true
+    t.index [ "company_id", "version" ], name: "idx_client_operating_profiles_company_version", unique: true
+    t.index [ "company_id" ], name: "idx_client_operating_profiles_one_current", unique: true, where: "(ends_on IS NULL)"
+    t.index [ "company_id" ], name: "index_client_operating_profiles_on_company_id"
+    t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "client_operating_profiles_dates_check"
+    t.check_constraint "hours_source::text = 'intake_adapter'::text AND intake_adapter IS NOT NULL OR hours_source::text <> 'intake_adapter'::text AND intake_adapter IS NULL", name: "client_operating_profiles_intake_adapter_shape_check"
+    t.check_constraint "hours_source::text = ANY (ARRAY['connected_app'::character varying::text, 'intake_adapter'::character varying::text, 'manual'::character varying::text, 'salaried_only'::character varying::text])", name: "client_operating_profiles_hours_source_check"
+    t.check_constraint "jsonb_typeof(options) = 'object'::text", name: "client_operating_profiles_options_object_check"
+    t.check_constraint "offering::text = ANY (ARRAY['payroll_service'::character varying::text, 'payroll_portals'::character varying::text, 'workforce_suite'::character varying::text])", name: "client_operating_profiles_offering_check"
+    t.check_constraint "version >= 1", name: "client_operating_profiles_version_check"
+    t.exclusion_constraint "company_id WITH =, daterange(effective_on, ends_on, '[]'::text) WITH &&", using: :gist, name: "client_operating_profiles_no_overlapping_dates"
   end
 
   create_table "client_portal_messages", force: :cascade do |t|
@@ -4810,6 +4842,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
   add_foreign_key "client_documents", "users", column: "archived_by_id"
   add_foreign_key "client_documents", "users", column: "reviewed_by_id"
   add_foreign_key "client_documents", "users", column: "uploaded_by_id"
+  add_foreign_key "client_operating_profiles", "companies"
+  add_foreign_key "client_operating_profiles", "users", column: "changed_by_id"
   add_foreign_key "client_portal_messages", "client_documents", on_delete: :nullify
   add_foreign_key "client_portal_messages", "client_portal_threads"
   add_foreign_key "client_portal_messages", "companies"
