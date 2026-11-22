@@ -236,13 +236,13 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       patch "/api/v1/admin/users/#{managed_user.id}",
         params: {
           user: {
-            role: "employee"
+            role: "org_admin"
           }
         }
 
       expect(response).to have_http_status(:ok)
       managed_user.reload
-      expect(managed_user.role).to eq("employee")
+      expect(managed_user.role).to eq("org_admin")
       expect(managed_user.company_assignments).to be_empty
 
       payload = response.parsed_body.fetch("data")
@@ -291,14 +291,14 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
         params: {
           user: {
             name: "Renamed Other Company User",
-            role: "employee"
+            role: "org_admin"
           }
         }
 
       expect(response).to have_http_status(:ok)
       switched_company_user.reload
       expect(switched_company_user.name).to eq("Renamed Other Company User")
-      expect(switched_company_user.role).to eq("employee")
+      expect(switched_company_user.role).to eq("org_admin")
       expect(switched_company_user.company_assignments).to be_empty
     end
 

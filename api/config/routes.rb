@@ -235,6 +235,7 @@ Rails.application.routes.draw do
             post :activate
             post :deactivate
             post :resend_invitation
+            post :lookup_clerk_id
             post :bind_clerk_id
             post :move_practice_copy
           end

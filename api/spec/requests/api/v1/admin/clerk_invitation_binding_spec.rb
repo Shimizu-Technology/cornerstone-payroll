@@ -23,8 +23,18 @@ RSpec.describe "Payroll Clerk invitation administration", type: :request do
     post "/api/v1/admin/users/#{invitee.id}/resend_invitation", headers: headers
   end
 
-  def recover(subject = "user_recovery")
-    post "/api/v1/admin/users/#{invitee.id}/bind_clerk_id", headers: headers, params: { clerk_id: subject }
+  let(:account) do
+    { id: "user_recovery", name: "Sample Recipient",
+      verified_emails: [ "verified@example.test" ], primary_email: "unverified@example.test" }
+  end
+
+  def recover(subject = "user_recovery", email: "verified@example.test")
+    post "/api/v1/admin/users/#{invitee.id}/bind_clerk_id", headers: headers,
+      params: { clerk_id: subject, confirm_email: email }
+  end
+
+  def lookup
+    post "/api/v1/admin/users/#{invitee.id}/lookup_clerk_id", headers: headers, params: { clerk_id: "user_recovery" }
   end
 
   it "attaches a new digest and metadata when creating a staff user" do
@@ -107,22 +117,162 @@ RSpec.describe "Payroll Clerk invitation administration", type: :request do
     expect(response.parsed_body["invitation_error"]).to include("Could not confirm")
   end
 
-  it "binds a verified subject with an audit attributed to the operator" do
-    allow(provider).to receive(:fetch_user).with("user_recovery").and_return("id" => "user_recovery")
+  it "offers recovery and only returns the verified emails and display name in the preview" do
+    allow(provider).to receive(:recovery_account).with("user_recovery").and_return(account)
+    get "/api/v1/admin/users/#{invitee.id}", headers: headers
+    expect(response.parsed_body.dig("data", "can_recover_clerk_invitation")).to be(true)
+
+    expect { lookup }.not_to change { invitee.reload.clerk_id }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["data"]).to eq(
+      "id" => "user_recovery", "name" => "Sample Recipient", "verified_emails" => [ "verified@example.test" ])
+  end
+
+  it "lets a super admin bind an admin-level row and audits the Clerk ID and primary email" do
+    actor.update!(role: :super_admin)
+    invitee.update!(role: :org_admin)
+    allow(provider).to receive(:recovery_account).with("user_recovery").and_return(account)
+    expect(provider).to receive(:revoke_invitation).with("inv_original") do
+      expect(invitee.reload.clerk_id).to eq("user_recovery")
+      { success: true }
+    end
 
     expect { recover }.to change(AuditLog.where(action: "authentication#clerk_identity_bound"), :count).by(1)
 
     expect(response).to have_http_status(:ok)
     expect(invitee.reload).to have_attributes(clerk_id: "user_recovery", invitation_status: "accepted",
-      invite_nonce_digest: nil, invite_nonce_expires_at: nil)
+      clerk_invitation_id: nil, invite_nonce_digest: nil, invite_nonce_expires_at: nil)
+    expect(response.parsed_body.dig("data", "can_recover_clerk_invitation")).to be(false)
     expect(AuditLog.find_by!(action: "authentication#clerk_identity_bound")).to have_attributes(
       user_id: actor.id, record_id: invitee.id, event_category: "security",
-      metadata: { "source" => "staff_recovery", "clerk_id" => "user_recovery" })
+      metadata: { "source" => "staff_recovery", "clerk_id" => "user_recovery", "clerk_primary_email" => "unverified@example.test" })
+  end
+
+  it "keeps an organization admin's recovery bind when revocation fails" do
+    allow(provider).to receive(:recovery_account).with("user_recovery").and_return(account)
+    allow(provider).to receive(:revoke_invitation).with("inv_original").and_return(success: false, status: 503)
+    allow(Rails.logger).to receive(:warn).and_call_original
+
+    recover
+
+    expect(response).to have_http_status(:ok)
+    expect(invitee.reload).to have_attributes(clerk_id: "user_recovery", clerk_invitation_id: nil)
+    expect(Rails.logger).to have_received(:warn).with(/Could not revoke invitation inv_original: 503/)
+  end
+
+  { mismatched: "stranger@example.test", unverified: "unverified@example.test", missing: nil }.each do |scenario, email|
+    it "refuses a #{scenario} confirmation email" do
+      allow(provider).to receive(:recovery_account).with("user_recovery").and_return(account)
+      expect(provider).not_to receive(:revoke_invitation)
+
+      expect { recover(email: email) }.not_to change { invitee.reload.clerk_id }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("verified email")
+    end
+  end
+
+  %i[org_admin admin].each do |role|
+    it "refuses lookup and recovery of a #{role} by an organization admin" do
+      invitee.update!(role: role)
+      expect(provider).not_to receive(:recovery_account)
+      get "/api/v1/admin/users/#{invitee.id}", headers: headers
+      expect(response.parsed_body.dig("data", "can_recover_clerk_invitation")).to be(false)
+
+      lookup
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect { recover }.not_to change { invitee.reload.clerk_id }
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
+
+  [ :not_found, "expired" ].each do |status|
+    it "resends when the previous invitation is #{status}" do
+      allow(provider).to receive(:invitation_status).with("inv_original").and_return(status)
+      expect(provider).not_to receive(:revoke_invitation)
+      expect(provider).to receive(:create_invitation).and_return(success: true, invitation_id: "inv_replacement")
+
+      expect { resend }.to change { invitee.reload.clerk_invitation_id }.from("inv_original").to("inv_replacement")
+
+      expect(response).to have_http_status(:ok)
+      expect(invitee.invite_nonce_digest).not_to eq(Digest::SHA256.hexdigest(nonce))
+    end
+  end
+
+  [ nil, "" ].each do |clerk_id|
+    it "issues a fresh nonce invite for a pending row with clerk_id #{clerk_id.inspect}" do
+      invitee.update!(clerk_id: clerk_id, clerk_invitation_id: nil)
+      expect(provider).to receive(:create_invitation) do |**args|
+        expect(args.fetch(:public_metadata)).to include(payroll_user_id: invitee.id)
+        expect(args.fetch(:public_metadata).fetch(:payroll_invite_nonce)).not_to eq(nonce)
+        { success: true, invitation_id: "inv_replacement" }
+      end
+
+      expect { resend }.to change { invitee.reload.invite_nonce_digest }
+
+      expect(response).to have_http_status(:ok)
+      expect(invitee.clerk_invitation_id).to eq("inv_replacement")
+    end
+  end
+
+  it "revokes the new invite when a local validation prevents its save" do
+    invitee.update_columns(name: "", clerk_invitation_id: nil)
+    expect(provider).to receive(:create_invitation).and_return(success: true, invitation_id: "inv_new")
+    expect(provider).to receive(:revoke_invitation).with("inv_new", email: invitee.email).and_return(success: true)
+
+    resend
+
+    expect(response.parsed_body["invitation_error"]).to include("could not be saved locally")
+    expect(invitee.reload.clerk_invitation_id).to be_nil
+  end
+
+  it "revokes the losing invitation if the row binds while Clerk creates it" do
+    invitee.update!(clerk_invitation_id: nil)
+    expect(provider).to receive(:create_invitation) do
+      User.find(invitee.id).update!(clerk_id: "user_concurrent", invitation_status: "accepted")
+      { success: true, invitation_id: "inv_losing" }
+    end
+    expect(provider).to receive(:revoke_invitation).with("inv_losing", email: invitee.email).and_return(success: true)
+
+    resend
+
+    expect(response.parsed_body["invitation_error"]).to include("account changed")
+    expect(invitee.reload).to have_attributes(clerk_id: "user_concurrent", clerk_invitation_id: nil)
+  end
+
+  it "does not bind from metadata if the invitation rotates during the Clerk status check" do
+    allow(provider).to receive(:fetch_user).with("user_invitee").and_return(
+      "public_metadata" => { "payroll_user_id" => invitee.id, "payroll_invite_nonce" => nonce })
+    allow_any_instance_of(ClerkTokenVerifier).to receive(:verify).and_return("sub" => "user_invitee")
+    expect(provider).to receive(:invitation_status).with("inv_original") do
+      User.find(invitee.id).update!(clerk_invitation_id: "inv_rotated", invite_nonce_digest: Digest::SHA256.hexdigest("d" * 64))
+      "accepted"
+    end
+
+    get "/api/v1/auth/me", headers: headers
+
+    expect(response).to have_http_status(:unauthorized)
+    expect(invitee.reload).to have_attributes(clerk_id: "pending_invitee", clerk_invitation_id: "inv_rotated")
+  end
+
+  %w[employee portal_employee].each do |role|
+    it "refuses to create or assign the gated #{role} role" do
+      actor.update!(role: :super_admin)
+      expect(provider).not_to receive(:create_invitation)
+
+      post "/api/v1/admin/users", headers: headers, params: { user: { role: role, email: "new@example.test" } }
+      expect(response).to have_http_status(:forbidden)
+
+      patch "/api/v1/admin/users/#{invitee.id}", headers: headers, params: { user: { role: role } }
+      expect(response).to have_http_status(:forbidden)
+      expect(invitee.reload).to be_client
+    end
   end
 
   it "refuses legacy admins before any Clerk read" do
     actor.update!(role: :admin)
-    expect(provider).not_to receive(:fetch_user)
+    expect(provider).not_to receive(:recovery_account)
 
     recover
 
@@ -133,7 +283,7 @@ RSpec.describe "Payroll Clerk invitation administration", type: :request do
   it "refuses recovery across organizations before any Clerk read" do
     foreign = create(:user, role: :org_admin, clerk_id: "user_foreign")
     allow_any_instance_of(ClerkTokenVerifier).to receive(:verify).and_return("sub" => foreign.clerk_id)
-    expect(provider).not_to receive(:fetch_user)
+    expect(provider).not_to receive(:recovery_account)
 
     recover
 
@@ -141,8 +291,9 @@ RSpec.describe "Payroll Clerk invitation administration", type: :request do
   end
 
   it "refuses missing and already-bound Clerk subjects" do
-    allow(provider).to receive(:fetch_user).with("user_missing").and_return(nil)
-    allow(provider).to receive(:fetch_user).with(actor.clerk_id).and_return("id" => actor.clerk_id)
+    allow(provider).to receive(:recovery_account).with("user_missing").and_return(nil)
+    allow(provider).to receive(:recovery_account).with(actor.clerk_id).and_return(account.merge(id: actor.clerk_id))
+    expect(provider).not_to receive(:revoke_invitation)
 
     %W[user_missing #{actor.clerk_id}].each do |subject|
       recover(subject)

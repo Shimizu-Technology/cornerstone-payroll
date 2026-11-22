@@ -49,7 +49,8 @@ module TestWorkspace
     rescue StagingOutboundPolicy::Blocked
       # Staging refuses this Clerk target, so a retry every minute can never succeed.
       Rails.logger.warn("[PracticePortalAccess] Staging blocked invitation revocation for user=#{user.id}")
-      clear_invitation!(user, invitation_id) if user.invite_nonce_digest.blank?
+      # Staging uses explicit tester bindings and never accepts invitation metadata.
+      clear_invitation!(user, invitation_id)
     rescue StandardError => error
       # Retain the invitation id so the next sweep can retry independently.
       Rails.logger.error("[PracticePortalAccess] Invitation revocation failed for user=#{user.id}: #{error.class}")

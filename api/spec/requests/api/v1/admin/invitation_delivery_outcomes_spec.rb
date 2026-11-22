@@ -35,7 +35,7 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
   def request_invitation(path)
     case path
     when :create_user
-      post "/api/v1/admin/users", params: { user: { email: "new@example.test", name: "New User", role: "employee" } }
+      post "/api/v1/admin/users", params: { user: { email: "new@example.test", name: "New User", role: "accountant" } }
     when :resend
       post "/api/v1/admin/users/#{invitee.id}/resend_invitation"
     when :create_organization

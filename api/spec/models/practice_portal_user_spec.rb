@@ -154,14 +154,16 @@ RSpec.describe "Practice portal identity" do
     expect(client.reload.clerk_invitation_id).to be_nil
   end
 
-  it "clears an invitation staging refuses to revoke instead of retrying every minute" do
-    client.update_columns(clerk_invitation_id: "inv_staging", invitation_status: "pending")
+  it "clears a nonce invitation staging refuses to revoke instead of retrying every minute" do
+    client.update_columns(clerk_invitation_id: "inv_staging", invitation_status: "pending",
+      invite_nonce_digest: Digest::SHA256.hexdigest("a" * 64), invite_nonce_expires_at: 1.day.from_now)
     workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
     service = instance_double(ClerkInvitationService, configured?: true)
     allow(ClerkInvitationService).to receive(:new).and_return(service)
     expect(service).to receive(:revoke_invitation).with("inv_staging").and_raise(StagingOutboundPolicy::Blocked)
     ExpirePracticePortalAccessJob.perform_now
-    expect(client.reload.clerk_invitation_id).to be_nil
+    expect(client.reload).to have_attributes(clerk_invitation_id: nil, invite_nonce_digest: nil, invite_nonce_expires_at: nil)
+    ExpirePracticePortalAccessJob.perform_now
   end
 
   it "keeps sweeping other users when one user's deactivation fails" do

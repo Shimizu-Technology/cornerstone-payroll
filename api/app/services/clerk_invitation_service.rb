@@ -53,19 +53,37 @@ class ClerkInvitationService
     data if data.is_a?(Hash) && data["id"] == subject
   end
 
+  def recovery_account(subject)
+    user = fetch_user(subject)
+    return unless user
+
+    emails = Array(user["email_addresses"]).select do |entry|
+      entry.is_a?(Hash) && entry["email_address"].is_a?(String) && entry["email_address"].present?
+    end
+    primary = emails.find { |entry| entry["id"] == user["primary_email_address_id"] } if user["primary_email_address_id"].present?
+    {
+      id: subject,
+      name: user.values_at("first_name", "last_name").compact_blank.join(" ").presence,
+      verified_emails: emails.filter_map { |entry| entry["email_address"] if entry.dig("verification", "status") == "verified" },
+      primary_email: primary&.fetch("email_address")
+    }
+  end
+
   def invitation_status(invitation_id)
     return if invitation_id.blank?
 
-    # Clerk exposes lookup by ID as a filter on the list endpoint.
-    query = URI.encode_www_form(query: invitation_id, limit: 10)
-    invitation = find_invitation("/invitations?#{query}", invitation_id) ||
-      find_invitation("/invitations?#{query}&status=revoked", invitation_id)
-    invitation&.fetch("status", nil)
+    # The unfiltered list excludes revoked invites. Also query expired explicitly
+    # so a default response that omits expired invites still resolves their status.
+    [ nil, "revoked", "expired" ].each do |status|
+      invitation = find_invitation(invitation_id, status: status)
+      return invitation&.fetch("status", nil) unless invitation == :not_found
+    end
+    :not_found
   end
 
-  def revoke_invitation(invitation_id)
+  def revoke_invitation(invitation_id, email: nil)
     if StagingOutboundPolicy.staging?
-      StagingOutboundPolicy.clerk_target!(email: User.find_by(clerk_invitation_id: invitation_id)&.email)
+      StagingOutboundPolicy.clerk_target!(email: email || User.find_by(clerk_invitation_id: invitation_id)&.email)
     end
     raise "CLERK_SECRET_KEY not configured" unless configured?
 
@@ -84,12 +102,23 @@ class ClerkInvitationService
 
   private
 
-  def find_invitation(path, id)
-    data = get_json(path)
-    invitations = data.is_a?(Hash) ? data["data"] : data
-    return unless invitations.is_a?(Array)
+  def find_invitation(id, status:)
+    limit = 10
+    offset = 0
+    loop do
+      filters = { query: id, limit: limit, status: status }.compact
+      filters[:offset] = offset if offset.positive?
+      data = get_json("/invitations?#{URI.encode_www_form(filters)}")
+      invitations = data.is_a?(Hash) ? data["data"] : data
+      return unless invitations.is_a?(Array) && invitations.all? { |invitation| invitation.is_a?(Hash) && invitation["id"].present? }
 
-    invitations.find { |invitation| invitation.is_a?(Hash) && invitation["id"] == id }
+      match = invitations.find { |invitation| invitation["id"] == id }
+      return match if match
+
+      total = data["total_count"] if data.is_a?(Hash)
+      offset += invitations.length
+      return :not_found if invitations.empty? || (total.is_a?(Integer) ? offset >= total : invitations.length < limit)
+    end
   end
 
   def get_json(path)

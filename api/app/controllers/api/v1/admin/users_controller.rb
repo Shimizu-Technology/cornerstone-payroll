@@ -8,7 +8,8 @@ module Api
         include InvitationDeliveryOutcome
         audit_actions :activate, :deactivate, :resend_invitation, :destroy
         before_action :require_admin!
-        before_action :set_user, only: [ :show, :update, :destroy, :activate, :deactivate, :resend_invitation, :move_practice_copy, :bind_clerk_id ]
+        before_action :set_user, only: [ :show, :update, :destroy, :activate, :deactivate, :resend_invitation, :move_practice_copy, :lookup_clerk_id, :bind_clerk_id ]
+        before_action :require_recovery_environment!, only: [ :lookup_clerk_id, :bind_clerk_id ]
 
         # GET /api/v1/admin/users
         # Organization admins see users in their firm; super admins can see all firms.
@@ -234,13 +235,16 @@ module Api
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
         end
 
-        def bind_clerk_id
-          return if reject_platform_owner_mutation!
-          if StagingOutboundPolicy.staging?
-            return render json: { error: "Use staging tester bindings to manage Clerk identities in staging" }, status: :forbidden
-          end
+        def lookup_clerk_id
+          account = PayrollInvitation.new.recovery_account(@user, params[:clerk_id], actor: current_user)
+          render json: { data: account.slice(:id, :name, :verified_emails) }
+        rescue PayrollInvitation::BindingRefused => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
 
-          PayrollInvitation.new.recover!(@user, params[:clerk_id], actor: current_user, request: request)
+        def bind_clerk_id
+          PayrollInvitation.new.recover!(@user, params[:clerk_id], confirm_email: params[:confirm_email],
+            actor: current_user, request: request)
           skip_default_audit_log!
           render json: { data: user_json(@user) }
         rescue PayrollInvitation::BindingRefused => e
@@ -449,11 +453,16 @@ module Api
           %w[admin org_admin].include?(role)
         end
 
-        def role_manageable?(role)
-          return false if role.blank?
-          return true if current_user&.super_admin?
+        def require_recovery_environment!
+          return unless StagingOutboundPolicy.staging?
 
-          role != "super_admin"
+          render json: { error: "Use staging tester bindings to manage Clerk identities in staging" }, status: :forbidden
+        end
+
+        def role_manageable?(role)
+          return false unless %w[super_admin org_admin admin manager accountant client].include?(role)
+
+          role != "super_admin" || current_user.super_admin?
         end
 
         def role_requires_client_assignment?(role)
@@ -476,6 +485,7 @@ module Api
             active: user.active,
             invitation_status: user.invitation_status,
             invitation_pending: user.invitation_pending?,
+            can_recover_clerk_invitation: !StagingOutboundPolicy.staging? && PayrollInvitation.recoverable_by?(user, current_user),
             invited_at: user.invited_at,
             invited_by_id: user.invited_by_id,
             invited_by_name: user.invited_by&.name,

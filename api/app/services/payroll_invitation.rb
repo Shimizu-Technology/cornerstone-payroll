@@ -4,6 +4,9 @@ class PayrollInvitation
   class BindingRefused < StandardError; end
 
   NONCE_LIFETIME = 30.days
+  INVITATION_FIELDS = %w[email role organization_id company_id practice_company_id active clerk_id
+    invitation_status clerk_invitation_id invite_nonce_digest invite_nonce_expires_at].freeze
+  ADMIN_ROLES = %w[admin org_admin super_admin].freeze
   NONCE_PATTERN = /\A[0-9a-f]{64}\z/
   ACCEPTED_MESSAGE = "Clerk already accepted this invitation. Ask the recipient to sign in. If they still cannot sign in, an organization or platform admin can verify and bind their Clerk user ID."
 
@@ -14,41 +17,47 @@ class PayrollInvitation
   def send_invite(user, redirect_url:, ignore_existing: false)
     return { success: false, error: "Clerk API not configured" } unless @clerk.configured?
 
-    user.with_lock do
-      unless user.awaiting_clerk_binding?
-        next { success: false, error: "This account is no longer awaiting an invitation" }
-      end
+    user.reload
+    return invitation_changed unless user.awaiting_clerk_binding?
 
-      if user.clerk_invitation_id.present?
-        failure = close_previous_invitation(user.clerk_invitation_id)
-        next failure if failure
-      end
-
-      nonce = SecureRandom.hex(32)
-      result = @clerk.create_invitation(
-        email: user.email,
-        redirect_url: redirect_url,
-        public_metadata: {
-          role: user.role,
-          organization_id: user.organization_id,
-          payroll_user_id: user.id,
-          payroll_invite_nonce: nonce
-        },
-        ignore_existing: ignore_existing
-      )
-
-      if result[:success]
-        user.update!(
-          clerk_invitation_id: result.fetch(:invitation_id),
-          invite_nonce_digest: Digest::SHA256.hexdigest(nonce),
-          invite_nonce_expires_at: NONCE_LIFETIME.from_now
-        )
-      end
-      result
+    snapshot = user.attributes.slice(*INVITATION_FIELDS)
+    if user.clerk_invitation_id.present?
+      failure = close_previous_invitation(user.clerk_invitation_id)
+      return failure if failure
     end
+
+    nonce = SecureRandom.hex(32)
+    result = @clerk.create_invitation(
+      email: snapshot.fetch("email"),
+      redirect_url: redirect_url,
+      public_metadata: {
+        role: snapshot.fetch("role"),
+        organization_id: snapshot.fetch("organization_id"),
+        payroll_user_id: user.id,
+        payroll_invite_nonce: nonce
+      },
+      ignore_existing: ignore_existing
+    )
+    return result unless result[:success]
+
+    invitation_id = result.fetch(:invitation_id)
+    saved = user.with_lock do
+      next false unless user.attributes.slice(*INVITATION_FIELDS) == snapshot
+
+      user.update!(
+        clerk_invitation_id: invitation_id,
+        invite_nonce_digest: Digest::SHA256.hexdigest(nonce),
+        invite_nonce_expires_at: NONCE_LIFETIME.from_now
+      )
+      true
+    end
+    saved ? result : invitation_changed
   rescue ActiveRecord::RecordInvalid
-    # Clerk sends no email itself. Delivery only starts after the local commit.
     { success: false, error: "Invitation could not be saved locally" }
+  rescue ActiveRecord::RecordNotFound
+    invitation_changed
+  ensure
+    revoke_best_effort(invitation_id, email: snapshot.fetch("email")) if invitation_id && !saved
   end
 
   def bind_from_metadata(subject, request:)
@@ -63,13 +72,21 @@ class PayrollInvitation
     user = User.find_by(id: id)
     return unless user
 
+    return user if user.clerk_id == subject
+
+    digest = Digest::SHA256.hexdigest(nonce)
+    return unless nonce_matches?(user, digest)
+    return unless user.payroll_access_allowed?
+
+    invitation_id = user.clerk_invitation_id
+    return unless @clerk.invitation_status(invitation_id) == "accepted"
+
     user.with_lock do
       # A simultaneous request can complete this exact binding first.
       next user if user.clerk_id == subject
-      next unless user.awaiting_clerk_binding? && user.payroll_access_allowed?
-      next unless user.invite_nonce_expires_at && user.invite_nonce_expires_at > Time.current
-      next unless ActiveSupport::SecurityUtils.secure_compare(user.invite_nonce_digest.to_s, Digest::SHA256.hexdigest(nonce))
-      next unless @clerk.invitation_status(user.clerk_invitation_id) == "accepted"
+      next unless user.clerk_invitation_id == invitation_id && nonce_matches?(user, digest)
+      next unless user.active? && (user.super_admin? || user.organization&.active?)
+      next if user.practice_company_id? && !user.practice_portal_open?
 
       bind!(user, subject, actor: user, request: request, source: "invitation_metadata")
       user
@@ -81,30 +98,66 @@ class PayrollInvitation
     nil
   end
 
-  def recover!(user, subject, actor:, request:)
-    unless @clerk.fetch_user(subject)
-      raise BindingRefused, "Clerk user ID could not be verified"
+  def self.recoverable_by?(user, actor)
+    user.awaiting_clerk_binding? && !user.platform_owner? &&
+      (actor.super_admin? || (actor.org_admin? && user.organization_id == actor.organization_id && ADMIN_ROLES.exclude?(user.role)))
+  end
+
+  def recovery_account(user, subject, actor:)
+    ensure_recoverable!(user, actor)
+    @clerk.recovery_account(subject) || raise(BindingRefused, "Clerk user ID could not be verified")
+  end
+
+  def recover!(user, subject, confirm_email:, actor:, request:)
+    account = recovery_account(user, subject, actor: actor)
+    unless confirm_email.is_a?(String) && account.fetch(:verified_emails).any? { |email| email.casecmp?(confirm_email.strip) }
+      raise BindingRefused, "Confirm one of this Clerk account's verified email addresses"
     end
 
-    user.with_lock do
-      unless user.awaiting_clerk_binding? && !user.platform_owner? &&
-        (actor.super_admin? || (actor.org_admin? && user.organization_id == actor.organization_id && !user.super_admin?))
-        raise BindingRefused, "This account cannot be bound through invitation recovery"
-      end
-
-      bind!(user, subject, actor: actor, request: request, source: "staff_recovery")
+    invitation_id = user.with_lock do
+      ensure_recoverable!(user, actor)
+      previous_id = user.clerk_invitation_id
+      bind!(user, subject, actor: actor, request: request, source: "staff_recovery",
+        clerk_primary_email: account.fetch(:primary_email))
+      user.update!(clerk_invitation_id: nil) if previous_id.present?
+      previous_id
     end
+    revoke_best_effort(invitation_id) if invitation_id.present?
   rescue ActiveRecord::RecordNotUnique
     raise BindingRefused, "This Clerk user ID is already bound"
   end
 
   private
 
+  def invitation_changed
+    { success: false, error: "This account changed while preparing the invitation. Refresh and try again if it is still pending." }
+  end
+
+  def ensure_recoverable!(user, actor)
+    return if self.class.recoverable_by?(user, actor)
+
+    raise BindingRefused, "This account cannot be bound through invitation recovery"
+  end
+
+  def nonce_matches?(user, digest)
+    user.awaiting_clerk_binding? && user.invite_nonce_expires_at && user.invite_nonce_expires_at > Time.current &&
+      ActiveSupport::SecurityUtils.secure_compare(user.invite_nonce_digest.to_s, digest)
+  end
+
+  def revoke_best_effort(invitation_id, email: nil)
+    result = email ? @clerk.revoke_invitation(invitation_id, email: email) : @clerk.revoke_invitation(invitation_id)
+    return if result[:success]
+
+    Rails.logger.warn("[PayrollInvitation] Could not revoke invitation #{invitation_id}: #{result[:error_code] || result[:status] || 'request failed'}")
+  rescue StandardError => error
+    Rails.logger.warn("[PayrollInvitation] Could not revoke invitation #{invitation_id}: #{error.class}")
+  end
+
   def close_previous_invitation(invitation_id)
     case @clerk.invitation_status(invitation_id)
     when "accepted"
       return { success: false, error: ACCEPTED_MESSAGE }
-    when "expired", "revoked"
+    when "expired", "revoked", :not_found
       return
     when "pending"
       # Acceptance can race this request. Only rotate once Clerk confirms revocation.
@@ -116,12 +169,12 @@ class PayrollInvitation
     { success: false, error: "Could not confirm the previous invitation is closed. Its sign-in details were preserved. Try again or contact an administrator." }
   end
 
-  def bind!(user, subject, actor:, request:, source:)
+  def bind!(user, subject, actor:, request:, source:, **metadata)
     user.update!(clerk_id: subject, invitation_status: "accepted", invite_nonce_digest: nil, invite_nonce_expires_at: nil)
     AuditLog.record!(
       user: actor, organization_id: user.organization_id, company_id: user.company_id,
       action: "authentication#clerk_identity_bound", record_type: "users", record_id: user.id,
-      subject_name: user.name, event_category: "security", metadata: { source: source, clerk_id: subject },
+      subject_name: user.name, event_category: "security", metadata: metadata.merge(source: source, clerk_id: subject),
       ip_address: request.remote_ip, user_agent: request.user_agent, request_id: request.request_id
     )
   end

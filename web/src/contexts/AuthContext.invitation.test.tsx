@@ -5,7 +5,7 @@ import { ApiError, authApi } from '@/services/api';
 
 const clerk = vi.hoisted(() => ({
   getToken: vi.fn().mockResolvedValue('synthetic-token'),
-  signOut: vi.fn().mockRejectedValue(new Error('Synthetic sign-out failure')),
+  signOut: vi.fn(),
 }));
 vi.mock('@clerk/clerk-react', () => ({
   useAuth: () => ({ isSignedIn: true, isLoaded: true, ...clerk }),
@@ -17,21 +17,42 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it('keeps an unbound account denied without repeating checks or sign-out', async () => {
+function UnboundProbe({ useAuth }: { useAuth: typeof import('./AuthContext').useAuth }) {
+  const { authProblem, isAuthenticated, refreshUser } = useAuth();
+  return (
+    <button onClick={() => { void refreshUser(); }}>
+      {isAuthenticated ? 'Signed in' : authProblem?.signOutFailed ? 'Retry sign-out' : authProblem?.code}
+    </button>
+  );
+}
+
+it('keeps an unbound account denied without repeating checks after a successful sign-out', async () => {
+  clerk.signOut.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_test_synthetic');
   const { AuthProvider, useAuth } = await import('./AuthContext');
   const me = vi.spyOn(authApi, 'me').mockRejectedValue(
     new ApiError('This Clerk account is not linked to Payroll', 401, undefined, { code: 'payroll_account_unbound' }),
   );
-  function Probe() {
-    const { authProblem, isAuthenticated, refreshUser } = useAuth();
-    return <button onClick={() => { void refreshUser(); }}>{isAuthenticated ? 'Signed in' : authProblem?.code}</button>;
-  }
 
-  render(<AuthProvider><Probe /></AuthProvider>);
+  render(<AuthProvider><UnboundProbe useAuth={useAuth} /></AuthProvider>);
 
-  const denied = await screen.findByRole('button', { name: 'payroll_account_unbound' });
-  fireEvent.click(denied);
-  await waitFor(() => expect(clerk.signOut).toHaveBeenCalledTimes(1));
+  fireEvent.click(await screen.findByRole('button', { name: 'payroll_account_unbound' }));
+  expect(clerk.signOut).toHaveBeenCalledTimes(1);
   expect(me).toHaveBeenCalledTimes(1);
+});
+
+it('allows a retry when Clerk sign-out fails', async () => {
+  clerk.signOut.mockReset().mockRejectedValueOnce(new Error('Synthetic sign-out failure')).mockResolvedValue(undefined);
+  vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_test_synthetic');
+  const { AuthProvider, useAuth } = await import('./AuthContext');
+  const me = vi.spyOn(authApi, 'me').mockRejectedValue(
+    new ApiError('This Clerk account is not linked to Payroll', 401, undefined, { code: 'payroll_account_unbound' }),
+  );
+
+  render(<AuthProvider><UnboundProbe useAuth={useAuth} /></AuthProvider>);
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry sign-out' }));
+  await waitFor(() => expect(clerk.signOut).toHaveBeenCalledTimes(2));
+  expect(me).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('button', { name: 'Signed in' })).toBeNull();
 });
