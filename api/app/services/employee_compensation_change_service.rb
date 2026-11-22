@@ -51,7 +51,7 @@ class EmployeeCompensationChangeService
     # Run once all legacy writers are drained and before the dated writers/job
     # are enabled. Only the migration's baseline can be superseded by a legacy
     # cache value. A scheduled version whose cache has yet to activate is ignored.
-    def reconcile_rollout!(employee_id, as_of:)
+    def reconcile_rollout!(employee_id, as_of:, actor: AuditActor.system_job(ROLLOUT_ACTOR_NAME))
       Employee.transaction do
         company_id = Employee.where(id: employee_id).pick(:company_id)
         next unless company_id
@@ -77,9 +77,9 @@ class EmployeeCompensationChangeService
         end
         next if !new_employee && missing_rates.empty? && changes.empty? && edits.empty?
 
-        record_initial!(employee, source: ROLLOUT_SOURCE) if new_employee
-        missing_rates.each { |row| record_wage_rate_created!(row, sync: false) }
-        result = new(employee: employee, actor: nil, source: ROLLOUT_SOURCE, pay_rate: changes.fetch("pay_rate", UNCHANGED),
+        record_initial!(employee, actor: actor, source: ROLLOUT_SOURCE) if new_employee
+        missing_rates.each { |row| record_wage_rate_created!(row, actor: actor, sync: false) }
+        result = new(employee: employee, actor: actor, source: ROLLOUT_SOURCE, pay_rate: changes.fetch("pay_rate", UNCHANGED),
           effective_on: reconciliation_date(employee, as_of), basis: changes.slice(*BASIS_ATTRIBUTES), wage_rate_edits: edits).call!
         sync_cache!(employee, as_of: as_of)
         { employee_id: employee.id, wage_rate_ids: (missing_rates.map(&:id) + result.wage_rate_versions.map(&:employee_wage_rate_id)).uniq }
@@ -140,7 +140,7 @@ class EmployeeCompensationChangeService
     # Records the first version for a newly created employee and any wage
     # rates created with it. Called from Employee's after_create, inside the
     # creation transaction.
-    def record_initial!(employee, source: nil, reason: nil)
+    def record_initial!(employee, actor:, source: nil, reason: nil)
       writing_for(employee.id) do
         effective_on = initial_effective_on(employee)
         employee.employee_compensation_changes.create!(
@@ -149,7 +149,7 @@ class EmployeeCompensationChangeService
             effective_on: effective_on,
             reason: reason.presence || "Initial pay setup",
             source: source.presence || "employee_creation",
-            created_by_id: Current.user&.id || employee.try(:created_by_id)
+            created_by_id: (actor.id if actor.is_a?(User))
           )
         )
       end
@@ -159,7 +159,7 @@ class EmployeeCompensationChangeService
     # path or setup code) starts on the default effective date: the start of
     # the employee's pay history while nothing is locked, otherwise the day
     # after their last approved or committed payroll.
-    def record_wage_rate_created!(wage_rate, sync: true)
+    def record_wage_rate_created!(wage_rate, actor:, sync: true)
       employee = wage_rate.employee
       writing_for(employee.id) do
         effective_on = default_effective_on(employee)
@@ -170,7 +170,7 @@ class EmployeeCompensationChangeService
             effective_on: effective_on,
             reason: "Wage rate added",
             source: "wage_rate_created",
-            created_by_id: Current.user&.id
+            created_by_id: (actor.id if actor.is_a?(User))
           )
         )
         sync_cache!(employee) if sync
@@ -181,13 +181,13 @@ class EmployeeCompensationChangeService
     # employee (test workspaces, rehearsal promotion). The block copies the
     # wage-rate rows inside the write context and returns
     # { source_wage_rate_id => target_wage_rate }.
-    def copy_history!(source:, target:)
+    def copy_history!(source:, target:, actor:)
       writing_for(target.id) do
         purge_history_under_context!([ target.id ])
         rate_map = block_given? ? yield.to_h : {}
         changes = source.employee_compensation_changes.chronological.to_a
         if changes.empty?
-          record_initial!(target, source: "copied_setup", reason: "Copied pay setup")
+          record_initial!(target, actor: actor, source: "copied_setup", reason: "Copied pay setup")
         else
           changes.each do |change|
             target.employee_compensation_changes.create!(copied_attributes(change, target))
@@ -202,7 +202,7 @@ class EmployeeCompensationChangeService
         rate_map.each_value do |target_rate|
           next if target_rate.employee_wage_rate_versions.exists? || target_rate.label.start_with?(RESERVED_LABEL_PREFIX)
 
-          record_wage_rate_created!(target_rate)
+          record_wage_rate_created!(target_rate, actor: actor)
         end
       end
     end
@@ -348,7 +348,7 @@ class EmployeeCompensationChangeService
                  historical_correction: false, basis: {}, expected_revision: UNCHANGED, cancel: false,
                  reject_scheduled_conflict: false, require_revision: false)
     @employee = employee
-    @actor = actor
+    @actor = actor || Current.user || Current.actor
     @source = source.to_s
     @reason = reason.to_s.strip
     @basis = basis.stringify_keys.slice(*BASIS_ATTRIBUTES)
@@ -498,7 +498,7 @@ class EmployeeCompensationChangeService
     if @historical_correction
       raise Error, "Choose a date in locked payroll for a historical correction" if !locked || effective_on > locked
       raise Error, "Explain why this is a historical correction" if reason.blank?
-      unless StaffRolePolicy.allowed?(actor || Current.user, :manage_client_configuration, company: employee.company)
+      unless StaffRolePolicy.allowed?(acting_user, :manage_client_configuration, company: employee.company)
         raise Error, "Client configuration access is required for historical pay corrections"
       end
       @restore_on = locked + 1
@@ -596,7 +596,7 @@ class EmployeeCompensationChangeService
       "reason" => reason.presence || default_reason,
       "source" => source,
       "historical_correction" => historical_correction,
-      "created_by_id" => actor&.id
+      "created_by_id" => acting_user&.id
     )
     existing = scope.find_by(effective_on: effective_on)
     if existing
@@ -645,16 +645,11 @@ class EmployeeCompensationChangeService
         warnings: warnings
       }
     }
-    if source != ROLLOUT_SOURCE
-      AuditLog.record!(user: actor || Current.user, **attributes)
-    elsif defined?(AuditActor)
-      AuditLog.record!(actor: AuditActor.system_job(ROLLOUT_ACTOR_NAME), **attributes)
-    else
-      # Before M3-3 the audit API only accepts real users. Store the system
-      # identity in the existing actor snapshot without creating a login.
-      AuditLog.create!(**attributes, organization_id: employee.company.organization_id,
-        actor_name: ROLLOUT_ACTOR_NAME, actor_role: "system_job")
-    end
+    AuditLog.record!(user: acting_user, actor: (actor unless acting_user), **attributes)
+  end
+
+  def acting_user
+    actor if actor.is_a?(User)
   end
 
   def printable_rates(rates)

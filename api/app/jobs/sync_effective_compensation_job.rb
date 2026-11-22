@@ -14,7 +14,13 @@ class SyncEffectiveCompensationJob < ApplicationJob
   retry_on StandardError, wait: :polynomially_longer, attempts: 3
 
   def perform(as_of: nil)
-    as_of = as_of.present? ? Date.iso8601(as_of.to_s) : PayrollBusinessClock.today
+    date = as_of.present? ? Date.iso8601(as_of.to_s) : PayrollBusinessClock.today
+    Current.with_isolated_actor(AuditActor.system_job(self)) { sync_employees(date) }
+  end
+
+  private
+
+  def sync_employees(as_of)
     failures = employee_ids_needing_sync(as_of).filter_map do |employee_id|
       Employee.transaction(requires_new: true) do
         company_id = Employee.where(id: employee_id).pick(:company_id)
@@ -30,8 +36,6 @@ class SyncEffectiveCompensationJob < ApplicationJob
     end
     raise "Compensation cache sync failed for employee IDs: #{failures.join(', ')}" if failures.any?
   end
-
-  private
 
   # Employees with a version that started on or before today and is newer than
   # the last cache refresh window: anything that took effect since yesterday,

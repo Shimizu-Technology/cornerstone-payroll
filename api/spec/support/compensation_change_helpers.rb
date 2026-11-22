@@ -6,7 +6,7 @@
 # (the day after the employee's last approved or committed payroll), which is
 # when a direct overwrite used to reach payroll.
 module CompensationChangeHelpers
-  def change_compensation!(employee, effective_on: nil, historical_correction: false, **attributes)
+  def change_compensation!(employee, effective_on: nil, historical_correction: false, actor: AuditActor.system_job("Compensation spec setup"), **attributes)
     attributes = attributes.stringify_keys
     pay_rate = attributes.key?("pay_rate") ? attributes.delete("pay_rate") : EmployeeCompensationChangeService::UNCHANGED
     basis = attributes.extract!(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES)
@@ -15,15 +15,15 @@ module CompensationChangeHelpers
     employee.allow_tax_classification_change = true if basis.key?("employment_type")
     employee.update!(attributes) if attributes.any?
     EmployeeCompensationChangeService.new(
-      employee: employee, actor: nil, source: "staff", reason: "Spec setup", effective_on: effective_on,
+      employee: employee, actor: actor, source: "staff", reason: "Spec setup", effective_on: effective_on,
       historical_correction: historical_correction, pay_rate: pay_rate, basis: basis
     ).call!
     employee
   end
 
-  def change_wage_rate!(wage_rate, effective_on: nil, historical_correction: false, **attributes)
+  def change_wage_rate!(wage_rate, effective_on: nil, historical_correction: false, actor: AuditActor.system_job("Compensation spec setup"), **attributes)
     EmployeeCompensationChangeService.new(
-      employee: wage_rate.employee, actor: nil, source: "staff", reason: "Spec setup", effective_on: effective_on,
+      employee: wage_rate.employee, actor: actor, source: "staff", reason: "Spec setup", effective_on: effective_on,
       historical_correction: historical_correction, wage_rate_edits: [ attributes.merge(id: wage_rate.id) ]
     ).call!
     wage_rate.reload

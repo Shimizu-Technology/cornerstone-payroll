@@ -27,6 +27,11 @@ module Api
               [ company.id.to_s, StaffRolePolicy.capabilities_for(current_user, company: company) ]
             end
           },
+          roles: {
+            staff: StaffRolePolicy.allowed?(current_user, :staff_workspace),
+            client: current_user.client?,
+            employee_links_count: current_user.employee_account_links.portal_eligible.includes(company: :organization).count(&:portal_enabled?)
+          },
           features: current_company ? CompanyFeatures.for(current_company).summary : nil
         }
       end

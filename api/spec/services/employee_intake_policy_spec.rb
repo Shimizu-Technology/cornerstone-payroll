@@ -193,7 +193,7 @@ RSpec.describe EmployeeIntakePolicy do
   it "invalidates confirmation after changing compensation" do
     employee = incomplete_employee
     confirm(employee)
-    change_compensation!(employee, pay_rate: 20)
+    change_compensation!(employee, actor: manager, pay_rate: 20)
     expect(employee.reload.intake_payroll_confirmed_at).to be_nil
   end
 
@@ -253,7 +253,7 @@ RSpec.describe EmployeeIntakePolicy do
   it "blocks stale compensation even after manager reconfirmation" do
     create(:tax_table, tax_year: 2026)
     employee = incomplete_employee
-    change_compensation!(employee, pay_rate: 20)
+    change_compensation!(employee, actor: manager, pay_rate: 20)
     confirm(employee)
     EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: accountant)
     employee.employee_document_requirements.each do |requirement|
@@ -280,7 +280,7 @@ RSpec.describe EmployeeIntakePolicy do
     secondary = employee.employee_wage_rates.create!(label: "Secondary", rate: 25, is_primary: false)
     confirm(employee)
     fingerprint = PayrollCalculationContext.intake_setup_fingerprint(employee: employee)
-    EmployeeCompensationChangeService.new(employee: employee, actor: nil, source: "staff", reason: "Spec sync", wage_rates: [
+    EmployeeCompensationChangeService.new(employee: employee, actor: manager, source: "staff", reason: "Spec sync", wage_rates: [
       { id: primary.id, label: "Primary", rate: 20, is_primary: true },
       { id: secondary.id, label: "Secondary", rate: 30, is_primary: false }
     ]).call!

@@ -2,6 +2,12 @@ import type { AuthProblem } from '@/contexts/AuthContext';
 
 /** Plain-language reasons for a refused sign-in. The server's own wording stays as a detail. */
 export function describeAuthProblem(problem: AuthProblem): { title: string; body: string } {
+  if (problem.code === 'payroll_account_unbound') {
+    return {
+      title: 'This sign-in is not linked to Payroll',
+      body: 'Open your Payroll invitation to set up access. If you already accepted it, ask your Payroll administrator to verify your account.',
+    };
+  }
   const text = problem.message.toLowerCase();
   if (text.includes('inactive') || text.includes('deactivated') || text.includes('disabled')) {
     return {

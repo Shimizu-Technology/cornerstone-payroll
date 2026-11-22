@@ -57,12 +57,14 @@ class PayrollStandingChange < ApplicationRecord
   end
 
   def audit_removal
-    AuditLog.record!(company_id: company_id, action: "payroll_standing_changes#destroy", record_type: self.class.name,
+    AuditLog.record!(user: Current.user, actor: Current.actor || AuditActor.system_job(self.class.name),
+      company_id: company_id, action: "payroll_standing_changes#destroy", record_type: self.class.name,
       record_id: id, metadata: { previous: attributes.except("created_at", "updated_at") })
   end
 
   def audit_change
-    AuditLog.record!(company_id: company_id, action: "payroll_standing_changes#save", record_type: self.class.name,
+    AuditLog.record!(user: Current.user, actor: Current.actor || AuditActor.system_job(self.class.name),
+      company_id: company_id, action: "payroll_standing_changes#save", record_type: self.class.name,
       record_id: id, metadata: { changes: saved_changes.except("updated_at", "created_at") })
   end
 end
