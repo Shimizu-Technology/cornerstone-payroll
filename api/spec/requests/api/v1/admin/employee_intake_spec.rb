@@ -140,7 +140,7 @@ RSpec.describe "Employee incomplete intake", type: :request do
     patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { city: "" } }
     expect(response).to have_http_status(:unprocessable_entity)
     expect(employee.reload.city).to eq("Hagatna")
-    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { zip: "", pay_rate: 22 } }
+    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { zip: "", pay_rate: 22, compensation_revision: EmployeeCompensationChangeService.revision(employee.reload) } }
     expect(response).to have_http_status(:ok)
     expect(employee.reload).to have_attributes(zip: nil, pay_rate: 22)
   end
@@ -228,18 +228,20 @@ RSpec.describe "Employee incomplete intake", type: :request do
 
   it "invalidates manager confirmation through wage-rate creation, changes, and deletion" do
     employee = default_withholding_employee
-    post "/api/v1/admin/employee_wage_rates", params: { employee_wage_rate: { employee_id: employee.id, label: "Secondary", rate: 25, active: true, is_primary: false } }
+    post "/api/v1/admin/employee_wage_rates", params: { employee_wage_rate: { employee_id: employee.id, label: "Secondary", rate: 25, active: true, is_primary: false,
+      compensation_revision: EmployeeCompensationChangeService.revision(employee) } }
     expect(response).to have_http_status(:created), response.body
     rate_id = response.parsed_body.dig("wage_rate", "id")
     expect(employee.reload.intake_payroll_confirmed_at).to be_nil
     [ { rate: 30 }, { active: false }, { is_primary: true } ].each do |changes|
       employee.update_columns(intake_payroll_confirmed_at: Time.current)
-      patch "/api/v1/admin/employee_wage_rates/#{rate_id}", params: { employee_wage_rate: changes }
+      patch "/api/v1/admin/employee_wage_rates/#{rate_id}", params: { employee_wage_rate: changes.merge(compensation_revision: EmployeeCompensationChangeService.revision(employee.reload)) }
       expect(response).to have_http_status(:ok), response.body
       expect(employee.reload.intake_payroll_confirmed_at).to be_nil
     end
     employee.update_columns(intake_payroll_confirmed_at: Time.current)
-    delete "/api/v1/admin/employee_wage_rates/#{rate_id}"
+    delete "/api/v1/admin/employee_wage_rates/#{rate_id}",
+      params: { employee_wage_rate: { compensation_revision: EmployeeCompensationChangeService.revision(employee.reload) } }
     expect(response).to have_http_status(:ok)
     expect(employee.reload.intake_payroll_confirmed_at).to be_nil
   end

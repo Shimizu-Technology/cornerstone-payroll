@@ -10,6 +10,9 @@ module CompensationChangeHelpers
     attributes = attributes.stringify_keys
     pay_rate = attributes.key?("pay_rate") ? attributes.delete("pay_rate") : EmployeeCompensationChangeService::UNCHANGED
     basis = attributes.extract!(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES)
+    # Some legacy payroll fixtures simulate changing tax class in place,
+    # while real tax-class changes create a linked successor employee.
+    employee.allow_tax_classification_change = true if basis.key?("employment_type")
     employee.update!(attributes) if attributes.any?
     EmployeeCompensationChangeService.new(
       employee: employee, actor: nil, source: "staff", reason: "Spec setup", effective_on: effective_on,
