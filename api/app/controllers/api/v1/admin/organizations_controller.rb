@@ -196,34 +196,13 @@ module Api
         end
 
         def invite_user(user)
-          service = ClerkInvitationService.new
-          unless service.configured?
-            return { success: false, error: "Clerk API not configured" }
-          end
-
-          result = service.create_invitation(
-            email: user.email,
-            redirect_url: build_redirect_url,
-            public_metadata: { role: user.role, organization_id: user.organization_id },
-            ignore_existing: false
-          )
-
-          if result[:success]
-            user.update!(clerk_invitation_id: result[:invitation_id])
-          end
-
-          result
+          PayrollInvitation.new.send_invite(user, redirect_url: invitation_redirect_url)
         end
 
         def safe_invite_user(user)
           invite_user(user)
         rescue ActiveRecord::RecordInvalid => e
           { success: false, error: "Invitation could not be saved locally: #{e.record.errors.full_messages.join(', ')}" }
-        end
-
-        def build_redirect_url
-          frontend = ENV.fetch("FRONTEND_URL") { ENV.fetch("ALLOWED_ORIGINS", "http://localhost:5173").split(",").first.strip }
-          "#{frontend}/login"
         end
 
         def organization_json(organization, detailed: false)

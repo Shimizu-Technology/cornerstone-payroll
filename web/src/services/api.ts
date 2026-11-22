@@ -796,6 +796,12 @@ interface UserCreateResponse extends InvitationDeliveryResponse {
   data: User;
 }
 
+export interface ClerkRecoveryAccount {
+  id: string;
+  name: string | null;
+  verified_emails: string[];
+}
+
 export const usersApi = {
   list: (params?: { search?: string }) =>
     api.get<{ data: User[] }>('/admin/users', params),
@@ -811,6 +817,10 @@ export const usersApi = {
     api.post<{ data: User }>(`/admin/users/${id}/deactivate`),
   resendInvitation: (id: number) =>
     api.post<UserCreateResponse>(`/admin/users/${id}/resend_invitation`),
+  lookupClerkId: (id: number, clerkId: string) =>
+    api.post<{ data: ClerkRecoveryAccount }>(`/admin/users/${id}/lookup_clerk_id`, { clerk_id: clerkId }),
+  bindClerkId: (id: number, data: { clerk_id: string; confirm_email: string }) =>
+    api.post<{ data: User }>(`/admin/users/${id}/bind_clerk_id`, data),
   movePracticeCopy: (id: number, data: { company_id: number; activate: boolean }) =>
     api.post<Partial<UserCreateResponse> & { data: User; moved_from: { id: number; name: string } }>(`/admin/users/${id}/move_practice_copy`, data),
   delete: (id: number) =>
