@@ -16,6 +16,22 @@ class EmployeeCompensationChange < ApplicationRecord
   validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
   validates :effective_on, uniqueness: { scope: :employee_id }
 
+  def hourly?
+    employment_type == "hourly"
+  end
+
+  def contractor_hourly?
+    employment_type == "contractor" && contractor_pay_type == "hourly"
+  end
+
+  def hourly_pay_basis?
+    hourly? || contractor_hourly?
+  end
+
+  def variable_salary?
+    employment_type == "salary" && salary_type == "variable"
+  end
+
   def snapshot
     SNAPSHOT_ATTRIBUTES.index_with { |attribute| public_send(attribute) }
   end

@@ -179,7 +179,7 @@ module Api
               item = pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
               if item.new_record?
                 item.company_id = current_company_id
-                item.employment_type = employee.employment_type
+                item.employment_type = employee.payroll_compensation_on(pay_period.end_date).employment_type
                 item.pay_rate = employee.default_payroll_rate_on(pay_period.end_date)
               end
 
@@ -287,7 +287,7 @@ module Api
         def apply_timecard_hours_to_payroll_item(item, employee, total_hours)
           active_rates = employee.wage_rates_on(item.pay_period.end_date)
           rounded_hours = total_hours.round(2)
-          uses_rate_selection = (employee.hourly? || employee.contractor_pay_type == "hourly") && active_rates.length > 1
+          uses_rate_selection = employee.payroll_compensation_on(item.pay_period.end_date).hourly_pay_basis? && active_rates.length > 1
 
           unless uses_rate_selection
             item.clear_wage_rate_hours!

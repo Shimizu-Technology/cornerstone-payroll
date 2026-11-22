@@ -21,7 +21,7 @@ class PayrollExpectedEntries
       { id: field.id, employee_id: field.employee_id, employee_wage_rate_id: field.employee_wage_rate_id,
         wage_rate: period_rate&.rate, wage_rate_label: period_rate&.label, label: field.display_label, help_text: field.help_text, kind: field.kind, required: field.required?,
         saved_wage_rate_hours: items.select { |item| item.employee_id == field.employee_id }.flat_map(&:wage_rate_hours),
-        allow_none: field.allow_none?, availability_error: field.availability_error, status: status, value: value,
+        allow_none: field.allow_none?, availability_error: field.availability_error(rates_on: @period.end_date), status: status, value: value,
         source_revision: client_revision(field, status, resolution),
         note: exclusion&.reason || resolution&.note, inline_save_error: inline_save_error(field) }
     end
@@ -61,10 +61,7 @@ class PayrollExpectedEntries
   end
 
   def period_wage_rate(field)
-    return unless field.employee_wage_rate
-
-    field.employee.wage_rates_on(@period.end_date, include_inactive: true).find { |rate| rate.id == field.employee_wage_rate_id } ||
-      field.employee_wage_rate
+    field.wage_rate_on(@period.end_date)
   end
 
   def inline_save_error(field)

@@ -17,15 +17,20 @@ class PayrollStandingChange < ApplicationRecord
   after_save :audit_change
   after_destroy :audit_removal
 
-  def availability_error
+  def availability_error(rates_on: PayrollBusinessClock.today)
     return "Employee is missing or belongs to another client. Ask Cornerstone to update this default." unless employee&.company_id == company_id
     return "#{employee.full_name} is #{employee.status}. Ask Cornerstone to update this default or choose Not this period." unless employee.active?
+    basis = employee.payroll_compensation_on(rates_on)
     if kind == "owner_pay"
-      return "#{employee.full_name} no longer uses variable salary. Ask Cornerstone to update this default." unless employee.variable_salary?
-    elsif !employee.hourly_pay_basis? || !employee_wage_rate&.active? || employee_wage_rate.employee_id != employee_id || employee_wage_rate.rate.nil?
+      return "#{employee.full_name} no longer uses variable salary. Ask Cornerstone to update this default." unless basis.variable_salary?
+    elsif !basis.hourly_pay_basis? || wage_rate_on(rates_on)&.rate.nil?
       return "Saved job and rate are missing or inactive for #{employee.full_name}. Ask Cornerstone to update this default or choose Not this period."
     end
     nil
+  end
+
+  def wage_rate_on(date)
+    employee.wage_rates_on(date).find { |rate| rate.id == employee_wage_rate_id }
   end
 
   def display_label
