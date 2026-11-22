@@ -3,7 +3,7 @@
 Rails 8 API-only backend for Cornerstone Payroll, a Guam payroll system.
 
 ## Requirements
-- Ruby 3.3+
+- Ruby 3.3.14+
 - PostgreSQL 14+
 - Bundler
 

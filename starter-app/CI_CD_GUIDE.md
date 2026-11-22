@@ -125,7 +125,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: '3.3'
           bundler-cache: true
@@ -154,7 +154,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: '3.3'
           bundler-cache: true
@@ -171,7 +171,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: '3.3'
           bundler-cache: true
@@ -407,7 +407,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/myapp_test
     steps:
       - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: '3.3'
           bundler-cache: true
@@ -726,7 +726,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: ${{ matrix.ruby-version }}
           bundler-cache: true
@@ -942,7 +942,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: '3.3'
           bundler-cache: true
@@ -1002,7 +1002,7 @@ e2e:
     - uses: actions/checkout@v4
 
     # Start the backend
-    - uses: ruby/setup-ruby@v1
+    - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
       with:
         ruby-version: '3.3'
         bundler-cache: true
