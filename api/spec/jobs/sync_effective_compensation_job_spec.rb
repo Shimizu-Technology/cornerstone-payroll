@@ -43,6 +43,21 @@ RSpec.describe SyncEffectiveCompensationJob do
     expect(employee.compensation_on(Date.new(2026, 12, 1)).pay_rate).to eq(17)
   end
 
+  it "reports a failed employee and still activates later employees" do
+    second = create(:employee, company: company, pay_rate: 15, hire_date: Date.new(2026, 1, 1))
+    change_compensation!(second, effective_on: "2026-12-01", pay_rate: 19)
+    allow(EmployeeCompensationChangeService).to receive(:sync_cache!).and_wrap_original do |original, row, as_of:|
+      raise ActiveRecord::RecordInvalid, row if row.id == employee.id
+
+      original.call(row, as_of: as_of)
+    end
+    expect(Rails.error).to receive(:report).with(an_instance_of(ActiveRecord::RecordInvalid),
+      handled: true, context: { employee_id: employee.id })
+    expect { described_class.new.perform(as_of: "2026-12-01") }.to raise_error(RuntimeError, /#{employee.id}/)
+    expect(employee.reload.pay_rate).to eq(15)
+    expect(second.reload.pay_rate).to eq(19)
+  end
+
   it "catches up a change whose start date it missed" do
     described_class.perform_now(as_of: "2026-12-20")
     expect(employee.reload.pay_rate).to eq(17)

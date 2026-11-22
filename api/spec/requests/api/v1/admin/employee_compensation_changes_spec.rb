@@ -73,6 +73,38 @@ RSpec.describe "Effective-dated pay changes through the admin employee API", typ
     expect(employee.reload.compensation_on(Date.new(2026, 11, 12))).to have_attributes(pay_rate: 18, historical_correction: true)
   end
 
+  it "rejects an outdated compensation revision and permits a profile-only save" do
+    stale = EmployeeCompensationChangeService.revision(employee.reload)
+    update_pay(pay_rate: 17, compensation_effective_on: "2026-12-01")
+    expect(response).to have_http_status(:ok)
+
+    update_pay(pay_rate: 16, compensation_effective_on: "2026-11-22", compensation_revision: stale)
+    expect(response).to have_http_status(:conflict)
+    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { first_name: "Renamed" } }, as: :json
+    expect(response).to have_http_status(:ok)
+    expect(employee.reload.compensation_on(Date.new(2026, 12, 1)).pay_rate).to eq(17)
+  end
+
+  it "cancels a future change with its current revision and a reason" do
+    update_pay(pay_rate: 17, compensation_effective_on: "2026-12-01")
+    expect(response).to have_http_status(:ok)
+    history = response.parsed_body.dig("data", "compensation_history")
+    post "/api/v1/admin/employees/#{employee.id}/cancel_scheduled_compensation", as: :json, params: { employee: {
+      compensation_effective_on: "2026-12-01", compensation_change_reason: "Raise withdrawn",
+      compensation_revision: history.fetch("revision")
+    } }
+    expect(response).to have_http_status(:ok), response.body
+    expect(employee.reload.payroll_rate_on(Date.new(2026, 12, 1))).to eq(15)
+  end
+
+  it "rejects a stale correction flag and exposes the locked-through date" do
+    update_pay(pay_rate: 17, compensation_effective_on: "2026-11-20",
+      compensation_change_reason: "Previously selected correction", compensation_historical_correction: true)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to include("locked_through" => "2026-11-15")
+    expect(employee.reload.pay_rate).to eq(15)
+  end
+
   it "reports a mid-period change against an open payroll" do
     create(:pay_period, company: company, start_date: Date.new(2026, 11, 16), end_date: Date.new(2026, 11, 30), pay_date: Date.new(2026, 12, 4))
     update_pay(pay_rate: 16, compensation_effective_on: "2026-11-20", compensation_change_reason: "Promotion")
