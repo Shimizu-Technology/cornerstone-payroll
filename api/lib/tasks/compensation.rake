@@ -18,9 +18,10 @@ namespace :compensation do
     employee_count = 0
     rate_count = 0
     today = PayrollBusinessClock.today
+    actor = AuditActor.system_job(EmployeeCompensationChangeService::ROLLOUT_ACTOR_NAME)
     Employee.in_batches do |batch|
       batch.ids.each do |employee_id|
-        result = EmployeeCompensationChangeService.reconcile_rollout!(employee_id, as_of: today)
+        result = EmployeeCompensationChangeService.reconcile_rollout!(employee_id, as_of: today, actor: actor)
         next unless result
 
         employee_count += 1

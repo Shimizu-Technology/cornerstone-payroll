@@ -19,7 +19,7 @@ class EmployeeClassificationTransitionService
       employee.lock!
       validate_transition!
 
-      new_employee = Employee.new(new_employee_attributes.merge(initial_compensation_source: "classification_transition"))
+      new_employee = Employee.new(new_employee_attributes.merge(initial_compensation_source: "classification_transition", initial_compensation_actor: actor))
       EmployeeIntakePolicy.prepare!(new_employee, actor: actor)
       new_employee.save!
       create_w4_election!(new_employee)

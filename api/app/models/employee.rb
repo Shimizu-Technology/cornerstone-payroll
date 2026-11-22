@@ -128,7 +128,7 @@ class Employee < ApplicationRecord
   attr_accessor :intake_original_employee, :require_initial_w4_effective_on
   # Creation paths that copy an existing history (test workspaces, rehearsal
   # promotion) skip the initial version and copy the source's instead.
-  attr_accessor :skip_initial_compensation_history, :initial_compensation_source
+  attr_accessor :skip_initial_compensation_history, :initial_compensation_source, :initial_compensation_actor
   validate :valid_supplied_intake_dates
   before_update :invalidate_intake_payroll_confirmation
   before_update :guard_compensation_mutation
@@ -930,7 +930,9 @@ class Employee < ApplicationRecord
   end
 
   def record_initial_compensation_history
-    EmployeeCompensationChangeService.record_initial!(self, source: initial_compensation_source)
+    actor = initial_compensation_actor || Current.user || Current.actor || created_by ||
+      AuditActor.operator("Employee initial pay setup")
+    EmployeeCompensationChangeService.record_initial!(self, actor: actor, source: initial_compensation_source)
   end
 
   def normalize_pay_rate_precision
