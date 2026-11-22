@@ -65,6 +65,17 @@ describe('client-scoped portal subscriptions', () => {
     expect(mocks.ticket.mock.calls).toEqual([[2], [2]]); expect(mocks.create).toHaveBeenCalledOnce(); cleanup();
   });
 
+  it('waits for the maintenance retry interval before requesting another ticket', async () => {
+    mocks.ticket.mockRejectedValueOnce(Object.assign(new ApiError('Maintenance', 503), { retryAfterMs: 60_000 }));
+    const cleanup = await subscribeToClientPortalThreads(2, { onThread: vi.fn() });
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(mocks.ticket).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.ticket.mock.calls).toEqual([[2], [2]]);
+    expect(mocks.create).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
   it('blocks another company payload and clears pending reconnect work on cleanup', async () => {
     const onThread = vi.fn(); const onUnavailable = vi.fn();
     const cleanup = await subscribeToClientPortalThreads(2, { onThread, onUnavailable });
