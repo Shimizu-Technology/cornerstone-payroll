@@ -454,9 +454,9 @@ Year-end forms (the W-2GU plan, steps 0–5) take priority over everything here 
 ## 10. Decisions for Leon
 
 1. **Close PR #139** and build the operating profile fresh. Recommended.
-2. **SMS provider:** neither app sends SMS today (AIRE only has unused ClickSend placeholders), so either choice is new work. Options: ClickSend or Twilio. Recommended: pick whichever has confirmed delivery and pricing to Guam numbers, and use it in both apps.
-3. **Clerk:** a separate Pro application for employees, about $25 a month plus per-user and SMS costs. Recommended.
-4. **Turn on MFA for staff and client users** in production before any employee is invited. Recommended. Today it is off.
+2. **SMS provider** (*November 22: not needed for milestone 3; chosen when text notices are built*)**:** neither app sends SMS today (AIRE only has unused ClickSend placeholders), so either choice is new work. Options: ClickSend or Twilio. Recommended: pick whichever has confirmed delivery and pricing to Guam numbers, and use it in both apps.
+3. **Clerk:** a separate Pro application for employees, about $25 a month plus per-user and SMS costs. Recommended. *Superseded November 19: one Clerk app for everyone. November 22: Payroll moves to a Clerk production instance (free plan) in milestone 3, and Pro is bought when MFA is switched on.*
+4. **Turn on MFA for staff and client users** in production before any employee is invited. Recommended. Today it is off. *Decided November 22: built and tested in milestone 3, switched on at the milestone 4 gate or once the platform earns revenue.*
 5. **Bank changes from time apps:** allow them in Phase 2 with a Payroll OTP plus staff verification, or keep them to the Cornerstone portal only at first. Recommended: portal only at first, and time apps after a pilot.
 6. **Contact-change approval:** approve automatically after an OTP to the old contact, as in the table above. Recommended, to keep staff work down. The alternative is staff approval for every contact change.
 7. **Employee app address,** for example `my.` plus the payroll domain. This is for Leon to choose.
