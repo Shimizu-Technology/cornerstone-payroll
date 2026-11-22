@@ -26,6 +26,14 @@ RSpec.describe EmployeeAccountLink do
     end.to raise_error(ActiveRecord::InvalidForeignKey)
   end
 
+  it "keeps linked employees from being deleted" do
+    described_class.create!(employee: worker, company: worker.company, status: :revoked)
+
+    expect(worker.destroy).to be(false)
+    expect(worker.errors[:base]).to be_present
+    expect(worker).to be_persisted
+  end
+
   it "allows history but only one open link per employee" do
     attrs = { employee_id: worker.id, company_id: worker.company_id }
     described_class.create!(**attrs, status: :revoked)

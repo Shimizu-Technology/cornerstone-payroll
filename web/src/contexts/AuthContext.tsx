@@ -23,6 +23,7 @@ export interface AuthProblem {
   status: number | null;
   code?: string;
   message: string;
+  signOutFailed?: boolean;
 }
 
 interface AuthContextType {
@@ -173,16 +174,23 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
       setUser(mapAuthUser(res.user));
       setAuthProblem(null);
     } catch (err) {
-      setAuthProblem(authProblemFrom(err));
+      const problem = authProblemFrom(err);
       setUser(null);
       if (err instanceof ApiError && err.status === 401) {
-        // One rejected Clerk session should trigger one sign-out.
+        // Suppress duplicate sign-outs while Clerk clears the rejected session.
         if (!backendUnauthorized.current) {
           backendUnauthorized.current = true;
+          setAuthProblem(problem);
           setAuthToken(null);
-          await clerkSignOut().catch(() => undefined);
+          try {
+            await clerkSignOut();
+          } catch {
+            backendUnauthorized.current = false;
+            setAuthProblem({ ...problem, signOutFailed: true });
+          }
         }
       } else {
+        setAuthProblem(problem);
         console.error('Failed to load user:', err);
       }
     } finally {

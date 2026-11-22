@@ -88,7 +88,7 @@ class User < ApplicationRecord
   end
 
   def awaiting_clerk_binding?
-    invitation_pending? && clerk_id.to_s.start_with?("pending_")
+    invitation_pending? && (clerk_id.blank? || clerk_id.start_with?("pending_"))
   end
 
   def invitation_accepted?
