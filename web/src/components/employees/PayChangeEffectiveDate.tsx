@@ -77,7 +77,8 @@ export function PayChangeEffectiveDate({ dates, canCorrect, value, onChange, err
           />
           <span>
             Record as a historical correction. The correction ends at the next recorded change or by {formatDate(dates.locked_through as string)}.
-            Approved and paid amounts stay as saved. Open payroll ending after that date keeps its existing pay setup.
+            Approved and paid amounts stay as saved. An open run ending within the corrected dates uses the corrected
+            rate when recalculated. Open runs ending later keep their existing pay setup.
           </span>
         </label>
       )}
