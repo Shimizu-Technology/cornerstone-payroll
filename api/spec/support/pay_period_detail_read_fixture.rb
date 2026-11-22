@@ -147,7 +147,7 @@ module PayPeriodDetailReadFixture
     detail_read_line(state, detail_read_item(state, **imported), earning_snapshot: snapshot)
     changed = detail_read_item(state, **imported)
     detail_read_line(state, changed, earning_snapshot: snapshot)
-    changed.employee.update_columns(employment_type: "salary")
+    change_compensation!(changed.employee, employment_type: "salary", salary_type: "annual")
     detail_read_line(state, detail_read_item(state, **imported), earning_snapshot: snapshot.except("employment_type"))
     detail_read_item(state, payment_delivery_method: "direct_deposit", check_number: nil)
     detail_read_item(state, payment_delivery_method: "paper_check")

@@ -730,7 +730,7 @@ class PayrollItem < ApplicationRecord
       calculator = PayrollCalculator.for(employee, self, annual_fica_context: annual_fica_context)
       calculator.calculate
       save!
-      TimeTracking::SourceEarningsConservation.validate!(self, calculated: true)
+      TimeTracking::SourceEarningsConservation.validate!(self, calculated: true, employee: employee)
     end
   rescue *PayrollCalculationHistory::ERRORS => e
     raise PayrollCalculationHistory::HoldError, PayrollCalculationHistory.message(e)
@@ -810,7 +810,7 @@ class PayrollItem < ApplicationRecord
     input_fields = %w[hours_worked overtime_hours pay_rate employment_type custom_columns_data gross_pay employee_id company_id pay_period_id]
     return if pay_period&.committed? && (changed_attribute_names_to_save & input_fields).empty?
 
-    TimeTracking::SourceEarningsConservation.validate!(self)
+    TimeTracking::SourceEarningsConservation.validate!(self, employee: association(:employee).target)
   rescue ArgumentError => e
     errors.add(:base, e.message)
   end

@@ -2716,6 +2716,7 @@ module Api
             employee, selected_items, selected_historical, selected_adjustments, unified: unified
           )
 
+          basis = employee.payroll_compensation_on([ period.end_date, PayrollBusinessClock.today ].min)
           {
             type: "employee_pay_history",
             review_warnings: report_component_review_warnings(selected_items),
@@ -2726,10 +2727,8 @@ module Api
               name: employee.full_name,
               first_name: employee.first_name,
               last_name: employee.last_name,
-              employment_type: employee.employment_type,
-              # The rate in effect at the end of the report range, or today
-              # when the range has not ended yet (M3-4).
-              pay_rate: employee.payroll_rate_on([ period.end_date, PayrollBusinessClock.today ].min).to_f
+              employment_type: basis.employment_type,
+              pay_rate: basis.pay_rate.to_f
             },
             history: history,
             summary: summary,

@@ -115,6 +115,28 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     [ company, workweek, pay_period, source ]
   end
 
+  it "bulk loads compensation and category policy for 50 mapped workers" do
+    company, workweek, pay_period, source = setup_records
+    raw = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date)
+    template = raw.fetch("employees").sole
+    raw["employees"] = 50.times.map do |index|
+      employee = create(:employee, company: company, pay_rate: 30)
+      employee.employee_wage_rates.create!(label: "Flight Hours", rate: 30, is_primary: true)
+      confirm_mapping!(company: company, source: source, employee: employee, source_user_id: index.to_s)
+      change_compensation!(employee, effective_on: pay_period.end_date + 1, employment_type: "salary", salary_type: "annual", pay_rate: 52_000) if index.zero?
+      template.merge("source_user_id" => index.to_s)
+    end
+
+    preview = described_class.new(pay_period: pay_period, source: source)
+    queries = compensation_read_queries("employees", "time_tracking_category_mappings", "time_tracking_earning_choices") do
+      rows = preview.send(:process, raw, workweek: workweek).fetch(:rows)
+      expect(rows.size).to eq(50)
+      expect(rows.pluck(:estimated_gross_delta).uniq).to eq([ 240.0 ])
+      expect(rows).to all(include(ready: true))
+    end
+    expect(queries.size).to eq(7)
+  end
+
   it "stores verified batch provenance, payable dimensions, and unpaid exclusions" do
     company, _workweek, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com", pay_rate: 25)

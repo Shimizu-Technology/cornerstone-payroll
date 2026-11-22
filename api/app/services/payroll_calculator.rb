@@ -20,7 +20,7 @@ class PayrollCalculator
 
   def self.for(employee, payroll_item, employment_type: nil, calculation_context: nil, annual_fica_context: nil)
     AnnualTaxConfig.require_verified!(payroll_item.pay_period.pay_date.year, lock: true) if calculation_context.blank?
-    TimeTracking::SourceEarningsConservation.validate!(payroll_item)
+    TimeTracking::SourceEarningsConservation.validate!(payroll_item, employee: employee)
     employment_type ||= if calculation_context.present? || payroll_item.timekeeping_source == "correction_reference"
       PayrollCalculationContext.employee_value(calculation_context, :employment_type) || payroll_item.employment_type
     else

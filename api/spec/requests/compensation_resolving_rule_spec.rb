@@ -113,7 +113,8 @@ RSpec.describe "Pay rates resolve on the pay period end date", type: :request do
     source = create(:time_tracking_source, company: company)
     [ [ open_period, 1500 ], [ next_period, 1700 ] ].each do |period, cents|
       match = TimeTracking::BatchImportPreviewService.new(pay_period: period, source: source)
-        .send(:match_wage_rate_buckets, [ { key: "regular", name: "Regular", total_hours: 8 } ], employee.id)
+        .send(:match_wage_rate_buckets, [ { key: "regular", name: "Regular", total_hours: 8 } ], employee,
+          employee.payroll_compensation_on(period.end_date), TimeTracking::CategoryRateMatcher.new(source: source))
       expect(match[:categories].sole).to include(wage_rate_label: "Regular", payroll_rate_cents: cents)
     end
   end
