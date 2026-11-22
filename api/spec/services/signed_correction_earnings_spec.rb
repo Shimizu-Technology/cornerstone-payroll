@@ -21,7 +21,7 @@ RSpec.describe SignedCorrectionEarnings do
   end
 
   it "uses saved signed inputs consistently in disclosure and PDF without changing history" do
-    employee.update!(pay_rate: 999)
+    change_compensation!(employee, pay_rate: 999)
     before = item.reload.attributes.deep_dup
     lines = described_class.call(item)
     expect(lines.map(&:label)).to eq([ "Regular adjustment" ])

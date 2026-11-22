@@ -95,7 +95,8 @@ class ClientEmployeeUpdateService
         company: company,
         pay_rate: 0,
         status: "inactive",
-        portal_pending_approval: true
+        portal_pending_approval: true,
+        initial_compensation_source: "client_portal"
       ))
       employee.intake_exception = candidate.intake_exception
       validate_department_scope!(direct_attrs)

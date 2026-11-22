@@ -25,6 +25,8 @@ RSpec.describe ClientEmployeeUpdateService, :postgres_concurrency, type: :servic
     EmployeeWageRate.where(employee_id: employee.id).delete_all
     Employee.where(id: employee.id).delete_all
     Department.where(id: department.id).delete_all
+    # The admin's wage-rate edit records a compensation audit entry (M3-4).
+    AuditLog.where(company_id: company.id).delete_all
     User.where(id: client_user.id).delete_all
     Company.where(id: company.id).delete_all
     Organization.where(id: organization.id).delete_all
@@ -75,7 +77,12 @@ RSpec.describe ClientEmployeeUpdateService, :postgres_concurrency, type: :servic
     first_snapshot_read.pop
     admin_thread = Thread.new do
       ActiveRecord::Base.connection_pool.with_connection do
-        EmployeeWageRate.find(wage_rate.id).update_with_employee_lock(rate: 20)
+        # M3-4: staff wage-rate edits go through the compensation service,
+        # which takes the same company and employee locks.
+        EmployeeCompensationChangeService.new(
+          employee: Employee.find(employee.id), actor: nil, source: "staff", reason: "Competing admin edit",
+          wage_rate_edits: [ { id: wage_rate.id, rate: 20 } ]
+        ).call!
         results << [ :admin, :updated ]
       rescue StandardError => e
         results << [ :admin_error, e ]

@@ -1640,7 +1640,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     it "rejects a rate changed after preview and a newer portal revision without payroll writes" do
       source = standing_source
       data = preview(source)
-      manual_job.update!(rate: 36)
+      change_wage_rate!(manual_job, rate: 36)
       post "#{url}/apply_import", params: reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id")), as: :json
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to include("changed")

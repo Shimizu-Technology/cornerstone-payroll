@@ -147,6 +147,7 @@ class EmployeeChangeRequest < ApplicationRecord
     election_received = safe_attrs.delete(:w4_election_received)
     w4_attrs = safe_attrs.extract!(*EmployeeW4Election::PROFILE_ATTRIBUTES)
 
+    requested_pay_rate = safe_attrs.key?(:pay_rate) ? safe_attrs.delete(:pay_rate) : EmployeeCompensationChangeService::UNCHANGED
     employee.update!(safe_attrs) if safe_attrs.present?
     EmployeeW4ElectionChangeService.new(
       employee: employee,
@@ -155,9 +156,17 @@ class EmployeeChangeRequest < ApplicationRecord
       source: "client_approved",
       reason: "Approved client employee change request ##{id}", election_received: election_received
     ).call! if w4_attrs.present?
-    return unless wage_rates.present?
 
-    EmployeeWageRateSyncService.new(employee: employee, wage_rates: wage_rates).sync!
+    # Approved pay changes start on the default effective date: the day after
+    # the employee's last approved or committed payroll.
+    EmployeeCompensationChangeService.new(
+      employee: employee,
+      actor: actor,
+      source: "client_approved",
+      reason: "Approved client employee change request ##{id}",
+      pay_rate: requested_pay_rate,
+      wage_rates: wage_rates.presence
+    ).call!
   end
 
   def effective_proposed_changes

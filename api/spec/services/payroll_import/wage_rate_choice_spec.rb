@@ -34,7 +34,7 @@ RSpec.describe PayrollImport::WageRateChoice do
   end
 
   it "requires a reviewed choice if the copied job rate changed" do
-    joint.update!(rate: 18)
+    change_wage_rate!(joint, rate: 18)
     expect(described_class.new(employee: employee, pay_period: period).preview[:selected_wage_rate_id]).to be_nil
   end
 end

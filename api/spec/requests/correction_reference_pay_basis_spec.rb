@@ -40,7 +40,7 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
   end
 
   def change_to_salary!
-    employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+    change_compensation!(employee, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
   end
 
   it "rejects a worksheet calculation before hours, fields or loan drafts change" do
@@ -93,8 +93,8 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
 
   it "keeps retained scalar and bucket rates for a same-basis hourly correction despite a profile rate edit" do
     original_source = source_item.reload.attributes
-    rate.update!(rate: 99)
-    employee.update!(pay_rate: 99)
+    change_wage_rate!(rate, rate: 99)
+    change_compensation!(employee, pay_rate: 99)
     post "/api/v1/admin/pay_periods/#{period.id}/run_payroll", headers: headers,
       params: { employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: [
         { employee_wage_rate_id: rate.id, label: rate.label, rate: 25, regular_hours: 3, overtime_hours: 0, is_primary: true, active: true }
@@ -204,13 +204,13 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
 
     it "rejects a changed contractor basis from captured evidence without replaying or inventing context" do
       original = frozen_financial_state
-      employee.update!(contractor_pay_type: "flat_fee", pay_rate: 500)
+      change_compensation!(employee, contractor_pay_type: "flat_fee", pay_rate: 500)
       expect { item.calculate! }.to raise_error(ArgumentError, /pay basis differs/)
       expect(frozen_financial_state).to eq(original)
     end
 
     it "supports the recorded hourly basis and preserves original scalar after a current amount edit" do
-      employee.update!(pay_rate: 99)
+      change_compensation!(employee, pay_rate: 99)
       post "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}/recalculate", headers: headers
       expect(response).to have_http_status(:ok), response.body
       expect(item.reload.pay_rate).to eq(25)
@@ -247,7 +247,7 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
     end
 
     it "preserves recorded annual salary and scalar despite a current profile amount edit" do
-      employee.update!(pay_rate: 78_000)
+      change_compensation!(employee, pay_rate: 78_000)
       post "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}/recalculate", headers: headers
       expect(response).to have_http_status(:ok), response.body
       expect(item.reload.pay_rate).to eq(52_000)
@@ -256,7 +256,7 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
 
     it "holds a changed salary subtype without reinterpreting annual pay as period pay" do
       original = frozen_financial_state
-      employee.update!(salary_type: "per_period", pay_rate: 2000)
+      change_compensation!(employee, salary_type: "per_period", pay_rate: 2000)
       expect { item.calculate! }.to raise_error(ArgumentError, /pay basis differs/)
       expect(frozen_financial_state).to eq(original)
     end
@@ -351,7 +351,7 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
     end
 
     it "preserves the recorded fee despite a current amount edit" do
-      employee.update!(pay_rate: 1500)
+      change_compensation!(employee, pay_rate: 1500)
       post "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}/recalculate", headers: headers
       expect(response).to have_http_status(:ok), response.body
       expect(item.reload.pay_rate).to eq(500)

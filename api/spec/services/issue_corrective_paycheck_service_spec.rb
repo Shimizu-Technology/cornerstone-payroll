@@ -285,7 +285,7 @@ RSpec.describe IssueCorrectivePaycheckService do
       it "uses the absolute target in a temporary sole row without changing the paid rate evidence" do
         frozen = original_item.attributes.deep_dup
         earnings = original_item.payroll_item_earnings.map(&:attributes)
-        historical_rate.update!(rate: 50, label: "Current renamed rate", active: false)
+        change_wage_rate!(historical_rate, rate: 50, label: "Current renamed rate", active: false)
         preview = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9 })
         expect(preview[:corrected]).to include(hours_worked: 9, pay_rate: 25, gross_pay: 225)
         expect(preview[:deltas][:gross_pay]).to eq(-25)
@@ -523,7 +523,7 @@ RSpec.describe IssueCorrectivePaycheckService do
     end
 
     it "uses the original W-2 classification when the employee's current type changed" do
-      employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      change_compensation!(employee, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
 
       _supplemental, corrective = described_class.issue!(
         original_pay_period: original_period,

@@ -180,7 +180,8 @@ module YearEnd
         pay_rate: 0,
         hire_date: first_paid,
         status: "inactive",
-        created_by: actor
+        created_by: actor,
+        initial_compensation_source: "one_off_payee"
       )
     end
 

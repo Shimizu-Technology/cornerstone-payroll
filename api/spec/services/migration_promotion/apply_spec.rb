@@ -223,6 +223,9 @@ RSpec.describe MigrationPromotion::Apply do
     target_employee.reload
     expect(target_employee).to have_attributes(first_name: "Ana", last_name: "Updated", pay_rate: 22.to_d)
     expect(target_company.employees.find_by!(first_name: "New", last_name: "Employee").pay_rate).to eq(19.to_d)
+    # M3-4: the rehearsal's compensation history replaces the target's.
+    expect(target_employee.employee_compensation_changes.map(&:pay_rate)).to eq([ 22.to_d ])
+    expect(target_company.employees.find_by!(first_name: "New", last_name: "Employee").employee_compensation_changes.sole.pay_rate).to eq(19.to_d)
     expect(EmployeeYtdTotal.find_by!(employee: target_employee, year: 2026)).to have_attributes(
       gross_pay: 2_600.to_d,
       net_pay: 2_060.to_d

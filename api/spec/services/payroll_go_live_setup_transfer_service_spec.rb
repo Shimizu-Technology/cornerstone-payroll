@@ -85,6 +85,8 @@ RSpec.describe PayrollGoLiveSetupTransferService do
     end.to change(EmployeeW4Election.where(employee: target), :count).by(1)
 
     expect(target.reload).to have_attributes(hire_date: Date.new(1998, 5, 26), pay_rate: 22.50)
+    # M3-4: the reviewed pay rate starts on the go-live date.
+    expect(target.compensation_on(effective_on)).to have_attributes(pay_rate: 22.50, effective_on: effective_on, source: "go_live_setup_transfer")
     expect(target.bank_routing_number_encrypted).to be_nil
     expect(target.bank_account_number_encrypted).to be_nil
     expect(company.deduction_types.find_by!(name: "Employee loan")).to have_attributes(default_amount: 50.to_d)

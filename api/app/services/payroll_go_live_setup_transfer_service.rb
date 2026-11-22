@@ -181,6 +181,7 @@ class PayrollGoLiveSetupTransferService
         adjustment
       end
     end
+    pay_rate = attributes.delete("pay_rate")
     target.update!(attributes.merge(
       department: source.department && department_map.fetch(source.department),
       configuration_source: "quickbooks_history"
@@ -188,7 +189,7 @@ class PayrollGoLiveSetupTransferService
     flag_loan_reconciliation!(target) if held_loan_adjustments
     copy_w4!(source, target, review, actor)
     copy_retirement!(source, target, review, actor)
-    copy_wage_rates!(source, target)
+    copy_compensation!(source, target, review, actor, pay_rate)
     copy_deductions!(source, target, deduction_type_map)
     copy_payroll_fields!(source, target, definition_map)
     copy_work_profile!(source, target, review, actor)
@@ -225,14 +226,23 @@ class PayrollGoLiveSetupTransferService
     ).call!
   end
 
-  def self.copy_wage_rates!(source, target)
-    source.employee_wage_rates.each do |source_rate|
-      target.employee_wage_rates.find_or_initialize_by(label: source_rate.label).update!(
-        rate: source_rate.rate,
-        active: source_rate.active,
-        is_primary: source_rate.is_primary
-      )
+  # The reviewed pay rate and wage rates start on the go-live date, like the
+  # copied W-4 and retirement elections.
+  def self.copy_compensation!(source, target, review, actor, pay_rate)
+    existing = target.employee_wage_rates.index_by(&:label)
+    edits = source.employee_wage_rates.map do |source_rate|
+      { id: existing[source_rate.label]&.id, label: source_rate.label, rate: source_rate.rate,
+        active: source_rate.active, is_primary: source_rate.is_primary }
     end
+    EmployeeCompensationChangeService.new(
+      employee: target,
+      actor: actor,
+      source: "go_live_setup_transfer",
+      reason: "Reviewed successor setup copied from #{review.source_company.name}",
+      effective_on: review.effective_on,
+      pay_rate: pay_rate,
+      wage_rate_edits: edits
+    ).call!
   end
 
   def self.copy_deductions!(source, target, type_map)
@@ -347,6 +357,6 @@ class PayrollGoLiveSetupTransferService
 
   private_class_method :authorize_preview!, :authorize_apply!, :copy_company_settings!, :copy_schedule!,
     :copy_departments!, :copy_deduction_types!, :copy_payroll_field_definitions!, :copy_employee!,
-    :copy_w4!, :copy_retirement!, :copy_wage_rates!, :copy_deductions!, :copy_payroll_fields!, :copy_work_profile!,
+    :copy_w4!, :copy_retirement!, :copy_compensation!, :copy_deductions!, :copy_payroll_fields!, :copy_work_profile!,
     :flag_configuration_certifications!, :retirement_configuration?, :audit!
 end

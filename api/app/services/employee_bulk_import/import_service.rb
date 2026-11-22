@@ -87,6 +87,7 @@ module EmployeeBulkImport
 
           employee = company.employees.new(attrs)
           employee.created_by = actor
+          employee.initial_compensation_source = "bulk_import"
           EmployeeIntakePolicy.prepare!(employee, actor: actor)
           if employee.save
             create_w4_election!(employee)
