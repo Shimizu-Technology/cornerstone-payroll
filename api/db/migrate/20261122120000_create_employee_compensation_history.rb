@@ -5,13 +5,12 @@
 # today; these tables hold the history readers resolve against.
 class CreateEmployeeCompensationHistory < ActiveRecord::Migration[8.1]
   def up
-    # History belongs to its employee and wage-rate rows. Application code
-    # never deletes those (rates are ended, employees terminated), and
-    # CompensationWriteLint rejects raw deletes, so the cascade only serves
-    # whole-record removal such as test fixture cleanup.
+    execute "SET LOCAL lock_timeout = '5s'"
+    add_index :employee_wage_rates, %i[id employee_id], unique: true, name: "idx_employee_wage_rates_id_employee"
+
     create_table :employee_compensation_changes do |t|
       t.references :company, null: false, foreign_key: { on_delete: :restrict }
-      t.references :employee, null: false, foreign_key: { on_delete: :cascade }, index: false
+      t.references :employee, null: false, index: false
       t.decimal :pay_rate, precision: 18, scale: 6, null: false
       t.string :employment_type, null: false
       t.string :salary_type
@@ -38,8 +37,8 @@ class CreateEmployeeCompensationHistory < ActiveRecord::Migration[8.1]
 
     create_table :employee_wage_rate_versions do |t|
       t.references :company, null: false, foreign_key: { on_delete: :restrict }
-      t.references :employee, null: false, foreign_key: { on_delete: :cascade }
-      t.references :employee_wage_rate, null: false, foreign_key: { on_delete: :cascade }, index: false
+      t.references :employee, null: false
+      t.references :employee_wage_rate, null: false, index: false
       t.string :label, null: false
       t.decimal :rate, precision: 12, scale: 6
       t.boolean :is_primary, null: false, default: false
@@ -63,12 +62,23 @@ class CreateEmployeeCompensationHistory < ActiveRecord::Migration[8.1]
     add_check_constraint :employee_wage_rate_versions, "rate IS NULL OR rate >= 0",
       name: "employee_wage_rate_versions_rate_nonnegative"
 
+    add_foreign_key :employee_compensation_changes, :employees,
+      column: %i[employee_id company_id], primary_key: %i[id company_id], on_delete: :restrict,
+      name: "fk_compensation_employee_company"
+    add_foreign_key :employee_wage_rate_versions, :employees,
+      column: %i[employee_id company_id], primary_key: %i[id company_id], on_delete: :restrict,
+      name: "fk_wage_rate_versions_employee_company"
+    add_foreign_key :employee_wage_rate_versions, :employee_wage_rates,
+      column: %i[employee_wage_rate_id employee_id], primary_key: %i[id employee_id], on_delete: :restrict,
+      name: "fk_wage_rate_versions_rate_employee"
+
     backfill_baselines!
   end
 
   def down
     drop_table :employee_wage_rate_versions
     drop_table :employee_compensation_changes
+    remove_index :employee_wage_rates, name: "idx_employee_wage_rates_id_employee"
   end
 
   private

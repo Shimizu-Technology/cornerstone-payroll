@@ -11,6 +11,13 @@ RSpec.describe CompensationWriteLint do
   end
 
   {
+    "attrs = ({ pay_rate: BigDecimal('12') }); employee.update_columns((attrs))" => "bulk or callback-skipping write naming pay_rate",
+    "row = EmployeeWageRate.find(5); row.delete" => "bulk or callback-skipping write on employee wage rates",
+    "employee.employee_wage_rates\n  .where(active: true)\n  .update_all(rate: 30)" => "bulk or callback-skipping write on employee wage rates",
+    "employee.update_columns(pay_frequency: 'monthly')" => "bulk or callback-skipping write on employee compensation",
+    %q(execute('INSERT INTO "public"."employee_wage_rates" DEFAULT VALUES')) => "raw SQL write on pay rates or compensation history",
+    %q(execute('TRUNCATE TABLE "public"."employee_compensation_changes"')) => "raw SQL write on pay rates or compensation history",
+    %q(execute('DELETE FROM public.employee_wage_rates')) => "raw SQL write on pay rates or compensation history",
     "employee.update_columns(pay_rate: 20)" => "bulk or callback-skipping write naming pay_rate",
     "Employee.where(company_id: 1).update_all(pay_rate: 0, updated_at: Time.current)" => "bulk or callback-skipping write naming pay_rate",
     "employee.update_column(:pay_rate, 20)" => "bulk or callback-skipping write naming pay_rate",

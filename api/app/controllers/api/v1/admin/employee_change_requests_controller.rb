@@ -26,7 +26,7 @@ module Api
           # The decision, its portal notification and this audit record commit
           # together, so an audit failure keeps none of them.
           EmployeeChangeRequest.transaction do
-            @change_request.apply!(actor: current_user, review_notes: params[:review_notes])
+            @change_request.apply!(actor: current_user, review_notes: params[:review_notes], effective_on: params[:effective_on])
 
             AuditLog.record!(
               user: current_user,
@@ -41,6 +41,8 @@ module Api
           end
 
           render json: { data: serialize_change_request(@change_request.reload, include_payloads: true) }
+        rescue EmployeeCompensationChangeService::Error => e
+          render json: { error: e.message, details: { effective_on: [ e.message ] } }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
         end
@@ -95,6 +97,7 @@ module Api
           }
 
           if include_payloads
+            payload[:proposed_compensation_effective_on] = change_request.proposed_compensation_effective_on
             payload[:proposed_changes] = sanitize_payload(change_request.proposed_changes)
             payload[:original_values] = sanitize_payload(change_request.original_values)
             payload[:direct_changes_applied] = sanitize_payload(change_request.direct_changes_applied)

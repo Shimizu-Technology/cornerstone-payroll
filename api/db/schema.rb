@@ -1256,6 +1256,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
     t.datetime "updated_at", null: false
     t.index [ "employee_id", "label" ], name: "index_employee_wage_rates_on_employee_id_and_label", unique: true
     t.index [ "employee_id" ], name: "index_employee_wage_rates_on_employee_id"
+    t.index [ "id", "employee_id" ], name: "idx_employee_wage_rates_id_employee", unique: true
   end
 
   create_table "employee_work_profiles", force: :cascade do |t|
@@ -4918,7 +4919,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
   add_foreign_key "employee_change_requests", "users", column: "requested_by_id"
   add_foreign_key "employee_change_requests", "users", column: "reviewed_by_id"
   add_foreign_key "employee_compensation_changes", "companies", on_delete: :restrict
-  add_foreign_key "employee_compensation_changes", "employees", on_delete: :cascade
+  add_foreign_key "employee_compensation_changes", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_compensation_employee_company", on_delete: :restrict
   add_foreign_key "employee_compensation_changes", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_configuration_review_resolutions", "companies", on_delete: :restrict
   add_foreign_key "employee_configuration_review_resolutions", "employees", on_delete: :restrict
@@ -4957,8 +4958,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_120000) do
   add_foreign_key "employee_w4_elections", "employees", on_delete: :restrict
   add_foreign_key "employee_w4_elections", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_wage_rate_versions", "companies", on_delete: :restrict
-  add_foreign_key "employee_wage_rate_versions", "employee_wage_rates", on_delete: :cascade
-  add_foreign_key "employee_wage_rate_versions", "employees", on_delete: :cascade
+  add_foreign_key "employee_wage_rate_versions", "employee_wage_rates", column: [ "employee_wage_rate_id", "employee_id" ], primary_key: [ "id", "employee_id" ], name: "fk_wage_rate_versions_rate_employee", on_delete: :restrict
+  add_foreign_key "employee_wage_rate_versions", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_wage_rate_versions_employee_company", on_delete: :restrict
   add_foreign_key "employee_wage_rate_versions", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_wage_rates", "employees"
   add_foreign_key "employee_work_profiles", "companies"
