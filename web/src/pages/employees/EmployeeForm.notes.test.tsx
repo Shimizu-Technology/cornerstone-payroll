@@ -107,7 +107,7 @@ describe('EmployeeForm staff notes visibility', () => {
 
     await screen.findByDisplayValue('Avery');
     expect(await screen.findByText('Staff only')).toBeTruthy();
-    expect(screen.getByText('No staff notes yet')).toBeTruthy();
+    expect(await screen.findByText('No staff notes yet')).toBeTruthy();
     expect(mocks.listNotes).toHaveBeenCalledWith(1, 7);
   });
 
