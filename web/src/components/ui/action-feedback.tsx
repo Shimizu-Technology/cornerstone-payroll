@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
+import { WRITE_MAINTENANCE_EVENT } from '@/services/write-maintenance';
 import { errorRecovery } from '@/lib/error-recovery';
 import { AlertCircle, CheckCircle2, Info, TriangleAlert, X } from 'lucide-react';
 
@@ -49,6 +50,15 @@ export function FeedbackProvider({ children, scopeKey = 'default' }: { children:
     });
   }, [scopeKey]);
   const notify = useCallback((input: FeedbackInput, owner?: string) => enqueue(input, owner, undefined, true), [enqueue]);
+  useEffect(() => {
+    const onMaintenance = (event: Event) => {
+      if (event instanceof CustomEvent && typeof event.detail === 'string') {
+        notify({ tone: 'info', message: event.detail });
+      }
+    };
+    window.addEventListener(WRITE_MAINTENANCE_EVENT, onMaintenance);
+    return () => window.removeEventListener(WRITE_MAINTENANCE_EVENT, onMaintenance);
+  }, [notify]);
   const publish = useCallback((input: FeedbackInput, owner: string, content: () => ReactNode) => enqueue(input, owner, content), [enqueue]);
   const release = useCallback((owner: string) => {
     setEntries((current) => current.flatMap((entry) => {
