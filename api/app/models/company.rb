@@ -125,6 +125,12 @@ class Company < ApplicationRecord
   before_validation :default_test_workspace_purpose
 
   validates :name, presence: true
+  validates :subdomain_slug,
+            format: { with: TenantSubdomainRegistry::SLUG_PATTERN },
+            exclusion: { in: TenantSubdomainRegistry::RESERVED_SLUGS },
+            uniqueness: { case_sensitive: false, conditions: -> { live_payroll } },
+            allow_nil: true
+  validate :subdomain_requires_live_payroll, if: -> { !subdomain_slug.nil? && !live_payroll? }
   validates :ein, uniqueness: { conditions: -> { where(payroll_environment: "live") } }, allow_blank: true, unless: :test_workspace?
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   validates :payroll_environment, inclusion: { in: PAYROLL_ENVIRONMENTS }
@@ -349,6 +355,10 @@ class Company < ApplicationRecord
 
       errors.add(:payroll_intake_settings, "lists unknown #{source_type} source files: #{Array(required).join(', ')}")
     end
+  end
+
+  def subdomain_requires_live_payroll
+    errors.add(:subdomain_slug, "is only available to live companies")
   end
 
   def test_workspace_source_is_valid

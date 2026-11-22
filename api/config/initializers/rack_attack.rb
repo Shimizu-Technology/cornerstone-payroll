@@ -22,6 +22,10 @@ class Rack::Attack
     throttle_ip(request) if request.path.match?(%r{\A/api/(?:v1/)?(?:auth|sessions|invitations)})
   end
 
+  throttle("tenant_branding/ip", limit: 30, period: 1.minute) do |request|
+    throttle_ip(request) if request.path.match?(%r{\A/api/v1/public/tenant_branding/?\z})
+  end
+
   # AIRE proxies every worker from its own servers, so the per-IP API limit is
   # shared. Also bound each worker's statement reads; PDFs are costlier.
   WORKER_STATEMENTS_PATH = %r{\A/api/v1/integrations/time_payroll/workers/([^/]+)/statements(?:/\d+(/pdf)?)?/?\z}

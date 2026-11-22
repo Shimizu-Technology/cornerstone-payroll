@@ -239,7 +239,10 @@ class ClerkTokenVerifier
   end
 
   def valid_authorized_party?(payload)
-    return true unless authorized_parties_configured?
+    azp = payload["azp"]
+    normalized_azp = self.class.normalize_origin(azp) if azp.is_a?(String)
+    client_origin = TenantSubdomainRegistry.client_origin?(normalized_azp)
+    return !client_origin unless authorized_parties_configured?
 
     parties = authorized_parties
     if parties.empty?
@@ -247,14 +250,17 @@ class ClerkTokenVerifier
       return false
     end
 
-    azp = payload["azp"]
     if !azp.is_a?(String) || azp.strip.empty?
       Rails.logger.warn("Clerk JWT verification failed: missing azp claim")
       return false
     end
 
-    normalized_azp = self.class.normalize_origin(azp)
-    unless normalized_azp && parties.include?(normalized_azp)
+    allowed = if client_origin
+      TenantSubdomainRegistry.allowed_origin?(azp)
+    else
+      parties.include?(normalized_azp)
+    end
+    unless allowed
       Rails.logger.warn("Clerk JWT verification failed: unauthorized azp claim")
       return false
     end

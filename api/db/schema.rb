@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -667,6 +667,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
     t.bigint "created_by_id"
     t.integer "regular_pay_lookback", default: 4, null: false
     t.integer "regular_pay_threshold", default: 3, null: false
+    t.string "subdomain_slug"
+    t.jsonb "branding", default: {}, null: false
+    t.index "lower((subdomain_slug)::text)", name: "index_live_companies_on_lower_subdomain_slug", unique: true, where: "(((payroll_environment)::text = 'live'::text) AND (subdomain_slug IS NOT NULL))"
     t.index [ "active_printer_profile_id" ], name: "index_companies_on_active_printer_profile_id"
     t.index [ "created_by_id" ], name: "index_companies_on_created_by_id"
     t.index [ "id", "payroll_environment" ], name: "idx_companies_payroll_environment_key", unique: true
@@ -683,6 +686,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
     t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL AND test_workspace_purpose IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND migration_source_company_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL AND test_workspace_purpose IS NOT NULL AND (test_workspace_purpose::text <> 'migration_rehearsal'::text OR migration_source_batch_id IS NOT NULL)", name: "companies_test_workspace_shape_check"
     t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
     t.check_constraint "regular_pay_threshold > 0 AND regular_pay_threshold <= regular_pay_lookback AND regular_pay_lookback <= 24", name: "regular_pay_rule"
+    t.check_constraint "subdomain_slug IS NULL OR payroll_environment::text = 'live'::text", name: "company_subdomain_requires_live_payroll"
     t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['sandbox'::character varying::text, 'migration_rehearsal'::character varying::text, 'training_replay'::character varying::text, 'backup_snapshot'::character varying::text]))", name: "companies_test_workspace_purpose_check"
   end
 

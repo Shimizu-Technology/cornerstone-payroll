@@ -16,7 +16,16 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
       "http://127.0.0.1:4174"
     ]
     env_origins = ENV.fetch("CORS_ORIGINS", "").split(",").map(&:strip).reject(&:empty?)
-    origins(*(env_origins.empty? ? default_origins : env_origins))
+    static_origins = (env_origins.empty? ? default_origins : env_origins).reject { |origin| origin.include?("*") }
+    origins do |origin, _env|
+      normalized_origin = ClerkTokenVerifier.normalize_origin(origin)
+      if TenantSubdomainRegistry.client_origin?(normalized_origin)
+        # Rack::Cors runs ahead of the Rails executor, including for preflights.
+        Rails.application.executor.wrap { TenantSubdomainRegistry.allowed_origin?(origin) }
+      else
+        static_origins.include?(origin)
+      end
+    end
 
     resource "*",
       headers: :any,
