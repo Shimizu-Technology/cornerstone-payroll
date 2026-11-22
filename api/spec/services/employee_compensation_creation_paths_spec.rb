@@ -31,7 +31,7 @@ RSpec.describe "Initial compensation history on employee creation" do
     import.create_employees!([ { row_number: 2, attributes: import.send(:build_attributes, row, {}), raw: row } ])
 
     expect(company.employees.sole.employee_compensation_changes.sole).to have_attributes(
-      pay_rate: 15, effective_on: Date.new(2026, 1, 1), source: "bulk_import"
+      pay_rate: 15, effective_on: Date.new(2026, 1, 1), source: "bulk_import", created_by_id: admin.id
     )
   end
 
@@ -48,8 +48,8 @@ RSpec.describe "Initial compensation history on employee creation" do
     ).call
 
     worker = result.new_employee.reload
-    expect(worker.employee_compensation_changes.sole).to have_attributes(pay_rate: 9.25, source: "classification_transition")
-    expect(worker.employee_wage_rates.sole.employee_wage_rate_versions.sole).to have_attributes(rate: 9.25, active: true)
+    expect(worker.employee_compensation_changes.sole).to have_attributes(pay_rate: 9.25, source: "classification_transition", created_by_id: super_admin.id)
+    expect(worker.employee_wage_rates.sole.employee_wage_rate_versions.sole).to have_attributes(rate: 9.25, active: true, created_by_id: super_admin.id)
   end
 
   it "records a client portal employee as pending, then the approved rate replaces it before any payroll" do
@@ -65,11 +65,11 @@ RSpec.describe "Initial compensation history on employee creation" do
       company: company
     ).create!
     pending = result.employee
-    expect(pending.employee_compensation_changes.sole).to have_attributes(pay_rate: 0, source: "client_portal")
+    expect(pending.employee_compensation_changes.sole).to have_attributes(pay_rate: 0, source: "client_portal", created_by_id: client.id)
 
     result.change_request.apply!(actor: admin)
     expect(pending.reload.pay_rate).to eq(14)
-    expect(pending.employee_compensation_changes.sole).to have_attributes(pay_rate: 14, source: "client_approved")
+    expect(pending.employee_compensation_changes.sole).to have_attributes(pay_rate: 14, source: "client_approved", created_by_id: admin.id)
   end
 
   it "records an admin-created employee and its first wage rate" do
