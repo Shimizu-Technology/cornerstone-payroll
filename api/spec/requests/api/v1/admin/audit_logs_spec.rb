@@ -67,6 +67,37 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     )
   end
 
+  it "includes non-user actors in JSON and exports them through the existing CSV columns" do
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    actors = [
+      AuditActor.source_system(source: source),
+      AuditActor.source_worker(id: "worker-1"),
+      AuditActor.operator("Release operator"),
+      AuditActor.system_job(ExpirePracticePortalAccessJob.new)
+    ]
+    actors.each do |actor|
+      AuditLog.record!(actor: actor, company_id: company.id, action: "test#actor_export", record_type: "test")
+    end
+    filters = { event_action: "test#actor_export" }
+
+    get "/api/v1/admin/audit_logs", params: filters
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").pluck("actor_type", "actor_id", "user_id", "user_name", "actor_role"))
+      .to match_array(actors.map { |actor| [ actor.type, actor.id, nil, actor.name, actor.role ] })
+
+    get "/api/v1/admin/audit_logs/export", params: filters
+
+    expect(response).to have_http_status(:ok)
+    exported = CSV.parse(response.body, headers: true)
+    expect(exported.headers).to eq([
+      "Time", "Person", "Activity", "Actor email", "Role", "Category", "Affected record", "Technical action",
+      "Record type", "Record ID", "Organization", "Client", "IP address", "Request ID", "Advanced details"
+    ])
+    expect(exported.map { |row| [ row["Person"], row["Role"], row["Actor email"] ] })
+      .to match_array(actors.map { |actor| [ actor.name, actor.role, nil ] })
+  end
+
   it "presents legacy pay-period and report activity without mechanical fallback labels" do
     pay_period = create(
       :pay_period,

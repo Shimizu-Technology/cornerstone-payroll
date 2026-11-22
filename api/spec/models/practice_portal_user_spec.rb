@@ -80,6 +80,20 @@ RSpec.describe "Practice portal identity" do
     expect(client.reload).not_to be_active
   end
 
+  it "attributes deactivation discovered by an admin to the system and preserves the admin's audit flag" do
+    client
+    workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
+    Current.set(user: admin, actor: AuditActor.for_user(admin), domain_audit_recorded: false) do
+      expect(client.payroll_access_allowed?).to be(false)
+      expect(Current.domain_audit_recorded).to be(false)
+      expect(Current.actor).to eq(AuditActor.for_user(admin))
+    end
+
+    expect(client.reload).not_to be_active
+    expect(AuditLog.find_by!(action: "test_workspace#portal_access_deactivated", record_id: client.id))
+      .to have_attributes(actor_type: "system_job", actor_name: "TestWorkspace::PortalAccess", user_id: nil)
+  end
+
   it "deactivates expired accounts at authentication before the scheduled sweep" do
     client
     workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
