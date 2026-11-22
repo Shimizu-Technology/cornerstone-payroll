@@ -11,7 +11,7 @@ module CompensationWriteLint
   ].freeze
   RATE_RECEIVERS = /\b(?:EmployeeWageRate|employee_wage_rates)\b/
   HISTORY_RECEIVERS = /\b(?:EmployeeCompensationChange|EmployeeWageRateVersion|employee_compensation_changes|employee_wage_rate_versions)\b/
-  EMPLOYEE_RECEIVERS = /\b(?:Employee|employees?|@employee)\b/
+  PAYROLL_ITEM_RECEIVERS = /\b(?:PayrollItem|payroll_items?)\b/
   PROTECTED_TABLE = /employee_wage_rate(?:s|_versions)|employee_compensation_changes/
   SQL_TABLE = /(?:["\w]+\s*\.\s*)?"?/
   SQL_COMMAND = /\b(?:UPDATE\s+(?:ONLY\s+)?|INSERT\s+INTO\s+|DELETE\s+FROM\s+|TRUNCATE\s+(?:TABLE\s+)?)/i
@@ -47,37 +47,72 @@ module CompensationWriteLint
     end
 
     def visit_call_node(node)
-      if BYPASS_METHODS.include?(node.name)
+      method = node.name
+      if %i[send public_send __send__].include?(method)
+        argument = node.arguments&.arguments&.first
+        method = argument.unescaped.to_sym if argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+      end
+      if BYPASS_METHODS.include?(method)
         receiver = receiver_evidence(node.receiver)
         arguments = evidence(node.arguments)
         if receiver.match?(RATE_RECEIVERS)
           flag(node, "bulk or callback-skipping write on employee wage rates")
         elsif receiver.match?(HISTORY_RECEIVERS)
           flag(node, "bulk write on compensation history")
-        elsif !%i[delete delete_all].include?(node.name) && named_attribute?(arguments, "pay_rate") && !receiver.match?(/\b(?:PayrollItem|payroll_items?)\b/)
+        elsif !%i[delete delete_all].include?(method) && named_attribute?(arguments, "pay_rate") && !receiver.match?(PAYROLL_ITEM_RECEIVERS)
           flag(node, "bulk or callback-skipping write naming pay_rate")
-        elsif receiver.match?(EMPLOYEE_RECEIVERS) && (
-            !%i[delete delete_all].include?(node.name) &&
+        elsif !receiver.match?(PAYROLL_ITEM_RECEIVERS) && (
+            !%i[delete delete_all].include?(method) &&
             EmployeeCompensationChangeService::BASIS_ATTRIBUTES.any? { |field| named_attribute?(arguments, field) }
           )
           flag(node, "bulk or callback-skipping write on employee compensation")
         end
       end
-      super
+      if node.name == :+ && (sql = static_string(node))
+        check_sql(node, sql)
+      else
+        super
+      end
     end
 
     def visit_string_node(node)
-      sql = node.unescaped.scrub
+      check_sql(node, node.unescaped)
+    end
+
+    def visit_interpolated_string_node(node)
+      if (sql = static_string(node))
+        check_sql(node, sql)
+      else
+        super
+      end
+    end
+
+    private
+
+    def check_sql(node, sql)
+      sql = sql.scrub
       if sql.match?(SQL_WRITE) || sql.scan(EMPLOYEE_SQL_WRITE).flatten.any? do |statement|
         sql.match?(/\b(?:DELETE\s+FROM|TRUNCATE)\b/i) ||
           EmployeeCompensationChangeService::COMPENSATION_ATTRIBUTES.any? { |field| statement.match?(/\b#{field}\b/i) }
       end
         flag(node, "raw SQL write on pay rates or compensation history")
       end
-      super
     end
 
-    private
+    def static_string(node)
+      case node
+      when Prism::StringNode
+        node.unescaped
+      when Prism::InterpolatedStringNode
+        node.parts.map { |part| static_string(part) }.then { |parts| parts.join if parts.all? }
+      when Prism::CallNode
+        return unless node.name == :+ && node.arguments&.arguments&.one?
+
+        left = static_string(node.receiver)
+        right = static_string(node.arguments.arguments.first)
+        left + right if left && right
+      end
+    end
 
     def named_attribute?(arguments, name)
       arguments.match?(/(?:\b#{name}:|:#{name}\b|["']#{name}["'])/)
