@@ -243,6 +243,7 @@ module AirePayrollCalendar
     def record_audit!(override, publication)
       AuditLog.record!(
         user: @actor,
+        actor: (AuditActor.source_system(source: @source) if @source_actor),
         company_id: @pay_period.company_id,
         action: "aire_payroll_calendar#cutoff_changed",
         record_type: "AirePayrollCutoffOverride",

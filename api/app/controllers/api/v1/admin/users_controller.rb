@@ -8,7 +8,8 @@ module Api
         include InvitationDeliveryOutcome
         audit_actions :activate, :deactivate, :resend_invitation, :destroy
         before_action :require_admin!
-        before_action :set_user, only: [ :show, :update, :destroy, :activate, :deactivate, :resend_invitation, :move_practice_copy ]
+        before_action :set_user, only: [ :show, :update, :destroy, :activate, :deactivate, :resend_invitation, :move_practice_copy, :lookup_clerk_id, :bind_clerk_id ]
+        before_action :require_recovery_environment!, only: [ :lookup_clerk_id, :bind_clerk_id ]
 
         # GET /api/v1/admin/users
         # Organization admins see users in their firm; super admins can see all firms.
@@ -86,14 +87,15 @@ module Api
           permitted = user_params
           role_provided = params.dig(:user, :role).present?
           requested_role = role_provided ? requested_user_role : @user.role
-          unless role_manageable?(requested_role)
+          role_changing = requested_role != @user.role
+          if role_changing && !role_manageable?(requested_role)
             return render json: { error: "Cannot assign that role" }, status: :forbidden
           end
 
           company_ids_provided = permitted.key?(:company_ids)
           company_ids = permitted.delete(:company_ids)
 
-          if @user.id == current_user_id && role_provided && requested_role != @user.role
+          if @user.id == current_user_id && role_changing
             return render json: { error: "Cannot change your own role" }, status: :unprocessable_entity
           end
 
@@ -103,9 +105,15 @@ module Api
             end
           end
 
-          ActiveRecord::Base.transaction do
+          @user.with_lock do
+            if @user.awaiting_clerk_binding? && @user.clerk_invitation_id.present? &&
+              permitted.key?(:email) && permitted[:email] != @user.email
+              @user.errors.add(:email, "cannot be changed while a Clerk invitation is on file")
+              raise ActiveRecord::RecordInvalid, @user
+            end
+
             @user.assign_attributes(permitted)
-            @user.role = requested_role if role_provided
+            @user.role = requested_role if role_changing
             sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
             @user.save!
             @user.association(:company_assignments).reset
@@ -205,11 +213,6 @@ module Api
           end
 
           before_values = user_audit_snapshot(@user)
-          if @user.clerk_invitation_id.present?
-            service = ClerkInvitationService.new
-            service.revoke_invitation(@user.clerk_invitation_id) if service.configured?
-          end
-
           clerk_result = create_clerk_invitation(@user, ignore_existing: true)
           if clerk_result[:success] && clerk_result[:url].present?
             @user.update!(invited_at: Time.current)
@@ -229,6 +232,24 @@ module Api
             data: user_json(@user),
             **invitation_delivery
           }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
+        end
+
+        def lookup_clerk_id
+          account = PayrollInvitation.new.recovery_account(@user, params[:clerk_id], actor: current_user)
+          render json: { data: account.slice(:id, :name, :verified_emails) }
+        rescue PayrollInvitation::BindingRefused => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def bind_clerk_id
+          PayrollInvitation.new.recover!(@user, params[:clerk_id], confirm_email: params[:confirm_email],
+            actor: current_user, request: request)
+          skip_default_audit_log!
+          render json: { data: user_json(@user) }
+        rescue PayrollInvitation::BindingRefused => e
+          render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
         end
@@ -305,10 +326,6 @@ module Api
             return {}
           end
 
-          if user.clerk_invitation_id.present?
-            service = ClerkInvitationService.new
-            service.revoke_invitation(user.clerk_invitation_id) if service.configured?
-          end
           clerk_result = create_clerk_invitation(user, ignore_existing: true)
           user.update!(invited_at: Time.current) if clerk_result[:success] && clerk_result[:url].present?
           invitation_response = invitation_delivery_response(user, clerk_result)
@@ -437,11 +454,16 @@ module Api
           %w[admin org_admin].include?(role)
         end
 
-        def role_manageable?(role)
-          return false if role.blank?
-          return true if current_user&.super_admin?
+        def require_recovery_environment!
+          return unless StagingOutboundPolicy.staging?
 
-          role != "super_admin"
+          render json: { error: "Use staging tester bindings to manage Clerk identities in staging" }, status: :forbidden
+        end
+
+        def role_manageable?(role)
+          return false unless %w[super_admin org_admin admin manager accountant client].include?(role)
+
+          role != "super_admin" || current_user.super_admin?
         end
 
         def role_requires_client_assignment?(role)
@@ -449,36 +471,7 @@ module Api
         end
 
         def create_clerk_invitation(user, ignore_existing: false)
-          service = ClerkInvitationService.new
-          unless service.configured?
-            return { success: false, error: "Clerk API not configured" }
-          end
-
-          result = service.create_invitation(
-            email: user.email,
-            redirect_url: build_redirect_url,
-            public_metadata: { role: user.role },
-            ignore_existing: ignore_existing
-          )
-
-          if result[:success]
-            begin
-              user.update!(clerk_invitation_id: result[:invitation_id])
-            rescue ActiveRecord::RecordInvalid => e
-              service.revoke_invitation(result[:invitation_id]) if result[:invitation_id].present?
-              return {
-                success: false,
-                error: "Invitation could not be saved locally: #{e.record.errors.full_messages.join(', ')}"
-              }
-            end
-          end
-
-          result
-        end
-
-        def build_redirect_url
-          frontend = ENV.fetch("FRONTEND_URL") { ENV.fetch("ALLOWED_ORIGINS", "http://localhost:5173").split(",").first.strip }
-          "#{frontend}/login"
+          PayrollInvitation.new.send_invite(user, redirect_url: invitation_redirect_url, ignore_existing: ignore_existing)
         end
 
         def user_json(user)
@@ -493,6 +486,7 @@ module Api
             active: user.active,
             invitation_status: user.invitation_status,
             invitation_pending: user.invitation_pending?,
+            can_recover_clerk_invitation: !StagingOutboundPolicy.staging? && PayrollInvitation.recoverable_by?(user, current_user),
             invited_at: user.invited_at,
             invited_by_id: user.invited_by_id,
             invited_by_name: user.invited_by&.name,

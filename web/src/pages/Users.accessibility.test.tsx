@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +11,7 @@ const apiMocks = vi.hoisted(() => ({
   users: {
     list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(),
     activate: vi.fn(), deactivate: vi.fn(), resendInvitation: vi.fn(),
+    lookupClerkId: vi.fn(), bindClerkId: vi.fn(),
   },
   companies: { list: vi.fn() },
   assignments: { list: vi.fn(), updateClientManagement: vi.fn() },
@@ -80,7 +81,7 @@ describe('Users accessible account controls', () => {
     const role = inPresentation(screen.getAllByRole('combobox', { name: 'Role' }), presentation);
     await user.clear(name);
     await user.type(name, 'Unsaved name');
-    await user.selectOptions(role, 'employee');
+    await user.selectOptions(role, 'client');
     await user.click(inPresentation(screen.getAllByRole('button', { name: 'Cancel editing Ari Ledger (ari-ledger@example.invalid)' }), presentation));
     expect(apiMocks.users.update).not.toHaveBeenCalled();
     expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull();
@@ -161,4 +162,45 @@ it('offers a separate practice login and prevents selecting real clients alongsi
   expect(screen.getByText(/This login cannot access real clients/)).toBeTruthy();
   await user.click(screen.getByRole('checkbox', { name: /Real client/ }));
   expect((screen.getByRole('checkbox', { name: /Practice client/ }) as HTMLInputElement).checked).toBe(false);
+});
+
+
+it('recovers an eligible pending login after the operator reviews and confirms a verified email', async () => {
+  const pending = { ...originalUser, invitation_pending: true, can_recover_clerk_invitation: true };
+  apiMocks.users.list.mockResolvedValue({ data: [
+    pending,
+    { ...pending, id: 3, name: 'Pending Org Admin', role: 'org_admin', can_recover_clerk_invitation: false },
+  ] });
+  apiMocks.users.lookupClerkId
+    .mockRejectedValueOnce(new Error('Clerk user ID could not be verified'))
+    .mockResolvedValue({ data: { id: 'user_recipient', name: 'Clerk Recipient', verified_emails: ['verified@example.test'] } });
+  apiMocks.users.bindClerkId
+    .mockRejectedValueOnce(new Error('This Clerk user ID is already bound'))
+    .mockResolvedValue({ data: { ...pending, invitation_pending: false, can_recover_clerk_invitation: false } });
+  const user = userEvent.setup();
+  render(<Users />);
+
+  const actions = await screen.findAllByRole('button', { name: 'Recover login' });
+  expect(actions).toHaveLength(2);
+  await user.click(inPresentation(actions, 'mobile'));
+  const dialog = within(screen.getByRole('dialog', { name: 'Recover login for Ari Ledger' }));
+  await user.type(dialog.getByRole('textbox', { name: 'Clerk user ID' }), 'user_recipient');
+  await user.click(dialog.getByRole('button', { name: 'Look up account' }));
+  await dialog.findByText('Clerk user ID could not be verified');
+  await user.click(dialog.getByRole('button', { name: 'Look up account' }));
+  await dialog.findByText('Clerk Recipient');
+  expect(apiMocks.users.lookupClerkId).toHaveBeenLastCalledWith(2, 'user_recipient');
+  const bindButton = dialog.getByRole('button', { name: 'Bind account' }) as HTMLButtonElement;
+  expect(bindButton.disabled).toBe(true);
+  await user.click(dialog.getByRole('radio', { name: 'verified@example.test' }));
+  await user.click(bindButton);
+  await dialog.findByText('This Clerk user ID is already bound');
+  await user.click(bindButton);
+
+  expect(apiMocks.users.bindClerkId).toHaveBeenLastCalledWith(2, {
+    clerk_id: 'user_recipient', confirm_email: 'verified@example.test',
+  });
+  await screen.findByText('Clerk account linked for Ari Ledger.');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Recover login' })).toBeNull();
 });

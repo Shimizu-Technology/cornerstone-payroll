@@ -56,6 +56,7 @@ export interface User {
   assigned_companies?: AssignedCompanySummary[];
   invitation_status?: 'pending' | 'accepted';
   invitation_pending?: boolean;
+  can_recover_clerk_invitation?: boolean;
   invited_at?: string | null;
   invited_by_id?: number | null;
   invited_by_name?: string | null;

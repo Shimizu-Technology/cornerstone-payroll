@@ -116,7 +116,7 @@ RSpec.describe EmployeeCompensationChangeService do
     expect(orphan.label).to start_with(described_class::RESERVED_LABEL_PREFIX)
 
     target = create(:employee)
-    described_class.copy_history!(source: employee, target: target) do
+    described_class.copy_history!(source: employee, target: target, actor: actor) do
       { orphan.id => target.employee_wage_rates.create!(label: orphan.label, active: false) }
     end
 

@@ -42,7 +42,9 @@ class EmployeeWageRate < ApplicationRecord
   end
 
   def record_initial_version
-    EmployeeCompensationChangeService.record_wage_rate_created!(self)
+    actor = employee.initial_compensation_actor || Current.user || Current.actor ||
+      AuditActor.operator("Initial wage rate setup")
+    EmployeeCompensationChangeService.record_wage_rate_created!(self, actor: actor)
   end
 
   def with_employee_mutation_lock

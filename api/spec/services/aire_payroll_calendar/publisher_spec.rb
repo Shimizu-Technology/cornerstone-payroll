@@ -113,7 +113,16 @@ RSpec.describe AirePayrollCalendar::Publisher do
       }
     )
     expect(AirePayrollCalendarPublication).to have_received(:dispatch_one!).with(result.publication.id, now: now)
-    expect(AuditLog.find_by!(action: "aire_payroll_calendar#published").company_id).to eq(company.id)
+    expect(AuditLog.find_by!(action: "aire_payroll_calendar#published")).to have_attributes(
+      company_id: company.id, user_id: actor.id, actor_type: "staff_user", actor_id: actor.id.to_s
+    )
+  end
+
+  it "attributes an integration-authorized publication to the AIRE source" do
+    result = described_class.new(pay_period: pay_period, source: source, actor: nil, now: now, integration_authorized: true).call
+
+    expect(AuditLog.find_by!(action: "aire_payroll_calendar#published", record_id: result.publication.id))
+      .to have_attributes(user_id: nil, actor_type: "source_system", actor_id: source.id.to_s, actor_name: "AIRE System")
   end
 
   it "rejects a shifted target payday even when a legacy record bypassed date validation" do
