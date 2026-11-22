@@ -112,7 +112,7 @@ class PayrollGoLiveSetupPlan
             )
             locked = EmployeeCompensationChangeService.locked_through(target)
             errors << "#{target.full_name}: transfer date overlaps locked payroll through #{locked}" if locked && effective_on <= locked
-          rescue EmployeeCompensationChangeService::Error => error
+          rescue EmployeeCompensationChangeService::Error, ActiveRecord::RecordInvalid => error
             errors << "#{target.full_name}: #{error.message}"
           end
         end
