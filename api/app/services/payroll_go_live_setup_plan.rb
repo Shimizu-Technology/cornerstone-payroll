@@ -99,11 +99,22 @@ class PayrollGoLiveSetupPlan
         source = candidates.first
         if matched_source_ids.include?(source.id)
           errors << "#{target.full_name}: the source employee is already matched to another successor employee"
-        elsif source.employment_type != target.employment_type
+        elsif EmployeeCompensationChangeService.snapshot(source, effective_on)["employment_type"] !=
+          EmployeeCompensationChangeService.snapshot(target, effective_on)["employment_type"]
           errors << "#{target.full_name}: source and successor tax classifications do not match"
         else
           matches << [ source, target ]
           matched_source_ids << source.id
+          begin
+            proposed = EmployeeCompensationChangeService.snapshot(source, effective_on)
+            EmployeeCompensationChangeService.validate_basis_transition!(
+              target, effective_on, proposed.slice(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES)
+            )
+            locked = EmployeeCompensationChangeService.locked_through(target)
+            errors << "#{target.full_name}: transfer date overlaps locked payroll through #{locked}" if locked && effective_on <= locked
+          rescue EmployeeCompensationChangeService::Error => error
+            errors << "#{target.full_name}: #{error.message}"
+          end
         end
       elsif candidates.empty?
         errors << "#{target.full_name}: no active predecessor employee has the same verified payroll identity"
@@ -215,12 +226,14 @@ class PayrollGoLiveSetupPlan
     employee_matches.each do |source, target|
       records.concat([ source, target ])
       records.concat(source.employee_w4_elections.to_a)
-      records.concat(source.employee_wage_rates.to_a)
+      records.concat(source.employee_compensation_changes.to_a)
+      records.concat(source.employee_wage_rate_versions.to_a)
       records.concat(source.employee_deductions.to_a)
       records.concat(source.employee_payroll_fields.to_a)
       records.concat(source.employee_work_profiles.to_a)
       records.concat(target.employee_w4_elections.to_a)
-      records.concat(target.employee_wage_rates.to_a)
+      records.concat(target.employee_compensation_changes.to_a)
+      records.concat(target.employee_wage_rate_versions.to_a)
       records.concat(target.employee_deductions.to_a)
       records.concat(target.employee_payroll_fields.to_a)
       records.concat(target.employee_work_profiles.to_a)
@@ -236,6 +249,12 @@ class PayrollGoLiveSetupPlan
       "plan" => plan,
       "records" => records.uniq.sort_by { |record| [ record.class.name, record.id ] }.map do |record|
         [ record.class.name, record.id, record.updated_at&.iso8601(6) ]
+      end,
+      "compensation_at_cutover" => employee_matches.flatten.map do |employee|
+        [ employee.id, EmployeeCompensationChangeService.snapshot(employee, effective_on),
+          employee.wage_rates_on(effective_on, include_inactive: true).map do |row|
+            [ row.id, row.attributes.slice(*EmployeeWageRateVersion::SNAPSHOT_ATTRIBUTES) ]
+          end ]
       end,
       "company_fields" => source_company.attributes.slice(*COMPANY_FIELDS)
     }

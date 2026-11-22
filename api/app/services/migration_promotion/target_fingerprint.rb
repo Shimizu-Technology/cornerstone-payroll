@@ -12,6 +12,8 @@ module MigrationPromotion
       EmployeeDeduction,
       EmployeePayrollField,
       EmployeeWageRate,
+      EmployeeCompensationChange,
+      EmployeeWageRateVersion,
       EmployeeW4Election,
       EmployeeWorkProfile,
       EmployeeStatusEvent,

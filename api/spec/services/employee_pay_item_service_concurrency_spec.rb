@@ -14,6 +14,7 @@ RSpec.describe EmployeePayItemService, :postgres_concurrency do
   after do
     EmployeePayrollField.where(employee_id: employee.id).delete_all
     PayrollFieldDefinition.where(company_id: company.id).delete_all
+    EmployeeCompensationChange.where(employee_id: employee.id).delete_all
     Employee.where(id: employee.id).delete_all
     Department.where(id: department.id).delete_all
     Company.where(id: company.id).delete_all

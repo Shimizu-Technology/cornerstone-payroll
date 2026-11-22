@@ -13,6 +13,26 @@ namespace :compensation do
     puts "Compensation write path clean"
   end
 
+  desc "Record legacy compensation writes made after the migration's backfill"
+  task reconcile_rollout: :environment do
+    employee_count = 0
+    rate_count = 0
+    today = PayrollBusinessClock.today
+    Employee.in_batches do |batch|
+      batch.ids.each do |employee_id|
+        result = EmployeeCompensationChangeService.reconcile_rollout!(employee_id, as_of: today)
+        next unless result
+
+        employee_count += 1
+        rate_count += result.fetch(:wage_rate_ids).size
+        puts "employee_id=#{employee_id} wage_rate_ids=#{result.fetch(:wage_rate_ids).join(',')}"
+      rescue StandardError => error
+        abort "Compensation reconciliation stopped at employee_id=#{employee_id} (#{error.class})"
+      end
+    end
+    puts "employee_count=#{employee_count} wage_rate_count=#{rate_count}"
+  end
+
   desc "Refresh pay-rate cache columns from the versions in effect today"
   task sync_effective: :environment do
     SyncEffectiveCompensationJob.perform_now

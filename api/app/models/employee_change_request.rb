@@ -79,7 +79,17 @@ class EmployeeChangeRequest < ApplicationRecord
     self.sensitive_payload_encrypted = payload.present? ? JSON.generate(payload) : nil
   end
 
-  def apply!(actor:, review_notes: nil)
+  def compensation_requested?
+    (proposed_changes.keys.map(&:to_s) & (EmployeeCompensationChangeService::COMPENSATION_ATTRIBUTES + %w[wage_rates])).any?
+  end
+
+  def proposed_compensation_effective_on
+    return unless compensation_requested?
+
+    [ PayrollBusinessClock.today, EmployeeCompensationChangeService.default_effective_on(employee) ].max
+  end
+
+  def apply!(actor:, review_notes: nil, effective_on: nil)
     ActiveRecord::Base.transaction do
       Company.lock.find(company_id)
       lock!
@@ -87,7 +97,7 @@ class EmployeeChangeRequest < ApplicationRecord
       employee.lock!
       verify_original_values!
       actor = authorized_review_actor!(actor)
-      apply_proposed_changes!(actor: actor)
+      apply_proposed_changes!(actor: actor, effective_on: effective_on.presence || proposed_compensation_effective_on)
       EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor) if request_kind == "create"
       update!(
         status: :approved,
@@ -132,7 +142,7 @@ class EmployeeChangeRequest < ApplicationRecord
     raise ActiveRecord::RecordInvalid, self
   end
 
-  def apply_proposed_changes!(actor:)
+  def apply_proposed_changes!(actor:, effective_on:)
     attrs = effective_proposed_changes
     wage_rates = attrs.delete(:wage_rates)
     validate_supported_change_keys!(attrs.keys)
@@ -148,6 +158,7 @@ class EmployeeChangeRequest < ApplicationRecord
     w4_attrs = safe_attrs.extract!(*EmployeeW4Election::PROFILE_ATTRIBUTES)
 
     requested_pay_rate = safe_attrs.key?(:pay_rate) ? safe_attrs.delete(:pay_rate) : EmployeeCompensationChangeService::UNCHANGED
+    basis = safe_attrs.extract!(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES.map(&:to_sym))
     employee.update!(safe_attrs) if safe_attrs.present?
     EmployeeW4ElectionChangeService.new(
       employee: employee,
@@ -157,14 +168,15 @@ class EmployeeChangeRequest < ApplicationRecord
       reason: "Approved client employee change request ##{id}", election_received: election_received
     ).call! if w4_attrs.present?
 
-    # Approved pay changes start on the default effective date: the day after
-    # the employee's last approved or committed payroll.
     EmployeeCompensationChangeService.new(
       employee: employee,
       actor: actor,
       source: "client_approved",
       reason: "Approved client employee change request ##{id}",
+      effective_on: effective_on,
       pay_rate: requested_pay_rate,
+      basis: basis,
+      reject_scheduled_conflict: true,
       wage_rates: wage_rates.presence
     ).call!
   end
@@ -215,11 +227,15 @@ class EmployeeChangeRequest < ApplicationRecord
     return current_wage_rates_payload if key.to_sym == :wage_rates
     return false if key.to_sym == :w4_election_received
 
-    employee.public_send(key)
+    if EmployeeCompensationChangeService::COMPENSATION_ATTRIBUTES.include?(key.to_s)
+      EmployeeCompensationChangeService.snapshot(employee, PayrollBusinessClock.today).fetch(key.to_s)
+    else
+      employee.public_send(key)
+    end
   end
 
   def current_wage_rates_payload
-    employee.active_wage_rates.map do |rate|
+    employee.wage_rates_on(PayrollBusinessClock.today).map do |rate|
       {
         id: rate.id,
         label: rate.label,

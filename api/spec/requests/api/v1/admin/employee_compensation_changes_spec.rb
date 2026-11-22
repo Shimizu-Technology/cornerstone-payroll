@@ -23,7 +23,7 @@ RSpec.describe "Effective-dated pay changes through the admin employee API", typ
   end
 
   def update_pay(**employee_params)
-    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: employee_params }, as: :json
+    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { compensation_revision: EmployeeCompensationChangeService.revision(employee.reload) }.merge(employee_params) }, as: :json
   end
 
   it "shows the pay rate history and the effective dates the editor offers" do
