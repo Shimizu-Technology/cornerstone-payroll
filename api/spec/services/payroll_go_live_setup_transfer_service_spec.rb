@@ -116,6 +116,22 @@ RSpec.describe PayrollGoLiveSetupTransferService do
     expect(target.compensation_on(cutover)).to have_attributes(salary_type: "annual", pay_frequency: "biweekly", pay_rate: 52_000)
   end
 
+  it "applies the predecessor's hourly contractor basis on a future cutover" do
+    cutover = PayrollBusinessClock.today + 30
+    source = create(:employee, :contractor, company: source_company, department: create(:department, company: source_company),
+      contractor_pay_type: "hourly", pay_rate: 25)
+    target = create(:employee, :contractor, company: company, ssn_encrypted: source.ssn_digits,
+      contractor_pay_type: "flat_fee", pay_rate: 500)
+
+    review = described_class.preview!(company:, source_company:, batch:, effective_on: cutover, actor:)
+    expect(review.validation_errors).to be_empty
+    described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
+
+    expect(target.reload).to have_attributes(contractor_pay_type: "flat_fee", pay_rate: 500)
+    expect(target.compensation_on(cutover - 1)).to have_attributes(contractor_pay_type: "flat_fee", pay_rate: 500)
+    expect(target.compensation_on(cutover)).to have_attributes(contractor_pay_type: "hourly", pay_rate: 25)
+  end
+
   it "copies a linked loan field inactive without losing an existing successor ledger" do
     source = create(:employee, company: source_company)
     target = create(:employee, company: company)
