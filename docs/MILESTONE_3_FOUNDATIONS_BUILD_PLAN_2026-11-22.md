@@ -170,7 +170,7 @@ Every code claim below was verified against `origin/main` (`be960a50`) on Novemb
 
 - **Legal research brief exists:** `docs/GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md` lists 12 "Needed before launch" questions for a Guam law firm (Part 3, `lines 737-750`) plus agency questions for Guam DRT, Guam DOL Wage & Hour, and the AG's Child Support Enforcement Division (Part 4, `lines 770-796`).
 - **WISP status unknown:** Dafne attended IRS WISP training in March 2026; whether Cornerstone finished its WISP is unconfirmed (`PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md:283`). Shimizu Technology has no platform security addendum or service-provider DPA yet.
-- **Decided (Leon, Nov 22, 2026):** Not part of Milestone 3 work or acceptance. Both stay in this document (§5) as a **Milestone 4 go-live prerequisite** per §6 of [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) ("the lawyer review must be finished before it goes live").
+- **Decided (Leon, Nov 22, 2026):** Not part of Milestone 3 work or acceptance. Both stay in this document (§5) as a **Milestone 4 go-live prerequisite** per §6 of [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) ("the lawyer review and the written security plan (WISP) must be finished before it goes live").
 
 ### 1.11 File scanning (decided: no virus scanner for Milestone 3 and pilot)
 
@@ -214,7 +214,12 @@ Neon's pooled endpoint (`-pooler`) runs PgBouncer in **transaction mode** ([Neon
   ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO payroll_app;
   ```
-- Runtime `DATABASE_URL` connects as `payroll_app`. Boot/readiness (`ProductionReadiness`) and CI's `before(:suite)` fail immediately if `SELECT NOT rolbypassrls AND NOT rolsuper FROM pg_roles WHERE rolname = current_user` is not `true`.
+- **Keep `rls_kill_switch` strictly `SELECT`-only for `payroll_app`:** Because the `ALL TABLES` grant and `ALTER DEFAULT PRIVILEGES` in `public` would otherwise grant `INSERT`/`UPDATE`/`DELETE` on `rls_kill_switch` (whether created before or after those statements run), either place `rls_kill_switch` in a separate `rls_admin` schema (granting only `USAGE` on `rls_admin` and `SELECT` on `rls_admin.rls_kill_switch` to `payroll_app`, outside `public`'s default privileges) or run an explicit revoke immediately after creating `public.rls_kill_switch` **and** idempotently at the end of `api/db/rls_policies.sql`:
+  ```sql
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.rls_kill_switch FROM payroll_app;
+  GRANT SELECT ON TABLE public.rls_kill_switch TO payroll_app;
+  ```
+- Runtime `DATABASE_URL` connects as `payroll_app`. Boot/readiness (`ProductionReadiness`) and CI's `before(:suite)` fail immediately if `SELECT NOT rolbypassrls AND NOT rolsuper FROM pg_roles WHERE rolname = current_user` is not `true`, or if `has_table_privilege('payroll_app', 'rls_kill_switch', 'SELECT')` is not `true`, or if any of `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE` on `rls_kill_switch` returns `true` (`has_table_privilege('payroll_app', 'rls_kill_switch', 'UPDATE')` must be `false`).
 
 #### 2. Scoping mechanism — M3-7 design decision (transaction-scoped pooled vs. direct session-scoped)
 
@@ -240,8 +245,11 @@ Wrapping every HTTP request in a single database transaction for `set_config(...
 
 A silent empty result when RLS context is missing causes subtle corruption in payroll: empty AIRE My Pay lists, reminders stopping silently, a zero year-end overview, deductions silently dropped from a paycheck, or `update!` changing 0 rows without error.
 
-**Mandatory fail-loud behavior:**
-- Every RLS policy delegates to a Postgres helper function `app_rls_allows(row_company_id bigint)` that **raises an exception** when neither `app.current_company_id` nor `app.rls_mode = 'system'` is set:
+**Mandatory fail-loud behavior (two layers — query-level guard + Postgres policy):**
+- **Layer 1 — Permanent query-level context guard (`RlsContextGuard`, stays on in production):** A per-row Postgres RLS policy function **never executes on an empty table or when an index lookup finds zero candidate rows**, meaning an unscoped query against an empty protected table or a missing primary key would still silently return 0 rows instead of raising. Therefore, install a **permanent** query-level guard (Active Record connection-adapter hook / `sql.active_record` guard) that checks every SQL statement referencing a table in `RLS_PROTECTED_TABLES` **before row evaluation**:
+  - **During the initial one-pay-cycle shadow phase only (`RLS_CONTEXT_GUARD_MODE=log` in production):** logs every unscoped query (with controller/job/backtrace) to structured telemetry without raising until shadow logs hit zero for a full pay cycle (test and staging already run in `raise` mode).
+  - **Permanently once RLS is enforced (`RLS_CONTEXT_GUARD_MODE=raise` in test, staging, AND production):** raises `TenantScope::MissingContextError` whenever any protected table is queried without an active company or `system` context — including on empty tables and missing-key lookups. This guard is **not** turned off after the shadow phase.
+- **Layer 2 — Postgres fail-loud policy helper (`app_rls_allows`):** Every RLS policy also delegates to `app_rls_allows(row_company_id bigint)` so even raw `PG` connections or queries bypassing Active Record fail loudly whenever any candidate row is evaluated without context:
   ```sql
   CREATE OR REPLACE FUNCTION app_rls_allows(row_company_id bigint) RETURNS boolean
   LANGUAGE plpgsql STABLE AS $$
@@ -260,9 +268,7 @@ A silent empty result when RLS context is missing causes subtle corruption in pa
   END;
   $$;
   ```
-- Pair this with an `ActiveSupport::Notifications.subscribe("sql.active_record")` guard that:
-  - **In test and staging:** raises immediately if any query touches an RLS-protected table without an active `TenantScope` context.
-  - **During the mandatory log-only shadow phase (staging + production for one full pay cycle before `ENABLE/FORCE`):** logs every unscoped query (with controller/job/backtrace) to structured telemetry with zero user disruption until shadow logs hit zero for a full pay cycle.
+- **Required empty-table & missing-key tests:** `company_rls_isolation_spec.rb` explicitly tests missing-context queries against **(a) an empty protected table** and **(b) a populated protected table queried by a non-existent ID**, asserting both raise `TenantScope::MissingContextError` instead of silently returning `[]` or `nil`.
 - **Threat-model honesty:** `app.rls_mode = 'system'` is settable inside a `payroll_app` session. It is a **defense-in-depth guard against developer query and scoping bugs**, **not** a defense against arbitrary SQL injection (an attacker with raw SQL execution could call `set_config('app.rls_mode', 'system', true)`). Parameterized Active Record queries, Brakeman, and controller authorization remain the SQL-injection boundary.
 
 #### 4. Complete table classification (all 111 `company_id` tables + 12 child tables + 4 new M3 tables)
@@ -296,7 +302,7 @@ Old application code running mid-deploy inserts into child tables without `compa
 - **Phased rollout:** After the mandatory full-pay-cycle log-only shadow phase produces zero unscoped warnings in staging and production, enable `ENABLE/FORCE ROW LEVEL SECURITY` **a few tables at a time** (e.g., Batch 1: new M3 + employee tables; Batch 2: payroll/check/intake tables; Batch 3: portal/filing/historical/AIRE/audit tables) — **in a window at least one full pay cycle separate from the `M3-0b` Clerk cutover**.
 - **Rollback plan:** Ship both:
   1. A prepared `bundle exec rails rls:disable` task executing over `MIGRATION_DATABASE_URL` with `SET lock_timeout = '3s'` and bounded retries so emergency rollback never queues behind long-running queries; **and/or**
-  2. A single-row `rls_kill_switch` table owned by `neondb_owner` with `SELECT`-only permission granted to `payroll_app` (`payroll_app` cannot update it), checked by `app_rls_allows()` so an operator with `MIGRATION_DATABASE_URL` can toggle emergency bypass instantaneously with zero DDL locks.
+  2. A single-row `rls_kill_switch` table owned by `neondb_owner` with write privileges explicitly revoked (`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ... FROM payroll_app; GRANT SELECT ... TO payroll_app;` or placed in an isolated `rls_admin` schema outside `public`'s default privileges), verified via `has_table_privilege('payroll_app', 'rls_kill_switch', 'UPDATE') = false`, and checked by `app_rls_allows()` so an operator with `MIGRATION_DATABASE_URL` can toggle emergency bypass instantaneously with zero DDL locks.
 - **Schema loading (`schema.rb` + `rls_policies.sql` vs. `structure.sql`):** Keep `db/schema.rb` with a versioned, idempotent `api/db/rls_policies.sql` (containing `app_rls_allows()`, child triggers, and all `ENABLE/FORCE` policies) hooked into `db:schema:load` and `db:test:prepare`, verified by CI's table-coverage assertion against `pg_class` — or switch `config.active_record.schema_format = :sql` (`db/structure.sql`) in `M3-7` if preferred.
 - **Test-suite strategy under RLS:**
   - Default legacy unit/model specs in `rails_helper.rb` to `TenantScope.as_system(reason: "rspec_default")` so the existing 6,600+ specs remain fast and clean during factory setup.
@@ -313,14 +319,14 @@ Per [Clerk's session tokens documentation](https://clerk.com/docs/guides/session
 1. `ClerkTokenVerifier#verify` returns the verified payload including `sub`, `sid`, `azp`, and `fva`.
 2. `MfaPolicy.verified_second_factor?(payload)` returns `true` only when `payload["fva"].is_a?(Array) && payload["fva"].length == 2 && payload["fva"][1].is_a?(Integer) && payload["fva"][1] >= 0`.
 3. `MfaPolicy.recently_verified?(payload, max_age_minutes: 10)` checks `0 <= fva[1] <= max_age_minutes` (matching Clerk's 10-minute default reverification window in [Clerk reverification docs](https://clerk.com/docs/guides/secure/reverification), ready for Milestone 4 step-up actions).
-4. **Enforce on every Clerk-authenticated action (never by URL prefix):**
-   - In `ClerkAuthenticatable` (which backs `ApplicationController`, covering `/api/v1/admin/*`, `/api/v1/client/*`, `/api/v1/companies`, `/api/v1/form_500s/*`, `/api/v1/cable_ticket`, `/api/v1/notification_settings`, and `/api/v1/auth/me`) and in `CableTicketService.issue!`:
+4. **Enforce on every Clerk-authenticated action — including employee routes for dual-role users (never by URL prefix):**
+   - In `ClerkAuthenticatable` (which backs `ApplicationController`, covering `/api/v1/admin/*`, `/api/v1/client/*`, `/api/v1/companies`, `/api/v1/form_500s/*`, `/api/v1/cable_ticket`, `/api/v1/notification_settings`, and `/api/v1/auth/me`), **in `Api::V1::Employee::BaseController`** (which inherits from `ActionController::API` directly and therefore must call the same shared `MfaPolicy` check after loading `@current_user`), and in `CableTicketService.issue!`:
      - Parse `ENV.fetch("REQUIRE_MFA", "false")` with an explicit truthy check (`%w[1 true t yes y on]`).
-     - Whenever `REQUIRE_MFA` is `true` and `@current_user` is **not** an employee-only user (i.e., holds any staff or client role), require `MfaPolicy.verified_second_factor?(@clerk_token_payload)`. (Allow `GET /api/v1/auth/me` only to return `{ mfa_required: true, mfa_verified: false }` so the frontend can display the MFA enrollment prompt cleanly; reject every other authenticated endpoint with `403`.)
+     - Whenever `REQUIRE_MFA` is `true` and `@current_user` holds **any** staff or client role (i.e., is not a pure employee-only user — including dual-role users such as a client admin or Cornerstone staff member accessing `/api/v1/employee/*`), require `MfaPolicy.verified_second_factor?(@clerk_token_payload)`. Pure employee-only users (holding no staff or client role) pass the global MFA gate on `/api/v1/employee/*` (relying on step-up `recently_verified?` for sensitive Milestone 4 changes). Allow `GET /api/v1/auth/me` only to return `{ mfa_required: true, mfa_verified: false }` so the frontend can display the MFA enrollment prompt cleanly; reject every other authenticated endpoint with `403`.
      - On failure, return HTTP `403` with `{ error: "Multi-factor authentication is required before accessing payroll.", code: "mfa_required" }` and record a `security` `AuditLog` event (`authentication#mfa_required_denied`).
      - When `REQUIRE_MFA` is `false` (production during Milestone 3), allow requests without noisy logs while keeping `ProductionReadiness#mfa_attestation_recorded?` failing as designed until the Milestone 4 gate.
-   - Add an automated **route-enumeration spec** iterating `Rails.application.routes.routes` and failing if any Clerk-authenticated route bypasses `enforce_mfa!` (with an explicit, reviewed allowlist for unauthenticated `/up`, `/health/dependencies`, `/api/v1/public/tenant_branding`, token-authenticated `/api/v1/finance/*` & `/api/v1/integrations/*`, and employee-only `/api/v1/employee/*`).
-5. **Testing in Milestone 3 (free):** Clerk's [sign-up/sign-in options docs](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options) confirm MFA (TOTP authenticator apps and backup codes) is **free in Clerk development instances**. Because the Clerk development instance stays active for local and staging work throughout Milestone 3, we verify live `fva` JWT claims against Clerk dev, plus deterministic RSpec tests with locally signed RS256 JWTs covering `fva: [5, 0]`, `fva: [5, 15]`, `fva: [5, -1]`, missing `fva`, malformed `fva`, and `REQUIRE_MFA` on vs. off.
+   - Add an automated **route-enumeration spec** iterating `Rails.application.routes.routes` and failing if any Clerk-authenticated route — **including `/api/v1/employee/*`** — omits the `enforce_mfa!` filter (exempting only unauthenticated `/up`, `/health/dependencies`, `/api/v1/public/tenant_branding`, and non-Clerk token-authenticated `/api/v1/finance/*` and `/api/v1/integrations/*`).
+5. **Testing in Milestone 3 (free):** Clerk's [sign-up/sign-in options docs](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options) confirm MFA (TOTP authenticator apps and backup codes) is **free in Clerk development instances**. Because the Clerk development instance stays active for local and staging work throughout Milestone 3, we verify live `fva` JWT claims against Clerk dev, plus deterministic RSpec tests with locally signed RS256 JWTs covering `fva: [5, 0]`, `fva: [5, 15]`, `fva: [5, -1]`, missing `fva`, malformed `fva`, `REQUIRE_MFA` on vs. off, and **both dual-role staff/client users (rejected without MFA) and pure employee-only users (allowed without global MFA) on `/api/v1/employee/*`**.
 
 ### 2.3 One login, separate roles (`users` + `employee_account_links`) and invitation binding
 
@@ -341,8 +347,8 @@ Leon's November 19 & 22 decisions specify **one Clerk app for everyone**, invita
 - **Area-specific base controllers:**
   - `Api::V1::Admin::BaseController`: requires `StaffRolePolicy.allowed?(current_user, :staff_workspace)` (unchanged).
   - `Api::V1::Client::BaseController`: requires `current_user.client?` (unchanged).
-  - `Api::V1::Employee::BaseController` (new, scaffolded behind feature flag): inherits from `ActionController::API` directly (no `ApplicationController` dev bypass, no `X-Company-Id`), verifies the Clerk JWT via `ClerkTokenVerifier`, resolves the caller strictly via `EmployeeAccountLink.where(user_id: current_user.id, status: %w[active former])` and `X-Employee-Link-Id` header, and checks `CompanyFeatures.for(link.company).employee_portal_enabled?` (which returns `false` → `404` for all clients in Milestone 3).
-- **Role switcher readiness:** `GET /api/v1/auth/me` returns `roles: { staff: bool, client: bool, employee_links_count: int }` (only counting links whose company has `employee_portal_enabled?`) so Milestone 4 can render the role switcher cleanly.
+  - `Api::V1::Employee::BaseController` (new, scaffolded behind feature flag): inherits from `ActionController::API` directly (no `ApplicationController` dev bypass, no `X-Company-Id`), verifies the Clerk JWT via `ClerkTokenVerifier`, runs `MfaPolicy` enforcement (wired in `M3-2`) so dual-role staff/client users must still satisfy MFA on employee routes, resolves the caller strictly via `EmployeeAccountLink.where(user_id: current_user.id, status: %w[active former])` and `X-Employee-Link-Id` header, and checks `CompanyFeatures.for(link.company).employee_portal_enabled?` from `M3-5a` (which returns `false` → `404` for all clients in Milestone 3).
+- **Role switcher readiness:** `GET /api/v1/auth/me` returns `roles: { staff: bool, client: bool, employee_links_count: int }` (only counting links whose company has `CompanyFeatures.for(company).employee_portal_enabled?`) so Milestone 4 can render the role switcher cleanly.
 
 ---
 
@@ -356,7 +362,7 @@ Leon's November 19 & 22 decisions specify **one Clerk app for everyone**, invita
 flowchart LR
   M30a["M3-0a: Clerk verifier, azp, issuer JWKS cache, cutover tooling"]
   M31["M3-1: Metadata-bound invites, end email match, role separation"]
-  M32["M3-2: MFA fva check on all auth routes (REQUIRE_MFA=false)"]
+  M32["M3-2: MFA fva check on all auth + dual-role employee routes (REQUIRE_MFA=false)"]
   M33["M3-3: Non-staff audit actors"]
   M34["M3-4: Effective-dated pay rates"]
   M35a["M3-5a: Operating profile backend (A1)"]
@@ -367,7 +373,9 @@ flowchart LR
   M30b["M3-0b: Live Clerk production cutover (own window, >=1 pay cycle from M3-7)"]
 
   M30a --> M31
+  M35a --> M31
   M30a --> M32
+  M31 --> M32
   M30a --> M36
   M35a --> M35b
   M35a --> M36
@@ -380,14 +388,14 @@ flowchart LR
 | Order | Slice | Type | Parallelizable? | Depends on | Ships switched off? |
 |---|---|---|---|---|---|
 | 1 | **M3-0a:** Clerk JWT verifier consolidation, `azp` check, per-issuer JWKS key, cutover/re-link tooling | Code PR | First auth PR (parallel with M3-3, M3-4, M3-5a, M3-8) | None | Dev keys unchanged; zero live impact |
-| 2 | **M3-1:** Metadata-bound invites, delete all email auto-linking, `employee_account_links`, `Employee::BaseController` scaffold | Code PR | Parallel after M3-0a | M3-0a (code); M3-0b (live prod verification) | `employee/*` routes gated off; existing dev `clerk_id`s keep working |
-| 3 | **M3-2:** MFA `fva` verification across all Clerk-authenticated routes + step-up helper | Code PR | Parallel after M3-0a | M3-0a (code); M4 gate (prod enforcement) | `REQUIRE_MFA=false` in prod; tested on Clerk dev |
-| 4 | **M3-3:** Non-staff audit actors (`actor_type` derived on write, `AuditActor`, job & AIRE/operator auditing) | Code PR | Parallel from day 1 | None | Additive (no user-facing change) |
-| 5 | **M3-4:** Effective-dated pay rates & wage-rate history across all 13 writers and 21 readers | Code PR | Parallel from day 1 | None | Additive backfill; UI requires explicit effective-date choice |
-| 6 | **M3-5a:** Client operating profile backend (Spec A1: table, catalog, `CompanyFeatures`, backfill, read API) | Code PR | Parallel from day 1 | None | Dual-read; all M4–M6 flags default `false` |
+| 2 | **M3-5a:** Client operating profile backend (Spec A1: table, catalog, `CompanyFeatures`, backfill, read API) | Code PR | Parallel from day 1 | None | Dual-read; all M4–M6 flags default `false` |
+| 3 | **M3-1:** Metadata-bound invites, delete all email auto-linking, `employee_account_links`, `Employee::BaseController` scaffold | Code PR | Parallel after M3-0a + M3-5a | M3-0a, M3-5a (code); M3-0b (live prod verification) | `employee/*` routes gated off via `CompanyFeatures`; existing dev `clerk_id`s keep working |
+| 4 | **M3-2:** MFA `fva` verification across all Clerk-authenticated routes (including dual-role users on `/api/v1/employee/*`) + step-up helper | Code PR | Parallel after M3-0a + M3-1 | M3-0a, M3-1 (code); M4 gate (prod enforcement) | `REQUIRE_MFA=false` in prod; tested on Clerk dev |
+| 5 | **M3-3:** Non-staff audit actors (`actor_type` derived on write, `AuditActor`, job & AIRE/operator auditing) | Code PR | Parallel from day 1 | None | Additive (no user-facing change) |
+| 6 | **M3-4:** Effective-dated pay rates & wage-rate history across all 13 writers and 21 readers | Code PR | Parallel from day 1 | None | Additive backfill; UI requires explicit effective-date choice |
 | 7 | **M3-5b:** Operating profile PATCH + "How this client runs" admin settings page (Spec A2) | Code PR | Parallel after M3-5a | M3-5a | Admin settings only; all M4–M6 switches default `false` |
 | 8 | **M3-6:** Client subdomains (`subdomain_slug`, dynamic CORS/`azp`, public branding endpoint) | Code PR | Parallel after M3-0a + M3-5a | M3-0a, M3-5a (code); M3-0b (live prod subdomain verification) | `subdomain_enabled=false` for all clients → 404 |
-| 9 | **M3-7:** Postgres RLS (`payroll_app`, expand-and-contract child `company_id`, caller inventory, full-cycle shadow phase, phased `ENABLE/FORCE`, PgBouncer CI, isolation suite) | Code PR(s) | After schema-adding PRs | M3-1, M3-4, M3-5a + Preflight §1.12 | Phased: shadow logging 1 full pay cycle → batched `ENABLE/FORCE` |
+| 9 | **M3-7:** Postgres RLS (`payroll_app`, expand-and-contract child `company_id`, caller inventory, permanent query guard, full-cycle shadow phase, phased `ENABLE/FORCE`, PgBouncer CI, isolation suite) | Code PR(s) | After schema-adding PRs | M3-1, M3-4, M3-5a + Preflight §1.12 | Phased: shadow logging 1 full pay cycle → batched `ENABLE/FORCE` |
 | 10 | **M3-8:** Reserved capacity (`APP_PROCESS_ROLE`, queue/pool limits, employee/kiosk `Rack::Attack`, telemetry, `netlify.toml`) | Code PR | Parallel from day 1 | Preflight §1.12 (Render RAM + Netlify UI settings) | `APP_PROCESS_ROLE=all` (existing Render topology unchanged) |
 | 11 | **M3-0b:** Live Clerk production cutover on `shimizu-technology.com` (free plan) | Ops step | Own window, ≥ 1 pay cycle from M3-7 enforcement | M3-0a, M3-1, `CLERK_AUTHORIZED_PARTIES` + Preflight §1.12 | N/A (live cutover; `REQUIRE_MFA` stays `false`) |
 
@@ -425,7 +433,7 @@ flowchart LR
   - Add `invite_nonce_digest` (string, nullable) and `invite_nonce_expires_at` (datetime, nullable) to `users`.
   - Create `employee_account_links` with composite FK `(employee_id, company_id) REFERENCES employees(id, company_id)` (adding unique index on `employees(id, company_id)`) and partial unique index on `employee_id WHERE status IN ('invited', 'active')`.
 - **Pre-deploy operational step:** Before deploying `M3-1`, list any `users` with `invitation_status = 'pending'`, revoke their old metadata-less Clerk invites, and re-send them immediately after deploy so every open invite carries `payroll_user_id` + nonce.
-- **Dependencies:** `M3-0a` for code. Works safely on production **before** `M3-0b` because every active production user already has their current dev `clerk_id` stored on `users`, and new/re-sent invites bind via `public_metadata` without email matching.
+- **Dependencies:** `M3-0a` (verifier) and `M3-5a` (`CompanyFeatures.for(company).employee_portal_enabled?` used by `Api::V1::Employee::BaseController` and `AuthController#me`) for code. Works safely on production **before** `M3-0b` because every active production user already has their current dev `clerk_id` stored on `users`, and new/re-sent invites bind via `public_metadata` without email matching.
 - **Acceptance tests:**
   - *Automated (RSpec + Vitest):*
     - Invited `pending_` user signing in with matching `payroll_user_id`, nonce, and `clerk_invitation_id` binds cleanly, clears `invite_nonce_digest`, and logs a security audit event;
@@ -439,18 +447,23 @@ flowchart LR
 
 ### PR M3-2: MFA `fva` verification across all Clerk-authenticated routes (shipped off)
 
-- **Purpose:** Enforce Clerk's `fva` second-factor claim on **every** Clerk-authenticated API action and Cable ticket for any user who is not employee-only whenever `REQUIRE_MFA=true`, plus provide a step-up freshness helper for Milestone 4.
+- **Purpose:** Enforce Clerk's `fva` second-factor claim on **every** Clerk-authenticated API action — including `/api/v1/employee/*` for dual-role users who also hold a staff or client role — and on Cable tickets whenever `REQUIRE_MFA=true`, plus provide a step-up freshness helper for Milestone 4.
 - **Main files:**
   - `api/app/services/mfa_policy.rb` (new: `required_for?(user:, env:)`, `verified_second_factor?(payload)`, `recently_verified?(payload, max_age_minutes:)`, explicit boolean parsing of `REQUIRE_MFA`)
-  - `api/app/controllers/concerns/clerk_authenticatable.rb` (call `enforce_mfa!` on every authenticated request after loading `@current_user` — not gated by URL prefix, so `companies_controller`, `form_500s_controller`, `cable_tickets_controller`, and `notification_settings_controller` are all covered automatically; allow `/api/v1/auth/me` to return MFA status so the UI can prompt enrollment)
+  - `api/app/controllers/concerns/mfa_enforceable.rb` (shared `enforce_mfa!` concern included in both `ClerkAuthenticatable` and `Api::V1::Employee::BaseController`)
+  - `api/app/controllers/concerns/clerk_authenticatable.rb` (call `enforce_mfa!` on every authenticated request after loading `@current_user` — not gated by URL prefix, covering `admin/*`, `client/*`, `companies_controller`, `form_500s_controller`, `cable_tickets_controller`, and `notification_settings_controller`; allow `/api/v1/auth/me` to return MFA status so the UI can prompt enrollment)
+  - `api/app/controllers/api/v1/employee/base_controller.rb` (include `MfaEnforceable` and run `enforce_mfa!` after authenticating the Clerk JWT and loading `@current_user`, so any dual-role staff/client user hitting `/api/v1/employee/*` must satisfy MFA while pure employee-only users pass the global gate)
   - `api/app/services/cable_ticket_service.rb` (check `MfaPolicy` when issuing tickets)
   - `api/app/controllers/api/v1/auth_controller.rb` (include `mfa_verified: bool` and `mfa_required: bool` in `/auth/me`)
   - `web/src/contexts/AuthContext.tsx` and `web/src/pages/Login.tsx` (handle `403 code: "mfa_required"` cleanly by guiding user to enroll/complete MFA in Clerk rather than looping)
 - **Migration:** None.
-- **Dependencies:** `M3-0a` for code. Tested end-to-end against Clerk dev (free MFA); production enforcement turns on only at the Milestone 4 gate (after `M3-0b` + Clerk Pro).
+- **Dependencies:** `M3-0a` (verifier) and `M3-1` (`Api::V1::Employee::BaseController` + `EmployeeAccountLink`) for code. Tested end-to-end against Clerk dev (free MFA); production enforcement turns on only at the Milestone 4 gate (after `M3-0b` + Clerk Pro).
 - **Acceptance tests:**
-  - *Automated (RSpec + Vitest):* Signed RS256 JWT fixtures testing `fva: [5, 2]` (pass), `fva: [5, 0]` (pass), `fva: [5, -1]` (403 `mfa_required` + security audit event), missing/malformed `fva` (403), `REQUIRE_MFA=false` (pass regardless of `fva`), `REQUIRE_MFA=true` on `admin`/`accountant`/`client` (enforced) vs. employee-only account (exempt from global gate; tested with `require_recent_mfa!`), Cable ticket denied when `REQUIRE_MFA=true` and `fva[1] == -1`, **plus a route-enumeration spec** checking every route in `api/config/routes.rb` (explicitly verifying `companies`, `form_500s`, `cable_ticket`, `notification_settings`, `admin/*`, `client/*` enforce MFA while non-Clerk `finance/*` and `integrations/*` are documented). Vitest for `mfa_required` UI state.
-  - *Manual / browser QA (against Clerk dev where MFA is free):* Enable TOTP + backup codes in Clerk dev, set `REQUIRE_MFA=true` on local/staging, confirm non-MFA session gets `403 mfa_required` on `/api/v1/companies` and `/api/v1/admin/*`, enroll authenticator app, verify full payroll navigation succeeds, confirm backup-code login sets `fva[1] >= 0`.
+  - *Automated (RSpec + Vitest):*
+    - Signed RS256 JWT fixtures testing `fva: [5, 2]` (pass), `fva: [5, 0]` (pass), `fva: [5, -1]` (403 `mfa_required` + security audit event), missing/malformed `fva` (403), `REQUIRE_MFA=false` (pass regardless of `fva`), `REQUIRE_MFA=true` on `admin`/`accountant`/`client` (enforced), Cable ticket denied when `REQUIRE_MFA=true` and `fva[1] == -1`;
+    - **Employee-route dual-role vs. employee-only specs:** (a) a dual-role user (staff or client role + active `EmployeeAccountLink`) calling `/api/v1/employee/*` with `REQUIRE_MFA=true` and `fva: [5, -1]` receives `403 code: "mfa_required"` (and passes MFA with `fva: [5, 1]`), while (b) a pure employee-only user (no staff/client role) calling `/api/v1/employee/*` with `REQUIRE_MFA=true` and `fva: [5, -1]` passes the global MFA gate (reaching the feature flag / step-up check);
+    - **Route-enumeration spec** checking every route in `api/config/routes.rb` — verifying `companies`, `form_500s`, `cable_ticket`, `notification_settings`, `admin/*`, `client/*`, **and `employee/*`** all include `enforce_mfa!` (with only unauthenticated health/branding and non-Clerk token-authenticated `finance/*` & `integrations/*` exempted). Vitest for `mfa_required` UI state.
+  - *Manual / browser QA (against Clerk dev where MFA is free):* Enable TOTP + backup codes in Clerk dev, set `REQUIRE_MFA=true` on local/staging, confirm non-MFA session gets `403 mfa_required` on `/api/v1/companies`, `/api/v1/admin/*`, and (for a dual-role test user) `/api/v1/employee/*`, enroll authenticator app, verify full payroll navigation succeeds, confirm backup-code login sets `fva[1] >= 0`.
 - **Ships switched off:** Production `REQUIRE_MFA` stays `false` until Milestone 4 gate / first revenue.
 
 ### PR M3-3: Non-staff audit actors
@@ -604,19 +617,19 @@ flowchart LR
 - **Required acceptance artifact:** Commit `docs/RLS_CALLER_INVENTORY.md` enumerating **every** controller (namespaced, top-level, and integration — including `integrations/aire/*`, `companies_controller`, `form_500s_controller`, `finance/access_controller`, `cable_tickets_controller`, `notification_settings_controller`), ActionCable channel (`client_portal_thread_channel`), ActiveJob, recurring job (`api/config/recurring.yml`), cross-company reader (`year_end/input_revision.rb`, `YearEnd::ClientsOverview`, `audit_log_presenter.rb`), `staging_clone_containment.rb`, and rake task, each tagged with its RLS mode (`company`, `system`, or `exempt_tables_only`).
 - **Main files:**
   - `api/app/services/tenant_scope.rb` (`with_company(company_id)` and `as_system(reason:)` with save/restore of prior setting, refusal on outer-transaction context mismatch, and implementation of the pooling vs. Neon direct decision from §2.1)
-  - `api/app/services/rls_shadow_observer.rb` (`sql.active_record` subscriber: raises in test/staging when context is missing on a protected table; logs structured warnings in production during the shadow phase)
+  - `api/app/services/rls_context_guard.rb` (**permanent** query-level `sql.active_record` / connection guard: runs in `log` mode in production only during the one-pay-cycle shadow phase, then stays **permanently enabled in `raise` mode** in test, staging, and production so missing-context queries on empty tables or missing keys fail loudly before row evaluation)
   - `api/app/controllers/concerns/company_rls_scoped.rb` (wired into `Admin::BaseController`, `Client::BaseController`, `Employee::BaseController`, plus explicit scoping on all non-base controllers listed in §1.3)
-  - `api/db/rls_policies.sql` + `api/lib/tasks/rls.rake` (`app_rls_allows()` fail-loud function, `rls_kill_switch` / `rls:disable` rollback with `lock_timeout = '3s'`, batched `ENABLE/FORCE ROW LEVEL SECURITY`, hooked into `db:schema:load` and `db:test:prepare`)
-  - `api/app/services/production_readiness.rb` (assert runtime role has `NOT rolbypassrls AND NOT rolsuper` and all protected tables have `relrowsecurity AND relforcerowsecurity`)
+  - `api/db/rls_policies.sql` + `api/lib/tasks/rls.rake` (`app_rls_allows()` fail-loud function, `rls_kill_switch` with explicit `REVOKE INSERT, UPDATE, DELETE, TRUNCATE ... FROM payroll_app` + `GRANT SELECT`, `rls:disable` rollback with `lock_timeout = '3s'`, batched `ENABLE/FORCE ROW LEVEL SECURITY`, hooked into `db:schema:load` and `db:test:prepare`)
+  - `api/app/services/production_readiness.rb` (assert runtime role has `NOT rolbypassrls AND NOT rolsuper`, `has_table_privilege('payroll_app', 'rls_kill_switch', 'SELECT')` is `true`, `has_table_privilege('payroll_app', 'rls_kill_switch', 'UPDATE')` — and `INSERT`/`DELETE`/`TRUNCATE` — are `false`, and all protected tables have `relrowsecurity AND relforcerowsecurity`)
   - `.github/workflows/*.yml` (add transaction-mode PgBouncer service container so `payment_transition_lock_transaction_pooler_spec.rb:19-20` and RLS pooler specs actually run in CI)
-  - `api/spec/security/company_rls_isolation_spec.rb` (`use_transactional_tests = false`; `before(:suite)` asserts `NOBYPASSRLS`; direct ActiveRecord, raw SQL, and **service-level** wrong-context/no-context tests proving fail-loud raises; `INSERT` with mismatched `company_id` raises `PG::InsufficientPrivilege`; PgBouncer connection-reuse leak test across transactions; table-coverage test asserting every `company_id` table is classified and every protected table has `relrowsecurity AND relforcerowsecurity`)
+  - `api/spec/security/company_rls_isolation_spec.rb` (`use_transactional_tests = false`; `before(:suite)` asserts `NOBYPASSRLS` and `has_table_privilege('payroll_app', 'rls_kill_switch', 'UPDATE') = false`; direct ActiveRecord, raw SQL, and **service-level** wrong-context/no-context tests proving fail-loud raises — **including missing-context queries against an empty protected table and a missing primary key**; `INSERT` with mismatched `company_id` raises `PG::InsufficientPrivilege`; PgBouncer connection-reuse leak test across transactions; table-coverage test asserting every `company_id` table is classified and every protected table has `relrowsecurity AND relforcerowsecurity`)
 - **Migrations (multi-release expand-and-contract + phased enforcement):**
   1. **Expand PR:** Add nullable `company_id`, indexes, `BEFORE INSERT` parent-fill triggers, batched backfill, and composite FKs `(parent_id, company_id) REFERENCES parent(id, company_id)` on all 12 child tables (`employee_wage_rates`, `employee_deductions`, `employee_payroll_fields`, `employee_tipped_occupations`, `employee_ytd_totals`, `loan_transactions`, `payroll_item_earnings`, `payroll_item_deductions`, `payroll_item_field_entries`, `direct_deposit_payment_confirmations`, `check_events`, `payroll_intake_rows`), and update all models, calculators, and `insert_all!` sites.
-  2. **Shadow-phase deploy:** Deploy `TenantScope`, caller scoping across the full inventory, `payroll_app` role, and `RlsShadowObserver` in **log-only mode** on staging and production for **one full pay cycle** until zero unscoped warnings occur.
-  3. **Contract + phased enforcement PR(s):** Enforce `NOT NULL` on the 12 child tables, then apply `ENABLE/FORCE ROW LEVEL SECURITY` in small table batches — scheduled **at least one full pay cycle apart from `M3-0b`**.
+  2. **Shadow-phase deploy:** Deploy `TenantScope`, caller scoping across the full inventory, `payroll_app` role, and `RlsContextGuard` in **log-only mode** (`RLS_CONTEXT_GUARD_MODE=log`) on production for **one full pay cycle** (staging runs in `raise` mode) until zero unscoped warnings occur.
+  3. **Contract + phased enforcement PR(s):** Enforce `NOT NULL` on the 12 child tables, switch production `RLS_CONTEXT_GUARD_MODE=raise` permanently, and apply `ENABLE/FORCE ROW LEVEL SECURITY` in small table batches — scheduled **at least one full pay cycle apart from `M3-0b`**.
 - **Dependencies:** M3-1, M3-4, M3-5a (so `employee_account_links`, `employee_compensation_changes`, `employee_wage_rate_versions`, and `client_operating_profiles` are included), plus Preflight §1.12.
 - **Acceptance tests:**
-  - *Automated (RSpec + PgBouncer CI):* `before(:suite)` asserts `NOBYPASSRLS`; `company_rls_isolation_spec.rb` passes with `use_transactional_tests = false` against real transaction-mode PgBouncer; `payment_transition_lock_transaction_pooler_spec.rb` runs (not skipped) and passes; schema-classification test passes for all 111 `company_id` tables + 12 child tables + 4 new tables; legacy specs pass in default system mode while all `:rls` and request specs pass strictly enforced; `rls:disable` / kill-switch rollback tested on staging.
+  - *Automated (RSpec + PgBouncer CI):* `before(:suite)` asserts `NOBYPASSRLS` and `has_table_privilege('payroll_app', 'rls_kill_switch', 'UPDATE') = false` (plus `INSERT`/`DELETE`/`TRUNCATE` = `false`, `SELECT` = `true`); `company_rls_isolation_spec.rb` passes with `use_transactional_tests = false` against real transaction-mode PgBouncer, including **empty-table and missing-key** missing-context raise tests; `payment_transition_lock_transaction_pooler_spec.rb` runs (not skipped) and passes; schema-classification test passes for all 111 `company_id` tables + 12 child tables + 4 new tables; legacy specs pass in default system mode while all `:rls` and request specs pass strictly enforced; `rls:disable` / kill-switch rollback tested on staging.
   - *Manual / browser QA:* Complete one full staging pay cycle under `payroll_app` (`NOBYPASSRLS`) with RLS enforced (calculate, client upload, approve, commit, check print, year-end overview, recurring jobs, AIRE My Pay) with zero errors; complete one full production pay cycle in log-only shadow mode before enabling enforcement.
 - **Ships switched off:** No user-facing feature change; gated by full-pay-cycle shadow phase and instant rollback mechanism.
 
@@ -764,7 +777,7 @@ Plan a **60–90 minute** maintenance window (allowing for Netlify build/publish
 
 ## 5. Milestone 4 go-live prerequisites (deferred from Milestone 3)
 
-**Deferred by Leon (November 22, 2026):** Legal review and WISP work are **not** part of Milestone 3 work or Milestone 3 acceptance. They stay documented here because §6 of [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) (`line 262`) requires **the lawyer review to be finished before Milestone 4 goes live**.
+**Deferred by Leon (November 22, 2026):** Legal review and WISP work are **not** part of Milestone 3 work or Milestone 3 acceptance. They stay documented here because §6 of [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) (`line 262`) requires **the lawyer review and the written security plan (WISP) to be finished before Milestone 4 goes live**.
 
 ### 5.1 Guam law-firm review packet (complete before Milestone 4 goes live)
 
@@ -806,7 +819,7 @@ Per IRS Pub 5708 / Pub 4557 and FTC Safeguards Rule (16 CFR 314.4, `GUAM_PAYROLL
 
 | Risk | Concrete mechanism | Mitigation |
 |---|---|---|
-| **Silent empty sets or broken callers under RLS** | Missing RLS context returns 0 rows on `SELECT`/`UPDATE`/`DELETE`, breaking AIRE My Pay, recurring reminders, year-end overview, or deductions without raising. | `app_rls_allows()` raises `42501` when context is unset; committed caller inventory covers every controller/channel/job/reader; mandatory full-pay-cycle log-only shadow phase on staging + prod before batched `ENABLE/FORCE`; `rls:disable` (`lock_timeout='3s'`) + kill-switch table ready. |
+| **Silent empty sets or broken callers under RLS** | Missing RLS context returns 0 rows on `SELECT`/`UPDATE`/`DELETE` — and Postgres never invokes a per-row policy function on an empty table or a zero-hit index lookup — breaking AIRE My Pay, reminders, year-end overview, or deductions silently. | Permanent query-level `RlsContextGuard` (`raise` mode in test, staging, and production after the shadow phase) + fail-loud `app_rls_allows()` (`42501`); empty-table and missing-key isolation tests; committed caller inventory; full-pay-cycle log-only shadow phase before batched `ENABLE/FORCE`; `rls:disable` (`lock_timeout='3s'`) + `SELECT`-only `rls_kill_switch` verified via `has_table_privilege`. |
 | **RLS silently bypassed on Neon** | `neondb_owner` inherits `neon_superuser` (`BYPASSRLS`), which overrides even `FORCE ROW LEVEL SECURITY`. | Test `rolbypassrls` directly in Preflight §1.12; runtime `DATABASE_URL` connects as SQL-created `payroll_app` (`NOBYPASSRLS`); `production:readiness` and CI `before(:suite)` fail if `rolbypassrls` is true. |
 | **Per-request transaction regressions or savepoint leaks** | Wrapping entire requests in a transaction rolls back `mark_failed!` writes (`payroll_intake_session.rb:81`), leaves `rescue_from` unscoped, and pins locks; `set_config(..., true)` survives `RELEASE SAVEPOINT`. | Decide explicitly in `M3-7` between narrow `TenantScope` blocks over pooled endpoint (with save/restore + outer-context mismatch guard) vs. Neon direct endpoint with session `set_config(..., false)` + `ensure` reset; run isolation suite with `use_transactional_tests = false` against a real CI PgBouncer container. |
 | **Mid-deploy child-table insert failures** | Old code during deploy runs `CheckEvent.insert_all!` (`checks_controller.rb:235`, `pay_period_lifecycle_service.rb:373`) and calculator child inserts without `company_id`. | Expand-and-contract rollout: nullable `company_id` + `BEFORE INSERT` parent-fill triggers + batched backfill + composite FKs first; enforce `NOT NULL` only in a subsequent release after all code writes `company_id`. |
@@ -847,16 +860,16 @@ Milestone 3's acceptance rule (`PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md:261`
 Milestone 3 is operationally closed only when every checkbox below passes on production:
 
 ### Automated gates (CI green on final `main` head)
-- [ ] Full RSpec backend suite passes with RLS enabled under a `NOBYPASSRLS` Postgres role (`before(:suite)` asserts `NOT rolbypassrls`), including `api/spec/security/company_rls_isolation_spec.rb` (`use_transactional_tests = false`, direct/raw-SQL/service-level fail-loud tests, 111-table classification + `pg_class` coverage) and real transaction-mode **PgBouncer CI** running both `payment_transition_lock_transaction_pooler_spec.rb` and RLS pooler leak tests.
-- [ ] MFA route-enumeration spec passes across every Clerk-authenticated route in `api/config/routes.rb`; compensation single-write-path guard + CI static check pass; `AuditLog` writer/reader specs pass (including direct `create!` call sites).
+- [ ] Full RSpec backend suite passes with RLS enabled under a `NOBYPASSRLS` Postgres role (`before(:suite)` asserts `NOT rolbypassrls` and `has_table_privilege('payroll_app', 'rls_kill_switch', 'UPDATE') = false`), including `api/spec/security/company_rls_isolation_spec.rb` (`use_transactional_tests = false`, permanent query-level guard empty-table & missing-key tests, direct/raw-SQL/service-level fail-loud tests, 111-table classification + `pg_class` coverage) and real transaction-mode **PgBouncer CI** running both `payment_transition_lock_transaction_pooler_spec.rb` and RLS pooler leak tests.
+- [ ] MFA route-enumeration spec passes across every Clerk-authenticated route in `api/config/routes.rb` (including dual-role staff/client enforcement and employee-only pass-through on `/api/v1/employee/*`); compensation single-write-path guard + CI static check pass; `AuditLog` writer/reader specs pass (including direct `create!` call sites).
 - [ ] Full Vitest frontend suite, TypeScript typecheck, ESLint, RuboCop, Brakeman, `bundler-audit`, and `npm audit` pass.
 - [ ] Deterministic Playwright release lane (`test:e2e:release`) passes with zero skips.
 - [ ] `netlify.toml` ignore rule verified on both a docs/API-only diff (skipped) and a `web/` diff (built), matching live Netlify UI settings.
 
 ### Identity, RLS & switch-off proof (two separate windows, ≥ 1 pay cycle apart)
 - [ ] **Window A (`M3-0b` Clerk production cutover):** Verification matrix (§4.5) passed on `payroll.shimizu-technology.com` (root domain `shimizu-technology.com` with Allowed Subdomains enabled; Leon and Dafne signed in fresh verifying password, email code, and Google sign-in; fresh post-cutover invite bound via `public_metadata`; uninvited same-email account rejected with `401` and unchanged `users.clerk_id`); `production:readiness` passes production Clerk keys while `REQUIRE_MFA` stays `false`.
-- [ ] **Window B (`M3-7` Postgres RLS enforcement, ≥ 1 pay cycle after shadow phase and ≥ 1 pay cycle from `M3-0b`):** Full-pay-cycle production log-only shadow phase recorded zero unscoped warnings; committed `docs/RLS_CALLER_INVENTORY.md` accounts for every controller, channel, job, recurring job, and rake task; phased `ENABLE/FORCE ROW LEVEL SECURITY` completed cleanly; `production:readiness` passes `NOBYPASSRLS` and `FORCE ROW LEVEL SECURITY` checks; rollback path verified on staging.
-- [ ] MFA `fva` enforcement verified in staging/dev against the Clerk development instance with `REQUIRE_MFA=true` across `/api/v1/companies`, `/api/v1/form_500s/*`, `/api/v1/admin/*`, `/api/v1/client/*`, and Cable tickets, while production confirms `REQUIRE_MFA=false`.
+- [ ] **Window B (`M3-7` Postgres RLS enforcement, ≥ 1 pay cycle after shadow phase and ≥ 1 pay cycle from `M3-0b`):** Full-pay-cycle production log-only shadow phase recorded zero unscoped warnings; committed `docs/RLS_CALLER_INVENTORY.md` accounts for every controller, channel, job, recurring job, and rake task; `RLS_CONTEXT_GUARD_MODE=raise` stays permanently active in production; phased `ENABLE/FORCE ROW LEVEL SECURITY` completed cleanly; `production:readiness` passes `NOBYPASSRLS`, `rls_kill_switch` read-only privilege, and `FORCE ROW LEVEL SECURITY` checks; rollback path verified on staging.
+- [ ] MFA `fva` enforcement verified in staging/dev against the Clerk development instance with `REQUIRE_MFA=true` across `/api/v1/companies`, `/api/v1/form_500s/*`, `/api/v1/admin/*`, `/api/v1/client/*`, `/api/v1/employee/*` (for dual-role staff/client users), and Cable tickets, while production confirms `REQUIRE_MFA=false`.
 - [ ] Every M4–M6 feature (`employee_portal_enabled`, `subdomain_enabled`, `time_module_enabled`) is `false` on all live companies; `/api/v1/employee/*` and `/api/v1/public/tenant_branding` return `404`.
 
 ### Live normal payroll run (Mark, Benjo, and a client office; signed off by Dafne)
