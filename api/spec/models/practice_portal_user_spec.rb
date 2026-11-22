@@ -64,7 +64,11 @@ RSpec.describe "Practice portal identity" do
     client
     workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
     expect(client.accessible_company_ids).to be_empty
-    ExpirePracticePortalAccessJob.perform_now
+    job = ExpirePracticePortalAccessJob.new
+    job.perform_now
+    expect(AuditLog.find_by!(action: "test_workspace#portal_access_deactivated", record_id: client.id))
+      .to have_attributes(actor_type: "system_job", actor_id: job.job_id, actor_name: "ExpirePracticePortalAccessJob", user_id: nil)
+    expect(Current.actor).to be_nil
     expect(client.reload).not_to be_active
     expect(client.update(active: true)).to be(false)
   end
@@ -76,12 +80,29 @@ RSpec.describe "Practice portal identity" do
     expect(client.reload).not_to be_active
   end
 
+  it "attributes deactivation discovered by an admin to the system and preserves the admin's audit flag" do
+    client
+    workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
+    Current.set(user: admin, actor: AuditActor.for_user(admin), domain_audit_recorded: false) do
+      expect(client.payroll_access_allowed?).to be(false)
+      expect(Current.domain_audit_recorded).to be(false)
+      expect(Current.actor).to eq(AuditActor.for_user(admin))
+    end
+
+    expect(client.reload).not_to be_active
+    expect(AuditLog.find_by!(action: "test_workspace#portal_access_deactivated", record_id: client.id))
+      .to have_attributes(actor_type: "system_job", actor_name: "TestWorkspace::PortalAccess", user_id: nil)
+  end
+
   it "deactivates expired accounts at authentication before the scheduled sweep" do
     client
     workspace.update_columns(test_workspace_expires_at: 1.minute.ago)
     expect(client.payroll_access_allowed?).to be(false)
     expect(client.reload).not_to be_active
+    expect(AuditLog.find_by!(action: "test_workspace#portal_access_deactivated", record_id: client.id))
+      .to have_attributes(actor_type: "system_job", actor_name: "TestWorkspace::PortalAccess", user_id: nil)
   end
+
   it "memoizes practice company ids until the user is reloaded" do
     expect(client).to receive(:practice_portal_open?).once.and_call_original
     2.times { expect(client.accessible_company_ids).to eq([ workspace.id ]) }

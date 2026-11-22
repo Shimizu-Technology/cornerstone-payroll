@@ -169,6 +169,8 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
       expect(response).to have_http_status(:ok)
       log = AuditLog.find_by!(action: "worker_statements#listed")
       expect(log).to have_attributes(company_id: company.id, record_type: "Employee", record_id: worker.id, event_category: "integration", user_id: nil)
+      expect(log).to have_attributes(actor_type: "source_worker", actor_id: uuid, actor_name: "AIRE Worker (#{uuid})")
+      expect(Current.actor).to be_nil
       expect(log.metadata).to include("employee_id" => worker.id, "time_tracking_source_id" => source.id, "source_user_uuid" => uuid, "statement_count" => 6)
     end
   end

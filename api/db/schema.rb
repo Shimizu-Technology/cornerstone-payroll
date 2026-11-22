@@ -280,8 +280,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
   create_table "audit_logs", force: :cascade do |t|
     t.string "action", null: false
     t.string "actor_email"
+    t.string "actor_id"
     t.string "actor_name"
     t.string "actor_role"
+    t.string "actor_type"
     t.bigint "company_id"
     t.datetime "created_at", null: false
     t.string "event_category", default: "activity", null: false
@@ -295,6 +297,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_113000) do
     t.string "user_agent"
     t.bigint "user_id"
     t.index "company_id, ((metadata ->> 'pay_period_id'::text))", name: "idx_audit_logs_company_pay_period"
+    t.index [ "company_id", "actor_type", "created_at" ], name: "idx_audit_logs_company_actor_type_created_at"
     t.index [ "company_id" ], name: "index_audit_logs_on_company_id"
     t.index [ "created_at" ], name: "index_audit_logs_on_created_at"
     t.index [ "organization_id", "created_at", "id" ], name: "idx_audit_logs_org_history"

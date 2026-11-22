@@ -253,6 +253,7 @@ RSpec.describe ClerkCutover::RelinkService do
       audit_logs = AuditLog.where(action: "users#clerk_production_relinked", event_category: "security").order(:record_id)
       expect(audit_logs.count).to eq(2)
       expect(audit_logs.map(&:record_id)).to contain_exactly(user_a.id, user_b.id)
+      expect(audit_logs).to all(have_attributes(user_id: nil, actor_type: "operator", actor_name: "leon@shimizu-technology.com"))
       expect(audit_logs.first.metadata).to include(
         "matching_strategy" => "external_id",
         "operator" => "leon@shimizu-technology.com"
@@ -343,6 +344,7 @@ RSpec.describe ClerkCutover::RelinkService do
 
       rollback_logs = AuditLog.where(action: "users#clerk_production_relink_rolled_back", event_category: "security")
       expect(rollback_logs.count).to eq(2)
+      expect(rollback_logs).to all(have_attributes(user_id: nil, actor_type: "operator", actor_name: "dafne@cornerstone.test"))
       expect(rollback_logs.first.metadata).to include(
         "operator" => "dafne@cornerstone.test",
         "restored_invitation" => true

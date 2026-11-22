@@ -16,6 +16,8 @@ class AuditLogSerializer
       record_id: log.record_id,
       subject_name: log.subject_name,
       user_id: log.user_id,
+      actor_type: log.actor_type,
+      actor_id: log.actor_id,
       user_name: log.actor_name.presence || log.user&.name,
       actor_email: log.actor_email.presence || log.user&.email,
       actor_role: log.actor_role.presence || log.user&.role,
