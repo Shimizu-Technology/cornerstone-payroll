@@ -130,6 +130,67 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     )
   end
 
+  it "commits AIRE Solo using the reviewed period rate across activation" do
+    ensure_verified_test_tax_years(2026)
+    company, older, source = setup_records
+    actor = create(:user, company: company, role: "admin")
+    pilot = create(:employee, company: company, pay_rate: 30)
+    rate = pilot.employee_wage_rates.create!(label: "Flight Hours", rate: 30, is_primary: true)
+    later = create(:pay_period, company: company, company_workweek: older.company_workweek,
+      start_date: "2026-09-01", end_date: "2026-09-15", pay_date: "2026-09-18")
+    preview_date = Date.new(2026, 8, 28)
+    allow(PayrollBusinessClock).to receive(:today).and_return(preview_date)
+    change_wage_rate!(rate, effective_on: later.start_date, rate: 34)
+    confirm_mapping!(company: company, source: source, employee: pilot)
+    TimeTrackingEarningChoice.create!(time_tracking_source: source, employee: pilot, employee_wage_rate: rate,
+      reviewed_by: actor, source_category_key: "solo",
+      rate_snapshot: rate.attributes.slice("id", "employee_id", "label", "rate", "active").as_json)
+
+    preview = lambda do |period|
+      date = period.start_date + 3
+      adjustment = {
+        "source_time_entry_id" => "solo-#{period.id}", "line_key" => "solo:1",
+        "source_kind" => "current", "original_work_date" => date.iso8601,
+        "original_week_start" => date.beginning_of_week(:sunday).iso8601, "source_category_id" => "solo",
+        "category" => { "id" => "solo", "key" => "solo", "name" => "Solo" },
+        "total_hours" => 40.0, "regular_hours" => 40.0, "overtime_hours" => 0.0
+      }
+      payload = payload_for(pay_period: period, employee: pilot, adjustments: [ adjustment ], batch_id: "DATED-SOLO-#{period.id}")
+      cutoff = Time.utc(period.end_date.year, period.end_date.month, period.end_date.day, 1)
+      payload["cutoff_at"] = payload["generated_at"] = cutoff.iso8601
+      payload.fetch("export").merge!("cutoff_at" => cutoff.iso8601, "finalized_at" => (cutoff + 1).iso8601,
+        "checksum" => TimeTracking::CanonicalPayload.checksum(payload.except("export")))
+      preview_import(pay_period: period, source: source, payload: payload)
+    end
+
+    future_import = preview.call(later)
+    expect(rate.reload.rate).to eq(30)
+    expect(future_import.processed_payload.fetch("rows").sole.fetch("categories").sole["employee_wage_rate_id"]).to be_nil
+    selected_future = [ { source_user_id: "aire-user-1", employee_id: pilot.id, wage_rate_mappings: [
+      { source_category_id: "solo", source_category_key: "solo", source_category_name: "Solo",
+        source_kind: "current", employee_wage_rate_id: rate.id }
+    ] } ]
+    expect(described_class.new(import: future_import, mappings: selected_future, applied_by: actor).call.fetch(:errors)).to be_empty
+
+    SyncEffectiveCompensationJob.perform_now(as_of: later.start_date)
+    expect(rate.reload.rate).to eq(34)
+    older_import = preview.call(older)
+    expect(older_import.processed_payload.fetch("rows").sole.fetch("categories").sole).to include(
+      "employee_wage_rate_id" => rate.id, "payroll_rate_cents" => 3000)
+    expect(described_class.new(import: older_import, mappings: [], applied_by: actor).call.fetch(:errors)).to be_empty
+
+    [ [ older, 1200, "1040.56" ], [ later, 1360, "1169.12" ] ].each do |period, gross, net|
+      item = period.payroll_items.find_by!(employee: pilot)
+      item.calculate!
+      expect(item.reload.attributes.values_at("gross_pay", "net_pay")).to eq([ gross, net.to_d ])
+      period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(item.reload.attributes.values_at("gross_pay", "net_pay")).to eq([ gross, net.to_d ])
+    end
+  end
+
   describe "unset payroll wage rates" do
     def wage_safety_preview(company, pay_period, source, employee)
       confirm_mapping!(company: company, source: source, employee: employee)

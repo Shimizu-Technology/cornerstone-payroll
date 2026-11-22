@@ -210,6 +210,8 @@ RSpec.describe "Pay rates resolve on the pay period end date", type: :request do
     company.update!(payroll_intake_source_types: [ "spike_email" ])
     open_period.update!(start_date: "2026-11-15", end_date: "2026-11-28")
     next_period.update!(start_date: "2026-11-29", end_date: "2026-12-12")
+    EmployeeW4ElectionChangeService.new(employee: employee, actor: actor, source: "staff", reason: "Synthetic withholding review",
+      attributes: { w4_effective_on: open_period.start_date, filing_status: "single", w4_form_version: 2020 }).call!
     employee.update_columns(intake_exception: { "reason" => "Deferred intake field" },
       intake_payroll_confirmed_at: Time.current, intake_payroll_eligible_from: open_period.start_date)
     workweek = CompanyWorkweek.create!(company: company, effective_on: Date.new(2026, 1, 1),

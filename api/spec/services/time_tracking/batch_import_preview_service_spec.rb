@@ -316,7 +316,7 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     expect(refreshed.raw_payload).to eq(payload)
 
     refreshed.update!(status: "applied", applied_at: Time.current)
-    change_compensation!(employee, employment_type: "hourly", contractor_type: nil, contractor_pay_type: nil)
+    change_compensation!(employee, employment_type: "hourly", contractor_pay_type: nil)
     applied = described_class.new(pay_period: pay_period, source: source).call
 
     expect(applied.reload.processed_payload.dig("rows", 0, "estimated_gross_delta")).to eq(250.0)

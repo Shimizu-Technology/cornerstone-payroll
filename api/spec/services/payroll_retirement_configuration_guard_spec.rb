@@ -165,7 +165,7 @@ RSpec.describe PayrollRetirementConfigurationGuard do
   end
 
   it "does not apply employee retirement validation to contractor calculations" do
-    employee.update_columns(employment_type: "contractor", contractor_pay_type: "flat_fee", contractor_type: "individual")
+    change_compensation!(employee, employment_type: "contractor", contractor_pay_type: "flat_fee", contractor_type: "individual")
     legacy_deduction
 
     expect(described_class).not_to receive(:new)
