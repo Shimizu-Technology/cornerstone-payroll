@@ -52,9 +52,11 @@ RSpec.describe "Converter environment isolation" do
     Dir.mktmpdir do |dir|
       allow(ClientDocumentConverterProcess).to receive(:network_sandbox) { |command, _directory| command }
       ENV["PORTAL_CONVERTER_TEST_SECRET"] = "must-not-inherit"
-      out, err, status = ClientDocumentConverterProcess.capture(RbConfig.ruby, "-rjson", "-e", "puts ENV.to_h.to_json", directory: dir)
+      # Read the child environment directly. RubyGems can add PKG_CONFIG_PATH
+      # on macOS before Ruby code has a chance to inspect it.
+      out, err, status = ClientDocumentConverterProcess.capture("/usr/bin/env", "-0", directory: dir)
       expect(status).to be_success, err
-      environment = JSON.parse(out)
+      environment = out.split("\0").to_h { |entry| entry.split("=", 2) }
       expect(environment.keys - [ "__CF_USER_TEXT_ENCODING" ]).to contain_exactly("PATH", "HOME", "TMPDIR", "LANG")
       expect(environment).to include("HOME" => dir, "TMPDIR" => dir)
     ensure

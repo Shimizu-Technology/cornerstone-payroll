@@ -15,6 +15,7 @@ import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocuments
 import { EmployeeClassificationTransitionDialog } from '@/components/employees/EmployeeClassificationTransitionDialog';
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
+import { EmployeeNotesPanel } from '@/components/employees/EmployeeNotesPanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
@@ -201,7 +202,10 @@ export function EmployeeForm() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const isEditing = Boolean(id);
-  const { user, isClient, isSuperAdmin } = useAuth();
+  const { user, isClient, isSuperAdmin, hasCapability } = useAuth();
+  const canRevealHiddenNotes = Boolean(
+    hasCapability?.('reveal_hidden_employee_notes') || isSuperAdmin || user?.role === 'org_admin',
+  );
   const { activeCompanyId, activeCompany, refreshCompanies } = useCompany();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
@@ -2446,6 +2450,19 @@ export function EmployeeForm() {
               </p>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {isEditing && id && !isClient && loadedEmployee && loadedEmployee.id === parseInt(id, 10) && loadedEmployee.company_id === companyId && (
+        <div className="px-6 pb-8 lg:px-8">
+          <EmployeeNotesPanel
+            key={`${companyId}:${loadedEmployee.id}`}
+            companyId={companyId}
+            employeeId={loadedEmployee.id}
+            readOnly={!canWriteCompany(activeCompany)}
+            canRevealHidden={canRevealHiddenNotes}
+            className="max-w-4xl"
+          />
         </div>
       )}
 
