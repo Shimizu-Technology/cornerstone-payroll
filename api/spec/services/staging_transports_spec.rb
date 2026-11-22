@@ -40,7 +40,8 @@ RSpec.describe "staging transport boundaries" do
 
   it "blocks Clerk invitations and revocations for non-testers" do
     expect { ClerkInvitationService.new.create_invitation(email: "employee@example.test") }.to raise_error(StagingOutboundPolicy::Blocked)
-    expect { ClerkInvitationService.new.revoke_invitation("copied-invitation") }.to raise_error(StagingOutboundPolicy::Blocked)
+    expect { ClerkInvitationService.new.revoke_invitation("inv_copied") }.to raise_error(StagingOutboundPolicy::Blocked)
+    expect { ClerkInvitationService.new.revoke_invitation("inv_copied", email: "employee@example.test") }.to raise_error(StagingOutboundPolicy::Blocked)
   end
 
   it "limits Clerk invitation status lookups to a named tester's exact invitation ID" do
@@ -51,9 +52,38 @@ RSpec.describe "staging transport boundaries" do
     allowed = Net::HTTP::Get.new("#{endpoint}?query=inv_tester&limit=10")
     expect { StagingOutboundPolicy.clerk_request!(allowed, endpoint, ENV) }.not_to raise_error
 
-    [ "", "?query=inv_other&limit=10", "?query=leon@example.test", "?query=inv_tester&query=inv_other" ].each do |query|
+    paginated = Net::HTTP::Get.new("#{endpoint}?query=inv_tester&limit=10&status=expired&offset=10")
+    expect { StagingOutboundPolicy.clerk_request!(paginated, endpoint, ENV) }.not_to raise_error
+
+    [
+      "", "?query=inv_other&limit=10&status=expired&offset=10", "?query=leon@example.test",
+      "?query=inv_tester&query=inv_other", "?query=inv_tester&status=pending",
+      "?query=inv_tester&offset=0", "?query=inv_tester&offset=-10", "?query=inv_tester&offset=1.5",
+      "?query=inv_tester&offset=10&offset=20"
+    ].each do |query|
       request = Net::HTTP::Get.new(endpoint + query)
       expect { StagingOutboundPolicy.clerk_request!(request, endpoint, ENV) }.to raise_error(StagingOutboundPolicy::Blocked)
     end
+  end
+
+  it "allows an unsaved Clerk revoke only within the verified target's request" do
+    ENV["CLERK_SECRET_KEY"] = "sk_test_synthetic"
+    service = ClerkInvitationService.new
+    http = Net::HTTP.new("api.clerk.com", 443)
+    http.use_ssl = true
+    path = "/v1/invitations/inv_unsaved/revoke"
+    request = Net::HTTP::Post.new(path)
+    other_request = Net::HTTP::Post.new("/v1/invitations/inv_other/revoke")
+
+    expect(Net::HTTP).to receive(:new).with("api.clerk.com", 443).and_return(http)
+    expect(http).to receive(:request) do |outbound|
+      expect(outbound.path).to eq(path)
+      expect(StagingOutboundPolicy.clerk_request!(outbound, path, ENV)).to be(true)
+      expect { StagingOutboundPolicy.clerk_request!(other_request, other_request.path, ENV) }.to raise_error(StagingOutboundPolicy::Blocked)
+      Net::HTTPOK.new("1.1", "200", "OK")
+    end
+
+    expect(service.revoke_invitation("inv_unsaved", email: "leon@example.test")).to eq(success: true)
+    expect { StagingOutboundPolicy.clerk_request!(request, path, ENV) }.to raise_error(StagingOutboundPolicy::Blocked)
   end
 end
