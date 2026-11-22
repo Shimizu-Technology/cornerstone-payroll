@@ -357,6 +357,7 @@ Rails.application.routes.draw do
           resources :notes, only: [ :index, :create ], controller: :employee_notes do
             member do
               patch :hide
+              get :original
             end
           end
           resources :time_records, only: [ :index, :create, :update ], controller: :employee_time_records

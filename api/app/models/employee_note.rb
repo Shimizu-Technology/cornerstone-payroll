@@ -4,9 +4,31 @@ class EmployeeNote < ApplicationRecord
   MAX_BODY_LENGTH = 2000
   MAX_HIDDEN_REASON_LENGTH = 500
 
-  SSN_PATTERN = /\b\d{3}-?\d{2}-?\d{4}\b/
-  LONG_DIGIT_RUN_PATTERN = /\d{12,}/
-  GROUPED_CARD_PATTERN = /\b(?:\d{4}[-\s]){3}\d{4}\b/
+  # Separated SSN (3-2-4 with one consistent separator: hyphen, space, or dot).
+  # Digit/hyphen lookarounds avoid matching embedded fragments, ZIP+4 (5-4),
+  # EINs (2-7), or phone numbers (3-3-4).
+  SSN_SEPARATED_PATTERN = /(?<![\d-])\d{3}([- .])\d{2}\1\d{4}(?![\d-])/
+
+  # Bare 9-digit runs are ambiguous with unformatted EINs (e.g. 660970313) and
+  # reference IDs, so flag them as SSNs only when adjacent to SSN/TIN wording
+  # (including glued forms like SSN123456789).
+  SSN_CONTEXT_BEFORE_PATTERN = /\b(?:ssn|social\s+security|ss#|itin|tin|tax\s*id)(?=\d|[^a-zA-Z])[^0-9\n.;]{0,20}?(?<!\d)\d{9}(?!\d)/i
+  SSN_CONTEXT_AFTER_PATTERN = /(?<!\d)\d{9}(?!\d)[^0-9\n.;]{0,12}?\b(?:ssn|social\s+security|ss#|itin|tin|tax\s*id)(?![a-zA-Z])/i
+
+  # Flag 10-17 digit account numbers near bank/DD keywords (and 9-digit routing
+  # numbers near routing/ABA keywords) so 10-digit phone numbers and unformatted
+  # EINs are not false positives.
+  BANK_ACCOUNT_BEFORE_PATTERN = /\b(?:acct\.?|account|routing|aba|dd|direct\s+deposit|bank|checking|savings)(?=\d|[^a-zA-Z])[^0-9\n.;]{0,25}?(?<!\d)\d{10,17}(?!\d)/i
+  BANK_ACCOUNT_AFTER_PATTERN = /(?<!\d)\d{10,17}(?!\d)[^0-9\n.;]{0,15}?\b(?:acct\.?|account|routing|aba|dd|direct\s+deposit|bank|checking|savings)(?![a-zA-Z])/i
+  ROUTING_BEFORE_PATTERN = /\b(?:routing|aba)(?=\d|[^a-zA-Z])[^0-9\n.;]{0,20}?(?<!\d)\d{9}(?!\d)/i
+  ROUTING_AFTER_PATTERN = /(?<!\d)\d{9}(?!\d)[^0-9\n.;]{0,12}?\b(?:routing|aba)(?![a-zA-Z])/i
+
+  # Card-number shapes: 13-19 bare digits, or space/hyphen-grouped shapes
+  # including 4-4-4-4 (16), 4-6-5 (Amex 15), 4-6-4 (Diners 14), 4-4-4 (12),
+  # and 13-19 digit grouped variants, using one consistent separator so adjacent
+  # ISO dates (e.g. "2026-11-22 2026-11-29") do not match.
+  CARD_BARE_PATTERN = /(?<![\d-])\d{13,19}(?![\d-])/
+  CARD_GROUPED_PATTERN = /(?<![\d-])\d{4,6}([- ])\d{4,6}\1\d{4,6}(?:\1\d{4}\1\d{1,3}|\1\d{1,4})?(?![\d-])/
 
   IMMUTABLE_ATTRIBUTES = %w[company_id employee_id body created_by_id created_at].freeze
 
@@ -21,11 +43,43 @@ class EmployeeNote < ApplicationRecord
 
   validates :body, presence: true, length: { maximum: MAX_BODY_LENGTH }
   validate :company_matches_employee
-  validate :exclude_sensitive_patterns
+  validate :exclude_sensitive_patterns, on: :create
   validate :hidden_fields_consistent
   validate :append_only_updates, on: :update
 
   before_destroy :prevent_destroy
+
+  def self.sensitive_data_kind(value)
+    return nil if value.blank?
+
+    text = value.to_s
+    return :ssn if contains_ssn?(text)
+    return :bank_or_card if contains_bank_account?(text) || contains_card_number?(text)
+
+    nil
+  end
+
+  def self.contains_ssn?(text)
+    text.match?(SSN_SEPARATED_PATTERN) ||
+      text.match?(SSN_CONTEXT_BEFORE_PATTERN) ||
+      text.match?(SSN_CONTEXT_AFTER_PATTERN)
+  end
+
+  def self.contains_bank_account?(text)
+    text.match?(BANK_ACCOUNT_BEFORE_PATTERN) ||
+      text.match?(BANK_ACCOUNT_AFTER_PATTERN) ||
+      text.match?(ROUTING_BEFORE_PATTERN) ||
+      text.match?(ROUTING_AFTER_PATTERN)
+  end
+
+  def self.contains_card_number?(text)
+    return true if text.match?(CARD_BARE_PATTERN)
+
+    text.enum_for(:scan, CARD_GROUPED_PATTERN).any? do
+      digits = Regexp.last_match[0].delete("- ")
+      digits.length.between?(12, 19)
+    end
+  end
 
   def hidden?
     hidden_at.present?
@@ -58,21 +112,15 @@ class EmployeeNote < ApplicationRecord
   end
 
   def exclude_sensitive_patterns
-    validate_no_sensitive_data(:body, body)
-    validate_no_sensitive_data(:hidden_reason, hidden_reason) if hidden_reason.present?
-  end
-
-  def validate_no_sensitive_data(attribute, value)
-    return if value.blank?
-
-    if value.match?(SSN_PATTERN)
+    case self.class.sensitive_data_kind(body)
+    when :ssn
       errors.add(
-        attribute,
+        :body,
         "appears to contain an SSN or 9-digit tax ID. Do not enter SSNs, bank account numbers, or card numbers in staff notes."
       )
-    elsif value.match?(LONG_DIGIT_RUN_PATTERN) || value.match?(GROUPED_CARD_PATTERN)
+    when :bank_or_card
       errors.add(
-        attribute,
+        :body,
         "appears to contain a bank account or card number. Do not enter SSNs, bank account numbers, or card numbers in staff notes."
       )
     end

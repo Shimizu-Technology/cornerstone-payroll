@@ -31,6 +31,9 @@ class StaffRolePolicy
     # Cost and margin per client from the practice's own staff pay: owners
     # and admins only, never managers or accountants.
     view_client_profitability: %w[super_admin org_admin admin],
+    # Viewing the original body of a hidden staff note is restricted to
+    # platform and organization admins.
+    reveal_hidden_employee_notes: %w[super_admin org_admin],
     manage_platform: %w[super_admin]
   }.freeze
 
@@ -55,6 +58,7 @@ class StaffRolePolicy
     manage_historical_time_reconciliation: "Historical time reconciliation access required",
     manage_organization: "Admin access required",
     view_client_profitability: "Admin access required to see client profitability",
+    reveal_hidden_employee_notes: "Only super admins and organization admins can view hidden staff notes",
     manage_platform: "Super admin access required"
   }.freeze
 
@@ -207,6 +211,7 @@ class StaffRolePolicy
     "api/v1/admin/employees#deactivate" => :manage_employee_status,
     "api/v1/admin/employees#reactivate" => :manage_employee_status,
     "api/v1/admin/employees#transition_tax_classification" => :manage_platform,
+    "api/v1/admin/employee_notes#original" => :reveal_hidden_employee_notes,
     "api/v1/admin/employee_work_profiles#create" => :manage_client_configuration,
     "api/v1/admin/historical_imports#preview" => :manage_client_configuration,
     "api/v1/admin/historical_imports#apply" => :manage_client_configuration,
