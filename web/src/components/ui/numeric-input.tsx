@@ -1,4 +1,4 @@
-import { forwardRef, useMemo, useState, type InputHTMLAttributes, type WheelEvent } from 'react';
+import { forwardRef, useMemo, useRef, useState, type InputHTMLAttributes, type WheelEvent } from 'react';
 import { controlClassName } from './field-styles';
 
 type BaseProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'>;
@@ -8,6 +8,8 @@ export interface NumericInputProps extends BaseProps {
   onValueChange: (value: number | null) => void;
   emptyValue?: number | null;
   notifyEmptyOnChange?: boolean;
+  /** On blur, a blank field goes back to the value it had when editing started. */
+  restoreOnEmpty?: boolean;
   min?: number;
   max?: number;
   fixedDecimalsOnBlur?: number;
@@ -44,6 +46,7 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
       onValueChange,
       emptyValue = 0,
       notifyEmptyOnChange = false,
+      restoreOnEmpty = false,
       min,
       max,
       fixedDecimalsOnBlur,
@@ -57,14 +60,20 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
   ) => {
     const [draft, setDraft] = useState(() => formatDraftValue(value, fixedDecimalsOnBlur));
     const [focused, setFocused] = useState(false);
+    const valueAtFocus = useRef<number | null>(null);
     const allowsNegative = useMemo(() => (typeof min === 'number' ? min < 0 : true), [min]);
     const displayValue = focused ? draft : formatDraftValue(value, fixedDecimalsOnBlur);
+
+    // Report only real changes, so leaving a field untouched doesn't look like an edit.
+    const commitValue = (next: number | null) => {
+      if (next !== normalizeNumericValue(value)) onValueChange(next);
+      setDraft(formatDraftValue(next, fixedDecimalsOnBlur));
+    };
 
     const commitDraft = (rawValue: string) => {
       const trimmed = rawValue.trim();
       if (trimmed === '' || trimmed === '-' || trimmed === '.' || trimmed === '-.') {
-        onValueChange(emptyValue);
-        setDraft(formatDraftValue(emptyValue, fixedDecimalsOnBlur));
+        commitValue(restoreOnEmpty ? valueAtFocus.current : emptyValue);
         return;
       }
 
@@ -74,9 +83,7 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
         return;
       }
 
-      const clamped = clampValue(parsed, min, max);
-      onValueChange(clamped);
-      setDraft(formatDraftValue(clamped, fixedDecimalsOnBlur));
+      commitValue(clampValue(parsed, min, max));
     };
 
     const handleWheel = (event: WheelEvent<HTMLInputElement>) => {
@@ -96,6 +103,7 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
         className={controlClassName(className)}
         onFocus={(event) => {
           setFocused(true);
+          valueAtFocus.current = normalizeNumericValue(value);
           setDraft(formatDraftValue(value, fixedDecimalsOnBlur));
           onFocus?.(event);
         }}
@@ -113,7 +121,9 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
           setDraft(next);
 
           if (next === '') {
-            if (notifyEmptyOnChange) onValueChange(emptyValue);
+            // Keep the parent on what blur will commit, so Enter on a blank field saves the same thing.
+            if (restoreOnEmpty) onValueChange(valueAtFocus.current);
+            else if (notifyEmptyOnChange) onValueChange(emptyValue);
             return;
           }
 

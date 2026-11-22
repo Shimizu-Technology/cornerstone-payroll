@@ -152,8 +152,8 @@ describe('InvoiceCenter', () => {
     await user.type(within(dialog).getByRole('textbox', { name: 'Line 1 product or service' }), 'Bookkeeping');
     await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Line 1 kind' }), 'reimbursement');
     expect(within(dialog).getByRole('textbox', { name: 'Line 1 description' })).toBeTruthy();
-    expect(within(dialog).getByRole('spinbutton', { name: 'Quantity' })).toBeTruthy();
-    expect(within(dialog).getByRole('spinbutton', { name: 'Rate' })).toBeTruthy();
+    expect(within(dialog).getByRole('textbox', { name: 'Quantity' })).toBeTruthy();
+    expect(within(dialog).getByRole('textbox', { name: 'Rate' })).toBeTruthy();
     expect(within(dialog).getByRole('textbox', { name: 'Line 1 product or service' })).toHaveProperty('value', 'Bookkeeping');
     expect(within(dialog).getByRole('combobox', { name: 'Line 1 kind' })).toHaveProperty('value', 'reimbursement');
 
@@ -162,8 +162,8 @@ describe('InvoiceCenter', () => {
     for (const field of [
       within(dialog).getByRole('textbox', { name: 'Line 1 product or service' }),
       within(dialog).getByRole('textbox', { name: 'Line 1 description' }),
-      within(dialog).getByRole('spinbutton', { name: 'Quantity' }),
-      within(dialog).getByRole('spinbutton', { name: 'Rate' }),
+      within(dialog).getByRole('textbox', { name: 'Quantity' }),
+      within(dialog).getByRole('textbox', { name: 'Rate' }),
     ]) {
       const label = field.closest('label')!.className.split(/\s+/);
       expect(label).toEqual(expect.arrayContaining(['@2xl:grid', '@2xl:grid-rows-subgrid', '@2xl:row-start-1']));
@@ -172,6 +172,25 @@ describe('InvoiceCenter', () => {
 
     await user.click(within(dialog).getByRole('button', { name: 'Remove line 1' }));
     expect(within(dialog).queryByRole('textbox', { name: 'Line 1 product or service' })).toBeNull();
+  });
+
+  it('lets a cleared rate or quantity stay blank while a new value is typed', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><InvoiceCenter /></MemoryRouter>);
+    await screen.findByRole('button', { name: /07052/ });
+    await user.click(screen.getByRole('button', { name: 'New invoice' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New invoice' });
+
+    const rate = within(dialog).getByRole('textbox', { name: 'Rate' });
+    await user.clear(rate);
+    expect(rate).toHaveProperty('value', '');
+    await user.type(rate, '624.85');
+    expect(rate).toHaveProperty('value', '624.85');
+
+    const quantity = within(dialog).getByRole('textbox', { name: 'Quantity' });
+    await user.clear(quantity);
+    await user.type(quantity, '2');
+    expect(quantity).toHaveProperty('value', '2');
   });
 
   it('starts a recurrence the period after the invoice and follows the customer terms', async () => {
