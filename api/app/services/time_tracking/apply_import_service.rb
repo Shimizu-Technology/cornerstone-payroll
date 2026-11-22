@@ -338,13 +338,14 @@ module TimeTracking
           raise ArgumentError, "An earning mapping does not match this frozen source dimension; refresh the import"
         end
       end
-      uses_multi_rate = (employee.payroll_compensation_on(@pay_period.end_date).hourly? || employee.payroll_compensation_on(@pay_period.end_date).contractor_hourly?) && categories.any? &&
+      basis = employee.payroll_compensation_on(@pay_period.end_date)
+      uses_multi_rate = basis.hourly_pay_basis? && categories.any? &&
                         (finalized_batch? || active_rates.length > 1 || active_rates.any? { |rate| rate.rate.nil? } ||
                           wage_rate_overrides_by_category_key(override).any?)
       # Unset rates are setup placeholders, not zero-dollar earning types. Keep
       # them in the mapping-required decision above, but never serialize them.
       active_rates = active_rates.reject { |rate| rate.rate.nil? }
-      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override, OvertimePremium.multiplier(employee.payroll_compensation_on(@pay_period.end_date).employment_type)).negative?
+      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override, OvertimePremium.multiplier(basis.employment_type)).negative?
         return "This time tracking correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
       end
 

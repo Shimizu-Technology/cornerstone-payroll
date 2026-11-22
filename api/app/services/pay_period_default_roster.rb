@@ -16,10 +16,9 @@ class PayPeriodDefaultRoster
       if @pay_period.payroll_items.where.not(import_source: [ nil, "" ]).exists?
         types = [ "contractor" ]
         types << "salary" if @pay_period.includes_base_salary?
-        saved_ids + eligible.where(employment_type: types).pluck(:id)
+        saved_ids + employee_ids_for_types(eligible, types)
       else
-        eligible = eligible.where.not(employment_type: "salary") unless @pay_period.includes_base_salary?
-        saved_ids + eligible.pluck(:id)
+        saved_ids + (@pay_period.includes_base_salary? ? eligible.ids : employee_ids_for_types(eligible, %w[hourly contractor]))
       end
     else
       saved_ids
@@ -30,6 +29,12 @@ class PayPeriodDefaultRoster
   end
 
   private
+
+  def employee_ids_for_types(eligible, types)
+    eligible.preload(:employee_compensation_changes).filter_map do |employee|
+      employee.id if employee.payroll_compensation_on(@pay_period.end_date).employment_type.in?(types)
+    end
+  end
 
   def initial_regular_run?
     @pay_period.draft? && @pay_period.regular_run? && @pay_period.regular_cycle? &&

@@ -32,6 +32,17 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     expect(summary[:paid][:line_count]).to eq(0)
   end
 
+  it "confirms an existing proof after newer compensation activates" do
+    activation = PayrollBusinessClock.today + 2
+    change_compensation!(employee, effective_on: activation, pay_rate: 31)
+    change_wage_rate!(rate, effective_on: activation, rate: 31)
+    preview = service.preview
+    SyncEffectiveCompensationJob.perform_now(as_of: activation)
+    expect(rate.reload.rate).to eq(31)
+    disposition = confirm(preview)
+    expect(disposition.corrective_payroll_item.gross_pay).to eq(-25)
+  end
+
   it 'preserves ordinary negative guards until explicit accounting disposition' do
     result = TimeTracking::ApplyImportService.new(import: next_import, mappings: [], applied_by: actor,
       acknowledge_negative_adjustments: true, negative_adjustment_note: 'Reviewed exact correction').call

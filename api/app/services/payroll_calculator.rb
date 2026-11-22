@@ -1021,7 +1021,8 @@ class PayrollCalculator
       employee_deductions: employee_deductions_for_calculation,
       payroll_field_assignments: payroll_field_assignments_for_calculation,
       rates_on: pay_period.end_date,
-      employee_basis: EmployeeCompensationChangeService::BASIS_ATTRIBUTES.index_with { |field| employee_value(field) },
+      employee_basis: EmployeeCompensationChangeService::BASIS_ATTRIBUTES.index_with { |field| employee_value(field) }
+        .merge("pay_rate" => payroll_item.pay_rate),
       w4_election: w4_election_for_calculation,
       retirement_election: retirement_election_for_calculation
     ).merge(built_in_employer_match_identity)
