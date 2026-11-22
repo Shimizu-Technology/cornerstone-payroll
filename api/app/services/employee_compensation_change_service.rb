@@ -310,8 +310,6 @@ class EmployeeCompensationChangeService
     end
 
     def legacy_changes(cache, version)
-      return {} if cache.updated_at <= version.created_at
-
       cache.attributes.slice(*version.snapshot.keys).reject do |field, value|
         comparable(value) == comparable(version[field])
       end
@@ -454,7 +452,7 @@ class EmployeeCompensationChangeService
 
   def validate_scheduled_conflict!(effective_on)
     dates = [ effective_on, PayrollBusinessClock.today ].min
-    return unless employee.employee_compensation_changes.where(effective_on: dates..).where.not(source: %w[backfill employee_creation]).exists? ||
+    return unless employee.employee_compensation_changes.where(effective_on: dates..).where.not(source: %w[backfill employee_creation client_portal]).exists? ||
       employee.employee_wage_rate_versions.where(effective_on: dates..).where.not(source: %w[backfill wage_rate_created]).exists?
 
     raise ConflictError, "The employee already has a compensation change on or after the proposed date. Review their pay history."

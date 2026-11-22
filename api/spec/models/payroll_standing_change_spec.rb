@@ -37,6 +37,7 @@ RSpec.describe PayrollStandingChange do
   it "allows staff to deactivate broken defaults and explains a removed job" do
     item = described_class.create!(attributes)
     # Wage rates are ended, not deleted, since M3-4; a job deleted before then is missing.
+    EmployeeWageRateVersion.where(employee_wage_rate_id: rate.id).delete_all
     EmployeeWageRate.where(id: rate.id).delete_all
     expect(item.reload.availability_error).to include("missing or inactive")
     expect(item.update(active: false)).to be(true)
