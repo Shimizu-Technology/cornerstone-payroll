@@ -1,4 +1,4 @@
-import { SignIn } from '@clerk/clerk-react';
+import { SignIn, SignedOut } from '@clerk/clerk-react';
 import { Navigate } from 'react-router';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -109,6 +109,9 @@ export function Login() {
             />
           )}
 
+          {/* An already-signed-in Clerk session (e.g. an invite accepted during
+              maintenance) keeps the notice up; mounting SignIn would bounce to /app. */}
+          <SignedOut>
           <SignIn
             routing="hash"
             forceRedirectUrl="/app"
@@ -130,6 +133,7 @@ export function Login() {
               },
             }}
           />
+          </SignedOut>
         </section>
       </div>
     </div>
