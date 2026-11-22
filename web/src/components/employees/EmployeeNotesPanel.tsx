@@ -108,6 +108,10 @@ export function EmployeeNotesPanel({
   }, [loadNotes]);
 
   const sensitiveWarning = useMemo(() => detectSensitiveNoteContent(draftBody), [draftBody]);
+  const hideSensitiveWarning = useMemo(
+    () => detectSensitiveNoteContent(hideReason, 'This hide reason'),
+    [hideReason],
+  );
 
   const handleAddNote = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -468,6 +472,15 @@ export function EmployeeNotesPanel({
                               if (hideError) setHideError(null);
                             }}
                           />
+                          {hideSensitiveWarning && (
+                            <div
+                              role="status"
+                              className="flex items-start gap-2 rounded-xl border border-warning-200 bg-warning-50 px-3 py-2 text-xs leading-5 text-warning-900"
+                            >
+                              <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" />
+                              <span>{hideSensitiveWarning.message}</span>
+                            </div>
+                          )}
                           {hideError && (
                             <p role="alert" className="text-xs font-medium text-danger-700">
                               {hideError}

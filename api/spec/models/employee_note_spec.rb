@@ -51,22 +51,26 @@ RSpec.describe EmployeeNote do
         [ "dot-separated SSN", "Listed as 123.45.6789 on intake", /SSN/i ],
         [ "glued SSN prefix + 9 digits", "SSN123456789", /SSN/i ],
         [ "SSN label + bare 9 digits", "SSN: 123456789", /SSN/i ],
+        [ "SSN no. + bare 9 digits", "SSN no. 987654321", /SSN/i ],
+        [ "SSN + newline + bare 9 digits", "SSN:\n987654321", /SSN/i ],
         [ "Tax ID label + bare 9 digits", "Tax ID 123456789 on W-4", /SSN/i ],
         [ "bare 9 digits followed by SSN label", "123456789 (SSN)", /SSN/i ],
         [ "10-digit account near acct", "Direct deposit acct 1234567890", /bank account or card number/i ],
+        [ "Acct no. + 10-digit account", "Acct no. 1234567890", /bank account or card number/i ],
+        [ "Account #: + 10-digit account", "Account #: 1234567890", /bank account or card number/i ],
+        [ "DD acct ending + 10-digit account", "DD acct ending 1234567890", /bank account or card number/i ],
+        [ "10-digit 671 number directly after account keyword", "Acct no. 6715551234", /bank account or card number/i ],
         [ "12-digit account near account", "Direct deposit account 123456789012", /bank account or card number/i ],
         [ "17-digit account near DD", "DD #12345678901234567", /bank account or card number/i ],
         [ "11-digit account near bank", "Bank 12345678901", /bank account or card number/i ],
         [ "9-digit routing near routing", "Routing 021000021 for payroll", /bank account or card number/i ],
+        [ "routing no. + 9-digit routing", "routing no. 121000358", /bank account or card number/i ],
         [ "10-digit number near routing", "routing # 1234567890", /bank account or card number/i ],
         [ "card 4-4-4-4 hyphenated", "Card 4111-1111-1111-1111 on file", /bank account or card number/i ],
         [ "card 4-4-4-4 spaced", "Card 4111 1111 1111 1111 on file", /bank account or card number/i ],
         [ "card 4-6-5 hyphenated (Amex)", "Amex 3782-822463-10005", /bank account or card number/i ],
         [ "card 4-6-5 spaced (Amex)", "Amex 3782 822463 10005", /bank account or card number/i ],
-        [ "card 4-4-4 hyphenated", "Partial 4111-1111-1111", /bank account or card number/i ],
-        [ "card 4-4-4 spaced", "Partial 4111 1111 1111", /bank account or card number/i ],
-        [ "card 4-4-4-1 (13 digits)", "4111-1111-1111-1", /bank account or card number/i ],
-        [ "card 4-4-4-4-3 (19 digits)", "4111-1111-1111-1111-123", /bank account or card number/i ],
+        [ "card 4-4-4-4-3 hyphenated (19 digits)", "4111-1111-1111-1111-123", /bank account or card number/i ],
         [ "bare 13-digit card", "4111111111111", /bank account or card number/i ],
         [ "bare 16-digit card", "4111111111111111", /bank account or card number/i ],
         [ "bare 19-digit card", "4111111111111111111", /bank account or card number/i ]
@@ -88,10 +92,16 @@ RSpec.describe EmployeeNote do
         [ "hyphenated Guam phone", "Call 671-555-1234 about missing hours." ],
         [ "parenthesized Guam phone", "Phone (671) 555-1234 confirmed." ],
         [ "bare 10-digit Guam phone", "Reached employee at 6715551234." ],
+        [ "bare Guam phone before direct deposit wording", "Called Maria at 6715551234 re: direct deposit change" ],
+        [ "bare Guam phone after bank name", "Bank of Guam called from 6714721234" ],
+        [ "consecutive 4-digit years", "W-2s for 2024 2025 2026 still missing" ],
+        [ "consecutive 5-digit ZIP codes", "ZIPs 96913 96910 96929" ],
+        [ "4-4-4 reference code", "Ref 2026 1122 0001" ],
         [ "ISO dates and adjacent date range", "Pay period 2026-11-22 2026-11-29 reviewed on 11/22/2026." ],
         [ "money amounts", "Bonus $1,234,567.89 adjusted by $45.50 after review." ],
         [ "check number", "Reissued check #1042 after stop-payment." ],
-        [ "mixed separator 3-2-4", "Code 123-45 6789 is not an SSN format." ]
+        [ "mixed separator 3-2-4", "Code 123-45 6789 is not an SSN format." ],
+        [ "semicolon clause boundary", "Updated SSN; reference 660970313." ]
       ].each do |label, sample_body|
         it "accepts #{label}" do
           note = build(:employee_note, company: company, employee: employee, created_by: staff_user, body: sample_body)
@@ -101,14 +111,39 @@ RSpec.describe EmployeeNote do
       end
     end
 
-    it "runs the sensitive-data check on create only, not when hiding" do
+    it "rejects sensitive data in hidden_reason when hiding, while skipping body re-check on hide" do
       note = create(:employee_note, company: company, employee: employee, created_by: staff_user, body: "Initial payroll note")
 
       expect {
-        note.hide!(actor: staff_user, reason: "Replaced per call about 123-45-6789 policy")
-      }.not_to raise_error
+        note.hide!(actor: staff_user, reason: "Contained SSN 987-65-4321, acct 1234567890")
+      }.to raise_error(ActiveRecord::RecordInvalid)
+      expect(note.errors[:hidden_reason].join(" ")).to match(/SSN/i)
+      expect(note.reload).not_to be_hidden
 
-      expect(note.reload).to be_hidden
+      expect {
+        note.hide!(actor: staff_user, reason: "Moved to acct no. 1234567890")
+      }.to raise_error(ActiveRecord::RecordInvalid)
+      expect(note.errors[:hidden_reason].join(" ")).to match(/bank account or card number/i)
+      expect(note.reload).not_to be_hidden
+
+      # A legacy note whose body would now fail the create-time check can still be
+      # hidden with a clean reason because body is only checked on create.
+      inserted_id = described_class.insert!(
+        {
+          company_id: company.id,
+          employee_id: employee.id,
+          created_by_id: staff_user.id,
+          body: "Legacy row with SSN 987-65-4321",
+          created_at: Time.current,
+          updated_at: Time.current
+        }
+      ).rows.first.first
+      legacy_note = described_class.find(inserted_id)
+
+      expect {
+        legacy_note.hide!(actor: staff_user, reason: "Contained sensitive data; hidden")
+      }.not_to raise_error
+      expect(legacy_note.reload).to be_hidden
     end
   end
 
