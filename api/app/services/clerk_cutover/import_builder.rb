@@ -16,6 +16,14 @@ module ClerkCutover
 
     VALID_DISPOSITIONS = InventoryService::VALID_DISPOSITIONS
     TRUTHY_VALUES = %w[1 true t yes y on].freeze
+    RECOGNIZED_MFA_FIELDS = %w[
+      totp_enabled
+      two_factor_enabled
+      backup_code_enabled
+      totp_secret
+      backup_codes
+      backup_code_digests
+    ].freeze
 
     def initialize(inventory:, clerk_export:, batch: nil)
       @inventory_rows = extract_inventory_rows(inventory)
@@ -96,9 +104,11 @@ module ClerkCutover
         raise WriteRefusedError, "Refusing to write import file without explicit write: true (WRITE=true)"
       end
       raise ArgumentError, "Output path is required" if path.blank?
+      raise ArgumentError, "Refusing to write to a symlink" if File.symlink?(path)
 
       result = build
       File.open(path, File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |file|
+        file.chmod(0o600)
         file.write(JSON.pretty_generate(result[:records]))
         file.write("\n")
       end
@@ -120,14 +130,18 @@ module ClerkCutover
 
     def parse_clerk_export(clerk_export)
       if clerk_export.is_a?(Array)
-        return clerk_export.map { |row| normalize_json_export_row(row.transform_keys(&:to_s)) }
+        return clerk_export.each_with_index.map do |row, index|
+          normalize_json_export_row(row.transform_keys(&:to_s), index)
+        end
       end
 
       if clerk_export.is_a?(Hash)
         rows = clerk_export["users"] || clerk_export["data"]
         raise ValidationError, "Clerk export object must contain 'users' or 'data' array" unless rows.is_a?(Array)
 
-        return rows.map { |row| normalize_json_export_row(row.transform_keys(&:to_s)) }
+        return rows.each_with_index.map do |row, index|
+          normalize_json_export_row(row.transform_keys(&:to_s), index)
+        end
       end
 
       raw = clerk_export.to_s
@@ -143,6 +157,12 @@ module ClerkCutover
 
     def parse_csv_export(raw)
       table = CSV.parse(raw, headers: true)
+      headers = Array(table.headers).compact.map { |header| header.to_s.strip }
+      if (headers & RECOGNIZED_MFA_FIELDS).empty?
+        raise ValidationError,
+          "Clerk export is missing recognized MFA/TOTP columns (#{RECOGNIZED_MFA_FIELDS.join(', ')}); cannot verify zero TOTP enrollment"
+      end
+
       table.map do |row|
         hash = row.to_h.transform_keys { |key| key.to_s.strip }
         emails = extract_csv_emails(hash)
@@ -153,12 +173,17 @@ module ClerkCutover
           emails: emails,
           password_digest: hash["password_digest"].to_s.strip.presence,
           password_hasher: hash["password_hasher"].to_s.strip.presence,
-          totp_enabled: truthy?(hash["totp_enabled"]) || truthy?(hash["two_factor_enabled"]) || truthy?(hash["backup_code_enabled"])
+          totp_enabled: mfa_enrolled?(hash)
         }
       end
     end
 
-    def normalize_json_export_row(row)
+    def normalize_json_export_row(row, index)
+      if (row.keys & RECOGNIZED_MFA_FIELDS).empty?
+        raise ValidationError,
+          "Clerk export row #{index} is missing recognized MFA/TOTP fields (#{RECOGNIZED_MFA_FIELDS.join(', ')}); cannot verify zero TOTP enrollment"
+      end
+
       emails = extract_json_emails(row)
       {
         id: row["id"].to_s.strip,
@@ -167,8 +192,27 @@ module ClerkCutover
         emails: emails,
         password_digest: row["password_digest"].to_s.strip.presence,
         password_hasher: row["password_hasher"].to_s.strip.presence,
-        totp_enabled: truthy?(row["totp_enabled"]) || truthy?(row["two_factor_enabled"]) || truthy?(row["backup_code_enabled"])
+        totp_enabled: mfa_enrolled?(row)
       }
+    end
+
+    def mfa_enrolled?(hash)
+      truthy?(hash["totp_enabled"]) ||
+        truthy?(hash["two_factor_enabled"]) ||
+        truthy?(hash["backup_code_enabled"]) ||
+        non_empty_mfa_material?(hash["totp_secret"]) ||
+        non_empty_mfa_material?(hash["backup_codes"]) ||
+        non_empty_mfa_material?(hash["backup_code_digests"])
+    end
+
+    def non_empty_mfa_material?(value)
+      return false if value.nil? || value == false
+      return value.reject(&:blank?).any? if value.is_a?(Array)
+
+      stripped = value.to_s.strip
+      return false if stripped.empty?
+
+      !%w[[] {} null false].include?(stripped.downcase)
     end
 
     def extract_csv_emails(hash)

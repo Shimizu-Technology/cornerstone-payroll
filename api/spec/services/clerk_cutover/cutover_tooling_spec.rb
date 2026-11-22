@@ -13,6 +13,7 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       organization: organization,
       email: "leon@example.com",
       clerk_id: "user_dev_admin",
+      clerk_invitation_id: "inv_dev_admin",
       role: "super_admin",
       active: true
     )
@@ -42,7 +43,7 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
   end
 
   describe ClerkCutover::InventoryService do
-    it "builds a read-only inventory with suggested dispositions and independent-review flags" do
+    it "builds a read-only inventory with suggested dispositions, invitation id, and independent-review flags" do
       inventory = described_class.new.generate
 
       expect(inventory["summary"]).to include(
@@ -59,6 +60,7 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       admin_row = inventory["users"].find { |row| row["user_id"] == admin_user.id }
       expect(admin_row).to include(
         "old_clerk_id" => "user_dev_admin",
+        "old_clerk_invitation_id" => "inv_dev_admin",
         "suggested_disposition" => "migrate",
         "disposition" => nil,
         "requires_independent_review" => true
@@ -71,8 +73,11 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       expect(inactive_row["suggested_disposition"]).to eq("skip_inactive")
     end
 
-    it "refuses to write to disk without explicit write: true and writes 0600 when enabled" do
+    it "refuses to write without write: true and tightens an existing 0644 file to 0600 when enabled" do
       Tempfile.create([ "inventory", ".json" ]) do |file|
+        File.chmod(0o644, file.path)
+        expect(File.stat(file.path).mode & 0o777).to eq(0o644)
+
         expect {
           described_class.new.write!(path: file.path)
         }.to raise_error(ClerkCutover::InventoryService::WriteRefusedError)
@@ -89,7 +94,7 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
     let(:env) do
       {
         "CLERK_ISSUER" => "https://smiling-fox-12.clerk.accounts.dev",
-        "CLERK_AUTHORIZED_PARTIES" => "https://payroll.shimizu-technology.com"
+        "CLERK_AUTHORIZED_PARTIES" => "https://Payroll.Shimizu-Technology.com:443"
       }
     end
 
@@ -118,11 +123,11 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       expect(report.as_json.to_json).not_to include("leon@example.com")
     end
 
-    it "fails preflight when any Clerk user has TOTP enrolled" do
+    it "fails preflight when any Clerk user has TOTP enrolled or a non-empty totp_secret" do
       source_client = instance_double(
         ClerkCutover::ClerkClient,
         list_users: [
-          { "id" => "user_dev_admin", "totp_enabled" => true, "two_factor_enabled" => true }
+          { "id" => "user_dev_admin", "totp_enabled" => false, "totp_secret" => "JBSWY3DPEHPK3PXP" }
         ]
       )
 
@@ -166,9 +171,9 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
     end
     let(:clerk_csv_export) do
       <<~CSV
-        id,first_name,last_name,primary_email_address,password_digest,password_hasher,totp_enabled
-        user_dev_admin,Leon,Shimizu,leon@example.com,$2a$10$examplehash,bcrypt,false
-        user_dev_inactive,Old,User,inactive@example.com,,bcrypt,false
+        id,first_name,last_name,primary_email_address,password_digest,password_hasher,totp_enabled,totp_secret
+        user_dev_admin,Leon,Shimizu,leon@example.com,$2a$10$examplehash,bcrypt,false,
+        user_dev_inactive,Old,User,inactive@example.com,,bcrypt,false,
       CSV
     end
 
@@ -199,15 +204,46 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       }.to raise_error(ClerkCutover::ImportBuilder::ValidationError, /was not found in the Clerk Dashboard export/)
     end
 
-    it "refuses to build an import entry for a user with TOTP enrolled" do
-      totp_csv = <<~CSV
+    it "refuses to build an import entry when totp_enabled is true or totp_secret/backup_codes is non-empty" do
+      totp_flag_csv = <<~CSV
         id,first_name,last_name,primary_email_address,password_digest,password_hasher,totp_enabled
         user_dev_admin,Leon,Shimizu,leon@example.com,$2a$10$examplehash,bcrypt,true
       CSV
+      totp_secret_csv = <<~CSV
+        id,first_name,last_name,primary_email_address,password_digest,password_hasher,totp_secret
+        user_dev_admin,Leon,Shimizu,leon@example.com,$2a$10$examplehash,bcrypt,JBSWY3DPEHPK3PXP
+      CSV
+      backup_codes_csv = <<~CSV
+        id,first_name,last_name,primary_email_address,password_digest,password_hasher,backup_codes
+        user_dev_admin,Leon,Shimizu,leon@example.com,$2a$10$examplehash,bcrypt,"[""code1""]"
+      CSV
+
+      [ totp_flag_csv, totp_secret_csv, backup_codes_csv ].each do |csv|
+        expect {
+          described_class.new(inventory: reviewed_inventory, clerk_export: csv).build
+        }.to raise_error(ClerkCutover::ImportBuilder::ValidationError, /has TOTP enrolled/)
+      end
+    end
+
+    it "fails closed when the CSV or JSON export omits all recognized MFA/TOTP columns" do
+      missing_mfa_csv = <<~CSV
+        id,first_name,last_name,primary_email_address,password_digest,password_hasher
+        user_dev_admin,Leon,Shimizu,leon@example.com,$2a$10$examplehash,bcrypt
+      CSV
+      missing_mfa_json = [
+        {
+          "id" => "user_dev_admin",
+          "primary_email_address" => "leon@example.com"
+        }
+      ]
 
       expect {
-        described_class.new(inventory: reviewed_inventory, clerk_export: totp_csv).build
-      }.to raise_error(ClerkCutover::ImportBuilder::ValidationError, /has TOTP enrolled/)
+        described_class.new(inventory: reviewed_inventory, clerk_export: missing_mfa_csv).build
+      }.to raise_error(ClerkCutover::ImportBuilder::ValidationError, /missing recognized MFA\/TOTP columns/)
+
+      expect {
+        described_class.new(inventory: reviewed_inventory, clerk_export: missing_mfa_json).build
+      }.to raise_error(ClerkCutover::ImportBuilder::ValidationError, /missing recognized MFA\/TOTP fields/)
     end
 
     it "refuses when any inventory row lacks an explicit disposition" do
@@ -219,7 +255,7 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       }.to raise_error(ClerkCutover::ImportBuilder::ValidationError, /disposition must be one of/)
     end
 
-    it "sets skip_password_requirement for OAuth/email-code users without a password digest and refuses writes without write: true" do
+    it "sets skip_password_requirement for OAuth/email-code users, refuses writes without write: true, and chmods existing 0644 files to 0600" do
       json_export = [
         {
           "id" => "user_dev_admin",
@@ -239,15 +275,19 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       expect(result[:records].first).not_to have_key("password_digest")
 
       Tempfile.create([ "import", ".json" ]) do |file|
+        File.chmod(0o644, file.path)
         expect {
           builder.write!(path: file.path)
         }.to raise_error(ClerkCutover::ImportBuilder::WriteRefusedError)
+
+        builder.write!(path: file.path, write: true)
+        expect(File.stat(file.path).mode & 0o777).to eq(0o600)
       end
     end
   end
 
   describe ClerkCutover::RelinkManifestBuilder do
-    it "builds an email-free re-link manifest strictly by target external_id == old_clerk_id" do
+    it "builds a sealed email-free re-link manifest strictly by target external_id == old_clerk_id with SHA-256 digest and old_clerk_invitation_id" do
       target_users = [
         {
           "id" => "user_live_admin",
@@ -264,9 +304,13 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
           "user_id" => admin_user.id,
           "old_clerk_id" => "user_dev_admin",
           "new_clerk_id" => "user_live_admin",
-          "external_id" => "user_dev_admin"
+          "external_id" => "user_dev_admin",
+          "old_clerk_invitation_id" => "inv_dev_admin"
         }
       ])
+      expect(result[:manifest]["manifest_digest"]).to eq(
+        ClerkCutover::RelinkService.compute_manifest_digest(result[:manifest]["entries"])
+      )
       expect(result[:manifest].to_json).not_to include("leon@example.com")
     end
 
@@ -284,14 +328,18 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       }.to raise_error(ClerkCutover::RelinkManifestBuilder::ValidationError, /no target Clerk user found with external_id=user_dev_admin/)
     end
 
-    it "refuses to write without write: true" do
+    it "refuses to write without write: true and tightens an existing 0644 file to 0600" do
       target_users = [ { "id" => "user_live_admin", "external_id" => "user_dev_admin" } ]
       builder = described_class.new(target_users: target_users)
 
       Tempfile.create([ "manifest", ".json" ]) do |file|
+        File.chmod(0o644, file.path)
         expect {
           builder.write!(path: file.path)
         }.to raise_error(ClerkCutover::RelinkManifestBuilder::WriteRefusedError)
+
+        builder.write!(path: file.path, write: true)
+        expect(File.stat(file.path).mode & 0o777).to eq(0o600)
       end
     end
   end

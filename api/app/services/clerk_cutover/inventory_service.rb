@@ -25,6 +25,7 @@ module ClerkCutover
         {
           "user_id" => user.id,
           "old_clerk_id" => user.clerk_id,
+          "old_clerk_invitation_id" => user.clerk_invitation_id,
           "email" => user.email,
           "role" => user.role,
           "active" => user.active,
@@ -51,9 +52,11 @@ module ClerkCutover
         raise WriteRefusedError, "Refusing to write inventory file without explicit write: true (WRITE=true)"
       end
       raise ArgumentError, "Output path is required" if path.blank?
+      raise ArgumentError, "Refusing to write to a symlink" if File.symlink?(path)
 
       inventory = generate
       File.open(path, File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |file|
+        file.chmod(0o600)
         file.write(JSON.pretty_generate(inventory))
         file.write("\n")
       end

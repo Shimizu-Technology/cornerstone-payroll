@@ -7,7 +7,8 @@ module ClerkCutover
   # has populated the target Clerk production instance.
   #
   # Joins local/inventory users to target Clerk production users STRICTLY by
-  # `target_user["external_id"] == old_clerk_id` — zero email matching.
+  # `target_user["external_id"] == old_clerk_id` — zero email matching — and
+  # seals the entries with a SHA-256 `manifest_digest`.
   class RelinkManifestBuilder
     class ValidationError < StandardError; end
     class WriteRefusedError < StandardError; end
@@ -61,17 +62,20 @@ module ClerkCutover
           "user_id" => user_id,
           "old_clerk_id" => old_clerk_id,
           "new_clerk_id" => new_clerk_id,
-          "external_id" => old_clerk_id
+          "external_id" => old_clerk_id,
+          "old_clerk_invitation_id" => row[:old_clerk_invitation_id]
         }
       end
 
       raise ValidationError, errors.join("; ") if errors.any?
       raise ValidationError, "No users matched for re-link manifest" if entries.empty?
 
+      manifest_digest = RelinkService.compute_manifest_digest(entries)
       manifest = {
         "version" => 1,
         "generated_at" => Time.current.iso8601,
         "matching_strategy" => "external_id",
+        "manifest_digest" => manifest_digest,
         "entries" => entries
       }
 
@@ -79,6 +83,7 @@ module ClerkCutover
         manifest: manifest,
         summary: {
           "matching_strategy" => "external_id",
+          "manifest_digest" => manifest_digest,
           "source_users" => source_rows.length,
           "target_users" => @target_users.length,
           "manifest_entries" => entries.length
@@ -91,9 +96,11 @@ module ClerkCutover
         raise WriteRefusedError, "Refusing to write manifest file without explicit write: true (WRITE=true)"
       end
       raise ArgumentError, "Output path is required" if path.blank?
+      raise ArgumentError, "Refusing to write to a symlink" if File.symlink?(path)
 
       result = build
       File.open(path, File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |file|
+        file.chmod(0o600)
         file.write(JSON.pretty_generate(result[:manifest]))
         file.write("\n")
       end
@@ -125,16 +132,33 @@ module ClerkCutover
 
     def load_source_rows
       if @inventory_rows
-        @inventory_rows
-          .select { |row| row["disposition"] == "migrate" }
-          .map { |row| { user_id: row["user_id"], old_clerk_id: row["old_clerk_id"].to_s.strip } }
+        migrating = @inventory_rows.select { |row| row["disposition"] == "migrate" }
+        users_by_id = @user_scope.where(id: migrating.filter_map { |row| row["user_id"] }).index_by(&:id)
+        migrating.map do |row|
+          invitation_id = if row.key?("old_clerk_invitation_id")
+            row["old_clerk_invitation_id"].presence
+          else
+            users_by_id[row["user_id"]]&.clerk_invitation_id.presence
+          end
+          {
+            user_id: row["user_id"],
+            old_clerk_id: row["old_clerk_id"].to_s.strip,
+            old_clerk_invitation_id: invitation_id
+          }
+        end
       else
         @user_scope
           .where(active: true)
           .where.not(clerk_id: [ nil, "" ])
           .order(:id)
           .reject { |user| user.clerk_id.start_with?("pending_") }
-          .map { |user| { user_id: user.id, old_clerk_id: user.clerk_id } }
+          .map do |user|
+            {
+              user_id: user.id,
+              old_clerk_id: user.clerk_id,
+              old_clerk_invitation_id: user.clerk_invitation_id.presence
+            }
+          end
       end
     end
 

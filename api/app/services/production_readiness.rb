@@ -205,7 +205,7 @@ class ProductionReadiness
 
   def clerk_authorized_parties_valid?
     parties = env.fetch("CLERK_AUTHORIZED_PARTIES", "").split(",").map(&:strip).reject(&:empty?)
-    parties.present? && parties.all? { |party| production_https_url?(party) }
+    parties.present? && parties.all? { |party| ClerkTokenVerifier.valid_production_https_origin?(party) }
   end
 
   def mfa_attestation_recorded?
