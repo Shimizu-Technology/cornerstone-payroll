@@ -63,6 +63,101 @@ RSpec.describe "Api::V1::Auth", type: :request do
         )
       )
       expect(response.parsed_body.fetch("user")).not_to have_key("super_admin")
+      expect(response.parsed_body.fetch("features")).to eq(
+        "offering" => "payroll_service",
+        "hours_source" => "manual",
+        "intake_adapter" => nil,
+        "client_portal_enabled" => false,
+        "employee_portal_enabled" => false,
+        "subdomain_enabled" => false,
+        "time_module_enabled" => false
+      )
+    end
+
+    it "returns the persisted operating profile summary in features on /auth/me rather than legacy fallback" do
+      # Legacy columns would resolve to payroll_service / manual / client_portal_enabled: false.
+      company = create(:company, payroll_intake_source_types: [], client_payroll_approval_required: false)
+      ClientOperatingProfile.create!(
+        company: company,
+        effective_on: Date.new(2026, 1, 1),
+        ends_on: nil,
+        version: 1,
+        offering: "payroll_portals",
+        hours_source: "intake_adapter",
+        intake_adapter: "mosa_revel",
+        client_portal_enabled: true,
+        employee_portal_enabled: false,
+        options: { "time_module_enabled" => true }
+      )
+      user = create(:user, company: company, organization: company.organization, role: "admin")
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
+
+      get "/api/v1/auth/me"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("features")).to eq(
+        "offering" => "payroll_portals",
+        "hours_source" => "intake_adapter",
+        "intake_adapter" => "mosa_revel",
+        "client_portal_enabled" => true,
+        "employee_portal_enabled" => false,
+        "subdomain_enabled" => false,
+        "time_module_enabled" => true
+      )
+    end
+
+    it "returns features for a client user and switches features for multi-company staff via X-Company-Id" do
+      organization = create(:organization)
+      company_a = create(:company, organization: organization, name: "Client A")
+      company_b = create(:company, organization: organization, name: "Client B")
+
+      ClientOperatingProfile.create!(
+        company: company_a,
+        effective_on: Date.new(2026, 1, 1),
+        version: 1,
+        offering: "payroll_service",
+        hours_source: "intake_adapter",
+        intake_adapter: "spike_email",
+        client_portal_enabled: true,
+        employee_portal_enabled: false
+      )
+      ClientOperatingProfile.create!(
+        company: company_b,
+        effective_on: Date.new(2026, 1, 1),
+        version: 1,
+        offering: "workforce_suite",
+        hours_source: "connected_app",
+        client_portal_enabled: false,
+        employee_portal_enabled: false
+      )
+
+      client_user = create(:user, organization: organization, company: company_a, role: "client", active: true)
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(client_user)
+
+      get "/api/v1/auth/me"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("user", "company_id")).to eq(company_a.id)
+      expect(response.parsed_body.fetch("features")).to include(
+        "offering" => "payroll_service",
+        "hours_source" => "intake_adapter",
+        "intake_adapter" => "spike_email",
+        "client_portal_enabled" => true
+      )
+
+      staff_user = create(:user, organization: organization, company: company_a, role: "accountant", active: true)
+      create(:company_assignment, user: staff_user, company: company_a)
+      create(:company_assignment, user: staff_user, company: company_b)
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(staff_user)
+
+      get "/api/v1/auth/me", headers: { "X-Company-Id" => company_b.id.to_s }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("user", "company_id")).to eq(company_b.id)
+      expect(response.parsed_body.fetch("features")).to include(
+        "offering" => "workforce_suite",
+        "hours_source" => "connected_app",
+        "intake_adapter" => nil,
+        "client_portal_enabled" => false
+      )
     end
 
     it "exposes own AIRE account connection to accountants without configuration access" do
@@ -99,6 +194,7 @@ RSpec.describe "Api::V1::Auth", type: :request do
         "company_id" => nil,
         "home_company_id" => company.id
       )
+      expect(response.parsed_body.fetch("features")).to be_nil
     end
   end
 end
