@@ -63,39 +63,18 @@ jobs:
           name: backend-coverage-proof
           path: tmp/quality-rspec
 
-  # Snapshot once: shards must never restore different timing caches while
-  # another PR completes, or they could compute different partitions.
-  backend-plan:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 3
-    steps:
-      - uses: actions/cache/restore@v4
-        with:
-          path: tmp/quality-rspec/timings.json
-          key: quality-rspec-timings-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: quality-rspec-timings-
-      - run: mkdir -p tmp/quality-rspec; test -f tmp/quality-rspec/timings.json || echo '{}' > tmp/quality-rspec/timings.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: backend-timing-snapshot
-          path: tmp/quality-rspec/timings.json
-
+  # One timing snapshot and three isolated processes share one runner slot.
   backend-specs:
-    needs: [backend-plan]
-    name: Backend RSpec shard ${{ matrix.shard }}/3
+    name: Backend RSpec workers
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: cornerstone_payroll_ci_${{ matrix.shard }}
+          POSTGRES_DB: postgres
         ports: [5432:5432]
         options: >-
           --health-cmd "pg_isready -U postgres"
@@ -106,8 +85,7 @@ jobs:
     env:
       RAILS_ENV: test
       AUTH_ENABLED: "false"
-      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_ci_${{ matrix.shard }}
-      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_ci_${{ matrix.shard }}
+      PGPASSWORD: postgres
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
@@ -115,20 +93,17 @@ jobs:
           ruby-version: .ruby-version
           bundler-cache: true
           working-directory: api
-      - uses: actions/download-artifact@v4
+      - uses: actions/cache/restore@v4
         with:
-          name: backend-timing-snapshot
-          path: tmp/quality-rspec
-      - name: Assert disposable database before schema load
-        run: |
-          ruby -r uri -e 'ARGV.each { |key| u = URI(ENV.fetch(key)); abort "Unsafe test database" unless u.host == "127.0.0.1" && u.path == "/cornerstone_payroll_ci_${{ matrix.shard }}" }' DATABASE_URL TEST_DATABASE_URL
-      - run: bundle exec rails db:schema:load db:integrity
-      - name: Run RSpec shard (one isolated database per worker)
-        run: python3 ../.github/scripts/quality_rspec.py run --shard ${{ matrix.shard }} --count 3 --directory ../tmp/quality-rspec/results --timings ../tmp/quality-rspec/timings.json
+          path: tmp/quality-rspec/timings.json
+          key: quality-rspec-timings-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: quality-rspec-timings-
+      - name: Run three isolated RSpec workers
+        run: bash ../.github/scripts/quality-rspec-workers.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: backend-specs-${{ matrix.shard }}
+          name: backend-specs-workers
           path: tmp/quality-rspec/results
           if-no-files-found: error
 
@@ -233,23 +208,8 @@ jobs:
           VITE_AUTH_ENABLED: "false"
           VITE_CLERK_PUBLISHABLE_KEY: ""
 
+  # Stateful lanes stay serial within one runner; their fixtures remain isolated.
   browser:
-    if: always()
-    needs: [browser-tests]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 3
-    steps:
-      - name: Require every isolated browser lane
-        env:
-          RESULT: ${{ needs.browser-tests.result }}
-        run: test "$RESULT" = success
-
-  browser-tests:
-    name: Browser ${{ matrix.lane }}
-    strategy:
-      fail-fast: false
-      matrix:
-        lane: [release, refresh, pay-items]
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     services:
@@ -284,11 +244,9 @@ jobs:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - if: matrix.lane == 'release'
-        run: bundle exec rails db:schema:load db:seed
+      - run: bundle exec rails db:schema:load db:seed
         working-directory: api
-      - if: matrix.lane == 'release'
-        run: bundle exec rails e2e:seed
+      - run: bundle exec rails e2e:seed
         working-directory: api
       - run: npm ci
         working-directory: web
@@ -301,11 +259,21 @@ jobs:
           "$GITHUB_WORKSPACE/.github/scripts/apt-refresh.sh"
           npx playwright install --with-deps chromium
         working-directory: web
-      - if: matrix.lane == 'release'
-        run: npm run test:e2e:release
+      - run: npm run test:e2e:release
         working-directory: web
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate0-browser-evidence-release
+          path: |
+            web/playwright-report
+            web/test-results
+            web/.e2e-fixtures/release.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Prepare isolated payroll refresh acceptance fixture
-        if: matrix.lane == 'refresh'
+        if: ${{ !cancelled() }}
         working-directory: api
         env:
           PGPASSWORD: postgres
@@ -316,26 +284,25 @@ jobs:
           bundle exec rails db:schema:load db:seed
           bundle exec rails runner 'require Rails.root.join("lib/payroll_refresh_qa_fixture"); PayrollRefreshQaFixture.seed!(output_path: ENV.fetch("E2E_FIXTURE_PATH"))'
       - name: Payroll refresh acceptance
-        if: matrix.lane == 'refresh'
+        if: ${{ !cancelled() }}
         working-directory: web
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_refresh_qa
           E2E_FIXTURE_PATH: ${{ github.workspace }}/web/.e2e-fixtures/payroll-refresh.json
         run: npm run test:e2e:refresh
       - name: Upload browser evidence
-        if: always() && matrix.lane != 'pay-items'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gate0-browser-evidence-${{ matrix.lane }}
+          name: gate0-browser-evidence-refresh
           path: |
             web/playwright-report
             web/test-results
-            web/.e2e-fixtures/release.json
             web/.e2e-fixtures/payroll-refresh.json
           if-no-files-found: warn
           retention-days: 14
       - name: Prepare isolated pay-item workflow fixture
-        if: matrix.lane == 'pay-items'
+        if: ${{ !cancelled() }}
         working-directory: api
         env:
           PGPASSWORD: postgres
@@ -347,14 +314,14 @@ jobs:
           bundle exec rails db:schema:load
           bundle exec rails runner 'require Rails.root.join("lib/pay_item_workflow_qa_fixture"); PayItemWorkflowQaFixture.seed!(output_path: ENV.fetch("E2E_FIXTURE_PATH"))'
       - name: Pay-item workflow acceptance
-        if: matrix.lane == 'pay-items'
+        if: ${{ !cancelled() }}
         working-directory: web
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_pay_items_qa
           E2E_FIXTURE_PATH: ${{ github.workspace }}/web/.e2e-fixtures/pay-items.json
         run: npm run test:e2e:pay-items
       - name: Upload pay-item browser evidence
-        if: always() && matrix.lane == 'pay-items'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pay-item-browser-evidence
