@@ -56,6 +56,7 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     worker.update!(status: "active", termination_date: nil)
     expect { service.apply_to(rows.first(1), reviewed: reviewed, confirmed: true, source_employee_ids: [ owner.id, worker.id ]) }.to raise_error(ArgumentError, /included/)
     # Wage rates are ended, not deleted, since M3-4; a rate deleted before then is missing.
+    EmployeeWageRateVersion.where(employee_wage_rate_id: rate.id).delete_all
     EmployeeWageRate.where(id: rate.id).delete_all
     expect(service.proposals.last[:error]).to include("missing")
   end
