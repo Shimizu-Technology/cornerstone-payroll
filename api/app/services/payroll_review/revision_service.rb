@@ -199,8 +199,8 @@ module PayrollReview
 
     def audit!(package, event)
       previous_domain_audit = Current.domain_audit_recorded
-      AuditLog.record!(user: actor, company_id: pay_period.company_id,
-        action: "payroll_review##{event}", record_type: "PayrollReviewPackage", record_id: package.id,
+      AuditLog.record!(user: actor, actor: Current.actor || AuditActor.system_job(self.class.name),
+        company_id: pay_period.company_id, action: "payroll_review##{event}", record_type: "PayrollReviewPackage", record_id: package.id,
         metadata: { pay_period_id: pay_period.id, revision: package.revision })
     ensure
       # Publication/withdrawal accompany a separate lifecycle audit containing

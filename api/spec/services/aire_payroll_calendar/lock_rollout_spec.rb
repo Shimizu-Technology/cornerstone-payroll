@@ -12,7 +12,7 @@ RSpec.describe AirePayrollCalendar::LockRollout do
     2.times { expect(service.configure!).to include(status: "configured", source_id: source.id) }
     logs = AuditLog.where(action: "time_tracking_source#lock_rollout_gate_passed", record_id: source.id)
     expect(logs.count).to eq(2)
-    expect(logs.last).to have_attributes(actor_name: "Release operator", company_id: source.company_id)
+    expect(logs.last).to have_attributes(actor_type: "operator", actor_name: "Release operator", company_id: source.company_id)
     expect(logs.last.metadata).to include("reason" => "Approved rollout", "cutoff_enforcement_starts_on" => "2026-10-16")
   end
 
@@ -26,7 +26,7 @@ RSpec.describe AirePayrollCalendar::LockRollout do
     expect(TimeTrackingLockRolloutSelection.count).to eq(1)
     audit = AuditLog.find_by!(action: "time_tracking_source#initial_lock_rollout_selected", record_id: source.id)
     expect(audit.metadata).to include("old_starts_on" => "2026-10-16", "new_starts_on" => "2026-11-01")
-    expect(audit.actor_name).to eq("Release operator")
+    expect(audit).to have_attributes(actor_type: "operator", actor_name: "Release operator")
     selection = source.lock_rollout_selection
     expect { selection.update!(starts_on: "2026-11-16") }.to raise_error(ActiveRecord::ReadOnlyRecord)
     expect do

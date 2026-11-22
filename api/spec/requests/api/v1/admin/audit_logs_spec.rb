@@ -58,6 +58,8 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
 
     expect(response).to have_http_status(:ok)
     payload = response.parsed_body.fetch("data").first
+    expect(payload).to include("actor_type" => "staff_user", "actor_id" => admin.id.to_s, "user_id" => admin.id,
+      "user_name" => "Audit Admin", "actor_role" => "admin", "actor_email" => admin.email)
     expect(payload).to include(
       "display_action" => "Audit Admin terminated Ada Payroll",
       "display_subject" => "Ada Payroll",

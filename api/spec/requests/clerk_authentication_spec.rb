@@ -292,7 +292,13 @@ RSpec.describe "Clerk Authentication", type: :request do
       })
     end
 
-    it "records the session marker and sign-in audit together" do
+    it "records the session marker and sign-in audit together and clears the request actor" do
+      expect(user).to be_persisted
+      allow(AuditLog).to receive(:record!).and_wrap_original do |method, **attributes|
+        expect(Current.actor).to eq(AuditActor.for_user(user))
+        method.call(**attributes)
+      end
+
       expect {
         get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
       }.to change {
@@ -302,6 +308,11 @@ RSpec.describe "Clerk Authentication", type: :request do
       expect(response).to have_http_status(:ok)
       expect(user.reload.last_session_id_digest).to eq(Digest::SHA256.hexdigest("session-audit-123"))
       expect(user.last_login_at).to be_present
+      expect(Current.actor).to be_nil
+
+      get "/api/v1/admin/employees"
+      expect(response).to have_http_status(:unauthorized)
+      expect(Current.actor).to be_nil
     end
 
     it "does not lock the user row when no activity write is due" do
