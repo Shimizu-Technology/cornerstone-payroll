@@ -27,6 +27,56 @@ RSpec.describe "Write maintenance", type: :request do
     expect(response.parsed_body).to eq("code" => "write_maintenance", "error" => WriteMaintenance::DEFAULT_MESSAGE)
   end
 
+  [ " TRUE ", " 1 ", " YeS ", " ON " ].each do |value|
+    it "enables maintenance for #{value.inspect}" do
+      allow(ENV).to receive(:[]).with("WRITE_MAINTENANCE").and_return(value)
+      post departments_path, params: department_params, as: :json
+      expect(response).to have_http_status(:service_unavailable)
+    end
+  end
+
+  it "logs the effective state when building the middleware" do
+    expect(Rails.logger).to receive(:info).with("[WriteMaintenance] enabled=true")
+    WriteMaintenance.new(->(_) { nil })
+  end
+
+  it "correlates a rejection without logging a signed upload path" do
+    allow(Rails.logger).to receive(:info).and_call_original
+    put "/rails/active_storage/disk/private-upload-token", headers: { "X-Request-Id" => "maintenance-probe" }
+
+    expect(response.headers["X-Request-Id"]).to eq("maintenance-probe")
+    expect(Rails.logger).to have_received(:info).with("[maintenance-probe] [WriteMaintenance] Blocked PUT request (503)")
+    expect(Rails.logger).not_to have_received(:info).with(/private-upload-token/)
+  end
+
+  %w[transmittal_log_pdf full_print_package_pdf check_signoff_sheet].each do |report|
+    it "blocks GET and HEAD for #{report}, including formatted URLs" do
+      path = "/api/v1/admin/reports/#{report}.pdf"
+
+      expect do
+        get path
+        expect(response).to have_http_status(:service_unavailable)
+        expect(response.parsed_body["code"]).to eq("write_maintenance")
+        expect(response.headers["Retry-After"]).to eq("60")
+        head path
+        expect(response).to have_http_status(:service_unavailable)
+      end.not_to change { [ Transmittal.count, CheckSignoffSheet.count ] }
+    end
+  end
+
+  %w[/rails/action_mailbox/relay/inbound_emails /rails/conductor/action_mailbox/inbound_emails].each do |path|
+    it "blocks mailbox ingress at #{path}" do
+      post path
+      expect(response).to have_http_status(:service_unavailable)
+    end
+  end
+
+  it "asks AIRE to retry later before accepting a cutoff change" do
+    post "/api/v1/integrations/time_payroll/calendar_periods/123/cutoff_change"
+    expect(response).to have_http_status(:service_unavailable)
+    expect(response.parsed_body["code"]).to eq("write_maintenance")
+  end
+
   it "allows the same write when the flag is unset" do
     allow(ENV).to receive(:[]).with("WRITE_MAINTENANCE").and_return(nil)
 

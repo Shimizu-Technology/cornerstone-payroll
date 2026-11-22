@@ -56,3 +56,22 @@ it('allows a retry when Clerk sign-out fails', async () => {
   expect(me).toHaveBeenCalledTimes(2);
   expect(screen.queryByRole('button', { name: 'Signed in' })).toBeNull();
 });
+
+
+it('keeps the Clerk sign-in intact and allows a retry when invitation binding is paused', async () => {
+  clerk.signOut.mockClear();
+  vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_test_synthetic');
+  const { AuthProvider, useAuth } = await import('./AuthContext');
+  const me = vi.spyOn(authApi, 'me').mockRejectedValueOnce(
+    new ApiError('Try again shortly', 503, undefined, { code: 'write_maintenance' }),
+  ).mockResolvedValue({
+    user: { id: 1, name: 'Payroll User', email: 'payroll@example.test', role: 'admin', organization_id: 1, company_id: 1, company_name: 'Payroll QA', home_company_id: 1, assigned_company_ids: [1], capabilities: [] },
+  });
+
+  render(<AuthProvider><UnboundProbe useAuth={useAuth} /></AuthProvider>);
+
+  fireEvent.click(await screen.findByRole('button', { name: 'write_maintenance' }));
+  expect(await screen.findByRole('button', { name: 'Signed in' })).toBeTruthy();
+  expect(clerk.signOut).not.toHaveBeenCalled();
+  expect(me).toHaveBeenCalledTimes(2);
+});

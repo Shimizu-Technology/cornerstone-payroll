@@ -31,6 +31,21 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
     storage.upload(document.preview_file_key, "%PDF-1.4\npreview", content_type: "application/pdf")
   end
 
+  it "serves an existing preview and defers on-demand generation during maintenance" do
+    allow(WriteMaintenance).to receive(:enabled?).and_return(true)
+    expect(ClientDocumentPreviewGenerator).not_to receive(:new)
+    path = "/api/v1/admin/client_documents/#{document.id}/preview"
+
+    get path
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to start_with("%PDF")
+
+    document.update!(preview_status: "pending", preview_file_key: nil)
+    expect { get path }.not_to change { document.reload.attributes }
+    expect(response).to have_http_status(:service_unavailable)
+    expect(response.parsed_body).to include("code" => "write_maintenance", "error" => /Download the original/)
+  end
+
   it "allows staff to upload a document for client portal sharing" do
     expect do
       post "/api/v1/admin/client_documents",
