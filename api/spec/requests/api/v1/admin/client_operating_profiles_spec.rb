@@ -270,13 +270,5 @@ RSpec.describe "Api::V1::Admin::ClientOperatingProfiles", type: :request do
         expect(row.dig("options", "subdomain_enabled")).to be(false)
       end
     end
-
-    it "does not expose a PATCH route in M3-5a" do
-      admin = create(:user, organization: organization, company: company, role: "admin")
-      sign_in_as(admin)
-
-      patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: { changes: {} }
-      expect(response).to have_http_status(:not_found)
-    end
   end
 end
