@@ -193,7 +193,7 @@ RSpec.describe ClerkTokenVerifier do
         env: {
           "CLERK_PUBLISHABLE_KEY" => pk_live,
           "CLERK_ISSUER" => "https://#{live_host}",
-          "CLERK_AUTHORIZED_PARTIES" => "https://payroll.shimizu-technology.com, https://mosa.shimizu-technology.com"
+          "CLERK_AUTHORIZED_PARTIES" => "https://payroll.shimizu-technology.com, https://backoffice.example.test"
         },
         cache: cache,
         http_get: http_get
@@ -201,7 +201,7 @@ RSpec.describe ClerkTokenVerifier do
       token = encode_token(
         sub: "user_live_2",
         iss: "https://#{live_host}",
-        azp: "https://mosa.shimizu-technology.com",
+        azp: "https://backoffice.example.test",
         exp: 10.minutes.from_now.to_i
       )
 
