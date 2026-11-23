@@ -93,6 +93,13 @@ A `legacy_basis_gap` item gets a "Review proposed bases" action. It shows the B1
 
 Applying it calls `PayrollFicaLegacyRecovery#apply!`, scoped to the employee and fully verified as in B1, with the reviewer as actor and the reference text. It then resolves the item as `legacy_basis_proven`. The rake tasks remain for operations.
 
+**Clone finding (Nov 23), which defers B2:**
+- On a sanitized production clone, the B1 inventory proposes **zero** proofs for every client: AIRE, Spike, Cornerstone, MoSa's and Sweep.
+- Every legacy row sits in an employee-year whose committed history differs from the reportable ledger: a voided run, a retired instrument or a predecessor. The recovery tool deliberately stops at that boundary.
+- So for current data, legacy-basis items close as `legacy_basis_accepted`: the admin accepts the conservative bound, which the clone checks show yields correct W-2 and 941 amounts.
+- B2 stays reserved (`legacy_basis_proven`). Build it only when a client's inventory actually shows recoverable rows.
+- B1 still ships: its statuses are truthful, apply is safe, and fingerprints are time-scoped.
+
 ### Year-end check (before W-2s)
 
 Confirm how W-2 boxes 3 and 5 and the quarterly packet treat legacy rows with nil bases, before and after proofs, for AIRE and Spike on a local production clone. Record the result here. If any report derives wrong wages from nil bases, fix it in the B release.
