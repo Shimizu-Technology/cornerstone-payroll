@@ -53,6 +53,7 @@ export function apiErrorMessage(data: unknown, status: number, options: { readOn
       : 'The server could not complete this request. Check whether your changes were saved before retrying. If it keeps failing, contact support with the page and action.')
     : `The request could not be completed (HTTP ${status}). Refresh the page and try again.`);
   const message = explanations.join('; ');
+  if (status === 403 && payload.code === 'mfa_required') return message;
   // These outcomes have a definite recovery step regardless of the endpoint.
   const recovery: Record<number, string> = {
     401: 'Sign in again, then retry.',
@@ -71,6 +72,8 @@ export function apiErrorMessage(data: unknown, status: number, options: { readOn
 import type { ConnectorHealth } from '@/lib/connector-health';
 import { WRITE_MAINTENANCE_EVENT } from './write-maintenance';
 
+export const MFA_REQUIRED_EVENT = 'payroll:mfa-required';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
 export function resolveApiUrl(baseUrl: string, endpoint: string, origin = globalThis.location?.origin || 'http://localhost'): URL {
@@ -78,6 +81,7 @@ export function resolveApiUrl(baseUrl: string, endpoint: string, origin = global
 }
 
 interface RequestOptions extends RequestInit {
+  authToken?: string | null;
   params?: Record<string, string | number | boolean | undefined>;
   companyId?: number | null;
   notifyMaintenance?: boolean;
@@ -132,6 +136,9 @@ async function readApiError(response: Response, options?: { readOnly?: boolean; 
   const payload = record(data);
   const message = apiErrorMessage(data, response.status, options);
   const error = new ApiError(message, response.status, payload.details as ApiError['details'], data);
+  if (response.status === 403 && payload.code === 'mfa_required') {
+    globalThis.window?.dispatchEvent(new CustomEvent(MFA_REQUIRED_EVENT, { detail: message }));
+  }
   if (error.isWriteMaintenance) {
     const seconds = Number(response.headers.get('Retry-After'));
     error.retryAfterMs = Number.isSafeInteger(seconds) && seconds > 0 ? seconds * 1000 : 60_000;
@@ -228,7 +235,7 @@ class ApiClient {
   }
 
   private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const { params, companyId, notifyMaintenance, ...fetchOptions } = options;
+    const { params, companyId, notifyMaintenance, authToken, ...fetchOptions } = options;
     const initiatingCompanyId = companyId === undefined ? this.activeCompanyId : companyId;
     const financeHeaders = this.financeHeaders(endpoint);
     const url = this.buildUrl(endpoint, params);
@@ -239,7 +246,7 @@ class ApiClient {
       ...financeHeaders,
     };
 
-    const token = await this.resolveAuthToken();
+    const token = authToken === undefined ? await this.resolveAuthToken() : authToken;
     if (token) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
@@ -279,7 +286,7 @@ class ApiClient {
   async get<T>(
     endpoint: string,
     params?: Record<string, string | number | boolean | undefined>,
-    options: Pick<RequestOptions, 'companyId' | 'signal' | 'notifyMaintenance'> = {},
+    options: Pick<RequestOptions, 'companyId' | 'signal' | 'notifyMaintenance' | 'authToken'> = {},
   ): Promise<T> {
     return this.request<T>(endpoint, { method: 'GET', params, ...options });
   }
@@ -6816,12 +6823,16 @@ export function clearPriorProviderDrafts(): void {
   } catch { /* Storage can be unavailable in restricted browser contexts. */ }
 }
 
+type AuthMeResponse =
+  | { user: AuthApiUser; mfa_required?: boolean; mfa_verified?: boolean }
+  | { user?: never; mfa_required: true; mfa_verified: false };
+
 export const authApi = {
-  me: () => api.get<{ user: AuthApiUser }>('/auth/me', undefined, { notifyMaintenance: false }),
+  me: (authToken?: string | null) => api.get<AuthMeResponse>('/auth/me', undefined, { notifyMaintenance: false, authToken }),
   createCableTicket: (companyId: number) => api.post<{ ticket: string; expires_in: number }>('/cable_ticket', undefined, { companyId, notifyMaintenance: false }),
   login: (token: string) => {
     api.setAuthToken(token);
-    return api.get<{ user: AuthApiUser }>('/auth/me', undefined, { notifyMaintenance: false });
+    return api.get<AuthMeResponse>('/auth/me', undefined, { notifyMaintenance: false });
   },
   logout: () => {
     clearPriorProviderDrafts();
