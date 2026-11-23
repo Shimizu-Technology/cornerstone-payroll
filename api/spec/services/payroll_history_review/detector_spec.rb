@@ -1,0 +1,98 @@
+# frozen_string_literal: true
+
+require "rails_helper"
+
+RSpec.describe PayrollHistoryReview::Detector do
+  include FicaHistoryHelpers
+
+  let(:company) { create(:company) }
+  let(:employee) { create(:employee, company: company) }
+  let(:actor) { create(:user, company: company) }
+  let(:batch) { create(:historical_import_batch, company: company, status: "locked", locked_at: Time.current) }
+  let(:detector) { described_class.new(company: company, tax_year: 2026) }
+
+  def period(year: 2026, **attrs)
+    create(:pay_period, :committed, company: company, start_date: Date.new(year, 1, 1),
+      end_date: Date.new(year, 1, 14), pay_date: Date.new(year, 1, 16), **attrs)
+  end
+
+  def paycheck(run = period, **attrs)
+    bases = { fit_taxable_wages: 1000, social_security_taxable_wages: 1000, social_security_taxable_tips: 0,
+      medicare_taxable_wages: 1000, additional_medicare_taxable_wages: 0 }
+    create(:payroll_item, company: company, employee: employee, pay_period: run, gross_pay: 1000,
+      social_security_tax: 62, employer_social_security_tax: 62, medicare_tax: 14.5, employer_medicare_tax: 14.5,
+      **bases.merge(attrs))
+  end
+
+  def apply
+    detector.call(apply: true)
+  end
+
+  it "detects all five subject types once and keeps dry runs read-only" do
+    create(:tax_table, tax_year: 2026, ss_wage_base: 184500)
+    original = paycheck(period(correction_status: "voided", void_reason: "Original payment cancelled"))
+    replacement = paycheck(period(corrects_pay_period_id: original.pay_period_id))
+    reversed = paycheck
+    reversed.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: actor.id, payroll_reversal_reason: "Financial reversal")
+    disposed = paycheck
+    PayrollItemLegacyDisposition.insert_all!([ { payroll_item_id: disposed.id, company_id: company.id,
+      created_by_id: actor.id, reason: "unreviewed_legacy_reason", evidence_digest: "a" * 64 } ])
+    paycheck(additional_medicare_taxable_wages: nil)
+    paycheck(social_security_taxable_wages: nil)
+    imported
+
+    expect { expect(detector.call.fetch(:counts)).to eq(new: 5) }.not_to change(PayrollHistoryReviewItem, :count)
+    results = apply.fetch(:items)
+    expect(results.map { |item, _subject| item.subject_type }).to contain_exactly(
+      "voided_pay_period", "reversed_payroll_item", "legacy_disposition", "legacy_basis_gap", "imported_history")
+    facts = results.find { |item, _subject| item.pay_period_id == original.pay_period_id }.last.facts
+    expect(facts).to include("void_reason" => "Original payment cancelled", "gross_pay" => 1000.to_d,
+      "replacements" => include(a_hash_including("id" => replacement.pay_period_id, "gross_pay" => 1000.to_d)))
+    expect { expect(apply.fetch(:counts)).to eq(open: 5) }.not_to change(PayrollHistoryReviewItem, :count)
+    expect(PayrollHistoryReviewItem.find_by!(subject_type: "legacy_basis_gap")).to have_attributes(employee_id: employee.id)
+  end
+
+  it "keeps companies and tax years isolated and detects nothing for clean payroll" do
+    paycheck
+    older = paycheck(period(year: 2025, correction_status: "voided"))
+    other = create(:company)
+    create(:pay_period, :voided, company: other, pay_date: Date.new(2026, 1, 16))
+
+    expect(apply.fetch(:items)).to be_empty
+    expect(PayrollHistoryReviewItem.count).to eq(0)
+    old_items = described_class.new(company: company, tax_year: 2025).call(apply: true).fetch(:items).map(&:first)
+    expect(old_items.sole).to have_attributes(company_id: company.id, tax_year: 2025, pay_period_id: older.pay_period_id)
+  end
+
+  it "does not create an imported review for reconciled imports on a verified annual path" do
+    create(:tax_table, tax_year: 2026, ss_wage_base: 184500)
+    paycheck
+    row = imported
+    EmployeeYearFicaSourceReview.record!(employee: employee, actor: actor, tax_year: 2026, through_pay_date: "2026-12-31",
+      external_ss_wage_bound: 0, external_medicare_wage_bound: 0, review_reference: "Confirmed complete synthetic history")
+    reconciliation = ImportedPaycheckFicaReconciliation.new(company: company, year: 2026)
+    reconciliation.apply!(actor: actor, review_reference: "Reviewed synthetic import evidence",
+      expected_digest: reconciliation.inventory.fetch(:plan_digest))
+    expect(row.reload.fica_basis_proof).to be_present
+    expect(apply.fetch(:items)).to be_empty
+  end
+
+  it "reopens a changed subject once and retains the original decision in the audit" do
+    original = paycheck(period(correction_status: "voided", void_reason: "Original payment voided"))
+    item = apply.fetch(:items).sole.first
+    resolution = PayrollHistoryReview::Resolution.new(item: item, user: actor, actor: AuditActor.for_user(actor))
+    original_digest = item.subject_digest
+    resolution.resolve!(code: "void_reissued", reference: "Reissue evidence reviewed", expected_digest: original_digest)
+    original.pay_period.update_columns(void_reason: "New evidence of cancellation")
+
+    expect(detector.call.fetch(:counts)).to eq(reopened: 1)
+    expect(item.reload).to be_resolved
+    expect(apply.fetch(:counts)).to eq(reopened: 1)
+    expect(apply.fetch(:counts)).to eq(open: 1)
+    expect(item.reload).to have_attributes(status: "open", resolution_code: nil, resolved_at: nil)
+    expect(item.subject_digest).not_to eq(original_digest)
+    audit = AuditLog.find_by!(action: "payroll_history_review#reopen", record_id: item.id)
+    expect(audit.metadata.fetch("previous_resolution")).to include("resolution_code" => "void_reissued",
+      "resolved_by_id" => actor.id, "resolution_reference" => "Reissue evidence reviewed", "subject_digest" => original_digest)
+  end
+end

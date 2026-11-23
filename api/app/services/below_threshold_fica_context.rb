@@ -4,6 +4,7 @@
 # Call only under the existing Company -> PayPeriod financial locks.
 class BelowThresholdFicaContext
   VERSION = 1
+  REVIEW_FIELDS = %w[history_review_open filing_review_open note].freeze
   MODE = "calculable_below_thresholds"
   NOTE = "Prior-period void history or imported paycheck history needs accountant review; this paycheck's Social Security/Medicare is unaffected because the conservative annual wage bounds are within the limits. Historical tax and filing review remains open.".freeze
   TAX_FIELDS = %w[social_security_tax employer_social_security_tax medicare_tax employer_medicare_tax].freeze
@@ -21,33 +22,22 @@ class BelowThresholdFicaContext
   end
 
   def applicable?
-    imported_paychecks.any? || unresolved_history? || unverified_legacy_ids.any?
+    imported_paychecks.any? || sources.disputed? || unverified_legacy_ids.any?
   end
 
-  # Imported checks alone are not unresolved history on a verified annual path.
+  # Review state controls disclosure only. The bound still counts every source.
   def unresolved_history?
-    periods = PayPeriod.where(company: company, status: "committed", pay_date: year_range)
-    periods = periods.where.not(id: excluding_pay_period_id) if excluding_pay_period_id
-    PayrollItem.where(company: company, employee_id: candidate_employee_ids, pay_period_id: periods.select(:id))
-      .where.not(employment_type: "contractor").left_joins(:legacy_disposition, :pay_period)
-      .where("payroll_items.payroll_reversed_at IS NOT NULL OR pay_periods.correction_status = 'voided' OR (payroll_item_legacy_dispositions.id IS NOT NULL AND payroll_item_legacy_dispositions.reason != ?)", PayrollItemLegacyDisposition::REASON).exists?
+    sources.disputed? && open_subjects.call(subjects.disputes).any?
   end
 
-  # Committed, reportable legacy paychecks saved before FICA bases were
-  # recorded, with no usable annual fingerprint or reviewed proof. The ordinary
-  # annual path always holds on these; every one is also a bounded candidate.
   def unverified_legacy_ids
     return [] unless @include_unverified_legacy
 
-    @unverified_legacy_ids ||= EmployeeYearFicaContext.reportable_items(company: company, employee_ids: candidate_employee_ids,
-      year: year, excluding_pay_period_id: excluding_pay_period_id).where(id: candidates.map(&:id)).left_joins(:fica_basis_proof)
-      .where("payroll_items.social_security_taxable_wages IS NULL OR payroll_items.social_security_taxable_tips IS NULL OR payroll_items.additional_medicare_taxable_wages IS NULL")
-      .where("jsonb_typeof(payroll_items.tax_rule_snapshot -> 'annual_fica_context' -> 'fingerprint') IS DISTINCT FROM 'string' OR " \
-        "payroll_items.tax_rule_snapshot -> 'annual_fica_context' ->> 'fingerprint' = ''")
-      .where(payroll_item_fica_basis_proofs: { id: nil }).order(:id).pluck(:id)
+    @unverified_legacy_ids ||= sources.unverified_legacy.pluck(:id)
   end
 
-  def snapshot(current_item:, rules:, lock_rules: false, reviewing_imports: false, include_imported_history: true)
+  def snapshot(current_item:, rules:, lock_rules: false, reviewing_imports: false, include_imported_history: true,
+    live_review: false, saved_review: nil)
     if lock_rules
       AnnualTaxConfig.where(tax_year: year).order(:id).lock("FOR SHARE").load
       TaxTable.for_year(year).order(:id).lock("FOR SHARE").load
@@ -65,7 +55,7 @@ class BelowThresholdFicaContext
     imported_bases = imported_paychecks.to_h do |row|
       begin
         bases = ImportedPaycheckFicaEvidence.bases(row, verified)
-        unless (reviewing_imports && row.fica_basis_proof.nil?) || ImportedPaycheckFicaEvidence.verified_bases(row, rules: verified, year: year)
+        unless (reviewing_imports && row.fica_basis_proof.nil?) || sources.imported_proof(row, verified)
           hold!("Imported paycheck ##{row.id} lacks a matching reviewed FICA proof; run reconcile_imports")
         end
         [ row.id, bases ]
@@ -112,8 +102,15 @@ class BelowThresholdFicaContext
         (row.fica_basis_proof&.evidence unless reviewing_imports) ] },
       review.attributes, candidate_employees.map { |person| person.attributes.slice("id", "company_id", "previous_employee_id", "employment_type") }
     ])
+    review_fields = if saved_review
+      saved_review
+    elsif live_review
+      live_review_fields(include_imported_history: include_imported_history)
+    else
+      { "history_review_open" => true, "filing_review_open" => true, "note" => review_note(include_imported_history: include_imported_history) }
+    end
     { "version" => VERSION, "mode" => MODE, "year" => year, "employee_id" => employee.id,
-      "history_review_open" => true, "filing_review_open" => true, "note" => review_note(include_imported_history: include_imported_history),
+      **review_fields,
       "source_digest" => source_digest, "rule_digest" => FicaBasisEvidence.digest(verified),
       "bounds" => FicaBasisEvidence.normalize(bounds.stringify_keys),
       "current_wages" => FicaBasisEvidence.normalize({ "medicare" => gross, "ss_wages" => gross - tips, "ss_tips" => tips }) }
@@ -126,8 +123,27 @@ class BelowThresholdFicaContext
 
   attr_reader :employee, :company, :year, :excluding_pay_period_id
 
-  def year_range
-    Date.new(year, 1, 1)..Date.new(year, 12, 31)
+  def sources
+    @sources ||= PayrollHistoryReview::Sources.new(company: company, year: year,
+      employee_ids: candidate_employee_ids, excluding_pay_period_id: excluding_pay_period_id)
+  end
+
+  def subjects
+    @subjects ||= PayrollHistoryReview::Subjects.new(sources)
+  end
+
+  def open_subjects
+    @open_subjects ||= PayrollHistoryReview::OpenSubjects.new(company: company, year: year)
+  end
+
+  def live_review_fields(include_imported_history:)
+    relevant = subjects.disputes + (@include_unverified_legacy ? subjects.gaps : [])
+    if include_imported_history
+      relevant += subjects.imports_for_batches(imported_paychecks.map(&:historical_import_batch_id).uniq)
+    end
+    reasons = open_subjects.call(relevant).flat_map(&:note_reasons)
+    { "history_review_open" => reasons.any?, "filing_review_open" => true,
+      "note" => (format_review_note(reasons) if reasons.any?) }
   end
 
   def candidate_employees
@@ -148,17 +164,11 @@ class BelowThresholdFicaContext
   end
 
   def candidates
-    @candidates ||= begin
-      periods = PayPeriod.where(company: company, status: "committed", pay_date: year_range)
-      periods = periods.where.not(id: excluding_pay_period_id) if excluding_pay_period_id
-      PayrollItem.where(company: company, employee_id: candidate_employee_ids, pay_period_id: periods.select(:id))
-        .where.not(employment_type: "contractor").includes(:pay_period, :legacy_disposition, :fica_basis_proof).order(:id).to_a
-    end
+    @candidates ||= sources.candidates.to_a
   end
 
   def imported_paychecks
-    @imported_paychecks ||= HistoricalPaycheck.where(company: company, employee_id: [ nil, *candidate_employee_ids ], pay_date: year_range)
-      .includes(:employee, :historical_import_batch, :historical_worker, :historical_pay_period, :historical_paycheck_adjustments, :fica_basis_proof).order(:id).to_a
+    @imported_paychecks ||= sources.imported_paychecks.to_a
   end
 
   def balances
@@ -168,21 +178,15 @@ class BelowThresholdFicaContext
       .includes(:historical_ytd_bridge).order(:id).to_a
   end
 
-  def unresolved_disposition?(item)
-    item.legacy_disposition.present? && item.legacy_disposition.reason != PayrollItemLegacyDisposition::REASON
+  # Direct evidence-tool callers retain their existing diagnostic output.
+  def review_note(include_imported_history:)
+    reasons = subjects.disputes.flat_map(&:note_reasons)
+    reasons << "imported paycheck history" if include_imported_history && imported_paychecks.any?
+    reasons = unverified_legacy_ids.map { |id| "legacy paycheck ##{id} has no verified FICA bases" } if reasons.empty?
+    format_review_note(reasons)
   end
 
-  def review_note(include_imported_history:)
-    reasons = candidates.flat_map do |item|
-      result = []
-      result << "reversed paycheck ##{item.id}" if item.payroll_reversed_at.present?
-      result << "voided pay period ##{item.pay_period_id}" if item.pay_period.voided?
-      result << "unresolved legacy disposition for paycheck ##{item.id}" if unresolved_disposition?(item)
-      result
-    end
-    reasons << "imported paycheck history" if include_imported_history && imported_paychecks.any?
-    # Only when nothing else qualifies, so notes on already-approved runs rebuild identically.
-    reasons = unverified_legacy_ids.map { |id| "legacy paycheck ##{id} has no verified FICA bases" } if reasons.empty?
+  def format_review_note(reasons)
     "Prior-period payroll history needs accountant review: #{reasons.uniq.join('; ')}. " \
       "This paycheck's Social Security/Medicare is unaffected because the conservative annual wage bounds are within the limits. " \
       "Historical tax and filing review remains open."

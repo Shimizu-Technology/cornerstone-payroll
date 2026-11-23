@@ -49,9 +49,9 @@ module YearEnd
         explanation: "Tips were received in more than two occupations. The W-2 shows two codes, as the IRS allows, and always includes 000 when any tips came from a nonqualifying occupation. Confirm these are right."
       },
       "legacy_tax_bases" => {
-        kind: "acknowledge",
+        kind: "history_review",
         title: "Older payroll without stored taxable wages",
-        explanation: "Some payroll rows were committed before taxable wage bases were stored, so their W-2 amounts use a compatibility calculation. Confirm the reconciliation above ties out for these employees."
+        explanation: "Some payroll rows were committed before taxable wage bases were stored, so their W-2 amounts use a compatibility calculation. Confirm the reconciliation for these employees in Payroll history review."
       },
       "legacy_employer_benefit_unclassified" => {
         kind: "acknowledge",
@@ -253,7 +253,13 @@ module YearEnd
       definition = DEFINITIONS.fetch(code)
       digest = self.class.digest_for(code, evidence.except(:names, :messages))
       acknowledgement = acknowledgements[code]
-      current = acknowledgement && acknowledgement.warning_digest == digest
+      ids = evidence[:employees].map(&:first)
+      history_reviews = legacy_basis_reviews(ids) if definition[:kind] == "history_review"
+      current = if history_reviews
+        ids.all? { |id| history_reviews.key?(id) }
+      else
+        acknowledgement && acknowledgement.warning_digest == digest
+      end
       status = if definition[:kind] == "blocker"
         "blocked"
       elsif current
@@ -261,7 +267,6 @@ module YearEnd
       else
         "needs_review"
       end
-      ids = evidence[:employees].map(&:first)
 
       {
         code: code,
@@ -273,11 +278,21 @@ module YearEnd
         period: evidence[:period],
         details: evidence[:messages] || [],
         employees: ids.map do |id|
-          { employee_id: id, name: evidence[:names][id], edit_path: "/companies/#{company.id}/employees/#{id}" }
+          resolution = history_reviews&.[](id)
+          { employee_id: id, name: evidence[:names][id], edit_path: "/companies/#{company.id}/employees/#{id}",
+            history_review: ({ by: resolution.resolved_by.name, at: resolution.resolved_at } if resolution) }.compact
         end,
         acknowledgement: definition[:kind] == "acknowledge" && acknowledgement ? acknowledgement.payload : nil,
         acknowledgement_stale: definition[:kind] == "acknowledge" && acknowledgement.present? && !current
       }
+    end
+
+    def legacy_basis_reviews(employee_ids)
+      sources = PayrollHistoryReview::Sources.new(company: company, year: year, employee_ids: employee_ids)
+      subjects = PayrollHistoryReview::Subjects.new(sources).gaps
+      matches = PayrollHistoryReview::OpenSubjects.new(company: company, year: year).matching_resolutions(subjects)
+      matches.values.select { |item| item.resolution_code.in?([ "legacy_basis_accepted", PayrollHistoryReviewItem::PROVEN_CODE ]) }
+        .index_by(&:employee_id)
     end
 
     def box12_amount(row, code)

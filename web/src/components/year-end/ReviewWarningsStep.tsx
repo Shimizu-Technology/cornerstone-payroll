@@ -95,6 +95,9 @@ function WarningCard({ checklist, warning, onSaved, onRefresh }: {
                 <Link to={`${employee.edit_path}?return_to=${returnTo}`} className="inline-flex min-h-9 items-center font-medium text-primary-700 underline [overflow-wrap:anywhere]">
                   {employee.name ?? `Employee ${employee.employee_id}`}
                 </Link>
+                {employee.history_review && (
+                  <p className="text-xs text-neutral-600">Reviewed by {employee.history_review.by} on {formatGuamDateTimeShort(employee.history_review.at)}</p>
+                )}
               </li>
             ))}
           </ul>
@@ -110,6 +113,11 @@ function WarningCard({ checklist, warning, onSaved, onRefresh }: {
           {warning.acknowledgement_stale ? 'Earlier review' : 'Reviewed'} by {warning.acknowledgement.acknowledged_by.name}
           {warning.acknowledgement.acknowledged_at ? ` on ${formatGuamDateTimeShort(warning.acknowledgement.acknowledged_at)}` : ''}: “{warning.acknowledgement.note}”
         </p>
+      )}
+      {warning.kind === 'history_review' && warning.status !== 'reviewed' && (
+        <a href="#payroll-history-review" className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-primary-700 underline">
+          Go to Payroll history review
+        </a>
       )}
       {warning.kind === 'acknowledge' && warning.status !== 'reviewed' && (
         checklist.permissions.can_acknowledge
