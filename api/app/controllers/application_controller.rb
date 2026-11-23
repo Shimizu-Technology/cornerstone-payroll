@@ -173,7 +173,9 @@ class ApplicationController < ActionController::API
     id = value.to_i
     return if id > 2**63 - 1
 
-    id if Company.active.exists?(id) && current_user.can_access_company?(id)
+    # Inactive clients stay reachable to the people allowed to open them, so
+    # year-end can still file for a client that stopped mid-year.
+    id if Company.exists?(id) && current_user.can_access_company?(id)
   end
 
   # Resolve the active company for this request.
