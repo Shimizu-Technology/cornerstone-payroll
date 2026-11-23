@@ -15,9 +15,9 @@ export function FicaHistoryReviewNotice({ payPeriod, showDisclosure = false }: {
 
   return (
     <div className="text-sm text-neutral-700">
-      <div className="flex flex-wrap items-center gap-x-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <p>{count} payroll history {count === 1 ? 'item' : 'items'} awaiting accountant review. This payroll isn't affected.</p>
-        {showDisclosure && <Button type="button" variant="ghost" size="sm" className="min-h-11 underline underline-offset-4"
+        {showDisclosure && <Button type="button" variant="ghost" size="sm" className="min-h-11 px-0 underline underline-offset-4"
           aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}>
           {expanded ? 'Hide details' : 'Show details'}
         </Button>}

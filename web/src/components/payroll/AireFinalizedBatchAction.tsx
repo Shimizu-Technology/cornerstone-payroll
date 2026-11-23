@@ -172,7 +172,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
                       ? 'This payroll was recorded before Cornerstone tracked payment line by line. Its checks show who was paid and when; the original hours are preserved.'
                       : 'Check preparation and delivery are reported back to time tracking automatically. Delivery or settlement establishes paid status.'
                 : `${nextAction} Adding the batch records hours in payroll; it does not mark anyone paid.`
-              : 'Held entries stay visible in time tracking and Cornerstone and are not added to this payroll.'}
+              : 'Entries outside this payroll stay visible in time tracking and Cornerstone and are not added to it.'}
           </p>
         </div>
       </CardContent>

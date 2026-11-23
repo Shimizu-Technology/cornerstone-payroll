@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { useEffect, useMemo, useRef } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { payRunPath } from '@/lib/routes';
-import { exclusionCountMessages, payRunExclusionCounts } from '@/lib/time-tracking-exclusions';
+import { exclusionCountMessages, payRunExclusionCounts, payRunUnclassifiedExclusionCount } from '@/lib/time-tracking-exclusions';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { PayRunRecordHeader } from './pay-periods/pay-run/PayRunRecordHeader';
 import { usePayRunController } from './pay-periods/pay-run/usePayRunController';
@@ -93,6 +93,7 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
   const { payPeriod, companyId, returnTo } = sections.processing;
   const route = (tab: 'work' | 'checks' | 'reports' | 'activity', hash = '') => `${payRunPath(companyId, payPeriod.id, tab, { returnTo })}${hash}`;
   const exclusions = exclusionCountMessages(payRunExclusionCounts(payPeriod.time_tracking));
+  const unclassifiedExclusions = payRunUnclassifiedExclusionCount(payPeriod.time_tracking);
   const preparedChecks = sections.processing.payrollItems.filter(item => !item.voided && item.effective_payment_delivery_method !== 'direct_deposit' && Number(item.net_pay) > 0 && ['prepared', 'printed'].includes(item.check_status || '')).length;
   const attention = [
     ...(payPeriod.intake_stale_at ? [{ text: 'Source changed · review required', href: route('work', '#payroll-blockers') }] : []),
@@ -103,6 +104,7 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
     ...(sections.feedback.calculationFailures.length ? [{ text: `${sections.feedback.calculationFailures.length} calculation error${sections.feedback.calculationFailures.length === 1 ? '' : 's'}`, href: route('work', '#payroll-calculation-issues') }] : []),
     ...(payPeriod.status === 'approved' && payPeriod.client_payroll_approval_required && payPeriod.payroll_review?.status !== 'approved' ? [{ text: payPeriod.payroll_review?.status === 'changes_requested' ? 'Client requested changes' : 'Client approval pending', href: route('work', '#payroll-commit') }] : []),
     ...(exclusions.action ? [{ text: exclusions.action, href: route('work', '#time-tracking-sync') }] : []),
+    ...(unclassifiedExclusions ? [{ text: 'Review entries outside this payroll', href: route('work', '#time-tracking-sync') }] : []),
     ...(payPeriod.status === 'committed' && payPeriod.correction_status !== 'voided' ? [{ text: preparedChecks ? `${preparedChecks} check${preparedChecks === 1 ? '' : 's'} prepared, not issued` : 'Review check preparation and payment delivery', href: route('checks') }] : []),
     ...(payPeriod.parallel_run ? [{ text: 'Parallel comparison · cannot commit', href: route('activity') }] : []),
   ];
