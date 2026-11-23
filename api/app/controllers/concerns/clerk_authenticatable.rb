@@ -6,8 +6,10 @@
 module ClerkAuthenticatable
   extend ActiveSupport::Concern
 
+  include MfaEnforceable
+
   included do
-    before_action :authenticate_user!, unless: :auth_disabled?
+    before_action :authenticate_user!, :enforce_mfa!, unless: :auth_disabled?
   end
 
   private
@@ -50,8 +52,13 @@ module ClerkAuthenticatable
       return render_write_maintenance("New Payroll sign-ins are paused during maintenance. Try again shortly using this same sign-in.")
     end
 
-    @current_user ||= TenantScope.as_system(reason: "Bind authorized Clerk invitation") do
-      PayrollInvitation.new.bind_from_metadata(clerk_id, request: request)
+    unless @current_user
+      denied_user = nil
+      @current_user = PayrollInvitation.new.bind_from_metadata(clerk_id, request: request) do |candidate|
+        denied_user = candidate if mfa_verification_required_for?(candidate)
+        !denied_user
+      end
+      return deny_mfa!(denied_user) if denied_user
     end
     unless @current_user
       render json: { error: "This Clerk account is not linked to Payroll. Use your invitation or contact your administrator.",

@@ -5,6 +5,10 @@ require "rails_helper"
 RSpec.describe "Company RLS", :rls do
   self.use_transactional_tests = false
 
+  before(:each, :raises_without_context) do
+    allow(RlsContextGuard).to receive(:mode).and_return("raise")
+  end
+
   let(:pool) { ActiveRecord::Base.connection_pool }
 
   it "classifies every primary table exactly once and stages every registered policy" do
@@ -37,12 +41,12 @@ RSpec.describe "Company RLS", :rls do
     end
   end
 
-  it "rejects a query on an empty protected table" do
+  it "rejects a query on an empty protected table", :raises_without_context do
     TenantScope.as_system(reason: "Check fixture precondition") { expect(Department.count).to eq(0) }
     expect { Department.limit(1).load }.to raise_error(TenantScope::MissingContextError, /departments/)
   end
 
-  it "rejects a missing key even when the table has a row" do
+  it "rejects a missing key even when the table has a row", :raises_without_context do
     pool.with_connection do |connection|
       connection.transaction do
         TenantScope.as_system(reason: "Create a protected fixture") { create(:department) }
@@ -52,7 +56,7 @@ RSpec.describe "Company RLS", :rls do
     end
   end
 
-  it "rejects a payroll service query without context" do
+  it "rejects a payroll service query without context", :raises_without_context do
     expect { ContractorEinEncryption.plaintext_ids }
       .to raise_error(TenantScope::MissingContextError, /employees/)
   end
@@ -63,7 +67,7 @@ RSpec.describe "Company RLS", :rls do
     end
   end
 
-  it "rejects raw writes before PostgreSQL executes them" do
+  it "rejects raw writes before PostgreSQL executes them", :raises_without_context do
     pool.with_connection do |connection|
       expect do
         connection.execute("WITH deleted AS (DELETE FROM public.departments RETURNING id) SELECT id FROM deleted")

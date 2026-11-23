@@ -11,7 +11,7 @@ module Api
           return render json: { error: "Not authenticated" }, status: :unauthorized
         end
 
-        render json: {
+        payload = {
           user: {
             id: current_user.id,
             email: current_user.email,
@@ -35,12 +35,23 @@ module Api
           },
           features: current_company ? CompanyFeatures.for(current_company).summary : nil
         }
+        if @clerk_token_payload && MfaPolicy.enabled?
+          payload[:mfa_required] = MfaPolicy.required_for?(user: current_user)
+          payload[:mfa_verified] = MfaPolicy.verified_second_factor?(@clerk_token_payload)
+        end
+        render json: payload
       end
 
       private
 
       def rls_system_reason
         "Resolve linked employee accounts for authenticated user"
+      end
+
+      def render_mfa_required
+        return super unless action_name == "me" && (request.get? || request.head?)
+
+        render json: { mfa_required: true, mfa_verified: false }
       end
 
       def allow_client_subdomain_token?

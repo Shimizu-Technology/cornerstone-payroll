@@ -39,7 +39,7 @@ The global reference and framework tables in the registry carry no `company_id`.
 
 ## HTTP controllers
 
-Paths in this table are relative to `api/app/controllers/`. The base callbacks cover record lookups, the action, serializers, audit callbacks and action-level exception handlers. The portal failure audit uses a narrow system block because it can run before authentication or after a company scope has closed. Streamed CSV exports open a system scope for each authorized batch. The authentication step uses exempt identity tables and a narrow system block for invitation binding and nullable authentication audit writes.
+Paths in this table are relative to `api/app/controllers/`. The base callbacks cover record lookups, the action, serializers, audit callbacks and action-level exception handlers. The portal failure audit uses a narrow system block because it can run before authentication or after a company scope has closed. Streamed CSV exports open a system scope for each authorized batch. Clerk authentication and MFA run before business scoping. An accepted invitation checks MFA against the locked Payroll user before the system-scoped binding write. MFA denial is an organization security audit written in system mode without opening company scope.
 
 | Controller file | RLS mode |
 | --- | --- |
@@ -157,7 +157,7 @@ Paths in this table are relative to `api/app/controllers/`. The base callbacks c
 | `api/v1/client/portal_threads_controller.rb` | `company` via base scope. |
 | `api/v1/client/reports_controller.rb` | `company` via base scope. |
 | `api/v1/companies_controller.rb` | `system` for counts across accessible companies. |
-| `api/v1/employee_portal/base_controller.rb` | `system` for verified user’s link lookup. `company` from the authorized link. |
+| `api/v1/employee_portal/base_controller.rb` | `system` for the verified user’s link lookup after MFA. `company` from the authorized link. |
 | `api/v1/employee_portal/context_controller.rb` | `company`. |
 | `api/v1/finance/access_controller.rb` | `system` after finance book-token checks, including org audit. |
 | `api/v1/form_500s_controller.rb` | `company` for the selected and authorized payroll period. |
@@ -173,7 +173,7 @@ Paths in this table are relative to `api/app/controllers/`. The base callbacks c
 
 | Caller | RLS mode |
 | --- | --- |
-| `ApplicationCable::Connection` | `exempt_tables_only` for ticket consumption and authorization. |
+| `ApplicationCable::Connection` | `exempt_tables_only` for ticket consumption and authorization. `system` for a denied MFA attempt’s organization audit. |
 | `ApplicationCable::Channel` | `exempt_tables_only` for base connection accessors. |
 | `ClientPortalThreadChannel` | `exempt_tables_only` for subscribe and delivery rechecks. Broadcast serialization uses `company` from the thread, or an existing `system` scope for a batch. |
 | `ClientInboxChannel` | `exempt_tables_only` for organization membership and a data-free invalidation stream. |
@@ -254,7 +254,7 @@ Paths are relative to `api/app/jobs/`. The scope covers Active Job deserializati
 | `AirePayrollEvents::Receiver` | `system` for source authentication, `company` for the authenticated event. |
 | `StagingCloneContainment` | `system` for quarantine, configuration and validation of a contained staging clone. `exempt_tables_only` for queue schema probes. The clone manifest is staging infrastructure. |
 | `EncryptedDataReadiness`, `ProductionReadiness`, `StagingReadiness` | `system` for across-company encrypted reads and integration destinations. `exempt_tables_only` for dependency probes. |
-| `PayrollAccess::SessionRevoker`, `CableTicketService` | `exempt_tables_only` for revocation and connection handshakes. |
+| `PayrollAccess::SessionRevoker`, `CableTicketService` | `exempt_tables_only` for revocation and connection handshakes. Ticket denial audits use `system` via `MfaPolicy`. |
 | M3-4 compensation writers, wage-rate versions and history reader | `company` during staff/client payroll setup, with existing `system` scope for authorized clone and reconciliation flows. |
 | Client operating profile updates and parity checks | `company` for edits and lookups. `system` for operator parity checks and registry discovery. |
 | `PayrollHistoryReview` detection and resolution | `company` for admin review and the operator detector. `system` for grouped year-end reads. |

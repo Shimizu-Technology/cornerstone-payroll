@@ -110,6 +110,22 @@ RSpec.describe "Clerk Authentication", type: :request do
         user_id: user.id, record_id: user.id, event_category: "security")
     end
 
+    it "checks MFA before binding an accepted invitation or opening a business scope" do
+      issue_pending_invite!
+      allow(MfaPolicy).to receive(:enabled?).and_return(true)
+      expect(TenantScope).not_to receive(:with_company)
+      allow(TenantScope).to receive(:as_system).and_call_original
+      expect(TenantScope).not_to receive(:as_system).with(reason: "Bind authorized Clerk invitation")
+      expect(TenantScope).not_to receive(:as_system).with(reason: "Resolve linked employee accounts for authenticated user")
+
+      expect { authenticate }.to change(AuditLog.where(action: "authentication#mfa_required_denied"), :count).by(1)
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body).to eq("mfa_required" => true, "mfa_verified" => false)
+      expect(user.reload).to have_attributes(clerk_id: "pending_synthetic", invitation_status: "pending",
+        invite_nonce_digest: Digest::SHA256.hexdigest(nonce))
+      expect(AuditLog.where(action: "authentication#clerk_identity_bound")).to be_empty
+    end
+
     it "leaves the invitation intact during maintenance and binds the same sign-in afterward" do
       issue_pending_invite!
       allow(WriteMaintenance).to receive(:enabled?).and_return(true)
