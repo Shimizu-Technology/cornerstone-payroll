@@ -30,6 +30,16 @@ export function payRunExclusionCounts(timeTracking: PayPeriod['time_tracking']):
   return counts;
 }
 
+// Older payloads carry only totals; their entries can't be classified, so
+// the header still points staff at them instead of hiding them.
+export function payRunUnclassifiedExclusionCount(timeTracking: PayPeriod['time_tracking']) {
+  return (timeTracking?.linked_source_records ?? timeTracking?.linked_aire_records ?? [])
+    .reduce((sum, record) => {
+      const held = record.payable_line_status?.held;
+      return held && !held.by_category ? sum + held.entry_count : sum;
+    }, 0);
+}
+
 export function countExcludedEntries(entries: { exclusion_category?: TimeTrackingExclusionCategory; held_total_hours: number }[]): TimeTrackingExclusionCounts {
   const counts: TimeTrackingExclusionCounts = {};
   for (const entry of entries) {
