@@ -441,10 +441,10 @@ module TimeTracking
         "category_configuration" => checksum(TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).map(&:attributes)),
         "company" => checksum(@company.attributes),
         "mappings" => @saved_mapping_fingerprint,
-        "employees" => checksum(@employees.map { |employee| [ employee.attributes, employee.employee_wage_rates.sort_by(&:id).map(&:attributes) ] }),
+        "employees" => checksum(@employees.map { |employee| [ employee.attributes, employee.employee_wage_rates.sort_by(&:id).map { |row| row.attributes.except("company_id") } ] }),
         "runs" => @company.pay_periods.where(id: run_ids).order(:id).to_h do |run|
           items = run.payroll_items.includes(:payroll_item_earnings).order(:id)
-          [ run.id.to_s, checksum([ run.attributes, items.map { |item| [ item.attributes, item.payroll_item_earnings.sort_by(&:id).map(&:attributes) ] } ]) ]
+          [ run.id.to_s, checksum([ run.attributes, items.map { |item| [ item.attributes, item.payroll_item_earnings.sort_by(&:id).map { |row| row.attributes.except("company_id") } ] } ]) ]
         end }
     end
 

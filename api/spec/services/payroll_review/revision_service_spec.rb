@@ -59,6 +59,21 @@ RSpec.describe PayrollReview::RevisionService do
     )
   end
 
+  it "keeps the existing payroll review revision valid when child company ownership is backfilled" do
+    type = DeductionType.create!(company: company, name: "Test deduction", category: "post_tax")
+    deduction = payroll_item.payroll_item_deductions.create!(
+      deduction_type: type, category: "post_tax", label: "Test deduction", amount: 20
+    )
+    deduction.update_column(:company_id, nil)
+    revision = service.issue!
+    snapshot = revision.calculation_snapshot.dig("payroll_items", 0, "payroll_item_deductions", 0)
+    expect(snapshot).not_to have_key("company_id")
+
+    PayrollChildCompanyBackfill.new(connection: ApplicationRecord.connection).backfill { |_, _| }
+    expect(deduction.reload.company_id).to eq(company.id)
+    expect(service.issue!).to eq(revision)
+  end
+
   it "locks company before period and keeps calculation separate from publication" do
     company.update!(client_payroll_approval_required: false)
     pay_period.company # cache the disabled setting on this instance

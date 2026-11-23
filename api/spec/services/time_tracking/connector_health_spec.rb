@@ -126,7 +126,8 @@ RSpec.describe TimeTracking::ConnectorHealth do
     expect(report.dig(:receipts, :entry)).to include(recorded_count: 1, pending_count: 1, oldest_pending_age_seconds: 3600)
     ack.mark_delivered!(at: now)
     expect(report.dig(:receipts, :entry)).to include(recorded_count: 1, pending_count: 0, last_success_at: now)
-    ack.update_columns(payroll_item_id: create(:payroll_item).id)
+    other_item = create(:payroll_item)
+    ack.update_columns(payroll_item_id: other_item.id, company_id: other_item.company_id)
     expect(report.dig(:receipts, :entry, :recorded_count)).to eq(0)
   end
 

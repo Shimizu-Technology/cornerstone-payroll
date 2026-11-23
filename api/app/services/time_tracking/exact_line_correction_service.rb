@@ -239,7 +239,7 @@ module TimeTracking
         line: context[:line], original: context[:original].attributes, original_period: context[:original].pay_period.attributes,
         original_batches_and_allocations: context[:original_proof], original_payment: context[:payment_proof],
         financial_succession: context[:target_proof],
-        employee: context[:original].employee.attributes, wage_rates: context[:original].employee.employee_wage_rates.order(:id).map(&:attributes),
+        employee: context[:original].employee.attributes, wage_rates: context[:original].employee.employee_wage_rates.order(:id).map { |row| row.attributes.except("company_id") },
         money: money, pay_date: @import.pay_period.pay_date.to_s }.deep_stringify_keys)
     end
 

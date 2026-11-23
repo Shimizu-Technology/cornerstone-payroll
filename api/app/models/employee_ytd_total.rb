@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class EmployeeYtdTotal < ApplicationRecord
+  include CompanyFromParent
   belongs_to :employee
+  inherit_company_from :employee
 
   validates :year, presence: true
   validates :year, uniqueness: { scope: :employee_id }

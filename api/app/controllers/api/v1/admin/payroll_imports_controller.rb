@@ -552,6 +552,7 @@ module Api
           return import_record if import_record.persisted? && package_result[:duplicate]
           import_record.assign_attributes(
             pay_period: @pay_period,
+            company_id: @pay_period.company_id,
             status: "previewed",
             pdf_filename: retained_filename(source_package, "revel_hours") || pdf_file&.original_filename,
             excel_filename: retained_filename(source_package, "supplemental_workbook") || excel_file&.original_filename,

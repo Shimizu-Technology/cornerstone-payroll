@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 class PayrollImportRecord < ApplicationRecord
+  include CompanyFromParent
   self.table_name = "payroll_imports"
 
   belongs_to :pay_period
+  inherit_company_from :pay_period
   belongs_to :payroll_intake_session, optional: true
   has_many :submission_imports, class_name: "PayrollSubmissionImport", foreign_key: :payroll_import_id, dependent: :restrict_with_error
   has_many :payroll_submissions, through: :submission_imports

@@ -4,9 +4,11 @@
 # before/after snapshot of just the fields that actually changed plus optional
 # user-supplied context. Records are immutable once written.
 class NonEmployeeCheckEdit < ApplicationRecord
+  include CompanyFromParent
   self.inheritance_column = nil
 
   belongs_to :non_employee_check
+  inherit_company_from :non_employee_check
   belongs_to :edited_by, class_name: "User", optional: true
 
   validates :before, presence: true

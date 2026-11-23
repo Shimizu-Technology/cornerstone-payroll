@@ -1,12 +1,14 @@
 # frozen_string_literal: true
 
 class AirePayrollEntryAcknowledgement < ApplicationRecord
+  include CompanyFromParent
   LINE_CONTRACT_VERSION = "2.0"
   STATUSES = %w[imported committed payment_prepared payment_issued payment_failed payment_voided payment_cancelled].freeze
   REDISPATCH_AFTER = 30.minutes
 
   belongs_to :time_tracking_import
   belongs_to :payroll_item
+  inherit_company_from :payroll_item
   belongs_to :check_event, optional: true
   belongs_to :financial_correction_link, class_name: "TimeTrackingFinancialCorrectionLink", optional: true
 

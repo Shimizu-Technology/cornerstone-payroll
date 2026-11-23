@@ -269,6 +269,7 @@ class PayrollCalculator
       next if amount.zero?
 
       payroll_item.payroll_item_deductions.build(
+        company_id: pay_period.company_id,
         deduction_type: dt,
         employee_loan: loan,
         loan_schedule_snapshot: loan ? loan_schedule_snapshot(loan, default: true) : {},
@@ -365,6 +366,7 @@ class PayrollCalculator
       next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
 
       deduction = payroll_item.payroll_item_deductions.build(
+        company_id: pay_period.company_id,
         deduction_type: payroll_field_mirror_type(entry, "employer_contribution"), amount: entry.amount,
         category: "employer_contribution", label: entry.label, reporting_group: entry.reporting_group
       )
@@ -381,6 +383,7 @@ class PayrollCalculator
       category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
       deduction_type = payroll_field_mirror_type(entry, category)
       deduction = payroll_item.payroll_item_deductions.build(
+        company_id: pay_period.company_id,
         deduction_type: deduction_type,
         amount: entry.amount,
         category: category,
@@ -422,7 +425,7 @@ class PayrollCalculator
       unless type.active? && type.post_tax? && type.loan?
         raise ArgumentError, "#{loan.name}: linked loan deduction must be active and post-tax"
       end
-      payroll_item.payroll_item_deductions.build(deduction_type: type, employee_loan: loan,
+      payroll_item.payroll_item_deductions.build(company_id: pay_period.company_id, deduction_type: type, employee_loan: loan,
         amount: amount, category: "post_tax", label: loan.name,
         loan_schedule_snapshot: loan_schedule_snapshot(loan, default: false))
     end
@@ -633,6 +636,7 @@ class PayrollCalculator
 
     # Employer contributions don't need a DeductionType row — use a virtual record
     payroll_item.payroll_item_deductions.build(
+      company_id: pay_period.company_id,
       deduction_type_id: find_or_create_employer_deduction_type(label, sub_category: sub_category, reporting_group: normalized_group).id,
       amount: amount,
       category: "employer_contribution",

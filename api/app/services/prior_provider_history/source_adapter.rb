@@ -61,7 +61,7 @@ module PriorProviderHistory
     # Child writes acquire the same parent lock as conversion.
     def self.digest(period)
       rows = period.payroll_items.order(:id).map do |item|
-        [ item.attributes, item.payroll_item_deductions.order(:id).map(&:attributes), item.payroll_item_field_entries.order(:id).map(&:attributes) ]
+        [ item.attributes, item.payroll_item_deductions.order(:id).map { |row| row.attributes.except("company_id") }, item.payroll_item_field_entries.order(:id).map { |row| row.attributes.except("company_id") } ]
       end
       Digest::SHA256.hexdigest(JSON.generate(QuickbooksHistory::CanonicalJson.normalize([ period.attributes, rows ])))
     end

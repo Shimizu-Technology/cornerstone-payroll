@@ -1,5 +1,7 @@
 class PunchEntry < ApplicationRecord
+  include CompanyFromParent
   belongs_to :timecard
+  inherit_company_from :timecard
 
   enum :review_state, { unresolved: 0, approved: 1 }
 

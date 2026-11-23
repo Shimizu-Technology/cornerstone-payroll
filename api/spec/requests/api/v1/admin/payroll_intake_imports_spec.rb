@@ -331,6 +331,9 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
 
   describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports/:id/apply" do
     it "applies reviewed Spike rows as taxable reported tips and paid-out tip offsets" do
+      %w[payroll_intake_rows payroll_intake_documents].each do |table|
+        ApplicationRecord.connection.execute("ALTER TABLE #{table} DISABLE TRIGGER fill_#{table}_company_id")
+      end
       post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
       import = JSON.parse(response.body).fetch("import")
 
@@ -345,6 +348,9 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(json.dig("results", "applied").length).to eq(2)
       expect(json.dig("pay_period", "status")).to eq("calculated")
 
+      session = pay_period.payroll_intake_sessions.sole
+      expect(session.rows.pluck(:company_id)).to eq([ pay_period.company_id ] * 2)
+      expect(session.documents.sole.company_id).to eq(pay_period.company_id)
       alice_item = pay_period.payroll_items.find_by!(employee_id: alice.id)
       expect(alice_item.import_source).to eq("spike_email")
       expect(alice_item.hours_worked.to_f).to eq(78.0)

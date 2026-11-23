@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class PayrollEntryResolution < ApplicationRecord
+  include CompanyFromParent
   belongs_to :pay_period
+  inherit_company_from :pay_period
   belongs_to :employee
   belongs_to :payroll_standing_change, optional: true
   validates :note, length: { maximum: 500 }

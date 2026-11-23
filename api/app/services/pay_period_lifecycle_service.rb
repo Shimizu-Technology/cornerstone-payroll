@@ -374,6 +374,7 @@ class PayPeriodLifecycleService
       assigned_items.map do |item_id, check_number|
         {
           payroll_item_id: item_id,
+          company_id: pay_period.company_id,
           user_id: actor_id,
           event_type: "assigned",
           check_number: check_number,

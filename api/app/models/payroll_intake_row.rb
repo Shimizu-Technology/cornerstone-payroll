@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
 class PayrollIntakeRow < ApplicationRecord
+  include CompanyFromParent
   STATUSES = %w[pending ready needs_review applied skipped failed].freeze
   DISPOSITIONS = %w[pending included excluded deferred informational].freeze
 
   belongs_to :payroll_intake_session, inverse_of: :rows
+  inherit_company_from :payroll_intake_session
   belongs_to :employee, optional: true
   belongs_to :applied_payroll_item, class_name: "PayrollItem", optional: true
   belongs_to :dispositioned_by, class_name: "User", optional: true
