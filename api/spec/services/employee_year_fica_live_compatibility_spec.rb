@@ -65,13 +65,13 @@ RSpec.describe EmployeeYearFicaContext do
     calls = 0
     allow_any_instance_of(described_class).to receive(:fingerprint_for).and_wrap_original do |method, *args|
       calls += 1
-      raise "Historical FICA replay exceeded its fingerprint budget" if calls > 2 * items.size
+      raise "Historical FICA replay exceeded its fingerprint budget" if calls > items.size
 
       method.call(*args)
     end
     result = PayrollFicaLegacyRecovery.new(company: company, year: 2024).inventory
     expect(result[:employee_years].sole[:status]).to eq("ready")
     expect(result[:counts]).to include(proven: 26, recoverable: 0)
-    expect(calls).to eq(2 * items.size)
+    expect(calls).to eq(items.size)
   end
 end
