@@ -5,7 +5,7 @@ module CompanyFromParent
 
   class_methods do
     def inherit_company_from(parent_association)
-      before_create do
+      before_save do
         self.company_id ||= public_send(parent_association)&.company_id
       end
     end

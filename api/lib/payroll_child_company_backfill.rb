@@ -4,6 +4,7 @@ require_relative "../db/migrate/support/m3_7_child_companies"
 
 class PayrollChildCompanyBackfill
   DEFAULT_BATCH_SIZE = 1_000
+  MAX_BATCH_RETRIES = 2
 
   def initialize(connection:, batch_size: DEFAULT_BATCH_SIZE)
     @connection = connection
@@ -12,9 +13,10 @@ class PayrollChildCompanyBackfill
   end
 
   def backfill
-    M3_7ChildCompanies::CHILDREN.each do |table, (key, parent)|
+    M3_7ChildCompanies::CHILDREN.to_h do |table, (key, parent)|
       updated = backfill_table(table, key, parent)
-      yield table, updated
+      yield table, updated if block_given?
+      [ table, updated ]
     end
   end
 
@@ -46,8 +48,18 @@ class PayrollChildCompanyBackfill
     cursor = nil
     updated = 0
     loop do
-      after_cursor = "AND id > #{cursor}" if cursor
-      cursor, count = @connection.transaction do
+      cursor, count = apply_batch(table, key, parent, cursor, upper_id)
+      updated += count
+      break unless cursor
+    end
+    updated
+  end
+
+  def apply_batch(table, key, parent, cursor, upper_id)
+    retries = 0
+    after_cursor = "AND id > #{cursor}" if cursor
+    begin
+      @connection.transaction(requires_new: true) do
         @connection.execute("SET LOCAL lock_timeout = '5s'")
         @connection.exec_query(<<~SQL).rows.first
           WITH batch AS (
@@ -64,9 +76,12 @@ class PayrollChildCompanyBackfill
           SELECT (SELECT MAX(id) FROM batch), (SELECT COUNT(*) FROM updated)
         SQL
       end
-      updated += count
-      break unless cursor
+    rescue ActiveRecord::Deadlocked, ActiveRecord::LockWaitTimeout, PG::TRDeadlockDetected, PG::LockNotAvailable
+      raise if retries >= MAX_BATCH_RETRIES
+
+      retries += 1
+      sleep(0.05 * retries)
+      retry
     end
-    updated
   end
 end

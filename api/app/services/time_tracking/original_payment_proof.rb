@@ -14,7 +14,7 @@ module TimeTracking
                                      confirmation.valid?
                                    end
         raise ArgumentError, ERROR unless verified
-        return { method: "direct_deposit", confirmation: confirmation.attributes }
+        return { method: "direct_deposit", confirmation: confirmation.attributes.except("company_id") }
       end
       raise ArgumentError, ERROR unless item.effective_payment_delivery_method == "paper_check" && item.check_number.present?
       events = item.check_events.where(check_number: item.check_number).order(:created_at, :id).to_a
@@ -25,7 +25,7 @@ module TimeTracking
                                                       head.valid?
                                                     end
       raise ArgumentError, ERROR unless verified && CheckReconciliationStatus.for(item).in?(%w[issued cleared])
-      { method: "paper_check", check_number: item.check_number, events: events.map(&:attributes),
+      { method: "paper_check", check_number: item.check_number, events: events.map { |event| event.attributes.except("company_id") },
         reconciliation: item.check_reconciliation_events.where(check_number: item.check_number).order(:created_at, :id).map(&:attributes) }
     end
   end

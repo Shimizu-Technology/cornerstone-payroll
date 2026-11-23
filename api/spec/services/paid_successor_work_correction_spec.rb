@@ -51,6 +51,31 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     [ period, item ]
   end
 
+  it "fills ownership when accepting a pending legacy link and delivering its outbox row" do
+    _period, current = build_successor
+    connection = ApplicationRecord.connection
+    tables = %i[time_tracking_financial_correction_links aire_payroll_entry_acknowledgements]
+    tables.each do |table|
+      key, parent = M3_7ChildCompanies::CHILDREN.fetch(table)
+      connection.remove_column table, :company_id
+      connection.add_column table, :company_id, :bigint
+      connection.add_foreign_key table, parent, column: [ key, :company_id ], primary_key: %i[id company_id],
+        name: M3_7ChildCompanies.foreign_key_name(table)
+    end
+    connection.clear_cache!
+    link = current.time_tracking_financial_correction_links.sole
+    acknowledgement = link.aire_payroll_entry_acknowledgements.sole
+    expect(link).to have_attributes(company_id: nil, accepted_at: nil)
+    expect(acknowledgement).to have_attributes(company_id: nil, delivered_at: nil)
+
+    accept_successor(current)
+
+    expect(link.reload.company_id).to eq(company.id)
+    expect(link).to be_accepted
+    expect(acknowledgement.reload.company_id).to eq(company.id)
+    expect(acknowledgement.delivered_at).to be_present
+  end
+
   it "records once against the paid successor and preserves all settled checks, original work and ownership history" do
     period, current = paid_successor
     frozen = [ original_item.reload.attributes, original_period.reload.attributes, current.attributes,
@@ -253,6 +278,69 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     expect(current.reload.net_pay).to eq(92.35)
     expect(disposition.corrective_payroll_item.net_pay).to eq(-23.09)
     expect(disposition.corrective_payroll_item.direct_deposit_payment_confirmation).to be_nil
+  end
+
+  %w[paper_check direct_deposit].each do |method|
+    it "keeps a pre-expand #{method} disposition verifiable after adding and backfilling child ownership" do
+      _period, current = build_successor
+      accept_successor(current)
+      payment_table = if method == "paper_check"
+        issue_successor(current)
+        "check_events"
+      else
+        current.update!(payment_delivery_method: "direct_deposit", check_number: nil)
+        current.create_direct_deposit_payment_confirmation!(user: actor, settled_on: PayrollBusinessClock.today,
+          bank_reference: "SYNTHETIC-LEGACY-BANK")
+        "direct_deposit_payment_confirmations"
+      end
+      connection = ApplicationRecord.connection
+      tables = [ payment_table, "time_tracking_financial_correction_links", "aire_payroll_entry_acknowledgements" ]
+      models = [ method == "paper_check" ? CheckEvent : DirectDepositPaymentConfirmation,
+        TimeTrackingFinancialCorrectionLink, AirePayrollEntryAcknowledgement ]
+      retained = models.to_h do |model|
+        [ model, model.where(payroll_item: current).order(:id).map { |row| row.attributes.except("company_id") } ]
+      end
+      tables.each { |table| connection.execute("ALTER TABLE #{table} DROP COLUMN company_id") }
+      connection.clear_cache!
+      preview = service.preview
+      disposition = confirm(preview)
+      corrective = disposition.corrective_payroll_item
+      snapshot = corrective.calculation_context_snapshot.deep_dup
+      evidence = snapshot.fetch("corrective_paycheck").fetch("source_accounting_target")
+      payment = evidence.fetch("current_payment")
+      payment_rows = method == "paper_check" ? payment.fetch("events") : [ payment.fetch("confirmation") ]
+      link_rows = evidence.fetch("financial_links") + evidence.fetch("financial_proofs").map { |proof| proof.fetch("link") }
+      (payment_rows + link_rows).each { |row| expect(row).not_to have_key("company_id") }
+
+      tables.each do |table|
+        key, parent = M3_7ChildCompanies::CHILDREN.fetch(table.to_sym)
+        connection.add_column table, :company_id, :bigint
+        connection.add_foreign_key table, parent, column: [ key, :company_id ], primary_key: %i[id company_id],
+          name: M3_7ChildCompanies.foreign_key_name(table)
+      end
+      connection.clear_cache!
+      expect(disposition.reload.verified!).to eq(disposition)
+      counts = PayrollChildCompanyBackfill.new(connection: connection, batch_size: 1).backfill
+      tables.each { |table| expect(counts.fetch(table.to_sym)).to be_positive }
+      models.each do |model|
+        rows = model.where(payroll_item: current).order(:id)
+        expect(rows.reload.map { |row| row.attributes.except("company_id") }).to eq(retained.fetch(model))
+        expect(rows.pluck(:company_id)).to all(eq(company.id))
+        expect do
+          connection.transaction(requires_new: true) { rows.update_all(company_id: nil) }
+        end.to raise_error(ActiveRecord::StatementInvalid, /append-only|immutable/)
+      end
+      expect(disposition.reload.verified!).to eq(disposition)
+      expect(TimeTracking::CorrectionCoverage.new(next_import).verify_complete!).to be(true)
+      expect(confirm(preview).id).to eq(disposition.id)
+
+      # Also read snapshots written by an expand build before this fix.
+      payment_rows.each { |row| row["company_id"] = nil }
+      link_rows.each { |row| row["company_id"] = company.id }
+      corrective.update_column(:calculation_context_snapshot, snapshot)
+      expect(disposition.reload.verified!).to eq(disposition)
+      expect(corrective.reload.calculation_context_snapshot).to eq(snapshot)
+    end
   end
 
   [ "unconfirmed", "foreign_actor", "future_date", "missing_reference" ].each do |state|
