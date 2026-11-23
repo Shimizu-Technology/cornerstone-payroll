@@ -185,10 +185,21 @@ RSpec.describe DatabasePredeploy do
         "CACHE_DATABASE_URL" => direct_url,
         "QUEUE_DATABASE_URL" => direct_url,
         "CABLE_DATABASE_URL" => direct_url,
+        "RLS_CONTEXT_GUARD_MODE" => "off",
         "PGCONNECT_TIMEOUT" => "10",
         "PGOPTIONS" => include("lock_timeout=10s", "statement_timeout=15min")
       )
     end
+  end
+
+  it "turns the runtime guard off even when a runtime or migration URL is absent" do
+    expect(described_class.new(env: { "RLS_CONTEXT_GUARD_MODE" => "raise" }).migration_environment)
+      .to eq("RLS_CONTEXT_GUARD_MODE" => "off")
+
+    env = { "RLS_CONTEXT_GUARD_MODE" => "log", "RLS_DATABASE_URL" => pooled_url, "MIGRATION_DATABASE_URL" => direct_url }
+    expect(described_class.new(env: env).migration_environment).to include(
+      "RLS_CONTEXT_GUARD_MODE" => "off", "DATABASE_URL" => direct_url
+    )
   end
 
   it "keeps its generated timeouts compatible with staging connection containment" do
@@ -275,6 +286,6 @@ RSpec.describe DatabasePredeploy do
 
     predeploy.run!
 
-    expect(calls).to all(start_with({}, "/app/api/bin/rails"))
+    expect(calls).to all(start_with({ "RLS_CONTEXT_GUARD_MODE" => "off" }, "/app/api/bin/rails"))
   end
 end

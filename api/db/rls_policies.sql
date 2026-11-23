@@ -38,9 +38,9 @@ END;
 $$;
 
 -- The installer calls this temporary function for every registered protected
--- table. The same predicate protects reads, updates, deletes and writes.
+-- table. Shared reference rows have a distinct read policy.
 CREATE OR REPLACE FUNCTION pg_temp.install_company_policy(
-  target_schema text, child_table text, parent_table text DEFAULT NULL, foreign_key text DEFAULT NULL
+  target_schema text, child_table text, parent_table text DEFAULT NULL, foreign_key text DEFAULT NULL, shared_read boolean DEFAULT false
 ) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
   condition text;
@@ -57,9 +57,24 @@ BEGIN
 
   condition := format('current_setting(''app.rls_mode'', true) = ''system'' OR (%s)', condition);
   EXECUTE format('DROP POLICY IF EXISTS company_isolation ON %I.%I', target_schema, child_table);
-  EXECUTE format(
-    'CREATE POLICY company_isolation ON %I.%I USING (%s) WITH CHECK (%s)',
-    target_schema, child_table, condition, condition
-  );
+  EXECUTE format('DROP POLICY IF EXISTS company_select ON %I.%I', target_schema, child_table);
+  EXECUTE format('DROP POLICY IF EXISTS company_insert ON %I.%I', target_schema, child_table);
+  EXECUTE format('DROP POLICY IF EXISTS company_update ON %I.%I', target_schema, child_table);
+  EXECUTE format('DROP POLICY IF EXISTS company_delete ON %I.%I', target_schema, child_table);
+
+  IF shared_read THEN
+    EXECUTE format(
+      'CREATE POLICY company_select ON %I.%I FOR SELECT USING (company_id IS NULL OR (%s))',
+      target_schema, child_table, condition
+    );
+    EXECUTE format('CREATE POLICY company_insert ON %I.%I FOR INSERT WITH CHECK (%s)', target_schema, child_table, condition);
+    EXECUTE format('CREATE POLICY company_update ON %I.%I FOR UPDATE USING (%s) WITH CHECK (%s)', target_schema, child_table, condition, condition);
+    EXECUTE format('CREATE POLICY company_delete ON %I.%I FOR DELETE USING (%s)', target_schema, child_table, condition);
+  ELSE
+    EXECUTE format(
+      'CREATE POLICY company_isolation ON %I.%I USING (%s) WITH CHECK (%s)',
+      target_schema, child_table, condition, condition
+    );
+  END IF;
 END;
 $$;

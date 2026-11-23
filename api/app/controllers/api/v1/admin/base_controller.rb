@@ -189,15 +189,6 @@ module Api
           }, status: :forbidden
         end
 
-        # Staff must stay inside the companies granted by their platform role.
-        def enforce_company_access!
-          return if current_user.nil?
-
-          unless current_user.can_access_company?(current_company_id)
-            render json: { error: "You do not have access to this company" }, status: :forbidden
-          end
-        end
-
         # Backward-compatible alias
         def require_admin_or_manager!
           require_manager_or_admin!

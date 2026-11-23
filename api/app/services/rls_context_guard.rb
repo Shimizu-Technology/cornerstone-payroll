@@ -13,7 +13,7 @@ class RlsContextGuard
   end
 
   def self.check!(connection, sql)
-    return unless enabled?
+    return unless enabled? && connection.pool.db_config&.primary?
     return if TenantScope.current && connection.tenant_settings_active?
 
     # A PostgreSQL parser handles quoted identifiers, joins, CTEs and writes
@@ -32,7 +32,7 @@ class RlsContextGuard
   end
 
   def self.report_missing_context(connection, **details)
-    bypass = connection.pool.db_config.primary? && RlsDatabase.bypass_enabled?(connection)
+    bypass = RlsDatabase.bypass_enabled?(connection)
     report!(**details, bypass: bypass)
     bypass
   end

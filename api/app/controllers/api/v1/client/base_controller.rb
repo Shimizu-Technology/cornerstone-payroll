@@ -12,16 +12,6 @@ module Api
 
         before_action :require_client_portal_access!
         before_action :enforce_company_access!
-
-        private
-
-        def enforce_company_access!
-          return if current_user.nil?
-
-          unless current_user.can_access_company?(current_company_id)
-            render json: { error: "You do not have access to this company" }, status: :forbidden
-          end
-        end
       end
     end
   end

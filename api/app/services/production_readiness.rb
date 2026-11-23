@@ -69,7 +69,9 @@ class ProductionReadiness
     encryption_credentials: Rails.application.credentials,
     encrypted_data_probe: -> { EncryptedDataReadiness.verify! },
     tax_configuration_valid: -> { AnnualTaxConfig.official_2026_configuration? },
-    tax_year_readiness: -> { TaxYearReadiness.new.as_json },
+    tax_year_readiness: -> {
+      TenantScope.as_system(reason: "Check tax table verification across open pay periods") { TaxYearReadiness.new.as_json }
+    },
     http_get: nil
   )
     @env = env

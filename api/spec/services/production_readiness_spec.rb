@@ -135,6 +135,31 @@ RSpec.describe ProductionReadiness do
     allow(ActiveRecord::Migration).to receive(:check_all_pending!).and_return(nil)
   end
 
+  it "checks real open pay-period tax years in strict guard mode", :rls do
+    TenantScope.as_system(reason: "Create readiness fixture") do
+      create(:pay_period, start_date: Date.new(2070, 1, 1), end_date: Date.new(2070, 1, 14),
+        pay_date: Date.new(2070, 1, 17), status: "draft")
+    end
+
+    report = described_class.new(env: env, environment: environment, config: config,
+      time_sources: -> { [] }, tax_configuration_valid: -> { true }).run(live: false)
+    expect(report.failures.map(&:name)).to include("2070 payroll tax tables are verified")
+  end
+
+  it "checks runtime role and the staged policy phase when RLS is configured" do
+    env["RLS_CONTEXT_GUARD_MODE"] = "raise"
+    env["RLS_DATABASE_URL"] = "postgres://payroll_app@localhost/test"
+    allow(record_class).to receive(:connection_pool).and_return(ActiveRecord::Base.connection_pool)
+
+    results = readiness.run(live: true).checks.to_h { |check| [ check.name, check.passed ] }
+    expect(results).to include(
+      "RLS runtime role and kill switch privileges" => false,
+      "RLS policy installation matches the selected phase" => true
+    )
+    env["RLS_EXPECT_ENFORCED"] = "true"
+    expect(readiness.run(live: true).failures.map(&:name)).to include("RLS policy installation matches the selected phase")
+  end
+
   it "passes effective configuration and every safe live dependency probe" do
     report = readiness.run(live: true)
 

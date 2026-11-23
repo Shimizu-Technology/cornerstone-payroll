@@ -38,7 +38,8 @@ class DatabasePredeploy
         "MIGRATION_DATABASE_URL must be configured with a direct, non-pooler connection in production."
     end
 
-    return {} if primary_migration_url.empty?
+    # Migration processes always boot without the runtime guard or role URL.
+    return { "RLS_CONTEXT_GUARD_MODE" => "off" } if primary_migration_url.empty?
 
     validate_migration_url!("MIGRATION_DATABASE_URL", primary_migration_url)
 
@@ -64,7 +65,7 @@ class DatabasePredeploy
 
     # Runtime RLS scoping uses a distinct direct URL. DDL still runs as the
     # migration owner, with no request/job guard during predeploy.
-    overrides["RLS_CONTEXT_GUARD_MODE"] = "off" unless value("RLS_DATABASE_URL").empty?
+    overrides["RLS_CONTEXT_GUARD_MODE"] = "off"
     overrides["PGCONNECT_TIMEOUT"] = "10"
     overrides["PGOPTIONS"] = DatabaseConnectionTimeouts::PG_OPTIONS
     overrides

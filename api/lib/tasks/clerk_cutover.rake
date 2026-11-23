@@ -30,7 +30,7 @@ namespace :clerk do
     end
 
     desc "Read-only local user inventory (prints counts only; writes OUTPUT=... only when WRITE=true)"
-    RlsTask.system inventory: :environment do
+    task inventory: :environment do
       service = ClerkCutover::InventoryService.new
       output_path = ENV["OUTPUT"].presence
 
@@ -48,7 +48,7 @@ namespace :clerk do
     end
 
     desc "Build clerk migrate import JSON from reviewed INVENTORY and Clerk EXPORT using external_id = dev clerk_id (writes OUTPUT=... only when WRITE=true)"
-    RlsTask.system build_import: :environment do
+    task build_import: :environment do
       inventory_path = ENV["INVENTORY"].presence || abort("INVENTORY=/path/to/reviewed_inventory.json is required")
       export_path = ENV["EXPORT"].presence || abort("EXPORT=/path/to/clerk_export.csv is required")
       output_path = ENV["OUTPUT"].presence
@@ -108,7 +108,7 @@ namespace :clerk do
     end
 
     desc "Dry-run Clerk user re-link from a sealed MANIFEST (read-only; never writes)"
-    RlsTask.system dry_run: :environment do
+    task dry_run: :environment do
       manifest_path = ENV["MANIFEST"].presence || abort("MANIFEST=/path/to/prod_manifest.json is required")
       target_client = ENV["TARGET_CLERK_SECRET_KEY"].present? ? ClerkCutover::ClerkClient.new(secret_key: ENV["TARGET_CLERK_SECRET_KEY"]) : nil
 

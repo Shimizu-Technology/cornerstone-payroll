@@ -23,4 +23,10 @@ module ExplicitCompanyAccess
       code: "company_context_unavailable"
     }, status: :forbidden
   end
+
+  def enforce_company_access!
+    return if current_user.nil? || current_user.can_access_company?(current_company_id)
+
+    render json: { error: "You do not have access to this company" }, status: :forbidden
+  end
 end

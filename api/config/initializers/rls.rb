@@ -11,14 +11,7 @@ adapter.set_callback :checkout, :after, :reset_tenant_settings
 adapter.set_callback :checkin, :before, :reset_tenant_settings
 
 Rails.application.config.after_initialize do
-  unless RlsConfiguration::MODES.include?(RlsContextGuard.mode)
-    raise ArgumentError, "RLS_CONTEXT_GUARD_MODE must be off, log, or raise"
-  end
-  if Rails.env.production? && RlsContextGuard.enabled?
-    unless RlsConfiguration.runtime_url
-      raise ArgumentError, "Set RLS_DATABASE_URL to the direct payroll_app endpoint before enabling the guard"
-    end
-
+  RlsConfiguration.verify_boot!(environment: Rails.env) do
     ActiveRecord::Base.connection_pool.with_connection { |connection| RlsDatabase.verify_runtime!(connection) }
   end
 end
