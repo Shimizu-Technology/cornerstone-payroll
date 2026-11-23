@@ -38,6 +38,22 @@ describe('ApiClient company identity', (): void => {
     vi.restoreAllMocks();
   });
 
+  it('looks up public branding without auth or company headers and handles 404 distinctly', async () => {
+    const host = 'example-employer.shimizu-technology.com';
+    const tokenProvider = vi.fn().mockResolvedValue('staff-token');
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    apiClient.setActiveCompanyId(7);
+    setAuthTokenProvider(tokenProvider);
+
+    await expect(apiClient.getTenantBranding(host, signal)).resolves.toBeNull();
+    await expect(apiClient.getTenantBranding(host, signal)).rejects.toMatchObject({ status: 503 });
+    expect(tokenProvider).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`?host=${host}`), { credentials: 'omit', cache: 'no-store', signal });
+  });
+
   it('keeps the initiating company while auth token resolution is pending', async (): Promise<void> => {
     let markTokenRequested: (() => void) | undefined;
     const tokenRequested = new Promise<void>((resolve): void => {

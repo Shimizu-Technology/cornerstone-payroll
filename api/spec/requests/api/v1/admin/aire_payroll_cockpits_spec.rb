@@ -297,6 +297,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       "employee_id" => employee.id
     )
     expect(response.parsed_body.dig("exclusions", 0, "cornerstone", "employee_id")).to eq(employee.id)
+    expect(response.parsed_body.dig("exclusions", 0, "exclusion_category")).to eq("needs_action")
   end
 
   it "uses the exact AIRE source that published the pay period" do

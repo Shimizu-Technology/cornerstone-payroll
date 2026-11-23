@@ -210,7 +210,7 @@ export interface YearEndReconciliation {
 
 export interface YearEndWarning {
   code: string;
-  kind: 'blocker' | 'acknowledge';
+  kind: 'blocker' | 'acknowledge' | 'history_review';
   title: string;
   explanation: string;
   status: 'blocked' | 'needs_review' | 'reviewed';
@@ -218,7 +218,7 @@ export interface YearEndWarning {
   period: [string | null, string | null] | null;
   /** Per-quarter specifics, for warnings that are not about employees. */
   details?: string[];
-  employees: Array<{ employee_id: number; name: string | null; edit_path: string }>;
+  employees: Array<{ employee_id: number; name: string | null; edit_path: string; history_review?: { by: string; at: string } }>;
   acknowledgement: {
     note: string;
     acknowledged_at: string | null;

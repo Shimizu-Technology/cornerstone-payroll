@@ -201,8 +201,8 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(screen.queryByText(/approved late/i)).toBeNull();
   });
 
-  it('leads with payroll context, payable hours and held entries while audit details start collapsed', async () => {
-    await review({ exclusions: [{ source_time_entry_id: 'held-1', source_user_id: 'user-7', display_name: 'Test Direct', reason: 'pending_approval', original_work_date: '2026-10-02', held_total_hours: 4, held_regular_hours: 4, held_overtime_hours: 0 }] });
+  it('leads with payroll context, payable hours and exclusions while audit details start collapsed', async () => {
+    await review({ exclusions: [{ source_time_entry_id: 'held-1', source_user_id: 'user-7', display_name: 'Test Direct', reason: 'pending_approval', exclusion_category: 'needs_action', original_work_date: '2026-10-02', held_total_hours: 4, held_regular_hours: 4, held_overtime_hours: 0 }] });
     expect(screen.getByText('Mosa Restaurant')).toBeTruthy();
     expect(screen.getByText('Work period: Oct 1 - 15, 2026')).toBeTruthy();
     expect(screen.getByText('Pay date: Oct 31, 2026')).toBeTruthy();
@@ -211,8 +211,9 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(within(summary).getByText('14.00')).toBeTruthy();
     expect(within(summary).getByText('0.00')).toBeTruthy();
     expect(screen.getByText('$350.00')).toBeTruthy();
-    expect(screen.getByText('1 held entry · 4.00 held hours at cutoff.')).toBeTruthy();
+    expect(screen.getByText('1 excluded entry · 4.00 hours outside this payroll.')).toBeTruthy();
     expect(screen.getByText('Pending Approval')).toBeTruthy();
+    expect(screen.getByText('Needs action')).toBeTruthy();
     const disclosure = screen.getByText('Technical details').closest('details')!;
     expect(disclosure.open).toBe(false);
     expect(screen.getByText('a'.repeat(64)).className).toContain('break-all');
@@ -223,18 +224,31 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(disclosure.open).toBe(true);
   });
 
+  it('retains zero-hour denied entries in the detail list without counting them', async () => {
+    await review({ exclusions: [{
+      source_time_entry_id: 'zero-hour-entry', source_user_id: 'user-7', display_name: 'Demo Employee',
+      reason: 'denied_approval', exclusion_category: 'not_paid_by_decision', original_work_date: '2026-10-02',
+      held_total_hours: 0, held_regular_hours: 0, held_overtime_hours: 0,
+    }] });
+    expect(screen.queryByText(/1 excluded entry/)).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Entries outside this payroll' })).toBeTruthy();
+    expect(screen.getByText('Not paid by decision')).toBeTruthy();
+    expect(screen.getByText('0.00 hours outside this payroll')).toBeTruthy();
+  });
+
   it.each(['pending_payment_attestation', 'payment_attested_pending_evidence'])(
     'describes %s neutrally and keeps its held hours out of the apply payload',
     async (reason) => {
       const { data } = await review({ exclusions: [{
         source_time_entry_id: 'reported-paid-entry', source_user_id: 'reported-paid-user',
-        display_name: 'Reported Paid Employee', reason, original_work_date: '2026-10-03',
+        display_name: 'Reported Paid Employee', reason, exclusion_category: 'payment_evidence_pending', original_work_date: '2026-10-03',
         held_total_hours: 8.08, held_regular_hours: 8.08, held_overtime_hours: 0,
       }] });
       const dialog = screen.getByRole('dialog');
       expect(dialog.textContent).not.toMatch(/unpaid|owed|repayment/i);
-      expect(screen.getByText('1 held entry · 8.08 held hours at cutoff.')).toBeTruthy();
-      expect(screen.getByText('8.08 held hours at cutoff')).toBeTruthy();
+      expect(screen.getByText('1 excluded entry · 8.08 hours outside this payroll.')).toBeTruthy();
+      expect(screen.getByText('8.08 hours outside this payroll')).toBeTruthy();
+      expect(screen.getByText('Payment evidence pending')).toBeTruthy();
       expect(screen.getByText(reason.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()))).toBeTruthy();
       expect(within(screen.getByRole('region', { name: 'Hours included in this review' })).getByText('14.00')).toBeTruthy();
       apiMocks.apply.mockResolvedValue({ import: { ...data, status: 'applied' }, results: { applied: [{}], skipped: [], errors: [] } });

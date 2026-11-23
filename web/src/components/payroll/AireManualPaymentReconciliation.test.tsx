@@ -414,11 +414,11 @@ it('ignores older same-period reviews and clears drafts when the period changes'
   mocks.review.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
   view.rerender(<AireManualPaymentReconciliation {...props} refreshToken={1} />);
   await waitFor(() => expect(mocks.review).toHaveBeenCalledTimes(2));
-  mocks.review.mockResolvedValue({ ...review, exclusions: [{ source_time_entry_id: '99', source_user_id: '91', display_name: 'Manual Employee', original_work_date: '2026-08-15', reason: 'pending_approval', held_total_hours: 2, cornerstone: { status: 'mapped', employee_id: 7 } }] });
+  mocks.review.mockResolvedValue({ ...review, exclusions: [{ source_time_entry_id: '99', source_user_id: '91', display_name: 'Manual Employee', original_work_date: '2026-08-15', reason: 'pending_approval', exclusion_category: 'needs_action', held_total_hours: 2, cornerstone: { status: 'mapped', employee_id: 7 } }] });
   view.rerender(<AireManualPaymentReconciliation {...props} refreshToken={2} />);
-  expect(await screen.findByText(/1 held entries remain outside/)).toBeTruthy();
+  expect(await screen.findByText('1 time entry needs action')).toBeTruthy();
   await act(async () => resolveOld(review));
-  expect(screen.getByText(/1 held entries remain outside/)).toBeTruthy();
+  expect(screen.getByText('1 time entry needs action')).toBeTruthy();
   view.rerender(<AireManualPaymentReconciliation {...props} payPeriodId={68} refreshToken={2} />);
   await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh reconciliation' }).hasAttribute('disabled')).toBe(false));
   expect((screen.getByLabelText('Evidence and reconciliation reason') as HTMLTextAreaElement).value).toBe('');
