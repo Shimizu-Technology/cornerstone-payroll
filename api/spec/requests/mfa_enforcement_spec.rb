@@ -38,7 +38,10 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
     claims = { sub: user.clerk_id, iss: issuer, azp: origin, exp: 5.minutes.from_now.to_i, sid: "sess_synthetic" }
     claims[:fva] = fva unless fva == :missing
     token = JWT.encode(claims, signing_key, "RS256", kid: jwk.kid)
-    { "Authorization" => "Bearer #{token}", "X-Company-Id" => user.company_id.to_s }
+    {
+      "Authorization" => "Bearer #{token}", "X-Company-Id" => user.company_id.to_s,
+      "REMOTE_ADDR" => "192.0.2.24", "User-Agent" => "MFA request spec"
+    }
   end
 
   [
@@ -58,8 +61,11 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
         expect(response).to have_http_status(:forbidden)
         expect(response.parsed_body).to eq("code" => "mfa_required", "error" => MfaPolicy::ERROR_MESSAGE)
         expect(denials.last).to have_attributes(
-          user_id: user.id, record_id: user.id, event_category: "security", metadata: { "source" => "clerk_session" }
+          user_id: user.id, record_id: user.id, event_category: "security", metadata: { "source" => "clerk_session" },
+          subject_name: user.name, ip_address: "192.0.2.24", user_agent: "MFA request spec"
         )
+        expect(AuditLogPresenter.new(denials.last).headline)
+          .to eq("#{user.name} was denied payroll access because multi-factor authentication was required")
         expect(CableConnectionTicket.count).to eq(0) if verb == :post
       end
 
@@ -83,7 +89,7 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
     end
   end
 
-  [ :missing, nil, [ 5, nil ], [ 5 ], [ 5, "0" ], [ 5, 0.5 ], "5,0" ].each do |claim|
+  [ :missing, nil, [ 5, nil ], [ 5 ], [ 5, "0" ], [ 5, 0.5 ], [ -2, 0 ], [ "5", 0 ], "5,0" ].each do |claim|
     it "denies fva=#{claim.inspect} in a valid signed token" do
       get "/api/v1/companies", headers: headers(fva: claim)
 
@@ -109,6 +115,18 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body).to eq(verified_body.except("mfa_required", "mfa_verified"))
     expect(jwks_fetch).to have_received(:call).once
+  end
+
+  it "mirrors GET for HEAD auth/me, with the expected empty response body" do
+    [ [ 5, -1 ], [ 5, 0 ] ].each do |ages|
+      get "/api/v1/auth/me", headers: headers(fva: ages)
+      get_status = response.status
+
+      head "/api/v1/auth/me", headers: headers(fva: ages)
+      expect(response).to have_http_status(get_status)
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to be_empty
+    end
   end
 
   it "accepts a previously verified second factor for global access even beyond the step-up window" do
@@ -144,6 +162,9 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
           else
             expect(response).to have_http_status(:forbidden)
             expect(response.parsed_body.fetch("code")).to eq("mfa_required")
+            expect(denials.last).to have_attributes(
+              user_id: user.id, subject_name: user.name, ip_address: "192.0.2.24", user_agent: "MFA request spec"
+            )
           end
 
           allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true)

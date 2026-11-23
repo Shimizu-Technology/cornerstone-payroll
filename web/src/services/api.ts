@@ -81,6 +81,7 @@ export function resolveApiUrl(baseUrl: string, endpoint: string, origin = global
 }
 
 interface RequestOptions extends RequestInit {
+  authToken?: string | null;
   params?: Record<string, string | number | boolean | undefined>;
   companyId?: number | null;
   notifyMaintenance?: boolean;
@@ -234,7 +235,7 @@ class ApiClient {
   }
 
   private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const { params, companyId, notifyMaintenance, ...fetchOptions } = options;
+    const { params, companyId, notifyMaintenance, authToken, ...fetchOptions } = options;
     const initiatingCompanyId = companyId === undefined ? this.activeCompanyId : companyId;
     const financeHeaders = this.financeHeaders(endpoint);
     const url = this.buildUrl(endpoint, params);
@@ -245,7 +246,7 @@ class ApiClient {
       ...financeHeaders,
     };
 
-    const token = await this.resolveAuthToken();
+    const token = authToken === undefined ? await this.resolveAuthToken() : authToken;
     if (token) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
@@ -285,7 +286,7 @@ class ApiClient {
   async get<T>(
     endpoint: string,
     params?: Record<string, string | number | boolean | undefined>,
-    options: Pick<RequestOptions, 'companyId' | 'signal' | 'notifyMaintenance'> = {},
+    options: Pick<RequestOptions, 'companyId' | 'signal' | 'notifyMaintenance' | 'authToken'> = {},
   ): Promise<T> {
     return this.request<T>(endpoint, { method: 'GET', params, ...options });
   }
@@ -6827,7 +6828,7 @@ type AuthMeResponse =
   | { user?: never; mfa_required: true; mfa_verified: false };
 
 export const authApi = {
-  me: () => api.get<AuthMeResponse>('/auth/me', undefined, { notifyMaintenance: false }),
+  me: (authToken?: string | null) => api.get<AuthMeResponse>('/auth/me', undefined, { notifyMaintenance: false, authToken }),
   createCableTicket: (companyId: number) => api.post<{ ticket: string; expires_in: number }>('/cable_ticket', undefined, { companyId, notifyMaintenance: false }),
   login: (token: string) => {
     api.setAuthToken(token);

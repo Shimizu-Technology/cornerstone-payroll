@@ -175,6 +175,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async (options?: { skipTokenCache?: boolean }) => {
     if (!isSignedIn) {
       setUser(null);
+      setAuthProblem((problem) => problem?.code === 'mfa_required' ? null : problem);
       backendUnauthorized.current = false;
       setIsLoading(false);
       return;
@@ -192,7 +193,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         setAuthToken(token);
       }
 
-      const res = await authApi.me();
+      const res = options?.skipTokenCache ? await authApi.me(token) : await authApi.me();
       if (res.mfa_required === true && res.mfa_verified === false) {
         setUser(null);
         setAuthProblem(mfaRequiredProblem);
@@ -272,6 +273,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
             await clerkSignOut();
           } catch (error) {
             if (authProblem?.status === 403 && authProblem.code === 'mfa_required') {
+              setUser(null);
               setAuthProblem({ ...authProblem, signOutFailed: true });
             }
             throw error;

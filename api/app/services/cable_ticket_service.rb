@@ -4,10 +4,14 @@ class CableTicketService
   TTL = 1.minute
   MFA_VERIFIED_PREFIX = "mfa."
 
-  def self.issue!(user:, company_id:, clerk_token_payload: nil, request_id: nil)
-    verified = MfaPolicy.enabled? && MfaPolicy.verified_second_factor?(clerk_token_payload)
-    if MfaPolicy.required_for?(user: user) && !verified
-      MfaPolicy.record_denial!(user: user, source: "cable_ticket", request_id: request_id)
+  def self.issue!(user:, company_id:, clerk_token_payload: nil, request: nil, auth_disabled: false)
+    enforce_mfa = Rails.env.production? || !auth_disabled
+    verified = enforce_mfa && MfaPolicy.enabled? && MfaPolicy.verified_second_factor?(clerk_token_payload)
+    if enforce_mfa && MfaPolicy.required_for?(user: user) && !verified
+      MfaPolicy.record_denial!(
+        user: user, source: "cable_ticket", subject_name: user.name,
+        request_id: request&.request_id, ip_address: request&.remote_ip, user_agent: request&.user_agent
+      )
       raise MfaPolicy::VerificationRequired
     end
 
@@ -28,7 +32,7 @@ class CableTicketService
   end
 
   def self.consume(ticket)
-    return nil if ticket.blank?
+    return nil unless ticket.is_a?(String) && ticket.present?
 
     consumed_ticket = nil
 

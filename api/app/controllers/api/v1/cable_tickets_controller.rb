@@ -13,7 +13,7 @@ module Api
         render json: {
           ticket: CableTicketService.issue!(
             user: current_user, company_id: current_company_id,
-            clerk_token_payload: @clerk_token_payload, request_id: request.request_id
+            clerk_token_payload: @clerk_token_payload, request: request, auth_disabled: auth_disabled?
           ),
           expires_in: CableTicketService::TTL.to_i
         }, status: :created

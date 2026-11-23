@@ -13,7 +13,10 @@ module MfaEnforceable
     return unless MfaPolicy.required_for?(user: @current_user)
     return if MfaPolicy.verified_second_factor?(@clerk_token_payload)
 
-    MfaPolicy.record_denial!(user: @current_user, source: "clerk_session", request_id: request.request_id)
+    MfaPolicy.record_denial!(
+      user: @current_user, source: "clerk_session", subject_name: @current_user.name,
+      request_id: request.request_id, ip_address: request.remote_ip, user_agent: request.user_agent
+    )
     render_mfa_required
   end
 
