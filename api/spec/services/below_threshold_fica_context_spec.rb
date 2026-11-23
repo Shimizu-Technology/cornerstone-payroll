@@ -79,6 +79,66 @@ RSpec.describe BelowThresholdFicaContext do
     expect(PayrollItemFicaBasisProof.count).to eq(0)
   end
 
+  it "calculates over legacy paychecks without recorded bases when no void, reversal or disposition exists" do
+    legacy = history
+    history(legacy: false)
+    source_review
+    item = calculate(tips: 50)
+    expect(item).to have_attributes(social_security_taxable_wages: 450.to_d, social_security_taxable_tips: 50.to_d,
+      social_security_tax: 31.to_d, medicare_tax: "7.25".to_d, additional_medicare_tax: 0.to_d)
+    evidence = context(item)
+    expect(evidence).to include("mode" => "calculable_below_thresholds", "history_review_open" => true, "filing_review_open" => true)
+    expect(evidence.fetch("note")).to include("legacy paycheck ##{legacy.id} has no verified FICA bases")
+    expect(item.pay_period.annual_fica_review_note).to include(employee.full_name, "legacy paycheck ##{legacy.id}")
+    lifecycle = PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor)
+    lifecycle.approve!
+    lifecycle.commit!
+    expect(item.pay_period.reload).to be_committed
+    expect(item.reload).to have_attributes(social_security_tax: 31.to_d, medicare_tax: "7.25".to_d)
+    expect(legacy.reload.social_security_taxable_wages).to be_nil
+    # Recovery keeps planning a reviewed proof for the derivable legacy row.
+    plan = inventory
+    expect(plan[:employee_years].sole[:rows].find { |row| row[:payroll_item_id] == legacy.id }).to include(status: "recoverable")
+    expect(PayrollFicaLegacyRecovery.new(company: company, year: 2026)
+      .apply!(actor: create(:user, company: company, role: "org_admin"), review_reference: "Synthetic legacy proof review",
+        expected_digest: plan[:plan_digest])).to include(applied_proofs: 1)
+    # Once proven, the next check verifies on the ordinary annual path.
+    expect(context(calculate)).not_to include("mode" => "calculable_below_thresholds")
+  end
+
+  [ nil, {}, { "version" => 3, "fingerprint" => nil }, { "version" => 3, "fingerprint" => "" } ].each do |stored|
+    it "treats a legacy annual context of #{stored.inspect} as unverified" do
+      legacy = history
+      legacy.update_columns(tax_rule_snapshot: legacy.tax_rule_snapshot.to_h.merge("annual_fica_context" => stored))
+      source_review
+      expect(context(calculate).fetch("note")).to include("legacy paycheck ##{legacy.id} has no verified FICA bases")
+    end
+  end
+
+  it "keeps the existing note when another reason already qualifies the bound" do
+    history(voided: true)
+    legacy = history
+    source_review
+    note = context(calculate).fetch("note")
+    expect(note).to include("voided pay period")
+    expect(note).not_to include("legacy paycheck ##{legacy.id}")
+  end
+
+  it "does not count uncommitted practice-workspace legacy rows that the bound cannot see" do
+    legacy = history
+    legacy.pay_period.update_columns(status: "approved")
+    source_review
+    allow_any_instance_of(Company).to receive(:test_workspace?).and_return(true) # rubocop:disable RSpec/AnyInstance
+    expect(EmployeeYearFicaContext.reportable_items(employee: employee, year: 2026)).to include(legacy)
+    expect { calculate }.to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /explicit reviewed annual reconciliation/)
+  end
+
+  it "still holds legacy paychecks without recorded bases when stored taxes contradict uncapped wages" do
+    history.update_columns(social_security_tax: 1, employer_social_security_tax: 1)
+    source_review
+    expect { calculate }.to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /contradict uncapped wages/)
+  end
+
   it "calculates with an unlinked financial void even when there are no surviving ledger rows" do
     history(voided: true)
     source_review
