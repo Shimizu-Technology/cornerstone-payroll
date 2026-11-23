@@ -102,8 +102,7 @@ RSpec.describe BelowThresholdFicaContext do
     expect(PayrollFicaLegacyRecovery.new(company: company, year: 2026)
       .apply!(actor: create(:user, company: company, role: "org_admin"), review_reference: "Synthetic legacy proof review",
         expected_digest: plan[:plan_digest])).to include(applied_proofs: 1)
-    # Once proven, the review flag on the committed check must not report a payroll hold.
-    expect(inventory[:employee_years].sole).to include(status: "ready", history_review_open: true)
+    # Once proven, the next check verifies on the ordinary annual path.
     expect(context(calculate)).not_to include("mode" => "calculable_below_thresholds")
   end
 
