@@ -592,6 +592,24 @@ class PayPeriod < ApplicationRecord
     warnings
   end
 
+  # Rates resolve on the period end date (M3-4), so a pay change that starts
+  # inside an open period pays every hour of it at the new rate. Say so before
+  # the payroll is approved instead of silently using one rate.
+  def mid_period_compensation_warnings
+    return [] unless run_purpose.in?(%w[regular final]) && !correction_run? && start_date && end_date && !committed?
+
+    payroll_items.preload(employee: %i[employee_compensation_changes employee_wage_rate_versions employee_wage_rates]).filter_map do |item|
+      next if item.timekeeping_source == "correction_reference"
+
+      changes = item.employee.compensation_changes_within(start_date, end_date)
+      next if changes.empty?
+
+      dates = changes.map(&:effective_on).uniq.map(&:iso8601).join(", ")
+      "#{item.employee.full_name}: pay rate changes mid-period on #{dates}. This payroll uses the rate in effect on " \
+        "#{end_date.iso8601} for every hour; split the hours or move the change to #{start_date.iso8601} if part of the period uses the earlier rate."
+    end
+  end
+
   # Only regular, currently-committed, non-voided periods can be the
   # target of a corrective paycheck. (Correcting a supplemental, a voided
   # period, or a correction run is intentionally disallowed; if a

@@ -87,7 +87,7 @@ RSpec.describe EmployeeRetirementYearInputCopier do
     original = evidence(source)
     [ source, target ].each do |employee|
       employee.allow_tax_classification_change = true
-      employee.update!(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "flat_fee")
+      change_compensation!(employee, employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "flat_fee")
     end
     copy(:history)
 

@@ -50,10 +50,18 @@ module Api
         end
 
         def payload
-          { regular_pay_rule: { lookback: current_company.regular_pay_lookback, threshold: current_company.regular_pay_threshold }, defaults: PayrollStandingChange.where(company: current_company).ordered.map { |item| item.as_json(only: %i[id kind employee_id employee_wage_rate_id position active label help_text required allow_none]).merge(availability_error: item.availability_error) },
-            employees: Employee.where(company: current_company).order(:last_name, :first_name).includes(:employee_wage_rates).map do |employee|
-              { id: employee.id, name: employee.full_name, status: employee.status, variable_salary: employee.variable_salary?,
-                hourly: employee.hourly_pay_basis?, wage_rates: employee.active_wage_rates.map { |rate| { id: rate.id, label: rate.label, rate: rate.rate } } }
+          today = PayrollBusinessClock.today
+          defaults = PayrollStandingChange.where(company: current_company).ordered
+            .preload(employee: %i[employee_compensation_changes employee_wage_rates employee_wage_rate_versions])
+          { regular_pay_rule: { lookback: current_company.regular_pay_lookback, threshold: current_company.regular_pay_threshold },
+            defaults: defaults.map do |item|
+              item.as_json(only: %i[id kind employee_id employee_wage_rate_id position active label help_text required allow_none])
+                .merge(availability_error: item.availability_error(rates_on: today))
+            end,
+            employees: Employee.where(company: current_company).order(:last_name, :first_name).with_compensation_history.map do |employee|
+              basis = employee.payroll_compensation_on(today)
+              { id: employee.id, name: employee.full_name, status: employee.status, variable_salary: basis.variable_salary?,
+                hourly: basis.hourly_pay_basis?, wage_rates: employee.wage_rates_on(today).map { |rate| { id: rate.id, label: rate.label, rate: rate.rate } } }
             end }
         end
       end

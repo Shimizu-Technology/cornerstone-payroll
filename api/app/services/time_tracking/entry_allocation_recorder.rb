@@ -47,7 +47,7 @@ module TimeTracking
 
       bucket.slice("source_bucket_key", "employee_wage_rate_id", "rate", "label", "source_lines").merge(
         "employment_type" => payroll_item.employment_type,
-        "contractor_pay_type" => payroll_item.employee.contractor_pay_type
+        "contractor_pay_type" => payroll_item.employee.payroll_compensation_on(payroll_item.pay_period.end_date).contractor_pay_type
       )
     end
 

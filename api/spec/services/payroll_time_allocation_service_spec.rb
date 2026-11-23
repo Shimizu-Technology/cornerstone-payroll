@@ -152,7 +152,7 @@ RSpec.describe PayrollTimeAllocationService do
   end
 
   it "uses the current per-period override for variable nonexempt salary overtime" do
-    employee.update!(salary_type: "variable", pay_rate: 0)
+    change_compensation!(employee, salary_type: "variable", pay_rate: 0)
     payroll_item.update!(pay_rate: 0, salary_override: 2_000)
     schedule = {
       "sunday" => 0, "monday" => 9, "tuesday" => 9, "wednesday" => 9,
@@ -214,7 +214,7 @@ RSpec.describe PayrollTimeAllocationService do
 
   it "keeps covered and uncovered overtime correct across semimonthly boundaries" do
     create(:tax_table, pay_frequency: "semimonthly")
-    employee.update!(pay_frequency: "semimonthly")
+    change_compensation!(employee, pay_frequency: "semimonthly")
     schedule = {
       "sunday" => 0, "monday" => 10, "tuesday" => 10, "wednesday" => 10,
       "thursday" => 10, "friday" => 10, "saturday" => 0

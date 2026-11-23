@@ -273,7 +273,8 @@ RSpec.describe PayrollIntake::Adapters::MosaRevel do
     end
 
     it "keeps unknown and other-company workers generic" do
-      employee.update!(status: "inactive", company: create(:company))
+      employee.update!(status: "inactive", first_name: "Local", last_name: "Different")
+      create(:employee, company: create(:company), first_name: "Avery", last_name: "Example", status: "inactive")
       adapter = described_class.new(pay_period: pay_period, company: company)
       result = adapter.normalize(extracted_rows: [ { row_kind: "unmatched_revel", source_employee_name: "Example, Avery" } ])
       expect(result[:rows].sole[:validation_errors].sole).to eq(

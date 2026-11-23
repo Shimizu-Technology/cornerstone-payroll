@@ -373,6 +373,7 @@ module Api
             .eligible_for_payroll_run(@pay_period, explicitly_selected: params[:employee_ids].present?)
           employees_by_id = eligible_scope
                                      .includes(:company, :employee_deductions, :deduction_types, :employee_loans, :employee_w4_elections, :employee_wage_rates, :employee_ytd_totals, employee_payroll_fields: :payroll_field_definition)
+                                     .preload(:employee_compensation_changes, :employee_wage_rate_versions)
                                      .index_by(&:id)
 
           history_errors = preload_ytd_caches!(employees_by_id.values, @pay_period)
@@ -408,12 +409,13 @@ module Api
             begin
               # Find or create payroll item for this employee
               payroll_item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+              payroll_item.employee = employee
               PayrollCorrectionPayBasisGuard.validate!(payroll_item)
-              pay_basis_changed = payroll_item.persisted? && payroll_item.employment_type != employee.employment_type
+              pay_basis_changed = payroll_item.persisted? && payroll_item.employment_type != employee.payroll_compensation_on(@pay_period.end_date).employment_type
               # Draft/calculated rows must reflect the employee classification used by
               # the calculator. Otherwise a contractor-to-W-2 change can calculate
               # FICA while retaining a contractor snapshot that reporting excludes.
-              payroll_item.employment_type = employee.employment_type
+              payroll_item.employment_type = employee.payroll_compensation_on(@pay_period.end_date).employment_type
 
               # Set defaults from employee if new record
               if payroll_item.new_record?
@@ -424,7 +426,7 @@ module Api
 
               sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
               if pay_basis_changed && !@pay_period.correction_run? && payroll_item.timekeeping_source != "correction_reference"
-                payroll_item.pay_rate = employee.default_payroll_rate
+                payroll_item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
               end
               payroll_item.sync_default_custom_earnings!(employee)
               payroll_item.sync_default_payroll_adjustments!(employee)
@@ -448,7 +450,7 @@ module Api
 
               # Reject altered frozen inputs before field/loan draft writes can
               # persist; the calculator and finalization recheck independently.
-              TimeTracking::SourceEarningsConservation.validate!(payroll_item)
+              TimeTracking::SourceEarningsConservation.validate!(payroll_item, employee: employee)
 
               # Apply salary override for variable-salary employees
               if params[:salary_overrides] && params[:salary_overrides][employee_id.to_s]
@@ -1427,6 +1429,7 @@ module Api
             company_pay_schedule_id: pay_period.company_pay_schedule_id,
             company_workweek_id: pay_period.company_workweek_id,
             compliance_warnings: pay_period.compliance_warnings(fica_review_note: fica_review_note),
+            compensation_warnings: pay_period.mid_period_compensation_warnings,
             annual_fica_review_note: fica_review_note,
             annual_fica_review: fica_review,
             annual_fica_review_path: (annual_fica_review_path(pay_period) if fica_review),
@@ -1746,7 +1749,7 @@ module Api
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
-          unless employee.hourly_pay_basis? || payroll_item.timekeeping_source == "correction_reference"
+          unless employee.payroll_compensation_on(@pay_period.end_date).hourly_pay_basis? || payroll_item.timekeeping_source == "correction_reference"
             raise ArgumentError, "This employee now uses salary or flat-fee pay. Reload the worksheet and review the current pay setup before calculating; hourly rate entries were not applied."
           end
           payroll_item.wage_rate_hours = PayrollWageRateInput.normalize(payroll_item: payroll_item, entries: wage_rate_hours)
@@ -1759,15 +1762,19 @@ module Api
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
           unless payroll_item.timekeeping_source == "correction_reference"
-            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.payroll_rate_on(@pay_period.end_date)
           end
         end
 
+        # Open payroll pays the rate in effect on the pay period end date (M3-4).
         def sync_pay_rate_from_employee(payroll_item, employee)
           return if payroll_item.timekeeping_source == "correction_reference"
-          return if employee.hourly_pay_basis? && payroll_item.wage_rate_hours.present?
+          if employee.payroll_compensation_on(@pay_period.end_date).hourly_pay_basis? && payroll_item.wage_rate_hours.present?
+            PayrollWageRateInput.reprice_saved!(payroll_item)
+            return
+          end
 
-          payroll_item.pay_rate = employee.default_payroll_rate
+          payroll_item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
         end
 
         # Compact summary of a corrective payroll_item — shipped back to the

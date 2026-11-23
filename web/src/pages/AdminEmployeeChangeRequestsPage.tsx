@@ -25,6 +25,7 @@ export function AdminEmployeeChangeRequestsPage() {
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
   const [status, setStatus] = useState(() => deepRequestId ? '' : 'pending');
   const [reviewNotes, setReviewNotes] = useState('');
+  const [effectiveOn, setEffectiveOn] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -52,6 +53,7 @@ export function AdminEmployeeChangeRequestsPage() {
       const response = await adminEmployeeChangeRequestsApi.get(id);
       if (detailRequestIdRef.current !== requestId) return;
       setSelected(response.data);
+      setEffectiveOn(response.data.proposed_compensation_effective_on || '');
       setReviewNotes(response.data.review_notes || '');
     } catch (err) {
       if (detailRequestIdRef.current === requestId) {
@@ -98,7 +100,7 @@ export function AdminEmployeeChangeRequestsPage() {
       setSaving(true);
       setError(null);
       if (action === 'approve') {
-        await adminEmployeeChangeRequestsApi.approve(selected.id, reviewNotes);
+        await adminEmployeeChangeRequestsApi.approve(selected.id, reviewNotes, effectiveOn || undefined);
       } else {
         await adminEmployeeChangeRequestsApi.reject(selected.id, reviewNotes);
       }
@@ -218,9 +220,16 @@ export function AdminEmployeeChangeRequestsPage() {
                     <p className="mb-1 text-sm font-medium text-gray-900">Review Notes</p>
                     <Textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} rows={4} />
                   </div>
+                  {selected.status === 'pending' && selected.proposed_compensation_effective_on && (
+                    <label className="block text-sm font-medium text-neutral-800">
+                      Pay change effective date
+                      <input type="date" required value={effectiveOn} onChange={(event) => setEffectiveOn(event.target.value)}
+                        className="mt-1 block rounded-md border border-neutral-300 bg-white px-3 py-2" />
+                    </label>
+                  )}
                   {selected.status === 'pending' ? (
                     <div className="flex gap-3">
-                      <Button disabled={saving || !canReview} onClick={() => void updateRequest('approve')}>
+                      <Button disabled={saving || !canReview || Boolean(selected.proposed_compensation_effective_on && !effectiveOn)} onClick={() => void updateRequest('approve')}>
                         {saving ? 'Saving...' : 'Approve'}
                       </Button>
                       <Button variant="outline" disabled={saving || !canReview} onClick={() => void updateRequest('reject')}>

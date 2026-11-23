@@ -560,7 +560,11 @@ export const employeesApi = {
   create: (data: EmployeeFormData & { company_id: number }) =>
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
   update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
-    api.patch<{ data: Employee; payment_method_review?: { reapproval_pay_period_ids: number[] } }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
+    api.patch<{ data: Employee; payment_method_review?: { reapproval_pay_period_ids: number[] }; compensation_warnings?: string[] }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
+  cancelScheduledCompensation: (id: number, date: string, reason: string, revision: string, companyId?: number) =>
+    api.post<{ data: Employee }>(`/admin/employees/${id}/cancel_scheduled_compensation`, {
+      employee: { compensation_effective_on: date, compensation_change_reason: reason, compensation_revision: revision },
+    }, { companyId }),
   deactivate: (id: number, deactivation: import('@/types').EmployeeTerminationInput) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/deactivate`, { deactivation }),
   terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>
@@ -734,15 +738,20 @@ export const employeePayrollFieldsApi = {
     api.post<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields/bulk_update`, { employee_payroll_fields: data }, { companyId }),
 };
 
+type WageRateRevision = { compensation_revision: string };
+type WageRateWriteResponse = WageRateRevision & { wage_rate: EmployeeWageRate };
+
 export const employeeWageRatesApi = {
-  list: (employeeId: number, companyId?: number): Promise<{ wage_rates: EmployeeWageRate[] }> =>
-    api.get<{ wage_rates: EmployeeWageRate[] }>('/admin/employee_wage_rates', { employee_id: employeeId }, { companyId }),
-  create: (data: EmployeeWageRate & { employee_id: number }, companyId?: number): Promise<{ wage_rate: EmployeeWageRate }> =>
-    api.post<{ wage_rate: EmployeeWageRate }>('/admin/employee_wage_rates', { employee_wage_rate: data }, { companyId }),
-  update: (id: number, data: Partial<EmployeeWageRate>, companyId?: number): Promise<{ wage_rate: EmployeeWageRate }> =>
-    api.patch<{ wage_rate: EmployeeWageRate }>(`/admin/employee_wage_rates/${id}`, { employee_wage_rate: data }, { companyId }),
-  delete: (id: number, companyId?: number): Promise<{ message: string }> =>
-    api.delete<{ message: string }>(`/admin/employee_wage_rates/${id}`, { companyId }),
+  list: (employeeId: number, companyId?: number) =>
+    api.get<WageRateRevision & { wage_rates: EmployeeWageRate[] }>('/admin/employee_wage_rates', { employee_id: employeeId }, { companyId }),
+  create: (data: EmployeeWageRate & WageRateRevision & { employee_id: number }, companyId?: number) =>
+    api.post<WageRateWriteResponse>('/admin/employee_wage_rates', { employee_wage_rate: data }, { companyId }),
+  update: (id: number, data: Partial<EmployeeWageRate> & WageRateRevision, companyId?: number) =>
+    api.patch<WageRateWriteResponse>(`/admin/employee_wage_rates/${id}`, { employee_wage_rate: data }, { companyId }),
+  delete: (id: number, revision: string, companyId?: number) =>
+    api.delete<WageRateRevision & { message: string }>(`/admin/employee_wage_rates/${id}`, {
+      companyId, data: { employee_wage_rate: { compensation_revision: revision } },
+    }),
 };
 
 // Departments (Admin API)
@@ -4660,6 +4669,7 @@ export interface ClientPortalThread {
 }
 
 export interface EmployeeChangeRequest {
+  proposed_compensation_effective_on?: string | null;
   id: number;
   status: 'pending' | 'approved' | 'rejected';
   request_kind: 'create' | 'update';
@@ -4950,8 +4960,8 @@ export const adminEmployeeChangeRequestsApi = {
     api.get<{ data: EmployeeChangeRequest[] }>('/admin/employee_change_requests', params),
   get: (id: number) =>
     api.get<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}`),
-  approve: (id: number, reviewNotes?: string) =>
-    api.patch<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}/approve`, { review_notes: reviewNotes }),
+  approve: (id: number, reviewNotes?: string, effectiveOn?: string) =>
+    api.patch<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}/approve`, { review_notes: reviewNotes, effective_on: effectiveOn }),
   reject: (id: number, reviewNotes?: string) =>
     api.patch<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}/reject`, { review_notes: reviewNotes }),
 };

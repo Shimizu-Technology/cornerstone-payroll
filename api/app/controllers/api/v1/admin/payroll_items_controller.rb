@@ -77,13 +77,13 @@ module Api
 
           attrs = payroll_item_params
           wage_rate_hours = attrs.delete(:wage_rate_hours)
-          attrs[:employment_type] = employee.employment_type
+          attrs[:employment_type] = employee.payroll_compensation_on(@pay_period.end_date).employment_type
 
           @payroll_item = @pay_period.payroll_items.build(attrs)
           @payroll_item.payment_delivery_method = employee.payment_delivery_method.presence || "paper_check"
           PayrollBonusInput.manual!(@payroll_item, attrs[:bonus]) if attrs.key?(:bonus)
           @payroll_item.employee = employee
-          @payroll_item.employment_type ||= employee.employment_type
+          @payroll_item.employment_type ||= employee.payroll_compensation_on(@pay_period.end_date).employment_type
           sync_pay_rate_from_employee(@payroll_item, employee)
           @payroll_item.mark_payroll_adjustments_overridden! if attrs.key?(:payroll_adjustments)
           @payroll_item.sync_default_payroll_adjustments!(employee)
@@ -114,7 +114,8 @@ module Api
           saved_hours = @payroll_item.attributes.slice("hours_worked", "overtime_hours", "holiday_hours", "pto_hours")
           saved_allocations = @payroll_item.wage_rate_hours
           wage_rate_hours = attrs.delete(:wage_rate_hours)
-          attrs[:employment_type] = @payroll_item.employee.employment_type
+          attrs[:employment_type] = @payroll_item.employee.payroll_compensation_on(@pay_period.end_date).employment_type
+          attrs.delete(:pay_rate)
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           changed_hours = saved_hours.keys.select { |field| attrs.key?(field.to_sym) && attrs[field.to_sym].to_d != saved_hours[field].to_d }
@@ -189,7 +190,7 @@ module Api
           PayrollCorrectionPayBasisGuard.validate!(@payroll_item)
 
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee)
-          @payroll_item.employment_type = @payroll_item.employee.employment_type
+          @payroll_item.employment_type = @payroll_item.employee.payroll_compensation_on(@pay_period.end_date).employment_type
           @payroll_item.sync_default_payroll_adjustments!(@payroll_item.employee)
           calculate_with_timekeeping!(@payroll_item)
           invalidate_prior_calculation!("A payroll employee row was recalculated outside the full payroll calculation.")
@@ -598,7 +599,7 @@ module Api
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
-          unless employee.hourly_pay_basis? || payroll_item.timekeeping_source == "correction_reference"
+          unless employee.payroll_compensation_on(@pay_period.end_date).hourly_pay_basis? || payroll_item.timekeeping_source == "correction_reference"
             raise ArgumentError, "This employee now uses salary or flat-fee pay. Reload the worksheet and review the current pay setup before calculating; hourly rate entries were not applied."
           end
           payroll_item.wage_rate_hours = PayrollWageRateInput.normalize(payroll_item: payroll_item, entries: wage_rate_hours)
@@ -610,15 +611,19 @@ module Api
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
           unless payroll_item.timekeeping_source == "correction_reference"
-            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.payroll_rate_on(payroll_item.pay_period.end_date)
           end
         end
 
+        # Open payroll pays the rate in effect on the pay period end date (M3-4).
         def sync_pay_rate_from_employee(payroll_item, employee)
           return if payroll_item.timekeeping_source == "correction_reference"
-          return if employee.hourly_pay_basis? && payroll_item.wage_rate_hours.present?
+          if employee.payroll_compensation_on(@pay_period.end_date).hourly_pay_basis? && payroll_item.wage_rate_hours.present?
+            PayrollWageRateInput.reprice_saved!(payroll_item)
+            return
+          end
 
-          payroll_item.pay_rate = employee.default_payroll_rate
+          payroll_item.pay_rate = employee.default_payroll_rate_on(payroll_item.pay_period.end_date)
         end
       end
     end

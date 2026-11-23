@@ -935,6 +935,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_130000) do
     t.check_constraint "request_kind::text = ANY (ARRAY['create'::character varying::text, 'update'::character varying::text])", name: "employee_change_requests_kind_check"
   end
 
+  create_table "employee_compensation_changes", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.decimal "pay_rate", precision: 18, scale: 6, null: false
+    t.string "employment_type", null: false
+    t.string "salary_type"
+    t.string "pay_frequency"
+    t.string "contractor_pay_type"
+    t.date "effective_on", null: false
+    t.date "ends_on"
+    t.text "reason", null: false
+    t.string "source", null: false
+    t.boolean "historical_correction", default: false, null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "effective_on" ], name: "idx_employee_compensation_changes_company_effective"
+    t.index [ "company_id" ], name: "index_employee_compensation_changes_on_company_id"
+    t.index [ "created_by_id" ], name: "index_employee_compensation_changes_on_created_by_id"
+    t.index [ "employee_id", "effective_on" ], name: "idx_employee_compensation_changes_employee_effective", unique: true
+    t.index [ "employee_id" ], name: "idx_employee_compensation_changes_one_current", unique: true, where: "(ends_on IS NULL)"
+    t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "employee_compensation_changes_ends_after_start"
+    t.check_constraint "pay_rate >= 0::numeric", name: "employee_compensation_changes_pay_rate_nonnegative"
+  end
+
   create_table "employee_configuration_review_resolutions", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -1249,6 +1274,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_130000) do
     t.check_constraint "source::text = ANY (ARRAY['staff'::character varying::text, 'client_approved'::character varying::text, 'employee_creation'::character varying::text, 'legacy_profile'::character varying::text, 'quickbooks_history'::character varying::text, 'default_withholding'::character varying::text])", name: "employee_w4_elections_source_check"
   end
 
+  create_table "employee_wage_rate_versions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "employee_wage_rate_id", null: false
+    t.string "label", null: false
+    t.decimal "rate", precision: 12, scale: 6
+    t.boolean "is_primary", default: false, null: false
+    t.boolean "active", default: true, null: false
+    t.date "effective_on", null: false
+    t.date "ends_on"
+    t.text "reason", null: false
+    t.string "source", null: false
+    t.boolean "historical_correction", default: false, null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "effective_on" ], name: "idx_employee_wage_rate_versions_company_effective"
+    t.index [ "company_id" ], name: "index_employee_wage_rate_versions_on_company_id"
+    t.index [ "created_by_id" ], name: "index_employee_wage_rate_versions_on_created_by_id"
+    t.index [ "employee_id" ], name: "index_employee_wage_rate_versions_on_employee_id"
+    t.index [ "employee_wage_rate_id", "effective_on" ], name: "idx_employee_wage_rate_versions_rate_effective", unique: true
+    t.index [ "employee_wage_rate_id" ], name: "idx_employee_wage_rate_versions_one_current", unique: true, where: "(ends_on IS NULL)"
+    t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "employee_wage_rate_versions_ends_after_start"
+    t.check_constraint "rate IS NULL OR rate >= 0::numeric", name: "employee_wage_rate_versions_rate_nonnegative"
+  end
+
   create_table "employee_wage_rates", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
@@ -1259,6 +1310,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_130000) do
     t.datetime "updated_at", null: false
     t.index [ "employee_id", "label" ], name: "index_employee_wage_rates_on_employee_id_and_label", unique: true
     t.index [ "employee_id" ], name: "index_employee_wage_rates_on_employee_id"
+    t.index [ "id", "employee_id" ], name: "idx_employee_wage_rates_id_employee", unique: true
   end
 
   create_table "employee_work_profiles", force: :cascade do |t|
@@ -4956,6 +5008,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_130000) do
   add_foreign_key "employee_change_requests", "employees"
   add_foreign_key "employee_change_requests", "users", column: "requested_by_id"
   add_foreign_key "employee_change_requests", "users", column: "reviewed_by_id"
+  add_foreign_key "employee_compensation_changes", "companies", on_delete: :restrict
+  add_foreign_key "employee_compensation_changes", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_compensation_employee_company", on_delete: :restrict
+  add_foreign_key "employee_compensation_changes", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_configuration_review_resolutions", "companies", on_delete: :restrict
   add_foreign_key "employee_configuration_review_resolutions", "employees", on_delete: :restrict
   add_foreign_key "employee_configuration_review_resolutions", "users", column: "reviewed_by_id", on_delete: :nullify
@@ -4996,6 +5051,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_130000) do
   add_foreign_key "employee_w4_elections", "companies", on_delete: :restrict
   add_foreign_key "employee_w4_elections", "employees", on_delete: :restrict
   add_foreign_key "employee_w4_elections", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "employee_wage_rate_versions", "companies", on_delete: :restrict
+  add_foreign_key "employee_wage_rate_versions", "employee_wage_rates", column: [ "employee_wage_rate_id", "employee_id" ], primary_key: [ "id", "employee_id" ], name: "fk_wage_rate_versions_rate_employee", on_delete: :restrict
+  add_foreign_key "employee_wage_rate_versions", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_wage_rate_versions_employee_company", on_delete: :restrict
+  add_foreign_key "employee_wage_rate_versions", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_wage_rates", "employees"
   add_foreign_key "employee_work_profiles", "companies"
   add_foreign_key "employee_work_profiles", "employees"
