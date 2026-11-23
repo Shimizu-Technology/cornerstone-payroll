@@ -90,8 +90,10 @@ class EmployeeYearFicaContext
     stored = item.tax_rule_snapshot.to_h["annual_fica_context"]
     return snapshot unless stored.is_a?(Hash) && stored["mode"] == BelowThresholdFicaContext::MODE
 
+    # Review decisions affect new calculations. Rebuild every financial field
+    # from source and keep the exact disclosure recorded on this paycheck.
     evidence = below_threshold_context.snapshot(current_item: item, rules: item.tax_rule_snapshot, lock_rules: lock_rules,
-      include_imported_history: !ordinary_calculation_verified?(item))
+      saved_review: stored.slice(*BelowThresholdFicaContext::REVIEW_FIELDS))
     expected = below_threshold_components(evidence, item.tax_rule_snapshot)
     unless expected.all? { |field, value| item.public_send(field) == value }
       raise UnreconciledLedgerError, "Current FICA amounts changed; recalculate before approval or commit."
@@ -125,9 +127,10 @@ class EmployeeYearFicaContext
     # Keep ordinary amounts authoritative. Retain a bound snapshot only for
     # genuinely disputed history, with exactly the same current-check amounts.
     # Verified-empty dispositions and reconciled imports alone need no note.
-    if current_item && correcting_bases.nil? && below_threshold_context.unresolved_history?
+    bound = below_threshold_context if current_item && correcting_bases.nil?
+    if bound&.unresolved_history?
       begin
-        evidence = below_threshold_context.snapshot(current_item: current_item, rules: rules, lock_rules: true, include_imported_history: false)
+        evidence = bound.snapshot(current_item: current_item, rules: rules, lock_rules: true, live_review: true, include_imported_history: false)
         @below_threshold_snapshot = evidence if below_threshold_components(evidence, rules) == ordinary
       rescue UnreconciledLedgerError
         # No new relaxation is needed; preserve the established annual path.
@@ -186,17 +189,8 @@ class EmployeeYearFicaContext
 
   attr_reader :employee, :year, :excluding_pay_period_id, :company
 
-  # Rebuild the same path-specific note during approval, commit and client review.
-  # The snapshot shape stays compatible; no path marker needs to be persisted.
-  def ordinary_calculation_verified?(item)
-    recorded_increment(wages_delta: item.gross_pay, tips_delta: item.cash_tips_reported, rules: item.tax_rule_snapshot)
-    true
-  rescue UnreconciledLedgerError
-    false
-  end
-
   def below_threshold_increment(item, rules)
-    @below_threshold_snapshot = below_threshold_context.snapshot(current_item: item, rules: rules, lock_rules: true)
+    @below_threshold_snapshot = below_threshold_context.snapshot(current_item: item, rules: rules, lock_rules: true, live_review: true)
     below_threshold_components(@below_threshold_snapshot, rules)
   end
 

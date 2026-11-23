@@ -28,7 +28,7 @@ RSpec.describe BelowThresholdFicaContext do
       additional_medicare_tax: 0)
     if !legacy
       item.update_columns(medicare_taxable_wages: gross, social_security_taxable_wages: gross.to_d - tips.to_d,
-        social_security_taxable_tips: tips, additional_medicare_taxable_wages: 0, cash_tips_reported: tips)
+        social_security_taxable_tips: tips, additional_medicare_taxable_wages: 0, fit_taxable_wages: gross, cash_tips_reported: tips)
     end
     item.pay_period.update_columns(correction_status: "voided") if voided
     item
@@ -115,13 +115,118 @@ RSpec.describe BelowThresholdFicaContext do
     end
   end
 
-  it "keeps the existing note when another reason already qualifies the bound" do
+  def resolve_history(subject_type, code)
+    entries = PayrollHistoryReview::Detector.new(company: company, tax_year: 2026).call(apply: true).fetch(:items)
+    item = entries.map(&:first).find { |entry| entry.subject_type == subject_type }
+    PayrollHistoryReview::Resolution.new(company: company, tax_year: 2026,
+      subject_key: PayrollHistoryReview::Subject.key_for(item).join("-"), user: actor, actor: AuditActor.for_user(actor))
+      .resolve!(code: code, reference: "Synthetic review documentation", expected_digest: item.subject_digest).first
+  end
+
+  def checksum(item)
+    PayrollReview::CalculationSnapshot.new(pay_period: item.pay_period.reload).call.fetch(:checksum)
+  end
+
+  it "drops a resolved void from new calculations while preserving all calculated amounts" do
     history(voided: true)
+    source_review
+    before = calculate(tips: 50)
+    resolve_history("voided_pay_period", "void_replaced")
+
+    after = calculate(tips: 50)
+    expect(after.attributes.slice(*EmployeeYearFicaContext::LEDGER_FIELDS.drop(2)))
+      .to eq(before.attributes.slice(*EmployeeYearFicaContext::LEDGER_FIELDS.drop(2)))
+    expect(after.pay_period.annual_fica_review_note).to be_nil
+    expect(context(after)).not_to have_key("mode")
+  end
+
+  it "names only open subjects when a void and legacy gap coexist" do
+    original = history(voided: true)
     legacy = history
     source_review
     note = context(calculate).fetch("note")
-    expect(note).to include("voided pay period")
-    expect(note).not_to include("legacy paycheck ##{legacy.id}")
+    expect(note).to include("voided pay period ##{original.pay_period_id}", "legacy paycheck ##{legacy.id}")
+
+    resolve_history("voided_pay_period", "void_replaced")
+    note = context(calculate).fetch("note")
+    expect(note).to include("legacy paycheck ##{legacy.id}")
+    expect(note).not_to include("voided pay period")
+  end
+
+  it "keeps bounded amounts and commits a closed legacy gap after it is reopened" do
+    history
+    source_review
+    before = calculate(tips: 50)
+    gap = resolve_history("legacy_basis_gap", "legacy_basis_accepted")
+    after = calculate(tips: 50)
+    expect(after.attributes.slice(*EmployeeYearFicaContext::LEDGER_FIELDS.drop(2)))
+      .to eq(before.attributes.slice(*EmployeeYearFicaContext::LEDGER_FIELDS.drop(2)))
+    expect(context(after)).to include("mode" => "calculable_below_thresholds", "history_review_open" => false,
+      "filing_review_open" => true, "note" => nil)
+    expect(after.pay_period.annual_fica_review_note).to be_nil
+
+    lifecycle = PayPeriodLifecycleService.new(pay_period: after.pay_period, actor: actor)
+    lifecycle.approve!
+    saved_checksum = checksum(after)
+    PayrollHistoryReview::Resolution.new(company: company, tax_year: 2026,
+      subject_key: PayrollHistoryReview::Subject.key_for(gap).join("-"), user: actor, actor: AuditActor.for_user(actor))
+      .reopen!(reason: "Another statement needs review", expected_digest: gap.subject_digest)
+    expect(checksum(after)).to eq(saved_checksum)
+    expect { lifecycle.commit! }.to change { after.pay_period.reload.status }.from("approved").to("committed")
+  end
+
+  it "matches the complete accepted gap when the current committed paycheck is excluded from the bound" do
+    earlier = history
+    current = history(gross: 500)
+    current.update_columns(cash_tips_reported: 0)
+    source_review
+    rules = PayrollFicaLegacyRecovery.new(company: company, year: 2026).verified_year_rules
+    calculation = lambda do
+      annual = EmployeeYearFicaContext.new(employee: employee, year: 2026, excluding_pay_period_id: current.pay_period_id)
+      amounts = annual.increment(wages_delta: current.gross_pay, tips_delta: 0, rules: rules, current_item: current)
+      [ amounts, annual.snapshot ]
+    end
+    original_amounts, original_snapshot = calculation.call
+    expect(original_snapshot.fetch("note")).to include("legacy paycheck ##{earlier.id}")
+    expect(original_snapshot.fetch("note")).not_to include("legacy paycheck ##{current.id}")
+
+    resolve_history("legacy_basis_gap", "legacy_basis_accepted")
+
+    amounts, snapshot = calculation.call
+    expect(amounts).to eq(original_amounts)
+    expect(snapshot).to eq(original_snapshot.merge("history_review_open" => false, "note" => nil))
+  end
+
+  it "approves and commits a pre-release saved note after the void is resolved, with the same client checksum" do
+    original = history(voided: true)
+    history
+    source_review
+    item = calculate
+    stored = item.tax_rule_snapshot
+    legacy_note = "Prior-period payroll history needs accountant review: voided pay period ##{original.pay_period_id}. " \
+      "This paycheck's Social Security/Medicare is unaffected because the conservative annual wage bounds are within the limits. " \
+      "Historical tax and filing review remains open."
+    item.update_columns(tax_rule_snapshot: stored.merge("annual_fica_context" => stored.fetch("annual_fica_context").merge("note" => legacy_note)))
+    original_checksum = checksum(item)
+    resolve_history("voided_pay_period", "void_replaced")
+    expect(checksum(item)).to eq(original_checksum)
+
+    lifecycle = PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor)
+    lifecycle.approve!
+    expect { lifecycle.commit! }.to change { item.pay_period.reload.status }.from("approved").to("committed")
+    expect(context(item).fetch("note")).to eq(legacy_note)
+  end
+
+  it "commits an approved run calculated before the review decision" do
+    history(voided: true)
+    source_review
+    item = calculate
+    lifecycle = PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor)
+    lifecycle.approve!
+    saved_checksum = checksum(item)
+    resolve_history("voided_pay_period", "void_reissued")
+    expect(checksum(item)).to eq(saved_checksum)
+    expect { lifecycle.commit! }.to change { item.pay_period.reload.status }.from("approved").to("committed")
   end
 
   it "does not count uncommitted practice-workspace legacy rows that the bound cannot see" do
