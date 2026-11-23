@@ -48,7 +48,7 @@ describe('PrivacyPolicy', () => {
     renderPage(<PrivacyPolicy />);
 
     expect(screen.getByText(/serves the web fonts your browser loads \(Google Fonts\)/)).toBeTruthy();
-    expect(screen.getByText(/pulls payroll details from emails or attachments/)).toBeTruthy();
+    expect(screen.getByText(/pulls payroll details from emails that staff paste in or files they upload/)).toBeTruthy();
     expect(screen.getByText(/to sync pay-period schedules, hours, and payment status/)).toBeTruthy();
     expect(screen.queryByText(/After that we delete the records/)).toBeNull();
     expect(screen.getByText(/a client may ask us to delete them/)).toBeTruthy();

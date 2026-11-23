@@ -3,5 +3,6 @@
 const PUBLIC_PATHS = new Set(['/', '/login', '/invite', '/privacy', '/terms']);
 
 export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.has(pathname);
+  // React Router also matches "/privacy/", so ignore a trailing slash.
+  return PUBLIC_PATHS.has(pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname);
 }
