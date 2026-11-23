@@ -5,7 +5,8 @@ import type { PayRunSections } from './usePayRunController';
 import { payRunSteps } from './payRunWorkflow';
 import { PayRunStepAction } from './PayRunProcessingActions';
 import { PayRunSourceCheckpoint } from './PayRunSourceCheckpoint';
-import { FicaHistoryReviewNotice, PayRunBlockers, PayRunClientFiles } from './PayRunBlockers';
+import { FicaHistoryReviewNotice } from '@/components/payroll/FicaHistoryReviewNotice';
+import { PayRunBlockers, PayRunClientFiles } from './PayRunBlockers';
 import { PayRunFeedback } from './PayRunFeedback';
 import { PayRunLoanInputs } from './PayRunLoanInputs';
 import { ExpectedEntriesPanel } from './ExpectedEntriesPanel';
@@ -32,7 +33,6 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
   const { payPeriod } = sections.processing;
   const state = payRunSteps(payPeriod);
   const hours = sections.results.payrollItems.reduce((sum, item) => sum + sections.results.payrollItemDisplayedHours(item), 0);
-  const held = (payPeriod.time_tracking?.linked_aire_records || []).reduce((sum, record) => sum + (record.payable_line_status?.held.entry_count || 0), 0);
   const committedAt = payPeriod.committed_at || payPeriod.lifecycle?.committed?.timestamp;
   const hasFeedback = Boolean(sections.feedback.error || sections.feedback.calculationNotice || sections.feedback.calendarRefreshError || sections.feedback.worksheetRefreshWarning || sections.feedback.savedImportReloadRequired || sections.feedback.calculationFailures.length);
   const committedSummary = state.committed ? `Committed${committedAt ? ` ${formatGuamDateTime(committedAt)}` : ''}${sections.metadata.processedBy ? ` by ${sections.metadata.processedBy}` : ''}` : state.commitReason || 'Ready to commit the approved payroll';
@@ -51,9 +51,9 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
         document.getElementById('payroll-loan-inputs')?.scrollIntoView({ block: 'start' });
       }} />
     <PayRunClientFiles payPeriod={payPeriod} />
-    <FicaHistoryReviewNotice note={payPeriod.annual_fica_review_note} />
+    <FicaHistoryReviewNotice key={`fica-review-${payPeriod.id}`} payPeriod={payPeriod} showDisclosure />
 
-    <Step id="payroll-hours" title="Hours" number={1} current={state.current === 'hours'} summary={payPeriod.status === 'draft' ? state.hoursReason : `${hours.toFixed(2)} h saved${held ? ` · ${held} held` : ''} · View source and inputs`} savedStatus={`${payPeriod.id}:${payPeriod.status}`}>
+    <Step id="payroll-hours" title="Hours" number={1} current={state.current === 'hours'} summary={payPeriod.status === 'draft' ? state.hoursReason : `${hours.toFixed(2)} h saved · View source and inputs`} savedStatus={`${payPeriod.id}:${payPeriod.status}`}>
       <PayRunStepAction {...sections.processing} step="hours" />
       <div id="payroll-blockers" tabIndex={-1} className="space-y-3"><PayRunBlockers {...sections.blockers} part="hours" /></div>
       <div id="time-tracking-hours"><PayRunSourceCheckpoint {...sections.source} /></div>

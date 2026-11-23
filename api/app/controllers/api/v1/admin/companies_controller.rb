@@ -92,7 +92,7 @@ module Api
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique => e
-          render json: { errors: [ "EIN is already taken by another company" ] }, status: :unprocessable_entity
+          render_company_uniqueness_error(e)
         end
 
         # GET /api/v1/admin/companies/:id/migration_rehearsal_preview
@@ -297,10 +297,20 @@ module Api
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique => e
-          render json: { errors: [ "EIN is already taken by another company" ] }, status: :unprocessable_entity
+          render_company_uniqueness_error(e)
         end
 
         private
+
+        def render_company_uniqueness_error(error)
+          constraint = error.cause&.result&.error_field(PG::Result::PG_DIAG_CONSTRAINT_NAME)
+          message = if constraint == "index_live_companies_on_lower_subdomain_slug"
+            "Subdomain slug is already taken by another company"
+          else
+            "EIN is already taken by another company"
+          end
+          render json: { errors: [ message ] }, status: :unprocessable_entity
+        end
 
         # A newly created client is not the client selected before the request.
         def audit_company_id

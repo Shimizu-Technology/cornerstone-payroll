@@ -11,6 +11,10 @@ Rails.application.routes.draw do
   # API v1 routes
   namespace :api do
     namespace :v1 do
+      namespace :public do
+        get :tenant_branding, to: "tenant_branding#show", format: false
+      end
+
       namespace :finance do
         get :context, to: "access#context"
         get :overview, to: "access#overview"
@@ -171,6 +175,12 @@ Rails.application.routes.draw do
           post :sign_operations
         end
         resources :payroll_history, only: [ :index ]
+        resources :payroll_history_review_items, only: [ :index, :show ] do
+          member do
+            post :resolve
+            post :reopen
+          end
+        end
         resources :imported_pay_periods, only: [ :show ]
 
         # CPR-66: Company check settings
@@ -198,7 +208,9 @@ Rails.application.routes.draw do
         delete "printer_profile_selections/:check_stock_type", to: "printer_profile_selections#destroy"
 
         resources :companies, only: [ :index, :show, :create, :update ] do
-          resource :operating_profile, only: [ :show ], controller: :client_operating_profiles
+          resource :operating_profile, only: [ :show ], controller: :client_operating_profiles do
+            patch :update, on: :member, path: ""
+          end
           member do
             get :migration_rehearsal_preview
             post :migration_rehearsal, action: :create_migration_rehearsal

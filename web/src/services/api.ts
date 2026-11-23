@@ -83,6 +83,13 @@ interface RequestOptions extends RequestInit {
   notifyMaintenance?: boolean;
 }
 
+export interface TenantBranding {
+  name: string;
+  logo_url: string | null;
+  primary_color: string | null;
+  accent_color: string | null;
+}
+
 export interface BlobDownload {
   blob: Blob;
   filename?: string;
@@ -253,6 +260,18 @@ class ApiClient {
     if (response.status === 204) {
       return undefined as T;
     }
+
+    return response.json();
+  }
+
+  async getTenantBranding(host: string, signal?: AbortSignal): Promise<TenantBranding | null> {
+    const response = await fetchWithFeedback(this.buildUrl('/public/tenant_branding', { host }), {
+      credentials: 'omit',
+      cache: 'no-store',
+      signal,
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw await readApiError(response, { readOnly: true, notifyMaintenance: false });
 
     return response.json();
   }
@@ -1296,6 +1315,7 @@ export interface TimeTrackingImportData {
       display_name?: string | null;
       email?: string | null;
       reason: string;
+      exclusion_category?: import('@/types').TimeTrackingExclusionCategory;
       original_work_date: string;
       held_total_hours: number;
       held_regular_hours: number;

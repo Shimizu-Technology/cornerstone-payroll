@@ -112,17 +112,7 @@ module TimeTracking
     end
 
     def held_summary
-      exclusions = Array(import.processed_payload["exclusions"])
-      {
-        entry_count: exclusions.length,
-        total_hours: exclusions.sum { |exclusion| decimal(exclusion["held_total_hours"]) }
-      }
-    end
-
-    def decimal(value)
-      BigDecimal(value.to_s)
-    rescue ArgumentError
-      0.to_d
+      ExclusionSummary.call(Array(import.processed_payload["exclusions"]))
     end
   end
 end

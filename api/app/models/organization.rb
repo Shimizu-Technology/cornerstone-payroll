@@ -36,6 +36,8 @@ class Organization < ApplicationRecord
   validates :client_limit, numericality: { only_integer: true, greater_than: 0 }, allow_nil: true
   validate :primary_company_must_belong_to_organization
 
+  after_commit { TenantSubdomainRegistry.invalidate! }
+
   scope :active, -> { where(status: "active") }
 
   def unlimited_clients?
