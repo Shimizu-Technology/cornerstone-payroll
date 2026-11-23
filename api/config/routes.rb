@@ -3,21 +3,21 @@ Rails.application.routes.draw do
   payroll_routes = role != ProcessRole::EMPLOYEE_WEB
   employee_routes = role != ProcessRole::PAYROLL_WEB
 
-  mount ActionCable.server => "/cable" if role == ProcessRole::ALL
+  mount ActionCable.server => "/cable" if payroll_routes
 
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
-  get "health/dependencies" => "health/dependencies#show", as: :dependency_health_check if role == ProcessRole::ALL
+  get "health/dependencies" => "health/dependencies#show", as: :dependency_health_check
 
   # API v1 routes
   namespace :api do
     namespace :v1 do
       namespace :public do
         get :tenant_branding, to: "tenant_branding#show", format: false
-      end if employee_routes
+      end
 
       namespace :finance do
         get :context, to: "access#context"

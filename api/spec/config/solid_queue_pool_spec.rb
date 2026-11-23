@@ -15,9 +15,8 @@ RSpec.describe SolidQueue::Configuration do
   end
 
   it "honors a comma-separated override for the main worker only" do
-    allow(ENV).to receive(:fetch).and_call_original
-    allow(ENV).to receive(:fetch).with("SOLID_QUEUE_QUEUES", "default,solid_queue_recurring,employee")
-      .and_return("employee, kiosk")
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("SOLID_QUEUE_QUEUES").and_return("employee, kiosk")
     expect(worker_options.pluck(:queues)).to eq([ %w[employee kiosk], "ocr" ])
   end
 
@@ -41,14 +40,33 @@ RSpec.describe SolidQueue::Configuration do
   end
 
   it "applies DB_POOL_MAX independently of the web thread setting to all production pools" do
-    allow(ENV).to receive(:key?).and_call_original
-    allow(ENV).to receive(:key?).with("DB_POOL_MAX").and_return(true)
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("DB_POOL_MAX").and_return("7")
     allow(ENV).to receive(:fetch).and_call_original
-    allow(ENV).to receive(:fetch).with("DB_POOL_MAX").and_return("7")
     allow(ENV).to receive(:fetch).with("RAILS_MAX_THREADS", 5).and_return("3")
 
     env_config = ActiveSupport::ConfigurationFile.parse(Rails.root.join("config/database.yml"))
     expect(env_config.fetch("production").transform_values { |db| db.fetch("pool") })
       .to eq("primary" => 7, "queue" => 7, "cache" => 7, "cable" => 7)
+  end
+
+  [ "", "  ", " , , " ].each do |value|
+    it "uses the default queues for an empty override (#{value.inspect})" do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with("SOLID_QUEUE_QUEUES").and_return(value)
+      expect(worker_options.pluck(:queues)).to eq([ %w[default solid_queue_recurring employee], "ocr" ])
+    end
+  end
+
+  [ "", "  " ].each do |value|
+    it "uses the thread-derived pool for a blank DB_POOL_MAX (#{value.inspect})" do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with("DB_POOL_MAX").and_return(value)
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with("RAILS_MAX_THREADS", 5).and_return("3")
+
+      env_config = ActiveSupport::ConfigurationFile.parse(Rails.root.join("config/database.yml"))
+      expect(env_config.fetch("production").values.pluck("pool")).to eq([ 3, 3, 3, 3 ])
+    end
   end
 end

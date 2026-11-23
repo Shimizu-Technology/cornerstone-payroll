@@ -117,6 +117,11 @@ class ProductionReadiness
       check("Solid Cable is the effective cable adapter") { cable_adapter == "solid_cable" },
       check("MFA enforcement has instance-bound evidence") { mfa_attestation_recorded? },
       check("effective trusted proxies reject arbitrary public clients") { trusted_proxies_are_bounded? },
+      check("shared rate-limit store is configured for split or multi-worker web") do
+        shared_required = env.fetch("WEB_CONCURRENCY", "1").to_i > 1 ||
+          env.fetch("APP_PROCESS_ROLE", ProcessRole::ALL) != ProcessRole::ALL
+        !shared_required || RackAttackStore.shared_url?(env["RACK_ATTACK_REDIS_URL"])
+      end,
       check("allowed frontend origins are explicit production HTTPS origins") { production_origins_valid? },
       check("mailer URL is a production HTTPS URL") { production_https_url?(env["FRONTEND_URL"]) },
       check("production Clerk keys are configured") { production_clerk_keys? },
