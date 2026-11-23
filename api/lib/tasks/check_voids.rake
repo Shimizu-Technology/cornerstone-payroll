@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 require "csv"
 
 namespace :payroll do
   desc "Read-only accountant review of legacy instrument voids without payroll reversal (CSV)"
-  task legacy_check_voids: :environment do
+  RlsTask.system legacy_check_voids: :environment do
     ApplicationRecord.transaction(requires_new: true) do
       ApplicationRecord.connection.execute("SET TRANSACTION READ ONLY")
       puts CSV.generate_line(%w[company_id pay_period_id payroll_item_id employee_id check_number gross_pay net_pay voided_at reason])

@@ -147,6 +147,10 @@ module Api
 
         private
 
+        def rls_system_reason
+          "Manage authorized company assignments and organization audit"
+        end
+
         def scoped_users
           scope = User.where(role: ASSIGNABLE_USER_ROLES)
           return scope if current_user&.super_admin?

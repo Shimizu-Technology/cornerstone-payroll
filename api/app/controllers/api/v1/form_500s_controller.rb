@@ -3,6 +3,8 @@
 module Api
   module V1
     class Form500sController < ApplicationController
+      include CompanyRlsScoped
+
       before_action :require_staff_access!
       before_action :set_pay_period!
       before_action :forbid_migration_rehearsal_official_action!, only: %i[save download]

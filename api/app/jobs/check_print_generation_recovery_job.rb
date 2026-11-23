@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class CheckPrintGenerationRecoveryJob < ApplicationJob
+  self.rls_mode = :system
+
   queue_as :default
 
   ABANDONED_AFTER = 30.minutes

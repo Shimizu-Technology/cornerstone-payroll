@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 namespace :e2e do
   desc "Create the deterministic Gate 0 browser fixture in an empty test database"
-  task seed: :environment do |task|
+  RlsTask.system seed: :environment do |task|
     Current.with_isolated_actor(AuditActor.system_job(task.name)) do
       require Rails.root.join("lib/e2e_release_fixture")
 

@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class AirePayrollEntryStatusSyncJob < ConnectedPayrollJob
+  self.rls_mode = :record
+
   queue_as :default
 
   retry_on TimeTracking::Client::Error, wait: :polynomially_longer, attempts: 8

@@ -120,6 +120,10 @@ module Api
 
         private
 
+        def rls_system_reason
+          "Organization administration and audit"
+        end
+
         def company_transfer_for(company_id, billing_profile_id)
           company = Company.find(company_id)
           profile = company.organization.invoice_billing_profiles.find(billing_profile_id) if billing_profile_id.present?

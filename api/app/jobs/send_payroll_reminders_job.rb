@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class SendPayrollRemindersJob < ApplicationJob
+  self.rls_mode = :system
+
   queue_as :default
   retry_on StandardError, wait: :polynomially_longer, attempts: 3
 

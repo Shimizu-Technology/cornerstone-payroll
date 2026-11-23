@@ -85,3 +85,5 @@ gem "resend", "~> 1.0"
 # Timecard OCR integration
 gem "httparty"
 gem "mini_magick"
+
+gem "pg_query", "~> 6.2"

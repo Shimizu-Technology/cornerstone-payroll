@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class OcrProcessJob < ApplicationJob
+  self.rls_mode = :record
+
   queue_as :ocr
 
   retry_on StandardError, wait: :polynomially_longer, attempts: 3

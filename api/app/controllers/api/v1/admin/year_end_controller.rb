@@ -93,6 +93,10 @@ module Api
 
         private
 
+        def rls_system_reason
+          "Year-end overview spans authorized companies" if action_name == "clients"
+        end
+
         # Runs one payee resolution and answers with what changed. The
         # resolver takes the company lock and rechecks access under it.
         def resolve_payee(input)

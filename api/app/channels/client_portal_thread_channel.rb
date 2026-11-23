@@ -11,6 +11,13 @@ class ClientPortalThreadChannel < ApplicationCable::Channel
   end
 
   def self.broadcast_thread(thread, event:)
+    # The delivery caller may already hold a system scope for a batch.
+    return broadcast_in_scope(thread, event: event) if TenantScope.current&.mode == "system"
+
+    TenantScope.with_company(thread.company_id) { broadcast_in_scope(thread, event: event) }
+  end
+
+  def self.broadcast_in_scope(thread, event:)
     serializer = ClientPortalThreadSerializer.new(current_user: nil)
     payload = serializer.thread(thread, include_messages: true)
     payload.delete(:unread)
@@ -23,6 +30,8 @@ class ClientPortalThreadChannel < ApplicationCable::Channel
       }
     )
   end
+
+  private_class_method :broadcast_in_scope
 
   private
 

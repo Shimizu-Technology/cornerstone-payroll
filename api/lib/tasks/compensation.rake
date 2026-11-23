@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 namespace :compensation do
   desc "Fail when code writes pay rates or compensation history outside EmployeeCompensationChangeService"
   task lint_writes: :environment do
@@ -14,7 +16,7 @@ namespace :compensation do
   end
 
   desc "Record legacy compensation writes made after the migration's backfill"
-  task reconcile_rollout: :environment do
+  RlsTask.system reconcile_rollout: :environment do
     employee_count = 0
     rate_count = 0
     today = PayrollBusinessClock.today
@@ -35,7 +37,7 @@ namespace :compensation do
   end
 
   desc "Refresh pay-rate cache columns from the versions in effect today"
-  task sync_effective: :environment do
+  RlsTask.system sync_effective: :environment do
     SyncEffectiveCompensationJob.perform_now
     puts "Compensation cache refreshed"
   end

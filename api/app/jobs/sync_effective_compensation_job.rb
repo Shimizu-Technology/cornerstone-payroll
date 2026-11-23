@@ -5,11 +5,10 @@
 # (employees.pay_rate and the employee_wage_rates rows) that profile screens,
 # exports and older readers show as "today's" rate.
 #
-# M3-7 (Postgres row-level security) hook: this job reads every company's
-# employees, so once RLS is enforced it must run in the RLS `system` scope
-# (see the plan's §2.1). Wrap #perform's employee scan in that scope when M3-7
-# adds it; until then it runs as an ordinary job.
+# The scheduled scan covers employees across all companies.
 class SyncEffectiveCompensationJob < ApplicationJob
+  self.rls_mode = :system
+
   queue_as :default
   retry_on StandardError, wait: :polynomially_longer, attempts: 3
 

@@ -62,6 +62,9 @@ class DatabasePredeploy
       result[database_key] = migration_url unless migration_url.empty?
     end
 
+    # Runtime RLS scoping uses a distinct direct URL. DDL still runs as the
+    # migration owner, with no request/job guard during predeploy.
+    overrides["RLS_CONTEXT_GUARD_MODE"] = "off" unless value("RLS_DATABASE_URL").empty?
     overrides["PGCONNECT_TIMEOUT"] = "10"
     overrides["PGOPTIONS"] = DatabaseConnectionTimeouts::PG_OPTIONS
     overrides
