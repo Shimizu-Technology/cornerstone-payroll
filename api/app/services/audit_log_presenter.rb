@@ -29,6 +29,7 @@ class AuditLogPresenter
     "employees#created" => "created the employee record for",
     "pay_periods#created" => "created the pay period",
     "authentication#signed_in" => "signed in",
+    "authentication#mfa_required_denied" => "was denied payroll access because multi-factor authentication was required",
     "client_documents#create" => "uploaded",
     "admin_client_documents#create" => "uploaded",
     "client_documents#destroy" => "deleted",
@@ -185,8 +186,8 @@ class AuditLogPresenter
   end
 
   def headline
-    @headline ||= if log.action == "authentication#signed_in"
-      "#{actor_name} signed in"
+    @headline ||= if log.action.in?(%w[authentication#signed_in authentication#mfa_required_denied])
+      "#{actor_name} #{verb}"
     elsif (worker_headline = PayRunActivityPhrase.worker_headline(log))
       worker_headline
     elsif (phrase = pay_run_phrase)

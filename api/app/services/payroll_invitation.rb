@@ -88,7 +88,12 @@ class PayrollInvitation
       next unless user.active? && (user.super_admin? || user.organization&.active?)
       next if user.practice_company_id? && !user.practice_portal_open?
 
-      bind!(user, subject, actor: user, request: request, source: "invitation_metadata")
+      # Check MFA against the locked invitation owner before binding or writing its audit.
+      next if block_given? && !yield(user)
+
+      TenantScope.as_system(reason: "Bind authorized Clerk invitation") do
+        bind!(user, subject, actor: user, request: request, source: "invitation_metadata")
+      end
       user
     end
   rescue ActiveRecord::RecordNotUnique

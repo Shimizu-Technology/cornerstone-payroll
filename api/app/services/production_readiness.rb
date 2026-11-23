@@ -239,7 +239,7 @@ class ProductionReadiness
     instance_id = raw_instance_id.strip
     evidence_ref = raw_evidence_ref.strip
 
-    env["REQUIRE_MFA"] == "true" &&
+    MfaPolicy.enabled?(env: env) &&
       instance_id.match?(/\Ains_[A-Za-z0-9]+\z/) &&
       evidence_ref.present? &&
       evidence_ref.bytesize <= 500

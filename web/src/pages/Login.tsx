@@ -1,7 +1,9 @@
-import { SignIn, SignedOut } from '@clerk/clerk-react';
+import { SignIn, SignedOut, useClerk } from '@clerk/clerk-react';
+import { useState } from 'react';
 import { Navigate } from 'react-router';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
 
@@ -24,6 +26,45 @@ const highlights = [
     icon: <Clock3 className="h-5 w-5" />,
   },
 ];
+
+function MfaPrompt() {
+  const { openUserProfile } = useClerk();
+  const { authProblem, refreshUser, signOut } = useAuth();
+  const [checking, setChecking] = useState(false);
+
+  async function checkVerification() {
+    setChecking(true);
+    try {
+      await refreshUser({ skipTokenCache: true });
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div className="mb-6 space-y-3 rounded-2xl border border-neutral-200 p-4">
+      <h2 className="text-xl font-semibold text-neutral-900">Multi-factor authentication required</h2>
+      <p className="text-sm text-neutral-700">
+        Open your Clerk account settings and add a second factor under Security.
+        Then sign out and sign back in with that factor.
+      </p>
+      {authProblem?.signOutFailed && (
+        <p role="alert" className="text-sm text-neutral-700">Could not sign out. Try again.</p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" onClick={() => openUserProfile()}>
+          Open account settings
+        </Button>
+        <Button type="button" variant="outline" onClick={() => { void signOut().catch(() => undefined); }}>
+          Sign out
+        </Button>
+        <Button type="button" variant="outline" loading={checking} onClick={() => { void checkVerification(); }}>
+          {checking ? 'Checking verification…' : 'Check verification'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export function Login() {
   const { isAuthenticated, isLoading, authProblem, refreshUser, signOut } = useAuth();
@@ -54,6 +95,8 @@ export function Login() {
   if (isAuthenticated) {
     return <Navigate to="/app" replace />;
   }
+
+  const mfaRequired = authProblem?.status === 403 && authProblem.code === 'mfa_required';
 
   return (
     <div className="min-h-screen bg-transparent px-3 py-4 sm:px-4 sm:py-10 lg:px-8">
@@ -94,13 +137,17 @@ export function Login() {
         </section>
 
         <section className="cornerstone-sign-in order-1 min-w-0 overflow-hidden rounded-3xl border border-neutral-200/80 bg-white/90 p-4 shadow-xl shadow-neutral-200/50 backdrop-blur-sm sm:p-6 lg:order-2 lg:p-8">
-          <div className="mb-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-700">Welcome back</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900">Sign in to Cornerstone Payroll</h2>
-            <p className="mt-2 text-sm text-neutral-500">Use your Cornerstone account to continue.</p>
-          </div>
+          {!mfaRequired && (
+            <div className="mb-6">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-700">Welcome back</p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900">Sign in to Cornerstone Payroll</h2>
+              <p className="mt-2 text-sm text-neutral-500">Use your Cornerstone account to continue.</p>
+            </div>
+          )}
 
-          {authProblem && (
+          {mfaRequired ? (
+            <MfaPrompt />
+          ) : authProblem && (
             <AccountAccessNotice
               className="mb-6"
               problem={authProblem}

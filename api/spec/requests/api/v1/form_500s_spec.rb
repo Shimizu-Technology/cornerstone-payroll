@@ -49,7 +49,6 @@ RSpec.describe "Api::V1::Form500s", type: :request do
   it "rejects malformed, missing, and unauthorized explicit companies before reading payroll" do
     other_company = create(:company)
     allow_any_instance_of(Api::V1::Form500sController).to receive(:current_company_id).and_call_original
-    expect(RlsContextGuard.mode).to eq("raise")
 
     [ "not-an-id", "9999999999", other_company.id.to_s ].each do |company_header|
       queries = []

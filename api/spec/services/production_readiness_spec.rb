@@ -290,6 +290,14 @@ RSpec.describe ProductionReadiness do
     expect(report.failures.map(&:name)).to contain_exactly("MFA enforcement has instance-bound evidence")
   end
 
+  it "shares runtime MFA switch parsing while retaining the attestation requirement" do
+    env["REQUIRE_MFA"] = "on"
+    expect(readiness.run(live: false)).to be_passed
+
+    env.delete("REQUIRE_MFA")
+    expect(readiness.run(live: false).failures.map(&:name)).to contain_exactly("MFA enforcement has instance-bound evidence")
+  end
+
   it "requires instance-bound MFA evidence in addition to the attestation flag" do
     env.delete("CLERK_MFA_EVIDENCE_REF")
 
