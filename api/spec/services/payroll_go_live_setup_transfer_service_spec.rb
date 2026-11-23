@@ -85,6 +85,8 @@ RSpec.describe PayrollGoLiveSetupTransferService do
     end.to change(EmployeeW4Election.where(employee: target), :count).by(1)
 
     expect(target.reload).to have_attributes(hire_date: Date.new(1998, 5, 26), pay_rate: 22.50)
+    # M3-4: the reviewed pay rate starts on the go-live date.
+    expect(target.compensation_on(effective_on)).to have_attributes(pay_rate: 22.50, effective_on: effective_on, source: "go_live_setup_transfer")
     expect(target.bank_routing_number_encrypted).to be_nil
     expect(target.bank_account_number_encrypted).to be_nil
     expect(company.deduction_types.find_by!(name: "Employee loan")).to have_attributes(default_amount: 50.to_d)
@@ -98,6 +100,36 @@ RSpec.describe PayrollGoLiveSetupTransferService do
     expect(company.historical_import_batches).to contain_exactly(batch)
     expect(company.reload.email).to eq("new@example.com")
     expect(company.company_pay_schedules.find_by!(effective_on: effective_on)).to be_confirmed
+  end
+
+  it "applies the reviewed salary basis and frequency on a future cutover" do
+    cutover = PayrollBusinessClock.today + 30
+    source = create(:employee, :salary, company: source_company, department: create(:department, company: source_company), salary_type: "annual", pay_frequency: "biweekly")
+    target = create(:employee, :salary, company: company, ssn_encrypted: source.ssn_digits,
+      salary_type: "per_period", pay_frequency: "semimonthly", pay_rate: 1000)
+
+    review = described_class.preview!(company:, source_company:, batch:, effective_on: cutover, actor:)
+    expect(review.validation_errors).to be_empty
+    described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
+
+    expect(target.reload).to have_attributes(salary_type: "per_period", pay_frequency: "semimonthly", pay_rate: 1000)
+    expect(target.compensation_on(cutover)).to have_attributes(salary_type: "annual", pay_frequency: "biweekly", pay_rate: 52_000)
+  end
+
+  it "applies the predecessor's hourly contractor basis on a future cutover" do
+    cutover = PayrollBusinessClock.today + 30
+    source = create(:employee, :contractor, company: source_company, department: create(:department, company: source_company),
+      contractor_pay_type: "hourly", pay_rate: 25)
+    target = create(:employee, :contractor, company: company, ssn_encrypted: source.ssn_digits,
+      contractor_pay_type: "flat_fee", pay_rate: 500)
+
+    review = described_class.preview!(company:, source_company:, batch:, effective_on: cutover, actor:)
+    expect(review.validation_errors).to be_empty
+    described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
+
+    expect(target.reload).to have_attributes(contractor_pay_type: "flat_fee", pay_rate: 500)
+    expect(target.compensation_on(cutover - 1)).to have_attributes(contractor_pay_type: "flat_fee", pay_rate: 500)
+    expect(target.compensation_on(cutover)).to have_attributes(contractor_pay_type: "hourly", pay_rate: 25)
   end
 
   it "copies a linked loan field inactive without losing an existing successor ledger" do

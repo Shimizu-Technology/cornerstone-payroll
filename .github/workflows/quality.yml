@@ -144,6 +144,8 @@ jobs:
       - run: bundle exec rails db:schema:load
       - run: bundle exec rails db:integrity
       - run: bundle exec rubocop
+      # Pay rates change only through EmployeeCompensationChangeService (M3-4).
+      - run: bundle exec rails compensation:lint_writes
       # Hosted databases are reached through PgBouncer in transaction mode,
       # where consecutive statements can run on different server backends.
       - name: Payment transition lock through a transaction-mode pooler

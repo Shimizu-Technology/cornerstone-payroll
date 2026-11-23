@@ -247,6 +247,7 @@ RSpec.describe "Historical adjustment and pay-period concurrency", :postgres_con
     PayrollItem.where(company_id: company_id).delete_all
     PayPeriod.where(company_id: company_id).delete_all
     AuditLog.where(company_id: company_id).delete_all
+    EmployeeCompensationChange.where(company_id: company_id).delete_all
     Employee.where(company_id: company_id).delete_all
     Department.where(company_id: company_id).delete_all
     User.where(id: actor.id).delete_all

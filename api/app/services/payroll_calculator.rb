@@ -18,9 +18,14 @@
 class PayrollCalculator
   attr_reader :employee, :payroll_item
 
-  def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil, annual_fica_context: nil)
+  def self.for(employee, payroll_item, employment_type: nil, calculation_context: nil, annual_fica_context: nil)
     AnnualTaxConfig.require_verified!(payroll_item.pay_period.pay_date.year, lock: true) if calculation_context.blank?
-    TimeTracking::SourceEarningsConservation.validate!(payroll_item)
+    TimeTracking::SourceEarningsConservation.validate!(payroll_item, employee: employee)
+    employment_type ||= if calculation_context.present? || payroll_item.timekeeping_source == "correction_reference"
+      PayrollCalculationContext.employee_value(calculation_context, :employment_type) || payroll_item.employment_type
+    else
+      employee.payroll_compensation_on(payroll_item.pay_period.end_date).employment_type
+    end
     case employment_type
     when "hourly"
       HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
@@ -923,6 +928,9 @@ class PayrollCalculator
         return w4_election_for_calculation.profile_attributes.fetch(attribute.to_sym)
       end
 
+      if EmployeeCompensationChangeService::BASIS_ATTRIBUTES.include?(attribute.to_s) && payroll_item.timekeeping_source != "correction_reference"
+        return employee.payroll_compensation_on(pay_period.end_date).public_send(attribute)
+      end
       return employee.public_send(attribute)
     end
 
@@ -930,7 +938,7 @@ class PayrollCalculator
   end
 
   def w4_election_for_calculation
-    return nil if historical_calculation? || employee.contractor?
+    return nil if historical_calculation? || employee_value(:employment_type) == "contractor"
 
     @w4_election_for_calculation ||= employee.w4_election_on(pay_period.pay_date)
   end
@@ -1012,6 +1020,9 @@ class PayrollCalculator
       employee: employee,
       employee_deductions: employee_deductions_for_calculation,
       payroll_field_assignments: payroll_field_assignments_for_calculation,
+      rates_on: pay_period.end_date,
+      employee_basis: EmployeeCompensationChangeService::BASIS_ATTRIBUTES.index_with { |field| employee_value(field) }
+        .merge("pay_rate" => payroll_item.pay_rate),
       w4_election: w4_election_for_calculation,
       retirement_election: retirement_election_for_calculation
     ).merge(built_in_employer_match_identity)
@@ -1026,7 +1037,7 @@ class PayrollCalculator
   end
 
   def retirement_election_for_calculation
-    return nil if historical_calculation? || employee.contractor?
+    return nil if historical_calculation? || employee_value(:employment_type) == "contractor"
 
     @retirement_election_for_calculation ||= employee.retirement_election_on(pay_period.pay_date)
   end

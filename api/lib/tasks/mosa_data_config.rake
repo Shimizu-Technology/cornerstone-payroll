@@ -91,6 +91,7 @@ namespace :mosa do
           e.middle_name = attrs[:middle_name]
           e.employment_type = attrs[:type]
           e.pay_rate = attrs[:rate]
+          e.initial_compensation_source = "data_config_task"
           e.pay_frequency = "biweekly"
           e.filing_status = attrs[:filing]
           e.allowances = 0

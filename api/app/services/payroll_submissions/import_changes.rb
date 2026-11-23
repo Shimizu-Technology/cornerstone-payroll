@@ -209,7 +209,7 @@ module PayrollSubmissions
 
     def current_none_field(row)
       field = PayrollStandingChange.find_by(id: row["standing_change_id"], company_id: @period.company_id)
-      field if field && field.active? && field.allow_none? && field.employee_id == row["employee_id"] && field.kind == row["kind"] && field.employee_wage_rate_id == row["employee_wage_rate_id"] && field.availability_error.nil?
+      field if field && field.active? && field.allow_none? && field.employee_id == row["employee_id"] && field.kind == row["kind"] && field.employee_wage_rate_id == row["employee_wage_rate_id"] && field.availability_error(rates_on: @period.end_date).nil?
     end
 
     def stale_none_rows
@@ -308,8 +308,9 @@ module PayrollSubmissions
         change_index: change[:change_index], submitted_amount: change[:amount] }
     end
 
+    # Job rates in effect on the pay period end date (M3-4).
     def active_rate(employee, id)
-      employee&.active_wage_rates&.find { |rate| rate.id.to_s == id.to_s }
+      employee&.wage_rates_on(@period.end_date)&.find { |rate| rate.id.to_s == id.to_s }
     end
 
     def legacy_manual_row?(row)
@@ -334,10 +335,10 @@ module PayrollSubmissions
       if @period.pay_period_excluded_employees.exists?(employee_id: employee.id) && !(row["kind"] == "owner_pay" && managed_owner_exclusion(employee.id))
         return "#{employee.full_name} is excluded from this pay period. Resolve this client change before applying."
       end
-      return "#{employee.full_name} no longer uses variable salary." if row["kind"] == "owner_pay" && !employee.variable_salary?
+      return "#{employee.full_name} no longer uses variable salary." if row["kind"] == "owner_pay" && !employee.payroll_compensation_on(@period.end_date).variable_salary?
       if row["kind"] == "extra_hours"
         rate = active_rate(employee, row["employee_wage_rate_id"])
-        unless employee.hourly_pay_basis? && rate && rate.rate && rate.rate == row["wage_rate"].to_d
+        unless employee.payroll_compensation_on(@period.end_date).hourly_pay_basis? && rate && rate.rate && rate.rate == row["wage_rate"].to_d
           return "Saved job and rate are missing, inactive or changed for #{employee.full_name}. Resolve this client change before applying."
         end
       end

@@ -181,6 +181,12 @@ Rails.application.routes.draw do
           post :sign_operations
         end
         resources :payroll_history, only: [ :index ]
+        resources :payroll_history_review_items, only: [ :index, :show ] do
+          member do
+            post :resolve
+            post :reopen
+          end
+        end
         resources :imported_pay_periods, only: [ :show ]
 
         # CPR-66: Company check settings
@@ -362,6 +368,7 @@ Rails.application.routes.draw do
         resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
           member do
             post :deactivate
+            post :cancel_scheduled_compensation
             post :terminate
             post :reactivate
             post :transition_tax_classification

@@ -921,7 +921,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
   describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate" do
     it "returns saved zero contribution evidence without a false available-pay warning" do
       create(:tax_table, tax_year: pay_period.pay_date.year)
-      employee.update!(pay_rate: 25)
+      change_compensation!(employee, pay_rate: 25)
       payroll_item.update!(hours_worked: 4, pay_rate: 25)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/recalculate"

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_23_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -935,6 +935,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
     t.check_constraint "request_kind::text = ANY (ARRAY['create'::character varying::text, 'update'::character varying::text])", name: "employee_change_requests_kind_check"
   end
 
+  create_table "employee_compensation_changes", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.decimal "pay_rate", precision: 18, scale: 6, null: false
+    t.string "employment_type", null: false
+    t.string "salary_type"
+    t.string "pay_frequency"
+    t.string "contractor_pay_type"
+    t.date "effective_on", null: false
+    t.date "ends_on"
+    t.text "reason", null: false
+    t.string "source", null: false
+    t.boolean "historical_correction", default: false, null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "effective_on" ], name: "idx_employee_compensation_changes_company_effective"
+    t.index [ "company_id" ], name: "index_employee_compensation_changes_on_company_id"
+    t.index [ "created_by_id" ], name: "index_employee_compensation_changes_on_created_by_id"
+    t.index [ "employee_id", "effective_on" ], name: "idx_employee_compensation_changes_employee_effective", unique: true
+    t.index [ "employee_id" ], name: "idx_employee_compensation_changes_one_current", unique: true, where: "(ends_on IS NULL)"
+    t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "employee_compensation_changes_ends_after_start"
+    t.check_constraint "pay_rate >= 0::numeric", name: "employee_compensation_changes_pay_rate_nonnegative"
+  end
+
   create_table "employee_configuration_review_resolutions", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -1249,6 +1274,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
     t.check_constraint "source::text = ANY (ARRAY['staff'::character varying::text, 'client_approved'::character varying::text, 'employee_creation'::character varying::text, 'legacy_profile'::character varying::text, 'quickbooks_history'::character varying::text, 'default_withholding'::character varying::text])", name: "employee_w4_elections_source_check"
   end
 
+  create_table "employee_wage_rate_versions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "employee_wage_rate_id", null: false
+    t.string "label", null: false
+    t.decimal "rate", precision: 12, scale: 6
+    t.boolean "is_primary", default: false, null: false
+    t.boolean "active", default: true, null: false
+    t.date "effective_on", null: false
+    t.date "ends_on"
+    t.text "reason", null: false
+    t.string "source", null: false
+    t.boolean "historical_correction", default: false, null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "effective_on" ], name: "idx_employee_wage_rate_versions_company_effective"
+    t.index [ "company_id" ], name: "index_employee_wage_rate_versions_on_company_id"
+    t.index [ "created_by_id" ], name: "index_employee_wage_rate_versions_on_created_by_id"
+    t.index [ "employee_id" ], name: "index_employee_wage_rate_versions_on_employee_id"
+    t.index [ "employee_wage_rate_id", "effective_on" ], name: "idx_employee_wage_rate_versions_rate_effective", unique: true
+    t.index [ "employee_wage_rate_id" ], name: "idx_employee_wage_rate_versions_one_current", unique: true, where: "(ends_on IS NULL)"
+    t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "employee_wage_rate_versions_ends_after_start"
+    t.check_constraint "rate IS NULL OR rate >= 0::numeric", name: "employee_wage_rate_versions_rate_nonnegative"
+  end
+
   create_table "employee_wage_rates", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
@@ -1259,6 +1310,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
     t.datetime "updated_at", null: false
     t.index [ "employee_id", "label" ], name: "index_employee_wage_rates_on_employee_id_and_label", unique: true
     t.index [ "employee_id" ], name: "index_employee_wage_rates_on_employee_id"
+    t.index [ "id", "employee_id" ], name: "idx_employee_wage_rates_id_employee", unique: true
   end
 
   create_table "employee_work_profiles", force: :cascade do |t|
@@ -3138,6 +3190,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
     t.index [ "payroll_item_id" ], name: "index_payroll_item_earnings_on_payroll_item_id"
   end
 
+  create_table "payroll_history_review_items", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "pay_period_id"
+    t.bigint "payroll_item_id"
+    t.bigint "employee_id"
+    t.bigint "historical_import_batch_id"
+    t.bigint "resolved_by_id"
+    t.integer "tax_year", null: false
+    t.string "subject_type", null: false
+    t.string "subject_digest", null: false
+    t.string "status", default: "open", null: false
+    t.string "resolution_code"
+    t.text "resolution_reference"
+    t.datetime "resolved_at"
+    t.datetime "reopened_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "tax_year", "employee_id" ], name: "idx_payroll_history_review_gap", unique: true, where: "((subject_type)::text = 'legacy_basis_gap'::text)"
+    t.index [ "company_id", "tax_year", "subject_type", "pay_period_id", "payroll_item_id", "historical_import_batch_id" ], name: "idx_payroll_history_review_subject", unique: true, where: "((subject_type)::text <> 'legacy_basis_gap'::text)", nulls_not_distinct: true
+    t.index [ "company_id" ], name: "index_payroll_history_review_items_on_company_id"
+    t.index [ "employee_id" ], name: "index_payroll_history_review_items_on_employee_id"
+    t.index [ "historical_import_batch_id" ], name: "idx_on_historical_import_batch_id_48322a42e5"
+    t.index [ "pay_period_id" ], name: "index_payroll_history_review_items_on_pay_period_id"
+    t.index [ "payroll_item_id" ], name: "index_payroll_history_review_items_on_payroll_item_id"
+    t.index [ "resolved_by_id" ], name: "index_payroll_history_review_items_on_resolved_by_id"
+    t.check_constraint "\nCASE\n    WHEN subject_type::text = 'voided_pay_period'::text THEN pay_period_id IS NOT NULL AND num_nonnulls(payroll_item_id, employee_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = ANY (ARRAY['reversed_payroll_item'::character varying, 'legacy_disposition'::character varying]::text[]) THEN payroll_item_id IS NOT NULL AND employee_id IS NOT NULL AND num_nonnulls(pay_period_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = 'legacy_basis_gap'::text THEN employee_id IS NOT NULL AND num_nonnulls(pay_period_id, payroll_item_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = 'imported_history'::text THEN historical_import_batch_id IS NOT NULL AND num_nonnulls(pay_period_id, payroll_item_id, employee_id) = 0\n    ELSE false\nEND", name: "payroll_history_review_subject_shape"
+    t.check_constraint "status::text = 'open'::text AND num_nonnulls(resolution_code, resolution_reference, resolved_at, resolved_by_id) = 0 OR status::text = 'resolved'::text AND num_nonnulls(resolution_code, resolution_reference, resolved_at) = 3 AND (resolved_by_id IS NOT NULL OR resolution_code::text = 'legacy_basis_proven'::text) AND char_length(btrim(resolution_reference)) >= 10 AND char_length(btrim(resolution_reference)) <= 1000", name: "payroll_history_review_resolution_shape"
+  end
+
   create_table "payroll_item_fica_basis_proofs", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -4927,6 +5008,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
   add_foreign_key "employee_change_requests", "employees"
   add_foreign_key "employee_change_requests", "users", column: "requested_by_id"
   add_foreign_key "employee_change_requests", "users", column: "reviewed_by_id"
+  add_foreign_key "employee_compensation_changes", "companies", on_delete: :restrict
+  add_foreign_key "employee_compensation_changes", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_compensation_employee_company", on_delete: :restrict
+  add_foreign_key "employee_compensation_changes", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_configuration_review_resolutions", "companies", on_delete: :restrict
   add_foreign_key "employee_configuration_review_resolutions", "employees", on_delete: :restrict
   add_foreign_key "employee_configuration_review_resolutions", "users", column: "reviewed_by_id", on_delete: :nullify
@@ -4967,6 +5051,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
   add_foreign_key "employee_w4_elections", "companies", on_delete: :restrict
   add_foreign_key "employee_w4_elections", "employees", on_delete: :restrict
   add_foreign_key "employee_w4_elections", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "employee_wage_rate_versions", "companies", on_delete: :restrict
+  add_foreign_key "employee_wage_rate_versions", "employee_wage_rates", column: [ "employee_wage_rate_id", "employee_id" ], primary_key: [ "id", "employee_id" ], name: "fk_wage_rate_versions_rate_employee", on_delete: :restrict
+  add_foreign_key "employee_wage_rate_versions", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_wage_rate_versions_employee_company", on_delete: :restrict
+  add_foreign_key "employee_wage_rate_versions", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_wage_rates", "employees"
   add_foreign_key "employee_work_profiles", "companies"
   add_foreign_key "employee_work_profiles", "employees"
@@ -5230,6 +5318,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
   add_foreign_key "payroll_item_deductions", "employee_loans"
   add_foreign_key "payroll_item_deductions", "payroll_items"
   add_foreign_key "payroll_item_earnings", "payroll_items"
+  add_foreign_key "payroll_history_review_items", "companies", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "employees", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "historical_import_batches", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "pay_periods", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "payroll_items", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "users", column: "resolved_by_id", on_delete: :restrict
   add_foreign_key "payroll_item_fica_basis_proofs", "companies", on_delete: :restrict
   add_foreign_key "payroll_item_fica_basis_proofs", "payroll_items", on_delete: :restrict
   add_foreign_key "payroll_item_fica_basis_proofs", "users", column: "created_by_id", on_delete: :restrict

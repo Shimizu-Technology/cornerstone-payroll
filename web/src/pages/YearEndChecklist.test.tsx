@@ -25,6 +25,7 @@ vi.mock('@/services/api', () => ({
   },
   companiesApi: { get: mocks.companyGet, update: mocks.companyUpdate },
   employeesApi: { update: mocks.employeeUpdate },
+  apiClient: { get: vi.fn(async () => ({ data: [], can_review: false })) },
   ApiError: class ApiError extends Error {
     status: number;
     details?: unknown;
@@ -185,6 +186,25 @@ describe('Year-end checklist', () => {
       expect(mocks.filingRecord).toHaveBeenCalledWith('w2_gu_w3_ss', 2026, undefined, 7, 'ssa');
       expect(mocks.filingRecord).toHaveBeenCalledWith('w2_gu_w3_ss', 2026, undefined, 7, 'drt');
     }
+  });
+
+  it('links a history-review warning to the checklist and displays per-employee decisions', async () => {
+    const warnings = step('review_warnings', 5, 'Review warnings', 'action_needed', {
+      data: { warnings: [{
+        code: 'legacy_tax_bases', kind: 'history_review', status: 'needs_review',
+        title: 'Older payroll without stored taxable wages', explanation: 'Review the older paychecks.',
+        digest: 'digest', period: null, acknowledgement: null, acknowledgement_stale: false,
+        employees: [
+          { employee_id: 2, name: 'Worker A', edit_path: '/employees/2', history_review: { by: 'Sample Admin', at: '2026-05-12T01:00:00Z' } },
+          { employee_id: 3, name: 'Worker B', edit_path: '/employees/3' },
+        ],
+      }] },
+    });
+    mocks.checklist.mockResolvedValue(checklist(working({ warnings })));
+    renderPage();
+    expect(await screen.findByRole('link', { name: 'Go to Payroll history review' })).toHaveProperty('hash', '#payroll-history-review');
+    expect(screen.getByText(/Reviewed by Sample Admin on/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Mark reviewed' })).toBeNull();
   });
 
   it('numbers filing confirmation after every preparation step, including 1099s', async () => {

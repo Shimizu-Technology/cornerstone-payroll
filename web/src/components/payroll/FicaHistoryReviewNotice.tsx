@@ -1,8 +1,9 @@
 import { useId, useState } from 'react';
+import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
 import type { PayPeriod } from '@/types';
 
-type ReviewPeriod = Pick<PayPeriod, 'annual_fica_review' | 'annual_fica_review_note'>;
+type ReviewPeriod = Pick<PayPeriod, 'annual_fica_review' | 'annual_fica_review_note' | 'annual_fica_review_path'>;
 
 export function FicaHistoryReviewNotice({ payPeriod, showDisclosure = false }: { payPeriod: ReviewPeriod; showDisclosure?: boolean }) {
   const [expanded, setExpanded] = useState(false);
@@ -17,6 +18,11 @@ export function FicaHistoryReviewNotice({ payPeriod, showDisclosure = false }: {
     <div className="text-sm text-neutral-700">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <p>{count} payroll history {count === 1 ? 'item' : 'items'} awaiting accountant review. This payroll isn't affected.</p>
+        {payPeriod.annual_fica_review_path && (
+          <Link to={payPeriod.annual_fica_review_path} className="inline-flex min-h-11 items-center font-medium text-primary-700 underline underline-offset-4">
+            Payroll history review
+          </Link>
+        )}
         {showDisclosure && <Button type="button" variant="ghost" size="sm" className="min-h-11 px-0 underline underline-offset-4"
           aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}>
           {expanded ? 'Hide details' : 'Show details'}

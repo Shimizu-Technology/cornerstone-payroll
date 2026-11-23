@@ -179,8 +179,8 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
       params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
     correction_id = response.parsed_body.dig("correction_run", "id")
-    primary.update!(rate: 16)
-    secondary.update!(rate: 30, active: false)
+    change_wage_rate!(primary, rate: 16)
+    change_wage_rate!(secondary, rate: 30, active: false)
 
     submitted = buckets
     post "/api/v1/admin/pay_periods/#{correction_id}/run_payroll", params: {
@@ -238,12 +238,15 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     ]
     item.update!(wage_rate_hours: buckets)
     commit_calculated_original!
-    primary.destroy_with_employee_lock!
+    # Wage rates are ended, not deleted, since M3-4; this replays one deleted before then.
+    EmployeeWageRateVersion.where(employee_wage_rate_id: primary.id).delete_all
+    EmployeeWageRate.where(id: primary.id).delete_all
     post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
       params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
     expect(response).to have_http_status(:created)
     correction_id = response.parsed_body.dig("correction_run", "id")
-    secondary.destroy_with_employee_lock!
+    EmployeeWageRateVersion.where(employee_wage_rate_id: secondary.id).delete_all
+    EmployeeWageRate.where(id: secondary.id).delete_all
     expect(EmployeeWageRate.where(id: buckets.map { |entry| entry["employee_wage_rate_id"] })).to be_empty
 
     post "/api/v1/admin/pay_periods/#{correction_id}/run_payroll", params: {

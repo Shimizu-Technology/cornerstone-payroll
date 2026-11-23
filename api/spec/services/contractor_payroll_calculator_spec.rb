@@ -95,7 +95,7 @@ RSpec.describe ContractorPayrollCalculator do
   end
 
   it "does not repeat an automatic flat fee in a tips-only run" do
-    employee.update!(contractor_pay_type: "flat_fee", pay_rate: 3_000)
+    change_compensation!(employee, contractor_pay_type: "flat_fee", pay_rate: 3_000)
     pay_period.update!(run_purpose: "off_cycle_tips", includes_base_salary: false)
     payroll_item.update!(pay_rate: 3_000, hours_worked: 0)
 

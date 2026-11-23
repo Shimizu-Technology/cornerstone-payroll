@@ -40,7 +40,7 @@ RSpec.describe "Prior-provider history from pre-upgrade calculated runs", type: 
     end
     start_date = Date.new(2026, 1, 1)
     @runs = PERIOD_ENDS.each_with_index.map do |end_date, index|
-      @employees.last.update!(pay_rate: 1_250) if index == 2
+      change_compensation!(@employees.last, pay_rate: 1_250) if index == 2
       run = create(:pay_period, company: @company, start_date: start_date, end_date: end_date, pay_date: end_date)
       @employees.each do |employee|
         create(:payroll_item, :salary, company: @company, employee: employee, pay_period: run, pay_rate: employee.pay_rate).calculate!
