@@ -40,6 +40,7 @@ class W2GuAggregator
         company_id: company.id,
         company_name: company.name,
         year: year,
+        ss_wage_base: ss_wage_base,
         generated_at: Time.current.iso8601,
         # W-2GU count reflects only employees with committed payroll in year.
         employee_count: rows.length,
@@ -103,16 +104,7 @@ class W2GuAggregator
   end
 
   def live_items
-    PayrollItem
-      .joins(:pay_period)
-      .where(company_id: company.id)
-      .financially_reportable.reportable
-      .where.not(employment_type: "contractor")
-      .where(pay_periods: {
-        id: PayPeriod.reportable_committed
-          .where(company_id: company.id, pay_date: year_range)
-          .select(:id)
-      })
+    YearEnd::W2PayrollItems.scope(company.id, year)
   end
 
   # Pre-aggregate payroll sums by employee to avoid N+1 SUM queries.
@@ -130,7 +122,7 @@ class W2GuAggregator
         "SUM(COALESCE(cash_tips_reported, reported_tips)) AS cash_tips_total",
         "SUM(COALESCE(qualified_overtime_compensation, 0)) AS qualified_overtime_total",
         "COUNT(*) AS payroll_item_count",
-        "COUNT(*) FILTER (WHERE fit_taxable_wages IS NULL OR social_security_taxable_wages IS NULL OR social_security_taxable_tips IS NULL OR medicare_taxable_wages IS NULL) AS missing_tax_base_count",
+        "COUNT(*) FILTER (WHERE #{YearEnd::W2PayrollItems::MISSING_TAX_BASE}) AS missing_tax_base_count",
         "COUNT(*) FILTER (WHERE reported_tips <> 0 AND cash_tips_reported IS NULL) AS missing_tip_classification_count",
         "COUNT(*) FILTER (WHERE overtime_hours <> 0 AND qualified_overtime_compensation IS NULL) AS missing_qualified_overtime_count"
       )
@@ -254,6 +246,7 @@ class W2GuAggregator
         quickbooks_bridge_balance_count: historical.length
       },
 
+      rebuild_ss: rebuild_ss,
       missing_committed_tax_bases: sums&.missing_tax_base_count.to_i.positive?,
       inconsistent_fit_taxable_wages: year_end_wages.dig(employee.id, :inconsistent_fit_count).to_i.positive?,
       fica_withheld_on_section_125: year_end_wages.dig(employee.id, :fica_on_benefits_count).to_i.positive?,

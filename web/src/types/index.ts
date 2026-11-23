@@ -727,6 +727,9 @@ export interface SourceAccountingReceiptState {
   can_retry: boolean;
 }
 
+export type TimeTrackingExclusionCategory = 'needs_action' | 'not_paid_by_decision' | 'next_payroll' | 'payment_evidence_pending';
+export type TimeTrackingExclusionCounts = Partial<Record<TimeTrackingExclusionCategory, number>>;
+
 export interface AirePayrollRecord {
   id: number;
   source_name: string;
@@ -775,7 +778,12 @@ export interface AirePayrollRecord {
     /** Lines from runs added before line-level payment receipts existed; payment is on that run's checks. */
     recorded_before_line_tracking?: AirePayableLineStatusBucket;
     accounting_corrections?: AirePayableLineStatusBucket;
-    held: { entry_count: number; total_hours: number };
+    held: {
+      entry_count: number;
+      total_hours: number;
+      by_category?: Partial<Record<TimeTrackingExclusionCategory, { entry_count: number; total_hours: number }>>;
+      actionable_entry_count?: number;
+    };
     synchronization: {
       pending_event_count: number;
       failed_event_count: number;
@@ -1128,6 +1136,7 @@ export interface AirePayrollManualReviewExclusion {
   original_work_date: string;
   category?: { id?: string | number; key?: string | null; name?: string | null } | null;
   reason: string;
+  exclusion_category?: TimeTrackingExclusionCategory;
   held_total_hours: number;
   held_regular_hours?: number;
   held_overtime_hours?: number;
@@ -1394,6 +1403,11 @@ export interface PayPeriod {
   compliance_warnings?: string[];
   compensation_warnings?: string[];
   annual_fica_review_note?: string | null;
+  annual_fica_review_path?: string | null;
+  annual_fica_review?: {
+    employee_count: number;
+    entries: { employee_name: string; note: string }[];
+  } | null;
   confirmed_workweek_adoption?: {
     available: boolean;
     workweek?: {
@@ -1425,6 +1439,7 @@ export interface PayPeriod {
     active_source_capabilities?: string[];
     aire_calendar?: AirePayrollCalendarState | null;
     linked_aire_records: AirePayrollRecord[];
+    linked_source_records?: AirePayrollRecord[];
   };
   created_by_id?: number;
   approved_by_id?: number;

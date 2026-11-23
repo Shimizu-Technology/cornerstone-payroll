@@ -23,6 +23,8 @@ class ClientOperatingProfile < ApplicationRecord
   validate :no_overlapping_versions
   validate :options_valid_against_catalog
 
+  after_commit { TenantSubdomainRegistry.invalidate! }
+
   scope :active_on, ->(date) {
     resolved_date = date.to_date
     where("effective_on <= ? AND (ends_on IS NULL OR ends_on >= ?)", resolved_date, resolved_date)

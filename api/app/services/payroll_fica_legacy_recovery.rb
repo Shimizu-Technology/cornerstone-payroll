@@ -123,7 +123,7 @@ class PayrollFicaLegacyRecovery
         employee = Employee.find(employee_id)
         probe = PayrollItem.new(employee: employee, company: company, employment_type: "hourly", gross_pay: 0,
           cash_tips_reported: 0, reported_tips: 0, pay_period: PayPeriod.new(pay_date: Date.new(year, 1, 1)))
-        context = BelowThresholdFicaContext.new(employee: employee, company: company, year: year)
+        context = BelowThresholdFicaContext.new(employee: employee, company: company, year: year, include_unverified_legacy: false)
         evidence = context.snapshot(current_item: probe, rules: year_rules)
         reports.each do |report|
           if report[:status] == "held"

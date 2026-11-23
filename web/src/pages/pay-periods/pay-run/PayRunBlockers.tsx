@@ -10,14 +10,6 @@ import type { PayPeriod } from '@/types';
 import { formatGuam } from '@/lib/payrollSubmissionFormat';
 import type { PayRunSectionProps } from './usePayRunController';
 
-export function FicaHistoryReviewNotice({ note }: { note?: string | null }) {
-  if (!note) return null;
-  return <Alert>
-    <p className="font-semibold">Prior-period payroll review remains open</p>
-    <p className="mt-1 text-sm leading-6">{note}</p>
-  </Alert>;
-}
-
 const CLIENT_FILE_STATUS: Record<string, string> = { waiting: 'Waiting for review', imported: 'Imported', 'set aside': 'Set aside' };
 
 export function PayRunClientFiles({ payPeriod }: { payPeriod: PayPeriod }) {

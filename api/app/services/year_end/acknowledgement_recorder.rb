@@ -20,6 +20,7 @@ module YearEnd
       PayrollFilingResponsibilityPolicy.authorize_record!(actor: actor, company: company)
       definition = OneOffPayees.code?(warning_code) ? { kind: "acknowledge", title: "Identify a one-off 1099 payee" } : JudgmentWarnings::DEFINITIONS[warning_code]
       raise ArgumentError, "Unknown warning" unless definition
+      raise ArgumentError, "Record this decision in Payroll history review" if definition[:kind] == "history_review"
       raise ArgumentError, "This warning must be fixed, not acknowledged" unless definition[:kind] == "acknowledge"
       raise ArgumentError, "Say what you reviewed" if note.blank?
 

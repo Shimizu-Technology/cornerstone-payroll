@@ -550,22 +550,29 @@ class PayPeriod < ApplicationRecord
     company_workweek || CompanyWorkweek.for_date(company_id, start_date)
   end
 
-  def annual_fica_review_note
+  def annual_fica_review
     items = payroll_items.financially_reportable.select do |item|
       context = item.tax_rule_snapshot.to_h["annual_fica_context"]
       context.is_a?(Hash) && context["history_review_open"] == true
     end
+    return if items.empty?
+
     ActiveRecord::Associations::Preloader.new(records: items, associations: :employee).call
-    notes = items.map do |item|
+    entries = items.map do |item|
       context = item.tax_rule_snapshot.fetch("annual_fica_context")
       # Keep older committed snapshots readable without reinterpreting history.
-      note = context["note"].presence || BelowThresholdFicaContext::NOTE
-      "#{item.employee.full_name}: #{note}"
+      { employee_name: item.employee.full_name, note: context["note"].presence || BelowThresholdFicaContext::NOTE }
     end
-    notes.uniq.sort.join("\n").presence
+    { employee_count: items.map(&:employee_id).uniq.size, entries: entries.sort_by { |entry| [ entry[:employee_name], entry[:note] ] } }
   end
 
-  def compliance_warnings
+  def annual_fica_review_note(review: annual_fica_review)
+    return unless review
+
+    review.fetch(:entries).map { |entry| "#{entry[:employee_name]}: #{entry[:note]}" }.uniq.sort.join("\n")
+  end
+
+  def compliance_warnings(fica_review_note: annual_fica_review_note)
     # Deduction review warnings only guide runs that can still be calculated.
     warnings = []
     if status.in?(%w[draft calculated])
@@ -573,8 +580,7 @@ class PayPeriod < ApplicationRecord
         item.deduction_review_warnings.each { |message| warnings << "#{item.employee.full_name}: #{message}" }
       end
     end
-    note = annual_fica_review_note
-    warnings << note if note
+    warnings << fica_review_note if fica_review_note
     workweek = resolved_company_workweek
     if workweek.nil?
       warnings << "No legal overtime workweek is configured for this pay period. Confirm the employer's workweek before relying on overtime results."

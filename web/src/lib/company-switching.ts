@@ -7,6 +7,13 @@ export interface CompanySwitchRedirect {
 }
 
 export function getCompanySwitchRedirect(pathname: string, nextCompanyId?: number, search = ''): CompanySwitchRedirect | null {
+  if (nextCompanyId && matchPath('/companies/:companyId/operating-profile', pathname)) {
+    return {
+      notice: 'Switched clients. Showing the operating profile for the selected client.',
+      to: `/companies/${nextCompanyId}/operating-profile`,
+    };
+  }
+
   if (pathname === '/payroll-fields' || matchPath('/companies/:companyId/payroll-fields', pathname)) {
     return {
       notice: 'Switched clients. Showing reusable payroll fields for the selected client.',

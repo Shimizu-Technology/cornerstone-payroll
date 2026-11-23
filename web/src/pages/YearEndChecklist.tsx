@@ -16,6 +16,7 @@ import { PrintAndFileStep } from '@/components/year-end/PrintAndFileStep';
 import { ReconciliationStep } from '@/components/year-end/ReconciliationStep';
 import { ReviewWarningsStep } from '@/components/year-end/ReviewWarningsStep';
 import { IssueList, StepCard } from '@/components/year-end/StepCard';
+import { PayrollHistoryReview } from '@/components/year-end/PayrollHistoryReview';
 import { yearEndApi } from '@/services/api';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { yearEndPath } from '@/lib/routes';
@@ -222,6 +223,8 @@ export function YearEndChecklist(): ReactElement {
                 </li>
               ))}
             </ol>
+
+            <PayrollHistoryReview key={scope} companyId={companyId} year={year} onSaved={onSaved} onRefresh={onRefresh} />
 
             {(checklist.files_w2 || checklist.files_1099) && (
               <Card>
