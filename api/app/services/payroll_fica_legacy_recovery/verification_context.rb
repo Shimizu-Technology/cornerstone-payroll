@@ -19,12 +19,8 @@ class PayrollFicaLegacyRecovery
     end
 
     def verify_recorded_history!(rules:)
-      rows.each_with_index do |row, index|
-        stored = row[:recorded_annual_fica_context]
-        if stored.is_a?(Hash) && stored["fingerprint"].present?
-          prior_rows = rows.take(index)
-          verify_stored_fingerprint!(row, prior_context(prior_rows), prior_rows)
-        end
+      rows.each do |row|
+        # Only missing bases call into ordinary replay and its fingerprint check.
         components = if FicaBasisEvidence::BASE_FIELDS.any? { |field| field != "medicare_taxable_wages" && row.public_send(field).nil? }
           recovered_bases(row, rules)
         else
@@ -33,10 +29,8 @@ class PayrollFicaLegacyRecovery
           FicaBasisEvidence.components(bases, rules)
         end
         unless FicaBasisEvidence.matches_recorded?(row, components)
-          raise UnreconciledLedgerError, "Recorded FICA bases and taxes do not reconcile."
+          raise UnreconciledLedgerError, "Payroll item ##{row.id}: recorded FICA bases and taxes do not reconcile."
         end
-      rescue UnreconciledLedgerError => error
-        raise UnreconciledLedgerError, "Payroll item ##{row.id}: #{error.message}"
       end
     end
 

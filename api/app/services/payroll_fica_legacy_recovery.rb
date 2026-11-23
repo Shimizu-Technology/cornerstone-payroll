@@ -116,7 +116,8 @@ class PayrollFicaLegacyRecovery
     employee_id = employee.id
     ledger = ledger.sort_by(&:id)
     ids = ledger.map(&:id)
-    history_reason = if history.map { |row| row[1] }.sort != ids
+    historical_ids = history.map { |row| row[1] }.sort
+    history_reason = if historical_ids != ids
       "Excluded or financially reversed history requires reviewed reconciliation"
     elsif history.any? { |row| row[2].present? || row[3].nil? || row[3].negative? }
       "Signed correction history requires reviewed correction reconciliation"
@@ -156,6 +157,8 @@ class PayrollFicaLegacyRecovery
     end
     result = { employee_id: employee_id, tax_year: year, status: "ready", rows: reports, proofs: proofs }
 
+    result.merge!(history_review_open: true, filing_review_open: true) if (historical_ids - ids).any?
+
     simulated = with_planned_proofs(ledger, proofs)
     context = proofs.empty? ? baseline : verification_context(employee, simulated, opening)
     # Recheck dependent rows against the whole candidate set. This pass never
@@ -168,7 +171,6 @@ class PayrollFicaLegacyRecovery
     raise EmployeeYearFicaContext::UnreconciledLedgerError, history_reason if invalid_source
 
     probe_ordinary!(context)
-    ordinary_succeeds = true
     if (held_row = reports.find { |report| report[:status] == "held" })
       raise EmployeeYearFicaContext::UnreconciledLedgerError, "Payroll item ##{held_row[:payroll_item_id]}: #{held_row[:reason]}"
     end
@@ -181,7 +183,18 @@ class PayrollFicaLegacyRecovery
       state.merge(payroll_item_id: row.id)
     end
     result.merge!(status: "held", reason: reason, rows: restored, proofs: {})
-    ordinary_succeeds ? result : bounded_inventory(result, employee)
+    if !invalid_source && baseline_probe_succeeds?(baseline)
+      result
+    else
+      bounded_inventory(result, employee)
+    end
+  end
+
+  def baseline_probe_succeeds?(context)
+    probe_ordinary!(context)
+    true
+  rescue EmployeeYearFicaContext::UnreconciledLedgerError
+    false
   end
 
   def verification_context(employee, ledger, opening)
