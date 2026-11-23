@@ -69,6 +69,24 @@ RSpec.describe StagingCloneContainment do
     expect(StagingQuarantine.suppressed?("solid_queue_jobs", fresh.id)).to eq(false)
   end
 
+  it "clears subdomain enablement from all copied profiles during quarantine" do
+    today = PayrollBusinessClock.today
+    company = create(:company, subdomain_slug: "cloned-client")
+    current = company.client_operating_profiles.create!(
+      effective_on: today, ends_on: today, version: 1, offering: "payroll_service",
+      hours_source: "manual", options: { subdomain_enabled: true, time_module_enabled: true }
+    )
+    scheduled = company.client_operating_profiles.create!(
+      effective_on: today + 1.day, version: 2, offering: "payroll_service",
+      hours_source: "manual", options: { subdomain_enabled: true }
+    )
+
+    described_class.new.quarantine(apply: true)
+
+    expect(current.reload.options).to include("subdomain_enabled" => false, "time_module_enabled" => true)
+    expect(scheduled.reload.options).to include("subdomain_enabled" => false)
+  end
+
   it "makes no tester binding writes when provider identity proof fails" do
     leon = create(:user, email: "leon@example.test")
     chels = create(:user, email: "chels@example.test")

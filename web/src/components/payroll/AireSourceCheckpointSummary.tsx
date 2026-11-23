@@ -1,3 +1,4 @@
+import { linkedExclusionMessages } from '@/lib/time-tracking-exclusions';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { formatGuamDateTime } from '@/lib/utils';
@@ -49,22 +50,25 @@ export function AireSourceCheckpointSummary({
   const lineStatus = aireRecord?.payable_line_status;
   // A committed run's linked record keeps its own frozen totals; a live estimate no longer applies.
   const recordTotals = committed && !calendar.finalized_batch ? lineStatus : undefined;
-  const heldCount = batch ? summary?.exclusion_count : recordTotals ? recordTotals.held.entry_count : overview?.readiness.held_entries;
+  const linkedExclusions = recordTotals?.held ?? (batch && aireRecord?.external_batch_id === batch.payroll_batch_id ? lineStatus?.held : undefined);
+  const aggregateExclusionCount = batch ? summary?.exclusion_count : overview?.readiness.held_entries;
+  const exclusionMessages = linkedExclusions ? linkedExclusionMessages(linkedExclusions) : [];
   const issues = batch?.issues;
   const readiness = overview?.readiness;
+  const paymentEvidenceLabel = 'Payment evidence pending';
   const reasons = [
-    [issues?.pending_approval_count ?? (!batch ? readiness?.pending_approvals : undefined), batch ? 'awaiting approval or submitted/approved after cutoff' : 'approval needed', batch ? 'awaiting approval or submitted/approved after cutoff' : 'approvals needed'],
-    [issues?.pending_overtime_count ?? (!batch ? readiness?.pending_overtime : undefined), batch ? 'overtime pending or approved after cutoff' : 'overtime approval needed', batch ? 'overtime pending or approved after cutoff' : 'overtime approvals needed'],
-    [issues?.open_clock_count ?? (!batch ? readiness?.missing_punches : undefined), 'missing punch', 'missing punches'],
+    [issues?.pending_approval_count ?? (!batch ? readiness?.pending_approvals : undefined), batch ? 'awaiting approval or submitted/approved after cutoff' : 'approval needed'],
+    [issues?.pending_overtime_count ?? (!batch ? readiness?.pending_overtime : undefined), batch ? 'overtime pending or approved after cutoff' : 'overtime approval needed'],
+    [issues?.open_clock_count ?? (!batch ? readiness?.missing_punches : undefined), 'missing punch'],
     // Frozen missing-category counts describe earning adjustments, not exclusions.
-    [!batch ? readiness?.missing_categories : undefined, 'missing category', 'missing categories'],
-    [issues?.denied_approval_count ?? (!batch ? readiness?.denied_entries : undefined), 'denied entry', 'denied entries'],
-    [issues?.denied_overtime_count, 'overtime denial', 'overtime denials'],
-    [issues?.payment_attested_pending_evidence_count ?? (!batch ? readiness?.payment_attested_pending_evidence_entries : undefined), 'payment report awaiting evidence', 'payment reports awaiting evidence'],
+    [!batch ? readiness?.missing_categories : undefined, 'missing category'],
+    [issues?.denied_approval_count ?? (!batch ? readiness?.denied_entries : undefined), 'denied time was excluded'],
+    [issues?.denied_overtime_count, 'denied overtime was excluded'],
+    [issues?.payment_attested_pending_evidence_count ?? (!batch ? readiness?.payment_attested_pending_evidence_entries : undefined), paymentEvidenceLabel],
   ] as const;
-  // A live count can't explain a frozen record's held entries, but missing payment evidence stays visible.
-  const heldReasons = reasons.filter(([count, singular]) => Number(count) > 0 && (!recordTotals || singular === 'payment report awaiting evidence'))
-    .map(([count, singular, plural]) => `${count} ${count === 1 ? singular : plural}`).join(' · ');
+  // Aggregate source counters have no entry hours. Show reasons without counts until exact rows are linked.
+  const aggregateReasons = reasons.filter(([count, reason]) => Number(count) > 0 && (!linkedExclusions || (!batch && reason === paymentEvidenceLabel)))
+    .map(([, reason]) => reason).join(' · ');
   const attention = Number(lineStatus?.needs_attention.line_count || 0) > 0;
   const paymentPending = committed && Number(lineStatus?.in_payroll.line_count || 0) + Number(lineStatus?.payment_pending.line_count || 0) > 0;
   const allPaid = committed && lineStatus && lineStatus.line_count > 0 && lineStatus.paid.line_count === lineStatus.line_count;
@@ -120,10 +124,13 @@ export function AireSourceCheckpointSummary({
           {Number(recordTotals?.accounting_corrections?.line_count || 0) > 0 && <p className="mt-1 text-xs text-neutral-600">Signed totals include accounting corrections.</p>}
         </div>
         <div>
-          <p className={`text-sm font-semibold tabular-nums ${Number(heldCount) > 0 && !recordTotals ? 'text-warning-900' : 'text-neutral-950'}`}>
-            {heldCount == null ? 'Held entry count unavailable' : `${heldCount} held ${heldCount === 1 ? 'entry' : 'entries'} excluded`}
+          <p className="text-sm font-semibold text-neutral-950">
+            {linkedExclusions ? exclusionMessages.join(' · ') || 'No excluded hours'
+              : aggregateExclusionCount == null ? 'Exclusion details unavailable'
+                : aggregateExclusionCount > 0 ? 'Review entries outside this payroll' : 'No exclusions reported'}
           </p>
-          <p className="mt-1 text-xs leading-5 text-neutral-600">{[recordTotals && heldCount ? `${hours(recordTotals.held.total_hours)} h outside this payroll; see the linked time record.` : '', heldReasons].filter(Boolean).join(' · ') || (Number(heldCount) > 0 ? 'Outside this cutoff; review held time for the exact reasons.' : heldCount === 0 ? 'No held entries reported.' : 'Review source details for held time.')}</p>
+          {linkedExclusions && Number(linkedExclusions.total_hours) > 0 && <p className="mt-1 text-xs leading-5 text-neutral-600">{hours(linkedExclusions.total_hours)} h outside this payroll. See the linked time record.</p>}
+          {aggregateReasons && <p className="mt-1 text-xs leading-5 text-neutral-600">{aggregateReasons}</p>}
         </div>
       </div>
       {sourceCoverageRequired && <div className="space-y-2"><p className="text-xs leading-5 text-neutral-600">Source hours have not been linked to this payroll. Calculating without linked source hours requires an acknowledgement and reason.</p>{sourceCoverageAction}</div>}

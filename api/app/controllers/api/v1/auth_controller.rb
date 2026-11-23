@@ -35,6 +35,12 @@ module Api
           features: current_company ? CompanyFeatures.for(current_company).summary : nil
         }
       end
+
+      private
+
+      def allow_client_subdomain_token?
+        action_name == "me"
+      end
     end
   end
 end

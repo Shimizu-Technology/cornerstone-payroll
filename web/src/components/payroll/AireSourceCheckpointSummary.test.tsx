@@ -39,14 +39,14 @@ describe('AireSourceCheckpointSummary', () => {
     render(<AireSourceCheckpointSummary {...props} calendar={{ ...calendar, finalized_batch: {
       ...batch, issues: { ...batch.issues, missing_category_count: 1 },
     } }} />);
-    expect(screen.getByText('1 awaiting approval or submitted/approved after cutoff · 1 overtime pending or approved after cutoff')).toBeTruthy();
+    expect(screen.getByText('awaiting approval or submitted/approved after cutoff · overtime pending or approved after cutoff')).toBeTruthy();
     expect(screen.queryByText(/missing category/)).toBeNull();
   });
 
   it('keeps missing totals and held counts unknown rather than claiming zero hours', () => {
     render(<AireSourceCheckpointSummary {...props} calendar={{ ...calendar, finalized_batch: { ...batch, summary: undefined, issues: undefined } }} />);
     expect(screen.getByText('— regular + — OT · — people')).toBeTruthy();
-    expect(screen.getByText('Held entry count unavailable')).toBeTruthy();
+    expect(screen.getByText('Exclusion details unavailable')).toBeTruthy();
     expect(screen.queryByText(/0\.00/)).toBeNull();
   });
 
@@ -109,7 +109,7 @@ describe('committed run with a linked record and no batch', () => {
   const earlierStatus = {
     ...linkedRecord.payable_line_status!, line_count: 134, total_hours: 599.06, regular_hours: 578.49, overtime_hours: 20.57,
     in_payroll: bucket(0), recorded_before_line_tracking: { line_count: 134, total_hours: 599.06, regular_hours: 578.49, overtime_hours: 20.57 },
-    held: { entry_count: 10, total_hours: 6.1 },
+    held: { entry_count: 10, total_hours: 6.1, by_category: { not_paid_by_decision: { entry_count: 2, total_hours: 6.1 } } },
   };
   const earlierRecord = { ...linkedRecord, payable_line_status: earlierStatus };
   const notEffective = { ...calendar, eligible: false, cutoff_at: null, cutoff_state: 'unpublished' as const, finalized_batch: null,
@@ -119,8 +119,8 @@ describe('committed run with a linked record and no batch', () => {
     render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);
     expect(screen.getByText('599.06 h linked to payroll')).toBeTruthy();
     expect(screen.getByText('578.49 regular + 20.57 OT · 134 lines')).toBeTruthy();
-    expect(screen.getByText('10 held entries excluded').className).not.toContain('warning');
-    expect(screen.getByText('6.10 h outside this payroll; see the linked time record.')).toBeTruthy();
+    expect(screen.getByText('2 denied entries, not paid').className).not.toContain('warning');
+    expect(screen.getByText('6.10 h outside this payroll. See the linked time record.')).toBeTruthy();
     expect(screen.getByText(/^Source cutoff · /)).toBeTruthy();
     expect(screen.getByRole('status').className).toContain('text-neutral-700');
     expect(screen.getByRole('status').textContent).toBe(notEffective.eligibility_error);
@@ -139,20 +139,21 @@ describe('committed run with a linked record and no batch', () => {
   it('does not explain the frozen held count with live approval counts', () => {
     const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, eligible_hours: 40, pending_approvals: 3, pending_overtime: 1, missing_punches: 2 } } as unknown as AirePayrollCockpitOverview;
     render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);
-    expect(screen.getByText('6.10 h outside this payroll; see the linked time record.')).toBeTruthy();
+    expect(screen.getByText('6.10 h outside this payroll. See the linked time record.')).toBeTruthy();
     expect(screen.queryByText(/approval|missing punch/)).toBeNull();
   });
 
   it('keeps live missing payment evidence beside the frozen held hours', () => {
     const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, pending_approvals: 3, payment_attested_pending_evidence_entries: 2 } } as unknown as AirePayrollCockpitOverview;
     render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);
-    expect(screen.getByText('6.10 h outside this payroll; see the linked time record. · 2 payment reports awaiting evidence')).toBeTruthy();
+    expect(screen.getByText('6.10 h outside this payroll. See the linked time record.')).toBeTruthy();
+    expect(screen.getByText('Payment evidence pending')).toBeTruthy();
   });
 
   it('keeps live reasons on an editable run', () => {
     const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, pending_approvals: 3 } } as unknown as AirePayrollCockpitOverview;
     render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="draft" calendar={notEffective} aireRecord={earlierRecord} />);
-    expect(screen.getByText('3 approvals needed')).toBeTruthy();
+    expect(screen.getByText('approval needed')).toBeTruthy();
   });
 
   it('notes signed totals when the record has accounting corrections', () => {
@@ -164,7 +165,7 @@ describe('committed run with a linked record and no batch', () => {
   it('does not present a live estimate as this run\'s held count', () => {
     const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, eligible_hours: 40 } } as unknown as AirePayrollCockpitOverview;
     render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);
-    expect(screen.getByText('10 held entries excluded')).toBeTruthy();
+    expect(screen.getByText('2 denied entries, not paid')).toBeTruthy();
     expect(screen.queryByText(/live estimate/)).toBeNull();
   });
 
@@ -187,7 +188,7 @@ describe('committed run with a linked record and no batch', () => {
     const pending = { ...batch, verification_status: 'pending' as const };
     render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={{ ...notEffective, finalized_batch: pending }} aireRecord={earlierRecord} />);
     expect(screen.getByText('Source hours linked to payroll')).toBeTruthy();
-    expect(screen.getByText('Held entry count unavailable')).toBeTruthy();
+    expect(screen.getByText('Exclusion details unavailable')).toBeTruthy();
   });
 
   it('does not say hours are linked when a completed payroll has no record', () => {
