@@ -7,8 +7,7 @@ import { clientSubdomainHost } from './lib/tenant-subdomain';
 import { TenantComingSoon } from './pages/tenant/TenantComingSoon';
 import './index.css';
 
-const employeeSurface = import.meta.env.VITE_APP_SURFACE === 'employee';
-const tenantHost = employeeSurface ? null : clientSubdomainHost(window.location, import.meta.env.DEV);
+const tenantHost = clientSubdomainHost(window.location, import.meta.env.DEV);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -23,7 +22,7 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>
 );
 
-if (!employeeSurface && !tenantHost && 'serviceWorker' in navigator && !import.meta.env.DEV) {
+if (!tenantHost && 'serviceWorker' in navigator && !import.meta.env.DEV) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')

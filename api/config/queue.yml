@@ -1,3 +1,4 @@
+<% main_queues = ENV["SOLID_QUEUE_QUEUES"].to_s.split(",").map(&:strip).reject(&:empty?) %>
 default: &default
   dispatchers:
     - polling_interval: 1
@@ -6,7 +7,7 @@ default: &default
     # Include Solid Queue's recurring command queue so scheduled maintenance
     # jobs (for example, clearing finished Solid Queue jobs) do not pile up.
     # Preserve payroll priority. Employee jobs run after both existing queues.
-    - queues: <%= ENV.fetch("SOLID_QUEUE_QUEUES", "default,solid_queue_recurring,employee").split(",").map(&:strip).reject(&:empty?).to_json %>
+    - queues: <%= (main_queues.presence || %w[default solid_queue_recurring employee]).to_json %>
       threads: 3
       processes: <%= ENV.fetch("JOB_CONCURRENCY", 1) %>
       polling_interval: 0.1

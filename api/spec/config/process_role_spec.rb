@@ -14,6 +14,7 @@ RSpec.describe "APP_PROCESS_ROLE" do
         up: session.response.status,
         up_queries: queries,
         forbidden: session.get(#{forbidden_path.inspect}),
+        cable_mount_path: Rails.application.config.action_cable.mount_path,
         paths: Rails.application.routes.routes.map { |route| route.path.spec.to_s }
       )
     RUBY_CODE
@@ -28,14 +29,17 @@ RSpec.describe "APP_PROCESS_ROLE" do
   it "mounts only the employee surface and serves /up without SQL" do
     result = boot_role("employee_web", "/api/v1/admin/companies")
     expect(result).to include(up: 200, up_queries: [], forbidden: 404)
-    expect(result[:paths]).to all(match(%r{\A(?:/up\(|/api/v1/(?:employee/|kiosk/|auth/|public/tenant_branding\z))}))
-    expect(result[:paths]).to include("/api/v1/employee/context(.:format)", "/api/v1/public/tenant_branding")
+    expect(result[:cable_mount_path]).to be_nil
+    expect(result[:paths]).to all(match(%r{\A(?:(?:/up|/health/dependencies)\(|/api/v1/(?:employee/|kiosk/|auth/|public/tenant_branding\z))}))
+    expect(result[:paths]).to include("/api/v1/employee/context(.:format)", "/api/v1/public/tenant_branding", "/health/dependencies(.:format)")
   end
 
   it "mounts only the payroll surface and excludes employee requests" do
     result = boot_role("payroll_web", "/api/v1/employee/context")
     expect(result).to include(up: 200, up_queries: [], forbidden: 404)
-    expect(result[:paths]).to all(match(%r{\A(?:/up\(|/api/v1/(?:(?:admin|client|auth|form_500s|finance|integrations)/|(?:companies|cable_ticket|notification_settings)\())}))
-    expect(result[:paths]).to include("/api/v1/admin/companies(.:format)", "/api/v1/auth/me(.:format)")
+    expect(result[:cable_mount_path]).to eq("/cable")
+    expect(result[:paths]).to all(match(%r{\A(?:/cable\z|(?:/up|/health/dependencies)\(|/api/v1/(?:(?:admin|client|auth|form_500s|finance|integrations)/|(?:companies|cable_ticket|notification_settings)\(|public/tenant_branding\z))}))
+    expect(result[:paths]).to include("/cable", "/health/dependencies(.:format)", "/api/v1/public/tenant_branding",
+      "/api/v1/admin/companies(.:format)", "/api/v1/auth/me(.:format)")
   end
 end

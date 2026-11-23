@@ -28,11 +28,11 @@ expect_status() {
   fi
 }
 
-for case_spec in '0 docs/runbook.md' '0 api/example.rb' '1 web/example.ts' '1 package-lock.json'; do
+for case_spec in '0 docs/runbook.md' '0 api/example.rb' '1 web/example.ts' '1 package-lock.json' '1 .gitignore' '1 web/.gitignore'; do
   read -r expected file <<< "$case_spec"
   echo "$file"
   touch "$fixture/$file"
-  git -C "$fixture" add "$file"
+  git -C "$fixture" add -f "$file"
   git -C "$fixture" commit -qm "$file"
   expect_status "$expected" production "$baseline" "$(git -C "$fixture" rev-parse HEAD)"
   git -C "$fixture" reset -q --hard "$baseline"

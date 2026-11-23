@@ -27,13 +27,27 @@ export default defineConfig(({ mode, command }) => {
     if (env.VITE_AUTH_ENABLED === 'false') throw new Error('Staging build requires authentication')
   }
   return {
-    plugins: [stagingBrowserContainment(env.VITE_DEPLOYMENT_ENV === 'staging'), react(), tailwindcss()],
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-        // Select the entry before Rollup traverses the staff import graph.
-        ...(surface === 'employee' ? { './App.tsx': path.resolve(__dirname, './src/EmployeeApp.tsx') } : {}),
+    plugins: [
+      surface === 'employee' && {
+        name: 'employee-entry',
+        transformIndexHtml: {
+          order: 'pre',
+          handler: (html: string) => html.replace('/src/main.tsx', '/src/employee-main.tsx'),
+        },
       },
+      stagingBrowserContainment(env.VITE_DEPLOYMENT_ENV === 'staging'),
+      react(),
+      tailwindcss(),
+    ],
+    resolve: {
+      alias: [
+        { find: '@', replacement: path.resolve(__dirname, './src') },
+        // Select the entry before Rollup traverses the staff import graph.
+        ...(surface === 'employee' ? [{
+          find: /^\.\/App(?:\.tsx)?$/,
+          replacement: path.resolve(__dirname, './src/EmployeeApp.tsx'),
+        }] : []),
+      ],
     },
   }
 })

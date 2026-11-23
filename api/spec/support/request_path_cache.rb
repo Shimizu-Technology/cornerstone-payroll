@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 RSpec.configure do |config|
-  # RequestPathCache is intentionally process-local and therefore is not reset
-  # by transactional fixtures. Isolate rate-limit and JWKS state per example.
+  # Local caches are outside transactional fixtures. Reset between examples.
   config.after do
     RequestPathCache::STORE.clear
+    RackAttackStore::MEMORY.clear
   end
 end

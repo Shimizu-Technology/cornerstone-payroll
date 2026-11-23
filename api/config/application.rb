@@ -50,10 +50,8 @@ module Api
     config.api_only = true
 
     # Framework routes are part of the legacy `all` surface.
-    if ProcessRole.current != ProcessRole::ALL
-      config.active_storage.draw_routes = false
-      config.action_cable.mount_path = nil
-    end
+    config.active_storage.draw_routes = false if ProcessRole.current != ProcessRole::ALL
+    config.action_cable.mount_path = nil if ProcessRole.current == ProcessRole::EMPLOYEE_WEB
 
     # Run after initializer middleware registrations (including CORS) so this
     # remains outermost, before Rails logging and either client-IP resolver.

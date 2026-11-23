@@ -11,8 +11,9 @@ RSpec.describe Rack::Attack do
     described_class.enabled = previously_enabled
   end
 
-  it "uses a process-local store instead of the database-backed Rails cache" do
-    expect(described_class.cache.store).to equal(RequestPathCache.store)
+  it "dedicates a process-local store to rate limits by default" do
+    expect(described_class.cache.store).to equal(RackAttackStore::MEMORY)
+    expect(described_class.cache.store).not_to equal(RequestPathCache.store)
     expect(described_class.cache.store).to be_a(ActiveSupport::Cache::MemoryStore)
     expect(described_class.cache.store).not_to equal(Rails.cache)
   end
@@ -89,6 +90,8 @@ RSpec.describe Rack::Attack do
 
       expect(throttle.block.call(request.call("/api/v1/integrations/time_payroll/workers/#{worker.upcase}/statements")))
         .to eq("203.0.113.40:#{worker}")
+      expect(throttle.block.call(request.call("/api//v1/integrations/time_payroll/workers/#{worker}/%73tatements/9/pdf/")))
+        .to eq("203.0.113.40:#{worker}")
       expect(throttle.block.call(request.call("/api/v1/integrations/time_payroll/events"))).to be_nil
     end
   end
@@ -143,10 +146,64 @@ RSpec.describe Rack::Attack do
       end
     end
 
+    it "counts encoded API prefixes against the existing API limit" do
+      limit = described_class.throttles.fetch("api/ip").limit
+      address = { "REMOTE_ADDR" => "203.0.113.1" }
+      limit.times { expect(client.get("/api/v1/admin/companies", address).status).to eq(200) }
+
+      response = client.get("/%61pi//v1/admin/companies/", address)
+      expect(response.status).to eq(429)
+      expect(response["Retry-After"]).to eq("60")
+      expect(client.get("/%61pi", address).status).to eq(429)
+      expect(client.get("/%61pis/v1/admin/companies", address).status).to eq(200)
+    end
+
+    it "counts encoded auth paths without matching lookalike namespaces" do
+      limit = described_class.throttles.fetch("auth/ip").limit
+      address = { "REMOTE_ADDR" => "203.0.113.1" }
+      limit.times { expect(client.get("/api/v1/auth/me", address).status).to eq(200) }
+
+      expect(client.get("/api//v1/%61uth/me/", address).status).to eq(429)
+      expect(client.get("/api//v1/%61uthors", address).status).to eq(200)
+    end
+
+    [
+      [ :get, "/api/v1/employee/context", "/%61pi//v1/%65mployee/context/", 120 ],
+      [ :post, "/api/v1/employee/activate", "/api/v1/employee//%61ctivate/", 5 ],
+      [ :get, "/api/v1/employee/pay_stubs/1/pdf", "/api//v1/employee/pay_stubs/1/%70df/", 15 ],
+      [ :get, "/api/v1/employee/pay_stubs/1/download", "/api/v1/employee/pay_stubs/2/download", 15 ],
+      [ :get, "/api/v1/employee/w2s/2025/download", "/api/v1/employee/w2s/2026/download.pdf", 15 ],
+      [ :post, "/api/v1/kiosk/punches", "/api//v1/%6Biosk/punches/", 60 ]
+    ].each do |method, canonical, equivalent, limit|
+      it "shares the limit for #{canonical} with #{equivalent}" do
+        options = { "REMOTE_ADDR" => "203.0.113.1", "CONTENT_TYPE" => "application/json", input: { token: "same-token" }.to_json }
+        limit.times { expect(client.public_send(method, canonical, **options).status).to eq(200) }
+        expect(client.public_send(method, equivalent, **options).status).to eq(429)
+      end
+    end
+
+    [
+      [ "application/x-www-form-urlencoded", "token=private-token", nil, 415 ],
+      [ "application/json", { token: "private-token", padding: " " * 4096 }.to_json, nil, 413 ],
+      [ "application/json", { token: "private-token", padding: " " * 4096 }.to_json, "1", 413 ],
+      [ "application/json", { unrelated: "private-token" }.to_json, nil, 400 ]
+    ].each do |content_type, payload, claimed_length, status|
+      it "rejects invalid activation payloads before dispatch (#{status}, claimed length #{claimed_length.inspect})" do
+        downstream = ->(_env) { raise "invalid activation reached the app" }
+        env = Rack::MockRequest.env_for("/api//v1/employee/%61ctivate", method: :post, input: payload,
+          "REMOTE_ADDR" => "203.0.113.1", "CONTENT_TYPE" => content_type)
+        env["CONTENT_LENGTH"] = claimed_length
+        actual, headers, body = described_class.new(downstream).call(env)
+        expect(actual).to eq(status)
+        expect(headers).to include("content-type" => "application/json", "cache-control" => "no-store")
+        expect(JSON.parse(body.join)).to eq("error" => "Invalid activation request")
+      end
+    end
+
     it "leaves payroll, AIRE events, and lookalike paths outside the new limits" do
       paths = %w[
         /api/v1/admin/employees/1/pay_stubs/2/pdf /api/v1/client/pay_stubs/2/download
-        /api/v1/integrations/aire/events /api/v1/employee_directory /api/v1/kiosk_status
+        /api/v1/integrations/aire/events /api//v1/%65mployee_directory /api/v1/%6Biosk_status
         /api/v1/form_500s/download /api/v1/finance/context
       ]
       paths.each_with_index do |path, i|

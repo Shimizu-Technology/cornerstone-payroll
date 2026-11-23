@@ -37,6 +37,7 @@ git -C "$repository_root" diff --quiet \
   -- \
   web/ \
   netlify.toml \
+  .gitignore \
   .nvmrc \
   .node-version \
   .npmrc \
