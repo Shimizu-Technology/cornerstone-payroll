@@ -11,11 +11,11 @@ const clerk = vi.hoisted(() => ({
   signOut: vi.fn().mockResolvedValue(undefined),
   openUserProfile: vi.fn(),
 }));
-vi.mock('@clerk/clerk-react', () => ({
+vi.mock('@clerk/react', () => ({
   useAuth: () => ({ isSignedIn: clerk.isSignedIn, isLoaded: true, getToken: clerk.getToken, signOut: clerk.signOut }),
   useClerk: () => ({ openUserProfile: clerk.openUserProfile }),
   SignIn: () => <div data-testid="clerk-sign-in" />,
-  SignedOut: ({ children }: { children: ReactNode }) => (clerk.isSignedIn ? null : children),
+  Show: ({ when, children }: { when: string; children: ReactNode }) => (when === 'signed-out' && !clerk.isSignedIn ? children : null),
 }));
 
 const account = {
