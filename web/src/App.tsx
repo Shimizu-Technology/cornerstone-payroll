@@ -72,6 +72,8 @@ const PayrollGoLive = lazy(() => import('@/pages/PayrollGoLive').then((module) =
 const Login = lazy(() => import('@/pages/Login').then((module) => ({ default: module.Login })));
 const Invite = lazy(() => import('@/pages/Invite').then((module) => ({ default: module.Invite })));
 const PublicHome = lazy(() => import('@/pages/PublicHome').then((module) => ({ default: module.PublicHome })));
+const PrivacyPolicy = lazy(() => import('@/pages/legal/PrivacyPolicy').then((module) => ({ default: module.PrivacyPolicy })));
+const TermsOfService = lazy(() => import('@/pages/legal/TermsOfService').then((module) => ({ default: module.TermsOfService })));
 
 // Environment flag to bypass auth in development
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
@@ -336,6 +338,8 @@ function AppRoutes() {
       <Route path="/" element={<PublicHome />} />
       <Route path="/login" element={<Login />} />
       <Route path="/invite" element={<Invite />} />
+      <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/terms" element={<TermsOfService />} />
       <Route path="/callback" element={<Navigate to="/app" replace />} />
 
       {/* Protected routes */}
