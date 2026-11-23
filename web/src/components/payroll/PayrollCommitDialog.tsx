@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError, payPeriodsApi, type PayrollCommitSnapshot } from '@/services/api';
 import { payrollClientCommitReason } from '@/lib/payrollClientCommitReason';
 import { Button } from '@/components/ui/button';
+import { FicaHistoryReviewNotice } from './FicaHistoryReviewNotice';
 import { BusyStatus } from '@/components/ui/busy-status';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatCurrency, formatDateRange, formatDate } from '@/lib/utils';
@@ -9,7 +10,7 @@ import type { PayPeriod } from '@/types';
 
 type Props = {
   open: boolean;
-  payPeriod: Pick<PayPeriod, 'id' | 'company_id' | 'status' | 'start_date' | 'end_date' | 'pay_date' | 'compliance_warnings' | 'correction_status' | 'payroll_review' | 'client_payroll_approval_required' | 'check_number_summary' | 'payroll_items' | 'outstanding_file_requests' | 'client_file_link_error'>;
+  payPeriod: Pick<PayPeriod, 'id' | 'company_id' | 'status' | 'start_date' | 'end_date' | 'pay_date' | 'compliance_warnings' | 'annual_fica_review' | 'annual_fica_review_note' | 'correction_status' | 'payroll_review' | 'client_payroll_approval_required' | 'check_number_summary' | 'payroll_items' | 'outstanding_file_requests' | 'client_file_link_error'>;
   companyName: string;
   processing: boolean;
   onCancel: () => void;
@@ -37,6 +38,7 @@ export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyNam
   const busy = processing || submitting;
   const requests = payPeriod.outstanding_file_requests ?? [];
   const items = payPeriod.payroll_items?.filter(item => item.payroll_included !== false) ?? [];
+  const warnings = payPeriod.compliance_warnings?.filter(warning => warning !== payPeriod.annual_fica_review_note) ?? [];
   const totalNet = items.reduce((sum, item) => sum + Number(item.net_pay || 0), 0);
 
   useEffect(() => {
@@ -132,9 +134,10 @@ export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyNam
           {numbering.last_used_check_number !== null && numbering.next_check_number <= numbering.last_used_check_number && <p role="alert" className="font-semibold text-warning-900">The next check number ({numbering.next_check_number}) is at or below the last one used ({numbering.last_used_check_number}). Check the stock before committing.</p>}
           {numbering.can_change && <a className="font-medium text-primary-700 underline" href="/check-settings">Review check settings</a>}
         </section>}
-        {!!payPeriod.compliance_warnings?.length && <div className={warningStyle}>
+        <FicaHistoryReviewNotice payPeriod={payPeriod} />
+        {warnings.length > 0 && <div className={warningStyle}>
           <p className="font-semibold">Review these warnings before committing</p>
-          <ul className="mt-2 list-disc space-y-1 pl-5">{payPeriod.compliance_warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+          <ul className="mt-2 list-disc space-y-1 pl-5">{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
         </div>}
         {(!!requests.length || conflict?.kind === 'requests') && <section aria-label="Outstanding client file requests" className="space-y-3 text-sm">
           {conflict?.kind === 'requests' && <div role="alert" ref={conflictAlert} tabIndex={-1} className={warningStyle}>

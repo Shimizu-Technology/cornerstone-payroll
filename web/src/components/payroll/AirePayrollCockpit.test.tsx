@@ -1412,7 +1412,7 @@ it('updates the live manual readiness and reconciliation exclusions after approv
   let manual = {
     start_date: period.start_date, end_date: period.end_date, generated_at: period.cutoff_at,
     employees: [], command_access: { can_manage_manual_allocations: true },
-    exclusions: ['42', '99'].map(id => ({ source_time_entry_id: id, source_user_id: '91', display_name: 'Malia Cruz', original_work_date: '2026-10-10', reason: 'pending_approval', held_total_hours: id === '42' ? 6 : 4, cornerstone: { status: 'mapped', employee_id: 7, employee_name: 'Malia Cruz' } })),
+    exclusions: ['42', '99'].map(id => ({ source_time_entry_id: id, source_user_id: '91', display_name: 'Malia Cruz', original_work_date: '2026-10-10', reason: 'pending_approval', exclusion_category: 'needs_action', held_total_hours: id === '42' ? 6 : 4, cornerstone: { status: 'mapped', employee_id: 7, employee_name: 'Malia Cruz' } })),
     issues: { missing_category_count: 0, negative_adjustment_count: 0, pending_approval_count: 2, denied_approval_count: 0, open_clock_count: 0, pending_overtime_count: 0, denied_overtime_count: 0 },
     summary: { employee_count: 0, adjustment_count: 0, total_hours: 8, regular_hours: 8, overtime_hours: 0, current_count: 0, carryover_count: 0, correction_count: 0, exclusion_count: 2 },
   };
@@ -1431,14 +1431,14 @@ it('updates the live manual readiness and reconciliation exclusions after approv
   }
   render(<SourcePanels />);
   expect(await screen.findByText('8.00 regular · 0.00 OT')).toBeTruthy();
-  expect(screen.getByText(/2 held entries remain outside/)).toBeTruthy();
+  expect(screen.getByText('2 time entries need action')).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Approve time' }));
   await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
   await user.type(screen.getByRole('textbox', { name: /reason/i }), 'Verified source approval');
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
   expect(await screen.findByText('14.00 regular · 0.00 OT')).toBeTruthy();
-  expect(await screen.findByText(/1 held entries remain outside/)).toBeTruthy();
-  expect(screen.queryByText(/2 held entries remain outside/)).toBeNull();
+  expect(await screen.findByText('1 time entry needs action')).toBeTruthy();
+  expect(screen.queryByText('2 time entries need action')).toBeNull();
   for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
     expect(endpoint).toHaveBeenCalledTimes(2);
   }
@@ -1741,8 +1741,8 @@ describe('AirePayrollCockpit compact source checkpoint', () => {
     const summary = screen.getByRole('region', { name: 'Source checkpoint' });
     expect(within(summary).getByText(/Locked · Oct 18, 2026/)).toBeTruthy();
     expect(within(summary).getByText('76.00 regular + 5.00 OT · 4 people')).toBeTruthy();
-    expect(within(summary).getByText('2 held entries excluded')).toBeTruthy();
-    expect(within(summary).getByText('1 awaiting approval or submitted/approved after cutoff · 1 overtime pending or approved after cutoff')).toBeTruthy();
+    expect(within(summary).getByText('Review entries outside this payroll')).toBeTruthy();
+    expect(within(summary).getByText('awaiting approval or submitted/approved after cutoff · overtime pending or approved after cutoff')).toBeTruthy();
     expect(within(summary).getByText(/Calculating without linked source hours requires an acknowledgement/)).toBeTruthy();
     await user.click(within(summary).getByRole('button', { name: 'Review and add time tracking hours' }));
     expect(onReview).toHaveBeenCalledOnce();
@@ -1759,7 +1759,7 @@ describe('AirePayrollCockpit compact source checkpoint', () => {
     render(<AirePayrollCockpit presentation="checkpoint" sourceCoverageRequired payPeriodId={17}
       calendar={{ ...calendar, cutoff_state: 'cutoff_due' }} onRefresh={vi.fn()} />);
     const summary = screen.getByRole('region', { name: 'Source checkpoint' });
-    await within(summary).findByText('1 held entry excluded');
+    await within(summary).findByText('Review entries outside this payroll');
     expect(within(summary).getByText(/Due — waiting for time tracking/)).toBeTruthy();
     expect(within(summary).getByText('No locked batch added')).toBeTruthy();
     expect(within(summary).queryByRole('button', { name: /Review and add/ })).toBeNull();
@@ -1795,7 +1795,7 @@ describe('AirePayrollCockpit compact source checkpoint', () => {
   it('shows failures outside disclosures and retains late-hours payment access', async () => {
     const user = userEvent.setup();
     render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
-    await within(screen.getByRole('region', { name: 'Source checkpoint' })).findByText('1 held entry excluded');
+    await within(screen.getByRole('region', { name: 'Source checkpoint' })).findByText('Review entries outside this payroll');
     await user.click(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByRole('button', { name: 'Review timecards' }));
     await user.click(screen.getByRole('button', { name: /Held time/ }));
     expect(screen.getByRole('button', { name: /Pay late hours/ })).toBeTruthy();
