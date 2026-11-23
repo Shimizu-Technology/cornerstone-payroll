@@ -14,16 +14,17 @@ export function TermsOfService() {
             services to its clients.
           </p>
           <p className="mt-4">
-            By using the software, you agree to these terms. If your organization has a written agreement with
-            Cornerstone or with us, that agreement controls wherever it differs from these terms.
+            By using the software, you agree to these terms. If your organization has a written agreement with us, that
+            agreement controls wherever it differs from these terms. Your organization's separate agreement with
+            Cornerstone governs Cornerstone's payroll and accounting services.
           </p>
         </>
       }
     >
       <LegalSection id="access" title="Who can use the software">
         <p>
-          Access is by invitation only. You may use the software only if your organization, or Cornerstone, has invited
-          you and you are acting for that organization.
+          Access is by invitation only. You may use the software only if Shimizu Technology, Cornerstone, or your
+          organization has invited you, and only within the role and company access you were given.
         </p>
       </LegalSection>
 
@@ -60,11 +61,12 @@ export function TermsOfService() {
         <p>
           The software calculates payroll from the information and settings it is given. Cornerstone reviews payroll as
           part of the services it provides under its agreement with each client. The software itself does not give tax,
-          legal, or accounting advice.
+          legal, or accounting advice. Optional AI-assisted tools, such as timecard reading or invoice drafting, produce
+          drafts that must be reviewed before they are used.
         </p>
         <p>
-          Unless your organization's written agreement says otherwise, your organization remains responsible for paying
-          wages and taxes on time and for the accuracy of the information it provides.
+          Unless a written agreement with your organization says otherwise, your organization remains responsible for
+          paying wages and taxes on time and for the accuracy of the information it provides.
         </p>
       </LegalSection>
 
@@ -72,7 +74,8 @@ export function TermsOfService() {
         <p>
           We work to keep the software available and to plan maintenance outside payroll deadlines, but we cannot promise
           it will always be available or free of errors. We may add, change, or remove features. If a change materially
-          affects how your organization uses the software, we will tell your organization ahead of time.
+          affects how your organization uses the software, we will give advance notice when practicable, except when an
+          urgent security, legal, or stability fix is needed.
         </p>
       </LegalSection>
 
@@ -85,17 +88,19 @@ export function TermsOfService() {
 
       <LegalSection id="ending" title="Ending access">
         <p>
-          Your organization can stop using the software at any time. We may suspend or end access for anyone who breaks
-          these terms. After access ends, we keep and delete information as our Privacy Policy and your organization's
-          written agreement describe.
+          Your organization can stop using the software at any time. We may suspend or end access if these terms are
+          broken, if your organization's arrangement with Cornerstone or with us ends, or to protect the service or the
+          people whose information it holds. After access ends, we keep and handle information as our Privacy Policy and
+          any applicable written agreement describe.
         </p>
       </LegalSection>
 
       <LegalSection id="liability" title="Limits on our responsibility">
         <p>
-          Unless your organization's written agreement says otherwise, and to the extent the law allows, the software is
-          provided as it is, and we are not responsible for indirect or consequential losses arising from its use. Nothing
-          in these terms limits any responsibility that cannot be limited by law.
+          Unless your organization's written agreement with us says otherwise, and to the extent the law allows, the
+          software is provided "as is" and "as available," without warranties of any kind. We are not responsible for
+          indirect or consequential losses, outages of third-party services, or errors caused by inaccurate information
+          supplied to the software. Nothing in these terms limits any responsibility that cannot be limited by law.
         </p>
       </LegalSection>
 

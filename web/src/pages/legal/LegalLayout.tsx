@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 export const LEGAL_LAST_UPDATED = 'November 23, 2026';
 
@@ -9,7 +9,15 @@ interface LegalLayoutProps {
   children: ReactNode;
 }
 
+const footerLinks = [
+  { to: '/', label: 'Home' },
+  { to: '/privacy', label: 'Privacy Policy' },
+  { to: '/terms', label: 'Terms of Service' },
+];
+
 export function LegalLayout({ title, intro, children }: LegalLayoutProps) {
+  const { pathname } = useLocation();
+
   useEffect(() => {
     const previous = document.title;
     document.title = `${title} · Cornerstone Payroll`;
@@ -17,7 +25,7 @@ export function LegalLayout({ title, intro, children }: LegalLayoutProps) {
   }, [title]);
 
   return (
-    <main className="min-h-screen bg-[#f8f6f1] text-neutral-950">
+    <div className="min-h-screen bg-[#f8f6f1] text-neutral-950">
       <header className="border-b border-neutral-900/10 bg-[#f8f6f1]/90">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-5 py-3.5 sm:px-6">
           <Link to="/" className="flex items-center gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
@@ -32,21 +40,30 @@ export function LegalLayout({ title, intro, children }: LegalLayoutProps) {
         </div>
       </header>
 
-      <article className="mx-auto max-w-3xl px-5 py-10 sm:px-6 sm:py-14">
-        <h1 className="font-display text-3xl font-extrabold tracking-tight text-primary-950 sm:text-4xl">{title}</h1>
-        <p className="mt-3 text-sm font-semibold text-neutral-500">Last updated {LEGAL_LAST_UPDATED}</p>
-        <div className="mt-6 text-base leading-7 text-neutral-800">{intro}</div>
-        <div className="legal-body mt-8 space-y-9 text-base leading-7 text-neutral-800">{children}</div>
-      </article>
+      <main>
+        <article className="mx-auto max-w-3xl px-5 py-10 sm:px-6 sm:py-14">
+          <h1 className="font-display text-3xl font-extrabold tracking-tight text-primary-950 sm:text-4xl">{title}</h1>
+          <p className="mt-3 text-sm font-semibold text-neutral-500">Last updated {LEGAL_LAST_UPDATED}</p>
+          <div className="mt-6 text-base leading-7 text-neutral-800">{intro}</div>
+          <div className="mt-8 space-y-9 text-base leading-7 text-neutral-800">{children}</div>
+        </article>
+      </main>
 
       <footer className="border-t border-neutral-900/10">
         <nav aria-label="Legal" className="mx-auto flex max-w-3xl flex-wrap gap-x-6 gap-y-2 px-5 py-6 text-sm font-semibold text-neutral-600 sm:px-6">
-          <Link to="/" className="hover:text-primary-800">Home</Link>
-          <Link to="/privacy" className="hover:text-primary-800">Privacy Policy</Link>
-          <Link to="/terms" className="hover:text-primary-800">Terms of Service</Link>
+          {footerLinks.map(link => (
+            <Link
+              key={link.to}
+              to={link.to}
+              aria-current={pathname === link.to ? 'page' : undefined}
+              className="hover:text-primary-800 aria-[current=page]:text-primary-900"
+            >
+              {link.label}
+            </Link>
+          ))}
         </nav>
       </footer>
-    </main>
+    </div>
   );
 }
 
