@@ -33,10 +33,12 @@ ORDER BY a.pid, c.relname;
 
 After verifying the drain, manually deploy the exact merged SHA on the Render web service with `WRITE_MAINTENANCE=true` still set. Its configured `bin/rails db:safe_prepare` pre-deploy command uses the direct migration connection and runs migration `20261122120000` before new web instances start. This pre-deploy step is the migration owner. If it fails, keep maintenance and the worker pause in place and investigate before retrying. The migration backfills compensation history and takes DDL locks with a five-second lock timeout.
 
-Confirm pre-deploy succeeded and the following query returns the version before treating the web revision as deployed.
+On the production clone, confirm that payroll history review migration `20261123130000` is already applied and compensation migration `20261122120000` is pending before the run. Rails tracks each migration version, so the newer applied migration does not prevent `db:safe_prepare` from running the older pending migration. After pre-deploy, confirm the query returns both versions before treating the web revision as deployed.
 
 ```sql
-SELECT version FROM schema_migrations WHERE version = '20261122120000';
+SELECT version FROM schema_migrations
+WHERE version IN ('20261122120000', '20261123130000')
+ORDER BY version;
 ```
 
 ## 4. Verify the web release and reconcile drift
