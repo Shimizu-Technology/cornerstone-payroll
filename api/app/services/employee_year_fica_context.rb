@@ -29,10 +29,13 @@ class EmployeeYearFicaContext
   ROW_FIELDS = ((FINGERPRINT_FIELDS + %w[employee_id company_id]).map { |field| "payroll_items.#{field}" } + [
     Arel.sql("jsonb_strip_nulls(jsonb_build_object(#{(%w[tax_year] + FicaBasisEvidence::RULE_FIELDS).map { |field| "'#{field}', payroll_items.tax_rule_snapshot -> '#{field}'" }.join(', ')})) AS recorded_fica_rules"),
     Arel.sql("payroll_items.tax_rule_snapshot -> 'annual_fica_context' AS recorded_annual_fica_context"),
-    Arel.sql("payroll_item_fica_basis_proofs.evidence AS recorded_legacy_fica_proof") ]).freeze
+    Arel.sql("payroll_item_fica_basis_proofs.evidence AS recorded_legacy_fica_proof"),
+    Arel.sql("payroll_item_fica_basis_proofs.created_at AS fica_proof_created_at"),
+    Arel.sql("pay_periods.calculated_at AS fica_calculated_at"),
+    Arel.sql("pay_periods.committed_at AS fica_committed_at") ]).freeze
 
   def self.ledger_rows(scope)
-    scope.left_joins(:fica_basis_proof).select(*ROW_FIELDS)
+    scope.joins(:pay_period).left_joins(:fica_basis_proof).select(*ROW_FIELDS)
   end
 
   # Retired instruments retain earned payroll; only financial reversals remove
@@ -71,11 +74,14 @@ class EmployeeYearFicaContext
     end
   end
 
-  def initialize(employee:, year:, excluding_pay_period_id: nil, company: nil, rows: nil, opening_balance: UNLOADED)
+  def initialize(employee:, year:, excluding_pay_period_id: nil, company: nil, rows: nil, opening_balance: UNLOADED, proof_cutoff: nil, planned_proofs: {}, planned_proofs_created_at: nil)
     @employee = employee
     @company = company || employee.company
     @year = year
     @excluding_pay_period_id = excluding_pay_period_id
+    @proof_cutoff = proof_cutoff
+    @planned_proofs = planned_proofs
+    @planned_proofs_created_at = planned_proofs_created_at
     @rows = rows if rows
     @opening_balance = opening_balance unless opening_balance.equal?(UNLOADED)
   end
@@ -88,26 +94,62 @@ class EmployeeYearFicaContext
 
   def snapshot_for(item, lock_rules: false)
     stored = item.tax_rule_snapshot.to_h["annual_fica_context"]
-    return snapshot unless stored.is_a?(Hash) && stored["mode"] == BelowThresholdFicaContext::MODE
+    return snapshot unless stored.is_a?(Hash)
 
-    evidence = below_threshold_context.snapshot(current_item: item, rules: item.tax_rule_snapshot, lock_rules: lock_rules,
-      include_imported_history: !ordinary_calculation_verified?(item))
-    expected = below_threshold_components(evidence, item.tax_rule_snapshot)
-    unless expected.all? { |field, value| item.public_send(field) == value }
-      raise UnreconciledLedgerError, "Current FICA amounts changed; recalculate before approval or commit."
+    calculated_at = item.pay_period.calculated_at
+    if stored["mode"] == BelowThresholdFicaContext::MODE
+      return bounded_snapshot_for(item, stored, calculated_at: calculated_at, lock_rules: lock_rules)
     end
-    evidence
+
+    # Keep the saved bytes for approval and client review only after verifying
+    # the ledger (apart from evidence appended since the calculation).
+    if stored["version"].in?([ 2, VERSION ])
+      return stored if stored.size == 4 && matches_fingerprint?(stored, calculated_at)
+
+      # A current digest cannot validate a proof newer than a known cutoff.
+      raise UnreconciledLedgerError, STALE_MESSAGE if stored == snapshot
+    end
+
+    snapshot
   end
 
   def fingerprint
     @fingerprint ||= fingerprint_for(VERSION)
   end
 
-  def fingerprint_for(version)
+  def fingerprint_for(version, proof_cutoff: nil)
     Digest::SHA256.hexdigest(JSON.generate([
-      version, year, employee.id, rows.map { |row| fingerprint_row(row, include_recovery: version >= 3) },
+      version, year, employee.id, rows.map { |row| fingerprint_row(row, version: version, proof_cutoff: proof_cutoff) },
       opening_balance&.attributes&.slice(*OPENING_FIELDS)
     ]))
+  end
+
+  # Recovery checks rows with complete bases too: the live allocation only
+  # needs a committed row's fingerprint when it has to reconstruct a base.
+  def verify_recorded_history!(rules:)
+    rows.each do |row|
+      stored = row[:recorded_annual_fica_context]
+      prior = stored.is_a?(Hash) && stored["fingerprint"].present? ? verified_prior_context(row, stored) : nil
+      components = if missing_recoverable_base?(row)
+        recovered_bases(row, rules)
+      else
+        bases = FicaBasisEvidence::BASE_FIELDS.to_h { |field| [ field.to_sym, row.public_send(field) ] }
+        bases[:medicare_taxable_wages] ||= row.gross_pay
+        FicaBasisEvidence.components(bases, rules)
+      end
+      unless FicaBasisEvidence.matches_recorded?(row, components)
+        raise UnreconciledLedgerError, "Recorded FICA bases and taxes do not reconcile."
+      end
+      next unless prior && row.correction_for_payroll_item_id.nil? && !row.gross_pay.negative?
+
+      replay = prior.recorded_increment(wages_delta: row.medicare_taxable_wages || row.gross_pay,
+        tips_delta: row.cash_tips_reported || row.reported_tips, rules: rules)
+      unless components == replay
+        raise UnreconciledLedgerError, "Recorded FICA bases disagree with the verified annual allocation."
+      end
+    rescue UnreconciledLedgerError => error
+      raise UnreconciledLedgerError, "Verifying payroll item ##{row.id}: #{error.message}"
+    end
   end
 
   # Monetary amounts use decimal arithmetic and round half up at the stored
@@ -186,14 +228,36 @@ class EmployeeYearFicaContext
 
   attr_reader :employee, :year, :excluding_pay_period_id, :company
 
-  # Rebuild the same path-specific note during approval, commit and client review.
-  # The snapshot shape stays compatible; no path marker needs to be persisted.
+  def bounded_snapshot_for(item, stored, calculated_at:, lock_rules:)
+    failure = nil
+    proof_cutoffs(calculated_at).each do |cutoff|
+      # Both path selection and the bound's digest must see the original
+      # native proofs. The live calculation continues to use current evidence.
+      ordinary = with_rows(rows, proof_cutoff: cutoff).ordinary_calculation_verified?(item)
+      evidence = below_threshold_context(proof_cutoff: cutoff).snapshot(current_item: item, rules: item.tax_rule_snapshot,
+        lock_rules: lock_rules, include_imported_history: !ordinary)
+      expected = below_threshold_components(evidence, item.tax_rule_snapshot)
+      unless expected.all? { |field, value| item.public_send(field) == value }
+        raise UnreconciledLedgerError, "Current FICA amounts changed; recalculate before approval or commit."
+      end
+      return evidence if evidence == stored
+    rescue UnreconciledLedgerError => error
+      failure = error
+    end
+
+    raise UnreconciledLedgerError, failure&.message || "Current FICA history changed; recalculate before approval or commit."
+  end
+
+  protected
+
   def ordinary_calculation_verified?(item)
     recorded_increment(wages_delta: item.gross_pay, tips_delta: item.cash_tips_reported, rules: item.tax_rule_snapshot)
     true
   rescue UnreconciledLedgerError
     false
   end
+
+  private
 
   def below_threshold_increment(item, rules)
     @below_threshold_snapshot = below_threshold_context.snapshot(current_item: item, rules: rules, lock_rules: true)
@@ -207,9 +271,9 @@ class EmployeeYearFicaContext
       additional_medicare_taxable_wages: 0.to_d }, rules)
   end
 
-  def below_threshold_context
+  def below_threshold_context(proof_cutoff: nil)
     BelowThresholdFicaContext.new(employee: employee, company: company, year: year,
-      excluding_pay_period_id: excluding_pay_period_id)
+      excluding_pay_period_id: excluding_pay_period_id, proof_cutoff: proof_cutoff)
   end
 
   def rows
@@ -254,7 +318,7 @@ class EmployeeYearFicaContext
 
       recovered = recovered_bases(row, rules)
       supported = row.additional_medicare_tax == recovered.fetch(:additional_medicare_tax) ||
-        (row.additional_medicare_tax.nil? && row[:recorded_legacy_fica_proof].present?)
+        (row.additional_medicare_tax.nil? && reviewed_proof(row).present?)
       hold_legacy!(row, "Additional Medicare") unless supported
       recovered.fetch(:additional_medicare_taxable_wages)
     end + excess(opening_balance&.medicare_taxable_wages.to_d, 200_000.to_d)
@@ -263,8 +327,8 @@ class EmployeeYearFicaContext
   def recovered_bases(row, rules)
     @recovered_bases ||= {}
     @recovered_bases[row.id] ||= begin
-      if row[:recorded_legacy_fica_proof].present?
-        recovered = FicaBasisEvidence.verified_bases(row[:recorded_legacy_fica_proof], row: row,
+      if (proof = reviewed_proof(row)).present?
+        recovered = FicaBasisEvidence.verified_bases(proof, row: row,
           year: year, employee_id: employee.id)
         hold_legacy!(row, "reviewed legacy FICA") unless recovered
         return @recovered_bases[row.id] = recovered
@@ -272,32 +336,89 @@ class EmployeeYearFicaContext
       # Signed corrections need their reviewed target's allocations; missing
       # correction bases cannot safely be replayed as an ordinary paycheck.
       hold_legacy!(row, "FICA") if row.correction_for_payroll_item_id.present? || row.gross_pay.negative?
-      prior_rows = rows.take_while { |prior| prior.id < row.id }
-      prior = self.class.new(employee: employee, company: company, year: year, rows: prior_rows, opening_balance: opening_balance)
-      stored = row[:recorded_annual_fica_context]
-      stored = {} unless stored.is_a?(Hash)
-      proof = if [ 2, VERSION ].include?(stored["version"])
-        prior.fingerprint_for(stored["version"])
-      elsif !stored.key?("version") && opening_balance.nil?
-        # v1 fingerprints included the complete opening row; only the
-        # no-opening-balance form can be verified from this bounded projection.
-        Digest::SHA256.hexdigest(JSON.generate([ year, employee.id, prior_rows.map { |item| item.attributes.slice(*LEDGER_FIELDS) }, nil ]))
-      end
-      unless proof && stored["year"] == year && stored["employee_id"] == employee.id && stored["fingerprint"] == proof
-        hold_legacy!(row, "FICA")
-      end
-      prior.increment(wages_delta: row.medicare_taxable_wages || row.gross_pay,
+      prior = verified_prior_context(row, row[:recorded_annual_fica_context])
+      prior.recorded_increment(wages_delta: row.medicare_taxable_wages || row.gross_pay,
         tips_delta: row.cash_tips_reported || row.reported_tips, rules: rules)
     end
   end
 
-  def fingerprint_row(row, include_recovery: true)
+  def verified_prior_context(row, stored)
+    hold_legacy!(row, "FICA") unless stored.is_a?(Hash)
+
+    calculated_at = row[:fica_calculated_at]
+    previous = rows.reject { |prior| prior.pay_period_id == row.pay_period_id }.select do |prior|
+      # Older rows lack lifecycle timestamps and historically used ID order.
+      committed_at = prior[:fica_committed_at]
+      calculated_at && committed_at ? committed_at <= calculated_at : prior.id < row.id
+    end
+    prior = with_rows(previous)
+    hold_legacy!(row, "FICA") unless prior.matches_fingerprint?(stored, calculated_at)
+
+    prior
+  end
+
+  def with_rows(ledger, proof_cutoff: @proof_cutoff)
+    self.class.new(employee: employee, company: company, year: year, rows: ledger,
+      opening_balance: opening_balance, proof_cutoff: proof_cutoff, planned_proofs: @planned_proofs,
+      planned_proofs_created_at: @planned_proofs_created_at)
+  end
+
+  # The period records calculation completion under the financial lock.
+  # Item updated_at can move during approval, check assignment or retirement.
+  # With no reliable time, only try snapshots of chronological proof sets.
+  def proof_cutoffs(calculated_at)
+    return [ calculated_at ] if calculated_at
+
+    times = rows.filter_map { |row| proof_created_at(row) }.uniq.sort
+    times.empty? ? [ nil ] : [ nil, *times[0...-1].reverse, times.first - Rational(1, 1_000_000) ]
+  end
+
+  protected
+
+  def matches_fingerprint?(stored, calculated_at)
+    return false unless stored["year"] == year && stored["employee_id"] == employee.id && stored["fingerprint"].present?
+
+    version = stored["version"]
+    case version
+    when VERSION
+      proof_cutoffs(calculated_at).any? { |cutoff| stored["fingerprint"] == fingerprint_for(version, proof_cutoff: cutoff) }
+    when 2
+      # v2 never serialized proof evidence, irrespective of the cutoff.
+      stored["fingerprint"] == fingerprint_for(version)
+    else
+      return false if stored.key?("version") || opening_balance
+
+      stored["fingerprint"] == Digest::SHA256.hexdigest(JSON.generate([
+        year, employee.id, rows.map { |item| item.attributes.slice(*LEDGER_FIELDS) }, nil
+      ]))
+    end
+  end
+
+  private
+
+  def missing_recoverable_base?(row)
+    row.social_security_taxable_wages.nil? || row.social_security_taxable_tips.nil? || row.additional_medicare_taxable_wages.nil?
+  end
+
+  def reviewed_proof(row, cutoff: @proof_cutoff)
+    created_at = proof_created_at(row)
+    return if cutoff && created_at && created_at > cutoff
+
+    @planned_proofs.fetch(row.id) { row[:recorded_legacy_fica_proof] }
+  end
+
+  def proof_created_at(row)
+    @planned_proofs.key?(row.id) ? @planned_proofs_created_at : row[:fica_proof_created_at]
+  end
+
+  def fingerprint_row(row, version:, proof_cutoff:)
     attributes = row.attributes.slice(*FINGERPRINT_FIELDS)
-    if row.social_security_taxable_wages.nil? || row.social_security_taxable_tips.nil? || row.additional_medicare_taxable_wages.nil?
+    if missing_recoverable_base?(row)
       attributes["legacy_basis_evidence"] = row[:recorded_annual_fica_context]
-      attributes["captured_fica_rules"] = FicaBasisEvidence.rule_evidence(row) if include_recovery
-      if include_recovery && row[:recorded_legacy_fica_proof].present?
-        attributes["reviewed_legacy_basis_evidence"] = row[:recorded_legacy_fica_proof]
+      if version >= 3
+        attributes["captured_fica_rules"] = FicaBasisEvidence.rule_evidence(row)
+        proof = reviewed_proof(row, cutoff: proof_cutoff)
+        attributes["reviewed_legacy_basis_evidence"] = proof if proof.present?
       end
     end
     attributes
