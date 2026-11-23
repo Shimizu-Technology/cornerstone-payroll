@@ -32,8 +32,7 @@ RSpec.describe "Explicit company access with Clerk authentication", type: :reque
 
       it "rejects invalid and stale selections on both payroll endpoints before opening company scope" do
         payroll_id = period.id
-        inactive = create(:company, organization: company.organization, active: false)
-        unavailable = [ "not-an-id", "", "9999999999", inactive.id.to_s ]
+        unavailable = [ "not-an-id", "", "9999999999" ]
         unavailable << create(:company).id.to_s unless role == "super_admin"
         expect(TenantScope).not_to receive(:with_company)
 
@@ -56,6 +55,20 @@ RSpec.describe "Explicit company access with Clerk authentication", type: :reque
         get "/api/v1/form_500s/defaults", params: { pay_period_id: payroll_id }, headers: headers(company.id)
         expect(response).to have_http_status(:ok)
         expect(response.parsed_body.dig("data", "company_name")).to eq(company.name)
+      end
+    end
+  end
+
+  # Year-end lists inactive clients with payroll that year so their forms can
+  # still be filed.
+  %w[super_admin admin].each do |staff_role|
+    context "as #{staff_role} selecting an inactive client in the organization" do
+      let(:role) { staff_role }
+
+      it "opens the inactive client" do
+        inactive = create(:company, organization: company.organization, active: false)
+        get "/api/v1/admin/pay_periods", headers: headers(inactive.id)
+        expect(response).to have_http_status(:ok)
       end
     end
   end
