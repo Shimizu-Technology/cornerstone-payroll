@@ -8,10 +8,14 @@ const serviceProviders = [
   { name: 'Cloudflare', purpose: 'Domain and network services, and storage for uploaded documents and generated files such as checks and reports.' },
   { name: 'Netlify', purpose: 'Hosts the website files your browser loads.' },
   { name: 'Resend', purpose: 'Sends email, such as invitations and notifications.' },
-  { name: 'Google', purpose: 'Handles "Sign in with Google" if you choose to use it.' },
+  {
+    name: 'Google',
+    purpose: 'Handles "Sign in with Google" if you choose to use it, and serves the web fonts your browser loads (Google Fonts).',
+  },
   {
     name: 'OpenRouter and the AI model provider it connects to',
-    purpose: 'Reads hours from timecard images, or drafts invoice text, only when one of those optional features is turned on.',
+    purpose:
+      'Reads timecard images (including employee names and hours), pulls payroll details from emails or attachments that staff paste in, and helps staff draft invoices (including client billing contacts and attachments). This happens only when staff use those optional AI-assisted tools and we have turned the AI service on.',
   },
 ];
 
@@ -49,20 +53,24 @@ export function PrivacyPolicy() {
         <LegalList>
           <li>name, home address, phone number, email address, and date of birth;</li>
           <li>Social Security number, or an employer identification number for contractors;</li>
-          <li>pay rates, compensation history, and hours worked;</li>
+          <li>hire and termination dates, job title, department, and employment status;</li>
+          <li>pay rates, compensation history, hours worked, and timecard images;</li>
           <li>tax withholding elections, such as Form W-4 details;</li>
           <li>deductions, such as retirement contributions, loan repayments, and court-ordered garnishments;</li>
           <li>bank account details, if an employer provides them for payment;</li>
+          <li>notes that Cornerstone staff keep about an employee's payroll record;</li>
           <li>payroll results: pay stubs, checks, W-2GU and 1099 forms, and other tax filings.</li>
         </LegalList>
         <p>We also hold:</p>
         <LegalList>
           <li>documents uploaded through the client portal, such as timesheets, hiring forms, and payroll files;</li>
           <li>messages exchanged between clients and Cornerstone in the portal;</li>
+          <li>business, billing contact, and vendor details used for invoicing and accounting administration;</li>
           <li>
             for people who sign in (Cornerstone staff and client users): name, email address, role, which companies they
-            can access, and a record of sign-ins and actions, including IP address and browser details.
+            can access, and a record of sign-ins and actions, including IP address and browser details;
           </li>
+          <li>for Cornerstone staff, work-hour records imported from Cornerstone's own tax software for internal reporting.</li>
         </LegalList>
       </LegalSection>
 
@@ -93,8 +101,9 @@ export function PrivacyPolicy() {
         <p>
           Other companies run parts of the service for us. Each one receives only the information it needs for its part:
         </p>
-        <div className="overflow-hidden rounded-2xl border border-neutral-900/10 bg-white/70">
-          <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto rounded-2xl border border-neutral-900/10 bg-white/70">
+          <table className="w-full min-w-[18rem] text-left text-sm">
+            <caption className="sr-only">Service providers and what they do</caption>
             <thead className="bg-white/80 text-xs font-extrabold uppercase tracking-wide text-neutral-500">
               <tr>
                 <th scope="col" className="px-4 py-3">Provider</th>
@@ -114,6 +123,10 @@ export function PrivacyPolicy() {
         <p>We also share information:</p>
         <LegalList>
           <li>with the employer, for its own employees and payroll;</li>
+          <li>
+            with time-tracking apps that a client chooses to connect, to link staff accounts and to sync pay-period
+            schedules, hours, and payment status;
+          </li>
           <li>with government agencies when filings require it, such as the IRS, the Social Security Administration, and the Guam Department of Revenue and Taxation;</li>
           <li>when the law requires it, for example in response to a valid court order;</li>
           <li>to protect the safety, rights, or property of people or of the service;</li>
@@ -121,9 +134,11 @@ export function PrivacyPolicy() {
         </LegalList>
       </LegalSection>
 
-      <LegalSection id="cookies" title="Cookies and analytics">
+      <LegalSection id="cookies" title="Cookies, browser storage, and analytics">
         <p>
-          The site uses cookies that keep you signed in. Clerk sets these cookies. We do not use advertising cookies.
+          The site uses cookies that keep you signed in. Clerk sets these cookies. The site also uses storage in your
+          browser to remember workspace settings, such as the selected company, and to keep unsent message drafts. We do
+          not use advertising cookies.
         </p>
         <p>
           The software includes a product-analytics tool, PostHog, which is turned off. If we turn it on, we will update
@@ -134,7 +149,8 @@ export function PrivacyPolicy() {
       <LegalSection id="security" title="How we protect it">
         <LegalList>
           <li>all connections to the service are encrypted (HTTPS);</li>
-          <li>Social Security numbers and bank account details are encrypted in the database;</li>
+          <li>Social Security numbers, contractor EINs, and bank account details are encrypted in the database;</li>
+          <li>uploaded documents and import files are kept in access-controlled cloud storage that is encrypted at rest;</li>
           <li>access is limited by role and by client company, and sign-ins and changes are logged;</li>
           <li>we are rolling out two-step sign-in for staff and client users.</li>
         </LegalList>
@@ -146,18 +162,21 @@ export function PrivacyPolicy() {
 
       <LegalSection id="location" title="Where it is stored">
         <p>
-          The application servers and database are in Singapore. Some service providers, such as Clerk and Resend, may
-          process information in the United States or other countries. Information may therefore be stored and processed
-          outside Guam.
+          The application servers and database are in Singapore. Other service providers, such as Clerk, Cloudflare,
+          Netlify, Resend, Google, and OpenRouter when it is turned on, may process or store information in the United
+          States or other countries. Information may therefore be stored and processed outside Guam.
         </p>
       </LegalSection>
 
       <LegalSection id="retention" title="How long we keep it">
         <p>
-          We keep payroll and tax records for as long as a client uses the service, and afterward for as long as tax and
-          employment law requires. Federal rules, for example, require employment tax records to be kept for at least four
-          years. After that we delete the records or remove the details that identify people. Account and audit records
-          follow the same approach.
+          We keep payroll, tax, account, and audit records for as long as a client uses the service. Afterward we keep
+          them for as long as tax and employment law requires, or as needed for accounting records and to resolve
+          disputes. Federal rules, for example, require employment tax records to be kept for at least four years.
+        </p>
+        <p>
+          Once records are no longer required, a client may ask us to delete them or remove the details that identify
+          people. Some records, such as audit logs, are kept unchanged so the history stays trustworthy.
         </p>
       </LegalSection>
 

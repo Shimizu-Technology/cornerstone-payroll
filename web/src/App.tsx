@@ -10,6 +10,7 @@ import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostH
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
+import { isPublicPath } from '@/lib/public-routes';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
 
@@ -447,8 +448,7 @@ function AppFeedback({ children }: { children: ReactNode }) {
   const { user, isLoading: authLoading } = useAuth();
   const { activeCompanyId, activeOrganizationId, loading: companyLoading } = useCompany();
   const { pathname } = useLocation();
-  const publicRoute = pathname === '/' || pathname === '/login' || pathname === '/invite';
-  if (!publicRoute && (authLoading || companyLoading)) return <PageLoader />;
+  if (!isPublicPath(pathname) && (authLoading || companyLoading)) return <PageLoader />;
   const financePage = pathname.startsWith('/tools/invoices') || pathname.startsWith('/tools/expenses') || pathname.startsWith('/tools/finance');
   const scope = `${user?.id ?? 'signed-out'}:${activeOrganizationId ?? 'none'}:${financePage ? 'finance' : activeCompanyId ?? 'none'}`;
   return <FeedbackProvider key={scope} scopeKey={scope}>{children}</FeedbackProvider>;
