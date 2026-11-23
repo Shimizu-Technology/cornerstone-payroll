@@ -1420,6 +1420,8 @@ module Api
             compliance_warnings: pay_period.compliance_warnings(fica_review_note: fica_review_note),
             annual_fica_review_note: fica_review_note,
             annual_fica_review: fica_review,
+            annual_fica_review_path: ("/companies/#{pay_period.company_id}/year-end?year=#{pay_period.pay_date.year}#payroll-history-review" if
+              fica_review && StaffRolePolicy.allowed?(current_user, :view_record_activity)),
             prior_provider_history_available: PriorProviderHistory::Discovery.available?(pay_period.company, period: pay_period),
             period_description: pay_period.period_description,
             payroll_intake_source_types: pay_period.company.payroll_intake_source_types,

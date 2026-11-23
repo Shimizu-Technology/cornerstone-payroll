@@ -75,15 +75,11 @@ module YearEnd
     ITEM_EVIDENCE_FIELDS = {
       "tip_classification_unreviewed" => %w[id pay_period_id gross_pay tips reported_tips cash_tips_reported social_security_taxable_tips],
       "qualified_overtime_unreviewed" => %w[id pay_period_id gross_pay pay_rate hours_worked overtime_hours qualified_overtime_compensation],
-      "legacy_tax_bases" => %w[id pay_period_id gross_pay reported_tips fit_taxable_wages social_security_taxable_wages
-                               social_security_taxable_tips medicare_taxable_wages withholding_tax social_security_tax medicare_tax],
       "inconsistent_fit_taxable_wages" => %w[id pay_period_id gross_pay fit_taxable_wages non_taxable_pay withholding_tax additional_withholding]
     }.freeze
     ROW_EVIDENCE_FIELDS = {
       "tip_classification_unreviewed" => %i[reported_tips_total box3_social_security_wages box7_social_security_tips box5_medicare_wages_tips],
       "qualified_overtime_unreviewed" => %i[box1_wages_tips_other_comp box3_social_security_wages box5_medicare_wages_tips],
-      "legacy_tax_bases" => %i[box1_wages_tips_other_comp box2_federal_income_tax_withheld box3_social_security_wages
-                               box4_social_security_tax_withheld box5_medicare_wages_tips box6_medicare_tax_withheld box7_social_security_tips],
       "inconsistent_fit_taxable_wages" => %i[box1_wages_tips_other_comp box2_federal_income_tax_withheld]
     }.freeze
 
@@ -149,7 +145,7 @@ module YearEnd
           end
         end
         add(found, "legacy_tax_bases", rows.select { |row| row[:missing_committed_tax_bases] }) do |row|
-          [ row[:employee_id], *source_evidence("legacy_tax_bases", row) ]
+          [ row[:employee_id], row[:box3_social_security_wages], row[:box7_social_security_tips], row[:rebuild_ss] ]
         end
         add(found, "inconsistent_fit_taxable_wages", rows.select { |row| row[:inconsistent_fit_taxable_wages] }) do |row|
           [ row[:employee_id], *source_evidence("inconsistent_fit_taxable_wages", row) ]
@@ -254,7 +250,7 @@ module YearEnd
       digest = self.class.digest_for(code, evidence.except(:names, :messages))
       acknowledgement = acknowledgements[code]
       ids = evidence[:employees].map(&:first)
-      history_reviews = legacy_basis_reviews(ids) if definition[:kind] == "history_review"
+      history_reviews, history_details = legacy_basis_reviews(ids) if definition[:kind] == "history_review"
       current = if history_reviews
         ids.all? { |id| history_reviews.key?(id) }
       else
@@ -276,11 +272,11 @@ module YearEnd
         status: status,
         digest: digest,
         period: evidence[:period],
-        details: evidence[:messages] || [],
+        details: history_details || evidence[:messages] || [],
         employees: ids.map do |id|
           resolution = history_reviews&.[](id)
           { employee_id: id, name: evidence[:names][id], edit_path: "/companies/#{company.id}/employees/#{id}",
-            history_review: ({ by: resolution.resolved_by.name, at: resolution.resolved_at } if resolution) }.compact
+            history_review: resolution }.compact
         end,
         acknowledgement: definition[:kind] == "acknowledge" && acknowledgement ? acknowledgement.payload : nil,
         acknowledgement_stale: definition[:kind] == "acknowledge" && acknowledgement.present? && !current
@@ -291,8 +287,34 @@ module YearEnd
       sources = PayrollHistoryReview::Sources.new(company: company, year: year, employee_ids: employee_ids)
       subjects = PayrollHistoryReview::Subjects.new(sources).gaps
       matches = PayrollHistoryReview::OpenSubjects.new(company: company, year: year).matching_resolutions(subjects)
-      matches.values.select { |item| item.resolution_code.in?([ "legacy_basis_accepted", PayrollHistoryReviewItem::PROVEN_CODE ]) }
-        .index_by(&:employee_id)
+      affected = rows.index_by { |row| row[:employee_id] }
+      reviews = {}
+      details = []
+      subjects.each do |subject|
+        row = affected.fetch(subject.employee_id)
+        item = matches[subject.key]
+        if item&.resolution_code == PayrollHistoryReviewItem::PROVEN_CODE
+          reviews[subject.employee_id] = { by: item.reviewer_name, at: item.resolved_at }
+        elsif subject.fully_proven?
+          reviews[subject.employee_id] = { by: PayrollHistoryReviewItem::DETECTION_ACTOR_NAME, at: subject.proven_at }
+        elsif item&.resolution_code == "legacy_basis_accepted"
+          issue = legacy_bound_issue(row)
+          if issue
+            details << "#{row[:employee_name]}: #{issue} Review the taxable wages before filing."
+          else
+            reviews[subject.employee_id] = { by: item.reviewer_name, at: item.resolved_at }
+          end
+        end
+      end
+      [ reviews, details ]
+    end
+
+    def legacy_bound_issue(row)
+      return "Pre-tax benefits require rebuilding Social Security wages." if row[:rebuild_ss]
+
+      cap = w2_report.dig(:meta, :ss_wage_base) || AnnualTaxConfig.for_year(year)&.ss_wage_base || W2GuAggregator::SS_WAGE_BASE_BY_YEAR.fetch(year)
+      wages_and_tips = row[:box3_social_security_wages].to_d + row[:box7_social_security_tips].to_d
+      "Social Security wages and tips are at or above the annual wage base." if wages_and_tips >= cap.to_d
     end
 
     def box12_amount(row, code)

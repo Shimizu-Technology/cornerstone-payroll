@@ -9,6 +9,6 @@ namespace :payroll_history_review do
 
     counts = PayrollHistoryReview::Detector.new(company: Company.find(company_id), tax_year: year)
       .call(apply: ENV["APPLY"] == "1").fetch(:counts)
-    puts %i[new reopened open resolved].to_h { |status| [ status, counts[status] ] }.to_json
+    puts %i[new reopened open resolved proven].to_h { |status| [ status, counts[status] ] }.to_json
   end
 end

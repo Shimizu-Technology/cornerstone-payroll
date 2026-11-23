@@ -40,6 +40,7 @@ class W2GuAggregator
         company_id: company.id,
         company_name: company.name,
         year: year,
+        ss_wage_base: ss_wage_base,
         generated_at: Time.current.iso8601,
         # W-2GU count reflects only employees with committed payroll in year.
         employee_count: rows.length,
@@ -245,6 +246,7 @@ class W2GuAggregator
         quickbooks_bridge_balance_count: historical.length
       },
 
+      rebuild_ss: rebuild_ss,
       missing_committed_tax_bases: sums&.missing_tax_base_count.to_i.positive?,
       inconsistent_fit_taxable_wages: year_end_wages.dig(employee.id, :inconsistent_fit_count).to_i.positive?,
       fica_withheld_on_section_125: year_end_wages.dig(employee.id, :fica_on_benefits_count).to_i.positive?,

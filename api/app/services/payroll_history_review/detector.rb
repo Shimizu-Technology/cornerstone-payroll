@@ -6,37 +6,49 @@ module PayrollHistoryReview
       @company, @tax_year = company, tax_year
     end
 
-    def call(apply: false, actor: Current.actor || AuditActor.system_job("Payroll history detection"))
+    def call(apply: false, required_key: nil)
       return scan unless apply
 
-      @company.with_lock { scan(apply: true, actor: actor) }
+      Resolution.ensure_writable!(@company)
+      @company.with_lock do
+        Resolution.ensure_writable!(@company)
+        scan(apply: true, required_key: required_key)
+      end
     end
 
     private
 
-    def scan(apply: false, actor: nil)
+    def scan(apply: false, required_key: nil)
       counts = Hash.new(0)
       scope = PayrollHistoryReviewItem.where(company: @company, tax_year: @tax_year)
-      existing = scope.index_by { |item| Subject.key_for(item) }
-      results = subjects.map do |subject|
-        item = existing[subject.key]
-        if item.nil?
-          counts[:new] += 1
-          item = scope.new(subject.identity.merge(employee_id: subject.employee_id))
-        elsif item.resolved? && item.subject_digest != subject.digest
-          counts[:reopened] += 1
-          Resolution.reopen_item!(item, reason: "Source evidence changed", actor: actor, digest: subject.digest) if apply
-        else
-          counts[item.resolved? ? :resolved : :open] += 1
-        end
+      existing = scope.includes(:resolved_by).index_by { |item| Subject.key_for(item) }
+      detected = subjects
+      raise ActiveRecord::RecordNotFound if required_key && detected.none? { |subject| subject.route_key == required_key }
 
-        if apply
-          item.assign_attributes(subject_digest: subject.digest, employee_id: subject.employee_id)
-          item.save! if item.changed?
-        end
+      results = detected.map do |subject|
+        item = existing[subject.key] || scope.new(subject.identity.merge(employee_id: subject.employee_id))
+        counts[reconcile(item, subject, apply: apply)] += 1
         [ item, subject ]
       end
       { counts: counts, items: results }
+    end
+
+    def reconcile(item, subject, apply:)
+      matching = item.subject_digest == subject.digest
+      if subject.fully_proven? && !(item.resolved? && item.resolution_code == PayrollHistoryReviewItem::PROVEN_CODE && matching)
+        Resolution.prove_item(item, digest: subject.digest, at: subject.proven_at, apply: apply)
+        return :proven
+      end
+
+      if item.resolved? && !matching
+        Resolution.reopen_item(item, reason: "Source evidence changed", actor: Resolution.detection_actor, digest: subject.digest, apply: apply)
+        count = :reopened
+      else
+        count = item.new_record? ? :new : item.status.to_sym
+      end
+      item.assign_attributes(subject_digest: subject.digest, employee_id: subject.employee_id)
+      item.save! if apply && item.changed?
+      count
     end
 
     def subjects

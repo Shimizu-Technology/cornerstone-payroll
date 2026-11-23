@@ -1346,6 +1346,7 @@ export interface PayPeriod {
   company_workweek_id?: number | null;
   compliance_warnings?: string[];
   annual_fica_review_note?: string | null;
+  annual_fica_review_path?: string | null;
   annual_fica_review?: {
     employee_count: number;
     entries: { employee_name: string; note: string }[];

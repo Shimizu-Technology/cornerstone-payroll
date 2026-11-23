@@ -25,6 +25,10 @@ module YearEnd
         retirement_year_inputs: stamps(EmployeeRetirementYearInput.where(company_id: company_ids, tax_year: year), "employee_retirement_year_inputs.company_id", "employee_retirement_year_inputs"),
         pay_periods: stamps(pay_periods, "pay_periods.company_id", "pay_periods", "MAX(pay_periods.committed_at)"),
         payroll_items: stamps(items, "payroll_items.company_id", "payroll_items"),
+        payroll_history_review_items: stamps(PayrollHistoryReviewItem.where(company_id: company_ids, tax_year: year),
+          "payroll_history_review_items.company_id", "payroll_history_review_items"),
+        payroll_item_fica_basis_proofs: stamps(PayrollItemFicaBasisProof.where(company_id: company_ids, tax_year: year),
+          "payroll_item_fica_basis_proofs.company_id", "payroll_item_fica_basis_proofs", timestamp_column: "created_at"),
         deductions: stamps(PayrollItemDeduction.joins(payroll_item: :pay_period).merge(items), "payroll_items.company_id", "payroll_item_deductions"),
         field_entries: stamps(PayrollItemFieldEntry.joins(payroll_item: :pay_period).merge(items), "payroll_items.company_id", "payroll_item_field_entries"),
         deduction_types: stamps(DeductionType.where(company_id: company_ids), "deduction_types.company_id", "deduction_types"),
@@ -47,8 +51,8 @@ module YearEnd
 
     # { company_id => [count, latest updated_at, ...] } for one table, with
     # timestamps as epoch seconds so microseconds survive.
-    def self.stamps(scope, group_column, table, *extra)
-      columns = [ "COUNT(*)", "EXTRACT(EPOCH FROM MAX(#{table}.updated_at))", *extra.map { |sql| "EXTRACT(EPOCH FROM #{sql})" } ]
+    def self.stamps(scope, group_column, table, *extra, timestamp_column: "updated_at")
+      columns = [ "COUNT(*)", "EXTRACT(EPOCH FROM MAX(#{table}.#{timestamp_column}))", *extra.map { |sql| "EXTRACT(EPOCH FROM #{sql})" } ]
       scope.group(Arel.sql(group_column)).pluck(Arel.sql(group_column), *columns.map { |sql| Arel.sql(sql) })
            .to_h { |company_id, *values| [ company_id, values.map(&:to_s) ] }
     end

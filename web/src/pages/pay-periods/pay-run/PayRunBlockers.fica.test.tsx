@@ -84,6 +84,12 @@ describe('FICA history disclosure', () => {
     expect(screen.queryByText(/voided pay period/)).toBeNull();
     expect(screen.queryByText('Review settings')).toBeNull();
   });
+
+  it('links staff to payroll history for the company and pay year', () => {
+    const url = '/companies/7/year-end?year=2026#payroll-history-review';
+    render(<MemoryRouter><FicaHistoryReviewNotice payPeriod={{ ...props.payPeriod, annual_fica_review_path: url }} /></MemoryRouter>);
+    expect(screen.getByRole('link', { name: 'Payroll history review' }).getAttribute('href')).toBe(url);
+  });
 });
 
 it('links a waiting client revision directly and hides the panel without a submission', () => {

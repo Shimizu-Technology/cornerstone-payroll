@@ -12,8 +12,7 @@ module PayrollHistoryReview
     end
 
     def voided_periods
-      scope = committed_periods.voided
-      scope = scope.where(id: items.select(:pay_period_id)) if @employee_ids
+      scope = committed_periods.voided.where(id: items.select(:pay_period_id))
       scope.includes(payroll_items: [ :check_events, :check_reconciliation_events, :direct_deposit_payment_confirmation, :legacy_disposition ])
     end
 
@@ -26,12 +25,14 @@ module PayrollHistoryReview
     end
 
     def unverified_legacy
-      EmployeeYearFicaContext.reportable_items(company: @company, employee_ids: @employee_ids || @company.employees.select(:id),
-        year: @year, excluding_pay_period_id: @excluding_pay_period_id).where(id: items.select(:id)).left_joins(:fica_basis_proof)
-        .where("payroll_items.social_security_taxable_wages IS NULL OR payroll_items.social_security_taxable_tips IS NULL OR payroll_items.additional_medicare_taxable_wages IS NULL")
+      legacy_missing_fica.left_joins(:fica_basis_proof)
         .where("jsonb_typeof(payroll_items.tax_rule_snapshot -> 'annual_fica_context' -> 'fingerprint') IS DISTINCT FROM 'string' OR " \
           "payroll_items.tax_rule_snapshot -> 'annual_fica_context' ->> 'fingerprint' = ''")
         .where(payroll_item_fica_basis_proofs: { id: nil }).order(:id)
+    end
+
+    def proof_backed_legacy
+      legacy_missing_fica.joins(:fica_basis_proof)
     end
 
     def w2_missing_bases
@@ -75,7 +76,7 @@ module PayrollHistoryReview
     # some of its employees need the bounded path.
     def import_batches(batch_ids)
       HistoricalPaycheck.where(company: @company, pay_date: year_range, historical_import_batch_id: batch_ids)
-        .includes(:historical_import_batch, :historical_worker, :historical_pay_period,
+        .includes(:employee, :historical_import_batch, :historical_worker, :historical_pay_period,
           :historical_paycheck_adjustments, :fica_basis_proof).order(:id).group_by(&:historical_import_batch_id)
     end
 
@@ -90,6 +91,12 @@ module PayrollHistoryReview
     end
 
     private
+
+    def legacy_missing_fica
+      EmployeeYearFicaContext.reportable_items(company: @company, employee_ids: @employee_ids || @company.employees.select(:id),
+        year: @year, excluding_pay_period_id: @excluding_pay_period_id).where(id: items.select(:id))
+        .where("payroll_items.social_security_taxable_wages IS NULL OR payroll_items.social_security_taxable_tips IS NULL OR payroll_items.additional_medicare_taxable_wages IS NULL")
+    end
 
     def reversed_items
       items.where.not(payroll_reversed_at: nil)
