@@ -3,20 +3,16 @@
 module ExplicitCompanyAccess
   extend ActiveSupport::Concern
 
-  included do
-    # Check before ApplicationController resolves Current.company_id. Explicit
-    # scope is a boundary, never a hint that may fall back to another client.
-    before_action :require_explicit_company_access, prepend: true
-  end
-
   private
 
   def require_explicit_company_access
     requested_company = request.headers["X-Company-Id"]
     return if requested_company.nil?
     return unless current_user
-    return if requested_company.match?(/\A[1-9]\d*\z/) &&
-      Company.exists?(requested_company.to_i) && current_user.can_access_company?(requested_company.to_i)
+    # ApplicationController invokes this after Clerk and MFA, before Current
+    # or the action scope can resolve a company. Keep the authorized selection.
+    @current_company_id = authorized_explicit_company_id(requested_company)
+    return if @current_company_id
 
     render json: {
       error: "This client workspace is unavailable or your access has expired. Your changes were not saved. Select the intended client after your access is restored.",
