@@ -14,11 +14,13 @@ module PayrollHistoryReview
     ITEM_FIELDS = %w[id gross_pay social_security_tax employer_social_security_tax
       medicare_tax employer_medicare_tax additional_medicare_tax].freeze
 
+    UNPROVABLE_W2_BASES = (YearEnd::W2PayrollItems::TAX_BASE_FIELDS - FicaBasisEvidence::BASE_FIELDS).freeze
+
     attr_reader :type, :id, :employee_id
 
-    def initialize(type, id, rows, employee_id: nil, fica_ids: nil, w2_ids: nil)
+    def initialize(type, id, rows, employee_id: nil, fica_ids: nil, w2_ids: nil, replacements: [])
       @type, @id, @rows, @employee_id = type, id, rows, employee_id
-      @fica_ids, @w2_ids = fica_ids, w2_ids
+      @fica_ids, @w2_ids, @replacements = fica_ids, w2_ids, replacements
     end
 
     def key
@@ -38,7 +40,14 @@ module PayrollHistoryReview
     end
 
     def fully_proven?
-      type == "legacy_basis_gap" && @rows.all? { |row| verified_proof?(row) }
+      type == "legacy_basis_gap" && @rows.all? do |row|
+        UNPROVABLE_W2_BASES.all? { |field| !row[field].nil? } && verified_proof?(row)
+      end
+    end
+
+    def resolution_current?(item)
+      item.resolved? && item.subject_digest == digest &&
+        (item.resolution_code != PayrollHistoryReviewItem::PROVEN_CODE || fully_proven?)
     end
 
     def proven_at
@@ -124,7 +133,7 @@ module PayrollHistoryReview
         "checks_printed" => payments.count { |payment| payment.fetch(:printed_at) },
         "checks_delivered_or_cleared" => payments.count { |payment| payment.fetch(:check_events).any? || payment.fetch(:clearing_events).any? },
         "direct_deposits_confirmed" => payments.count { |payment| payment.fetch(:deposit) },
-        "replacements" => replacements(period).map { |replacement| period_summary(replacement) })
+        "replacements" => @replacements.map { |replacement| period_summary(replacement) })
     end
 
     def payment_evidence(row)
@@ -137,15 +146,6 @@ module PayrollHistoryReview
     def period_summary(period)
       period.attributes.slice(*PERIOD_FIELDS).merge("item_count" => period.payroll_items.size,
         "gross_pay" => period.payroll_items.sum { |row| row.gross_pay.to_d })
-    end
-
-    def replacements(period)
-      runs = PayPeriod.where(company_id: period.company_id)
-      linked = runs.where(corrects_pay_period_id: period.id).or(runs.where(source_pay_period_id: period.id))
-        .or(runs.where(id: period.superseded_by_id))
-      same_dates = runs.where(status: "committed", start_date: period.start_date, end_date: period.end_date, pay_date: period.pay_date)
-      linked.or(same_dates).where.not(id: period.id).where("correction_status IS DISTINCT FROM 'voided'")
-        .includes(:payroll_items).order(:id)
     end
   end
 end

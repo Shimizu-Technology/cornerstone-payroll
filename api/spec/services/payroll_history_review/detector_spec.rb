@@ -102,6 +102,23 @@ RSpec.describe PayrollHistoryReview::Detector do
     expect(apply.fetch(:items)).to be_empty
   end
 
+  it "loads all matching replacement runs in one query and retains ID order" do
+    first_void = paycheck(period(correction_status: "voided")).pay_period
+    second_void = paycheck(period(correction_status: "voided", pay_date: Date.new(2026, 2, 2))).pay_period
+    linked = paycheck(period(corrects_pay_period_id: first_void.id, pay_date: Date.new(2026, 2, 3))).pay_period
+    same_dates = paycheck(period(source_pay_period_id: first_void.id)).pay_period
+    second_match = paycheck(period(pay_date: second_void.pay_date)).pay_period
+    queries = []
+    observer = ->(_name, _start, _finish, _id, event) { queries << event[:sql] if event[:sql].include?("IS DISTINCT FROM 'voided'") }
+
+    facts = ActiveSupport::Notifications.subscribed(observer, "sql.active_record") do
+      apply.fetch(:items).to_h { |item, subject| [ item.pay_period_id, subject.facts.fetch("replacements").pluck("id") ] }
+    end
+
+    expect(queries.size).to eq(1)
+    expect(facts).to eq(first_void.id => [ linked.id, same_dates.id ], second_void.id => [ second_match.id ])
+  end
+
   it "blocks detector writes in maintenance and sealed workspaces" do
     paycheck(period(correction_status: "voided"))
     allow(WriteMaintenance).to receive(:enabled?).and_return(true)
@@ -140,5 +157,36 @@ RSpec.describe PayrollHistoryReview::Detector do
     paycheck(additional_medicare_taxable_wages: nil)
     expect(apply.fetch(:counts)).to eq(reopened: 1)
     expect(item.reload).not_to be_resolved
+  end
+  it "requires manual review when a FICA proof leaves a missing W-2 wage base" do
+    create(:tax_table, tax_year: 2026, ss_wage_base: 184500)
+    row = paycheck(fit_taxable_wages: nil, social_security_taxable_wages: nil, additional_medicare_tax: 0)
+    recovery = PayrollFicaLegacyRecovery.new(company: company, year: 2026)
+    recovery.apply!(actor: actor, review_reference: "Checked archived FICA proof",
+      expected_digest: recovery.inventory.fetch(:plan_digest))
+    expect(row.reload.fica_basis_proof).to be_present
+    warning = lambda do
+      report = W2GuAggregator.new(company, 2026).generate
+      YearEnd::JudgmentWarnings.new(company: company, year: 2026, w2_report: report).call.find { |entry| entry[:code] == "legacy_tax_bases" }
+    end
+
+    item, subject = apply.fetch(:items).sole
+    expect(subject).not_to be_fully_proven
+    expect(item).to have_attributes(status: "open", resolution_code: nil)
+
+    # A proof resolution recorded before this check was introduced can still
+    # match the digest. It cannot establish the missing FIT wages.
+    item.update!(status: "resolved", resolution_code: PayrollHistoryReviewItem::PROVEN_CODE,
+      resolution_reference: "Previously treated as fully proven", resolved_at: Time.current)
+    expect(warning.call).to include(status: "needs_review")
+    expect(detector.call.fetch(:items).sole.first).to have_attributes(status: "open")
+    expect(item.reload).to be_resolved
+    expect(apply.fetch(:counts)).to eq(reopened: 1)
+
+    resolution = PayrollHistoryReview::Resolution.new(company: company, tax_year: 2026,
+      subject_key: subject.route_key, user: actor, actor: AuditActor.for_user(actor))
+    resolution.resolve!(code: "legacy_basis_accepted", reference: "Reviewed missing Guam taxable wages", expected_digest: subject.digest)
+    expect(warning.call).to include(status: "reviewed")
+    expect(apply.fetch(:counts)).to eq(resolved: 1)
   end
 end

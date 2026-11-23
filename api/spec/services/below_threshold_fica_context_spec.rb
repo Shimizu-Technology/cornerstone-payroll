@@ -175,6 +175,28 @@ RSpec.describe BelowThresholdFicaContext do
     expect { lifecycle.commit! }.to change { after.pay_period.reload.status }.from("approved").to("committed")
   end
 
+  it "matches the complete accepted gap when the current committed paycheck is excluded from the bound" do
+    earlier = history
+    current = history(gross: 500)
+    current.update_columns(cash_tips_reported: 0)
+    source_review
+    rules = PayrollFicaLegacyRecovery.new(company: company, year: 2026).verified_year_rules
+    calculation = lambda do
+      annual = EmployeeYearFicaContext.new(employee: employee, year: 2026, excluding_pay_period_id: current.pay_period_id)
+      amounts = annual.increment(wages_delta: current.gross_pay, tips_delta: 0, rules: rules, current_item: current)
+      [ amounts, annual.snapshot ]
+    end
+    original_amounts, original_snapshot = calculation.call
+    expect(original_snapshot.fetch("note")).to include("legacy paycheck ##{earlier.id}")
+    expect(original_snapshot.fetch("note")).not_to include("legacy paycheck ##{current.id}")
+
+    resolve_history("legacy_basis_gap", "legacy_basis_accepted")
+
+    amounts, snapshot = calculation.call
+    expect(amounts).to eq(original_amounts)
+    expect(snapshot).to eq(original_snapshot.merge("history_review_open" => false, "note" => nil))
+  end
+
   it "approves and commits a pre-release saved note after the void is resolved, with the same client checksum" do
     original = history(voided: true)
     history

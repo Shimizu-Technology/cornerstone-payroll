@@ -71,9 +71,9 @@ export interface HistoryReviewList {
 const path = '/admin/payroll_history_review_items';
 
 export const payrollHistoryReviewApi = {
-  list: (companyId: number, year: number) =>
+  list: (companyId: number, year: number): Promise<HistoryReviewList> =>
     apiClient.get<HistoryReviewList>(path, { year }, { companyId }),
-  change: (companyId: number, year: number, item: HistoryReviewItem, change: { resolution_code: string; reference: string } | { reason: string }) =>
+  change: (companyId: number, year: number, item: HistoryReviewItem, change: { resolution_code: string; reference: string } | { reason: string }): Promise<{ data: HistoryReviewItem }> =>
     apiClient.post<{ data: HistoryReviewItem }>(
       `${path}/${item.id}/${'reason' in change ? 'reopen' : 'resolve'}`,
       { year, subject_digest: item.subject_digest, ...change },
