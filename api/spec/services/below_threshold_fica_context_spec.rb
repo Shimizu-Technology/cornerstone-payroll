@@ -79,6 +79,24 @@ RSpec.describe BelowThresholdFicaContext do
     expect(PayrollItemFicaBasisProof.count).to eq(0)
   end
 
+  it "commits an approved bounded check after a later dated pay-basis change" do
+    history
+    source_review
+    item = calculate
+    expect(context(item)).to include("mode" => "calculable_below_thresholds")
+    lifecycle = PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor)
+    lifecycle.approve!
+    digest = PayrollReview::CalculationSnapshot.new(pay_period: item.pay_period.reload).call.fetch(:checksum)
+    allow(PayrollBusinessClock).to receive(:today).and_return(Date.new(2026, 11, 20))
+    EmployeeCompensationChangeService.new(employee: employee, actor: actor, source: "staff", effective_on: "2026-11-20",
+      reason: "Promotion", pay_rate: 52_000,
+      basis: { employment_type: "salary", salary_type: "annual", pay_frequency: "semimonthly" }).call!
+    expect(employee.reload.employment_type).to eq("salary")
+    expect(PayrollReview::CalculationSnapshot.new(pay_period: item.pay_period.reload).call.fetch(:checksum)).to eq(digest)
+    lifecycle.commit!
+    expect(item.pay_period.reload).to be_committed
+  end
+
   it "calculates over legacy paychecks without recorded bases when no void, reversal or disposition exists" do
     legacy = history
     history(legacy: false)
