@@ -53,6 +53,7 @@ module TimeTracking
       existing = AireHistoryReview.where(time_tracking_source: @source, company: @company).where.not(approved_at: nil).order(:id).last
       return response(existing) if existing
 
+      @proof_on = PayrollBusinessClock.today
       data = capture(mapping_selections: mapping_selections)
       review = AireHistoryReview.create!(company: @company, time_tracking_source: @source, actor: @actor,
         snapshot: data.fetch(:snapshot), summary: data.fetch(:summary), digest: checksum(data.fetch(:snapshot)))
@@ -70,6 +71,7 @@ module TimeTracking
       end
       validate_context!
       validate_review!(review)
+      @proof_on = PayrollBusinessClock.date_for(review.created_at)
       # The first full remote recapture holds no business-row locks.
       fresh = capture(mapping_selections: review.snapshot.fetch("mapping_selections"))
       changes = changed_sections(review.snapshot, fresh.fetch(:snapshot))
@@ -175,7 +177,7 @@ module TimeTracking
     end
 
     def refresh_local_inputs!
-      @employees = @company.employees.includes(:employee_wage_rates).order(:id).to_a
+      @employees = @company.employees.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes).order(:id).to_a
       @saved_mappings = @source.time_tracking_employee_mappings.order(:id).to_a
       @saved_mapping_fingerprint = checksum(@saved_mappings.map(&:attributes))
     end
@@ -384,7 +386,7 @@ module TimeTracking
         entries.map { |entry| entry["category"] }.uniq.filter_map do |category|
           policy = policies.find { |row| row.source_category_key == TimeTrackingCategoryMapping.category_key(category) }
           next unless policy
-          rate = policy.matching_rate(employee.employee_wage_rates.to_a)
+          rate = policy.matching_rate(employee.wage_rates_on(@proof_on, include_inactive: true))
           { "employee" => employee.full_name, "employee_id" => employee.id, "source_category" => category&.fetch("name", nil),
             "configured_components" => policy.required_rate_description, "resolved_component" => rate&.label,
             "employee_wage_rate_id" => rate&.id, "rate" => rate&.rate&.to_s("F"),
@@ -411,7 +413,7 @@ module TimeTracking
         employee = @employees.find { |record| record.id == mapping&.employee_id }
         { "source_user_uuid" => uuid, "employee_id" => employee&.id, "employee" => employee&.full_name,
           "hours" => entries.sum { |entry| BigDecimal(entry.fetch("hours").to_s) }.to_s("F"),
-          "options" => employee ? employee.active_wage_rates.filter_map do |rate|
+          "options" => employee ? employee.wage_rates_on(@proof_on).filter_map do |rate|
             { "id" => rate.id, "label" => rate.label, "rate" => rate.rate.to_s } if rate.rate&.positive?
           end : [] }
       end
@@ -422,16 +424,21 @@ module TimeTracking
       raise Error, "Solo choices contain duplicates" unless choices.map { |row| row["employee_id"] }.uniq.length == choices.length
       choices.each do |row|
         next if row["employee_wage_rate_id"].blank?
-        mapping = @mappings.find { |record| record.employee_id == row["employee_id"].to_i }
-        rate = mapping && EmployeeWageRate.active.find_by(employee_id: mapping.employee_id, id: row["employee_wage_rate_id"])
+        employee = @employees.find { |record| record.id == row["employee_id"].to_i }
+        rate = employee&.wage_rates_on(@proof_on)&.find { |candidate| candidate.id == row["employee_wage_rate_id"].to_i }
         raise Error, "The selected Solo earning component or rate is no longer available for this employee" unless rate&.rate&.positive?
-        choice = TimeTrackingEarningChoice.find_or_initialize_by(time_tracking_source: @source, employee_id: mapping.employee_id, source_category_key: "solo")
+        choice = TimeTrackingEarningChoice.find_or_initialize_by(time_tracking_source: @source, employee_id: employee.id, source_category_key: "solo")
         choice.update!(employee_wage_rate: rate, reviewed_by: @actor,
           rate_snapshot: rate.attributes.slice("id", "employee_id", "label", "rate", "active").as_json)
         AuditLog.record!(user: @actor, company_id: @company.id, action: "time_tracking_earning_choice#confirmed",
           record_type: "TimeTrackingEarningChoice", record_id: choice.id, event_category: "payroll",
-          metadata: { employee_id: mapping.employee_id, employee_wage_rate_id: rate.id, source_category_key: "solo", rate: rate.rate.to_s })
+          metadata: { employee_id: employee.id, employee_wage_rate_id: rate.id, source_category_key: "solo", rate: rate.rate.to_s })
       end
+    end
+
+    def employee_fingerprint(employee)
+      [ PayrollCalculationContext.dated_employee_attributes(employee, @proof_on),
+        PayrollCalculationContext.dated_wage_rate_attributes(employee, @proof_on) ]
     end
 
     def local_fingerprint(inventory)
@@ -441,7 +448,7 @@ module TimeTracking
         "category_configuration" => checksum(TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).map(&:attributes)),
         "company" => checksum(@company.attributes),
         "mappings" => @saved_mapping_fingerprint,
-        "employees" => checksum(@employees.map { |employee| [ employee.attributes, employee.employee_wage_rates.sort_by(&:id).map(&:attributes) ] }),
+        "employees" => checksum(@employees.map { |employee| employee_fingerprint(employee) }),
         "runs" => @company.pay_periods.where(id: run_ids).order(:id).to_h do |run|
           items = run.payroll_items.includes(:payroll_item_earnings).order(:id)
           [ run.id.to_s, checksum([ run.attributes, items.map { |item| [ item.attributes, item.payroll_item_earnings.sort_by(&:id).map(&:attributes) ] } ]) ]

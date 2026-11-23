@@ -58,7 +58,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       employee = create(:employee, company: company, department: department)
       employee.update_columns(ssn_encrypted: nil, hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
 
-      patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { first_name: "Updated", pay_rate: 27 } }
+      patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { first_name: "Updated", pay_rate: 27, compensation_revision: EmployeeCompensationChangeService.revision(employee.reload) } }
 
       expect(response).to have_http_status(:ok)
       expect(employee.reload).to have_attributes(first_name: "Updated", pay_rate: 27, ssn_encrypted: nil, hire_date: nil, address_line1: nil)
@@ -668,7 +668,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
       it "updates pay rate" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
-          employee: { pay_rate: 25.00 }
+          employee: { pay_rate: 25.00, compensation_revision: EmployeeCompensationChangeService.revision(employee.reload) }
         }
 
         expect(response).to have_http_status(:ok)
@@ -783,7 +783,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
       it "allows changing between hourly and salary within W-2 treatment" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
-          employee: { employment_type: "salary", salary_type: "annual", pay_rate: 52_000 }
+          employee: { employment_type: "salary", salary_type: "annual", pay_rate: 52_000, compensation_revision: EmployeeCompensationChangeService.revision(employee.reload) }
         }
 
         expect(response).to have_http_status(:ok)
@@ -876,7 +876,8 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           employee: {
             employment_type: "contractor",
             contractor_type: "individual",
-            contractor_pay_type: "flat_fee"
+            contractor_pay_type: "flat_fee",
+            compensation_revision: EmployeeCompensationChangeService.revision(employee)
           }
         }
 
@@ -901,7 +902,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
       it "returns validation errors" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
-          employee: { pay_rate: -5 }
+          employee: { pay_rate: -5, compensation_revision: EmployeeCompensationChangeService.revision(employee.reload) }
         }
 
         expect(response).to have_http_status(:unprocessable_entity)

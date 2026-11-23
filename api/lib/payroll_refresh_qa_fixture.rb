@@ -6,6 +6,11 @@ require "fileutils"
 # Disposable fixture for the real-stack payroll refresh acceptance journey.
 # It never runs through an HTTP endpoint and refuses non-test/populated data.
 class PayrollRefreshQaFixture
+  def self.change_pay_after_period!(employee, period, actor)
+    EmployeeCompensationChangeService.new(employee: employee, actor: actor, source: "qa_fixture",
+      pay_rate: 18, effective_on: period.end_date + 1).call!
+  end
+
   def self.seed!(output_path:)
     raise "Synthetic QA requires Rails test and E2E_TEST_MODE=true" unless Rails.env.test? && ENV["E2E_TEST_MODE"] == "true"
     raise "Synthetic QA requires an empty application database" if Company.exists? || User.exists? || Employee.exists?
@@ -72,11 +77,11 @@ class PayrollRefreshQaFixture
       reopen_employee = build_employee.call("Reopen")
       reopen_period, reopen_item = build_period.call(reopen_employee, "committed")
       reopen_loan = build_loan.call(reopen_employee)
-      reopen_employee.update!(pay_rate: 18)
+      change_pay_after_period!(reopen_employee, reopen_period, actor)
       refresh_employee = build_employee.call("Refresh Approved")
       refresh_period, refresh_item = build_period.call(refresh_employee, "approved")
       refresh_loan = build_loan.call(refresh_employee)
-      refresh_employee.update!(pay_rate: 18)
+      change_pay_after_period!(refresh_employee, refresh_period, actor)
       delivered_employee = build_employee.call("Delivered Block")
       delivered_period, delivered_item = build_period.call(delivered_employee, "delivered")
       multirate_employee = build_employee.call("Multi Rate")
@@ -94,8 +99,9 @@ class PayrollRefreshQaFixture
       multirate_lifecycle.approve!
       multirate_lifecycle.commit!
       multirate_loan = build_loan.call(multirate_employee)
-      primary.update!(rate: 16)
-      secondary.update!(rate: 30, active: false)
+      EmployeeCompensationChangeService.new(employee: multirate_employee, actor: actor, source: "qa_fixture",
+        effective_on: multirate_period.end_date + 1,
+        wage_rate_edits: [ { id: primary.id, rate: 16 }, { id: secondary.id, rate: 30, active: false } ]).call!
       unavailable_employee = build_employee.call("Unavailable Loan")
       unavailable_loan = build_loan.call(unavailable_employee)
       unavailable_period, unavailable_item = build_period.call(unavailable_employee, "draft")

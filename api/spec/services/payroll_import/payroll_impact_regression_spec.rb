@@ -151,11 +151,11 @@ RSpec.describe PayrollImport::ImportService do
 
     it "rejects a rate changed or deactivated since preview without changing existing hours" do
       row = preview.merge(selected_wage_rate_id: joint.id)
-      joint.update!(rate: 18)
+      change_wage_rate!(joint, rate: 18)
       result = service.apply!(matched: [ row ])
       expect(result[:errors].first[:error]).to include("rates changed")
       expect(period.payroll_items).to be_empty
-      joint.update!(active: false)
+      change_wage_rate!(joint, active: false)
       expect(service.apply!(matched: [ row ])[:errors].first[:error]).to include("Choose an active job")
     end
 
@@ -280,7 +280,7 @@ RSpec.describe PayrollImport::ImportService do
     end
 
     it "keeps the profile-rate path when the profile rate differs from the jobs, so pay cannot change" do
-      employee.update_columns(pay_rate: 16.00)
+      change_compensation!(employee, pay_rate: 16.00)
       row = preview
       expect(row).not_to have_key(:wage_rate_options)
       expect(import(row).wage_rate_hours).to be_empty

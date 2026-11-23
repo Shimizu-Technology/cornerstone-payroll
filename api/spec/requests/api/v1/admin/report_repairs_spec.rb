@@ -202,7 +202,7 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
       create(:payroll_item, company: company, employee: worker, pay_period: period,
         employment_type: "contractor", pay_rate: 500, gross_pay: 500,
         calculation_context_snapshot: { "employee" => { "contractor_pay_type" => saved_type }.compact })
-      worker.update!(contractor_pay_type: current_type)
+      change_compensation!(worker, contractor_pay_type: current_type)
       expected[worker.full_name] = basis
     end
 

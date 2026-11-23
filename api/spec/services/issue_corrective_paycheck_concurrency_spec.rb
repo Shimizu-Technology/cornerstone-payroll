@@ -46,7 +46,9 @@ RSpec.describe IssueCorrectivePaycheckService, :postgres_concurrency do
     EmployeeYtdTotal.where(employee: employee).delete_all
     CompanyYtdTotal.where(company: company).delete_all
     PayPeriod.where(id: period_ids).delete_all
+    EmployeeWageRateVersion.where(employee_id: employee.id).delete_all
     EmployeeWageRate.where(employee: employee).delete_all
+    EmployeeCompensationChange.where(employee_id: employee.id).delete_all
     Employee.where(id: employee.id).delete_all
     Department.where(id: department.id).delete_all
     User.where(id: actor.id).delete_all

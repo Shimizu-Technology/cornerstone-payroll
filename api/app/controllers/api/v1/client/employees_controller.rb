@@ -19,6 +19,7 @@ module Api
           employees = apply_filters(employees)
           employees = apply_sort(employees)
           employees = employees.includes(:department, :employee_wage_rates, :employee_w4_elections)
+            .preload(:employee_wage_rate_versions, :employee_compensation_changes)
           employees = employees.page(params[:page]).per(bounded_per_page(default: DEFAULT_PER_PAGE, max: MAX_PER_PAGE))
 
           render json: {
@@ -249,7 +250,9 @@ module Api
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: false)
           data["ssn_last_four"] = employee.ssn_last_four
           data["contractor_ein_last_four"] = employee.contractor_ein.to_s.gsub(/\D/, "").last(4).presence
-          data["wage_rates"] = employee.active_wage_rates.map do |rate|
+          rates_on = PayrollBusinessClock.today
+          data.merge!(EmployeeCompensationChangeService.snapshot(employee, rates_on).as_json)
+          data["wage_rates"] = employee.wage_rates_on(rates_on).map do |rate|
             {
               id: rate.id,
               employee_id: rate.employee_id,

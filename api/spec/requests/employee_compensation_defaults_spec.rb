@@ -37,7 +37,7 @@ RSpec.describe "Current compensation defaults", type: :request do
     it "calculates #{frequency} salary after hourly conversion without losing retained hourly definitions" do
       employee = create(:employee, company: company, pay_rate: 25, pay_frequency: frequency)
       rate = create(:employee_wage_rate, employee: employee, rate: 25, is_primary: true)
-      employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      change_compensation!(employee, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
       period = create(:pay_period, company: company, status: "draft", start_date: "2026-09-13", end_date: "2026-09-26", pay_date: "2026-10-02")
       post "/api/v1/admin/pay_periods/#{period.id}/run_payroll", headers: headers,
         params: { employee_ids: [ employee.id ] }
@@ -58,7 +58,7 @@ RSpec.describe "Current compensation defaults", type: :request do
   it "returns a flat contractor fee without reusing its retained hourly rate" do
     employee = create(:employee, :contractor, company: company, contractor_pay_type: "hourly", pay_rate: 25)
     rate = create(:employee_wage_rate, employee: employee, rate: 25, is_primary: true)
-    employee.update!(contractor_pay_type: "flat_fee", pay_rate: 500)
+    change_compensation!(employee, contractor_pay_type: "flat_fee", pay_rate: 500)
     expect(employee.default_payroll_rate).to eq(500.to_d)
     expect(rate.reload.rate).to eq(25.to_d)
   end
@@ -70,7 +70,7 @@ RSpec.describe "Current compensation defaults", type: :request do
     item = create(:payroll_item, company: company, employee: employee, pay_period: period, employment_type: "hourly",
       pay_rate: 25, hours_worked: 80, wage_rate_hours: [ { "employee_wage_rate_id" => rate.id, "label" => rate.label,
         "rate" => 25, "regular_hours" => 80, "overtime_hours" => 0, "is_primary" => true, "active" => true } ])
-    employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+    change_compensation!(employee, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
     post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", headers: headers,
       params: { includes_base_salary: true, includes_recurring_items: true }
     expect(response).to have_http_status(:ok), response.body

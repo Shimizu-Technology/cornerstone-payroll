@@ -14,8 +14,12 @@ class TimeTrackingEarningChoice < ApplicationRecord
   end
 
   def current_rate
-    rate = employee_wage_rate
-    rate if rate.active? && rate_snapshot == rate.attributes.slice("id", "employee_id", "label", "rate", "active").as_json
+    rate = employee.wage_rates_on(PayrollBusinessClock.today).find { |candidate| candidate.id == employee_wage_rate_id }
+    rate if matches_rate?(rate)
+  end
+
+  def matches_rate?(rate)
+    rate&.active? && rate_snapshot == rate.attributes.slice("id", "employee_id", "label", "rate", "active").as_json
   end
 
   private

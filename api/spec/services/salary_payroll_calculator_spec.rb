@@ -40,7 +40,7 @@ RSpec.describe SalaryPayrollCalculator do
   end
 
   it "calculates a high annual salary without overflowing the stored pay rate" do
-    employee.update!(pay_rate: 5_460_000)
+    change_compensation!(employee, pay_rate: 5_460_000)
     payroll_item.update!(pay_rate: employee.pay_rate, service_charge_wages: 0)
 
     payroll_item.calculate!
