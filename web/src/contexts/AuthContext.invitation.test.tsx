@@ -7,7 +7,7 @@ const clerk = vi.hoisted(() => ({
   getToken: vi.fn().mockResolvedValue('synthetic-token'),
   signOut: vi.fn(),
 }));
-vi.mock('@clerk/clerk-react', () => ({
+vi.mock('@clerk/react', () => ({
   useAuth: () => ({ isSignedIn: true, isLoaded: true, ...clerk }),
 }));
 

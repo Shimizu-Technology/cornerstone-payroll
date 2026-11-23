@@ -23,7 +23,8 @@
     "test:e2e:pay-items": "E2E_PAY_ITEMS_LANE=true playwright test --project=pay-items"
   },
   "dependencies": {
-    "@clerk/clerk-react": "^5.61.1",
+    "@clerk/react": "6.18.6",
+    "@clerk/ui": "1.42.4",
     "@rails/actioncable": "^8.1.300",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
