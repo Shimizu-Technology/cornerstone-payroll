@@ -267,21 +267,29 @@ class EmployeeYearFicaContext
       # correction bases cannot safely be replayed as an ordinary paycheck.
       hold_legacy!(row, "FICA") if row.correction_for_payroll_item_id.present? || row.gross_pay.negative?
       prior_rows = rows.take_while { |prior| prior.id < row.id }
-      prior = self.class.new(employee: employee, company: company, year: year, rows: prior_rows, opening_balance: opening_balance)
-      stored = row[:recorded_annual_fica_context]
-      stored = {} unless stored.is_a?(Hash)
-      proof = if [ 2, VERSION ].include?(stored["version"])
-        prior.fingerprint_for(stored["version"])
-      elsif !stored.key?("version") && opening_balance.nil?
-        # v1 fingerprints included the complete opening row; only the
-        # no-opening-balance form can be verified from this bounded projection.
-        Digest::SHA256.hexdigest(JSON.generate([ year, employee.id, prior_rows.map { |item| item.attributes.slice(*LEDGER_FIELDS) }, nil ]))
-      end
-      unless proof && stored["year"] == year && stored["employee_id"] == employee.id && stored["fingerprint"] == proof
-        hold_legacy!(row, "FICA")
-      end
+      prior = prior_context(prior_rows)
+      verify_stored_fingerprint!(row, prior, prior_rows)
       prior.increment(wages_delta: row.medicare_taxable_wages || row.gross_pay,
         tips_delta: row.cash_tips_reported || row.reported_tips, rules: rules)
+    end
+  end
+
+  def prior_context(prior_rows)
+    self.class.new(employee: employee, company: company, year: year, rows: prior_rows, opening_balance: opening_balance)
+  end
+
+  def verify_stored_fingerprint!(row, prior, prior_rows)
+    stored = row[:recorded_annual_fica_context]
+    stored = {} unless stored.is_a?(Hash)
+    proof = if [ 2, VERSION ].include?(stored["version"])
+      prior.fingerprint_for(stored["version"])
+    elsif !stored.key?("version") && opening_balance.nil?
+      # v1 fingerprints included the complete opening row; only the
+      # no-opening-balance form can be verified from this bounded projection.
+      Digest::SHA256.hexdigest(JSON.generate([ year, employee.id, prior_rows.map { |item| item.attributes.slice(*LEDGER_FIELDS) }, nil ]))
+    end
+    unless proof && stored["year"] == year && stored["employee_id"] == employee.id && stored["fingerprint"] == proof
+      hold_legacy!(row, "FICA")
     end
   end
 
