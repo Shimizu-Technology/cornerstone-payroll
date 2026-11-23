@@ -115,6 +115,13 @@ FOR EACH ROW EXECUTE FUNCTION prevent_payroll_item_legacy_disposition_mutation()
 CREATE OR REPLACE FUNCTION prevent_check_evidence_mutation()
 RETURNS trigger AS $$
 BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    -- Company ownership is the only field a legacy evidence row may gain.
+    IF to_jsonb(OLD)->>'company_id' IS NULL AND to_jsonb(NEW)->>'company_id' IS NOT NULL
+       AND (to_jsonb(NEW) - 'company_id') = (to_jsonb(OLD) - 'company_id') THEN
+      RETURN NEW;
+    END IF;
+  END IF;
   RAISE EXCEPTION '% records are append-only', TG_TABLE_NAME;
 END;
 $$ LANGUAGE plpgsql;
@@ -540,6 +547,11 @@ BEGIN
   IF TG_OP IN ('DELETE', 'TRUNCATE') THEN
     RAISE EXCEPTION 'Financial correction Source evidence is append-only';
   END IF;
+  -- Company ownership is the only field a legacy evidence row may gain.
+  IF to_jsonb(OLD)->>'company_id' IS NULL AND to_jsonb(NEW)->>'company_id' IS NOT NULL
+     AND (to_jsonb(NEW) - 'company_id') = (to_jsonb(OLD) - 'company_id') THEN
+    RETURN NEW;
+  END IF;
   IF (to_jsonb(NEW) - ARRAY['accepted_receipt','accepted_at','updated_at']) IS DISTINCT FROM
      (to_jsonb(OLD) - ARRAY['accepted_receipt','accepted_at','updated_at']) OR
      (OLD.accepted_receipt <> '{}'::jsonb AND (NEW.accepted_receipt IS DISTINCT FROM OLD.accepted_receipt OR NEW.accepted_at IS DISTINCT FROM OLD.accepted_at)) THEN
@@ -573,6 +585,11 @@ BEGIN
       RAISE EXCEPTION 'Financial correction origin is immutable';
     END IF;
   ELSE
+    -- Company ownership is the only field a legacy evidence row may gain.
+    IF to_jsonb(OLD)->>'company_id' IS NULL AND to_jsonb(NEW)->>'company_id' IS NOT NULL
+       AND (to_jsonb(NEW) - 'company_id') = (to_jsonb(OLD) - 'company_id') THEN
+      RETURN NEW;
+    END IF;
     IF NEW.financial_correction_link_id IS DISTINCT FROM OLD.financial_correction_link_id OR NEW.wire_payload IS DISTINCT FROM OLD.wire_payload OR
        (OLD.financial_correction_link_id IS NOT NULL AND
         (to_jsonb(NEW) - ARRAY['delivered_at','enqueued_at','last_error','updated_at']) IS DISTINCT FROM

@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class EmployeePayrollField < ApplicationRecord
+  include CompanyFromParent
   belongs_to :employee
+  inherit_company_from :employee
   belongs_to :payroll_field_definition
   belongs_to :employee_loan, optional: true
 

@@ -75,7 +75,8 @@ RSpec.describe PayrollSubmissionImport do
     expect(selection.errors[:staff_workbook_document]).to be_present
     selection.staff_workbook_attached_by = nil
     selection.staff_workbook_attached_at = nil
-    record.update!(pay_period: create(:pay_period, company: create(:company)))
+    other_run = create(:pay_period, company: create(:company))
+    selection.payroll_import = PayrollImportRecord.create!(pay_period: other_run, status: "previewed")
     expect(selection).not_to be_valid
     expect(selection.errors[:base].join).to include("same company and period")
   end

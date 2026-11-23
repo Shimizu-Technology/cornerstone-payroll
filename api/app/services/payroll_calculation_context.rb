@@ -70,7 +70,9 @@ class PayrollCalculationContext
         pay_rate hire_date intake_payroll_eligible_from contractor_type default_custom_earnings default_payroll_adjustments
       ]
       stable_rows = lambda do |association|
-        association.reorder(:id).map { |row| row.attributes.except("created_at", "updated_at") }
+        columns = %w[created_at updated_at]
+        columns << "company_id" if association.klass < CompanyFromParent
+        association.reorder(:id).map { |row| row.attributes.except(*columns) }
       end
       setup = {
         "employee" => employee.attributes.slice(*scalar_fields),

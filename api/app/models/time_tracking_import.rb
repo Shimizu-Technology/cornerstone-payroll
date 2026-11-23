@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class TimeTrackingImport < ApplicationRecord
+  include CompanyFromParent
   STATUSES = %w[previewed applied failed].freeze
   SOURCE_PROCESSING_STATUSES = %w[imported committed payment_issued payment_failed].freeze
   SOURCE_PAYMENT_STATUSES = %w[payment_issued payment_failed].freeze
@@ -21,6 +22,7 @@ class TimeTrackingImport < ApplicationRecord
   ].freeze
 
   belongs_to :pay_period
+  inherit_company_from :pay_period
   belongs_to :time_tracking_source
   belongs_to :applied_by, class_name: "User", optional: true
   belongs_to :reconciled_by, class_name: "User", optional: true

@@ -52,7 +52,7 @@ module TimeTracking
         row.earning_snapshot.present? ? row.attributes : row.attributes.except("earning_snapshot")
       end
       { allocations: allocations, lines: lines, evidence: { allocations: captured_allocations, batches: batches.sort_by { |batch| batch["id"] },
-        native_earnings: @item.payroll_item_earnings.order(:id).map(&:attributes) } }
+        native_earnings: @item.payroll_item_earnings.order(:id).map { |row| row.attributes.except("company_id") } } }
     rescue PayrollBatchPayloadValidator::Error, ConnectionIdentity::Error => e
       raise ArgumentError, e.message
     end

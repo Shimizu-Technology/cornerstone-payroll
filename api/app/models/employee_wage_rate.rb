@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class EmployeeWageRate < ApplicationRecord
+  include CompanyFromParent
   belongs_to :employee
+  inherit_company_from :employee
 
   around_save :persist_under_employee_lock
   around_destroy :destroy_under_employee_lock

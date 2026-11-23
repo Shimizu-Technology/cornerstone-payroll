@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../db/migrate/support/m3_7_child_companies"
+
 # Ruby schema dumps cannot represent PostgreSQL functions and triggers. This
 # versioned snapshot restores the current migration-defined guards without
 # replaying data migrations or rebuilding any application table.
@@ -9,14 +11,15 @@ module DatabaseIntegrity
   def self.install!(connection = ActiveRecord::Base.connection)
     raise "Payroll database integrity requires PostgreSQL" unless connection.adapter_name == "PostgreSQL"
     connection.transaction do
-      connection.execute(File.read(PATH))
+      connection.execute(snapshot_sql)
       verify!(connection)
     end
     true
   end
 
   def self.verify!(connection = ActiveRecord::Base.connection)
-    expected = File.read(PATH).scan(/CREATE TRIGGER\s+(\w+).*?\bON\s+(\w+)/m).uniq
+    sql = snapshot_sql
+    expected = sql.scan(/CREATE TRIGGER\s+(\w+).*?\bON\s+(\w+)/m).uniq
     actual = connection.select_rows(<<~SQL)
       SELECT t.tgname, c.relname FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
@@ -25,7 +28,6 @@ module DatabaseIntegrity
     SQL
     missing = expected - actual
     raise "Payroll database integrity guards missing: #{missing.map(&:first).join(', ')}" if missing.any?
-    sql = File.read(PATH)
     namespace = connection.select_value("SELECT current_schema()")
     expected_triggers = sql.scan(/CREATE TRIGGER\s+(\w+)(.*?);/m).to_h do |name, definition|
       [ name, normalize_trigger("CREATE TRIGGER #{name}#{definition}", namespace) ]
@@ -57,6 +59,10 @@ module DatabaseIntegrity
     altered = expected_functions.reject { |name, definition| functions[name] == definition }.keys
     raise "Payroll database integrity functions differ: #{altered.join(', ')}" if altered.any?
     true
+  end
+
+  def self.snapshot_sql
+    File.read(PATH) + M3_7ChildCompanies.schema_sql
   end
 
   def self.normalize_trigger(definition, namespace)

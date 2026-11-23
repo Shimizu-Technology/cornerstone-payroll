@@ -35,6 +35,7 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
 
   describe "POST /api/v1/admin/pay_periods/:id/preview_import" do
     it "retains and returns an integrity-verified Revel source package" do
+      ApplicationRecord.connection.execute("ALTER TABLE payroll_imports DISABLE TRIGGER fill_payroll_imports_company_id")
       CompanyWorkweek.create!(
         company: company,
         starts_on_weekday: pay_period.start_date.wday,
@@ -94,6 +95,7 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
         "overtime_hours" => 2.0,
         "pay_rate" => included_employee.pay_rate.to_f
       ))
+      expect(PayrollImportRecord.last.company_id).to eq(company.id)
       expect(PayrollImportRecord.last.payroll_intake_session.documents.in_package_order.map(&:source_role)).to eq([ "revel_hours", "supplemental_workbook" ])
     ensure
       workbook_file&.unlink

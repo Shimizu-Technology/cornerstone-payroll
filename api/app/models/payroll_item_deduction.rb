@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 class PayrollItemDeduction < ApplicationRecord
+  include CompanyFromParent
   include TrainingBaselineImmutable
   CATEGORIES = %w[pre_tax post_tax employer_contribution].freeze
   REPORTING_GROUPS = PayrollReportingGroups::GROUPS
 
   belongs_to :payroll_item
+  inherit_company_from :payroll_item
   belongs_to :deduction_type
   belongs_to :employee_loan, optional: true
 

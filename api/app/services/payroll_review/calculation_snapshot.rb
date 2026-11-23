@@ -48,8 +48,8 @@ module PayrollReview
         stable_attributes(item).merge(
           "annual_fica_context" => contexts.fetch(item.employee_id).snapshot_for(item),
           "employee" => item.employee.attributes.slice("id", "first_name", "last_name"),
-          "payroll_item_deductions" => item.payroll_item_deductions.sort_by(&:id).map { |row| stable_attributes(row) },
-          "payroll_item_field_entries" => item.payroll_item_field_entries.sort_by(&:id).map { |row| stable_attributes(row) },
+          "payroll_item_deductions" => item.payroll_item_deductions.sort_by(&:id).map { |row| stable_attributes(row, except: %w[company_id]) },
+          "payroll_item_field_entries" => item.payroll_item_field_entries.sort_by(&:id).map { |row| stable_attributes(row, except: %w[company_id]) },
           "time_tracking_entry_allocations" => item.time_tracking_entry_allocations.sort_by(&:id).map { |row| stable_attributes(row) }
         )
       end
@@ -76,14 +76,14 @@ module PayrollReview
               }
             end,
             "rows" => session.rows.order(:position, :id).map do |row|
-              stable_attributes(row, except: %w[source_payload]).merge(
+              stable_attributes(row, except: %w[company_id source_payload]).merge(
                 "source_payload_sha256" => Digest::SHA256.hexdigest(JSON.generate(canonicalize(row.source_payload || {})))
               )
             end
           }
         end,
         "time_tracking_imports" => pay_period.time_tracking_imports.where(status: "applied").order(:id).map do |time_import|
-          stable_attributes(time_import, except: %w[raw_payload processed_payload]).merge(
+          stable_attributes(time_import, except: %w[company_id raw_payload processed_payload]).merge(
             "raw_payload_sha256" => Digest::SHA256.hexdigest(JSON.generate(canonicalize(time_import.raw_payload || {}))),
             "processed_payload_sha256" => Digest::SHA256.hexdigest(JSON.generate(canonicalize(time_import.processed_payload || {})))
           )

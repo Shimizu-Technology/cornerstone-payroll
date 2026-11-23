@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class EmployeeTippedOccupation < ApplicationRecord
+  include CompanyFromParent
   belongs_to :employee
+  inherit_company_from :employee
 
   validates :occupation_code, format: { with: /\A\d{3}\z/, message: "must be a three-digit Treasury occupation code" }
   validates :effective_from, presence: true

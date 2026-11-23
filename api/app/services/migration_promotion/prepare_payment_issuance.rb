@@ -143,6 +143,7 @@ module MigrationPromotion
       CheckEvent.insert_all!(assignments.map do |item_id, number|
         {
           payroll_item_id: item_id,
+          company_id: pay_period.company_id,
           user_id: actor.id,
           event_type: "assigned",
           check_number: number,

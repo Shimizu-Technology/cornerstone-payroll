@@ -199,9 +199,11 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     end
 
     it "logs batch_downloaded events for each printable check" do
+      ApplicationRecord.connection.execute("ALTER TABLE check_events DISABLE TRIGGER fill_check_events_company_id")
       expect {
         post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/batch_pdf"
       }.to change { CheckEvent.where(event_type: "batch_downloaded").count }.by(2)
+      expect(CheckEvent.where(event_type: "batch_downloaded").pluck(:company_id)).to eq([ pay_period.company_id ] * 2)
     end
   end
 
