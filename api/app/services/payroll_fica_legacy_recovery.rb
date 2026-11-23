@@ -136,7 +136,13 @@ class PayrollFicaLegacyRecovery
           conservative_history_bounds: evidence.fetch("bounds"), source_digest: evidence.fetch("source_digest"))
         result[:proofs] = {}
       rescue EmployeeYearFicaContext::UnreconciledLedgerError => error
-        result.merge!(status: "held", history_review_open: true, filing_review_open: true, reason: error.message)
+        # A review flag alone does not undo an ordinary path that is already
+        # proven, complete or recoverable; only an actual hold stays held.
+        if history_reason || result[:status] == "held"
+          result.merge!(status: "held", history_review_open: true, filing_review_open: true, reason: error.message)
+        else
+          result.merge!(history_review_open: true, filing_review_open: true)
+        end
       end
     end
     result
