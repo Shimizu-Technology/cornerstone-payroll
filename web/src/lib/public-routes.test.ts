@@ -5,6 +5,7 @@ describe('isPublicPath', () => {
   it('lets the legal pages render without waiting for sign-in', () => {
     expect(isPublicPath('/privacy')).toBe(true);
     expect(isPublicPath('/terms')).toBe(true);
+    expect(isPublicPath('/privacy/')).toBe(true);
   });
 
   it('keeps the existing public pages and nothing else', () => {

@@ -15,7 +15,7 @@ const serviceProviders = [
   {
     name: 'OpenRouter and the AI model provider it connects to',
     purpose:
-      'Reads timecard images (including employee names and hours), pulls payroll details from emails or attachments that staff paste in, and helps staff draft invoices (including client billing contacts and attachments). This happens only when staff use those optional AI-assisted tools and we have turned the AI service on.',
+      'Reads timecard images (including employee names and hours), pulls payroll details from emails that staff paste in or files they upload, and helps staff draft invoices (including client billing contacts and attachments). This happens only when staff use those optional AI-assisted tools and we have turned the AI service on.',
   },
 ];
 
