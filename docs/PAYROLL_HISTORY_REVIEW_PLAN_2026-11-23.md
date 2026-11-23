@@ -100,6 +100,12 @@ Applying it calls `PayrollFicaLegacyRecovery#apply!`, scoped to the employee and
 - B2 stays reserved (`legacy_basis_proven`). Build it only when a client's inventory actually shows recoverable rows.
 - B1 still ships: its statuses are truthful, apply is safe, and fingerprints are time-scoped.
 
+**B1 narrowed (Nov 23, after the second independent review):**
+- `PayPeriod#calculated_at` isn't a trustworthy watermark for which proofs a stored fingerprint saw. Partial-roster recalculation, imports, intake, timecard apply, clock skew between hosts, and migration promotion all break it.
+- So B1 ships **without any change to the live annual FICA path**: truthful, order-independent inventory statuses, a plan that matches apply exactly, verify-after-write inside the locked apply transaction with full rollback, linear replay, and validated employee scope.
+- A proof that would change a later row's stored fingerprint is refused, not worked around.
+- **Prerequisite for B2:** record a per-item, database-authoritative proof watermark, such as the highest visible proof ID, in each new `annual_fica_context`, before allowing proofs that sit behind later fingerprinted rows.
+
 ### Year-end check (before W-2s)
 
 Confirm how W-2 boxes 3 and 5 and the quarterly packet treat legacy rows with nil bases, before and after proofs, for AIRE and Spike on a local production clone. Record the result here. If any report derives wrong wages from nil bases, fix it in the B release.
