@@ -22,7 +22,8 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/preview_time_tracking_import" do
-    it "loads the member pay period from the routed id parameter" do
+    it "loads the routed pay period and exposes exclusion categories without changing the import payload" do
+      processed_payload = { "rows" => [], "exclusions" => [ { "reason" => "denied_approval", "held_total_hours" => 0 } ] }
       import = instance_double(
         TimeTrackingImport,
         id: 123,
@@ -34,7 +35,7 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
         fetch_start_date: pay_period.start_date,
         fetch_end_date: pay_period.end_date,
         warnings: [],
-        processed_payload: { "rows" => [] },
+        processed_payload: processed_payload,
         external_batch_id: nil,
         external_batch_checksum: nil,
         contract_version: nil,
@@ -66,6 +67,10 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
       expect(response).to have_http_status(:ok)
       json = JSON.parse(response.body)
       expect(json.dig("import", "id")).to eq(123)
+      expect(json.dig("import", "processed_payload", "exclusions").sole).to eq(
+        "reason" => "denied_approval", "held_total_hours" => 0, "exclusion_category" => "not_paid_by_decision"
+      )
+      expect(processed_payload.fetch("exclusions").sole).not_to have_key("exclusion_category")
       expect(json.fetch("import")).to include(
         "applied_at" => nil,
         "reconciliation_exceptions" => [],
