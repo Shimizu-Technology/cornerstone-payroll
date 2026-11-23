@@ -63,7 +63,7 @@ RSpec.describe "Published payroll review loop", type: :request do
   end
 
   it "regenerates preview amounts and advances the filename revision after hours change and reapproval" do
-    employee.update!(pay_rate: 20, payment_delivery_method: "direct_deposit")
+    change_compensation!(employee, pay_rate: 20, payment_delivery_method: "direct_deposit")
     period.update!(status: "draft")
     amounts = []
     filenames = []

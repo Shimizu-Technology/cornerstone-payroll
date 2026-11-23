@@ -90,8 +90,10 @@ class EmployeeYearFicaContext
     stored = item.tax_rule_snapshot.to_h["annual_fica_context"]
     return snapshot unless stored.is_a?(Hash) && stored["mode"] == BelowThresholdFicaContext::MODE
 
+    # Review decisions affect new calculations. Rebuild every financial field
+    # from source and keep the exact disclosure recorded on this paycheck.
     evidence = below_threshold_context.snapshot(current_item: item, rules: item.tax_rule_snapshot, lock_rules: lock_rules,
-      include_imported_history: !ordinary_calculation_verified?(item))
+      saved_review: stored.slice(*BelowThresholdFicaContext::REVIEW_FIELDS))
     expected = below_threshold_components(evidence, item.tax_rule_snapshot)
     unless expected.all? { |field, value| item.public_send(field) == value }
       raise UnreconciledLedgerError, "Current FICA amounts changed; recalculate before approval or commit."
@@ -125,9 +127,10 @@ class EmployeeYearFicaContext
     # Keep ordinary amounts authoritative. Retain a bound snapshot only for
     # genuinely disputed history, with exactly the same current-check amounts.
     # Verified-empty dispositions and reconciled imports alone need no note.
-    if current_item && correcting_bases.nil? && below_threshold_context.unresolved_history?
+    bound = below_threshold_context if current_item && correcting_bases.nil?
+    if bound&.unresolved_history?
       begin
-        evidence = below_threshold_context.snapshot(current_item: current_item, rules: rules, lock_rules: true, include_imported_history: false)
+        evidence = bound.snapshot(current_item: current_item, rules: rules, lock_rules: true, live_review: true, include_imported_history: false)
         @below_threshold_snapshot = evidence if below_threshold_components(evidence, rules) == ordinary
       rescue UnreconciledLedgerError
         # No new relaxation is needed; preserve the established annual path.
@@ -186,17 +189,8 @@ class EmployeeYearFicaContext
 
   attr_reader :employee, :year, :excluding_pay_period_id, :company
 
-  # Rebuild the same path-specific note during approval, commit and client review.
-  # The snapshot shape stays compatible; no path marker needs to be persisted.
-  def ordinary_calculation_verified?(item)
-    recorded_increment(wages_delta: item.gross_pay, tips_delta: item.cash_tips_reported, rules: item.tax_rule_snapshot)
-    true
-  rescue UnreconciledLedgerError
-    false
-  end
-
   def below_threshold_increment(item, rules)
-    @below_threshold_snapshot = below_threshold_context.snapshot(current_item: item, rules: rules, lock_rules: true)
+    @below_threshold_snapshot = below_threshold_context.snapshot(current_item: item, rules: rules, lock_rules: true, live_review: true)
     below_threshold_components(@below_threshold_snapshot, rules)
   end
 
@@ -273,21 +267,29 @@ class EmployeeYearFicaContext
       # correction bases cannot safely be replayed as an ordinary paycheck.
       hold_legacy!(row, "FICA") if row.correction_for_payroll_item_id.present? || row.gross_pay.negative?
       prior_rows = rows.take_while { |prior| prior.id < row.id }
-      prior = self.class.new(employee: employee, company: company, year: year, rows: prior_rows, opening_balance: opening_balance)
-      stored = row[:recorded_annual_fica_context]
-      stored = {} unless stored.is_a?(Hash)
-      proof = if [ 2, VERSION ].include?(stored["version"])
-        prior.fingerprint_for(stored["version"])
-      elsif !stored.key?("version") && opening_balance.nil?
-        # v1 fingerprints included the complete opening row; only the
-        # no-opening-balance form can be verified from this bounded projection.
-        Digest::SHA256.hexdigest(JSON.generate([ year, employee.id, prior_rows.map { |item| item.attributes.slice(*LEDGER_FIELDS) }, nil ]))
-      end
-      unless proof && stored["year"] == year && stored["employee_id"] == employee.id && stored["fingerprint"] == proof
-        hold_legacy!(row, "FICA")
-      end
+      prior = prior_context(prior_rows)
+      verify_stored_fingerprint!(row, prior, prior_rows)
       prior.increment(wages_delta: row.medicare_taxable_wages || row.gross_pay,
         tips_delta: row.cash_tips_reported || row.reported_tips, rules: rules)
+    end
+  end
+
+  def prior_context(prior_rows)
+    self.class.new(employee: employee, company: company, year: year, rows: prior_rows, opening_balance: opening_balance)
+  end
+
+  def verify_stored_fingerprint!(row, prior, prior_rows)
+    stored = row[:recorded_annual_fica_context]
+    stored = {} unless stored.is_a?(Hash)
+    proof = if [ 2, VERSION ].include?(stored["version"])
+      prior.fingerprint_for(stored["version"])
+    elsif !stored.key?("version") && opening_balance.nil?
+      # v1 fingerprints included the complete opening row; only the
+      # no-opening-balance form can be verified from this bounded projection.
+      Digest::SHA256.hexdigest(JSON.generate([ year, employee.id, prior_rows.map { |item| item.attributes.slice(*LEDGER_FIELDS) }, nil ]))
+    end
+    unless proof && stored["year"] == year && stored["employee_id"] == employee.id && stored["fingerprint"] == proof
+      hold_legacy!(row, "FICA")
     end
   end
 

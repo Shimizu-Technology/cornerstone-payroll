@@ -228,8 +228,8 @@ module PayrollIntake
       return @loan_employee_ids if defined?(@loan_employee_ids)
 
       @loan_employee_ids = begin
-        employees = company.employees.active.to_a
-        ids = employees.select(&:variable_salary?).map(&:id)
+        employees = company.employees.active.preload(:employee_compensation_changes).to_a
+        ids = employees.filter_map { |employee| employee.id if employee.payroll_compensation_on(pay_period.end_date).variable_salary? }
         workbook = file_snapshots.find { |snapshot| snapshot_role(snapshot) == "supplemental_workbook" }
         if workbook
           matcher = PayrollImport::NameMatcher.new(employees)

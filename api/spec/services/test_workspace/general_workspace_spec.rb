@@ -66,6 +66,9 @@ RSpec.describe "General test workspaces" do
     copied_period = workspace.pay_periods.sole
     expect(workspace).to be_test_workspace_ready
     expect(copied_employee.test_workspace_source_employee).to eq(employee)
+    # M3-4: SetupCloner copies the compensation history, not a new baseline.
+    timeline = ->(person) { person.employee_compensation_changes.chronological.map { |row| row.attributes.slice("effective_on", "ends_on", "pay_rate", "source") } }
+    expect(timeline.call(copied_employee)).to eq(timeline.call(employee))
     expect(copied_employee.employee_payroll_fields.sole.amount).to eq(25.to_d)
     expect(copied_period).to have_attributes(
       test_workspace_source_pay_period_id: old_period.id,

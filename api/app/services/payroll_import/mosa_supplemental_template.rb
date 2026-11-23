@@ -43,7 +43,7 @@ module PayrollImport
     attr_reader :pay_period, :company
 
     def employees
-      @employees ||= company.employees.active.includes(:department, :employee_loans, employee_payroll_fields: :payroll_field_definition)
+      @employees ||= company.employees.active.includes(:department, :employee_loans, :employee_compensation_changes, employee_payroll_fields: :payroll_field_definition)
         .order(:last_name, :first_name, :id)
     end
 
@@ -260,7 +260,7 @@ module PayrollImport
     end
 
     def variable_salary_employees
-      @variable_salary_employees ||= employees.select(&:variable_salary?)
+      @variable_salary_employees ||= employees.select { |employee| employee.payroll_compensation_on(pay_period.end_date).variable_salary? }
     end
 
     def freeze_header!(sheet)

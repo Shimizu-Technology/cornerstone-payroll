@@ -42,7 +42,7 @@ module PayrollImport
     # @param excel_records [Array<Hash>, nil] pre-parsed Excel rows (optional)
     # @return [Hash] preview data with matched employees
     def preview(pdf_file: nil, excel_file: nil, pdf_records: nil, excel_records: nil)
-      employees = Employee.active.where(company_id: company_id)
+      employees = Employee.active.where(company_id: company_id).with_compensation_history
       employees_by_id = employees.index_by(&:id)
       matcher = NameMatcher.new(employees)
 
@@ -95,7 +95,7 @@ module PayrollImport
         eligible_ids = Employee.where(company_id: company_id)
           .eligible_for_period(pay_period.start_date, pay_period.end_date).pluck(:id).to_set
         employees_by_id.each_value do |employee|
-          next unless employee.variable_salary?
+          next unless employee.payroll_compensation_on(pay_period.end_date).variable_salary?
           next if excluded_ids.include?(employee.id)
           next unless eligible_ids.include?(employee.id)
           next if matched.any? { |row| row[:employee_id] == employee.id }
@@ -200,9 +200,9 @@ module PayrollImport
     private
 
     def apply_employment!(payroll_item, employee)
-      payroll_item.employment_type = employee.employment_type
+      payroll_item.employment_type = employee.payroll_compensation_on(pay_period.end_date).employment_type
       payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
-      payroll_item.pay_rate = employee.pay_rate
+      payroll_item.pay_rate = employee.payroll_rate_on(pay_period.end_date)
       payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
     end
 
@@ -241,7 +241,7 @@ module PayrollImport
       results = { success: [], skipped: [], errors: [] }
 
       employee_ids = matched.map { |row| row[:employee_id] }.compact.uniq
-      employees_by_id = Employee.where(id: employee_ids, company_id: company_id).index_by(&:id)
+      employees_by_id = Employee.where(id: employee_ids, company_id: company_id).with_compensation_history.index_by(&:id)
       rows_by_employee_id = matched.index_by { |row| row[:employee_id].to_i }
       excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
@@ -249,7 +249,7 @@ module PayrollImport
       # for the period pay of a variable-salary employee on a regular run.
       missing_salary_names = employees_by_id.values.filter_map do |employee|
         next if excluded_employee_ids.include?(employee.id)
-        next unless employee.variable_salary? && pay_period.includes_base_salary?
+        next unless employee.payroll_compensation_on(pay_period.end_date).variable_salary? && pay_period.includes_base_salary?
 
         item = pay_period.payroll_items.find_by(employee_id: employee.id) || PayrollItem.new(pay_period: pay_period, employee: employee)
         source_period_pay = decimal_or_zero(rows_by_employee_id.dig(employee.id, :period_pay))
@@ -489,8 +489,8 @@ module PayrollImport
         bonus_keeps_manual: !!retained_bonus,
         employee_id: employee.id,
         employee_name: employee.full_name,
-        employment_type: employee.employment_type,
-        period_pay_required: employee.variable_salary? && pay_period.includes_base_salary?,
+        employment_type: employee.payroll_compensation_on(pay_period.end_date).employment_type,
+        period_pay_required: employee.payroll_compensation_on(pay_period.end_date).variable_salary? && pay_period.includes_base_salary?,
         # Keep the authoritative workbook value and its evidence in the
         # server-retained preview. `current_period_pay` is presentation data;
         # apply! must receive the original amount and proof after the browser
@@ -501,7 +501,7 @@ module PayrollImport
         period_pay_source: source_period_pay(excel_data) ? "change_workbook" : (existing_manual_period_pay(existing_item).present? ? "payroll_worksheet" : nil),
         period_pay_missing: period_pay_missing?(employee, existing_item, excel_data),
         overwrite_required: self.class.overwrite_required?(existing_item, source_period_pay: excel_data&.dig(:period_pay)),
-        pay_rate: employee.pay_rate.to_f,
+        pay_rate: employee.payroll_rate_on(pay_period.end_date).to_f,
         confidence: match[:confidence],
         matched_name: match[:matched_name],
         # PDF data
@@ -532,11 +532,16 @@ module PayrollImport
       row
     end
 
+    # Job rates as they stand on the pay period end date (M3-4).
+    def period_wage_rates(employee)
+      employee.wage_rates_on(pay_period.end_date)
+    end
+
     def apply_wage_rate_choice!(item, employee, row)
       choice = WageRateChoice.new(employee: employee, pay_period: pay_period).preview
       if row[:wage_rate_options].present? || choice[:wage_rate_options].present?
         selected_id = row[:selected_wage_rate_id]
-        rate = employee.active_wage_rates.find { |candidate| candidate.id.to_s == selected_id.to_s }
+        rate = period_wage_rates(employee).find { |candidate| candidate.id.to_s == selected_id.to_s }
         raise ArgumentError, "Choose an active job and rate for #{employee.full_name}, then apply again." unless rate
 
         reviewed = Array(row[:wage_rate_options]).find { |option| option[:id].to_s == selected_id.to_s }
@@ -564,7 +569,7 @@ module PayrollImport
 
     def apply_client_hours!(item, employee, row)
       input = row.fetch(:client_extra_hours)
-      rate = employee.active_wage_rates.find { |candidate| candidate.id.to_s == input[:employee_wage_rate_id].to_s }
+      rate = period_wage_rates(employee).find { |candidate| candidate.id.to_s == input[:employee_wage_rate_id].to_s }
       unless rate && rate.rate == input[:rate].to_d
         raise ArgumentError, "Saved job and rate changed for #{employee.full_name}. Review the client change again."
       end
@@ -573,8 +578,8 @@ module PayrollImport
       baseline_allocations = item.wage_rate_hours.deep_dup
       allocations = item.wage_rate_hours
       if allocations.empty? && [ item.hours_worked, item.overtime_hours, item.holiday_hours, item.pto_hours ].any? { |hours| hours.to_d.positive? }
-        base = employee.primary_wage_rate
-        unless base && base.rate == item.pay_rate && employee.active_wage_rates.map(&:rate).uniq.one?
+        base = employee.primary_wage_rate_on(pay_period.end_date)
+        unless base && base.rate == item.pay_rate && period_wage_rates(employee).map(&:rate).uniq.one?
           raise ArgumentError, "Choose a saved job for the existing hours for #{employee.full_name}."
         end
         allocations << { "employee_wage_rate_id" => base.id, "label" => base.label, "rate" => base.rate.to_f,
@@ -658,7 +663,7 @@ module PayrollImport
     end
 
     def period_pay_missing?(employee, existing_item, excel_data)
-      return false unless employee.variable_salary? && pay_period.includes_base_salary?
+      return false unless employee.payroll_compensation_on(pay_period.end_date).variable_salary? && pay_period.includes_base_salary?
 
       source_period_pay(excel_data).blank? &&
         existing_manual_period_pay(existing_item).blank?
@@ -684,7 +689,7 @@ module PayrollImport
         return
       end
       raise ArgumentError, "Pay this employee must be a positive amount." unless amount.positive?
-      raise ArgumentError, "Pay this employee is only allowed for variable-pay salary employees." unless employee.variable_salary?
+      raise ArgumentError, "Pay this employee is only allowed for variable-pay salary employees." unless employee.payroll_compensation_on(pay_period.end_date).variable_salary?
 
       evidence = row[:period_pay_evidence].to_h.deep_symbolize_keys
       raise ArgumentError, "Pay this employee must confirm THIS EMPLOYEE ONLY." unless evidence[:scope] == "THIS EMPLOYEE ONLY"

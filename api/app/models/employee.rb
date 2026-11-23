@@ -104,6 +104,10 @@ class Employee < ApplicationRecord
   has_many :employee_w4_elections, dependent: :restrict_with_error
   has_many :employee_retirement_elections, dependent: :restrict_with_error
   has_many :employee_retirement_year_inputs, dependent: :restrict_with_error
+  has_many :historical_workers, dependent: :restrict_with_error
+  # Compensation history is removed before the wage rates it references.
+  has_many :employee_compensation_changes, dependent: :restrict_with_error
+  has_many :employee_wage_rate_versions, dependent: :restrict_with_error
   has_many :employee_wage_rates, dependent: :destroy
   has_many :employee_tipped_occupations, dependent: :destroy
   has_many :employee_work_profiles, dependent: :restrict_with_error
@@ -114,7 +118,6 @@ class Employee < ApplicationRecord
   has_many :employee_document_requirements, dependent: :restrict_with_error
   has_many :employee_document_requirement_events, dependent: :restrict_with_error
   has_many :employee_notes, dependent: :restrict_with_error
-  has_many :historical_workers, dependent: :restrict_with_error
   has_many :historical_paychecks, dependent: :restrict_with_error
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
   has_many :employee_configuration_review_resolutions, dependent: :restrict_with_error
@@ -123,8 +126,13 @@ class Employee < ApplicationRecord
            inverse_of: :payee_employee, dependent: :restrict_with_error
 
   attr_accessor :intake_original_employee, :require_initial_w4_effective_on
+  # Creation paths that copy an existing history (test workspaces, rehearsal
+  # promotion) skip the initial version and copy the source's instead.
+  attr_accessor :skip_initial_compensation_history, :initial_compensation_source, :initial_compensation_actor
   validate :valid_supplied_intake_dates
   before_update :invalidate_intake_payroll_confirmation
+  before_update :guard_compensation_mutation
+  after_create :record_initial_compensation_history, unless: :skip_initial_compensation_history
   before_validation :normalize_w4_source_reference
   before_validation :normalize_intake_blank_details
   before_validation :normalize_pay_rate_precision
@@ -291,6 +299,83 @@ class Employee < ApplicationRecord
   # or a flat contractor fee when preparing a new/current payroll calculation.
   def default_payroll_rate
     hourly_pay_basis? ? (primary_wage_rate&.rate || pay_rate) : pay_rate
+  end
+
+  # Effective-dated compensation (M3-4). pay_rate and the wage-rate rows cache
+  # today's values; these resolve the version in effect on a given date.
+  # Payroll readers pass the pay period end date; profile views pass today.
+  # The first version also covers earlier dates, so payroll older than the
+  # recorded history keeps the employee's original rate.
+  def compensation_on(date)
+    date = date.to_date
+    changes = compensation_change_timeline
+    changes.find { |change| change.covers?(date) } || changes.find { |change| !change.historical_correction? && date < change.effective_on }
+  end
+
+  def payroll_compensation_on(date)
+    compensation_on(date) || self
+  end
+
+  def payroll_rate_on(date)
+    payroll_compensation_on(date).pay_rate
+  end
+
+  def default_payroll_rate_on(date)
+    compensation = payroll_compensation_on(date)
+    compensation.hourly_pay_basis? ? (primary_wage_rate_on(date)&.rate || compensation.pay_rate) : compensation.pay_rate
+  end
+
+  # Wage rates as they stood on the date, as read-only EmployeeWageRate
+  # objects carrying that version's label, rate and flags. A rate with no
+  # recorded history (an unsaved employee) falls back to its current row.
+  def wage_rates_on(date, include_inactive: false)
+    date = date.to_date
+    rates = employee_wage_rates.to_a.filter_map do |row|
+      if wage_rate_versions_by_row.fetch(row.id, []).empty?
+        next if row.label.start_with?(EmployeeCompensationChangeService::RESERVED_LABEL_PREFIX)
+
+        next (include_inactive || row.active?) ? row : nil
+      end
+
+      version = wage_rate_version_for(row, date)
+      next unless version && (include_inactive || version.active)
+
+      version.as_wage_rate(row)
+    end
+    rates.sort_by { |rate| [ rate.is_primary ? 0 : 1, rate.label.to_s ] }
+  end
+
+  def primary_wage_rate_on(date)
+    rates = wage_rates_on(date)
+    rates.find(&:is_primary) || rates.first
+  end
+
+  def wage_rate_version_for(row, date)
+    date = date.to_date
+    versions = wage_rate_versions_by_row.fetch(row.id, [])
+    covering = versions.find { |version| version.covers?(date) }
+    return covering if covering
+
+    first = versions.find { |version| !version.historical_correction? }
+    baseline = compensation_change_timeline.find { |version| !version.historical_correction? }&.effective_on
+    first if first && date < first.effective_on && (first.source == "backfill" || (baseline && first.effective_on <= baseline))
+  end
+
+  scope :with_compensation_history, -> { preload(:employee_compensation_changes, :employee_wage_rates, :employee_wage_rate_versions) }
+
+  # Pay-rate or wage-rate versions that start after the first day of the
+  # range and on or before its last day: a change in the middle of a period.
+  # The initial setup (a timeline's first version from the employee's start)
+  # is not a change.
+  def compensation_changes_within(start_date, end_date)
+    range = (start_date.to_date + 1)..end_date.to_date
+    timeline = compensation_change_timeline
+    baseline = timeline.find { |version| !version.historical_correction? }
+    wage_changes = wage_rate_versions_by_row.values.flat_map do |versions|
+      initial_wage = versions.find { |version| !version.historical_correction? }
+      initial_wage && baseline && initial_wage.effective_on <= baseline.effective_on ? versions - [ initial_wage ] : versions
+    end
+    (timeline.reject { |version| version == baseline } + wage_changes).select { |version| range.cover?(version.effective_on) }.sort_by(&:effective_on)
   end
 
   def hourly_pay_basis?
@@ -833,6 +918,28 @@ class Employee < ApplicationRecord
 
   def pay_date_range_for_year(year)
     Date.new(year, 1, 1)..Date.new(year, 12, 31)
+  end
+
+  def compensation_change_timeline
+    employee_compensation_changes.to_a.sort_by { |change| [ change.effective_on, change.id ] }
+  end
+
+  def wage_rate_versions_by_row
+    employee_wage_rate_versions.to_a.sort_by { |version| [ version.effective_on, version.id ] }.group_by(&:employee_wage_rate_id)
+  end
+
+  def guard_compensation_mutation
+    return if (changes_to_save.keys & EmployeeCompensationChangeService::COMPENSATION_ATTRIBUTES).empty?
+    return if EmployeeCompensationChangeService.writing?(id)
+
+    raise EmployeeCompensationChangeService::CompensationMutationError,
+          "Change pay rates through EmployeeCompensationChangeService so the effective date and history are recorded"
+  end
+
+  def record_initial_compensation_history
+    actor = initial_compensation_actor || Current.user || Current.actor || created_by ||
+      AuditActor.operator("Employee initial pay setup")
+    EmployeeCompensationChangeService.record_initial!(self, actor: actor, source: initial_compensation_source)
   end
 
   def normalize_pay_rate_precision

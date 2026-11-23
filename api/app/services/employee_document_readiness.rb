@@ -37,14 +37,14 @@ class EmployeeDocumentReadiness
       employee = item.employee
       next false if employee.intake_exception.blank? || employee.intake_payroll_confirmed_at.blank?
       recorded = item.calculation_context_snapshot.to_h["intake_setup_fingerprint"]
-      recorded.blank? || recorded != PayrollCalculationContext.intake_setup_fingerprint(employee: employee)
+      recorded.blank? || recorded != PayrollCalculationContext.intake_setup_fingerprint(employee: employee, rates_on: item.pay_period.end_date)
     end
     if stale_setup.any?
       raise BlockedError, "Recalculate payroll after employee intake setup changed for: #{stale_setup.map(&:employee_full_name).join(', ')}."
     end
     stale_withholding = items.select do |item|
       employee = item.employee
-      next false if employee.intake_exception.blank? || employee.contractor?
+      next false if employee.intake_exception.blank? || employee.payroll_compensation_on(pay_period.end_date).employment_type == "contractor"
       election = employee.w4_election_on(pay_period.pay_date)
       election && (item.tax_rule_snapshot || {}).dig("w4", "election_id") != election.id
     end

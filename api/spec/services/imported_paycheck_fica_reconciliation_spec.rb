@@ -400,6 +400,8 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
   end
 
   it "exposes a read-only default task and digest-locked administrator apply" do
+    previous_application = Rake.application
+    Rake.application = Rake::Application.new
     imported
     review
     load Rails.root.join("lib/tasks/fica_legacy.rake")
@@ -414,6 +416,6 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
     expect { expect { task.invoke("apply") }.to output(/applied_proofs/).to_stdout }.to change(HistoricalPaycheckFicaBasisProof, :count).by(1)
   ensure
     previous&.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
-    task&.reenable
+    Rake.application = previous_application
   end
 end

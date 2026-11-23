@@ -96,6 +96,54 @@ export interface EmployeeWageRate {
   updated_at?: string;
 }
 
+export type CompensationVersionStatus = 'past' | 'current' | 'scheduled';
+
+// One effective-dated version of an employee's pay rate (M3-4).
+export interface EmployeePayRateChange {
+  id: number;
+  effective_on: string;
+  ends_on: string | null;
+  pay_rate: number | string;
+  employment_type: EmploymentType;
+  salary_type?: string | null;
+  pay_frequency?: PayFrequency | null;
+  contractor_pay_type?: ContractorPayType | null;
+  reason: string;
+  source: string;
+  historical_correction: boolean;
+  created_by_name?: string | null;
+  status: CompensationVersionStatus;
+}
+
+// One effective-dated version of a labeled hourly rate (M3-4).
+export interface EmployeeWageRateVersion {
+  id: number;
+  employee_wage_rate_id: number;
+  effective_on: string;
+  ends_on: string | null;
+  label: string;
+  rate: number | string | null;
+  is_primary: boolean;
+  active: boolean;
+  reason: string;
+  source: string;
+  historical_correction: boolean;
+  created_by_name?: string | null;
+  status: CompensationVersionStatus;
+}
+
+export interface EmployeeCompensationHistory {
+  revision?: string;
+  can_correct?: boolean;
+  effective_dates: {
+    next_uncommitted_period: string;
+    today: string;
+    locked_through: string | null;
+  };
+  pay_rate_changes: EmployeePayRateChange[];
+  wage_rate_versions: EmployeeWageRateVersion[];
+}
+
 export interface CustomEarning {
   label: string;
   amount: number;
@@ -276,6 +324,7 @@ export interface Employee {
   current_w4_election?: EmployeeW4Election | null;
   upcoming_w4_election?: EmployeeW4Election | null;
   w4_elections?: EmployeeW4Election[];
+  compensation_history?: EmployeeCompensationHistory;
   current_retirement_election?: EmployeeRetirementElection | null;
   upcoming_retirement_election?: EmployeeRetirementElection | null;
   retirement_elections?: EmployeeRetirementElection[];
@@ -596,6 +645,13 @@ export interface EmployeeFormData {
   w4_source_reference?: string | null;
   w4_effective_on?: string | null;
   w4_change_reason?: string;
+  // Pay changes (M3-4): when they take effect, why, and whether they knowingly
+  // correct history for payroll that is already approved or committed.
+  compensation_effective_on?: string;
+  compensation_change_reason?: string;
+  compensation_historical_correction?: boolean;
+  compensation_revision?: string;
+  compensation_wage_rate_edits?: Array<Partial<Pick<EmployeeWageRate, 'id' | 'label' | 'rate' | 'is_primary' | 'active'>> & { remove?: boolean }>;
   retirement_rate: number;
   roth_retirement_rate: number;
   employer_retirement_match_rate?: number;
@@ -1345,7 +1401,9 @@ export interface PayPeriod {
   company_pay_schedule_id?: number | null;
   company_workweek_id?: number | null;
   compliance_warnings?: string[];
+  compensation_warnings?: string[];
   annual_fica_review_note?: string | null;
+  annual_fica_review_path?: string | null;
   annual_fica_review?: {
     employee_count: number;
     entries: { employee_name: string; note: string }[];
