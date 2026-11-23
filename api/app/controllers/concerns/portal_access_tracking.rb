@@ -26,10 +26,12 @@ module PortalAccessTracking
 
   def record_portal_failure(status, reason)
     # Never resolve the requested resource or copy request params/error messages.
-    AuditLog.record!(user: current_user, actor: AuditActor.system_job("Portal Access"), company_id: nil, action: "portal_access#failed",
-      record_type: "portal_access", event_category: "security",
-      metadata: { status: status, reason: reason, operation: action_name },
-      ip_address: request.remote_ip, user_agent: request.user_agent, request_id: request.request_id)
+    TenantScope.as_system(reason: "Record portal security failure without a company") do
+      AuditLog.record!(user: current_user, actor: AuditActor.system_job("Portal Access"), company_id: nil, action: "portal_access#failed",
+        record_type: "portal_access", event_category: "security",
+        metadata: { status: status, reason: reason, operation: action_name },
+        ip_address: request.remote_ip, user_agent: request.user_agent, request_id: request.request_id)
+    end
   rescue StandardError => error
     Rails.logger.error("Portal failure audit unavailable: #{error.class.name}")
   end

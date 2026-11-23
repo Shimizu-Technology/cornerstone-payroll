@@ -19,17 +19,19 @@ module AirePayrollEvents
 
     def call
       validate_shape!
-      calendar_period = find_and_authenticate_period!
+      calendar_period = TenantScope.as_system(reason: "Resolve and authenticate AIRE event period") { find_and_authenticate_period! }
       source = calendar_period.time_tracking_source
-      Current.with_isolated_actor(AuditActor.source_system(source: source)) do
-        publication = find_publication!(calendar_period)
-        validate_contract!(calendar_period, publication)
-        checksum = TimeTracking::CanonicalPayload.checksum(@payload)
+      TenantScope.with_company(calendar_period.company_id) do
+        Current.with_isolated_actor(AuditActor.source_system(source: source)) do
+          publication = find_publication!(calendar_period)
+          validate_contract!(calendar_period, publication)
+          checksum = TimeTracking::CanonicalPayload.checksum(@payload)
 
-        result = persist!(calendar_period, publication, checksum)
-        reconcile_source_state(source)
-        queue_verification(result.event.id) if result.created
-        result
+          result = persist!(calendar_period, publication, checksum)
+          reconcile_source_state(source)
+          queue_verification(result.event.id) if result.created
+          result
+        end
       end
     end
 

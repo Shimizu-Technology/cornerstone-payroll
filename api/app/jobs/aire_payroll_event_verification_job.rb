@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class AirePayrollEventVerificationJob < ConnectedPayrollJob
+  self.rls_mode = :record
+
   queue_as :default
 
   discard_on ActiveRecord::RecordNotFound

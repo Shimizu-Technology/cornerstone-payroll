@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class AireHistoryOperationJob < ApplicationJob
+  self.rls_mode = :record
+
   queue_as :default
 
   def perform(operation_id)

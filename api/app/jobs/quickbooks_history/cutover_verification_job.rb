@@ -2,6 +2,8 @@
 
 module QuickbooksHistory
   class CutoverVerificationJob < ApplicationJob
+    self.rls_mode = :record
+
     queue_as :default
 
     def perform(batch_id, actor_id, verification_started_at)

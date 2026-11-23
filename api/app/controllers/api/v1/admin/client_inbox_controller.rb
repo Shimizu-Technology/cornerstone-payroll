@@ -6,6 +6,7 @@ module Api
       # Deliberately independent of the current company header, including a
       # stale/expired selected company. Each row is scoped again by the query.
       class ClientInboxController < ApplicationController
+        include CompanyRlsScoped
         include Auditable
         before_action :require_inbox_access!
 
@@ -22,6 +23,10 @@ module Api
         end
 
         private
+
+        def rls_system_reason
+          "Client inbox spans authorized companies"
+        end
 
         def query
           ClientInboxQuery.new(user: current_user, params: params.permit(:company_id, :kind, :status, :cursor, :per_page))

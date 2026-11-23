@@ -4,6 +4,7 @@ module Api
   module V1
     module Client
       class BaseController < ApplicationController
+        include CompanyRlsScoped
         include Auditable
         include ExplicitCompanyAccess
         include ClientPortalAccess

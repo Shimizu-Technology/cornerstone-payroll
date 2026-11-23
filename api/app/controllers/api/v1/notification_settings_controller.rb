@@ -6,6 +6,7 @@ module Api
     # Organization admins also see clients whose recent portal work had nobody
     # on staff to notify.
     class NotificationSettingsController < ApplicationController
+      include CompanyRlsScoped
       RECENT_LIMIT = 20
       WARNING_WINDOW = 30.days
       WARNING_LIMIT = 50
@@ -31,6 +32,10 @@ module Api
       end
 
       private
+
+      def rls_system_reason
+        "Read deliveries across the signed-in user's companies and audit organization preferences"
+      end
 
       def require_portal_user!
         return if current_user && PortalNotifications::Preferences.audience_for(current_user)

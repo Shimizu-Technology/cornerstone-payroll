@@ -14,6 +14,18 @@ module YearEnd
       company_ids = Array(company_ids)
       return {} if company_ids.empty?
 
+      if TenantScope.current&.mode == "system"
+        return calculate(company_ids, year)
+      end
+
+      if company_ids.uniq.one?
+        TenantScope.with_company(company_ids.first) { calculate(company_ids, year) }
+      else
+        TenantScope.as_system(reason: "Read year-end revisions across selected companies") { calculate(company_ids, year) }
+      end
+    end
+
+    def self.calculate(company_ids, year)
       range = Date.new(year, 1, 1)..Date.new(year, 12, 31)
       employees = Employee.where(company_id: company_ids)
       pay_periods = PayPeriod.where(company_id: company_ids, pay_date: range)
@@ -48,6 +60,8 @@ module YearEnd
         Digest::SHA256.hexdigest([ sources.transform_values { |stamps| stamps[company_id] }, tax_config ].to_json)
       end
     end
+
+    private_class_method :calculate
 
     # { company_id => [count, latest updated_at, ...] } for one table, with
     # timestamps as epoch seconds so microseconds survive.

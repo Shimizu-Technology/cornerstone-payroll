@@ -50,7 +50,9 @@ module ClerkAuthenticatable
       return render_write_maintenance("New Payroll sign-ins are paused during maintenance. Try again shortly using this same sign-in.")
     end
 
-    @current_user ||= PayrollInvitation.new.bind_from_metadata(clerk_id, request: request)
+    @current_user ||= TenantScope.as_system(reason: "Bind authorized Clerk invitation") do
+      PayrollInvitation.new.bind_from_metadata(clerk_id, request: request)
+    end
     unless @current_user
       render json: { error: "This Clerk account is not linked to Payroll. Use your invitation or contact your administrator.",
                     code: "payroll_account_unbound" }, status: :unauthorized

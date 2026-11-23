@@ -2,6 +2,8 @@
 
 module QuickbooksHistory
   class ClientBootstrapJob < ApplicationJob
+    self.rls_mode = :record
+
     queue_as :default
     TRANSIENT_ERRORS = [ ActiveRecord::Deadlocked, ActiveRecord::LockWaitTimeout, ActiveRecord::SerializationFailure ].freeze
 

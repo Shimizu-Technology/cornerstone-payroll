@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 require "json"
 
 namespace :clerk do
@@ -28,7 +30,7 @@ namespace :clerk do
     end
 
     desc "Read-only local user inventory (prints counts only; writes OUTPUT=... only when WRITE=true)"
-    task inventory: :environment do
+    RlsTask.system inventory: :environment do
       service = ClerkCutover::InventoryService.new
       output_path = ENV["OUTPUT"].presence
 
@@ -46,7 +48,7 @@ namespace :clerk do
     end
 
     desc "Build clerk migrate import JSON from reviewed INVENTORY and Clerk EXPORT using external_id = dev clerk_id (writes OUTPUT=... only when WRITE=true)"
-    task build_import: :environment do
+    RlsTask.system build_import: :environment do
       inventory_path = ENV["INVENTORY"].presence || abort("INVENTORY=/path/to/reviewed_inventory.json is required")
       export_path = ENV["EXPORT"].presence || abort("EXPORT=/path/to/clerk_export.csv is required")
       output_path = ENV["OUTPUT"].presence
@@ -106,7 +108,7 @@ namespace :clerk do
     end
 
     desc "Dry-run Clerk user re-link from a sealed MANIFEST (read-only; never writes)"
-    task dry_run: :environment do
+    RlsTask.system dry_run: :environment do
       manifest_path = ENV["MANIFEST"].presence || abort("MANIFEST=/path/to/prod_manifest.json is required")
       target_client = ENV["TARGET_CLERK_SECRET_KEY"].present? ? ClerkCutover::ClerkClient.new(secret_key: ENV["TARGET_CLERK_SECRET_KEY"]) : nil
 
@@ -121,7 +123,7 @@ namespace :clerk do
     end
 
     desc "Apply Clerk user re-link atomically from a sealed MANIFEST (requires APPLY=true and TARGET_CLERK_SECRET_KEY)"
-    task apply: :environment do
+    RlsTask.system apply: :environment do
       abort "Refusing to apply Clerk re-link without APPLY=true." unless ENV["APPLY"] == "true"
       manifest_path = ENV["MANIFEST"].presence || abort("MANIFEST=/path/to/prod_manifest.json is required")
       target_secret = ENV["TARGET_CLERK_SECRET_KEY"].presence || abort("TARGET_CLERK_SECRET_KEY is required to verify target Clerk external_id before apply.")
@@ -142,7 +144,7 @@ namespace :clerk do
     end
 
     desc "Roll back Clerk user re-link atomically from a sealed MANIFEST (refuses to write unless APPLY=true)"
-    task rollback: :environment do
+    RlsTask.system rollback: :environment do
       abort "Refusing to roll back Clerk re-link without APPLY=true." unless ENV["APPLY"] == "true"
       manifest_path = ENV["MANIFEST"].presence || abort("MANIFEST=/path/to/prod_manifest.json is required")
 

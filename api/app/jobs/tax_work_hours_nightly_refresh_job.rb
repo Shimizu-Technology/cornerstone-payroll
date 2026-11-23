@@ -5,6 +5,8 @@
 # connected (CORNERSTONE_TAX_API_URL and PAYROLL_WORK_HOURS_SECRET). Uses the
 # same reservation as the manual refresh, so the two never run at once.
 class TaxWorkHoursNightlyRefreshJob < ApplicationJob
+  self.rls_mode = :exempt_tables_only
+
   queue_as :default
 
   def perform(today: PayrollBusinessClock.today)

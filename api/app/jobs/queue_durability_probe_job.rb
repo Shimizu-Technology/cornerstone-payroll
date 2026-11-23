@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class QueueDurabilityProbeJob < ApplicationJob
+  self.rls_mode = :exempt_tables_only
+
   queue_as :default
 
   retry_on ActiveRecord::Deadlocked, wait: :polynomially_longer, attempts: 5

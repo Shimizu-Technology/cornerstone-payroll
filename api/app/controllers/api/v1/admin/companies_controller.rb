@@ -302,6 +302,10 @@ module Api
 
         private
 
+        def rls_system_reason
+          "Company administration spans authorized source and target companies"
+        end
+
         def render_company_uniqueness_error(error)
           constraint = error.cause&.result&.error_field(PG::Result::PG_DIAG_CONSTRAINT_NAME)
           message = if constraint == "index_live_companies_on_lower_subdomain_slug"

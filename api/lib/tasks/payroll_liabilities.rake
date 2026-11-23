@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 namespace :payroll_liabilities do
   desc "Preview or explicitly backfill immutable liability postings for legacy committed payroll"
-  task backfill: :environment do
+  RlsTask.system backfill: :environment do
     company_id = ENV["COMPANY_ID"].presence
     abort "COMPANY_ID is required" unless company_id
 

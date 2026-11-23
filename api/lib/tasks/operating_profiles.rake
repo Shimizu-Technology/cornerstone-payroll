@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 namespace :operating_profiles do
   desc "Read-only parity check comparing current operating profiles with legacy configuration and audited edits"
-  task parity: :environment do
+  RlsTask.system parity: :environment do
     result = ClientOperatingProfiles::ParityChecker.call
     result.differences.each do |diff|
       puts "DIFF  company_id=#{diff.company_id} name=#{diff.company_name.inspect} field=#{diff.field}"

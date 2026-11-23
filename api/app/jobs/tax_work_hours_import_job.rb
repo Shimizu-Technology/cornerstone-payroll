@@ -8,6 +8,8 @@
 # lease ends. When Solid Queue runs this job again, it waits out the lease and
 # then takes the import over (WorkHourImport#claim! lets exactly one worker in).
 class TaxWorkHoursImportJob < ApplicationJob
+  self.rls_mode = :exempt_tables_only
+
   class LeaseHeld < StandardError; end
 
   queue_as :default

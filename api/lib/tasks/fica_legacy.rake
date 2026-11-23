@@ -1,14 +1,16 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 namespace :payroll do
   namespace :fica_legacy do
     desc "Read-only inventory of legacy FICA evidence by company and employee-year"
-    task inventory: :environment do
+    RlsTask.system inventory: :environment do
       puts JSON.pretty_generate(FicaLegacyTaskInventory.call)
     end
 
     desc "Preview source-completeness reviews (default); APPLY=1 records the entire reviewed batch"
-    task review_sources: :environment do
+    RlsTask.system review_sources: :environment do
       raise ArgumentError, "Use EMPLOYEE_ID or EMPLOYEE_IDS, not both" if ENV["EMPLOYEE_ID"].present? && ENV["EMPLOYEE_IDS"].present?
       raise ArgumentError, "APPLY must be 1" if ENV["APPLY"].present? && ENV["APPLY"] != "1"
       raise ArgumentError, "DRY_RUN must be 1" if ENV["DRY_RUN"].present? && ENV["DRY_RUN"] != "1"
@@ -35,7 +37,7 @@ namespace :payroll do
     end
 
     desc "Preview imported paycheck FICA reconciliation; apply only the reviewed digest"
-    task :reconcile_imports, [ :mode ] => :environment do |_task, args|
+    RlsTask.system :reconcile_imports, [ :mode ] => :environment do |_task, args|
       mode = args[:mode] || "dry-run"
       raise ArgumentError, "Reconciliation mode must be dry-run or apply" unless %w[dry-run apply].include?(mode)
       ids = ENV["EMPLOYEE_IDS"]&.split(",", -1)&.map { |id| Integer(id.strip) }
@@ -60,7 +62,7 @@ namespace :payroll do
     end
 
     desc "Review legacy FICA recovery (dry-run by default); use bin/rake ... --apply with a reviewed plan"
-    task :recover, [ :mode ] => :environment do |_task, args|
+    RlsTask.system :recover, [ :mode ] => :environment do |_task, args|
       mode = args[:mode] || "dry-run"
       raise ArgumentError, "Recovery mode must be dry-run or apply" unless %w[dry-run apply].include?(mode)
       if mode == "apply"

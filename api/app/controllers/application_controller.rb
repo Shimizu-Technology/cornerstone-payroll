@@ -46,26 +46,28 @@ class ApplicationController < ActionController::API
     session_id = @clerk_token_payload&.fetch("sid", nil)
     return unless current_user.authenticated_activity_write_due?(session_id: session_id)
 
-    current_user.with_lock do
-      new_session = current_user.record_authenticated_activity!(
-        session_id: session_id
-      )
-      next unless new_session
+    TenantScope.as_system(reason: "Record authenticated organization session") do
+      current_user.with_lock do
+        new_session = current_user.record_authenticated_activity!(
+          session_id: session_id
+        )
+        next unless new_session
 
-      # Keep the session marker and its durable sign-in evidence atomic. If
-      # the audit insert fails, the digest rolls back so the next request can
-      # retry instead of silently losing this session's sign-in event.
-      AuditLog.record!(
-        user: current_user,
-        organization_id: current_user.organization_id,
-        company_id: nil,
-        action: "authentication#signed_in",
-        record_type: "users",
-        record_id: current_user.id,
-        subject_name: current_user.name,
-        metadata: { source: "clerk_session" },
-        event_category: "security"
-      )
+        # Keep the session marker and its durable sign-in evidence atomic. If
+        # the audit insert fails, the digest rolls back so the next request can
+        # retry instead of silently losing this session's sign-in event.
+        AuditLog.record!(
+          user: current_user,
+          organization_id: current_user.organization_id,
+          company_id: nil,
+          action: "authentication#signed_in",
+          record_type: "users",
+          record_id: current_user.id,
+          subject_name: current_user.name,
+          metadata: { source: "clerk_session" },
+          event_category: "security"
+        )
+      end
     end
   rescue ActiveRecord::ActiveRecordError => e
     Rails.logger.warn("[UserActivity] Failed to record activity for user=#{current_user&.id}: #{e.message}")

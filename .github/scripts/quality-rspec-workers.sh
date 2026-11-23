@@ -15,7 +15,7 @@ for shard in 1 2 3; do
     export TEST_STORAGE_ROOT="$PWD/tmp/quality-storage-$shard"
     createdb --host 127.0.0.1 --username postgres "cornerstone_payroll_ci_${shard}_test"
     bundle exec rails db:schema:load db:integrity
-    python3 ../.github/scripts/quality_rspec.py run --shard "$shard" --count 3 \
+    RLS_CONTEXT_GUARD_MODE=raise python3 ../.github/scripts/quality_rspec.py run --shard "$shard" --count 3 \
       --directory ../tmp/quality-rspec/results --timings ../tmp/quality-rspec/timings.json
   ) &
   pids+=("$!")

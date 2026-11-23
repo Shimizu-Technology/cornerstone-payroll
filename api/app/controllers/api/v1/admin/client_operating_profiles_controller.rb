@@ -35,6 +35,13 @@ module Api
 
         private
 
+        def rls_company_id
+          raw_id = params[:company_id].to_s
+          return unless raw_id.match?(/\A[1-9]\d{0,18}\z/) && raw_id.to_i <= 2**63 - 1
+
+          raw_id if current_user&.can_access_company?(raw_id.to_i)
+        end
+
         def profile_payload(as_of)
           features = CompanyFeatures.for(@target_company, on: as_of)
           profiles = @target_company.client_operating_profiles.history_order.to_a

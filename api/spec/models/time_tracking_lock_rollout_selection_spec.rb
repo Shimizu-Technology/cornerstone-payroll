@@ -53,6 +53,9 @@ RSpec.describe TimeTrackingLockRolloutSelection do
     migration = KeepImportRolloutDigestStable.new
     review = AirePayrollCalendar::HistoricalImportBoundaryReview.new(source: source)
 
+    # Recreate the pre-expand layout inside this example's transaction.
+    connection.execute("DROP POLICY company_isolation ON aire_payroll_acknowledgements")
+    connection.execute("DROP POLICY company_isolation ON time_tracking_imports")
     connection.remove_column :time_tracking_imports, :company_id
     connection.clear_cache!
     migration.down

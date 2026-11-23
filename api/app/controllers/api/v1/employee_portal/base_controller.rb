@@ -5,8 +5,13 @@ module Api
     module EmployeePortal
       class BaseController < ActionController::API
         before_action :require_employee_link!
+        include CompanyRlsScoped
 
         private
+
+        def rls_company_id
+          @employee_link&.company_id
+        end
 
         def require_employee_link!
           link_id = request.headers["X-Employee-Link-Id"]
@@ -23,8 +28,11 @@ module Api
           return head :not_found unless user && StagingOutboundPolicy.tester?(user_id: user.id, email: user.email, id: subject)
           return head :not_found unless user.payroll_access_allowed?
 
-          @employee_link = user.employee_account_links.portal_eligible.find_by(id: link_id)
-          return head :not_found unless @employee_link&.portal_enabled?
+          @employee_link = TenantScope.as_system(reason: "Resolve employee link for verified Clerk user") do
+            link = user.employee_account_links.portal_eligible.find_by(id: link_id)
+            link if link&.portal_enabled?
+          end
+          return head :not_found unless @employee_link
 
           azp = payload["azp"]
           if TenantSubdomainRegistry.client_origin?(azp) &&

@@ -3,6 +3,7 @@
 module Api
   module V1
     class CompaniesController < ApplicationController
+      include CompanyRlsScoped
       def index
         return render json: { error: "Not authenticated" }, status: :unauthorized unless current_user
 
@@ -32,6 +33,10 @@ module Api
       end
 
       private
+
+      def rls_system_reason
+        "Count employees across the signed-in user's accessible companies"
+      end
 
       def company_summary(company, total_employee_counts:, active_employee_counts:)
         summary = {

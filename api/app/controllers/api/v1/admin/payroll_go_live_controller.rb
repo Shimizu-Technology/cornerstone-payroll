@@ -96,6 +96,10 @@ module Api
 
         private
 
+        def rls_system_reason
+          "Payroll readiness compares authorized source and target companies"
+        end
+
         def review_params
           params.permit(:review_notes, attestations: PayrollGoLiveReview::ATTESTATIONS.keys)
         end

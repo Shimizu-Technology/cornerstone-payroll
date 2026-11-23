@@ -4,7 +4,7 @@ class StagingExecutionGate
   MAINTENANCE_TASKS = %w[
     db:version db:integrity db:migrate db:prepare db:safe_prepare db:abort_if_pending_migrations
     solid_queue:setup staging:clone:quarantine staging:clone:configure
-    staging:clone:verify staging:readiness production:readiness
+    staging:clone:verify staging:readiness production:readiness rls:install rls:status
   ].freeze
 
   def self.maintenance_only?(tasks)

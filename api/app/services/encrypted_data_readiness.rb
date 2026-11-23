@@ -12,6 +12,10 @@ class EncryptedDataReadiness
   }.freeze
 
   def self.verify!
+    TenantScope.as_system(reason: "Read persisted encryption readiness across companies") { verify_records! }
+  end
+
+  def self.verify_records!
     TARGETS.each do |model, attributes|
       model.unscoped.select(model.primary_key, *attributes).find_each(batch_size: 100) do |record|
         attributes.each { |attribute| record.public_send(attribute) }
@@ -30,4 +34,5 @@ class EncryptedDataReadiness
 
     true
   end
+  private_class_method :verify_records!
 end

@@ -2,6 +2,8 @@
 
 module MigrationRehearsal
   class CloneJob < ApplicationJob
+    self.rls_mode = :system
+
     queue_as :default
 
     def perform(company_id, batch_id, actor_id)

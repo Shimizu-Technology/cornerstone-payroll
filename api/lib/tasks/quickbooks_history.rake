@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 namespace :quickbooks_history do
   desc "Preview (and optionally apply/lock) a provider-backed payroll-history bundle"
-  task import: :environment do
+  RlsTask.system import: :environment do
     bundle_dir = Pathname.new(ENV.fetch("BUNDLE_DIR")).expand_path
     company_id = Integer(ENV.fetch("COMPANY_ID"), 10)
     apply_import = ENV["APPLY"] == "1"

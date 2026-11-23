@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class AirePayrollCalendarDispatchJob < ConnectedPayrollJob
+  self.rls_mode = :system
+
   queue_as :default
 
   def perform
