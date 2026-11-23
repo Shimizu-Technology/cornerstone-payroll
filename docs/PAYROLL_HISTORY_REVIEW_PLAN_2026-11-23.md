@@ -69,7 +69,7 @@ Fix the defects the PR #535 reviews found in `PayrollFicaLegacyRecovery`:
    - `status` (`open` | `resolved`), `subject_digest`, `resolution_code`, `resolution_reference` (text, 10–1000 chars), `resolved_by_id`, `resolved_at`, timestamps.
 
    Use the repo's `restrict` foreign-key conventions. Add a unique index on `(company_id, tax_year, subject_type, subject identity)`.
-2. **Detection.** One service builds the open set for a company-year from the same predicates the FICA engine uses (`BelowThresholdFicaContext#unresolved_history?` / `review_note` conditions, `unverified_legacy_ids`, imported paychecks). It's idempotent, safe to run at calculation time, and also available as a rake task. Items are created lazily, and a resolved item whose `subject_digest` no longer matches returns to `open`. Resolution and reopening are audited.
+2. **Detection.** One service builds the open set for a company-year from the same predicates the FICA engine uses (`BelowThresholdFicaContext#unresolved_history?` / `review_note` conditions, `unverified_legacy_ids`, and imported paychecks only when the ordinary annual calculation is not verified, matching `include_imported_history`). It's idempotent, safe to run at calculation time, and also available as a rake task. Items are created lazily, and a resolved item whose `subject_digest` no longer matches returns to `open`. Resolution and reopening are audited.
 3. **Resolution codes.** Start with:
    - `void_replaced`: voided and replaced, never paid;
    - `void_reissued`: voided after payment, with a reissue recorded;
@@ -126,7 +126,7 @@ PR 3's migration is additive and runs in `db:safe_prepare`. It doesn't need a ma
 - AIRE run 127 and Spike's latest run, recalculated on a production clone after resolving their void items: no per-employee wall, only legacy items left open. After B2 proofs, no notes at all. Every amount is unchanged.
 - An already-approved run with an old note commits after this ships.
 - MoSa's stays clean. Kasperbauer runs 96–115 are never touched.
-- Held-entry header on run 127: "2 denied entries, not paid" as information, nothing actionable, and the 0-hour entry not counted.
+- Held-entry header on run 127: "1 denied entry, not paid" as information, nothing actionable. The 0-hour entry is excluded from the count and stays visible in the detailed list.
 - Non-admin staff (manager, accountant) can see the checklist but can't resolve items.
 - No client-, company- or run-specific constants anywhere in the diff.
 
