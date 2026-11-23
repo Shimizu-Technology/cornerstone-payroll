@@ -2,6 +2,8 @@
 
 # One client per job: a failed client never prevents another client's check.
 class YearEndEfileCheckJob < ApplicationJob
+  self.rls_mode = :company
+
   queue_as :default
 
   def perform(company_id, year, revision)

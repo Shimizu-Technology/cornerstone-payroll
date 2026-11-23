@@ -22,6 +22,10 @@ module YearEnd
     end
 
     def call
+      TenantScope.as_system(reason: "Read year-end status across authorized companies") { build_overview }
+    end
+
+    private def build_overview
       rows = candidate_companies.map { |company| row(company) }
       {
         tax_year: year,

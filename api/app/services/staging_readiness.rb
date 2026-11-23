@@ -21,6 +21,14 @@ class StagingReadiness
         check("Solid Queue worker has a recent heartbeat") { SolidQueue::Process.where(kind: "Worker", last_heartbeat_at: 5.minutes.ago..).exists? }
       ])
     end
+    if live && RlsConfiguration.runtime_url(@env)
+      ActiveRecord::Base.connection_pool.with_connection do |connection|
+        checks << check("RLS runtime role and kill switch privileges") { RlsDatabase.verify_runtime!(connection) }
+        checks << check("RLS policy installation matches the selected phase") do
+          RlsDatabase.expected_phase?(connection, enforced: @env["RLS_EXPECT_ENFORCED"] == "true")
+        end
+      end
+    end
     ProductionReadiness::Report.new(checks: checks, connected_payroll: ConnectedPayrollMode.capability(env: @env))
   end
 

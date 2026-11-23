@@ -65,11 +65,13 @@ class ProductionReadiness
     job_adapter: ActiveJob::Base.queue_adapter,
     cable_adapter: ActionCable.server.config.cable.fetch("adapter", nil),
     storage_factory: -> { R2StorageService.new },
-    time_sources: -> { TimeTrackingSource.active.to_a },
+    time_sources: -> { TenantScope.as_system(reason: "Inspect integration destinations for readiness") { TimeTrackingSource.active.to_a } },
     encryption_credentials: Rails.application.credentials,
     encrypted_data_probe: -> { EncryptedDataReadiness.verify! },
     tax_configuration_valid: -> { AnnualTaxConfig.official_2026_configuration? },
-    tax_year_readiness: -> { TaxYearReadiness.new.as_json },
+    tax_year_readiness: -> {
+      TenantScope.as_system(reason: "Check tax table verification across open pay periods") { TaxYearReadiness.new.as_json }
+    },
     http_get: nil
   )
     @env = env
@@ -96,7 +98,10 @@ class ProductionReadiness
     return StagingReadiness.new(env: env).run(live: live) if StagingOutboundPolicy.staging?(env)
 
     checks = configuration_checks
-    checks.concat(live_dependency_checks) if live
+    if live
+      checks.concat(live_dependency_checks)
+      checks.concat(rls_checks) if RlsConfiguration.runtime_url(env)
+    end
     Report.new(checks: checks, connected_payroll: ConnectedPayrollMode.capability(env: env, environment: environment))
   end
 
@@ -143,6 +148,19 @@ class ProductionReadiness
     ] + @tax_year_readiness.call.fetch(:warnings).map do |warning|
       Check.new(name: "#{warning.fetch(:tax_year)} payroll tax tables are verified", passed: false, detail: warning.fetch(:message))
     end
+  end
+
+  def rls_checks
+    [
+      check("RLS runtime role and kill switch privileges") do
+        primary_record.connection_pool.with_connection { |connection| RlsDatabase.verify_runtime!(connection) }
+      end,
+      check("RLS policy installation matches the selected phase") do
+        primary_record.connection_pool.with_connection do |connection|
+          RlsDatabase.expected_phase?(connection, enforced: env["RLS_EXPECT_ENFORCED"] == "true")
+        end
+      end
+    ]
   end
 
   def live_dependency_checks

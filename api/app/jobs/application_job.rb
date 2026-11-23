@@ -1,12 +1,33 @@
+# frozen_string_literal: true
+
 class ApplicationJob < ActiveJob::Base
+  class_attribute :rls_mode, instance_writer: false
+
   def perform_now
     # Active Job handles retries and discards after the perform callbacks unwind.
-    Current.with_isolated_actor(AuditActor.system_job(self)) { super }
+    with_job_rls_scope do
+      Current.with_isolated_actor(AuditActor.system_job(self)) { super }
+    end
   end
 
-  # Automatically retry jobs that encountered a deadlock
-  # retry_on ActiveRecord::Deadlocked
+  private
 
-  # Most jobs are safe to ignore if the underlying records are no longer available
-  # discard_on ActiveJob::DeserializationError
+  def with_job_rls_scope(&perform)
+    case rls_mode
+    when :system
+      TenantScope.as_system(reason: self.class.name, &perform)
+    when :record
+      # A standalone worker receives a record ID, not a tenant ID. When run
+      # inline by a tenant operation, the existing scope constrains the lookup.
+      return yield if TenantScope.current
+
+      TenantScope.as_system(reason: "#{self.class.name} resolves its work from a queued record ID", &perform)
+    when :company
+      return yield if TenantScope.current&.mode == "system"
+
+      TenantScope.with_company(arguments.first, &perform)
+    else
+      yield
+    end
+  end
 end

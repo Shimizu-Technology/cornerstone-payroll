@@ -11,6 +11,7 @@ module Api
           include ConnectedPayrollControl
           before_action :require_connected_payroll!
           before_action :authenticate_source!
+          include CompanyRlsScoped
           before_action :set_employee!
           before_action :set_statement_item!, only: %i[show pdf]
           around_action :with_worker_actor
@@ -55,7 +56,15 @@ module Api
           # The events endpoint finds its source through the calendar period in
           # the payload. A read has no payload, so compare the credential with
           # every active AIRE source in constant time and require one match.
+          def rls_company_id
+            @source&.company_id
+          end
+
           def authenticate_source!
+            TenantScope.as_system(reason: "Authenticate AIRE source credential") { match_source! }
+          end
+
+          def match_source!
             secret = (request.headers["X-Shared-Secret"].presence || request.headers["X-Payroll-Shared-Secret"]).to_s
             matches = TimeTrackingSource.active.where(source_type: "aire_services").select do |source|
               expected = source.shared_secret.to_s

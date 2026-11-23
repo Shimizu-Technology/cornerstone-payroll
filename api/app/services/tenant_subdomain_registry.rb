@@ -90,11 +90,13 @@ class TenantSubdomainRegistry
     companies_by_slug = RequestPathCache.store.fetch([ "tenant-subdomains", date.iso8601 ], version: version, expires_in: CACHE_TTL) do
       # Read the same effective dates as ClientOperatingProfile.for_date in a
       # single query. A company without a persisted profile starts off.
-      ClientOperatingProfile.uncached do
-        ClientOperatingProfile.active_on(date).reorder(nil)
-          .joins(:company).merge(live_companies)
-          .where("client_operating_profiles.options @> ?", { subdomain_enabled: true }.to_json)
-          .pluck("companies.subdomain_slug", "companies.id").to_h
+      TenantScope.as_system(reason: "Load effective public subdomain registry") do
+        ClientOperatingProfile.uncached do
+          ClientOperatingProfile.active_on(date).reorder(nil)
+            .joins(:company).merge(live_companies)
+            .where("client_operating_profiles.options @> ?", { subdomain_enabled: true }.to_json)
+            .pluck("companies.subdomain_slug", "companies.id").to_h
+        end
       end
     end
     companies_by_slug[slug]

@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 namespace :production do
   desc "Fail unless production configuration and live durable dependencies are ready"
-  task readiness: :environment do
+  RlsTask.system readiness: :environment do
     report = ProductionReadiness.new.run(live: Rails.env.production?)
     report.checks.each do |check|
       puts "#{check.passed ? 'PASS' : 'FAIL'}  #{check.name} (#{check.detail})"

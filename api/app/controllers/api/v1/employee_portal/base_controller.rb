@@ -7,8 +7,13 @@ module Api
         include MfaEnforceable
 
         before_action :authenticate_employee_user!, :enforce_mfa!, :require_employee_link!
+        include CompanyRlsScoped
 
         private
+
+        def rls_company_id
+          @employee_link&.company_id
+        end
 
         def authenticate_employee_user!
           link_id = request.headers["X-Employee-Link-Id"]
@@ -29,8 +34,11 @@ module Api
         end
 
         def require_employee_link!
-          @employee_link = @current_user.employee_account_links.portal_eligible.find_by(id: request.headers["X-Employee-Link-Id"])
-          return head :not_found unless @employee_link&.portal_enabled?
+          @employee_link = TenantScope.as_system(reason: "Resolve employee link for verified Clerk user") do
+            link = @current_user.employee_account_links.portal_eligible.find_by(id: request.headers["X-Employee-Link-Id"])
+            link if link&.portal_enabled?
+          end
+          return head :not_found unless @employee_link
 
           azp = @clerk_token_payload["azp"]
           if TenantSubdomainRegistry.client_origin?(azp) &&

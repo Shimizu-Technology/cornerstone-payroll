@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 namespace :aire_rollout do
   desc "Capture an unapproved, private source-evidence packet for individual accounting review"
-  task export: :environment do
+  RlsTask.system export: :environment do
     source = TimeTrackingSource.find(ENV.fetch("SOURCE_ID"))
     actor = User.find(ENV.fetch("ACTOR_ID"))
     manifest = {
@@ -32,14 +34,14 @@ namespace :aire_rollout do
   end
 
   desc "Read-only preflight for a private, checksummed AIRE history rollout manifest"
-  task preview: :environment do
+  RlsTask.system preview: :environment do
     result = load_verified_rollout.preview!
     puts "AIRE rollout preflight: #{result.to_json}"
     puts TimeTracking::HistoryRoundingTable.render(result.fetch(:rounding_variances))
   end
 
   desc "Apply a preflighted AIRE history rollout; requires explicit release approval"
-  task apply: :environment do
+  RlsTask.system apply: :environment do
     if Rails.env.production?
       unless ENV["AIRE_ROLLOUT_PRODUCTION_APPROVED"] == "yes" && ENV["AIRE_ROLLOUT_RELEASE_ID"].present? && ENV["AIRE_ROLLOUT_RELEASE_OWNER"].present? &&
              ENV["AIRE_ROLLOUT_ACCEPTED_MANIFEST_SHA256"].to_s.downcase == ENV.fetch("AIRE_ROLLOUT_MANIFEST_SHA256").downcase
@@ -56,7 +58,7 @@ namespace :aire_rollout do
   end
 
   desc "Fail closed if the verified AIRE history has not been reconciled"
-  task ensure_complete: :environment do
+  RlsTask.system ensure_complete: :environment do
     load_verified_rollout.ensure_complete!
   end
 end

@@ -32,20 +32,23 @@ class MfaPolicy
   end
 
   def self.record_denial!(user:, source:, subject_name:, request_id: nil, ip_address: nil, user_agent: nil)
-    AuditLog.record!(
-      user: user,
-      organization_id: user.organization_id,
-      company_id: nil,
-      action: "authentication#mfa_required_denied",
-      record_type: "users",
-      record_id: user.id,
-      event_category: "security",
-      metadata: { source: source },
-      request_id: request_id,
-      subject_name: subject_name,
-      ip_address: ip_address,
-      user_agent: user_agent
-    )
+    # Denial is an organization security event with no tenant context.
+    TenantScope.as_system(reason: "Record organization MFA denial") do
+      AuditLog.record!(
+        user: user,
+        organization_id: user.organization_id,
+        company_id: nil,
+        action: "authentication#mfa_required_denied",
+        record_type: "users",
+        record_id: user.id,
+        event_category: "security",
+        metadata: { source: source },
+        request_id: request_id,
+        subject_name: subject_name,
+        ip_address: ip_address,
+        user_agent: user_agent
+      )
+    end
   rescue ActiveRecord::ActiveRecordError
     Rails.logger.warn("[MFA] Could not audit authentication#mfa_required_denied for user=#{user.id} source=#{source}")
   end

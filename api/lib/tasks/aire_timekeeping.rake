@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 namespace :timekeeping do
   desc "Preview/apply the explicit AIRE salary timekeeping backfill (dry-run by default)"
-  task aire_salary_backfill: :environment do
+  RlsTask.system aire_salary_backfill: :environment do
     required = %w[COMPANY_ID EMPLOYEE_ID EXPECTED_EMPLOYEE_NAME EFFECTIVE_ON ACTOR_USER_ID]
     missing = required.select { |key| ENV[key].blank? }
     abort "Missing required values: #{missing.join(', ')}" if missing.any?

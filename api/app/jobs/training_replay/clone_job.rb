@@ -2,6 +2,8 @@
 
 module TrainingReplay
   class CloneJob < ApplicationJob
+    self.rls_mode = :system
+
     queue_as :default
 
     def perform(company_id, actor_id)

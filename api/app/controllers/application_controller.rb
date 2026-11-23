@@ -10,6 +10,7 @@ class ApplicationController < ActionController::API
   include PdfGenerationFailureHandling
 
   around_action :reset_current_context, prepend: true
+  before_action :require_explicit_company_access, if: -> { is_a?(ExplicitCompanyAccess) }
   before_action :set_current_context
   before_action :track_authenticated_user_activity
 
@@ -46,26 +47,28 @@ class ApplicationController < ActionController::API
     session_id = @clerk_token_payload&.fetch("sid", nil)
     return unless current_user.authenticated_activity_write_due?(session_id: session_id)
 
-    current_user.with_lock do
-      new_session = current_user.record_authenticated_activity!(
-        session_id: session_id
-      )
-      next unless new_session
+    TenantScope.as_system(reason: "Record authenticated organization session") do
+      current_user.with_lock do
+        new_session = current_user.record_authenticated_activity!(
+          session_id: session_id
+        )
+        next unless new_session
 
-      # Keep the session marker and its durable sign-in evidence atomic. If
-      # the audit insert fails, the digest rolls back so the next request can
-      # retry instead of silently losing this session's sign-in event.
-      AuditLog.record!(
-        user: current_user,
-        organization_id: current_user.organization_id,
-        company_id: nil,
-        action: "authentication#signed_in",
-        record_type: "users",
-        record_id: current_user.id,
-        subject_name: current_user.name,
-        metadata: { source: "clerk_session" },
-        event_category: "security"
-      )
+        # Keep the session marker and its durable sign-in evidence atomic. If
+        # the audit insert fails, the digest rolls back so the next request can
+        # retry instead of silently losing this session's sign-in event.
+        AuditLog.record!(
+          user: current_user,
+          organization_id: current_user.organization_id,
+          company_id: nil,
+          action: "authentication#signed_in",
+          record_type: "users",
+          record_id: current_user.id,
+          subject_name: current_user.name,
+          metadata: { source: "clerk_session" },
+          event_category: "security"
+        )
+      end
     end
   rescue ActiveRecord::ActiveRecordError => e
     Rails.logger.warn("[UserActivity] Failed to record activity for user=#{current_user&.id}: #{e.message}")
@@ -164,6 +167,17 @@ class ApplicationController < ActionController::API
     }, status: :forbidden
   end
 
+  def authorized_explicit_company_id(value)
+    return unless value.match?(/\A[1-9]\d{0,18}\z/)
+
+    id = value.to_i
+    return if id > 2**63 - 1
+
+    # Inactive clients stay reachable to the people allowed to open them, so
+    # year-end can still file for a client that stopped mid-year.
+    id if Company.exists?(id) && current_user.can_access_company?(id)
+  end
+
   # Resolve the active company for this request.
   # Explicit scope never falls back. Company discovery can still suggest an
   # accessible selection when the caller has a stale header, without reading or
@@ -174,12 +188,7 @@ class ApplicationController < ActionController::API
     return if current_user.employee? || current_user.portal_employee?
 
     requested_company = request.headers["X-Company-Id"]
-    unless requested_company.nil?
-      return unless requested_company.match?(/\A[1-9]\d*\z/)
-      requested_id = requested_company.to_i
-      return requested_id if Company.exists?(requested_id) && current_user.can_access_company?(requested_id)
-      return
-    end
+    return authorized_explicit_company_id(requested_company) unless requested_company.nil?
 
     # Fall back to home company if accessible, otherwise first assigned company
     home = current_user.company_id

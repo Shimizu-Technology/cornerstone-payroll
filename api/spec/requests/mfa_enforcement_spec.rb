@@ -150,6 +150,17 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
       get "/api/v1/employee/context", headers: headers(fva: fva).merge("X-Employee-Link-Id" => link.id.to_s)
     end
 
+    it "denies MFA before looking up the employee link or opening company scope" do
+      link
+      expect(TenantScope).not_to receive(:with_company)
+      allow(TenantScope).to receive(:as_system).and_call_original
+      expect(TenantScope).not_to receive(:as_system).with(reason: "Resolve employee link for verified Clerk user")
+
+      employee_context(fva: [ 5, -1 ])
+      expect(response).to have_http_status(:forbidden)
+      expect(denials.count).to eq(1)
+    end
+
     [ :admin, :client, :portal_employee ].each do |caller_role|
       context "as #{caller_role} with an active employee link" do
         let(:role) { caller_role }

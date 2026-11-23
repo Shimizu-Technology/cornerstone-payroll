@@ -3,6 +3,7 @@
 module Api
   module V1
     class AuthController < ApplicationController
+      include CompanyRlsScoped
       # GET /api/v1/auth/me
       # Returns the current authenticated user
       def me
@@ -42,6 +43,10 @@ module Api
       end
 
       private
+
+      def rls_system_reason
+        "Resolve linked employee accounts for authenticated user"
+      end
 
       def render_mfa_required
         return super unless action_name == "me" && (request.get? || request.head?)

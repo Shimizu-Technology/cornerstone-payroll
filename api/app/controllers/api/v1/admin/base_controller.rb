@@ -4,6 +4,7 @@ module Api
   module V1
     module Admin
       class BaseController < ApplicationController
+        include CompanyRlsScoped
         include Auditable
         include ExplicitCompanyAccess
 
@@ -24,6 +25,10 @@ module Api
         before_action :enforce_high_impact_role_policy!
 
         private
+
+        def rls_system_reason
+          "Organization finance book operations" if finance_request?
+        end
 
         # Call after locking the company, inside the business write transaction.
         # Use fresh identity/assignment records instead of a request's memoized
@@ -182,15 +187,6 @@ module Api
             error: "Historical payroll is not enabled for this client",
             details: {}
           }, status: :forbidden
-        end
-
-        # Staff must stay inside the companies granted by their platform role.
-        def enforce_company_access!
-          return if current_user.nil?
-
-          unless current_user.can_access_company?(current_company_id)
-            render json: { error: "You do not have access to this company" }, status: :forbidden
-          end
         end
 
         # Backward-compatible alias

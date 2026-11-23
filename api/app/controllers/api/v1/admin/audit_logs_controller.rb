@@ -55,6 +55,10 @@ module Api
 
         private
 
+        def rls_system_reason
+          "Read organization and authorized company audit events"
+        end
+
         def authorize_security_history_access!
           return unless security_history_filters?
           return if current_user.organization_admin?
@@ -158,37 +162,44 @@ module Api
             cursor = nil
 
             loop do
-              batch = export_batch(scope, cursor)
-              break if batch.empty?
-
-              pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(batch)
-              employee_names = AuditLogPresenter.preload_employee_names(batch)
-
-              batch.each do |log|
-                presenter = AuditLogPresenter.new(log, pay_period_subjects: pay_period_subjects, employee_names: employee_names)
-                stream << CSV.generate_line([
-                  log.created_at&.iso8601,
-                  log.actor_name.presence || log.user&.name || "System",
-                  presenter.headline,
-                  log.actor_email.presence || log.user&.email,
-                  log.actor_role.presence || log.user&.role,
-                  log.event_category,
-                  presenter.subject,
-                  log.action,
-                  log.record_type,
-                  log.record_id,
-                  log.organization&.name,
-                  log.company&.name,
-                  log.ip_address,
-                  log.request_id,
-                  FilingFileDigest.redact_audit_metadata(log.action, log.metadata).to_json
-                ].map { |value| csv_safe(value) })
+              lines, cursor = TenantScope.as_system(reason: "Stream an authorized audit export batch") do
+                audit_csv_batch(scope, cursor)
               end
+              break if lines.empty?
 
-              last = batch.last
-              cursor = [ last.created_at, last.id ]
+              lines.each { |line| stream << line }
             end
           end
+        end
+
+        def audit_csv_batch(scope, cursor)
+          batch = export_batch(scope, cursor)
+          return [ [], nil ] if batch.empty?
+
+          pay_period_subjects = AuditLogPresenter.preload_pay_period_subjects(batch)
+          employee_names = AuditLogPresenter.preload_employee_names(batch)
+          lines = batch.map do |log|
+            presenter = AuditLogPresenter.new(log, pay_period_subjects: pay_period_subjects, employee_names: employee_names)
+            CSV.generate_line([
+              log.created_at&.iso8601,
+              log.actor_name.presence || log.user&.name || "System",
+              presenter.headline,
+              log.actor_email.presence || log.user&.email,
+              log.actor_role.presence || log.user&.role,
+              log.event_category,
+              presenter.subject,
+              log.action,
+              log.record_type,
+              log.record_id,
+              log.organization&.name,
+              log.company&.name,
+              log.ip_address,
+              log.request_id,
+              FilingFileDigest.redact_audit_metadata(log.action, log.metadata).to_json
+            ].map { |value| csv_safe(value) })
+          end
+          last = batch.last
+          [ lines, [ last.created_at, last.id ] ]
         end
 
         def export_batch(scope, cursor)

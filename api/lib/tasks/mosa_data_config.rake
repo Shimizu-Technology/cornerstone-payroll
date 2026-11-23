@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 # Comprehensive MoSa's Hotbox, Inc. data setup
 # Creates ALL employees and configurations from scratch based on
 # Cornerstone payroll preview data (PPE 2026.03.07, PD 2026.03.12)
 namespace :mosa do
   desc "Full rebuild: company + all 51 employees + deductions + retirement"
-  task rebuild: :environment do
+  RlsTask.system rebuild: :environment do
     ActiveRecord::Base.transaction do
       puts "=" * 70
       puts "MoSa's Hotbox, Inc. — Full Data Rebuild"
