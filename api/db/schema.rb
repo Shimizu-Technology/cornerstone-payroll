@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_23_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -3138,6 +3138,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
     t.index [ "payroll_item_id" ], name: "index_payroll_item_earnings_on_payroll_item_id"
   end
 
+  create_table "payroll_history_review_items", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "pay_period_id"
+    t.bigint "payroll_item_id"
+    t.bigint "employee_id"
+    t.bigint "historical_import_batch_id"
+    t.bigint "resolved_by_id"
+    t.integer "tax_year", null: false
+    t.string "subject_type", null: false
+    t.string "subject_digest", null: false
+    t.string "status", default: "open", null: false
+    t.string "resolution_code"
+    t.text "resolution_reference"
+    t.datetime "resolved_at"
+    t.datetime "reopened_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "tax_year", "employee_id" ], name: "idx_payroll_history_review_gap", unique: true, where: "((subject_type)::text = 'legacy_basis_gap'::text)"
+    t.index [ "company_id", "tax_year", "subject_type", "pay_period_id", "payroll_item_id", "historical_import_batch_id" ], name: "idx_payroll_history_review_subject", unique: true, where: "((subject_type)::text <> 'legacy_basis_gap'::text)", nulls_not_distinct: true
+    t.index [ "company_id" ], name: "index_payroll_history_review_items_on_company_id"
+    t.index [ "employee_id" ], name: "index_payroll_history_review_items_on_employee_id"
+    t.index [ "historical_import_batch_id" ], name: "idx_on_historical_import_batch_id_48322a42e5"
+    t.index [ "pay_period_id" ], name: "index_payroll_history_review_items_on_pay_period_id"
+    t.index [ "payroll_item_id" ], name: "index_payroll_history_review_items_on_payroll_item_id"
+    t.index [ "resolved_by_id" ], name: "index_payroll_history_review_items_on_resolved_by_id"
+    t.check_constraint "\nCASE\n    WHEN subject_type::text = 'voided_pay_period'::text THEN pay_period_id IS NOT NULL AND num_nonnulls(payroll_item_id, employee_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = ANY (ARRAY['reversed_payroll_item'::character varying, 'legacy_disposition'::character varying]::text[]) THEN payroll_item_id IS NOT NULL AND employee_id IS NOT NULL AND num_nonnulls(pay_period_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = 'legacy_basis_gap'::text THEN employee_id IS NOT NULL AND num_nonnulls(pay_period_id, payroll_item_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = 'imported_history'::text THEN historical_import_batch_id IS NOT NULL AND num_nonnulls(pay_period_id, payroll_item_id, employee_id) = 0\n    ELSE false\nEND", name: "payroll_history_review_subject_shape"
+    t.check_constraint "status::text = 'open'::text AND num_nonnulls(resolution_code, resolution_reference, resolved_at, resolved_by_id) = 0 OR status::text = 'resolved'::text AND num_nonnulls(resolution_code, resolution_reference, resolved_at) = 3 AND (resolved_by_id IS NOT NULL OR resolution_code::text = 'legacy_basis_proven'::text) AND char_length(btrim(resolution_reference)) >= 10 AND char_length(btrim(resolution_reference)) <= 1000", name: "payroll_history_review_resolution_shape"
+  end
+
   create_table "payroll_item_fica_basis_proofs", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -5230,6 +5259,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_100000) do
   add_foreign_key "payroll_item_deductions", "employee_loans"
   add_foreign_key "payroll_item_deductions", "payroll_items"
   add_foreign_key "payroll_item_earnings", "payroll_items"
+  add_foreign_key "payroll_history_review_items", "companies", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "employees", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "historical_import_batches", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "pay_periods", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "payroll_items", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "users", column: "resolved_by_id", on_delete: :restrict
   add_foreign_key "payroll_item_fica_basis_proofs", "companies", on_delete: :restrict
   add_foreign_key "payroll_item_fica_basis_proofs", "payroll_items", on_delete: :restrict
   add_foreign_key "payroll_item_fica_basis_proofs", "users", column: "created_by_id", on_delete: :restrict
