@@ -10,6 +10,7 @@ class ApplicationController < ActionController::API
   include PdfGenerationFailureHandling
 
   around_action :reset_current_context, prepend: true
+  before_action :require_explicit_company_access, if: -> { is_a?(ExplicitCompanyAccess) }
   before_action :set_current_context
   before_action :track_authenticated_user_activity
 
@@ -166,6 +167,15 @@ class ApplicationController < ActionController::API
     }, status: :forbidden
   end
 
+  def authorized_explicit_company_id(value)
+    return unless value.match?(/\A[1-9]\d{0,18}\z/)
+
+    id = value.to_i
+    return if id > 2**63 - 1
+
+    id if Company.active.exists?(id) && current_user.can_access_company?(id)
+  end
+
   # Resolve the active company for this request.
   # Explicit scope never falls back. Company discovery can still suggest an
   # accessible selection when the caller has a stale header, without reading or
@@ -176,12 +186,7 @@ class ApplicationController < ActionController::API
     return if current_user.employee? || current_user.portal_employee?
 
     requested_company = request.headers["X-Company-Id"]
-    unless requested_company.nil?
-      return unless requested_company.match?(/\A[1-9]\d*\z/)
-      requested_id = requested_company.to_i
-      return requested_id if Company.exists?(requested_id) && current_user.can_access_company?(requested_id)
-      return
-    end
+    return authorized_explicit_company_id(requested_company) unless requested_company.nil?
 
     # Fall back to home company if accessible, otherwise first assigned company
     home = current_user.company_id
