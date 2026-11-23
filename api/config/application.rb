@@ -15,7 +15,8 @@ require "active_record/railtie"
 require "active_storage/engine"
 require "action_controller/railtie"
 require "action_mailer/railtie"
-require "action_mailbox/engine"
+require_relative "../lib/process_role"
+require "action_mailbox/engine" if ProcessRole.current == ProcessRole::ALL
 require "action_text/engine"
 require "action_view/railtie"
 require "action_cable/engine"
@@ -47,6 +48,12 @@ module Api
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
+
+    # Framework routes are part of the legacy `all` surface.
+    if ProcessRole.current != ProcessRole::ALL
+      config.active_storage.draw_routes = false
+      config.action_cable.mount_path = nil
+    end
 
     # Run after initializer middleware registrations (including CORS) so this
     # remains outermost, before Rails logging and either client-IP resolver.

@@ -7,6 +7,10 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const surface = env.VITE_APP_SURFACE ?? 'staff'
+  if (surface !== 'staff' && surface !== 'employee') {
+    throw new Error('VITE_APP_SURFACE must be staff or employee')
+  }
   assertDeploymentFlags(env, command === 'build' ? 'production' : mode)
   if (env.VITE_DEPLOYMENT_ENV === 'staging' && (mode !== 'test' || command === 'build')) {
     assertStagingOrigin(env.VITE_STAGING_AIRE_FRONTEND_ORIGIN, 'VITE_STAGING_AIRE_FRONTEND_ORIGIN')
@@ -23,11 +27,13 @@ export default defineConfig(({ mode, command }) => {
     if (env.VITE_AUTH_ENABLED === 'false') throw new Error('Staging build requires authentication')
   }
   return {
-  plugins: [stagingBrowserContainment(env.VITE_DEPLOYMENT_ENV === 'staging'), react(), tailwindcss()],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
+    plugins: [stagingBrowserContainment(env.VITE_DEPLOYMENT_ENV === 'staging'), react(), tailwindcss()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+        // Select the entry before Rollup traverses the staff import graph.
+        ...(surface === 'employee' ? { './App.tsx': path.resolve(__dirname, './src/EmployeeApp.tsx') } : {}),
+      },
     },
-  },
-}
+  }
 })
