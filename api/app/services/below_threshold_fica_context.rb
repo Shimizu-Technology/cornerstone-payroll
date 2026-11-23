@@ -42,8 +42,8 @@ class BelowThresholdFicaContext
     @unverified_legacy_ids ||= EmployeeYearFicaContext.reportable_items(company: company, employee_ids: candidate_employee_ids,
       year: year, excluding_pay_period_id: excluding_pay_period_id).where(id: candidates.map(&:id)).left_joins(:fica_basis_proof)
       .where("payroll_items.social_security_taxable_wages IS NULL OR payroll_items.social_security_taxable_tips IS NULL OR payroll_items.additional_medicare_taxable_wages IS NULL")
-      .where("jsonb_typeof(payroll_items.tax_rule_snapshot -> 'annual_fica_context') IS DISTINCT FROM 'object' OR " \
-        "NOT jsonb_exists(payroll_items.tax_rule_snapshot -> 'annual_fica_context', 'fingerprint')")
+      .where("jsonb_typeof(payroll_items.tax_rule_snapshot -> 'annual_fica_context' -> 'fingerprint') IS DISTINCT FROM 'string' OR " \
+        "payroll_items.tax_rule_snapshot -> 'annual_fica_context' ->> 'fingerprint' = ''")
       .where(payroll_item_fica_basis_proofs: { id: nil }).order(:id).pluck(:id)
   end
 
