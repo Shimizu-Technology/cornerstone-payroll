@@ -26,6 +26,7 @@ class GeneralTransmittalItem < ApplicationRecord
 
   def self.from_non_employee_check(check, position:)
     new(
+      company_id: check.company_id,
       source_type: "NonEmployeeCheck",
       source_id: check.id,
       item_type: "check",

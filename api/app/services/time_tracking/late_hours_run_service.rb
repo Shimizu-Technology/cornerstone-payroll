@@ -187,7 +187,7 @@ module TimeTracking
         row
       end
       rate_ids = selected.flat_map { |row| row.fetch("adjustments").pluck("employee_wage_rate_id") }.uniq
-      captured_rates = EmployeeWageRate.where(id: rate_ids).lock.map(&:attributes)
+      captured_rates = EmployeeWageRate.where(id: rate_ids).lock.map { |rate| rate.attributes.except("company_id") }
       workweek = origin.resolved_company_workweek
       raise Error, "Confirm the legal workweek before paying late hours" unless workweek&.confirmed?
       PayrollGoLiveGate.new(company: origin.company, pay_date: request.fetch("pay_date")).require_live_payroll!(parallel_run: false)

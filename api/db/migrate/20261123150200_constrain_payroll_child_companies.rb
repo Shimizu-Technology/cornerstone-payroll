@@ -26,7 +26,8 @@ class ConstrainPayrollChildCompanies < ActiveRecord::Migration[8.1]
   def down
     CHILDREN.each_key do |table|
       with_short_ddl_transaction do
-        remove_foreign_key table, name: M3_7ChildCompanies.foreign_key_name(table), if_exists: true
+        name = M3_7ChildCompanies.foreign_key_name(table)
+        remove_foreign_key table, name: name if foreign_key_exists?(table, name: name)
       end
     end
   end
