@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { useState, type ComponentProps, type ReactNode, type ReactElement } from 'react';
 import { Link, createMemoryRouter, RouterProvider, MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
+import type { AirePayrollCalendarState, Employee, PayPeriod, TimeTrackingExclusionCounts } from '@/types';
 import { PayPeriodDetail as PayPeriodDetailPage } from './PayPeriodDetail';
 import { PayRunSteps } from './pay-periods/pay-run/PayRunWorkflowSteps';
 import { usePayRunController } from './pay-periods/pay-run/usePayRunController';
@@ -157,6 +157,39 @@ const initialPayPeriod = {
   payroll_items: [],
   time_tracking: { active_source_types: [], linked_aire_records: [] },
 } as unknown as PayPeriod;
+
+it.each<{ scenario: string; counts: TimeTrackingExclusionCounts; action?: string; information?: string }>([
+  { scenario: 'denied only', counts: { not_paid_by_decision: 2 }, information: '2 denied entries, not paid' },
+  { scenario: 'actionable and denied', counts: { needs_action: 1, not_paid_by_decision: 1 },
+    action: '1 time entry needs action', information: '1 denied entry, not paid' },
+  { scenario: 'after cutoff', counts: { next_payroll: 1 }, information: '1 entry moves to the next payroll' },
+  { scenario: 'payment evidence pending', counts: { payment_evidence_pending: 1 }, information: '1 entry awaits payment evidence' },
+  { scenario: 'zero hours', counts: { needs_action: 0, not_paid_by_decision: 0, next_payroll: 0 } },
+])('shows the correct header for $scenario', async ({ counts, action, information }) => {
+  const by_category = Object.fromEntries(Object.entries(counts).map(([category, count]) => [category, { entry_count: count, total_hours: count }]));
+  const period = {
+    ...initialPayPeriod, status: 'approved',
+    time_tracking: { active_source_types: [], linked_aire_records: [], linked_source_records: [{
+      payable_line_status: { held: { entry_count: 3, total_hours: 2, by_category, actionable_entry_count: counts.needs_action ?? 0 } },
+    }] },
+  } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const header = within(await screen.findByRole('banner', { name: 'Pay run identity' }));
+  const attention = within(header.getByLabelText('Payroll status and attention'));
+  if (action) expect(attention.getByRole('link', { name: action }).getAttribute('href')).toContain('#time-tracking-sync');
+  else expect(attention.queryByRole('link', { name: /time entr.*action/ })).toBeNull();
+  if (information) {
+    const text = header.getByText(information);
+    expect(text.closest('a')).toBeNull();
+    expect(attention.queryByText(information)).toBeNull();
+  } else {
+    expect(header.queryByText(/denied entr|next payroll|payment evidence/)).toBeNull();
+  }
+  expect(header.queryByText(/held entr/)).toBeNull();
+});
 
 const sourceCalendar: AirePayrollCalendarState = {
   enabled: true, source_id: 12, source_name: 'Synthetic time tracking', eligible: true,

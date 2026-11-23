@@ -56,6 +56,7 @@ RSpec.describe "Annual FICA review disclosure", type: :request do
     expect(fica_amounts).to eq(before_amounts)
     expect(item.tax_rule_snapshot.fetch("annual_fica_context")).not_to have_key("history_review_open")
     expect(payload["annual_fica_review_note"]).to be_nil
+    expect(payload["annual_fica_review"]).to be_nil
     expect(payload.fetch("compliance_warnings").join).not_to include("filing review", "Prior-period")
     context = BelowThresholdFicaContext.new(employee: employee, company: company, year: 2026, excluding_pay_period_id: run.id)
     expect(context.applicable?).to be(false)
@@ -119,6 +120,19 @@ RSpec.describe "Annual FICA review disclosure", type: :request do
     expect(note).to include("Maya Cruz: Voided pay period #75", "Noah Reyes: Reversed paycheck #412")
     expect(note).not_to include(unaffected.full_name, "imported paycheck history")
     expect(run.compliance_warnings).to include(note)
+
+    get "/api/v1/admin/pay_periods/#{run.id}"
+    expect(response).to have_http_status(:ok), response.body
+    payload = response.parsed_body.fetch("pay_period")
+    expect(payload.fetch("annual_fica_review")).to eq(
+      "employee_count" => 2,
+      "entries" => [
+        { "employee_name" => "Maya Cruz", "note" => "Voided pay period #75 needs review." },
+        { "employee_name" => "Noah Reyes", "note" => "Reversed paycheck #412 needs review." }
+      ]
+    )
+    expect(payload.fetch("annual_fica_review_note")).to eq(note)
+    expect(payload.fetch("compliance_warnings")).to include(note)
   end
 
   it "clears the old false note after rolling back approval and recalculating, retaining all amounts" do

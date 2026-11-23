@@ -36,6 +36,24 @@ describe('Payroll commit confirmation', () => {
     view.rerender(<PayrollCommitDialog {...state} />); await loaded();
     expect(screen.getByText(/numbered from 1300/)).toBeTruthy();
   });
+  it('displays the staff history summary while retaining other warnings and allowing commit', async () => {
+    const entries = [
+      { employee_name: 'Demo Employee', note: 'Voided pay period needs review.' },
+      { employee_name: 'Another Employee', note: 'Reversed paycheck needs review.' },
+    ];
+    const note = entries.map(entry => `${entry.employee_name}: ${entry.note}`).join('\n');
+    api.get.mockResolvedValue({ pay_period: {
+      ...period, annual_fica_review_note: note, annual_fica_review: { employee_count: 2, entries },
+      compliance_warnings: [...period.compliance_warnings!, note],
+    } });
+    const state = props();
+    render(<PayrollCommitDialog {...state} />);
+    expect(await screen.findByText("2 payroll history items awaiting accountant review. This payroll isn't affected.")).toBeTruthy();
+    expect(screen.queryByText(/Voided pay period|Reversed paycheck/)).toBeNull();
+    expect(screen.getByText('Review overtime classification')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
+    expect(state.onConfirm).toHaveBeenCalledExactlyOnceWith(12, { acknowledged_outstanding_file_request_ids: [], expected_next_check_number: 1200 });
+  });
   it('cancels without confirming', async () => {
     const state = props(); render(<PayrollCommitDialog {...state} />); await loaded();
     fireEvent.click(screen.getByRole('button', { name: 'Keep reviewing' }));
