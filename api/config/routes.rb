@@ -175,6 +175,12 @@ Rails.application.routes.draw do
           post :sign_operations
         end
         resources :payroll_history, only: [ :index ]
+        resources :payroll_history_review_items, only: [ :index, :show ] do
+          member do
+            post :resolve
+            post :reopen
+          end
+        end
         resources :imported_pay_periods, only: [ :show ]
 
         # CPR-66: Company check settings

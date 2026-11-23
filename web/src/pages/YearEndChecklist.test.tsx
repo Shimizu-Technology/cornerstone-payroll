@@ -25,6 +25,7 @@ vi.mock('@/services/api', () => ({
   },
   companiesApi: { get: mocks.companyGet, update: mocks.companyUpdate },
   employeesApi: { update: mocks.employeeUpdate },
+  apiClient: { get: vi.fn(async () => ({ data: [], can_review: false })) },
   ApiError: class ApiError extends Error {
     status: number;
     details?: unknown;

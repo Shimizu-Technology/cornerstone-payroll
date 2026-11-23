@@ -26,17 +26,17 @@ RSpec.describe YearEnd::JudgmentWarnings do
   end
 
   it "makes judgment calls need a review, which stays current only while the data is unchanged" do
-    rows = [ row(2, missing_committed_tax_bases: true) ]
-    warning = warnings(rows).fetch("legacy_tax_bases")
+    rows = [ row(2, missing_qualified_overtime: true) ]
+    warning = warnings(rows).fetch("qualified_overtime_unreviewed")
     expect(warning).to include(kind: "acknowledge", status: "needs_review", acknowledgement_stale: false)
 
-    YearEndAcknowledgement.create!(company: company, tax_year: 2026, warning_code: "legacy_tax_bases", warning_digest: warning[:digest],
+    YearEndAcknowledgement.create!(company: company, tax_year: 2026, warning_code: "qualified_overtime_unreviewed", warning_digest: warning[:digest],
       note: "Reconciliation ties out", acknowledged_by: reviewer, acknowledged_by_name: reviewer.name,
       acknowledged_by_email: reviewer.email, acknowledged_by_role: reviewer.role, acknowledged_at: Time.current)
-    expect(warnings(rows).fetch("legacy_tax_bases")).to include(status: "reviewed")
+    expect(warnings(rows).fetch("qualified_overtime_unreviewed")).to include(status: "reviewed")
 
     rows.first[:source_summary][:cornerstone_payroll_item_count] = 4
-    expect(warnings(rows).fetch("legacy_tax_bases")).to include(status: "needs_review", acknowledgement_stale: true)
+    expect(warnings(rows).fetch("qualified_overtime_unreviewed")).to include(status: "needs_review", acknowledgement_stale: true)
   end
 
   it "applies the 2026 tip and overtime rules only from 2026" do
@@ -102,14 +102,52 @@ RSpec.describe YearEnd::JudgmentWarnings do
       expect(live_warnings.fetch("qualified_overtime_unreviewed")).to include(status: "needs_review", acknowledgement_stale: true)
     end
 
-    it "needs a new legacy-base review when an amount changes without changing the item count" do
-      item.update_columns(social_security_taxable_tips: nil, overtime_hours: 0)
-      acknowledge("legacy_tax_bases", live_warnings.fetch("legacy_tax_bases")[:digest])
-      expect(live_warnings.fetch("legacy_tax_bases")).to include(status: "reviewed")
+    def review_gap(item)
+      admin = create(:user, company: company, role: "admin")
+      PayrollHistoryReview::Resolution.new(item: item, user: admin, actor: AuditActor.for_user(admin))
+        .resolve!(code: "legacy_basis_accepted", reference: "Legacy wages tie to the reconciliation", expected_digest: item.subject_digest).first
+    end
+
+    it "uses each employee's matching history decision for FIT- and Medicare-only legacy gaps" do
+      item.update_columns(fit_taxable_wages: nil, additional_medicare_taxable_wages: 0)
+      other = create(:employee, company: company, department: department)
+      create(:payroll_item, company: company, employee: other, pay_period: period, gross_pay: 1000,
+        social_security_taxable_wages: 1000, social_security_taxable_tips: 0, additional_medicare_taxable_wages: 0,
+        fit_taxable_wages: 1000, medicare_taxable_wages: nil)
+      report = W2GuAggregator.new(company, 2026).generate
+      before_amounts = report.fetch(:employees).map { |row| row.values_at(:box1_wages_tips_other_comp, :box3_social_security_wages, :box5_medicare_wages_tips) }
+
+      detector = PayrollHistoryReview::Detector.new(company: company, tax_year: 2026)
+      gaps = detector.call(apply: true).fetch(:items).map(&:first).index_by(&:employee_id)
+      expect(gaps.keys).to contain_exactly(employee.id, other.id)
+      result = live_warnings.fetch("legacy_tax_bases")
+      expect(result).to include(kind: "history_review", status: "needs_review", acknowledgement: nil)
+
+      first = review_gap(gaps.fetch(employee.id))
+      result = live_warnings.fetch("legacy_tax_bases")
+      expect(result[:status]).to eq("needs_review")
+      expect(result[:employees]).to contain_exactly(
+        a_hash_including(employee_id: employee.id, history_review: { by: first.resolved_by.name, at: first.resolved_at }),
+        a_hash_including(employee_id: other.id))
+
+      second = review_gap(gaps.fetch(other.id))
+      # B2 will set this code after applying proof. It uses the same warning path.
+      second.update!(resolution_code: PayrollHistoryReviewItem::PROVEN_CODE)
+      expect(live_warnings.fetch("legacy_tax_bases")[:status]).to eq("reviewed")
+      after_amounts = W2GuAggregator.new(company, 2026).generate.fetch(:employees)
+        .map { |row| row.values_at(:box1_wages_tips_other_comp, :box3_social_security_wages, :box5_medicare_wages_tips) }
+      expect(after_amounts).to eq(before_amounts)
 
       item.update_columns(withholding_tax: 175)
+      expect(live_warnings.fetch("legacy_tax_bases")[:status]).to eq("needs_review")
+      expect(detector.call(apply: true).fetch(:counts)).to eq(reopened: 1, resolved: 1)
+    end
 
-      expect(live_warnings.fetch("legacy_tax_bases")).to include(status: "needs_review", acknowledgement_stale: true)
+    it "keeps an Additional Medicare-only gap out of the W-2 missing bases warning" do
+      item.update_columns(additional_medicare_taxable_wages: nil)
+      detector = PayrollHistoryReview::Detector.new(company: company, tax_year: 2026)
+      expect(detector.call(apply: true).fetch(:items).sole.first.subject_type).to eq("legacy_basis_gap")
+      expect(live_warnings).not_to have_key("legacy_tax_bases")
     end
 
     it "needs a new employer-benefit review when a flagged paycheck's benefit amount or classification changes" do
