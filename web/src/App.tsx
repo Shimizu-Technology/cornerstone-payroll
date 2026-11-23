@@ -1,7 +1,9 @@
 // Staff surface entry. Vite resolves the employee surface to EmployeeApp.tsx.
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
 import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation } from 'react-router';
-import { ClerkProvider } from '@clerk/clerk-react';
+import { ClerkProvider } from '@clerk/react';
+// Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
+import { ui as clerkUi } from '@clerk/ui';
 import { useSelectedCompanyCapability, type ClientCapability } from '@/hooks/useSelectedCompanyCapability';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext';
@@ -438,7 +440,7 @@ function AppWithClerk({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
   return (
-    <ClerkProvider publishableKey={clerkPubKey}>
+    <ClerkProvider publishableKey={clerkPubKey} ui={clerkUi}>
       {children}
     </ClerkProvider>
   );

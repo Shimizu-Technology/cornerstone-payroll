@@ -5,9 +5,10 @@ import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 const clerk = vi.hoisted(() => ({ isSignedIn: true }));
-vi.mock('@clerk/clerk-react', () => ({
+vi.mock('@clerk/react', () => ({
   SignIn: () => <div data-testid="clerk-sign-in" />,
-  SignedOut: ({ children }: { children: ReactNode }) => (clerk.isSignedIn ? null : <>{children}</>),
+  Show: ({ when, children }: { when: string; children: ReactNode }) => (when === 'signed-out' && !clerk.isSignedIn ? <>{children}</> : null),
+  useClerk: () => ({ openUserProfile: () => undefined }),
 }));
 
 const auth = vi.hoisted(() => ({
