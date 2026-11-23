@@ -1,5 +1,9 @@
 Rails.application.routes.draw do
-  mount ActionCable.server => "/cable"
+  role = ProcessRole.current
+  payroll_routes = role != ProcessRole::EMPLOYEE_WEB
+  employee_routes = role != ProcessRole::PAYROLL_WEB
+
+  mount ActionCable.server => "/cable" if payroll_routes
 
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
@@ -26,7 +30,7 @@ Rails.application.routes.draw do
         get :billing_profiles, to: "access#billing_profiles"
         get :expenses, to: "access#expenses"
         get "expenses/:id", to: "access#expense"
-      end
+      end if payroll_routes
 
       namespace :integrations do
         post "time_payroll/events", to: "aire/events#create"
@@ -40,13 +44,13 @@ Rails.application.routes.draw do
         namespace :aire do
           post :events, to: "events#create"
         end
-      end
+      end if payroll_routes
 
       # Auth - current user info (Clerk JWT verified in ApplicationController)
       get "auth/me", to: "auth#me"
-      post "cable_ticket", to: "cable_tickets#create"
-      resource :notification_settings, only: [ :show, :update ]
-      get "companies", to: "companies#index"
+      post "cable_ticket", to: "cable_tickets#create" if payroll_routes
+      resource :notification_settings, only: [ :show, :update ] if payroll_routes
+      get "companies", to: "companies#index" if payroll_routes
 
       resources :form_500s, only: [] do
         collection do
@@ -55,11 +59,13 @@ Rails.application.routes.draw do
           post :preview
           post :download
         end
-      end
+      end if payroll_routes
 
       namespace :employee, module: :employee_portal do
         get :context, to: "context#show"
-      end
+      end if employee_routes
+
+      # Mount future kiosk routes under this same employee_routes guard.
 
       namespace :client do
         resource :employee_intake_settings, only: :show
@@ -152,7 +158,7 @@ Rails.application.routes.draw do
           get :annual_payroll_summary_pdf
           get :annual_payroll_summary_xlsx
         end
-      end
+      end if payroll_routes
 
       namespace :admin do
         resource :filing_submitter, only: [ :show, :update ]
@@ -850,7 +856,7 @@ Rails.application.routes.draw do
             patch ":id/brackets/:filing_status", to: "tax_configs#update_brackets"
           end
         end
-      end
+      end if payroll_routes
     end
   end
 
