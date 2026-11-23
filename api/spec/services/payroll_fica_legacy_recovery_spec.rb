@@ -3,8 +3,6 @@
 require "rails_helper"
 
 RSpec.describe PayrollFicaLegacyRecovery do
-  include ActiveSupport::Testing::TimeHelpers
-
   let!(:tax_table) { create(:tax_table) }
   let(:company) { create(:company, auto_create_fit_check: false) }
   let(:actor) { create(:user, company: company, role: "admin") }
@@ -92,53 +90,68 @@ RSpec.describe PayrollFicaLegacyRecovery do
     expect(PayrollItemFicaBasisProof.count).to eq(0)
   end
 
-  [ 2, 3 ].each do |version|
-    it "applies a legacy proof without invalidating a later committed v#{version} fingerprint or a pending approval" do
-      start = Time.utc(2024, 3, 1)
-      first = nil
-      travel_to(start) { first = calculate(employee, 1000) }
-      first.pay_period.update_columns(calculated_at: start, committed_at: start)
-      later = nil
-      travel_to(start + 1.day) { later = calculate(employee, 500) }
-      later.pay_period.update_columns(calculated_at: start + 1.day, committed_at: start + 1.day)
-      legacy!(first)
+  def save_fingerprint(item, version:)
+    prior = EmployeeYearFicaContext.new(employee: item.employee, year: 2024, excluding_pay_period_id: item.pay_period_id)
+    stored = prior.snapshot.merge("version" => version, "fingerprint" => prior.fingerprint_for(version))
+    item.update_columns(tax_rule_snapshot: item.tax_rule_snapshot.merge("annual_fica_context" => stored))
+  end
 
-      # Recreate a historical context captured with the first row's null
-      # bases. The later row's missing tip base has to replay this fingerprint.
-      prior = EmployeeYearFicaContext.new(employee: employee, year: 2024, excluding_pay_period_id: later.pay_period_id)
-      later_snapshot = prior.snapshot.merge("version" => version, "fingerprint" => prior.fingerprint_for(version))
-      later.update_columns(social_security_taxable_tips: nil,
-        tax_rule_snapshot: later.tax_rule_snapshot.merge("annual_fica_context" => later_snapshot))
+  def dependent_v2_history
+    first = calculate(employee, 1000)
+    later = calculate(employee, 170000)
+    # Known wages and zero tips allow a proof for the first row even above the cap.
+    first.update_columns(tax_rule_snapshot: {}, social_security_taxable_tips: nil)
+    save_fingerprint(later, version: 2)
+    later.update_columns(social_security_taxable_wages: nil)
+    [ first, later ]
+  end
 
-      pending = nil
-      travel_to(start + 2.days) do
-        EmployeeYearFicaSourceReview.record!(employee: employee, actor: actor, tax_year: 2024, through_pay_date: Date.new(2024, 12, 31),
-          external_ss_wage_bound: 0, external_medicare_wage_bound: 0, review_reference: "Reviewed synthetic outside wage sources")
-        pending = calculate(employee, 75, status: "calculated")
-      end
-      pending.pay_period.update_columns(calculated_at: start + 2.days)
-      saved_snapshot = pending.tax_rule_snapshot.fetch("annual_fica_context")
-      expect(saved_snapshot["mode"]).to eq(BelowThresholdFicaContext::MODE)
-      lifecycle = PayPeriodLifecycleService.new(pay_period: pending.pay_period, actor: actor)
-      lifecycle.approve!
-
-      plan = service.inventory
-      expect(plan[:employee_years].sole).to include(status: "ready",
-        rows: [ a_hash_including(status: "recoverable"), a_hash_including(status: "proven") ])
-      expect { apply(plan) }.to change(PayrollItemFicaBasisProof, :count).by(1)
-      expect(later.reload.tax_rule_snapshot.fetch("annual_fica_context")).to eq(later_snapshot)
-      expect(later.fica_basis_proof).to be_nil
-      expect(later.social_security_taxable_tips).to be_nil
-
-      lifecycle.commit!
-      expect(pending.reload.pay_period).to be_committed
-      expect(pending.tax_rule_snapshot.fetch("annual_fica_context")).to eq(saved_snapshot)
-      expect(service.inventory[:employee_years].sole[:status]).to eq("ready")
-      next_check = calculate(employee, 75, status: "calculated")
-      expect(next_check.social_security_tax).to eq("4.65".to_d)
-      expect(next_check.tax_rule_snapshot.fetch("annual_fica_context")).to include("version" => 3)
-      expect(next_check.tax_rule_snapshot.fetch("annual_fica_context")).not_to have_key("mode")
+  it "recovers v2-dependent bases regardless of the order in which classification receives rows" do
+    first, later = dependent_v2_history
+    plan = service.inventory
+    expect(plan[:employee_years].sole).to include(status: "ready",
+      rows: [ a_hash_including(status: "recoverable"), a_hash_including(status: "proven") ])
+    reversed = service
+    allow(reversed).to receive(:plan_employee).and_wrap_original do |method, employee, ledger, opening, history|
+      method.call(employee, ledger.reverse, opening, history)
     end
+    expect(reversed.inventory).to eq(plan)
+    expect { apply(plan) }.to change(PayrollItemFicaBasisProof, :count).by(1)
+    expect(PayrollItemFicaBasisProof.pluck(:payroll_item_id)).to eq([ first.id ])
+    expect(later.reload.social_security_taxable_wages).to be_nil
+    expect(calculate(employee, 75, status: "calculated").social_security_tax).to eq(0)
+  end
+
+  it "discards all candidates and restores dependent row labels when another row is held" do
+    complete = calculate(employee, 500)
+    first, later = dependent_v2_history
+    complete.update_columns(tax_rule_snapshot: complete.tax_rule_snapshot.merge("social_security_rate" => "0.061"))
+    # The first row now needs its own proof, while the dependent row cannot
+    # derive a capped wage base. A contradictory complete row blocks both.
+    plan = service.inventory
+    entry = plan[:employee_years].sole
+    expect(entry).to include(status: "held", reason: a_string_including("##{complete.id}", "Captured year rules"))
+    expect(entry[:rows]).to match([
+      a_hash_including(payroll_item_id: complete.id, status: "held"),
+      a_hash_including(payroll_item_id: first.id, status: "held"),
+      a_hash_including(payroll_item_id: later.id, status: "held")
+    ])
+    expect(entry[:rows].filter_map { |row| row[:proposed_bases] }).to be_empty
+    expect { apply(plan) }.not_to change(PayrollItemFicaBasisProof, :count)
+    complete.update_columns(tax_rule_snapshot: complete.tax_rule_snapshot.merge("social_security_rate" => "0.062"))
+    expect(service.inventory[:employee_years].sole[:rows].last).to include(payroll_item_id: later.id, status: "proven")
+  end
+
+  it "refuses a proof that would change a later committed v3 fingerprint" do
+    first = calculate(employee, 1000)
+    later = calculate(employee, 500)
+    legacy!(first)
+    save_fingerprint(later, version: 3)
+    snapshot = later.reload.tax_rule_snapshot
+    plan = service.inventory
+    expect(plan[:employee_years].sole).to include(status: "held", reason: a_string_including("Payroll item ##{later.id}", "lacks verified FICA bases"))
+    expect { apply(plan) }.not_to change(PayrollItemFicaBasisProof, :count)
+    expect(later.reload.tax_rule_snapshot).to eq(snapshot)
   end
 
   it "holds a complete paycheck with partial SS bases and discards proposed proofs for that employee" do
@@ -176,6 +189,36 @@ RSpec.describe PayrollFicaLegacyRecovery do
     end
   end
 
+  it "rolls back proofs when ordinary probes pass but fresh fingerprint verification fails" do
+    first = calculate(employee, 1000)
+    later = calculate(employee, 500)
+    legacy!(first)
+    save_fingerprint(later, version: 2)
+    plan = service.inventory
+    expect(plan[:employee_years].sole[:status]).to eq("ready")
+    allow(PayrollItemFicaBasisProof).to receive(:create!).and_wrap_original do |method, **attributes|
+      method.call(**attributes).tap do
+        invalid = later.tax_rule_snapshot.deep_merge("annual_fica_context" => { "fingerprint" => "0" * 64 })
+        later.update_columns(tax_rule_snapshot: invalid)
+        context = EmployeeYearFicaContext.new(employee: employee, year: 2024)
+        expect(context.recorded_increment(wages_delta: 1, tips_delta: 0, rules: tax_table_rule_snapshot)
+          .fetch(:social_security_taxable_wages)).to eq(1)
+      end
+    end
+
+    expect { apply(plan) }.to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError,
+      /Employee ##{employee.id}.*Payroll item ##{later.id}/)
+    expect(PayrollItemFicaBasisProof.count).to eq(0)
+    expect(later.reload.tax_rule_snapshot.dig("annual_fica_context", "fingerprint")).not_to eq("0" * 64)
+  end
+
+  it "holds a complete row with corrupted tax even when there are no candidate proofs" do
+    row = calculate(employee, 1000)
+    row.update_columns(social_security_tax: 61)
+    expect(service.inventory[:employee_years].sole).to include(status: "held",
+      reason: a_string_including("Payroll item ##{row.id}", "taxes do not reconcile"))
+  end
+
   it "holds a proof plan when an otherwise calculable ledger has a mismatched committed fingerprint" do
     first = calculate(employee, 1000)
     later = calculate(employee, 500)
@@ -184,7 +227,7 @@ RSpec.describe PayrollFicaLegacyRecovery do
     # can pass even though the fingerprint no longer describes the first row.
     plan = service.inventory
     expect(plan[:employee_years].sole).to include(status: "held",
-      reason: a_string_including("Verifying payroll item ##{later.id}", "lacks verified FICA bases"))
+      reason: a_string_including("Payroll item ##{later.id}", "lacks verified FICA bases"))
     expect { apply(plan) }.not_to change(PayrollItemFicaBasisProof, :count)
   end
 
@@ -204,6 +247,18 @@ RSpec.describe PayrollFicaLegacyRecovery do
         employee_ids: [ employee.id ])
     end.to change(PayrollItemFicaBasisProof, :count).by(1)
     expect(PayrollItemFicaBasisProof.pluck(:payroll_item_id)).to eq([ first.id ])
+  end
+
+  it "rejects foreign and nonexistent employee scopes for both entry points" do
+    foreign = create(:employee)
+    missing = Employee.maximum(:id) + 1
+    [ foreign.id, missing ].each do |id|
+      expect { service.inventory(employee_ids: [ id ]) }.to raise_error(ArgumentError, /must belong to the company/)
+      expect do
+        service.apply!(actor: actor, review_reference: "Scoped synthetic proof review", expected_digest: "0" * 64,
+          employee_ids: [ id ])
+      end.to raise_error(ArgumentError, /must belong to the company/)
+    end
   end
 
   it "binds recovery proofs into annual approval fingerprints and rejects altered financial evidence" do

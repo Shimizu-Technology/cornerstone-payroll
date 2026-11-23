@@ -24,14 +24,13 @@ class PayrollFicaLegacyRecovery
     unless review_reference.to_s.strip.length.between?(10, 1000)
       raise ArgumentError, "A review reference of 10–1000 characters is required"
     end
-    ids = normalize_employee_ids(employee_ids)
     ApplicationRecord.transaction(requires_new: true) do
       Company.lock.find(company.id)
       PayPeriod.where(company_id: company.id, pay_date: year_range).order(:id).lock.load
       AnnualTaxConfig.where(tax_year: year).order(:id).lock("FOR SHARE").load
       TaxTable.for_year(year).order(:id).lock("FOR SHARE").load
       self.class.new(company: company, year: year).apply_locked!(actor: actor, review_reference: review_reference.strip,
-        expected_digest: expected_digest, employee_ids: ids)
+        expected_digest: expected_digest, employee_ids: normalize_employee_ids(employee_ids))
     end
   end
 
@@ -51,16 +50,18 @@ class PayrollFicaLegacyRecovery
           plan_digest: plan[:plan_digest], review_reference: review_reference, evidence: evidence)
       end.size
     end
-    employees = company.employees.where(id: affected.pluck(:employee_id)).to_a
-    contexts = EmployeeYearFicaContext.batch(company: company, employees: employees, year: year)
+    employees = company.employees.where(id: affected.pluck(:employee_id)).index_by(&:id)
+    ledgers = EmployeeYearFicaContext.ledger_rows(EmployeeYearFicaContext.reportable_items(company: company,
+      employee_ids: employees.keys, year: year)).order(:id).group_by(&:employee_id)
+    openings = EmployeeYearFicaContext.opening_balances(company: company, employee_ids: employees.keys, year: year).group_by(&:employee_id)
     affected.each do |entry|
       employee_id = entry.fetch(:employee_id)
-      context = contexts.fetch(employee_id)
+      ledger = ledgers.fetch(employee_id)
+      context = verification_context(employees.fetch(employee_id), ledger, openings[employee_id]&.first)
       probe_ordinary!(context)
-      context.verify_recorded_history!(rules: year_rules)
+      verify_history!(context, ledger)
     rescue EmployeeYearFicaContext::UnreconciledLedgerError => error
-      last_item_id = entry.fetch(:rows).last.fetch(:payroll_item_id)
-      raise EmployeeYearFicaContext::UnreconciledLedgerError, "#{verification_location(employee_id, last_item_id)}: #{error.message}"
+      raise EmployeeYearFicaContext::UnreconciledLedgerError, "#{verification_location(employee_id, ledger.last.id)}: #{error.message}"
     end
     plan.merge(applied_proofs: created)
   end
@@ -72,7 +73,11 @@ class PayrollFicaLegacyRecovery
   def normalize_employee_ids(employee_ids)
     return if employee_ids.nil?
 
-    Array(employee_ids).map { |id| Integer(id.to_s, 10) }.uniq.sort
+    ids = Array(employee_ids).map { |id| Integer(id.to_s, 10) }.uniq.sort
+    unless company.employees.where(id: ids).count == ids.size
+      raise ArgumentError, "Every selected employee must belong to the company"
+    end
+    ids
   end
 
   def inventory_for(plans, employee_ids:)
@@ -109,7 +114,8 @@ class PayrollFicaLegacyRecovery
 
   def plan_employee(employee, ledger, opening, history)
     employee_id = employee.id
-    ids = ledger.map(&:id).sort
+    ledger = ledger.sort_by(&:id)
+    ids = ledger.map(&:id)
     history_reason = if history.map { |row| row[1] }.sort != ids
       "Excluded or financially reversed history requires reviewed reconciliation"
     elsif history.any? { |row| row[2].present? || row[3].nil? || row[3].negative? }
@@ -131,12 +137,10 @@ class PayrollFicaLegacyRecovery
       opening&.medicare_taxable_wages.to_d
     dependency_digest = FicaBasisEvidence.ledger_digest(ledger)
     opening_digest = FicaBasisEvidence.opening_digest(opening)
+    baseline = verification_context(employee, ledger, opening)
+    initial_states = ledger.map { |row| classify(row, ledger, opening, upper_bound, history_reason, baseline) }
     proofs = {}
-    proof_created_at = Time.current
-    context = EmployeeYearFicaContext.new(employee: employee, company: company, year: year, rows: ledger,
-      opening_balance: opening, planned_proofs: proofs, planned_proofs_created_at: proof_created_at)
-    reports = ledger.map do |row|
-      state = classify(row, ledger, opening, upper_bound, history_reason, context)
+    reports = ledger.zip(initial_states).map do |row, state|
       if state[:status] == "recoverable"
         proof = { "version" => 1, "year" => year, "employee_id" => employee_id,
           "row_digest" => FicaBasisEvidence.row_digest(row), "dependency_through_id" => ids.max, "dependency_count" => ids.size,
@@ -151,22 +155,58 @@ class PayrollFicaLegacyRecovery
       state.merge(payroll_item_id: row.id)
     end
     result = { employee_id: employee_id, tax_year: year, status: "ready", rows: reports, proofs: proofs }
-    context = EmployeeYearFicaContext.new(employee: employee, company: company, year: year, rows: ledger,
-      opening_balance: opening, planned_proofs: proofs, planned_proofs_created_at: proof_created_at)
+
+    simulated = with_planned_proofs(ledger, proofs)
+    context = proofs.empty? ? baseline : verification_context(employee, simulated, opening)
+    # Recheck dependent rows against the whole candidate set. This pass never
+    # adds more candidates, and the ordinary replay uses its own ledger order.
+    reports.zip(simulated).each do |report, row|
+      next if proofs.empty? || report[:status] != "held" || !captured_context_proven?(row, context, year_rules)
+
+      report.replace(proven_context.merge(payroll_item_id: row.id))
+    end
     raise EmployeeYearFicaContext::UnreconciledLedgerError, history_reason if invalid_source
 
     probe_ordinary!(context)
     ordinary_succeeds = true
-    context.verify_recorded_history!(rules: year_rules) if proofs.any?
+    if (held_row = reports.find { |report| report[:status] == "held" })
+      raise EmployeeYearFicaContext::UnreconciledLedgerError, "Payroll item ##{held_row[:payroll_item_id]}: #{held_row[:reason]}"
+    end
+    verify_history!(context, simulated)
     result
   rescue EmployeeYearFicaContext::UnreconciledLedgerError => error
-    # Eligible rows are written as a group only after the ordinary path passes.
     reason = "#{verification_location(employee_id, ids.last)}: #{error.message}"
-    reports.select { |report| report[:status] == "recoverable" }.each do |report|
-      report.replace(held(reason).merge(payroll_item_id: report.fetch(:payroll_item_id)))
+    restored = ledger.zip(initial_states).map do |row, state|
+      state = held(reason) if state[:status] == "recoverable"
+      state.merge(payroll_item_id: row.id)
     end
-    result.merge!(status: "held", reason: reason, proofs: {})
+    result.merge!(status: "held", reason: reason, rows: restored, proofs: {})
     ordinary_succeeds ? result : bounded_inventory(result, employee)
+  end
+
+  def verification_context(employee, ledger, opening)
+    VerificationContext.new(employee: employee, company: company, year: year, rows: ledger, opening_balance: opening)
+  end
+
+  def with_planned_proofs(ledger, proofs)
+    return ledger if proofs.empty?
+
+    # The live fingerprint hashes the JSONB key order returned by PostgreSQL.
+    connection = PayrollItem.connection
+    persisted_order = JSON.parse(connection.select_value("SELECT #{connection.quote(proofs.to_json)}::jsonb"))
+    ledger.map do |row|
+      proof = persisted_order[row.id.to_s]
+      proof ? PayrollItem.instantiate(row.attributes.merge("recorded_legacy_fica_proof" => proof)) : row
+    end
+  end
+
+  def verify_history!(context, ledger)
+    ledger.each do |row|
+      next if captured_rules_agree?(row, year_rules)
+
+      raise EmployeeYearFicaContext::UnreconciledLedgerError, "Payroll item ##{row.id}: captured year rules contradict verified year rules."
+    end
+    context.verify_recorded_history!(rules: year_rules)
   end
 
   def probe_ordinary!(context)
@@ -208,18 +248,16 @@ class PayrollFicaLegacyRecovery
 
   def classify(row, ledger, opening, upper_bound, history_reason, context)
     missing = FicaBasisEvidence::BASE_FIELDS.reject { |field| field == "medicare_taxable_wages" }.any? { |field| row.public_send(field).nil? }
+    rules = year_rules
+    return held("Verified year rules unavailable or inconsistent") unless rules
+    return held("Captured year rules contradict verified year rules; reviewed reconciliation required") unless captured_rules_agree?(row, rules)
     return { status: "complete", reason: "Recorded SS and Additional Medicare bases present" } unless missing
     if row[:recorded_legacy_fica_proof].present?
       valid = FicaBasisEvidence.verified_bases(row[:recorded_legacy_fica_proof], row: row, year: year, employee_id: row.employee_id)
       return valid ? { status: "proven", reason: "Reviewed proof matches financial history" } : held("Reviewed proof no longer matches financial history; separate reconciliation required")
     end
     return held(history_reason) if history_reason&.start_with?("Missing", "Opening")
-    rules = year_rules
-    return held("Verified year rules unavailable or inconsistent") unless rules
-    return held("Captured year rules contradict verified year rules; reviewed reconciliation required") unless captured_rules_agree?(row, rules)
-    if captured_context_proven?(row, context, rules)
-      return { status: "proven", reason: "Captured annual context and stored components remain verified" }
-    end
+    return proven_context if captured_context_proven?(row, context, rules)
     return held(history_reason) if history_reason
     gross = (row.medicare_taxable_wages || row.gross_pay).to_d
     tips = (row.cash_tips_reported || row.reported_tips).to_d
@@ -271,12 +309,11 @@ class PayrollFicaLegacyRecovery
   end
 
   def captured_context_proven?(row, context, rules)
-    return false unless row[:recorded_annual_fica_context].is_a?(Hash)
-    return false if row.additional_medicare_taxable_wages.nil? && row.additional_medicare_tax.nil?
-    recovered = context.send(:recovered_bases, row, rules)
-    FicaBasisEvidence.matches_recorded?(row, recovered)
-  rescue EmployeeYearFicaContext::UnreconciledLedgerError
-    false
+    rules && captured_rules_agree?(row, rules) && context.verified_basis?(row, rules)
+  end
+
+  def proven_context
+    { status: "proven", reason: "Captured annual context and stored components remain verified" }
   end
 
   def held(reason)

@@ -13,10 +13,11 @@ class BelowThresholdFicaContext
   ]).freeze
   PERIOD_FIELDS = %w[id company_id status pay_date parallel_run correction_status corrects_pay_period_id source_pay_period_id].freeze
 
-  def initialize(employee:, company:, year:, excluding_pay_period_id: nil, include_unverified_legacy: true, proof_cutoff: nil)
+  # Legacy recovery inventories pass include_unverified_legacy: false so a
+  # derivable legacy row keeps its reviewed-proof plan instead of this bound.
+  def initialize(employee:, company:, year:, excluding_pay_period_id: nil, include_unverified_legacy: true)
     @employee, @company, @year, @excluding_pay_period_id = employee, company, year, excluding_pay_period_id
     @include_unverified_legacy = include_unverified_legacy
-    @proof_cutoff = proof_cutoff
   end
 
   def applicable?
@@ -38,16 +39,12 @@ class BelowThresholdFicaContext
   def unverified_legacy_ids
     return [] unless @include_unverified_legacy
 
-    @unverified_legacy_ids ||= begin
-      scope = EmployeeYearFicaContext.reportable_items(company: company, employee_ids: candidate_employee_ids,
-        year: year, excluding_pay_period_id: excluding_pay_period_id).where(id: candidates.map(&:id)).left_joins(:fica_basis_proof)
-        .where("payroll_items.social_security_taxable_wages IS NULL OR payroll_items.social_security_taxable_tips IS NULL OR payroll_items.additional_medicare_taxable_wages IS NULL")
-        .where("jsonb_typeof(payroll_items.tax_rule_snapshot -> 'annual_fica_context' -> 'fingerprint') IS DISTINCT FROM 'string' OR " \
-          "payroll_items.tax_rule_snapshot -> 'annual_fica_context' ->> 'fingerprint' = ''")
-      no_proof = scope.where(payroll_item_fica_basis_proofs: { id: nil })
-      no_proof = no_proof.or(scope.where("payroll_item_fica_basis_proofs.created_at > ?", @proof_cutoff)) if @proof_cutoff
-      no_proof.order(:id).pluck(:id)
-    end
+    @unverified_legacy_ids ||= EmployeeYearFicaContext.reportable_items(company: company, employee_ids: candidate_employee_ids,
+      year: year, excluding_pay_period_id: excluding_pay_period_id).where(id: candidates.map(&:id)).left_joins(:fica_basis_proof)
+      .where("payroll_items.social_security_taxable_wages IS NULL OR payroll_items.social_security_taxable_tips IS NULL OR payroll_items.additional_medicare_taxable_wages IS NULL")
+      .where("jsonb_typeof(payroll_items.tax_rule_snapshot -> 'annual_fica_context' -> 'fingerprint') IS DISTINCT FROM 'string' OR " \
+        "payroll_items.tax_rule_snapshot -> 'annual_fica_context' ->> 'fingerprint' = ''")
+      .where(payroll_item_fica_basis_proofs: { id: nil }).order(:id).pluck(:id)
   end
 
   def snapshot(current_item:, rules:, lock_rules: false, reviewing_imports: false, include_imported_history: true)
@@ -109,7 +106,7 @@ class BelowThresholdFicaContext
     end
     source_digest = FicaBasisEvidence.digest([
       candidates.map { |item| [ item.attributes.slice(*SOURCE_FIELDS), FicaBasisEvidence.rule_evidence(item),
-        item.pay_period.attributes.slice(*PERIOD_FIELDS), item.legacy_disposition&.attributes, native_proof(item)&.evidence ] },
+        item.pay_period.attributes.slice(*PERIOD_FIELDS), item.legacy_disposition&.attributes, item.fica_basis_proof&.evidence ] },
       balances.map { |balance| [ balance.attributes, balance.historical_ytd_bridge.attributes ] },
       imported_paychecks.map { |row| [ ImportedPaycheckFicaEvidence.source(row),
         (row.fica_basis_proof&.evidence unless reviewing_imports) ] },
@@ -191,11 +188,6 @@ class BelowThresholdFicaContext
       "Historical tax and filing review remains open."
   end
 
-  def native_proof(item)
-    proof = item.fica_basis_proof
-    proof if proof && (!@proof_cutoff || proof.created_at <= @proof_cutoff)
-  end
-
   def validate_candidate!(item, rules)
     gross = amount(item.gross_pay)
     tips = amount(item.cash_tips_reported || item.reported_tips)
@@ -212,7 +204,7 @@ class BelowThresholdFicaContext
       recorded = item.public_send(field)
       hold!("Recorded historical FICA bases contradict uncapped wages") if recorded && amount(recorded) != value
     end
-    if (proof = native_proof(item))
+    if (proof = item.fica_basis_proof)
       proven = FicaBasisEvidence.verified_bases(proof.evidence, row: item, year: year, employee_id: item.employee_id)
       unless proven && expected.all? { |field, value| proven.fetch(field) == value }
         hold!("Reviewed historical FICA proof contradicts uncapped wages")
