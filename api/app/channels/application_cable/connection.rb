@@ -25,6 +25,11 @@ module ApplicationCable
       reject_unauthorized_connection unless user&.payroll_access_allowed?
       reject_unauthorized_connection unless StagingOutboundPolicy.tester?(user_id: user.id, email: user.email, id: user.clerk_id)
 
+      if MfaPolicy.required_for?(user: user) && !payload["mfa_verified"]
+        MfaPolicy.record_denial!(user: user, source: "action_cable", request_id: request.request_id)
+        reject_unauthorized_connection
+      end
+
       user
     end
 

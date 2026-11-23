@@ -6,8 +6,10 @@
 module ClerkAuthenticatable
   extend ActiveSupport::Concern
 
+  include MfaEnforceable
+
   included do
-    before_action :authenticate_user!, unless: :auth_disabled?
+    before_action :authenticate_user!, :enforce_mfa!, unless: :auth_disabled?
   end
 
   private
