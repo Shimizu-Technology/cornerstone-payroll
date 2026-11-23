@@ -46,3 +46,11 @@ it('shows SignIn when Clerk is signed out', async () => {
   await renderLogin();
   expect(screen.getByTestId('clerk-sign-in')).toBeTruthy();
 });
+
+it('links to the privacy policy and terms from the sign-in card', async () => {
+  clerk.isSignedIn = false;
+  auth.authProblem = null;
+  await renderLogin();
+  expect(screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href')).toBe('/privacy');
+  expect(screen.getByRole('link', { name: 'Terms of Service' }).getAttribute('href')).toBe('/terms');
+});

@@ -1,6 +1,6 @@
 import { SignIn, SignedOut, useClerk } from '@clerk/clerk-react';
 import { useState } from 'react';
-import { Navigate } from 'react-router';
+import { Link, Navigate } from 'react-router';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -181,6 +181,11 @@ export function Login() {
             }}
           />
           </SignedOut>
+          <p className="mt-6 text-center text-xs text-neutral-500">
+            <Link to="/privacy" className="font-semibold hover:text-primary-700">Privacy Policy</Link>
+            <span aria-hidden="true" className="mx-2">·</span>
+            <Link to="/terms" className="font-semibold hover:text-primary-700">Terms of Service</Link>
+          </p>
         </section>
       </div>
     </div>
