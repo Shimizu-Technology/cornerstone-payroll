@@ -54,6 +54,7 @@ module AirePayrollCockpit
         end,
         "exclusions" => payload.fetch("exclusions", []).map do |exclusion|
           exclusion.merge(
+            "exclusion_category" => TimeTracking::ExclusionSummary.category(exclusion["reason"]),
             "cornerstone" => mapping_payload(
               exclusion["source_user_uuid"] || exclusion["payroll_integration_id"],
               required: true
