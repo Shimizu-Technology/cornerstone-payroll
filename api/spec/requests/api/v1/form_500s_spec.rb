@@ -46,6 +46,23 @@ RSpec.describe "Api::V1::Form500s", type: :request do
     allow_any_instance_of(Api::V1::Form500sController).to receive(:current_company).and_return(company)
   end
 
+  it "rejects malformed, missing, and unauthorized explicit companies before reading payroll" do
+    other_company = create(:company)
+    allow_any_instance_of(Api::V1::Form500sController).to receive(:current_company_id).and_call_original
+
+    [ "not-an-id", "9999999999", other_company.id.to_s ].each do |company_header|
+      queries = []
+      observe = ->(event) { queries << event.payload[:sql] }
+      ActiveSupport::Notifications.subscribed(observe, "sql.active_record") do
+        get "/api/v1/form_500s/defaults", params: { pay_period_id: pay_period.id }, headers: { "X-Company-Id" => company_header }
+      end
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("company_context_unavailable")
+      expect(queries.grep(/\b(?:pay_periods|form500_filings)\b/)).to be_empty
+    end
+  end
+
   it "returns prefilled defaults, persists edits, and renders preview/download PDFs" do
     get "/api/v1/form_500s/defaults", params: { pay_period_id: pay_period.id }
 

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 require "json"
 
 namespace :clerk do
@@ -121,7 +123,7 @@ namespace :clerk do
     end
 
     desc "Apply Clerk user re-link atomically from a sealed MANIFEST (requires APPLY=true and TARGET_CLERK_SECRET_KEY)"
-    task apply: :environment do
+    RlsTask.system apply: :environment do
       abort "Refusing to apply Clerk re-link without APPLY=true." unless ENV["APPLY"] == "true"
       manifest_path = ENV["MANIFEST"].presence || abort("MANIFEST=/path/to/prod_manifest.json is required")
       target_secret = ENV["TARGET_CLERK_SECRET_KEY"].presence || abort("TARGET_CLERK_SECRET_KEY is required to verify target Clerk external_id before apply.")
@@ -142,7 +144,7 @@ namespace :clerk do
     end
 
     desc "Roll back Clerk user re-link atomically from a sealed MANIFEST (refuses to write unless APPLY=true)"
-    task rollback: :environment do
+    RlsTask.system rollback: :environment do
       abort "Refusing to roll back Clerk re-link without APPLY=true." unless ENV["APPLY"] == "true"
       manifest_path = ENV["MANIFEST"].presence || abort("MANIFEST=/path/to/prod_manifest.json is required")
 

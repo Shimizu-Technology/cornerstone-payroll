@@ -57,6 +57,7 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     tables = %i[time_tracking_financial_correction_links aire_payroll_entry_acknowledgements]
     tables.each do |table|
       key, parent = M3_7ChildCompanies::CHILDREN.fetch(table)
+      connection.execute("DROP POLICY company_isolation ON #{table}")
       connection.remove_column table, :company_id
       connection.add_column table, :company_id, :bigint
       connection.add_foreign_key table, parent, column: [ key, :company_id ], primary_key: %i[id company_id],
@@ -300,7 +301,10 @@ RSpec.describe "Exact work correction after accepted financial succession" do
       retained = models.to_h do |model|
         [ model, model.where(payroll_item: current).order(:id).map { |row| row.attributes.except("company_id") } ]
       end
-      tables.each { |table| connection.execute("ALTER TABLE #{table} DROP COLUMN company_id") }
+      tables.each do |table|
+        connection.execute("DROP POLICY company_isolation ON #{table}")
+        connection.remove_column table, :company_id
+      end
       connection.clear_cache!
       preview = service.preview
       disposition = confirm(preview)

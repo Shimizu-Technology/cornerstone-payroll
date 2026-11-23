@@ -22,7 +22,7 @@ module Api
           end
 
           def create
-            calendar_period = authenticate_period!
+            calendar_period = TenantScope.as_system(reason: "Resolve and authenticate AIRE calendar period") { authenticate_period! }
             return unless calendar_period
 
             body = request.request_parameters
@@ -32,16 +32,18 @@ module Api
             return invalid("actor is required") unless body["actor"].is_a?(Hash)
 
             source = calendar_period.time_tracking_source
-            result = Current.with_isolated_actor(AuditActor.source_system(source: source)) do
-              AirePayrollCalendar::CutoffChange.new(
-                pay_period: calendar_period.pay_period,
-                action: body["action"],
-                cutoff_at: body["cutoff_at"],
-                reason: body["reason"],
-                source_actor: actor_from(body["actor"]),
-                source: source,
-                request_id: request_id
-              ).call
+            result = TenantScope.with_company(calendar_period.company_id) do
+              Current.with_isolated_actor(AuditActor.source_system(source: source)) do
+                AirePayrollCalendar::CutoffChange.new(
+                  pay_period: calendar_period.pay_period,
+                  action: body["action"],
+                  cutoff_at: body["cutoff_at"],
+                  reason: body["reason"],
+                  source_actor: actor_from(body["actor"]),
+                  source: source,
+                  request_id: request_id
+                ).call
+              end
             end
             render json: { cutoff_change: serialize(result) }, status: result.idempotent ? :ok : :created
           rescue AirePayrollCalendar::CutoffChange::Error => e

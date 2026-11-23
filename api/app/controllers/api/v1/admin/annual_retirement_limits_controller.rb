@@ -24,6 +24,10 @@ module Api
 
         private
 
+        def rls_system_reason
+          "Write shared retirement limits and organization audit" unless action_name == "index"
+        end
+
         def require_platform_admin!
           render json: { error: "Only a platform administrator can change shared annual retirement limits" }, status: :forbidden unless current_user.super_admin?
         end

@@ -285,6 +285,10 @@ module Api
 
         private
 
+        def rls_system_reason
+          "Organization user administration and audit"
+        end
+
         # A practice login's copy closed (archived, expired, sealed). Activation
         # and invitations would fail model validation with an opaque message, so
         # say what happened and offer the move instead. An open copy whose grant

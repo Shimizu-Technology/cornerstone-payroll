@@ -79,11 +79,16 @@ module DatabaseIntegrity
       # Rails temporarily selects the schema target pool while loading each
       # database. Secondary Solid Cache/Queue/Cable schemas have no payroll tables.
       schema_pool = connection_pool
-      result = super
-      if schema_pool.db_config.primary?
-        schema_pool.with_connection { |connection| DatabaseIntegrity.install!(connection) }
+      return super unless schema_pool.db_config.primary?
+
+      TenantScope.as_system(reason: "Load the primary database schema") do
+        result = super
+        schema_pool.with_connection do |connection|
+          DatabaseIntegrity.install!(connection)
+          RlsDatabase.install!(connection)
+        end
+        result
       end
-      result
     end
   end
 end

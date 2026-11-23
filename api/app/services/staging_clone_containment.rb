@@ -16,6 +16,10 @@ class StagingCloneContainment
 
   # Default is a read-only plan. APPLY=true is deliberately explicit.
   def quarantine(apply: false)
+    TenantScope.as_system(reason: "Staging clone quarantine across companies") { quarantine_across_clone(apply: apply) }
+  end
+
+  private def quarantine_across_clone(apply: false)
     guard!
     return counts if !apply || StagingQuarantine.suppressed?("__quarantine_complete__", 0)
 
@@ -55,6 +59,10 @@ class StagingCloneContainment
   end
 
   def configure(apply: false)
+    TenantScope.as_system(reason: "Staging clone configure across companies") { configure_across_clone(apply: apply) }
+  end
+
+  private def configure_across_clone(apply: false)
     guard!
     return counts if marker?("__containment_complete__")
     unless TimeTrackingSource.column_names.include?("authorization_origin")
@@ -94,6 +102,10 @@ class StagingCloneContainment
   end
 
   def counts
+    TenantScope.as_system(reason: "Staging clone counts across companies") { counts_across_clone() }
+  end
+
+  private def counts_across_clone
     guard!
     result = {}
     ([ "solid_queue_jobs" ] + QUEUE_TABLES + DISPATCH.keys + TOKEN_TABLES).uniq.each do |table|

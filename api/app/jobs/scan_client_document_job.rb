@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class ScanClientDocumentJob < ApplicationJob
+  self.rls_mode = :record
+
   queue_as :default
   discard_on ActiveRecord::RecordNotFound
 

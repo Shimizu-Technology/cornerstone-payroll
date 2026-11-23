@@ -3,6 +3,8 @@
 # Pending records survive queue outages and worker termination. Reconcile a
 # bounded page on the existing scheduler; updated_at is the retry cooldown.
 class ClientDocumentScanRecoveryJob < ApplicationJob
+  self.rls_mode = :system
+
   queue_as :default
 
   STALE_AFTER = 15.minutes

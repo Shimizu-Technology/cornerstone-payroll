@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
+require_relative "../rls_task"
+
 require "csv"
 
 namespace :year_end do
   desc "Read-only per-company old/new W-2GU wage totals (YEAR=2026; optional COMPANY_ID)"
-  task wage_impact: :environment do
+  RlsTask.system wage_impact: :environment do
     year = Integer(ENV.fetch("YEAR", "2026"))
     # Database-enforced read-only transaction: no repair, backfill, seed or save.
     ActiveRecord::Base.transaction do

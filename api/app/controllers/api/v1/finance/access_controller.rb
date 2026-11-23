@@ -19,6 +19,7 @@ module Api
 
         before_action :authenticate_token!
         before_action :require_explicit_scope!
+        include CompanyRlsScoped
 
         def context
           render_scoped(book: @book.as_json(only: %i[id organization_id company_id name legal_name kind active]),
@@ -147,6 +148,10 @@ module Api
         end
 
         private
+
+        def rls_system_reason
+          "Finance book token can write organization-scoped audit events"
+        end
 
         def require_draft_write!
           return true if @token.scopes.include?("draft_write")

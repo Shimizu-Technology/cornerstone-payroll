@@ -9,6 +9,7 @@
 #       Choose the win32 build.
 #       Install PostgreSQL and put its /bin directory on your path.
 #
+<% require Rails.root.join("lib/rls_configuration") %>
 <% if (configured_pool_max = ENV["DB_POOL_MAX"].to_s.strip.presence)
      pool_max = Integer(configured_pool_max, 10)
      raise ArgumentError, "DB_POOL_MAX must be positive" unless pool_max.positive?
@@ -96,7 +97,7 @@ test:
 production:
   primary: &primary_production
     <<: *default
-    url: <%= ENV["DATABASE_URL"] %>
+    url: <%= (rls_url = RlsConfiguration.runtime_url) ? RlsConfiguration.direct_url!(rls_url, "RLS_DATABASE_URL") : ENV["DATABASE_URL"] %>
   cache:
     <<: *primary_production
     url: <%= ENV["CACHE_DATABASE_URL"].presence || ENV["DATABASE_URL"] %>

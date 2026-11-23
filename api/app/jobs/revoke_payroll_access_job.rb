@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class RevokePayrollAccessJob < ApplicationJob
+  self.rls_mode = :exempt_tables_only
+
   queue_as :default
 
   # A deactivated account must not keep an existing Cable subscription just

@@ -136,6 +136,10 @@ module Api
 
         private
 
+        def rls_system_reason
+          "Profitability reads across the organization"
+        end
+
         # The organization chosen in the switcher, sent as X-Organization-Id
         # and validated like the finance controllers do: a super admin may
         # name any organization (and must name one), everyone else only their

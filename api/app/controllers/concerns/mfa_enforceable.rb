@@ -10,11 +10,16 @@ module MfaEnforceable
   private
 
   def enforce_mfa!
-    return unless MfaPolicy.required_for?(user: @current_user)
-    return if MfaPolicy.verified_second_factor?(@clerk_token_payload)
+    deny_mfa!(@current_user) if mfa_verification_required_for?(@current_user)
+  end
 
+  def mfa_verification_required_for?(user)
+    MfaPolicy.required_for?(user: user) && !MfaPolicy.verified_second_factor?(@clerk_token_payload)
+  end
+
+  def deny_mfa!(user)
     MfaPolicy.record_denial!(
-      user: @current_user, source: "clerk_session", subject_name: @current_user.name,
+      user: user, source: "clerk_session", subject_name: user.name,
       request_id: request.request_id, ip_address: request.remote_ip, user_agent: request.user_agent
     )
     render_mfa_required

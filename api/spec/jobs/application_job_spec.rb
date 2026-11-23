@@ -7,6 +7,8 @@ RSpec.describe ApplicationJob do
 
   before do
     stub_const("AuditContextProbeJob", Class.new(described_class) do
+      self.rls_mode = :system
+
       def perform(fail: false)
         AuditLog.record!(action: "audit_probe#performed", record_type: "probe")
         raise "job failed" if fail
@@ -16,6 +18,8 @@ RSpec.describe ApplicationJob do
 
   it "keeps the job actor in a discard handler and restores the caller" do
     stub_const("DiscardAuditProbeJob", Class.new(described_class) do
+      self.rls_mode = :system
+
       discard_on ArgumentError do
         AuditLog.record!(action: "audit_probe#discarded", record_type: "probe")
       end

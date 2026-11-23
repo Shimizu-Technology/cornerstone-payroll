@@ -109,6 +109,14 @@ class AuditLogPresenter
   }.freeze
 
   def self.preload_pay_period_subjects(logs)
+    return load_pay_period_subjects(logs) if TenantScope.current
+
+    TenantScope.as_system(reason: "Load audit subjects from already-authorized audit events") do
+      load_pay_period_subjects(logs)
+    end
+  end
+
+  def self.load_pay_period_subjects(logs)
     references = logs.filter_map { |log| pay_period_reference(log) }.uniq
     return {} if references.empty?
 
@@ -129,6 +137,14 @@ class AuditLogPresenter
   # Older run rows stored only an employee ID. Names are read in one query,
   # each within the row's own client.
   def self.preload_employee_names(logs)
+    return load_employee_names(logs) if TenantScope.current
+
+    TenantScope.as_system(reason: "Load audit subjects from already-authorized audit events") do
+      load_employee_names(logs)
+    end
+  end
+
+  def self.load_employee_names(logs)
     references = logs.filter_map do |log|
       next unless PayRunActivityPhrase.handles?(log.action) && log.company_id.present?
       next if log.subject_name.present? || log.metadata&.dig("employee_name").present?
@@ -146,6 +162,8 @@ class AuditLogPresenter
         names[reference] = employee.full_name if reference_set.key?(reference)
       end
   end
+
+  private_class_method :load_pay_period_subjects, :load_employee_names
 
   def self.pay_period_reference(log)
     pay_period_id = if %w[PayPeriod pay_period payperiod pay_periods].include?(log.record_type)
@@ -226,7 +244,7 @@ class AuditLogPresenter
     reference = [ log.company_id, log.record_id.to_i ]
     return @resolved_pay_period_subject = @pay_period_subjects[reference] if @pay_period_subjects.key?(reference)
 
-    pay_period = PayPeriod.select(:start_date, :end_date).find_by(id: log.record_id, company_id: log.company_id)
+    pay_period = find_pay_period(log.record_id)
     @resolved_pay_period_subject = AuditRecordSnapshot.subject_name(pay_period)
   end
 
@@ -247,7 +265,7 @@ class AuditLogPresenter
     return "the run" if pay_period_id.blank?
 
     subject = @pay_period_subjects[[ log.company_id, pay_period_id ]] ||
-      AuditRecordSnapshot.subject_name(PayPeriod.select(:start_date, :end_date).find_by(id: pay_period_id, company_id: log.company_id))
+      AuditRecordSnapshot.subject_name(find_pay_period(pay_period_id))
     subject.present? ? "the #{subject} run" : "the run"
   end
 
@@ -257,7 +275,21 @@ class AuditLogPresenter
     return if log.company_id.blank?
     return @employee_names[[ log.company_id, employee_id.to_i ]] if @employee_names
 
-    Employee.select(:id, :first_name, :middle_name, :last_name).find_by(company_id: log.company_id, id: employee_id)&.full_name.presence
+    with_audit_subject_scope do
+      Employee.select(:id, :first_name, :middle_name, :last_name).find_by(company_id: log.company_id, id: employee_id)&.full_name.presence
+    end
+  end
+
+  def find_pay_period(id)
+    with_audit_subject_scope do
+      PayPeriod.select(:start_date, :end_date).find_by(id: id, company_id: log.company_id)
+    end
+  end
+
+  def with_audit_subject_scope(&lookup)
+    return yield if TenantScope.current || log.company_id.blank?
+
+    TenantScope.with_company(log.company_id, &lookup)
   end
 
   def report_action?
@@ -328,7 +360,7 @@ class AuditLogPresenter
     reference = [ log.company_id, pay_period_id.to_i ]
     return @resolved_report_pay_period_subject = @pay_period_subjects[reference] if @pay_period_subjects.key?(reference)
 
-    pay_period = PayPeriod.select(:start_date, :end_date).find_by(id: pay_period_id, company_id: log.company_id)
+    pay_period = find_pay_period(pay_period_id)
     @resolved_report_pay_period_subject = AuditRecordSnapshot.subject_name(pay_period)
   end
 end
