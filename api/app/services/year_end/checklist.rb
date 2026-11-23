@@ -698,6 +698,8 @@ module YearEnd
 
         message = if warning[:kind] == "blocker"
           "#{warning[:title]}: fix #{warning[:employees].length} employee#{'s' unless warning[:employees].length == 1}."
+        elsif warning[:kind] == "history_review"
+          "#{warning[:title]}: record a decision in Payroll history review."
         elsif warning[:acknowledgement_stale]
           "#{warning[:title]}: the data changed after it was reviewed. Review it again."
         else
