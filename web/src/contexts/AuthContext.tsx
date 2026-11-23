@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth as useClerkAuth } from '@clerk/clerk-react';
-import { ApiError, authApi, setAuthToken, setAuthTokenProvider } from '@/services/api';
+import { ApiError, authApi, MFA_REQUIRED_EVENT, setAuthToken, setAuthTokenProvider } from '@/services/api';
 import { clearAllDrafts } from '@/components/client-portal/messageDrafts';
 
 interface User {
@@ -38,7 +38,7 @@ interface AuthContextType {
   isClient: boolean;
   hasCapability: (capability: string) => boolean;
   signOut: () => Promise<void>;
-  refreshUser: () => Promise<void>;
+  refreshUser: (options?: { skipTokenCache?: boolean }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -51,7 +51,13 @@ function authProblemFrom(err: unknown): AuthProblem {
   }
   return { status: null, message: err instanceof Error ? err.message : 'Could not load your account' };
 }
-type AuthResponseUser = Awaited<ReturnType<typeof authApi.me>>['user'];
+const mfaRequiredProblem: AuthProblem = {
+  status: 403,
+  code: 'mfa_required',
+  message: 'Multi-factor authentication is required before accessing payroll.',
+};
+
+type AuthResponseUser = NonNullable<Awaited<ReturnType<typeof authApi.me>>['user']>;
 
 function mapAuthUser(user: AuthResponseUser): User {
   return {
@@ -97,7 +103,11 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
 
     // In dev mode, just fetch /auth/me without a token
     authApi.me()
-      .then((res) => { setUser(mapAuthUser(res.user)); setAuthProblem(null); })
+      .then((res) => {
+        if (!res.user) throw new Error('Could not load your account');
+        setUser(mapAuthUser(res.user));
+        setAuthProblem(null);
+      })
       .catch((err) => { setUser(null); setAuthProblem(authProblemFrom(err)); })
       .finally(() => setIsLoading(false));
   }, []);
@@ -122,6 +132,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         },
         refreshUser: async () => {
           const res = await authApi.me();
+          if (!res.user) throw new Error('Could not load your account');
           setUser(mapAuthUser(res.user));
           setAuthProblem(null);
         },
@@ -150,7 +161,18 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
     setAuthTokenProvider(() => getToken());
   }, [isSignedIn, getToken]);
 
-  const refreshUser = useCallback(async () => {
+  useEffect(() => {
+    if (!isSignedIn) return;
+
+    const requireMfa = () => {
+      setUser(null);
+      setAuthProblem(mfaRequiredProblem);
+    };
+    window.addEventListener(MFA_REQUIRED_EVENT, requireMfa);
+    return () => window.removeEventListener(MFA_REQUIRED_EVENT, requireMfa);
+  }, [isSignedIn]);
+
+  const refreshUser = useCallback(async (options?: { skipTokenCache?: boolean }) => {
     if (!isSignedIn) {
       setUser(null);
       backendUnauthorized.current = false;
@@ -164,13 +186,20 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      const token = await getToken();
+      const token = options?.skipTokenCache ? await getToken({ skipCache: true }) : await getToken();
       if (token) {
         // Set token for API calls
         setAuthToken(token);
       }
 
       const res = await authApi.me();
+      if (res.mfa_required === true && res.mfa_verified === false) {
+        setUser(null);
+        setAuthProblem(mfaRequiredProblem);
+        return;
+      }
+
+      if (!res.user) throw new Error('Could not load your account');
       setUser(mapAuthUser(res.user));
       setAuthProblem(null);
     } catch (err) {
@@ -191,7 +220,9 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         setAuthProblem(problem);
-        console.error('Failed to load user:', err);
+        if (problem.status !== 403 || problem.code !== 'mfa_required') {
+          console.error('Failed to load user:', err);
+        }
       }
     } finally {
       setIsLoading(false);
@@ -237,7 +268,14 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
           setAuthProblem(null);
           clearAllDrafts();
           authApi.logout();
-          await clerkSignOut();
+          try {
+            await clerkSignOut();
+          } catch (error) {
+            if (authProblem?.status === 403 && authProblem.code === 'mfa_required') {
+              setAuthProblem({ ...authProblem, signOutFailed: true });
+            }
+            throw error;
+          }
         },
         refreshUser,
       }}

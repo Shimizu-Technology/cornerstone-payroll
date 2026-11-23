@@ -4,6 +4,20 @@ require "rails_helper"
 
 RSpec.describe CableTicketService do
   describe ".issue!" do
+    it "rejects direct issuance for unverified staff even without an HTTP controller" do
+      user = create(:user, role: :admin)
+      allow(MfaPolicy).to receive(:enabled?).and_return(true)
+
+      expect do
+        described_class.issue!(user: user, company_id: user.company_id, clerk_token_payload: { "fva" => [ 5, -1 ] })
+      end.to raise_error(MfaPolicy::VerificationRequired)
+
+      expect(CableConnectionTicket.count).to eq(0)
+      expect(AuditLog.last).to have_attributes(
+        action: "authentication#mfa_required_denied", event_category: "security", metadata: { "source" => "cable_ticket" }
+      )
+    end
+
     it "removes stale consumed or expired tickets before issuing a new ticket" do
       company = create(:company)
       user = create(:user, company: company)

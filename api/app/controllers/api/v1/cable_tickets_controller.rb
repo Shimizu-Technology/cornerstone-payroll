@@ -11,7 +11,10 @@ module Api
         end
 
         render json: {
-          ticket: CableTicketService.issue!(user: current_user, company_id: current_company_id),
+          ticket: CableTicketService.issue!(
+            user: current_user, company_id: current_company_id,
+            clerk_token_payload: @clerk_token_payload, request_id: request.request_id
+          ),
           expires_in: CableTicketService::TTL.to_i
         }, status: :created
       end

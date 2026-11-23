@@ -46,4 +46,35 @@ RSpec.describe ApplicationCable::Connection, type: :channel do
     expect(connection.current_user).to eq(user)
     expect(connection.current_company).to eq(company)
   end
+
+  describe "MFA at connection time" do
+    around do |example|
+      previous = ENV["REQUIRE_MFA"]
+      ENV["REQUIRE_MFA"] = "false"
+      example.run
+    ensure
+      ENV["REQUIRE_MFA"] = previous
+    end
+
+    it "rejects a ticket issued before enforcement was enabled" do
+      ticket = issue_ticket
+      ENV["REQUIRE_MFA"] = "true"
+
+      expect { connect params: { ticket: ticket } }.to have_rejected_connection
+      expect(AuditLog.last).to have_attributes(
+        action: "authentication#mfa_required_denied", event_category: "security", metadata: { "source" => "action_cable" }
+      )
+    end
+
+    it "accepts a verified ticket once and retains the ticket's company scope" do
+      ENV["REQUIRE_MFA"] = "true"
+      ticket = CableTicketService.issue!(user: user, company_id: company.id, clerk_token_payload: { "fva" => [ 5, 0 ] })
+
+      connect params: { ticket: ticket }
+
+      expect(connection.current_user).to eq(user)
+      expect(connection.current_company).to eq(company)
+      expect { connect params: { ticket: ticket } }.to have_rejected_connection
+    end
+  end
 end
