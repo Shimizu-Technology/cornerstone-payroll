@@ -118,7 +118,8 @@ RSpec.describe BelowThresholdFicaContext do
   def resolve_history(subject_type, code)
     entries = PayrollHistoryReview::Detector.new(company: company, tax_year: 2026).call(apply: true).fetch(:items)
     item = entries.map(&:first).find { |entry| entry.subject_type == subject_type }
-    PayrollHistoryReview::Resolution.new(item: item, user: actor, actor: AuditActor.for_user(actor))
+    PayrollHistoryReview::Resolution.new(company: company, tax_year: 2026,
+      subject_key: PayrollHistoryReview::Subject.key_for(item).join("-"), user: actor, actor: AuditActor.for_user(actor))
       .resolve!(code: code, reference: "Synthetic review documentation", expected_digest: item.subject_digest).first
   end
 
@@ -167,7 +168,8 @@ RSpec.describe BelowThresholdFicaContext do
     lifecycle = PayPeriodLifecycleService.new(pay_period: after.pay_period, actor: actor)
     lifecycle.approve!
     saved_checksum = checksum(after)
-    PayrollHistoryReview::Resolution.new(item: gap, user: actor, actor: AuditActor.for_user(actor))
+    PayrollHistoryReview::Resolution.new(company: company, tax_year: 2026,
+      subject_key: PayrollHistoryReview::Subject.key_for(gap).join("-"), user: actor, actor: AuditActor.for_user(actor))
       .reopen!(reason: "Another statement needs review", expected_digest: gap.subject_digest)
     expect(checksum(after)).to eq(saved_checksum)
     expect { lifecycle.commit! }.to change { after.pay_period.reload.status }.from("approved").to("committed")

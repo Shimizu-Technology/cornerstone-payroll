@@ -80,7 +80,8 @@ RSpec.describe PayrollHistoryReview::Detector do
   it "reopens a changed subject once and retains the original decision in the audit" do
     original = paycheck(period(correction_status: "voided", void_reason: "Original payment voided"))
     item = apply.fetch(:items).sole.first
-    resolution = PayrollHistoryReview::Resolution.new(item: item, user: actor, actor: AuditActor.for_user(actor))
+    resolution = PayrollHistoryReview::Resolution.new(company: company, tax_year: 2026,
+      subject_key: PayrollHistoryReview::Subject.key_for(item).join("-"), user: actor, actor: AuditActor.for_user(actor))
     original_digest = item.subject_digest
     resolution.resolve!(code: "void_reissued", reference: "Reissue evidence reviewed", expected_digest: original_digest)
     original.pay_period.update_columns(void_reason: "New evidence of cancellation")
@@ -94,5 +95,50 @@ RSpec.describe PayrollHistoryReview::Detector do
     audit = AuditLog.find_by!(action: "payroll_history_review#reopen", record_id: item.id)
     expect(audit.metadata.fetch("previous_resolution")).to include("resolution_code" => "void_reissued",
       "resolved_by_id" => actor.id, "resolution_reference" => "Reissue evidence reviewed", "subject_digest" => original_digest)
+  end
+  it "ignores empty and contractor-only voids" do
+    period(correction_status: "voided")
+    paycheck(period(correction_status: "voided"), employment_type: "contractor")
+    expect(apply.fetch(:items)).to be_empty
+  end
+
+  it "blocks detector writes in maintenance and sealed workspaces" do
+    paycheck(period(correction_status: "voided"))
+    allow(WriteMaintenance).to receive(:enabled?).and_return(true)
+    expect { apply }.to raise_error(PayrollHistoryReview::Resolution::Maintenance)
+    expect(detector.call.fetch(:counts)).to eq(new: 1)
+
+    allow(WriteMaintenance).to receive(:enabled?).and_return(false)
+    company.update_columns(test_workspace_sealed_at: Time.current)
+    expect { apply }.to raise_error(PayrollHistoryReview::Resolution::Forbidden)
+    expect(PayrollHistoryReviewItem.count).to eq(0)
+  end
+
+  it "auto-resolves a fully proven gap, then reopens if a new paycheck has only partial proof coverage" do
+    create(:tax_table, tax_year: 2026, ss_wage_base: 184500)
+    paycheck(social_security_taxable_wages: nil, additional_medicare_taxable_wages: nil, additional_medicare_tax: 0)
+    item, subject = apply.fetch(:items).sole
+    resolution = PayrollHistoryReview::Resolution.new(company: company, tax_year: 2026,
+      subject_key: subject.route_key, user: actor, actor: AuditActor.for_user(actor))
+    resolution.resolve!(code: "legacy_basis_accepted", reference: "Checked original statements", expected_digest: item.subject_digest)
+    before_proofs = YearEnd::InputRevision.for(company.id, 2026)
+    recovery = PayrollFicaLegacyRecovery.new(company: company, year: 2026)
+    recovery.apply!(actor: actor, review_reference: "Checked archived FICA proof",
+      expected_digest: recovery.inventory.fetch(:plan_digest))
+    expect(YearEnd::InputRevision.for(company.id, 2026)).not_to eq(before_proofs)
+
+    expect(detector.call.fetch(:items).sole.first).to have_attributes(status: "resolved",
+      resolution_code: PayrollHistoryReviewItem::PROVEN_CODE, resolved_by_id: nil)
+    expect(item.reload.resolution_code).to eq("legacy_basis_accepted")
+    expect(apply.fetch(:counts)).to eq(proven: 1)
+    expect(apply.fetch(:counts)).to eq(resolved: 1)
+    expect(item.reload).to be_system_proven
+    audit = AuditLog.where(record_id: item.id, action: "payroll_history_review#resolve").newest_first.first
+    expect(audit).to have_attributes(actor_type: "system_job", actor_name: "Payroll history detection")
+    expect(audit.metadata.dig("previous_resolution", "resolution_code")).to eq("legacy_basis_accepted")
+
+    paycheck(additional_medicare_taxable_wages: nil)
+    expect(apply.fetch(:counts)).to eq(reopened: 1)
+    expect(item.reload).not_to be_resolved
   end
 end

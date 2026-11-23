@@ -211,6 +211,27 @@ RSpec.describe "Year-end checklist", type: :request do
       record_decision(filing_types: %w[form_1099], party: "no_filing")
     end
 
+    it "invalidates ready and e-file checks when the accepted legacy review is reopened" do
+      employee.payroll_items.sole.update_columns(fit_taxable_wages: nil)
+      detector = PayrollHistoryReview::Detector.new(company: company, tax_year: 2026)
+      item, subject = detector.call.fetch(:items).sole
+      resolution = PayrollHistoryReview::Resolution.new(company: company, tax_year: 2026,
+        subject_key: subject.route_key, user: admin, actor: AuditActor.for_user(admin))
+      resolution.resolve!(code: "legacy_basis_accepted", reference: "Reviewed archived wage statements", expected_digest: item.subject_digest)
+      mark_ready
+      expect(list_row).to include("status" => "ready")
+      accepted_revision = YearEnd::InputRevision.for(company.id, 2026)[company.id]
+
+      resolution.reopen!(reason: "More evidence arrived", expected_digest: item.subject_digest)
+
+      expect(YearEnd::InputRevision.for(company.id, 2026)[company.id]).not_to eq(accepted_revision)
+      expect(list_row.fetch("status")).not_to eq("ready")
+      expect(checklist_step("review_warnings").dig("data", "warnings")).to include(
+        a_hash_including("code" => "legacy_tax_bases", "status" => "needs_review"))
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2026, notes: "Attempt a second sign-off" }
+      expect(response).not_to have_http_status(:ok)
+    end
+
     it "keeps known issues visible while a stale check is queued only once" do
       mark_ready
       company.update!(ein: nil)
@@ -657,6 +678,16 @@ RSpec.describe "Year-end checklist", type: :request do
   end
 
   describe "POST /api/v1/admin/year_end/acknowledgements" do
+    it "requires recording legacy taxable-wage decisions from Payroll history review" do
+      post "/api/v1/admin/year_end/acknowledgements", params: { acknowledgement: {
+        tax_year: 2026, warning_code: "legacy_tax_bases", warning_digest: "a" * 64, note: "Attempt direct acknowledgement"
+      } }
+
+      expect(response.status).to eq(422)
+      expect(response.parsed_body.fetch("error")).to include("Payroll history review")
+      expect(YearEndAcknowledgement.exists?(company: company, warning_code: "legacy_tax_bases")).to be(false)
+    end
+
     before do
       pay(company, Date.new(2026, 4, 3), worker: employee, overtime_hours: 4, qualified_overtime_compensation: nil)
       record_decision(filing_types: %w[w2_gu form_1099], party: "cornerstone")

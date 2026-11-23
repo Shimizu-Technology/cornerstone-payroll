@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/services/api';
 import { PayrollHistoryReview } from './PayrollHistoryReview';
 import type { HistoryReviewItem } from '@/services/payroll-history-review';
 
@@ -11,7 +12,7 @@ vi.mock('@/services/payroll-history-review', async (importOriginal) => ({
 }));
 
 const openItem: HistoryReviewItem = {
-  id: 11, subject_type: 'voided_pay_period', status: 'open', subject_digest: 'a'.repeat(64),
+  id: 'voided_pay_period-17', can_reopen: true, subject_type: 'voided_pay_period', status: 'open', subject_digest: 'a'.repeat(64),
   resolution_codes: ['void_replaced', 'void_reissued', 'other'],
   resolution_code: null, resolved_by: null, resolved_at: null, resolution_reference: null,
   facts: { id: 17, start_date: '2026-02-01', end_date: '2026-02-14', pay_date: '2026-02-20', status: 'committed',
@@ -21,7 +22,7 @@ const openItem: HistoryReviewItem = {
 };
 
 const resolvedItem: HistoryReviewItem = {
-  id: 12, subject_type: 'legacy_basis_gap', status: 'resolved', subject_digest: 'b'.repeat(64),
+  id: 'legacy_basis_gap-10', can_reopen: true, subject_type: 'legacy_basis_gap', status: 'resolved', subject_digest: 'b'.repeat(64),
   resolution_code: 'legacy_basis_accepted', resolved_by: 'Sample Reviewer', resolved_at: '2026-05-12T01:00:00Z',
   resolution_reference: 'Reconciled to the original wage statements', resolution_codes: ['legacy_basis_accepted'],
   facts: { employee_name: 'Sample Employee', paychecks: [{ id: 19, pay_date: '2026-02-20', gross_pay: '1000',
@@ -42,9 +43,17 @@ describe('PayrollHistoryReview', () => {
     const region = screen.getByRole('region', { name: 'Payroll history review' });
     await within(region).findByText('Void reason: Rate corrected');
     expect(mocks.list).toHaveBeenCalledWith(7, 2026);
+    expect(within(region).getByText('Admins can record these decisions.')).toBeTruthy();
+    const resolvedGroup = within(region).getByText('Resolved (1)');
+    expect(resolvedGroup.parentElement?.hasAttribute('open')).toBe(false);
+    fireEvent.click(resolvedGroup);
     expect(within(region).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
       .toEqual(['Voided payroll #17', 'Sample Employee · Missing stored taxable wages']);
     expect(within(region).getByText(/Possible replacement #18.*\$1,240.00/)).toBeTruthy();
+    expect(within(region).getByText(/1 older paycheck.*Stored SS.*62.00/)).toBeTruthy();
+    const disclosure = within(region).getByText('Show paychecks');
+    expect(disclosure.parentElement?.hasAttribute('open')).toBe(false);
+    fireEvent.click(disclosure);
     expect(within(region).getByText(/Stored employee tax.*\$62.00.*\$14.50/)).toBeTruthy();
     expect(within(region).getByText(/Reviewed by Sample Reviewer on/)).toBeTruthy();
     expect(within(region).queryByRole('button', { name: /resolve|reopen/i })).toBeNull();
@@ -73,10 +82,43 @@ describe('PayrollHistoryReview', () => {
     expect(await screen.findByText('No payroll history items need review for this year.')).toBeTruthy();
     expect(screen.getByText('Checked the replacement payroll')).toBeTruthy();
 
+    fireEvent.click(screen.getByText('Resolved (1)'));
     fireEvent.click(screen.getByRole('button', { name: 'Reopen Voided payroll #17' }));
     fireEvent.change(screen.getByLabelText('Why are you reopening this item?'), { target: { value: 'New evidence' } });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm reopen' }));
     expect(await screen.findByRole('button', { name: 'Resolve Voided payroll #17' })).toBeTruthy();
     expect(mocks.change).toHaveBeenLastCalledWith(7, 2026, closed, { reason: 'New evidence' });
   });
+  it('refreshes changed evidence after a stale decision and submits against the new digest', async () => {
+    const changed = { ...openItem, subject_digest: 'c'.repeat(64), facts: { ...openItem.facts, void_reason: 'New payment evidence' } };
+    mocks.list.mockResolvedValueOnce({ data: [openItem], can_review: true }).mockResolvedValueOnce({ data: [changed], can_review: true });
+    mocks.change.mockRejectedValueOnce(new ApiError('Payroll history changed.', 409)).mockResolvedValueOnce({ data: changed });
+    mount();
+
+    async function decide() {
+      fireEvent.click(await screen.findByRole('button', { name: 'Resolve Voided payroll #17' }));
+      fireEvent.change(screen.getByLabelText('Resolution reason'), { target: { value: 'void_replaced' } });
+      fireEvent.change(screen.getByLabelText('Review reference'), { target: { value: 'Reviewed the payment records' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm resolution' }));
+    }
+
+    await decide();
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Payroll history changed.');
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh review items' }));
+    expect(await screen.findByText('Void reason: New payment evidence')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await decide();
+    await waitFor(() => expect(mocks.change).toHaveBeenLastCalledWith(7, 2026, changed,
+      { resolution_code: 'void_replaced', reference: 'Reviewed the payment records' }));
+  });
+
+  it('retries a failed list request', async () => {
+    mocks.list.mockRejectedValueOnce(new Error('Connection failed')).mockResolvedValueOnce({ data: [openItem], can_review: false });
+    mount();
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Connection failed');
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Void reason: Rate corrected')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
 });

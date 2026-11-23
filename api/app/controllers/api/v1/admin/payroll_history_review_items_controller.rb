@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class PayrollHistoryReviewItemsController < BaseController
+        skip_before_action :track_authenticated_user_activity, only: %i[index show]
+
         before_action :require_selected_company!
         before_action :load_year
 
@@ -23,17 +25,20 @@ module Api
           render json: { error: error.message }, status: :forbidden
         end
 
+        rescue_from PayrollHistoryReview::Resolution::Maintenance do |error|
+          render_write_maintenance(error.message)
+        end
+
         def index
-          entries = detected_entries.sort_by { |item, _subject| [ item.resolved? ? 1 : 0, item.subject_type, item.id ] }
+          entries = detected_entries.sort_by { |item, subject| [ item.resolved? ? 1 : 0, subject.type, subject.id ] }
           render json: {
             data: entries.map { |entry| serialize(*entry) },
-            can_review: StaffRolePolicy.allowed?(current_user, :review_payroll_history) && !current_company.test_workspace_read_only?
+            can_review: StaffRolePolicy.allowed?(current_user, :review_payroll_history) && !current_company.test_workspace_read_only? && !WriteMaintenance.enabled?
           }
         end
 
         def show
-          item = scoped_item
-          entry = detected_entries.find { |record, _subject| record.id == item.id }
+          entry = detected_entries.find { |_item, subject| subject.route_key == params[:id] }
           raise ActiveRecord::RecordNotFound unless entry
 
           render json: { data: serialize(*entry) }
@@ -69,21 +74,18 @@ module Api
         end
 
         def detected_entries
-          PayrollHistoryReview::Detector.new(company: current_company, tax_year: @tax_year).call(apply: true).fetch(:items)
-        end
-
-        def scoped_item
-          PayrollHistoryReviewItem.where(company: current_company, tax_year: @tax_year).find(params[:id])
+          PayrollHistoryReview::Detector.new(company: current_company, tax_year: @tax_year).call.fetch(:items)
         end
 
         def resolution
-          PayrollHistoryReview::Resolution.new(item: scoped_item, user: current_user, actor: Current.actor)
+          PayrollHistoryReview::Resolution.new(company: current_company, tax_year: @tax_year, subject_key: params[:id],
+            user: current_user, actor: Current.actor)
         end
 
         def serialize(item, subject)
-          item.attributes.slice("id", "tax_year", "subject_type", "subject_digest", "status",
+          item.attributes.slice("tax_year", "subject_type", "subject_digest", "status",
             "resolution_code", "resolution_reference", "resolved_at", "reopened_at").merge(
-              resolved_by: item.resolved_by&.name, facts: subject.facts, resolution_codes: item.available_resolution_codes)
+              id: subject.route_key, resolved_by: item.reviewer_name, can_reopen: !item.system_proven?, facts: subject.facts, resolution_codes: item.available_resolution_codes)
         end
       end
     end

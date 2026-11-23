@@ -104,7 +104,8 @@ RSpec.describe YearEnd::JudgmentWarnings do
 
     def review_gap(item)
       admin = create(:user, company: company, role: "admin")
-      PayrollHistoryReview::Resolution.new(item: item, user: admin, actor: AuditActor.for_user(admin))
+      PayrollHistoryReview::Resolution.new(company: company, tax_year: 2026,
+      subject_key: PayrollHistoryReview::Subject.key_for(item).join("-"), user: admin, actor: AuditActor.for_user(admin))
         .resolve!(code: "legacy_basis_accepted", reference: "Legacy wages tie to the reconciliation", expected_digest: item.subject_digest).first
     end
 
@@ -141,6 +142,25 @@ RSpec.describe YearEnd::JudgmentWarnings do
       item.update_columns(withholding_tax: 175)
       expect(live_warnings.fetch("legacy_tax_bases")[:status]).to eq("needs_review")
       expect(detector.call(apply: true).fetch(:counts)).to eq(reopened: 1, resolved: 1)
+    end
+
+    it "requires additional review if accepted legacy wages reach the cap or use a benefit rebuild" do
+      item.update_columns(fit_taxable_wages: nil, additional_medicare_taxable_wages: 0)
+      detector = PayrollHistoryReview::Detector.new(company: company, tax_year: 2026)
+      review_gap(detector.call.fetch(:items).sole.first)
+      report = W2GuAggregator.new(company, 2026).generate
+      row = report.fetch(:employees).sole
+      warning = -> { described_class.new(company: company, year: 2026, w2_report: report).call.find { |entry| entry[:code] == "legacy_tax_bases" } }
+
+      expect(warning.call).to include(status: "reviewed")
+      row[:box3_social_security_wages] = report.dig(:meta, :ss_wage_base) - 10
+      row[:box7_social_security_tips] = 10
+      expect(warning.call).to include(status: "needs_review", details: [ a_string_including("annual wage base") ])
+
+      row[:box3_social_security_wages] = 2000
+      row[:rebuild_ss] = true
+      expect(warning.call).to include(status: "needs_review", details: [ a_string_including("Pre-tax benefits") ])
+      expect(warning.call[:employees].sole).not_to have_key(:history_review)
     end
 
     it "keeps an Additional Medicare-only gap out of the W-2 missing bases warning" do

@@ -21,6 +21,7 @@ interface PaycheckFacts {
   medicare_tax: string | null;
   employer_medicare_tax?: string | null;
   missing_bases?: string[];
+  employee_name?: string;
 }
 
 interface PeriodFacts {
@@ -48,10 +49,11 @@ type Subject =
     } }
   | { subject_type: 'legacy_basis_gap'; facts: IdentifiedPaychecks }
   | { subject_type: 'reversed_payroll_item' | 'legacy_disposition'; facts: IdentifiedPaychecks & { reason: string | null } }
-  | { subject_type: 'imported_history'; facts: { batch_id: number; paychecks: PaycheckFacts[] } };
+  | { subject_type: 'imported_history'; facts: { batch_id: number; batch_status: string; batch_source: string; paychecks: PaycheckFacts[] } };
 
 export type HistoryReviewItem = Subject & {
-  id: number;
+  id: string;
+  can_reopen: boolean;
   subject_digest: string;
   status: 'open' | 'resolved';
   resolution_codes: ResolutionCode[];

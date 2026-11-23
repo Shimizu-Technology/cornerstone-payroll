@@ -1,11 +1,8 @@
 # frozen_string_literal: true
 
 class CreatePayrollHistoryReviewItems < ActiveRecord::Migration[8.1]
-  def change
-    reversible do |direction|
-      direction.up { execute "SET LOCAL lock_timeout = '5s'" }
-      direction.down { execute "SET LOCAL lock_timeout = '5s'" }
-    end
+  def up
+    execute "SET LOCAL lock_timeout = '5s'"
 
     create_table :payroll_history_review_items do |t|
       t.references :company, null: false, foreign_key: { on_delete: :restrict }
@@ -37,9 +34,15 @@ class CreatePayrollHistoryReviewItems < ActiveRecord::Migration[8.1]
       SQL
       t.check_constraint <<~SQL.squish, name: "payroll_history_review_resolution_shape"
         (status = 'open' AND num_nonnulls(resolution_code, resolution_reference, resolved_at, resolved_by_id) = 0)
-        OR (status = 'resolved' AND num_nonnulls(resolution_code, resolution_reference, resolved_at, resolved_by_id) = 4
+        OR (status = 'resolved' AND num_nonnulls(resolution_code, resolution_reference, resolved_at) = 3
+          AND (resolved_by_id IS NOT NULL OR resolution_code = 'legacy_basis_proven')
           AND char_length(btrim(resolution_reference)) BETWEEN 10 AND 1000)
       SQL
     end
+  end
+
+  def down
+    execute "SET LOCAL lock_timeout = '5s'"
+    drop_table :payroll_history_review_items
   end
 end

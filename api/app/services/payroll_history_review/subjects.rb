@@ -20,7 +20,8 @@ module PayrollHistoryReview
       @gaps ||= begin
         fica_ids = @sources.unverified_legacy.pluck(:id).to_set
         w2_ids = @sources.w2_missing_bases.pluck(:id).to_set
-        rows = PayrollItem.where(id: (fica_ids | w2_ids).to_a).includes(:employee, :pay_period, :legacy_disposition,
+        proof_ids = @sources.proof_backed_legacy.pluck(:id)
+        rows = PayrollItem.where(id: (fica_ids | w2_ids | proof_ids).to_a).includes(:employee, :pay_period, :legacy_disposition, :fica_basis_proof,
           { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type).order(:id)
         rows.group_by(&:employee_id).map do |employee_id, checks|
           Subject.new("legacy_basis_gap", employee_id, checks, employee_id: employee_id, fica_ids: fica_ids, w2_ids: w2_ids)

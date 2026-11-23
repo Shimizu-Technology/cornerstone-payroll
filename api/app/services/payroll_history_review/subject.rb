@@ -33,6 +33,18 @@ module PayrollHistoryReview
       { subject_type: type, ID_COLUMNS.fetch(type) => id }
     end
 
+    def route_key
+      key.join("-")
+    end
+
+    def fully_proven?
+      type == "legacy_basis_gap" && @rows.all? { |row| verified_proof?(row) }
+    end
+
+    def proven_at
+      @rows.map { |row| row.fica_basis_proof.created_at }.max
+    end
+
     def note_reasons
       case type
       when "voided_pay_period" then [ "voided pay period ##{id}" ]
@@ -50,7 +62,11 @@ module PayrollHistoryReview
         employee_facts.merge("paychecks" => @rows.map { |row| paycheck(row).merge(
           "missing_bases" => (YearEnd::W2PayrollItems::TAX_BASE_FIELDS + %w[additional_medicare_taxable_wages]).select { |field| row[field].nil? }) })
       when "imported_history"
-        { "batch_id" => id, "paychecks" => @rows.map { |row| row.attributes.slice(*ITEM_FIELDS, "pay_date") } }
+        batch = @rows.first.historical_import_batch
+        { "batch_id" => id, "batch_status" => batch.status, "batch_source" => batch.source_system,
+          "paychecks" => @rows.map do |row|
+            row.attributes.slice(*ITEM_FIELDS, "pay_date").merge("employee_name" => row.employee&.full_name || row.source_employee_name)
+          end }
       else
         employee_facts.merge("paychecks" => [ paycheck(@rows.first) ],
           "reason" => type == "reversed_payroll_item" ? @rows.first.payroll_reversal_reason : @rows.first.legacy_disposition&.reason)
@@ -71,7 +87,7 @@ module PayrollHistoryReview
           period.payroll_items.sort_by(&:id).map { |row| payment_evidence(row) } ]
       when "legacy_basis_gap"
         @rows.map do |row|
-          [ native_evidence(row), row.fit_taxable_wages, @fica_ids.include?(row.id),
+          [ native_evidence(row), row.fit_taxable_wages, @fica_ids.include?(row.id), row.fica_basis_proof&.evidence,
             (W2GuTaxableWages.for_item(row) if @w2_ids.include?(row.id)) ]
         end
       when "imported_history"
@@ -79,6 +95,11 @@ module PayrollHistoryReview
       else
         @rows.map { |row| native_evidence(row) }
       end
+    end
+
+    def verified_proof?(row)
+      proof = row.fica_basis_proof
+      proof && FicaBasisEvidence.verified_bases(proof.evidence, row: row, year: row.pay_period.pay_date.year, employee_id: row.employee_id)
     end
 
     def native_evidence(row)
