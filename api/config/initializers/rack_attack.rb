@@ -45,6 +45,58 @@ class Rack::Attack
     "#{throttle_ip(request)}:#{match[1].downcase}" if match && match[2]
   end
 
+  EMPLOYEE_PATH = %r{\A/api/v1/employee(?:/|\.[^/]+\z|\z)}
+  EMPLOYEE_ACTIVATION_PATH = %r{\A/api/v1/employee/(?:activate|activation|invites|invitations)(?:[/.]|\z)}
+  EMPLOYEE_PDF_PATH = %r{\A/api/v1/employee/(?:.*/)?(?:pdf(?:[/.]|\z)|[^/]+\.pdf\z)}
+  KIOSK_PATH = %r{\A/api/v1/kiosk(?:/|\.[^/]+\z|\z)}
+  ACTIVATION_BODY_LIMIT = 4096
+
+  def self.employee_activation?(request)
+    request.post? && EMPLOYEE_ACTIVATION_PATH.match?(request.path)
+  end
+
+  def self.activation_token(request)
+    # Activation clients POST JSON with a top-level token. Inspect only a small,
+    # rewindable body and leave it intact for Rails.
+    input = request.body
+    return unless request.media_type == "application/json" && input.respond_to?(:rewind)
+
+    begin
+      body = input.read(ACTIVATION_BODY_LIMIT + 1)
+      return if body.nil? || body.bytesize > ACTIVATION_BODY_LIMIT
+
+      params = JSON.parse(body)
+      return unless params.is_a?(Hash)
+
+      token = params["token"]
+      Digest::SHA256.hexdigest(token) if token.is_a?(String) && !token.empty?
+    rescue JSON::ParserError
+      nil
+    ensure
+      input.rewind
+    end
+  end
+
+  throttle("employee/ip", limit: 120, period: 1.minute) do |request|
+    throttle_ip(request) if EMPLOYEE_PATH.match?(request.path)
+  end
+
+  throttle("employee/activation_ip", limit: 10, period: 15.minutes) do |request|
+    throttle_ip(request) if employee_activation?(request)
+  end
+
+  throttle("employee/activation_token", limit: 5, period: 15.minutes) do |request|
+    activation_token(request) if employee_activation?(request)
+  end
+
+  throttle("employee/pdf", limit: 15, period: 1.minute) do |request|
+    throttle_ip(request) if EMPLOYEE_PDF_PATH.match?(request.path)
+  end
+
+  throttle("kiosk/ip", limit: 60, period: 1.minute) do |request|
+    throttle_ip(request) if KIOSK_PATH.match?(request.path)
+  end
+
   self.throttled_responder = lambda do |request|
     match_data = request.env["rack.attack.match_data"] || {}
     retry_after = match_data[:period].to_i

@@ -9,13 +9,18 @@
 #       Choose the win32 build.
 #       Install PostgreSQL and put its /bin directory on your path.
 #
+<% if ENV.key?("DB_POOL_MAX")
+     pool_max = Integer(ENV.fetch("DB_POOL_MAX"), 10)
+     raise ArgumentError, "DB_POOL_MAX must be positive" unless pool_max.positive?
+   end %>
+#
 # Configure Using Gemfile
 # gem "pg"
 #
 default: &default
   adapter: postgresql
   encoding: unicode
-  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  pool: <%= pool_max || ENV.fetch("RAILS_MAX_THREADS", 5) %>
   checkout_timeout: 10
   reaping_frequency: 10
   idle_timeout: 300

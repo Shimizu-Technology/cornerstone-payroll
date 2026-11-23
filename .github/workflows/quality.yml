@@ -190,6 +190,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run audit:gate
+      - run: bash scripts/test-netlify-ignore-build.sh
       - run: npm run gate
         env:
           DEPLOYMENT_ENV: production

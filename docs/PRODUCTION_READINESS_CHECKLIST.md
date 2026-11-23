@@ -41,9 +41,90 @@ The R2 and cache probes create random, non-customer test values and remove their
 
 Render uses `GET /up` as the liveness check. That endpoint proves the Rails process booted; it intentionally does not query PostgreSQL or Solid Queue. Keep it as the platform health check so a temporary dependency problem does not create a restart loop.
 
-Use `GET /health/dependencies` for external readiness monitoring. It performs read-only checks for primary-database connectivity, `transaction_read_only`, `pg_is_in_recovery()`, and a Solid Queue worker heartbeat within five minutes. It returns `200 {"status":"ok"}` when all checks pass and `503 {"status":"degraded"}` otherwise. The public response does not expose exception text, database identifiers, payroll data, or individual check results.
+On the current `all` process, use `GET /health/dependencies` for external readiness monitoring. It performs read-only checks for primary-database connectivity, `transaction_read_only`, `pg_is_in_recovery()`, and a Solid Queue worker heartbeat within five minutes. It returns `200 {"status":"ok"}` when all checks pass and `503 {"status":"degraded"}` otherwise. The public response does not expose exception text, database identifiers, payroll data, or individual check results.
 
 Rack::Attack counters and Clerk JWKS use a bounded in-process memory store. This keeps authenticated GET requests from attempting Solid Cache writes during a read-only database incident. The production web service currently runs one Puma process, so the rate limit is authoritative for the current topology. Move this request-path cache to shared Redis or Valkey before adding Puma workers or web instances; otherwise each process enforces its own limit.
+
+## Payroll web and employee capacity
+
+Keep `APP_PROCESS_ROLE=all` (also the default) on the current Render services. The future
+`payroll_web` role mounts the admin, client, finance, integration, form 500, company,
+cable-ticket, and notification-settings APIs. The future `employee_web` role
+mounts employee, kiosk, and public tenant-branding APIs as they become available.
+Both serve `/up` and the auth API. The existing `/cable` WebSocket, dependency
+health endpoint, and Rails storage/mailbox routes live on `all`. Before switching
+roles, account for those endpoints in the deployment topology.
+
+The November 23 preflight measured one Render Standard web service and one
+Standard worker service in Singapore, each configured with 2 GB. The observed
+process RSS was approximately 230 MB. Reserve independent database capacity
+with `DB_POOL_MAX`, a positive limit **per Active Record pool and per OS process**.
+When unset, Rails falls back to `RAILS_MAX_THREADS` or 5. Include all four pools
+(primary, cache, queue, and cable) when budgeting web connections. Keep
+`DATABASE_URL` pooled with prepared statements disabled and use the direct
+`MIGRATION_DATABASE_URL` for pre-deploy migrations. Keep pool-size settings out
+of the database URL query string.
+
+The worker still has two entries. The main worker uses three threads and polls
+`default`, `solid_queue_recurring`, then `employee` in that order. OCR keeps
+its own single-thread worker. Solid Queue rejects a primary or queue
+pool below the largest worker thread count plus two (5 with the standard
+configuration). Use `SOLID_QUEUE_QUEUES` for a comma-separated main-worker queue
+override. To add a separate employee process later, use a dedicated
+`SOLID_QUEUE_CONFIG` with just the employee worker and remove `employee` from
+the payroll worker's override. Run recurring scheduling on one supervisor and
+include the extra process and pools in the memory and connection budget.
+The preflight indicates room for another process, and the current release uses
+the existing two.
+
+### Employee and kiosk limits
+
+| Traffic | Limit |
+| --- | --- |
+| Employee API | 120 per IP per minute |
+| Employee activation and invitation POSTs | 10 per IP and 5 per token per 15 minutes |
+| Employee PDF requests | 15 per IP per minute |
+| Kiosk API | 60 per IP per minute |
+
+These limits are scoped to `/api/v1/employee` and `/api/v1/kiosk`. The activation
+limiter matches `activate`, `activation`, `invites`, and `invitations` below the
+employee prefix. Future activation handlers must accept a top-level JSON
+`token` in a body of at most 4 KiB and reject unsupported forms so token
+validation and throttling use the same input. The existing API-wide limit
+still counts all API traffic per IP.
+
+### Runtime telemetry
+
+Render logs include JSON payloads with the process role. Filter by `event`.
+
+- `http.request` records status and duration for requests that take at least
+  500 ms or return a 5xx. Fast routine traffic stays out of the structured stream.
+- `db.pool_checkout` records acquisition waits of at least 50 ms, including
+  time spent obtaining a new connection. Check pool sizing and concurrent load
+  when these events rise.
+- `db.slow_query` records uncached SQL taking over one second. The payload
+  contains timing only.
+- `http.rate_limited.payroll` records every 429 and emits a Rails notification
+  of the same name with `count: 1` and the throttle name. Sum `count` by
+  throttle and process role in the logs. The payload omits paths, tokens, IP
+  addresses, SQL, and bind values.
+
+### Netlify build settings
+
+The production site uses base `web`, command `npm run build`, and publish
+directory `dist`. Netlify finds [`web/netlify.toml`](../web/netlify.toml) from
+that base. Its command and publish values match the UI and take precedence.
+Keep `VITE_APP_SURFACE=staff` (the default) for the current site. The
+`employee` build is a separate entry scaffold for a future site and excludes
+staff routes and page modules. [Netlify monorepo configuration](https://docs.netlify.com/build/configure-builds/monorepos/)
+
+The preflight found Git-triggered production builds stopped. Continue the
+existing manual release process. If Git builds are enabled later, the ignore
+command skips production diffs limited to docs or the API. Changes to `web/`,
+root lockfiles, or other watched build inputs run the build. Missing commit
+history and non-production contexts also run the build. Verify the rule with
+`bash web/scripts/test-netlify-ignore-build.sh` from the repository root.
+[Netlify ignore commands](https://docs.netlify.com/build/configure-builds/ignore-builds/)
 
 ## Release evidence
 
