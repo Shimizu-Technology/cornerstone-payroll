@@ -65,8 +65,8 @@ module Api
               item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
               if item.new_record?
                 item.company_id = current_company_id
-                item.employment_type = employee.employment_type
-                item.pay_rate = employee.default_payroll_rate
+                item.employment_type = employee.payroll_compensation_on(@pay_period.end_date).employment_type
+                item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
               end
 
               item.hours_worked = mapping[:regular_hours].to_f if mapping[:regular_hours].present?

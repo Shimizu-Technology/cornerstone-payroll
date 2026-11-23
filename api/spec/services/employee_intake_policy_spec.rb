@@ -193,7 +193,7 @@ RSpec.describe EmployeeIntakePolicy do
   it "invalidates confirmation after changing compensation" do
     employee = incomplete_employee
     confirm(employee)
-    employee.update!(pay_rate: 20)
+    change_compensation!(employee, actor: manager, pay_rate: 20)
     expect(employee.reload.intake_payroll_confirmed_at).to be_nil
   end
 
@@ -253,7 +253,7 @@ RSpec.describe EmployeeIntakePolicy do
   it "blocks stale compensation even after manager reconfirmation" do
     create(:tax_table, tax_year: 2026)
     employee = incomplete_employee
-    employee.update!(pay_rate: 20)
+    change_compensation!(employee, actor: manager, pay_rate: 20)
     confirm(employee)
     EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: accountant)
     employee.employee_document_requirements.each do |requirement|
@@ -265,7 +265,7 @@ RSpec.describe EmployeeIntakePolicy do
     PayrollCalculator.for(employee, item).calculate
     item.save!
     expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.not_to raise_error
-    employee.update!(pay_rate: 30)
+    change_compensation!(employee, pay_rate: 30)
     confirm(employee)
     expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.to raise_error(EmployeeDocumentReadiness::BlockedError, /Recalculate/)
     item.update!(pay_rate: 30)
@@ -280,10 +280,10 @@ RSpec.describe EmployeeIntakePolicy do
     secondary = employee.employee_wage_rates.create!(label: "Secondary", rate: 25, is_primary: false)
     confirm(employee)
     fingerprint = PayrollCalculationContext.intake_setup_fingerprint(employee: employee)
-    EmployeeWageRateSyncService.new(employee: employee, wage_rates: [
+    EmployeeCompensationChangeService.new(employee: employee, actor: manager, source: "staff", reason: "Spec sync", wage_rates: [
       { id: primary.id, label: "Primary", rate: 20, is_primary: true },
       { id: secondary.id, label: "Secondary", rate: 30, is_primary: false }
-    ]).sync!
+    ]).call!
     expect(employee.reload.intake_payroll_confirmed_at).to be_nil
     expect(PayrollCalculationContext.intake_setup_fingerprint(employee: employee)).not_to eq(fingerprint)
   end

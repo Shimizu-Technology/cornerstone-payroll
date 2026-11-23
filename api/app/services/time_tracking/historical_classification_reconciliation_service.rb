@@ -218,7 +218,7 @@ module TimeTracking
         decimal!(line.fetch("regular_hours")) + decimal!(line.fetch("overtime_hours")) > 0
       end
       if lines.empty?
-        raise Error, "Review historical wage categories separately" unless item.employee.active_wage_rates.one?
+        raise Error, "Review historical wage categories separately" unless item.employee.wage_rates_on(item.pay_period.end_date).one?
 
         rate = item.pay_rate.to_d
         raise Error, "Review the saved check rate before historical reconciliation" unless rate.positive?

@@ -15,8 +15,8 @@ module Api
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
-          rates = employee.employee_wage_rates.order(:label)
-          render json: { wage_rates: rates.map { |r| rate_payload(r) } }
+          rates = employee.wage_rates_on(PayrollBusinessClock.today, include_inactive: true).sort_by(&:label)
+          render json: { wage_rates: rates.map { |r| rate_payload(r) }, compensation_revision: EmployeeCompensationChangeService.revision(employee) }
         end
 
         # POST /api/v1/admin/employee_wage_rates
@@ -26,15 +26,14 @@ module Api
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
-          rate = EmployeeWageRate.create_with_employee_lock(
-            employee: employee,
-            attributes: rate_params.except(:employee_id)
-          )
-          if rate.persisted?
-            render json: { wage_rate: rate_payload(rate) }, status: :created
-          else
-            render json: { errors: rate.errors.full_messages }, status: :unprocessable_entity
-          end
+          label = rate_params[:label].to_s.strip
+          result, revision = change_wage_rates!(employee, rate_params.except(:employee_id).to_h.merge(label: label))
+          rate = result.wage_rate_versions.first&.as_wage_rate || employee.wage_rates_on(result.effective_on, include_inactive: true).find { |row| row.label == label }
+          render json: { wage_rate: rate_payload(rate), compensation_warnings: result.warnings, compensation_revision: revision }, status: :created
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue EmployeeCompensationChangeService::Error => e
+          render_compensation_error(e)
         end
 
         # PATCH /api/v1/admin/employee_wage_rates/:id
@@ -44,28 +43,63 @@ module Api
             return render json: { error: "Wage rate not found" }, status: :not_found
           end
 
-          if rate.update_with_employee_lock(rate_update_params)
-            render json: { wage_rate: rate_payload(rate) }
-          else
-            render json: { errors: rate.errors.full_messages }, status: :unprocessable_entity
-          end
+          result, revision = change_wage_rates!(rate.employee, rate_update_params.to_h.merge(id: rate.id))
+          render json: { wage_rate: rate_payload(result.wage_rate_versions.first&.as_wage_rate || rate.reload), compensation_warnings: result.warnings, compensation_revision: revision }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue EmployeeCompensationChangeService::Error => e
+          render_compensation_error(e)
         end
 
         # DELETE /api/v1/admin/employee_wage_rates/:id
+        # Ends the rate on the effective date; its history and the payroll
+        # buckets that used it are kept.
         def destroy
           rate = scoped_rate(params[:id])
           unless rate
             return render json: { error: "Wage rate not found" }, status: :not_found
           end
 
-          rate.destroy_with_employee_lock!
-          render json: { message: "Wage rate deleted" }
+          result, revision = change_wage_rates!(rate.employee, { id: rate.id, remove: true })
+          render json: { message: "Wage rate ended", compensation_warnings: result.warnings, compensation_revision: revision }
+        rescue EmployeeCompensationChangeService::Error => e
+          render_compensation_error(e)
         end
 
         private
 
         def rate_params
           params.require(:employee_wage_rate).permit(:employee_id, :label, :rate, :is_primary, :active)
+        end
+
+        def compensation_params
+          params.fetch(:employee_wage_rate) { ActionController::Parameters.new }.permit(:effective_on, :reason, :historical_correction, :compensation_revision)
+        end
+
+        def change_wage_rates!(employee, edit)
+          # Keep the company and employee locks held until we have the
+          # revision for this write, even when the requested edit is a no-op.
+          Employee.transaction do
+            result = EmployeeCompensationChangeService.new(
+              employee: employee,
+              actor: current_user,
+              source: "staff",
+              reason: compensation_params[:reason],
+              effective_on: compensation_params[:effective_on],
+              historical_correction: compensation_params[:historical_correction],
+              expected_revision: compensation_params[:compensation_revision],
+              require_revision: true,
+              wage_rate_edits: [ edit.symbolize_keys ]
+            ).call!
+            [ result, EmployeeCompensationChangeService.revision(employee) ]
+          end
+        end
+
+        def render_compensation_error(error)
+          code = error.is_a?(EmployeeCompensationChangeService::LockedPeriodError) ? "compensation_locked_period" : "compensation_change_invalid"
+          conflict = error.is_a?(EmployeeCompensationChangeService::ConflictError)
+          render json: { error: error.message, code: conflict ? "compensation_conflict" : code, errors: [ error.message ] },
+                 status: conflict ? :conflict : :unprocessable_entity
         end
 
         def rate_update_params

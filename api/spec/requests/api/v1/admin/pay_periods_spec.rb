@@ -1672,7 +1672,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
 
     it "treats a submitted salary override as manual period-pay evidence" do
-      employee.update!(employment_type: "salary", salary_type: "variable", pay_rate: 0)
+      change_compensation!(employee, employment_type: "salary", salary_type: "variable", pay_rate: 0)
       item = pay_period.payroll_items.create!(
         company: company,
         employee: employee,
@@ -1698,7 +1698,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
 
     it "keeps imported period-pay evidence during a routine recalculation with the same amount" do
-      employee.update!(employment_type: "salary", salary_type: "variable", pay_rate: 0)
+      change_compensation!(employee, employment_type: "salary", salary_type: "variable", pay_rate: 0)
       evidence = {
         "amount" => "9000.0",
         "source_type" => "mosa_change_workbook",
@@ -1723,7 +1723,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
 
     it "clears an imported period-pay amount and evidence for an explicit zero override" do
-      employee.update!(employment_type: "salary", salary_type: "per_period", pay_rate: BigDecimal("9000.00"))
+      change_compensation!(employee, employment_type: "salary", salary_type: "per_period", pay_rate: BigDecimal("9000.00"))
       item = pay_period.payroll_items.create!(
         company: company,
         employee: employee,
@@ -1750,7 +1750,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
     it "resynchronizes a stale contractor snapshot before recalculating a W-2 employee" do
       employee.allow_tax_classification_change = true
-      employee.update!(
+      change_compensation!(employee,
         employment_type: "contractor",
         contractor_type: "individual",
         contractor_pay_type: "flat_fee"
@@ -1765,7 +1765,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         net_pay: 175
       )
       employee.allow_tax_classification_change = true
-      employee.update!(employment_type: "hourly", pay_rate: 15)
+      change_compensation!(employee, employment_type: "hourly", pay_rate: 15)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
         hours: {

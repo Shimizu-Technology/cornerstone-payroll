@@ -458,6 +458,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     PayPeriodCorrectionEvent.where(company_id: company_id).delete_all
     PayPeriod.where(id: pay_period_ids).update_all(source_pay_period_id: nil, superseded_by_id: nil)
     PayPeriod.where(id: pay_period_ids).delete_all
+    EmployeeCompensationChange.where(employee_id: employee_id).delete_all
     Employee.where(id: employee_id).delete_all
     Department.where(id: department.id).delete_all
     AuditLog.where(company_id: company_id).delete_all

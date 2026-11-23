@@ -9,7 +9,7 @@ RSpec.describe "Configured AIRE import categories" do
   let(:employee) { create(:employee, company: company) }
   let(:period) { create(:pay_period, company: company) }
   let(:category) { { key: "aire_solo", name: "Solo" } }
-  let(:preview) { TimeTracking::BatchImportPreviewService.new(pay_period: period, source: source) }
+  let(:matcher) { TimeTracking::CategoryRateMatcher.new(source: source) }
   def configure
     TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "solo",
       earning_label: "Flight Hours", import_enabled: true, reviewed_by: actor,
@@ -19,7 +19,7 @@ RSpec.describe "Configured AIRE import categories" do
     ground = create(:employee_wage_rate, employee: employee, label: "Ground Instruction Hours", rate: 30)
     create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 30)
 
-    rate, method = preview.send(:find_wage_rate, { key: "aire_ground_instruction", name: "Ground Instruction" }, employee.employee_wage_rates.to_a, employee_id: employee.id)
+    rate, method = matcher.call({ key: "aire_ground_instruction", name: "Ground Instruction" }, employee.employee_wage_rates.to_a, employee_id: employee.id)
     expect([ rate, method ]).to eq([ ground, "label" ])
   end
 
@@ -27,10 +27,11 @@ RSpec.describe "Configured AIRE import categories" do
     plain = create(:employee_wage_rate, employee: employee, label: "Ground Instruction", rate: 25)
     hours = create(:employee_wage_rate, employee: employee, label: "Ground Instruction Hours", rate: 30)
 
-    expect(preview.send(:find_wage_rate, { key: "aire_ground_instruction", name: "Ground Instruction" }, [ plain, hours ], employee_id: employee.id)).to eq([ plain, "label" ])
+    expect(matcher.call({ key: "aire_ground_instruction", name: "Ground Instruction" }, [ plain, hours ], employee_id: employee.id)).to eq([ plain, "label" ])
   end
 
   it "estimates a contractor's reported overtime at the contract rate" do
+    preview = TimeTracking::BatchImportPreviewService.new(pay_period: period, source: source)
     category = { payroll_rate_cents: 3000, regular_hours: 1, overtime_hours: 2 }
 
     expect(preview.send(:payroll_gross_delta_cents, [ category ], OvertimePremium.multiplier("contractor"))).to eq(9000)
@@ -45,7 +46,7 @@ RSpec.describe "Configured AIRE import categories" do
     maintenance = create(:employee_wage_rate, employee: employee, label: "Maintenance", rate: 19)
     expect(policy.matching_rate([ regular, maintenance ])).to eq(maintenance)
     expect(policy.matching_rate([ regular ])).to eq(regular)
-    rate, _, message = preview.send(:find_wage_rate, { key: "aire_maintenance", name: "Aircraft Maintenance" }, [], employee_id: employee.id)
+    rate, _, message = matcher.call({ key: "aire_maintenance", name: "Aircraft Maintenance" }, [], employee_id: employee.id)
     expect(rate).to be_nil
     expect(message).to include("Maintenance or Regular")
   end
@@ -63,14 +64,14 @@ RSpec.describe "Configured AIRE import categories" do
     flight = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 32)
     ground = create(:employee_wage_rate, employee: employee, label: "Ground", rate: 19)
     configure
-    expect(preview.send(:find_wage_rate, category, [ flight, ground ], employee_id: employee.id)).to include(flight, "company_category_mapping")
+    expect(matcher.call(category, [ flight, ground ], employee_id: employee.id)).to include(flight, "company_category_mapping")
     other = create(:time_tracking_source, company: create(:company), source_type: "aire_services")
-    expect(TimeTracking::BatchImportPreviewService.new(pay_period: period, source: other).send(:find_wage_rate, category, [ flight ], employee_id: employee.id).first).to be_nil
+    expect(TimeTracking::CategoryRateMatcher.new(source: other).call(category, [ flight ], employee_id: employee.id).first).to be_nil
   end
   it "blocks missing Flight rates clearly and never falls back to Ground" do
     configure
     ground = create(:employee_wage_rate, employee: employee, label: "Ground", rate: 19)
-    rate, _, message = preview.send(:find_wage_rate, category, [ ground ], employee_id: employee.id)
+    rate, _, message = matcher.call(category, [ ground ], employee_id: employee.id)
     expect(rate).to be_nil
     expect(message).to include("active Flight Hours rate")
     import = create(:time_tracking_import, pay_period: period, time_tracking_source: source)

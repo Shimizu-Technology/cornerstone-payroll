@@ -369,7 +369,7 @@ RSpec.describe PayStubGenerator do
     it "keeps earlier components on the statement when they are absent from this paycheck" do
       worker = hourly_worker
       calculated_item(worker, "hourly", Date.new(2026, 1, 15), hours_worked: 80, reported_tips: 150, bonus: 300)
-      worker.update!(employment_type: "salary", pay_rate: 41_234.56, salary_type: "annual", pay_frequency: "biweekly")
+      change_compensation!(worker, employment_type: "salary", pay_rate: 41_234.56, salary_type: "annual", pay_frequency: "biweekly")
       item = calculated_item(worker, "salary", Date.new(2026, 1, 29))
 
       rows = statement_rows(item)
@@ -600,7 +600,7 @@ RSpec.describe PayStubGenerator do
       it "does not fold a saved flat fee into hourly YTD after the profile changes" do
         worker = contractor("flat_fee")
         unstored_contractor_item(worker, Date.new(2026, 1, 15), saved_pay_type: "flat_fee", hours_worked: 25, gross_pay: 500)
-        worker.update!(contractor_pay_type: "hourly")
+        change_compensation!(worker, effective_on: "2026-01-16", contractor_pay_type: "hourly")
         item = calculated_item(worker, "contractor", Date.new(2026, 1, 29), hours_worked: 10)
 
         expect(statement_rows(item)).to eq([ [ "Contract Labor", "10.00", "$20.00", "$200.00", "—" ] ])

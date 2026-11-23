@@ -119,8 +119,8 @@ describe.each(bases)('retained hourly definitions after $label', ({ overrides, s
     expect(mocks.deleteRate).not.toHaveBeenCalled();
     expect(mocks.createRate).not.toHaveBeenCalled();
     expect(mocks.updateRate.mock.calls).toEqual([
-      [101, { label: 'Certification Operations', rate: 25, is_primary: true, active: true }, 1],
-      [205, { label: 'Administrative Support', rate: 17.5, is_primary: false, active: true }, 1],
+      [101, { label: 'Certification Operations', rate: 25, is_primary: true, active: true, compensation_revision: undefined }, 1],
+      [205, { label: 'Administrative Support', rate: 17.5, is_primary: false, active: true, compensation_revision: undefined }, 1],
     ]);
   });
 
@@ -211,7 +211,7 @@ describe.each(bases)('retained hourly definitions after $label', ({ overrides, s
       { id: 205, label: 'Administrative Support', rate: 17.5, is_primary: true, active: true },
     ] });
     expect(mocks.updateRate.mock.calls).toEqual([
-      [205, { label: 'Administrative Support', rate: 17.5, is_primary: true, active: true }, 1],
+      [205, { label: 'Administrative Support', rate: 17.5, is_primary: true, active: true, compensation_revision: undefined }, 1],
     ]);
     expect(mocks.createRate).not.toHaveBeenCalled();
     expect(mocks.deleteRate).not.toHaveBeenCalled();
@@ -242,7 +242,7 @@ it.each([
     { label: 'Regular', rate: 30, is_primary: true, active: true },
   ] });
   expect(mocks.updateEmployee.mock.calls[0][1].wage_rates[0].id).toBeUndefined();
-  expect(mocks.createRate).toHaveBeenCalledExactlyOnceWith({ employee_id: 7, label: 'Regular', rate: 30, is_primary: true, active: true }, 1);
+  expect(mocks.createRate).toHaveBeenCalledExactlyOnceWith({ employee_id: 7, label: 'Regular', rate: 30, is_primary: true, active: true, compensation_revision: undefined }, 1);
   expect(mocks.updateRate).not.toHaveBeenCalled();
   expect(mocks.deleteRate).not.toHaveBeenCalled();
 });
@@ -257,6 +257,10 @@ it.each(['salary', 'hourly'])('preserves a zero variable-salary draft and valida
   expect(screen.getByText(/Pay is set each pay period using the salary override/)).toBeTruthy();
   if (basis === 'hourly') fireEvent.change(screen.getByLabelText(/^Employment Type/), { target: { value: 'hourly' } });
   assertNoWrites();
+  if (basis === 'hourly') {
+    mocks.listRates.mockResolvedValue({ wage_rates: retainedRates, compensation_revision: 'r1' });
+    mocks.updateRate.mockResolvedValueOnce({ compensation_revision: 'r2' }).mockResolvedValueOnce({ compensation_revision: 'r3' });
+  }
   fireEvent.submit(document.getElementById('employee-form')!);
   await screen.findByText('Saved employee profile');
   expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ employment_type: basis, pay_rate: basis === 'hourly' ? 30 : 0 });
@@ -264,12 +268,11 @@ it.each(['salary', 'hourly'])('preserves a zero variable-salary draft and valida
     expect(mocks.updateEmployee.mock.calls[0][1].wage_rates).toBeUndefined();
     for (const endpoint of [mocks.listRates, mocks.updateRate]) expect(endpoint).not.toHaveBeenCalled();
   } else {
-    expect(mocks.updateEmployee.mock.calls[0][1].wage_rates).toMatchObject([
-      { id: 101, rate: 30, is_primary: true }, { id: 205, rate: 17.5, is_primary: false },
-    ]);
+    expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ compensation_revision: 'r1' });
+    expect(mocks.updateEmployee.mock.calls[0][1].wage_rates).toBeUndefined();
     expect(mocks.updateRate.mock.calls).toEqual([
-      [101, { label: 'Certification Operations', rate: 30, is_primary: true, active: true }, 1],
-      [205, { label: 'Administrative Support', rate: 17.5, is_primary: false, active: true }, 1],
+      [101, { label: 'Certification Operations', rate: 30, is_primary: true, active: true, compensation_revision: 'r1' }, 1],
+      [205, { label: 'Administrative Support', rate: 17.5, is_primary: false, active: true, compensation_revision: 'r2' }, 1],
     ]);
   }
   expect(mocks.createRate).not.toHaveBeenCalled();
@@ -302,7 +305,7 @@ it('creates a new hourly employee from the explicitly entered rate without requi
   expect(mocks.createEmployee.mock.calls[0][0]).toMatchObject({ company_id: 1, employment_type: 'hourly', pay_rate: 25,
     wage_rates: [{ label: 'Regular', rate: 25, is_primary: true, active: true }],
   });
-  expect(mocks.createRate).toHaveBeenCalledExactlyOnceWith({ employee_id: 7, label: 'Regular', rate: 25, is_primary: true, active: true }, 1);
+  expect(mocks.createRate).toHaveBeenCalledExactlyOnceWith({ employee_id: 7, label: 'Regular', rate: 25, is_primary: true, active: true, compensation_revision: undefined }, 1);
   expect(mocks.updateEmployee).not.toHaveBeenCalled();
   expect(mocks.updateRate).not.toHaveBeenCalled();
   expect(mocks.deleteRate).not.toHaveBeenCalled();
@@ -344,11 +347,11 @@ it.each([true, false])('limits explicit removal to the displayed saved ID still 
   expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ pay_rate: 25, wage_rates: [
     { id: 101, label: 'Certification Operations', rate: 25, is_primary: true, active: true },
   ] });
-  if (stillActive) expect(mocks.deleteRate).toHaveBeenCalledExactlyOnceWith(205, 1);
+  if (stillActive) expect(mocks.deleteRate).toHaveBeenCalledExactlyOnceWith(205, undefined, 1);
   else expect(mocks.deleteRate).not.toHaveBeenCalled();
   expect(mocks.createRate).not.toHaveBeenCalled();
   expect(mocks.updateRate.mock.calls).toEqual([
-    [101, { label: 'Certification Operations', rate: 25, is_primary: true, active: true }, 1],
+    [101, { label: 'Certification Operations', rate: 25, is_primary: true, active: true, compensation_revision: undefined }, 1],
   ]);
 });
 

@@ -11,32 +11,37 @@ class EmployeeWageRateSyncService
     @replace_missing = replace_missing
   end
 
-  def sync!
-    employee.company.with_lock do
-      employee.with_lock do
-        sync_under_employee_lock!
-      end
+  # Applies the desired wage-rate list to the employee's wage-rate rows. Only
+  # EmployeeCompensationChangeService calls this, inside its write context,
+  # and then records the versions and re-syncs the rows to today's values.
+  def apply_under_compensation_context!
+    unless EmployeeCompensationChangeService.writing?(employee.id)
+      raise EmployeeCompensationChangeService::CompensationMutationError,
+            "Sync wage rates through EmployeeCompensationChangeService"
     end
-  end
 
-  private
-
-  attr_reader :employee, :wage_rates
-
-  def sync_under_employee_lock!
     normalized = normalize_rates
-
-    existing_by_id = employee.employee_wage_rates.index_by(&:id)
+    rows = employee.employee_wage_rates.reload.to_a
+    existing_by_id = rows.index_by(&:id)
     incoming_ids = normalized.filter_map { |rate| rate[:id] }
 
-    if replace_missing? && existing_by_id.any?
-      employee.employee_wage_rates.where.not(id: incoming_ids).destroy_all
+    # Removed rates are ended, not deleted: their history and the payroll
+    # wage-rate buckets that reference them stay intact.
+    if replace_missing?
+      rows.each do |row|
+        row.update!(active: false, is_primary: false) if row.active? && !incoming_ids.include?(row.id)
+      end
     end
 
     normalized.each do |rate_attrs|
+      rate_attrs = rate_attrs.dup
       rate_id = rate_attrs.delete(:id)
       if rate_id.present? && existing_by_id[rate_id]
         existing_by_id[rate_id].update!(rate_attrs)
+      elsif (ended = rows.find { |row| !row.active? && !incoming_ids.include?(row.id) && row.label.casecmp?(rate_attrs[:label]) })
+        # Re-adding a label that was removed earlier reuses its ended row,
+        # whose label is still unique for the employee.
+        ended.update!(rate_attrs)
       else
         employee.employee_wage_rates.create!(rate_attrs)
       end
@@ -44,6 +49,10 @@ class EmployeeWageRateSyncService
 
     normalized
   end
+
+  private
+
+  attr_reader :employee, :wage_rates
 
   def replace_missing?
     @replace_missing

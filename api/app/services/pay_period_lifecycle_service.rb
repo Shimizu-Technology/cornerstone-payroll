@@ -211,8 +211,8 @@ class PayPeriodLifecycleService
   end
 
   def validate_source_earnings!
-    pay_period.payroll_items.financially_reportable.each do |item|
-      TimeTracking::SourceEarningsConservation.validate!(item, calculated: true)
+    pay_period.payroll_items.financially_reportable.preload(employee: :employee_compensation_changes).each do |item|
+      TimeTracking::SourceEarningsConservation.validate!(item, calculated: true, employee: item.employee)
     end
   rescue ArgumentError => e
     raise InvalidTransitionError, e.message

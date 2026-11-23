@@ -8,7 +8,7 @@ module Api
         include RecurringPayItemSetupMutation
         audit_actions :terminate, :reactivate, :deactivate
         before_action :set_employee, only: [
-          :show, :update, :destroy, :terminate, :reactivate, :deactivate, :transition_tax_classification,
+          :show, :update, :cancel_scheduled_compensation, :destroy, :terminate, :reactivate, :deactivate, :transition_tax_classification,
           :resolve_configuration_review_item, :review_intake_exception
         ]
         before_action :validate_department_scope!, only: [ :create, :update ]
@@ -25,10 +25,13 @@ module Api
             return render json: { error: "Pay period not found" }, status: :not_found unless period
 
             employees = employees.eligible_for_payroll_run(period, explicitly_selected: true)
+            # The pay-run worksheet shows the rates that payroll will use.
+            @rates_on = period.end_date
           end
           employees = apply_filters(employees)
           employees = apply_sort(employees)
           employees = employees.includes(:department, :employee_wage_rates, :employee_work_profiles, :employee_w4_elections)
+            .preload(:employee_wage_rate_versions, :employee_compensation_changes)
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
@@ -49,7 +52,8 @@ module Api
               include_w4_history: true,
               include_retirement_history: true,
               include_configuration_review_history: true,
-              include_document_readiness: true
+              include_document_readiness: true,
+              include_compensation_history: true
             )
           }
         end
@@ -67,6 +71,13 @@ module Api
             revalidate_current_company_write_access!
             EmployeeIntakePolicy.prepare!(@employee, actor: current_user)
             @employee.save!
+            if params.dig(:employee, :wage_rates).present?
+              initial_wage_rates = params.require(:employee).permit(wage_rates: [ :label, :rate, :is_primary, :active ])
+              EmployeeCompensationChangeService.new(
+                employee: @employee, actor: current_user, source: "staff",
+                wage_rates: initial_wage_rates.fetch(:wage_rates).map(&:to_h)
+              ).call!
+            end
             EmployeeW4ElectionChangeService.new(
               employee: @employee,
               attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| @employee.public_send(attribute) },
@@ -81,7 +92,8 @@ module Api
             data: serialize_employee(
               @employee,
               include_w4_history: true,
-              include_document_readiness: true
+              include_document_readiness: true,
+              include_compensation_history: true
             )
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
@@ -92,15 +104,34 @@ module Api
             code: expired_incomplete_entry ? "employee_intake_expired" : nil,
             details: e.record.errors.messages
           }, status: :unprocessable_entity
+        rescue EmployeeCompensationChangeService::Error => e
+          render_compensation_change_error(e)
         rescue EmployeeW4ElectionChangeService::Error => e
           render json: { error: "Validation failed", details: { w4_effective_on: [ e.message ] } }, status: :unprocessable_entity
         rescue LegacyRecurringComponentGuard::Error => e
           render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
         end
 
+        def cancel_scheduled_compensation
+          compensation = params.require(:employee).permit(:compensation_effective_on, :compensation_change_reason, :compensation_revision)
+          Employee.transaction do
+            current_company.lock!
+            revalidate_current_company_write_access!
+            EmployeeCompensationChangeService.new(
+              employee: @employee, actor: current_user, source: "staff", cancel: true,
+              effective_on: compensation[:compensation_effective_on],
+              reason: compensation[:compensation_change_reason], expected_revision: compensation[:compensation_revision]
+            ).call!
+          end
+          render json: { data: serialize_employee(@employee, include_sensitive: true, include_compensation_history: true) }
+        rescue EmployeeCompensationChangeService::Error => e
+          render_compensation_change_error(e)
+        end
+
         # PATCH /api/v1/admin/employees/:id
         def update
           attributes, w4_attributes, w4_reason, election_received = split_w4_attributes(employee_params)
+          compensation = compensation_change_params
           validate_legacy_recurring_components!(@employee, attributes)
           require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present? && params.dig(:employee, :ssn).to_s.gsub(/\D/, "") != @employee.ssn_digits
 
@@ -115,7 +146,23 @@ module Api
               )
               @payment_default_service.call
             end
+            requested_pay_rate = attributes.key?(:pay_rate) ? attributes.delete(:pay_rate) : EmployeeCompensationChangeService::UNCHANGED
+            basis = attributes.extract!(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES.map(&:to_sym))
             @employee.update!(attributes.merge(w4_attributes))
+            @compensation_result = EmployeeCompensationChangeService.new(
+              employee: @employee,
+              actor: current_user,
+              source: "staff",
+              reason: compensation[:reason],
+              effective_on: compensation[:effective_on],
+              historical_correction: compensation[:historical_correction],
+              pay_rate: requested_pay_rate,
+              basis: basis,
+              expected_revision: compensation[:revision],
+              wage_rates: compensation[:wage_rates],
+              wage_rate_edits: compensation[:wage_rate_edits],
+              replace_missing_wage_rates: !compensation[:wage_rates].nil?
+            ).call!
             EmployeeW4ElectionChangeService.new(
               employee: @employee,
               attributes: w4_attributes,
@@ -126,8 +173,9 @@ module Api
           end
 
           render json: {
-            data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true),
-            payment_method_review: { reapproval_pay_period_ids: @payment_default_service&.reapproval_pay_period_ids || [] }
+            data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true),
+            payment_method_review: { reapproval_pay_period_ids: @payment_default_service&.reapproval_pay_period_ids || [] },
+            compensation_warnings: @compensation_result&.warnings || []
           }
         rescue ActiveRecord::RecordInvalid => e
           render json: {
@@ -136,6 +184,8 @@ module Api
           }, status: :unprocessable_entity
         rescue EmployeeW4ElectionChangeService::Error => e
           render json: { error: "Validation failed", details: { w4_change_reason: [ e.message ] } }, status: :unprocessable_entity
+        rescue EmployeeCompensationChangeService::Error => e
+          render_compensation_change_error(e)
         rescue PayrollReview::RevisionService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue LegacyRecurringComponentGuard::Error => e
@@ -272,6 +322,17 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        def render_compensation_change_error(error)
+          conflict = error.is_a?(EmployeeCompensationChangeService::ConflictError)
+          locked = error.is_a?(EmployeeCompensationChangeService::LockedPeriodError)
+          render json: {
+            error: error.message,
+            code: conflict ? "compensation_conflict" : locked ? "compensation_locked_period" : "compensation_change_invalid",
+            locked_through: EmployeeCompensationChangeService.locked_through(@employee),
+            details: { compensation_effective_on: [ error.message ] }
+          }, status: conflict ? :conflict : :unprocessable_entity
+        end
+
         def set_employee
           @employee = Employee.find_by(id: params[:id], company_id: current_company_id)
           if @employee
@@ -365,6 +426,59 @@ module Api
               permitted.delete(:ssn)
             end
           end
+        end
+
+        # Read-only pay rate history (M3-4) and the dates the editor offers.
+        def serialize_compensation_history(employee)
+          today = PayrollBusinessClock.today
+          options = EmployeeCompensationChangeService.effective_date_options(employee)
+          status = lambda do |version|
+            if version.effective_on > today then "scheduled"
+            elsif version.covers?(today) then "current"
+            else "past"
+            end
+          end
+          shared = lambda do |version|
+            { id: version.id, effective_on: version.effective_on, ends_on: version.ends_on, reason: version.reason,
+              source: version.source, historical_correction: version.historical_correction,
+              created_by_name: version.created_by&.name, status: status.call(version) }
+          end
+          {
+            revision: EmployeeCompensationChangeService.revision(employee),
+            can_correct: StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: employee.company),
+            effective_dates: {
+              next_uncommitted_period: options[:next_uncommitted_period],
+              today: options[:today],
+              locked_through: options[:locked_through]
+            },
+            pay_rate_changes: employee.employee_compensation_changes.includes(:created_by).chronological.reverse.map do |change|
+              shared.call(change).merge(change.snapshot.symbolize_keys)
+            end,
+            wage_rate_versions: employee.employee_wage_rate_versions.includes(:created_by).order(effective_on: :desc, id: :desc).map do |version|
+              shared.call(version).merge(employee_wage_rate_id: version.employee_wage_rate_id).merge(version.snapshot.symbolize_keys)
+            end
+          }
+        end
+
+        # The effective date, reason and wage-rate list for a pay change. The
+        # wage-rate list is the full set of active rates the editor shows; it
+        # is applied only alongside compensation_effective_on, because older
+        # editors sent the list here but saved it through the wage-rate API.
+        def compensation_change_params
+          compensation = params.fetch(:employee, {}).permit(
+            :compensation_effective_on, :compensation_change_reason, :compensation_historical_correction, :compensation_revision,
+            wage_rates: [ :id, :label, :rate, :is_primary, :active ],
+            compensation_wage_rate_edits: [ :id, :label, :rate, :is_primary, :active, :remove ]
+          )
+          {
+            effective_on: compensation[:compensation_effective_on].presence,
+            reason: compensation[:compensation_change_reason],
+            revision: compensation[:compensation_revision],
+            wage_rate_edits: Array(compensation[:compensation_wage_rate_edits]).map(&:to_h),
+            historical_correction: compensation[:compensation_historical_correction],
+            wage_rates: params[:employee].respond_to?(:key?) && params[:employee].key?(:compensation_effective_on) &&
+              params[:employee].key?(:wage_rates) ? Array(compensation[:wage_rates]).map(&:to_h) : nil
+          }
         end
 
         def validate_legacy_recurring_components!(employee, attributes)
@@ -498,7 +612,8 @@ module Api
           include_w4_history: false,
           include_retirement_history: false,
           include_configuration_review_history: false,
-          include_document_readiness: false
+          include_document_readiness: false,
+          include_compensation_history: false
         )
           data = employee.as_json(
             except: [ :intake_exception, :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
@@ -513,7 +628,9 @@ module Api
             employee.employee_work_profiles.find_by(ends_on: nil)
           end
           data["current_work_profile"] = serialize_work_profile(current_profile)
-          data["wage_rates"] = employee.active_wage_rates.map do |rate|
+          rates_on = @rates_on || PayrollBusinessClock.today
+          data.merge!(EmployeeCompensationChangeService.snapshot(employee, rates_on).as_json)
+          data["wage_rates"] = employee.wage_rates_on(rates_on).map do |rate|
             {
               id: rate.id,
               employee_id: rate.employee_id,
@@ -548,6 +665,8 @@ module Api
               serialize_status_event(event)
             end
           end
+
+          data["compensation_history"] = serialize_compensation_history(employee) if include_compensation_history
 
           if include_w4_history
             elections = employee.employee_w4_elections.includes(:created_by).recent_first.to_a

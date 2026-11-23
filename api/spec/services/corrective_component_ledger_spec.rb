@@ -243,7 +243,7 @@ RSpec.describe "Corrective component ledger" do
   end
 
   it "retains salary nonexempt overtime as signed earning deltas from the saved coverage" do
-    employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52000)
+    change_compensation!(employee, employment_type: "salary", salary_type: "annual", pay_rate: 52000)
     original = original!(employment_type: "salary", pay_rate: 52000, hours_worked: 0, overtime_hours: 5,
       timekeeping_context_snapshot: { "overtime_status" => "nonexempt", "salary_covers_weekly_hours" => 40,
         "salary_type" => "annual", "pay_frequency" => "biweekly", "salary_uncovered_overtime_hours" => 5 })

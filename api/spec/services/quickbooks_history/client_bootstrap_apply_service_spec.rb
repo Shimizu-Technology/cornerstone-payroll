@@ -48,6 +48,9 @@ RSpec.describe QuickbooksHistory::ClientBootstrapApplyService do
     expect(batch.historical_paychecks.where(employee_id: nil)).to be_empty
 
     active = company.employees.find_by!(first_name: "Alice")
+    # M3-4: the prepared worker's starting pay and wage rate are recorded as history.
+    expect(active.employee_compensation_changes.sole).to have_attributes(source: "quickbooks_history", pay_rate: active.pay_rate)
+    expect(active.employee_wage_rates.flat_map(&:employee_wage_rate_versions).size).to eq(active.employee_wage_rates.size)
     expect(active).to have_attributes(
       status: "active",
       hire_date: nil,

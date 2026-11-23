@@ -73,6 +73,23 @@ RSpec.describe "Pay-period catalog and change rows" do
     expect(PayrollSubmissions::PeriodLabel.call(Date.new(2026, 12, 28), Date.new(2027, 1, 10))).to eq("Dec 28, 2026 – Jan 10, 2027")
   end
 
+  it "bulk loads compensation for 25 standing changes and submitted rows" do
+    rows = 25.times.map do
+      employee = create(:employee, company: company)
+      rate = employee.employee_wage_rates.create!(label: "Regular", rate: 15, is_primary: true)
+      standing = PayrollStandingChange.create!(company: company, employee: employee, employee_wage_rate: rate, kind: "extra_hours")
+      { "kind" => "extra_hours", "standing_change_id" => standing.id, "employee_id" => employee.id,
+        "employee_wage_rate_id" => rate.id, "hours" => "8" }
+    end
+
+    queries = compensation_read_queries("employees") do
+      result = PayrollSubmissions::ChangeRows.normalize!(rows, company_id: company.id)
+      expect(result.size).to eq(25)
+      expect(result.pluck("wage_rate").uniq).to eq([ "15.0" ])
+    end
+    expect(queries.size).to eq(8)
+  end
+
   it "normalizes rows and reports every invalid field" do
     employee = create(:employee, :salary, company: company, salary_type: "variable")
     rows = PayrollSubmissions::ChangeRows.normalize!([
