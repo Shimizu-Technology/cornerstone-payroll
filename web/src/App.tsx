@@ -1,3 +1,4 @@
+// Staff surface entry. Vite resolves the employee surface to EmployeeApp.tsx.
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
 import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
