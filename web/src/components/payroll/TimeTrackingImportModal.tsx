@@ -1,3 +1,4 @@
+import { exclusionCategoryLabels } from '@/lib/time-tracking-exclusions';
 import { supportsSourceOperation } from '@/lib/time-tracking';
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -64,7 +65,7 @@ function formatTimestamp(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function exclusionLabel(reason: string): string {
+function formatExclusionReason(reason: string): string {
   return reason.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
@@ -383,7 +384,8 @@ export function TimeTrackingImportModal({
   const includedPreviewRows = rows.filter((row) => includedRows.has(row.source_user_id));
   const includedRegularHours = includedPreviewRows.reduce((sum, row) => sum + Number(row.regular_hours || 0), 0);
   const includedOvertimeHours = includedPreviewRows.reduce((sum, row) => sum + Number(row.overtime_hours || 0), 0);
-  const heldHours = exclusions.reduce((sum, exclusion) => sum + Number(exclusion.held_total_hours || 0), 0);
+  const excludedEntryCount = exclusions.filter(exclusion => Number(exclusion.held_total_hours) > 0).length;
+  const excludedHours = exclusions.reduce((sum, exclusion) => sum + Number(exclusion.held_total_hours || 0), 0);
   const mappedIncludedRows = includedPreviewRows.filter((row) => mappings.get(row.source_user_id));
   const includedEmployeeIds = mappedIncludedRows.map((row) => mappings.get(row.source_user_id)).filter((id): id is number => Boolean(id));
   const duplicateEmployeeIds = new Set(includedEmployeeIds.filter((id, index) => includedEmployeeIds.indexOf(id) !== index));
@@ -632,7 +634,7 @@ export function TimeTrackingImportModal({
               {isFinalizedBatch
                 ? isHistoricalReconciliation
                   ? 'Link the committed payroll to this cutoff. Pay will stay unchanged.'
-                  : 'Review approved source hours, employee links, pay rates and held entries. Adding hours does not approve payroll or record payment.'
+                  : 'Review approved source hours, employee links, pay rates and exclusions. Adding hours does not approve payroll or record payment.'
                 : 'Pull approved hours from this client’s configured time tracking source.'}
             </p>
           </div>
@@ -697,7 +699,7 @@ export function TimeTrackingImportModal({
                         <p className="mt-2 text-sm leading-6 text-primary-800">
                           {isHistoricalReconciliation
                             ? 'This is a read-only reconciliation. Cornerstone will verify each employee’s regular and overtime hours before it links the records; payroll values, taxes, deductions, and checks will not change.'
-                            : 'Pending, denied, and open entries remain visible as held exclusions. Late approvals and corrections arrive in a later finalized batch without changing this one.'}
+                            : 'Review why each entry is outside this payroll. Late approvals and corrections arrive in a later finalized batch.'}
                         </p>
                       </div>
                       <div className="rounded-xl border border-neutral-200 p-4">
@@ -815,9 +817,9 @@ export function TimeTrackingImportModal({
                 {!isFinalizedBatch && <p className="mt-1 text-xs text-neutral-600">OT window: {formatDateRange(preview.fetch_start_date, preview.fetch_end_date)}</p>}
               </section>
 
-              {isFinalizedBatch && exclusions.length > 0 && (
-                <p className="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-900">
-                  <span className="font-semibold">{exclusions.length} held {exclusions.length === 1 ? 'entry' : 'entries'} · {formatHours(heldHours)} held hours at cutoff.</span> See held entries below; they will not be added to this payroll.
+              {isFinalizedBatch && excludedEntryCount > 0 && (
+                <p className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-700">
+                  <span className="font-semibold">{excludedEntryCount} excluded {excludedEntryCount === 1 ? 'entry' : 'entries'} · {formatHours(excludedHours)} hours outside this payroll.</span> See entry details below.
                 </p>
               )}
 
@@ -1048,20 +1050,21 @@ export function TimeTrackingImportModal({
                 <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 sm:p-6">
                   <div className="flex items-center gap-2">
                     <Clock3 className="h-4 w-4 text-neutral-600" aria-hidden="true" />
-                    <h3 className="font-semibold text-neutral-950">Held entries outside this payroll</h3>
+                    <h3 className="font-semibold text-neutral-950">Entries outside this payroll</h3>
                   </div>
-                  <p className="mt-2 text-sm text-neutral-600">These entries remain in time tracking for follow-up. Each reason explains why the entry is outside this payroll.</p>
                   <div className="mt-4 grid gap-2 lg:grid-cols-2">
                     {exclusions.map((exclusion) => (
                       <div key={`${exclusion.source_time_entry_id}-${exclusion.reason}`} className="rounded-xl border border-neutral-200 bg-white p-4">
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0 break-words">
                             <div className="text-sm font-semibold text-neutral-900">{exclusion.display_name || exclusion.source_user_id}</div>
                             <div className="mt-2 text-xs text-neutral-600">{exclusion.original_work_date} · {exclusion.category?.name || 'Uncategorized'}</div>
                           </div>
-                          <span className="rounded-full bg-neutral-100 px-2 text-xs font-semibold text-neutral-700">{exclusionLabel(exclusion.reason)}</span>
+                          <span className="rounded-full bg-neutral-100 px-2 text-xs font-semibold text-neutral-700">{exclusion.exclusion_category ? exclusionCategoryLabels[exclusion.exclusion_category] : 'Excluded'}</span>
                         </div>
-                        <div className="mt-2 text-xs text-neutral-600">{formatHours(exclusion.held_total_hours)} held hours at cutoff</div>
+                        <p className="mt-2 break-words text-xs text-neutral-600">
+                          <span>{formatHours(exclusion.held_total_hours)} hours outside this payroll</span> · <span>{formatExclusionReason(exclusion.reason)}</span>
+                        </p>
                       </div>
                     ))}
                   </div>

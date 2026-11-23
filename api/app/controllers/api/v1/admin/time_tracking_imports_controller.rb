@@ -157,6 +157,12 @@ module Api
 
         def import_json(import)
           coverage = import.is_a?(TimeTrackingImport) && import.finalized_batch? ? TimeTracking::CorrectionCoverage.new(import) : nil
+          processed_payload = coverage ? coverage.read_processed_payload : import.processed_payload
+          if processed_payload.key?("exclusions")
+            processed_payload = processed_payload.merge("exclusions" => Array(processed_payload["exclusions"]).map do |row|
+              row.merge("exclusion_category" => TimeTracking::ExclusionSummary.category(row["reason"]))
+            end)
+          end
           {
             correction_dispositions: coverage ? coverage.presentation : [],
             correction_lines: coverage ? Array(import.raw_payload["employees"]).flat_map { |employee|
@@ -173,7 +179,7 @@ module Api
             fetch_start_date: import.fetch_start_date,
             fetch_end_date: import.fetch_end_date,
             warnings: import.warnings,
-            processed_payload: coverage ? coverage.read_processed_payload : import.processed_payload,
+            processed_payload: processed_payload,
             external_batch_id: import.external_batch_id,
             external_batch_checksum: import.external_batch_checksum,
             contract_version: import.contract_version,

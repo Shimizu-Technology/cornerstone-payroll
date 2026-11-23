@@ -1388,6 +1388,8 @@ module Api
         def pay_period_json(pay_period, include_items: false, list: false)
           agg = pay_period_aggregates(pay_period)
           lifecycle = pay_period_lifecycle_summary(pay_period)
+          fica_review = pay_period.annual_fica_review
+          fica_review_note = pay_period.annual_fica_review_note(review: fica_review)
 
           json = {
             id: pay_period.id,
@@ -1415,8 +1417,9 @@ module Api
             training_baseline_locked: pay_period.training_baseline?,
             company_pay_schedule_id: pay_period.company_pay_schedule_id,
             company_workweek_id: pay_period.company_workweek_id,
-            compliance_warnings: pay_period.compliance_warnings,
-            annual_fica_review_note: pay_period.annual_fica_review_note,
+            compliance_warnings: pay_period.compliance_warnings(fica_review_note: fica_review_note),
+            annual_fica_review_note: fica_review_note,
+            annual_fica_review: fica_review,
             prior_provider_history_available: PriorProviderHistory::Discovery.available?(pay_period.company, period: pay_period),
             period_description: pay_period.period_description,
             payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
