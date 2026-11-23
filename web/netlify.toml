@@ -1,0 +1,7 @@
+"$schema" = "https://open-api.netlify.com/netlify.schema.json"
+
+# The Netlify site's UI sets the base directory to web and finds this file there.
+[build]
+  command = "npm run build"
+  publish = "dist"
+  ignore = "bash ./scripts/netlify-ignore-build.sh"

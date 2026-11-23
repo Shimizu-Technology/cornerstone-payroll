@@ -139,12 +139,30 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: true)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(30)
+    expect(report.checks.length).to eq(31)
     expect(cache.values).to be_empty
     expect(cache.deleted.length).to eq(1)
     expect(storage.objects).to be_empty
     expect(storage.deleted.length).to eq(1)
     expect(queue_process).to have_received(:where).with(kind: "Worker", last_heartbeat_at: instance_of(Range))
+  end
+
+  [
+    { "WEB_CONCURRENCY" => "2" },
+    { "APP_PROCESS_ROLE" => "payroll_web" },
+    { "APP_PROCESS_ROLE" => "employee_web" }
+  ].each do |settings|
+    it "requires a configured shared rate-limit store with #{settings.inspect}" do
+      env.merge!(settings)
+      name = "shared rate-limit store is configured for split or multi-worker web"
+      expect(readiness.run(live: false).failures.map(&:name)).to include(name)
+
+      env["RACK_ATTACK_REDIS_URL"] = "http://wrong-scheme.example"
+      expect(readiness.run(live: false).failures.map(&:name)).to include(name)
+
+      env["RACK_ATTACK_REDIS_URL"] = "rediss://cache.example:6379"
+      expect(readiness.run(live: false).failures.map(&:name)).not_to include(name)
+    end
   end
 
   it "can run configuration-only checks outside a live release" do
@@ -153,7 +171,7 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: false)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(19)
+    expect(report.checks.length).to eq(20)
   end
 
   it "fails closed when complete production encryption sources conflict" do
