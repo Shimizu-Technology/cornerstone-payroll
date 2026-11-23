@@ -7,7 +7,7 @@ module PayrollHistoryReview
     end
 
     def disputes
-      @disputes ||= @sources.voided_periods.order(:id).map { |period| Subject.new("voided_pay_period", period.id, [ period ]) } +
+      @disputes ||= voided_subjects +
         paycheck_subjects("reversed_payroll_item", @sources.reversals) +
         paycheck_subjects("legacy_disposition", @sources.legacy_dispositions)
     end
@@ -41,6 +41,12 @@ module PayrollHistoryReview
     end
 
     private
+
+    def voided_subjects
+      voids = @sources.voided_periods.order(:id).to_a
+      replacements = @sources.replacements_for(voids)
+      voids.map { |period| Subject.new("voided_pay_period", period.id, [ period ], replacements: replacements.fetch(period.id)) }
+    end
 
     def paycheck_subjects(type, rows)
       rows.order(:id).map { |row| Subject.new(type, row.id, [ row ], employee_id: row.employee_id) }

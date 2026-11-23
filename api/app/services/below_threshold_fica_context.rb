@@ -133,7 +133,7 @@ class BelowThresholdFicaContext
   end
 
   def open_subjects
-    @open_subjects ||= PayrollHistoryReview::OpenSubjects.new(company: company, year: year)
+    @open_subjects ||= PayrollHistoryReview::OpenSubjects.new(company: company, year: year, excluding_pay_period_id: excluding_pay_period_id)
   end
 
   def live_review_fields(include_imported_history:)

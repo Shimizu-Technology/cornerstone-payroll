@@ -34,13 +34,13 @@ module PayrollHistoryReview
     end
 
     def reconcile(item, subject, apply:)
-      matching = item.subject_digest == subject.digest
-      if subject.fully_proven? && !(item.resolved? && item.resolution_code == PayrollHistoryReviewItem::PROVEN_CODE && matching)
+      current = subject.resolution_current?(item)
+      if subject.fully_proven? && !(current && item.resolution_code == PayrollHistoryReviewItem::PROVEN_CODE)
         Resolution.prove_item(item, digest: subject.digest, at: subject.proven_at, apply: apply)
         return :proven
       end
 
-      if item.resolved? && !matching
+      if item.resolved? && !current
         Resolution.reopen_item(item, reason: "Source evidence changed", actor: Resolution.detection_actor, digest: subject.digest, apply: apply)
         count = :reopened
       else

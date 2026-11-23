@@ -131,9 +131,7 @@ RSpec.describe YearEnd::JudgmentWarnings do
         a_hash_including(employee_id: employee.id, history_review: { by: first.resolved_by.name, at: first.resolved_at }),
         a_hash_including(employee_id: other.id))
 
-      second = review_gap(gaps.fetch(other.id))
-      # B2 will set this code after applying proof. It uses the same warning path.
-      second.update!(resolution_code: PayrollHistoryReviewItem::PROVEN_CODE)
+      review_gap(gaps.fetch(other.id))
       expect(live_warnings.fetch("legacy_tax_bases")[:status]).to eq("reviewed")
       after_amounts = W2GuAggregator.new(company, 2026).generate.fetch(:employees)
         .map { |row| row.values_at(:box1_wages_tips_other_comp, :box3_social_security_wages, :box5_medicare_wages_tips) }

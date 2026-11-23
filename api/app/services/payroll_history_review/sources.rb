@@ -3,6 +3,8 @@
 module PayrollHistoryReview
   # Shared source selection for the conservative proof and the review checklist.
   class Sources
+    PERIOD_DATES = %i[start_date end_date pay_date].freeze
+
     def initialize(company:, year:, employee_ids: nil, excluding_pay_period_id: nil)
       @company, @year, @employee_ids, @excluding_pay_period_id = company, year, employee_ids, excluding_pay_period_id
     end
@@ -14,6 +16,26 @@ module PayrollHistoryReview
     def voided_periods
       scope = committed_periods.voided.where(id: items.select(:pay_period_id))
       scope.includes(payroll_items: [ :check_events, :check_reconciliation_events, :direct_deposit_payment_confirmation, :legacy_disposition ])
+    end
+
+    def replacements_for(voids)
+      return {} if voids.empty?
+
+      runs = PayPeriod.where(company: @company).where("correction_status IS DISTINCT FROM 'voided'")
+      ids = voids.map(&:id)
+      linked = runs.where(corrects_pay_period_id: ids).or(runs.where(source_pay_period_id: ids))
+        .or(runs.where(id: voids.filter_map(&:superseded_by_id)))
+      same_dates = runs.where(status: "committed").where(PERIOD_DATES => voids.map { |period| period_dates(period) }.uniq)
+      replacements = linked.or(same_dates).includes(:payroll_items).order(:id).to_a
+      by_id = replacements.index_by(&:id)
+      by_correction = replacements.group_by(&:corrects_pay_period_id)
+      by_source = replacements.group_by(&:source_pay_period_id)
+      by_dates = replacements.select(&:committed?).group_by { |period| period_dates(period) }
+      voids.to_h do |period|
+        candidates = by_correction.fetch(period.id, []) | by_source.fetch(period.id, []) |
+          Array(by_id[period.superseded_by_id]) | by_dates.fetch(period_dates(period), [])
+        [ period.id, candidates.sort_by(&:id) ]
+      end
     end
 
     def reversals
@@ -91,6 +113,10 @@ module PayrollHistoryReview
     end
 
     private
+
+    def period_dates(period)
+      PERIOD_DATES.map { |field| period.public_send(field) }
+    end
 
     def legacy_missing_fica
       EmployeeYearFicaContext.reportable_items(company: @company, employee_ids: @employee_ids || @company.employees.select(:id),
