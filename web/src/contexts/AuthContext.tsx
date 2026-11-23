@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
-import { useAuth as useClerkAuth } from '@clerk/clerk-react';
+import { useAuth as useClerkAuth } from '@clerk/react';
 import { ApiError, authApi, MFA_REQUIRED_EVENT, setAuthToken, setAuthTokenProvider } from '@/services/api';
 import { clearAllDrafts } from '@/components/client-portal/messageDrafts';
 
@@ -242,9 +242,13 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
     if (!isSignedIn) return;
 
     const interval = setInterval(async () => {
-      const token = await getToken();
-      if (token) {
-        setAuthToken(token);
+      try {
+        const token = await getToken();
+        if (token) {
+          setAuthToken(token);
+        }
+      } catch {
+        // Clerk Core 3 throws while offline; the next tick or request retries.
       }
     }, 50000); // Refresh every 50s
 
