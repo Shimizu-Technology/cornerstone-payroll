@@ -40,9 +40,31 @@ RSpec.describe TimeTracking::AllocationStatusSummary do
     expect(result[:payment_pending]).to include(line_count: 1, total_hours: 3.to_d)
     expect(result[:in_payroll]).to include(line_count: 0, total_hours: 0.to_d)
     expect(result[:needs_attention]).to include(line_count: 2, total_hours: 3.to_d)
-    expect(result[:held]).to eq(entry_count: 1, total_hours: 1.5.to_d)
+    expect(result[:held]).to include(entry_count: 1, total_hours: 1.5.to_d)
     expect(result[:synchronization]).to include(pending_event_count: 4, failed_event_count: 1)
     expect(result.dig(:synchronization, :last_confirmed_at)).to be_within(1.second).of(30.minutes.ago)
+  end
+
+  it "preserves the legacy totals while excluding zero-hour rows from each category count" do
+    exclusions = [
+      [ "pending_approval", "2.50" ], [ "future_reason", "0.75" ], [ "open_clock", "0.00" ],
+      [ "denied_approval", "4.00" ], [ "denied_overtime", 0 ],
+      [ "approved_after_cutoff", "1.25" ], [ "created_after_cutoff", 0 ],
+      [ "pending_payment_attestation", "3.25" ], [ "payment_attested_pending_evidence", 0 ]
+    ].map { |reason, hours| { "reason" => reason, "held_total_hours" => hours } }
+    import.update_columns(processed_payload: { "exclusions" => exclusions })
+
+    expect(described_class.call(import).fetch(:held)).to eq(
+      entry_count: 9,
+      total_hours: 11.75.to_d,
+      actionable_entry_count: 2,
+      by_category: {
+        needs_action: { entry_count: 2, total_hours: 3.25.to_d },
+        not_paid_by_decision: { entry_count: 1, total_hours: 4.to_d },
+        next_payroll: { entry_count: 1, total_hours: 1.25.to_d },
+        payment_evidence_pending: { entry_count: 1, total_hours: 3.25.to_d }
+      }
+    )
   end
 
   it "reports lines from runs recorded before line-level receipts separately from attention" do
@@ -81,7 +103,7 @@ RSpec.describe TimeTracking::AllocationStatusSummary do
 
     expect(record.fetch(:payable_line_status)).to include(line_count: 1, total_hours: 8.to_d)
     expect(record.dig(:payable_line_status, :in_payroll)).to include(line_count: 1, total_hours: 8.to_d)
-    expect(record.dig(:payable_line_status, :held)).to eq(entry_count: 1, total_hours: 1.5.to_d)
+    expect(record.dig(:payable_line_status, :held)).to include(entry_count: 1, total_hours: 1.5.to_d)
   end
 
   def allocation(key, hours)

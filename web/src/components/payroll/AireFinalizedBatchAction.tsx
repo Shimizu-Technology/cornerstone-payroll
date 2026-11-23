@@ -1,3 +1,4 @@
+import { linkedExclusionMessages } from '@/lib/time-tracking-exclusions';
 import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,11 +21,13 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
     total_hours: lineStatus.total_hours,
     regular_hours: lineStatus.regular_hours,
     overtime_hours: lineStatus.overtime_hours,
-    exclusion_count: lineStatus.held.entry_count,
   } : {});
   // The linked record keeps hours by line, not a batch headcount.
   const employeeCount = batch ? Number(summary.employee_count || 0) : null;
-  const exclusionCount = Number(summary.exclusion_count || 0);
+  const linkedExclusions = lineStatus && (!batch || aireRecord?.external_batch_id === batch.payroll_batch_id) ? lineStatus.held : null;
+  const exclusionMessage = linkedExclusions ? linkedExclusionMessages(linkedExclusions).join(' · ')
+    : Number(summary.exclusion_count) > 0 ? 'Review entries outside this payroll' : '';
+  const exclusionsUnavailable = !linkedExclusions && summary.exclusion_count == null;
   // Without a batch, the record's accounting corrections are its signed lines.
   const includesCorrections = batch
     ? Number(summary.correction_count || 0) > 0 || Number(batch.issues?.negative_adjustment_count || 0) > 0
@@ -108,7 +111,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
         </div>
 
         <p className="border-t border-neutral-200 px-5 py-3 text-sm text-neutral-700 sm:px-6">
-          <span className="font-semibold">{hours(summary.total_hours)} hours</span> · {hours(summary.regular_hours)} regular + {hours(summary.overtime_hours)} overtime{employeeCount === null ? '' : ` · ${employeeCount} employees`} · {exclusionCount} held entries excluded
+          <span className="font-semibold">{hours(summary.total_hours)} hours</span> · {hours(summary.regular_hours)} regular + {hours(summary.overtime_hours)} overtime{employeeCount === null ? '' : ` · ${employeeCount} employees`}{exclusionMessage && ` · ${exclusionMessage}`}
         </p>
         <details>
           <summary className="cursor-pointer border-t border-neutral-200 px-5 py-3 text-sm font-semibold text-primary-800 sm:px-6">Source and payment totals</summary>
@@ -126,9 +129,9 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
             <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(summary.overtime_hours)} hrs</p>
           </div>
           <div className="px-5 py-4 sm:px-6">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{employeeCount === null ? 'Held time' : 'People and held time'}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{employeeCount === null ? 'Excluded time' : 'People and exclusions'}</p>
             {employeeCount !== null && <p className="mt-2 font-semibold text-neutral-950">{employeeCount} employee{employeeCount === 1 ? '' : 's'}</p>}
-            <p className={employeeCount === null ? 'mt-2 font-semibold text-neutral-950' : 'mt-1 text-xs text-neutral-500'}>{exclusionCount} held entr{exclusionCount === 1 ? 'y' : 'ies'} tracked for later</p>
+            <p className={employeeCount === null ? 'mt-2 font-semibold text-neutral-950' : 'mt-1 text-xs text-neutral-500'}>{exclusionMessage || (exclusionsUnavailable ? 'Exclusion details unavailable' : 'No excluded hours')}</p>
           </div>
         </div>
 
@@ -158,7 +161,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
           <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />
           <p>
             {includesCorrections && attentionLines === 0
-              ? 'Signed batch totals can combine increases and reductions to earlier frozen time with ordinary hours. Accounting-only corrections record no new payment or recovery; held entries remain excluded.'
+              ? 'Signed batch totals can combine increases and reductions to earlier frozen time with ordinary hours. Accounting-only corrections record no new payment or recovery. The batch review shows excluded entries.'
               : aireRecordLinked
               ? committed
                 ? attentionLines > 0
