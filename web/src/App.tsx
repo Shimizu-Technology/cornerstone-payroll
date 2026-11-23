@@ -80,6 +80,10 @@ const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user, authProblem } = useAuth();
 
+  if (authProblem?.status === 403 && authProblem.code === 'mfa_required') {
+    return <Navigate to="/login" replace />;
+  }
+
   // Skip auth check if disabled. A refused account still gets an explanation
   // instead of an empty staff-style workspace.
   if (!AUTH_ENABLED) {

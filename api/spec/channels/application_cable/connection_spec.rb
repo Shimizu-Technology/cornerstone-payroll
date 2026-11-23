@@ -46,4 +46,43 @@ RSpec.describe ApplicationCable::Connection, type: :channel do
     expect(connection.current_user).to eq(user)
     expect(connection.current_company).to eq(company)
   end
+
+  it "rejects an array-valued ticket without raising a digest error" do
+    expect { connect params: { ticket: [ "invalid" ] } }.to have_rejected_connection
+  end
+
+  describe "MFA at connection time" do
+    around do |example|
+      previous = ENV["REQUIRE_MFA"]
+      ENV["REQUIRE_MFA"] = "false"
+      example.run
+    ensure
+      ENV["REQUIRE_MFA"] = previous
+    end
+
+    it "rejects a ticket issued before enforcement was enabled" do
+      ticket = issue_ticket
+      ENV["REQUIRE_MFA"] = "true"
+
+      expect do
+        connect params: { ticket: ticket }, headers: { "User-Agent" => "Cable connection spec" },
+          env: { "REMOTE_ADDR" => "192.0.2.81" }
+      end.to have_rejected_connection
+      expect(AuditLog.last).to have_attributes(
+        action: "authentication#mfa_required_denied", event_category: "security", metadata: { "source" => "action_cable" },
+        subject_name: user.name, ip_address: "192.0.2.81", user_agent: "Cable connection spec"
+      )
+    end
+
+    it "accepts a verified ticket once and retains the ticket's company scope" do
+      ENV["REQUIRE_MFA"] = "true"
+      ticket = CableTicketService.issue!(user: user, company_id: company.id, clerk_token_payload: { "fva" => [ 5, 0 ] })
+
+      connect params: { ticket: ticket }
+
+      expect(connection.current_user).to eq(user)
+      expect(connection.current_company).to eq(company)
+      expect { connect params: { ticket: ticket } }.to have_rejected_connection
+    end
+  end
 end
