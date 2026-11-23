@@ -102,6 +102,27 @@ RSpec.describe "Write maintenance", type: :request do
     expect(response).to have_http_status(:created)
   end
 
+  it "serves public branding and includes tenant CORS on blocked writes to employee paths" do
+    company = create(:company, subdomain_slug: "maintenance-demo")
+    company.client_operating_profiles.create!(
+      effective_on: PayrollBusinessClock.today, version: 1, offering: "payroll_service",
+      hours_source: "manual", options: { subdomain_enabled: true }
+    )
+    tenant_origin = "https://maintenance-demo.shimizu-technology.com"
+    headers = { "Origin" => tenant_origin }
+
+    get "/api/v1/public/tenant_branding", params: { slug: company.subdomain_slug }, headers: headers
+    expect(response).to have_http_status(:ok)
+    expect(response.headers["Access-Control-Allow-Origin"]).to eq(tenant_origin)
+    expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
+
+    patch "/api/v1/employee/context", headers: headers
+    expect(response).to have_http_status(:service_unavailable)
+    expect(response.headers["Access-Control-Allow-Origin"]).to eq(tenant_origin)
+    expect(response.headers["Access-Control-Allow-Credentials"]).to eq("true")
+    expect(response.headers["Retry-After"]).to eq("60")
+  end
+
   it "allows GET, HEAD, CORS preflight, and the boot health check" do
     get departments_path
     expect(response).to have_http_status(:ok)

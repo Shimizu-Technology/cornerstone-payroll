@@ -47,7 +47,7 @@ const linkedRecord = (overrides: Partial<NonNullable<AirePayrollRecord['payable_
     payment_pending: bucket(0, 0),
     paid: bucket(0, 0),
     needs_attention: bucket(0, 0),
-    held: { entry_count: 1, total_hours: 4 },
+    held: { entry_count: 2, total_hours: 4, by_category: { not_paid_by_decision: { entry_count: 1, total_hours: 4 } } },
     synchronization: { pending_event_count: 0, failed_event_count: 0, last_confirmed_at: null },
     ...overrides,
   },
@@ -71,7 +71,7 @@ describe('AireFinalizedBatchAction', () => {
     expect(screen.getByText('72.50 hrs')).toBeTruthy();
     expect(screen.getByText('69.00 hrs')).toBeTruthy();
     expect(screen.getByText('3.50 hrs')).toBeTruthy();
-    expect(screen.getByText('1 held entry tracked for later')).toBeTruthy();
+    expect(screen.getByText('Review entries outside this payroll')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: /review and add time tracking hours/i }));
     expect(onReview).toHaveBeenCalledTimes(1);
@@ -288,8 +288,8 @@ describe('linked record without a batch', () => {
     expect(screen.getByText('Time tracking hours were recorded with this payroll')).toBeTruthy();
     expect(screen.getByText('Recorded')).toBeTruthy();
     expect(screen.getByText(/recorded before Cornerstone tracked payment line by line/)).toBeTruthy();
-    expect(screen.getByText('Held time')).toBeTruthy();
-    expect(screen.getByText('1 held entry tracked for later')).toBeTruthy();
+    expect(screen.getByText('Excluded time')).toBeTruthy();
+    expect(screen.getByText('1 denied entry, not paid')).toBeTruthy();
     expect(screen.getAllByText('69.00 hrs').length).toBeGreaterThan(0);
     expect(screen.queryByText(/employee/)).toBeNull();
     expect(screen.queryByRole('button')).toBeNull();
