@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
 class LoanTransaction < ApplicationRecord
+  include CompanyFromParent
   TYPES = %w[payment addition adjustment].freeze
   SOURCES = %w[opening_balance payroll manual].freeze
 
   belongs_to :employee_loan
+  inherit_company_from :employee_loan
   belongs_to :reverses_transaction, class_name: "LoanTransaction", optional: true
   has_one :reversal, class_name: "LoanTransaction", foreign_key: :reverses_transaction_id
   belongs_to :pay_period, optional: true

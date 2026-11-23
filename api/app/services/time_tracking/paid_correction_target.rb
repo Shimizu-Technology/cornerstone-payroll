@@ -46,7 +46,7 @@ module TimeTracking
         "target" => target.attributes.except(*ITEM_OPERATIONAL_FIELDS),
         "target_period" => target.pay_period.attributes.except(*PERIOD_OPERATIONAL_FIELDS),
         "target_tax_year" => target.pay_period.pay_date.year,
-        "financial_links" => chains.flatten.uniq(&:id).sort_by(&:id).map(&:attributes),
+        "financial_links" => chains.flatten.uniq(&:id).sort_by(&:id).map { |link| link.attributes.except("company_id") },
         "financial_proofs" => financial_proofs.map(&:deep_stringify_keys),
         "current_payment" => payment.deep_stringify_keys }
       { origin: origin, target: target, original_proof: proof.fetch(:evidence), payment_proof: payment,
@@ -134,25 +134,45 @@ module TimeTracking
     def stable_saved_evidence(stored)
       return nil unless stored.is_a?(Hash) && stored["target"].is_a?(Hash) && stored["target_period"].is_a?(Hash)
       return nil unless stored["version"].is_a?(Integer)
+      normalized = stored.deep_dup
       case stored["version"]
       when EVIDENCE_VERSION
         return nil unless stored["target_tax_year"].is_a?(Integer)
         return nil unless stored["target"].keys.sort == (PayrollItem.column_names - ITEM_OPERATIONAL_FIELDS).sort &&
           stored["target_period"].keys.sort == (PayPeriod.column_names - PERIOD_OPERATIONAL_FIELDS).sort
-        stored.deep_dup
       when 1
         return nil if stored.key?("target_tax_year")
         return nil unless stored["target"].keys.sort == PayrollItem.column_names.sort &&
           stored["target_period"].keys.sort == PayPeriod.column_names.sort
-        normalized = stored.deep_dup
         normalized["version"] = EVIDENCE_VERSION
         normalized["target_tax_year"] = Date.iso8601(stored["target_period"].fetch("pay_date")).year
         normalized["target"] = normalized["target"].except(*ITEM_OPERATIONAL_FIELDS)
         normalized["target_period"] = normalized["target_period"].except(*PERIOD_OPERATIONAL_FIELDS)
-        normalized
+      else
+        return nil
       end
+      strip_child_company_ids!(normalized)
+      normalized
     rescue Date::Error, TypeError, KeyError
       nil
+    end
+
+    # Some evidence was written during the expand with a nil or populated
+    # company_id. Ignore it only on the denormalized child rows.
+    def strip_child_company_ids!(evidence)
+      Array(evidence["financial_links"]).each { |row| strip_company_id!(row) }
+      Array(evidence["financial_proofs"]).each { |proof| strip_company_id!(proof["link"]) if proof.is_a?(Hash) }
+      work = evidence["origin_work"]
+      Array(work["native_earnings"]).each { |row| strip_company_id!(row) } if work.is_a?(Hash)
+      payment = evidence["current_payment"]
+      return unless payment.is_a?(Hash)
+
+      strip_company_id!(payment["confirmation"])
+      Array(payment["events"]).each { |event| strip_company_id!(event) }
+    end
+
+    def strip_company_id!(row)
+      row.delete("company_id") if row.is_a?(Hash)
     end
 
     def chain_for(allocation, links)

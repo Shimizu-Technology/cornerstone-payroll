@@ -402,7 +402,7 @@ class EmployeeCompensationChangeService
       apply_version!(employee.employee_compensation_changes, effective_on, current.merge(changes), restore: current)
     end
     wage_rate_versions = edits.map do |id, values|
-      row = id ? employee.employee_wage_rates.find(id) : employee.employee_wage_rates.create!(label: self.class.reserved_label, active: false)
+      row = id ? employee.employee_wage_rates.find(id) : employee.employee_wage_rates.create!(company_id: employee.company_id, label: self.class.reserved_label, active: false)
       prior = before_rates[id]
       desired = (prior || { "active" => true, "is_primary" => false }).merge(values)
       restore = prior || desired.merge("active" => false, "is_primary" => false)

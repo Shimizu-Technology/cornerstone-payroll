@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 class TimeTrackingFinancialCorrectionLink < ApplicationRecord
+  include CompanyFromParent
   belongs_to :original_allocation, class_name: "TimeTrackingEntryAllocation"
   belongs_to :predecessor_payroll_item, class_name: "PayrollItem"
   belongs_to :payroll_item
+  inherit_company_from :payroll_item
   has_many :aire_payroll_entry_acknowledgements, foreign_key: :financial_correction_link_id, dependent: :restrict_with_error
 
   validates :command_id, :event_id, :payload, :request_digest, presence: true

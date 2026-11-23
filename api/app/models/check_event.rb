@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class CheckEvent < ApplicationRecord
+  include CompanyFromParent
   belongs_to :payroll_item
+  inherit_company_from :payroll_item
   belongs_to :user, optional: true
   has_many :aire_payroll_entry_acknowledgements, dependent: :restrict_with_error
 

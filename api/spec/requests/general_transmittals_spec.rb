@@ -222,6 +222,21 @@ RSpec.describe "General Transmittals Admin API", type: :request do
       expect(item.reload.title).to eq("Changed as draft")
     end
 
+    it "keeps item ownership when replacing a line with a standalone check snapshot" do
+      transmittal = create(:general_transmittal, :with_item, company: company)
+      item = transmittal.items.sole
+      check = create(:non_employee_check, :standalone, company: company)
+
+      patch "/api/v1/admin/general_transmittals/#{transmittal.id}", params: {
+        general_transmittal: {
+          items: [ { id: item.id, source_type: "NonEmployeeCheck", source_id: check.id, position: 0 } ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload).to have_attributes(company_id: company.id, source_id: check.id, amount: check.amount)
+    end
+
     it "rejects changing an existing item to a check from another company" do
       transmittal = create(:general_transmittal, :with_item, company: company)
       item = transmittal.items.first

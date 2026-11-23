@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class NonEmployeeCheckLineItem < ApplicationRecord
+  include CompanyFromParent
   belongs_to :non_employee_check, touch: true
+  inherit_company_from :non_employee_check
 
   before_validation :normalize_fields
 

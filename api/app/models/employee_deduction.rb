@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class EmployeeDeduction < ApplicationRecord
+  include CompanyFromParent
   belongs_to :employee
+  inherit_company_from :employee
   belongs_to :deduction_type
 
   validates :amount, presence: true, numericality: { greater_than_or_equal_to: 0 }

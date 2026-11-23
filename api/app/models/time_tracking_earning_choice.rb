@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 class TimeTrackingEarningChoice < ApplicationRecord
+  include CompanyFromParent
   belongs_to :time_tracking_source
   belongs_to :employee
+  inherit_company_from :employee
   belongs_to :employee_wage_rate
   belongs_to :reviewed_by, class_name: "User"
   validate :same_employee_and_company

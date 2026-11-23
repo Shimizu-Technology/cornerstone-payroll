@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class PayrollIntakeDocument < ApplicationRecord
+  include CompanyFromParent
   DOCUMENT_TYPES = %w[pasted_text image pdf other].freeze
   SOURCE_ROLES = %w[pasted_email email_attachment revel_hours supplemental_workbook supporting_document legacy_source].freeze
   VERIFICATION_STATUSES = %w[verified failed legacy_unverified].freeze
@@ -10,6 +11,7 @@ class PayrollIntakeDocument < ApplicationRecord
   ].freeze
 
   belongs_to :payroll_intake_session, inverse_of: :documents
+  inherit_company_from :payroll_intake_session
   belongs_to :payroll_submission_document, optional: true
 
   validates :document_type, inclusion: { in: DOCUMENT_TYPES }

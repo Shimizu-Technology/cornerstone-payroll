@@ -16,7 +16,10 @@ RSpec.describe "Expected payroll entries", type: :request do
     post url, params: { payroll_standing_change_id: field.id, note: "Away" }, as: :json
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("expected_entries", "fields").sole).to include("status" => "none")
-    expect(AuditLog.where(action: "payroll_entry_resolutions#save").last.user_id).to eq(staff.id)
+    audit = AuditLog.where(action: "payroll_entry_resolutions#save").last
+    expect(audit).to have_attributes(user_id: staff.id, company_id: company.id)
+    expect(audit.metadata.fetch("resolution")).not_to have_key("company_id")
+    expect(audit.metadata.fetch("changes")).not_to have_key("company_id")
     delete url, params: { employee_id: owner.id, payroll_standing_change_id: field.id }, as: :json
     expect(response).to have_http_status(:ok)
     expect(PayrollEntryResolution.count).to eq(0)

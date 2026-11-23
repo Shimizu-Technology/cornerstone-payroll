@@ -147,7 +147,7 @@ module TimeTracking
         raise Error, "Accepted financial command no longer matches the frozen work and reversal proof"
       end
       Client.new(allocation.time_tracking_source).validate_financial_correction_receipt!(link.accepted_receipt, expected: link.payload, historical: true)
-      { link: link.attributes, financial_assertion: proof, void_event_id: receipt.event_id }
+      { link: link.attributes.except("company_id"), financial_assertion: proof, void_event_id: receipt.event_id }
     rescue ArgumentError, Client::Error => e
       raise Error, e.message
     end

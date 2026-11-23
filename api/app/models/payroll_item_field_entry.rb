@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 class PayrollItemFieldEntry < ApplicationRecord
+  include CompanyFromParent
   include TrainingBaselineImmutable
   SOURCES = %w[employee_default manual import system].freeze
   REPORTING_GROUPS = PayrollReportingGroups::GROUPS
 
   belongs_to :payroll_item
+  inherit_company_from :payroll_item
   belongs_to :payroll_field_definition, optional: true
 
   validates :label, presence: true

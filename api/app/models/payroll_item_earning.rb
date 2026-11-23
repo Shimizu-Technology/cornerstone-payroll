@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
 class PayrollItemEarning < ApplicationRecord
+  include CompanyFromParent
   include TrainingBaselineImmutable
   CATEGORIES = %w[regular overtime holiday pto salary bonus tips service_charge reimbursement non_taxable contract_fee other].freeze
 
   belongs_to :payroll_item
+  inherit_company_from :payroll_item
 
   validates :category, presence: true, inclusion: { in: CATEGORIES }
   validates :label, presence: true

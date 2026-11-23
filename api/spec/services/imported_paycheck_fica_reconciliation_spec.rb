@@ -400,22 +400,21 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
   end
 
   it "exposes a read-only default task and digest-locked administrator apply" do
-    previous_application = Rake.application
-    Rake.application = Rake::Application.new
     imported
     review
-    load Rails.root.join("lib/tasks/fica_legacy.rake")
-    Rake::Task.define_task(:environment)
     values = { "COMPANY_ID" => company.id.to_s, "TAX_YEAR" => "2026", "ACTOR_ID" => actor.id.to_s,
       "REVIEW_REFERENCE" => "Reviewed imported FICA task fixture", "PLAN_DIGEST" => service.inventory[:plan_digest] }
     previous = values.to_h { |key, _| [ key, ENV[key] ] }
     values.each { |key, value| ENV[key] = value }
-    task = Rake::Task["payroll:fica_legacy:reconcile_imports"]
-    expect { expect { task.invoke }.to output(/recoverable/).to_stdout }.not_to change(HistoricalPaycheckFicaBasisProof, :count)
-    task.reenable
-    expect { expect { task.invoke("apply") }.to output(/applied_proofs/).to_stdout }.to change(HistoricalPaycheckFicaBasisProof, :count).by(1)
+    Rake.with_application do
+      load Rails.root.join("lib/tasks/fica_legacy.rake")
+      Rake::Task.define_task(:environment)
+      task = Rake::Task["payroll:fica_legacy:reconcile_imports"]
+      expect { expect { task.invoke }.to output(/recoverable/).to_stdout }.not_to change(HistoricalPaycheckFicaBasisProof, :count)
+      task.reenable
+      expect { expect { task.invoke("apply") }.to output(/applied_proofs/).to_stdout }.to change(HistoricalPaycheckFicaBasisProof, :count).by(1)
+    end
   ensure
     previous&.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
-    Rake.application = previous_application
   end
 end

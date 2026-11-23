@@ -104,6 +104,7 @@ RSpec.describe MigrationPromotion::PreparePaymentIssuance do
       idempotency_key: "prepare-payment-test-#{pay_period.id}"
     )
 
+    ApplicationRecord.connection.execute("ALTER TABLE check_events DISABLE TRIGGER fill_check_events_company_id")
     result = service.call
 
     expect(result).to include(eligible: true, paper_check_count: 2, already_prepared: false)
@@ -111,7 +112,8 @@ RSpec.describe MigrationPromotion::PreparePaymentIssuance do
     expect([ first_item.check_date, second_item.check_date ]).to all(eq(Date.new(2026, 9, 24)))
     expect(zero_item.reload).to have_attributes(check_number: nil, check_date: nil)
     expect(company.reload.next_check_number).to eq(5003)
-    expect(CheckEvent.where(payroll_item_id: [ first_item.id, second_item.id ], event_type: "assigned").count).to eq(2)
+    expect(CheckEvent.where(payroll_item_id: [ first_item.id, second_item.id ], event_type: "assigned").pluck(:company_id))
+      .to eq([ company.id ] * 2)
     expect(pay_period.reload).to have_attributes(
       promotion_payment_disposition: "process_in_cornerstone",
       promoted_payment_prepared_by: admin

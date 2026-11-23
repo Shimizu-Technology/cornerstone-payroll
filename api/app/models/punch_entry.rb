@@ -1,5 +1,7 @@
 class PunchEntry < ApplicationRecord
+  include CompanyFromParent
   belongs_to :timecard
+  inherit_company_from :timecard
 
   enum :review_state, { unresolved: 0, approved: 1 }
 
@@ -113,7 +115,7 @@ class PunchEntry < ApplicationRecord
     return unless saved_changes?
     return unless timecard.reviewed?
 
-    changed_fields = saved_changes.keys - %w[updated_at manually_edited]
+    changed_fields = saved_changes.keys - %w[updated_at manually_edited company_id]
     return if changed_fields.empty?
 
     timecard.clear_review_audit!
