@@ -5,6 +5,9 @@ module YearEnd
   # non-contractor items in reportable committed pay periods paid that year.
   # It is the same population as W2GuAggregator's live items.
   module W2PayrollItems
+    TAX_BASE_FIELDS = %w[fit_taxable_wages social_security_taxable_wages social_security_taxable_tips medicare_taxable_wages].freeze
+    MISSING_TAX_BASE = TAX_BASE_FIELDS.map { |field| "payroll_items.#{field} IS NULL" }.join(" OR ").freeze
+
     def self.scope(company_ids, year)
       range = Date.new(year, 1, 1)..Date.new(year, 12, 31)
       PayrollItem

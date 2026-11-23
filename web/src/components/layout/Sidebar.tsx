@@ -100,6 +100,7 @@ const toolsNavigation: NavItem[] = [
 const clientSettingsNavigation: NavItem[] = [
   { name: 'Standing Changes', href: '/standing-changes', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Time tracking account', href: '/app/aire-account-connection', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'How this client runs', href: '/operating-profile', icon: <SlidersHorizontal className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Schedule', href: '/pay-schedule-settings', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'My Printer & Checks', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Fields', href: '/payroll-fields', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
@@ -272,13 +273,16 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const canUsePrinterProfiles = hasCapability('use_printer_profiles');
   const visibleClientSettingsNavigation = clientSettingsNavigation.filter((item) => {
     if (item.href === '/app/aire-account-connection') return hasCapability('manage_own_aire_account_link');
+    if (item.href === '/operating-profile') return !!activeCompanyId && hasCapability('payroll_operations');
     if (item.href === '/check-settings') return canUsePrinterProfiles;
     if (item.href === '/payroll-fields') return hasCapability('manage_payroll_fields');
     if (item.href === '/time-tracking-sources') return isAdmin;
     if (item.href === '/app/aire-history-approval') return (isAdmin || isAccountant) && hasCapability('payroll_operations');
     if (!canManageClientConfiguration) return false;
     return true;
-  });
+  }).map((item) => item.href === '/operating-profile'
+    ? { ...item, href: `/companies/${activeCompanyId}/operating-profile` }
+    : item);
   const primaryNavigation = (isClient ? portalNavigation : clientNavigation).map((item): NavItem => {
     if (item.href === '/messages') return { ...item, count: counts?.unread_count };
     if (item.href === '/app/client-inbox') return { ...item, count: counts?.waiting_count };

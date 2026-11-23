@@ -1,3 +1,4 @@
+import { countExcludedEntries, exclusionCountMessages } from '@/lib/time-tracking-exclusions';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Decimal from 'decimal.js';
 import { Link, useLocation } from 'react-router';
@@ -171,6 +172,11 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
   };
 
   if (!allowed) return null;
+  const excludedEntries = review?.exclusions ?? [];
+  const exclusions = exclusionCountMessages(countExcludedEntries(excludedEntries));
+  const hasUnclassifiedHours = excludedEntries.some(entry => !entry.exclusion_category && Number(entry.held_total_hours) > 0);
+  const exclusionMessages = [exclusions.action, ...exclusions.information, hasUnclassifiedHours && 'Review entries outside this selection'].filter(Boolean);
+
   return <Card aria-label="Manual time tracking payroll reconciliation"><CardContent className="space-y-4 py-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="font-semibold text-neutral-900">Link manually entered hours to time tracking</h2>
@@ -236,9 +242,9 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
               onChange={event => setNote(event.target.value)} aria-describedby={`manual-reconciliation-help-${payPeriodId}`} />
             <p id={`manual-reconciliation-help-${payPeriodId}`} className="text-xs text-neutral-600">At least 10 characters. Identify the existing payroll item and why it covers these hours. Any regular/OT classification difference requires historical review.</p>
             <Button className="max-sm:min-h-[44px]" type="submit" disabled={!canSubmit}>{busy ? 'Saving reconciliation…' : 'Link hours to payroll item'}</Button>
-            {candidates.length === 0 && <p className="text-sm text-neutral-600">No eligible source hours with a confirmed employee identity and current version are available. Review held entries, mappings, and existing links.</p>}
+            {candidates.length === 0 && <p className="text-sm text-neutral-600">No eligible source hours with a confirmed employee identity and current version are available. Review exclusions, mappings, and existing links.</p>}
           </form>}
-      {review.exclusions.length > 0 && <p className="text-sm text-warning-900">{review.exclusions.length} held entries remain outside this selection. Review their approval, cutoff, or payment evidence in time tracking Time Cards and reported-payment holds.</p>}
+      {exclusionMessages.length > 0 && <p className="text-sm text-neutral-700">{exclusionMessages.join(' · ')}</p>}
     </>}
   </CardContent></Card>;
 }
