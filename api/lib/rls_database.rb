@@ -12,19 +12,22 @@ module RlsDatabase
     FROM pg_roles WHERE rolname = current_user
   SQL
 
-  @switch_lock = Mutex.new
+  SWITCH_CACHE = Concurrent::AtomicReference.new
 
   def self.install!(connection)
     schema = connection.select_value("SELECT current_schema()")
     connection.transaction do
       connection.execute("SET LOCAL lock_timeout = '3s'")
       connection.execute(File.read(POLICY_FILE))
-      policies = RlsTables::PROTECTED_TABLES.map do |table|
-        parent, foreign_key = RlsTables::RLS_PARENT_PROTECTED_TABLES[table]
-        args = [ schema, table, parent, foreign_key ].map { |value| connection.quote(value) }.join(", ")
-        "SELECT pg_temp.install_company_policy(#{args})"
+    end
+    RlsTables::PROTECTED_TABLES.each do |table|
+      parent, foreign_key = RlsTables::RLS_PARENT_PROTECTED_TABLES[table]
+      shared_read = RlsTables::RLS_SHARED_READ_TABLES.include?(table)
+      args = [ schema, table, parent, foreign_key, shared_read ].map { |value| connection.quote(value) }.join(", ")
+      connection.transaction do
+        connection.execute("SET LOCAL lock_timeout = '3s'")
+        connection.execute("SELECT pg_temp.install_company_policy(#{args})")
       end
-      connection.execute(policies.join(";\n"))
     end
   end
 
@@ -36,9 +39,15 @@ module RlsDatabase
 
   def self.table_status(connection)
     names = RlsTables::PROTECTED_TABLES.map { |table| connection.quote(table) }.join(", ")
+    shared = RlsTables::RLS_SHARED_READ_TABLES.map { |table| connection.quote(table) }.join(", ")
     connection.select_all(<<~SQL).to_a
       SELECT c.relname AS table, c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced,
-             EXISTS (SELECT FROM pg_policy WHERE polrelid = c.oid AND polname = 'company_isolation') AS policy
+             (SELECT coalesce(array_agg(polname::text || ':' || polcmd::text ORDER BY polname), ARRAY[]::text[])
+              FROM pg_policy WHERE polrelid = c.oid) =
+              CASE WHEN c.relname IN (#{shared})
+                THEN ARRAY['company_delete:d', 'company_insert:a', 'company_select:r', 'company_update:w']
+                ELSE ARRAY['company_isolation:*']
+              END AS policy
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = current_schema() AND c.relname IN (#{names})
       ORDER BY c.relname
@@ -57,13 +66,12 @@ module RlsDatabase
     # durable switch only after the direct runtime URL has been configured.
     return false unless RlsConfiguration.runtime_url
 
-    @switch_lock.synchronize do
-      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      if !@switch_expires_at || now >= @switch_expires_at
-        @bypass_enabled = connection.select_value("SELECT bypass_enabled FROM #{SWITCH} WHERE singleton") == true
-        @switch_expires_at = now + 5
-      end
-      @bypass_enabled
-    end
+    cached = SWITCH_CACHE.get
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    return cached.first if cached && now < cached.last
+
+    enabled = connection.select_value("SELECT bypass_enabled FROM #{SWITCH} WHERE singleton") == true
+    SWITCH_CACHE.compare_and_set(cached, [ enabled, now + 5 ].freeze)
+    SWITCH_CACHE.get.first
   end
 end

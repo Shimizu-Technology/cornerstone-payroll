@@ -26,7 +26,7 @@ class StagingDatabasePolicy
         [ name, parse_url!(env[name], name, allowed, denied) ]
       end.to_h
       primary = urls.fetch("DATABASE_URL")
-      %w[QUEUE_DATABASE_URL CACHE_DATABASE_URL CABLE_DATABASE_URL].each do |name|
+      %w[RLS_DATABASE_URL QUEUE_DATABASE_URL CACHE_DATABASE_URL CABLE_DATABASE_URL].each do |name|
         next unless urls[name]
         fail!("Separate #{name} is unsupported by staging clone containment") unless identity(urls[name]) == identity(primary)
       end

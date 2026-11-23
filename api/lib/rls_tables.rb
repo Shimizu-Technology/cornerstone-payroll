@@ -85,5 +85,7 @@ module RlsTables
     ar_internal_metadata schema_migrations solid_cache_entries solid_cable_messages staging_quarantines
   ].freeze
 
+  RLS_SHARED_READ_TABLES = %w[pay_component_tax_rules].freeze
+
   PROTECTED_TABLES = (RLS_PROTECTED_TABLES + RLS_PARENT_PROTECTED_TABLES.keys).to_set.freeze
 end

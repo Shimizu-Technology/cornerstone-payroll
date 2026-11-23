@@ -10,7 +10,7 @@ Cornerstone Payroll staff and client users operate on behalf of companies. Emplo
 
 1. Confirm direct connection capacity for both web and worker and allow headroom for advisory-lock connections, maintenance and other apps. Set the primary pool budget per process using existing `DB_POOL_MAX` or `RAILS_MAX_THREADS`. The primary pool uses the new direct URL. Queue, cache and cable keep their current URLs.
 2. Use the direct `MIGRATION_DATABASE_URL` as the migration owner. In a lead-controlled `psql` session, run [`db/rls_runtime_role.sql`](../api/db/rls_runtime_role.sql) with `ON_ERROR_STOP` enabled. Set the password at the prompt. Create the role through SQL so it receives only the declared privileges. Keep the owner connection separate and ensure `payroll_app` neither owns the schema/tables nor inherits the owner role.
-3. From `api/`, run `RLS_CONTEXT_GUARD_MODE=off bundle exec rails rls:install` with the direct owner URL available as `MIGRATION_DATABASE_URL`. Run this during low traffic. The installer takes table locks with a three-second lock timeout. It stages the policies and creates `rls_admin.rls_kill_switch` with SELECT-only runtime privileges. Existing deployments require this explicit command. Fresh Rails schema loads stage policies automatically. Check `bundle exec rails rls:status` for 144 staged policies with enforcement flags false.
+3. From `api/`, run `RLS_CONTEXT_GUARD_MODE=off bundle exec rails rls:install` with the direct owner URL available as `MIGRATION_DATABASE_URL`. Run this during low traffic. The installer takes table locks with a three-second lock timeout. The installer commits each table’s policies separately so previously staged tables release their locks promptly. It also creates `rls_admin.rls_kill_switch` with SELECT-only runtime privileges. Existing deployments require this explicit command. Fresh Rails schema loads stage policies automatically. Check `bundle exec rails rls:status` for 144 tables with staged policies and both enforcement flags false.
 4. On **both web and worker**, add `RLS_DATABASE_URL` containing a direct PostgreSQL URL for `payroll_app` on the same primary database. Keep the existing pooled `DATABASE_URL` and owner-only migration credentials. Set `RLS_CONTEXT_GUARD_MODE=log` in production and `raise` in the configured staging rehearsal. Leave `RLS_EXPECT_ENFORCED` unset in step 2. Restart the processes and check the runtime role, guard and policies with `rls:status` and production readiness. Boot verifies the runtime role and kill-switch grants when the guard is enabled.
 5. Process one full pay cycle and collect warnings from both processes. Filter for `rls_missing_context` and `rls_unclassified_sql`. Export the application JSON-lines messages and feed them to `bundle exec rails rls:shadow_report < exported.log` from `api/`. It groups by event, call site and sorted table names. The event contains application stack frames, process role and request ID when available. SQL text and bind values stay out of the event. Step 3 needs a full warning-free cycle and its own enforcement window.
 
@@ -23,6 +23,19 @@ WHERE singleton;
 ```
 
 New scopes pick up the switch within five seconds per process and enter system mode. In-flight scopes retain their original settings. A protected statement that arrives without a scope logs a warning and uses system mode for that statement during bypass. Clear the switch with the same owner connection when the incident is resolved. With enforcement disabled, application authorization is the active tenant boundary. Even with enforcement enabled, system mode is intended to contain application scoping errors and is available to trusted callers within the runtime DB session.
+
+## Nullable company IDs
+
+The schema audit reconciled every nullable `company_id` against the expand migration and the policy registry.
+
+| Tables | Meaning of NULL |
+| --- | --- |
+| `pay_component_tax_rules` | A shared reference rule available to all company scopes. The staged SELECT policy exposes shared and same-company rules. Separate INSERT, UPDATE and DELETE policies require company ownership or explicit system mode. |
+| `audit_logs` | An organization or authentication event. These records remain visible only in system mode. |
+| `finance_books`, `invoice_chat_sessions`, `invoice_recipients`, `invoices`, `work_hour_client_links` | Optional company links to organization-scoped data. These tables remain exempt and keep their organization or finance book authorization. |
+| The 26 [promoted children](../api/db/migrate/support/m3_7_child_companies.rb) | A transitional ownership gap during expand and backfill. These rows do not represent shared data. The staged policies require company ownership. |
+
+The global reference and framework tables in the registry carry no `company_id`. The parent-protected tables derive ownership from their declared relationships.
 
 ## HTTP controllers
 
@@ -259,10 +272,10 @@ Paths are relative to `api/app/jobs/`. The scope covers Active Job deserializati
 | `aire_rollout:export` | `system` |
 | `aire_rollout:preview` | `system` |
 | `clerk:cutover:apply` | `system` |
-| `clerk:cutover:build_import` | `system` |
+| `clerk:cutover:build_import` | `exempt_tables_only` |
 | `clerk:cutover:build_manifest` | `exempt_tables_only` |
-| `clerk:cutover:dry_run` | `system` |
-| `clerk:cutover:inventory` | `system` |
+| `clerk:cutover:dry_run` | `exempt_tables_only` |
+| `clerk:cutover:inventory` | `exempt_tables_only` |
 | `clerk:cutover:preflight` | `exempt_tables_only` |
 | `clerk:cutover:rollback` | `system` |
 | `clerk:jwks:clear` | `exempt_tables_only` |
@@ -276,7 +289,7 @@ Paths are relative to `api/app/jobs/`. The scope covers Active Job deserializati
 | `e2e:seed` | `system` |
 | `employees:decrypt_contractor_eins` | `system` |
 | `employees:encrypt_contractor_eins` | `system` |
-| `mosa:rebuild` | `exempt_tables_only` |
+| `mosa:rebuild` | `system` |
 | `operating_profiles:parity` | `system` |
 | `operations:queue_probe:cleanup` | `exempt_tables_only` |
 | `operations:queue_probe:enqueue` | `exempt_tables_only` |
@@ -309,6 +322,8 @@ Paths are relative to `api/app/jobs/`. The scope covers Active Job deserializati
 | `year_end:wage_impact` | `system` |
 
 Rails schema tasks and `rls:install` / `rls:disable` operate on catalog or DDL through the owner connection. The status and shadow report tasks inspect metadata or exported events. Operational scripts accessing protected data use their matching scoped Rake entry point.
+
+The Rake re-audit traced task calls into their services. `mosa:rebuild` scopes tenant payroll and compensation writes including employees, deduction types and employee deductions. `production:readiness` enters system scope for the open pay-period scan and the other readiness probes that span companies. Clerk inventory and dry-run use identity tables, and the import builder only reads files. Clerk apply and rollback retain system mode for audit writes. Queue probes use operational and Solid Queue tables. Staging readiness and containment open scopes in their services. Owner schema tasks run with the guard off.
 
 ## Verification boundary
 

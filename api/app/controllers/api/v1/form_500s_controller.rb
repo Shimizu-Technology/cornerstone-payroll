@@ -4,8 +4,10 @@ module Api
   module V1
     class Form500sController < ApplicationController
       include CompanyRlsScoped
+      include ExplicitCompanyAccess
 
       before_action :require_staff_access!
+      before_action :enforce_company_access!
       before_action :set_pay_period!
       before_action :forbid_migration_rehearsal_official_action!, only: %i[save download]
 
@@ -92,7 +94,7 @@ module Api
           return
         end
 
-        @pay_period = PayPeriod.find_by(id: pay_period_id, company_id: current_company_id)
+        @pay_period = PayPeriod.find_by(id: pay_period_id, company_id: current_company_id) if current_company_id
         unless @pay_period
           render json: { error: "Pay period not found" }, status: :not_found
           return

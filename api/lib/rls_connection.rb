@@ -17,6 +17,7 @@ module RlsConnection
   def with_tenant_settings(company_id, mode)
     previous = nil
     with_raw_connection(materialize_transactions: false) do |raw|
+      flush_tenant_restore
       previous = raw.exec(READ_SETTINGS, &:values).fetch(0)
       raw.exec_params(WRITE_SETTINGS, [ company_id.to_s, mode ], &:clear)
     end
@@ -53,14 +54,40 @@ module RlsConnection
   end
 
   def restore_tenant_settings(settings)
+    if @raw_connection&.transaction_status == PG::PQTRANS_INERROR && transaction_open?
+      @pending_tenant_restore = settings
+      return
+    end
+
+    @pending_tenant_restore = nil
     @raw_connection&.exec_params(WRITE_SETTINGS, settings, &:clear)
-  rescue PG::Error
-    # A failed transaction or dead socket must never return to the pool with
-    # session settings intact. Rails will reconnect on the next use.
+  rescue PG::Error => error
+    raise if transaction_open? && !error.is_a?(PG::ConnectionBad) && @raw_connection&.status != PG::CONNECTION_BAD
+
     disconnect!
   end
 
+  def flush_tenant_restore
+    return unless @pending_tenant_restore && @raw_connection
+    return if @raw_connection.transaction_status == PG::PQTRANS_INERROR
+
+    restore_tenant_settings(@pending_tenant_restore)
+  end
+
+  # A rollback or rollback-to-savepoint is itself a query. Defer the restore
+  # while PostgreSQL rejects statements, then restore on the recovered session
+  # before it can serve another query.
+  def perform_query(...)
+    return super unless @pending_tenant_restore
+
+    flush_tenant_restore
+    result = super
+    flush_tenant_restore
+    result
+  end
+
   def configure_connection
+    @pending_tenant_restore = nil
     super
     if @payroll_tenant_settings
       @raw_connection.exec_params(WRITE_SETTINGS, @payroll_tenant_settings, &:clear)

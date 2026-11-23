@@ -43,6 +43,23 @@ RSpec.describe "staging database routing" do
     end
   end
 
+  it "validates the RLS URL as the direct endpoint for the same clone" do
+    env["DATABASE_URL"] = "postgresql://staging-db-pooler.example.test/synthetic?sslmode=require"
+    env["STAGING_DATABASE_HOSTS"] += ",staging-db-pooler.example.test,staging-secondary.example.test"
+    runtime = "postgresql://payroll_app@staging-db.example.test/synthetic?sslmode=require"
+    expect(StagingDatabasePolicy.validate_config!(env: env.merge("RLS_DATABASE_URL" => runtime))).to eq(true)
+
+    [
+      runtime.sub("staging-db", "production-db"),
+      runtime.sub("staging-db", "staging-secondary"),
+      runtime.sub("synthetic", "other_clone"),
+      runtime + "&hostaddr=192.0.2.10"
+    ].each do |unsafe|
+      expect { StagingDatabasePolicy.validate_config!(env: env.merge("RLS_DATABASE_URL" => unsafe)) }
+        .to raise_error(StagingOutboundPolicy::ConfigurationError, /RLS_DATABASE_URL/)
+    end
+  end
+
   it "checks resolved parameters and effective peer/backend information" do
     policy = StagingDatabasePolicy
     expect { policy.validate_parameters!({ host: "staging-db.example.test", dbname: "synthetic", hostaddr: "192.0.2.10" }, env: env) }.to raise_error(StagingOutboundPolicy::ConfigurationError)
