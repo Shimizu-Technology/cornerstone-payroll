@@ -1306,6 +1306,7 @@ export interface TimeTrackingImportData {
       display_name?: string | null;
       email?: string | null;
       reason: string;
+      exclusion_category?: import('@/types').TimeTrackingExclusionCategory;
       original_work_date: string;
       held_total_hours: number;
       held_regular_hours: number;

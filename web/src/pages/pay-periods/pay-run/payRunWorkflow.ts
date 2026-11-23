@@ -12,7 +12,7 @@ export function payRunSteps(period: PayPeriod) {
       ? 'Selected late hours only; the original payroll is unchanged.'
       : period.run_purpose !== 'regular'
         ? 'Hours and pay for selected employees only; regular-period hours are not added automatically.'
-        : period.time_tracking?.aire_calendar?.enabled ? 'Review source hours and any held entries before calculating.' : 'Enter hours and pay, then calculate payroll.',
+        : period.time_tracking?.aire_calendar?.enabled ? 'Review source hours and exclusions before calculating.' : 'Enter hours and pay, then calculate payroll.',
     commitReason: period.status === 'approved' && payrollClientCommitReason(period) ? payrollClientCommitReason(period) : period.parallel_run ? 'Parallel comparison · cannot commit.' : period.status === 'draft' ? 'Calculate payroll and review the results first.' : period.status === 'calculated' ? 'Approve the reviewed results before commitment.' : '',
   };
 }
