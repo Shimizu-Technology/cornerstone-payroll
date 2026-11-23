@@ -80,12 +80,12 @@ RSpec.describe PayrollExpectedEntries do
 
   it "keeps deactivated jobs and changed salary setup visible without blocking" do
     field
-    rate.update!(active: false)
+    change_wage_rate!(rate, active: false)
     expect(data[:fields].sole[:availability_error]).to be_present
     expect(data[:outstanding]).to be_empty
     owner = create(:employee, :salary, company: company, salary_type: "variable", pay_rate: 0)
     PayrollStandingChange.create!(company: company, employee: owner, kind: "owner_pay", required: true)
-    owner.update!(salary_type: "per_period", pay_rate: 1000)
+    change_compensation!(owner, salary_type: "per_period", pay_rate: 1000)
     expect(data[:fields].last[:availability_error]).to be_present
     expect(data[:outstanding]).to be_empty
   end
@@ -128,7 +128,7 @@ RSpec.describe PayrollExpectedEntries do
 
     it "still flags an active regular whose configured field became unavailable" do
       field
-      rate.update!(active: false)
+      change_wage_rate!(rate, active: false)
       expect(data[:fields].sole[:availability_error]).to be_present
       expect(data[:missing_regulars].pluck(:employee_id)).to eq([ employee.id ])
       expect(data[:outstanding]).to eq([ employee.full_name ])

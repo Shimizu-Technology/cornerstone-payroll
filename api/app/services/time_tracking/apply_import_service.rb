@@ -64,7 +64,7 @@ module TimeTracking
         current_import_source = import_source_key
         excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
-        employees_by_id = Employee.active.includes(:employee_wage_rates).where(id: employee_ids, company_id: @company.id).index_by(&:id)
+        employees_by_id = Employee.active.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes).where(id: employee_ids, company_id: @company.id).index_by(&:id)
 
         rows.each do |row|
           source_user_id = row["source_user_id"].to_s
@@ -141,8 +141,8 @@ module TimeTracking
 
           if item.new_record?
             item.company_id = @company.id
-            item.employment_type = employee.employment_type
-            item.pay_rate = employee.default_payroll_rate
+            item.employment_type = employee.payroll_compensation_on(@pay_period.end_date).employment_type
+            item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
           end
           item.sync_default_payroll_adjustments!(employee)
           preserved_holiday_hours = item.holiday_hours.to_f
@@ -330,7 +330,7 @@ module TimeTracking
           category.merge("source_lines" => frozen["source_lines"])
         end
       end
-      active_rates = @pay_period.late_hours_run&.wage_rates_for(employee) || employee.active_wage_rates.to_a
+      active_rates = @pay_period.late_hours_run&.wage_rates_for(employee) || employee.wage_rates_on(@pay_period.end_date)
       if finalized_batch?
         supplied_keys = wage_rate_overrides_by_category_key(override).keys
         known_keys = categories.flat_map { |category| category_override_keys(category) }
@@ -338,13 +338,14 @@ module TimeTracking
           raise ArgumentError, "An earning mapping does not match this frozen source dimension; refresh the import"
         end
       end
-      uses_multi_rate = (employee.hourly? || employee.contractor_hourly?) && categories.any? &&
+      basis = employee.payroll_compensation_on(@pay_period.end_date)
+      uses_multi_rate = basis.hourly_pay_basis? && categories.any? &&
                         (finalized_batch? || active_rates.length > 1 || active_rates.any? { |rate| rate.rate.nil? } ||
                           wage_rate_overrides_by_category_key(override).any?)
       # Unset rates are setup placeholders, not zero-dollar earning types. Keep
       # them in the mapping-required decision above, but never serialize them.
       active_rates = active_rates.reject { |rate| rate.rate.nil? }
-      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override, OvertimePremium.multiplier(employee.employment_type)).negative?
+      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override, OvertimePremium.multiplier(basis.employment_type)).negative?
         return "This time tracking correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
       end
 

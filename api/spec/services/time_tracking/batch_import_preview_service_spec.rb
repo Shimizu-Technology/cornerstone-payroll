@@ -115,6 +115,28 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     [ company, workweek, pay_period, source ]
   end
 
+  it "bulk loads compensation and category policy for 50 mapped workers" do
+    company, workweek, pay_period, source = setup_records
+    raw = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date)
+    template = raw.fetch("employees").sole
+    raw["employees"] = 50.times.map do |index|
+      employee = create(:employee, company: company, pay_rate: 30)
+      employee.employee_wage_rates.create!(label: "Flight Hours", rate: 30, is_primary: true)
+      confirm_mapping!(company: company, source: source, employee: employee, source_user_id: index.to_s)
+      change_compensation!(employee, effective_on: pay_period.end_date + 1, employment_type: "salary", salary_type: "annual", pay_rate: 52_000) if index.zero?
+      template.merge("source_user_id" => index.to_s)
+    end
+
+    preview = described_class.new(pay_period: pay_period, source: source)
+    queries = compensation_read_queries("employees", "time_tracking_category_mappings", "time_tracking_earning_choices") do
+      rows = preview.send(:process, raw, workweek: workweek).fetch(:rows)
+      expect(rows.size).to eq(50)
+      expect(rows.pluck(:estimated_gross_delta).uniq).to eq([ 240.0 ])
+      expect(rows).to all(include(ready: true))
+    end
+    expect(queries.size).to eq(7)
+  end
+
   it "stores verified batch provenance, payable dimensions, and unpaid exclusions" do
     company, _workweek, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com", pay_rate: 25)
@@ -307,7 +329,7 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     # A saved estimate from an older rule, and a warning that no longer applies.
     first.update!(warnings: [ { "code" => "stale" } ])
 
-    employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
+    change_compensation!(employee, employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
     refreshed = described_class.new(pay_period: pay_period, source: source).call
 
     expect(refreshed.id).to eq(first.id)
@@ -316,7 +338,7 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     expect(refreshed.raw_payload).to eq(payload)
 
     refreshed.update!(status: "applied", applied_at: Time.current)
-    employee.update_columns(employment_type: "hourly", contractor_type: nil, contractor_pay_type: nil)
+    change_compensation!(employee, employment_type: "hourly", contractor_pay_type: nil)
     applied = described_class.new(pay_period: pay_period, source: source).call
 
     expect(applied.reload.processed_payload.dig("rows", 0, "estimated_gross_delta")).to eq(250.0)

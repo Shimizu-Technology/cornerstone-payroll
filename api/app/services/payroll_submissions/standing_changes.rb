@@ -2,18 +2,23 @@
 
 module PayrollSubmissions
   class StandingChanges
-    def initialize(company:, before_pay_date:)
+    # rates_on: the submission period's end date; wage-rate labels and amounts
+    # are shown as they stand on it (M3-4).
+    def initialize(company:, before_pay_date:, rates_on: nil)
       @company = company
       @before_pay_date = before_pay_date
+      @rates_on = rates_on || PayrollBusinessClock.today
     end
 
     def rows
-      PayrollStandingChange.active.ordered.where(company: @company).includes(:employee, :employee_wage_rate).map do |item|
+      PayrollStandingChange.active.ordered.where(company: @company)
+        .preload(:employee_wage_rate, employee: %i[employee_wage_rates employee_wage_rate_versions employee_compensation_changes]).map do |item|
+        wage_rate = item.wage_rate_on(@rates_on)
         { standing_change_id: item.id, kind: item.kind, employee_id: item.employee_id, employee_name: item.employee.full_name,
-          employee_wage_rate_id: item.employee_wage_rate_id, wage_rate_label: item.employee_wage_rate&.label,
-          wage_rate: item.employee_wage_rate&.rate&.to_s("F"), position: item.position,
+          employee_wage_rate_id: item.employee_wage_rate_id, wage_rate_label: wage_rate&.label,
+          wage_rate: wage_rate&.rate&.to_s("F"), position: item.position,
           label: item.display_label, help_text: item.help_text, required: item.required?, allow_none: item.allow_none?,
-          availability_error: item.availability_error, last_period_amount: previous_amount(item) }.compact
+          availability_error: item.availability_error(rates_on: @rates_on), last_period_amount: previous_amount(item) }.compact
       end
     end
 

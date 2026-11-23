@@ -26,6 +26,15 @@ import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
 import { intakeAllowsBlank, intakeFieldLabels } from '@/lib/employee-intake';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { filingStatusLabels, formatCurrency } from '@/lib/utils';
+import { PayChangeEffectiveDate } from '@/components/employees/PayChangeEffectiveDate';
+import {
+  emptyPayChangeEffectiveDate,
+  payChangeEffectiveDateErrors,
+  payChangeTouchesLockedPayroll,
+  resolvePayChangeEffectiveOn,
+  type PayChangeEffectiveDateValue,
+} from '@/lib/pay-change';
+import { PayRateHistory } from '@/components/employees/PayRateHistory';
 import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, PaymentDeliveryMethod, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
@@ -236,6 +245,7 @@ export function EmployeeForm() {
     w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
   });
   const [w4ChangeReason, setW4ChangeReason] = useState('');
+  const [payChangeTiming, setPayChangeTiming] = useState<PayChangeEffectiveDateValue>(emptyPayChangeEffectiveDate);
   const [w4ElectionReceived, setW4ElectionReceived] = useState(false);
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   // Bringing back a terminated worker is a rehire, which stays with client configuration.
@@ -301,6 +311,7 @@ export function EmployeeForm() {
       if (!isCurrentRequest()) return;
       const employee = response.data;
       setLoadedEmployee(employee);
+      setPayChangeTiming(emptyPayChangeEffectiveDate());
 
       const loadedSsn = isClient ? '' : formatSSN(employee.ssn || '');
       const nextForm = {
@@ -496,6 +507,9 @@ export function EmployeeForm() {
   const handleChange = (field: keyof typeof form, value: string | number | boolean | null): void => {
     if (field === 'pay_frequency') payFrequencyTouchedRef.current = true;
     setForm((prev) => ({ ...prev, [field]: value }));
+    if (['pay_rate', 'employment_type', 'salary_type', 'pay_frequency', 'contractor_pay_type'].includes(field)) {
+      setPayChangeTiming((previous) => previous.historicalCorrection ? { ...previous, historicalCorrection: false } : previous);
+    }
     const linkedSsnField = field === 'ssn' ? 'ssn_confirmation' : field === 'ssn_confirmation' ? 'ssn' : null;
     if (errors[field] || (linkedSsnField && errors[linkedSsnField])) {
       setErrors((prev) => {
@@ -529,6 +543,7 @@ export function EmployeeForm() {
     // Hourly submission derives its scalar from these rows. Keep the separate
     // salary/flat-fee draft intact when operators edit rates and switch back.
     setWageRates(normalized);
+    setPayChangeTiming((previous) => previous.historicalCorrection ? { ...previous, historicalCorrection: false } : previous);
   };
 
   const updateWageRate = (tempId: string, patch: Partial<WageRateFormRow>) => {
@@ -679,10 +694,77 @@ export function EmployeeForm() {
     return activeRates.map((rate) => ({ ...rate, is_primary: rate.temp_id === primaryId }));
   };
 
+  // A pay change (M3-4) needs an explicit effective date and a reason. It is
+  // the difference between the form and the saved pay setup: the pay rate,
+  // the active hourly rates, or the pay type.
+  const compensationHistory = !isClient && isEditing ? loadedEmployee?.compensation_history : undefined;
+  const formWageRates = supportsMultipleHourlyRates ? normalizeWageRates() : [];
+  const formPrimaryRate = formWageRates.find((rate) => rate.is_primary) || formWageRates[0];
+  const formPayRate = supportsMultipleHourlyRates && formPrimaryRate
+    ? roundCurrencyValue(Number(formPrimaryRate.rate) || 0)
+    : roundCurrencyValue(form.pay_rate);
+  const savedRates = (loadedEmployee?.wage_rates || []).filter((rate) => rate.active !== false);
+  const savedPrimary = savedRates.find((rate) => rate.is_primary) || savedRates[0];
+  const savedPayRate = roundCurrencyValue(toNumberOrZero(loadedEmployee?.pay_rate));
+  const placeholderLabel = 'Regular';
+  const scalarOnly = savedRates.length === 0 && formWageRates.length === 1 && !formWageRates[0].id
+    && formWageRates[0].label.trim() === placeholderLabel;
+  const priorHourly = loadedEmployee?.employment_type === 'hourly'
+    || (loadedEmployee?.employment_type === 'contractor' && loadedEmployee.contractor_pay_type === 'hourly');
+  const scalarPayChanged = formPayRate !== (priorHourly && supportsMultipleHourlyRates && savedPrimary
+    ? roundCurrencyValue(toNumberOrZero(savedPrimary.rate))
+    : savedPayRate);
+
+  const basisEdits: Partial<EmployeeFormData> = {};
+  if (loadedEmployee && loadedEmployee.employment_type !== form.employment_type) basisEdits.employment_type = form.employment_type;
+  if (loadedEmployee && loadedEmployee.pay_frequency !== form.pay_frequency) basisEdits.pay_frequency = form.pay_frequency;
+  if (loadedEmployee && form.employment_type === 'salary'
+    && (basisEdits.employment_type || (loadedEmployee.salary_type || 'annual') !== form.salary_type)) {
+    basisEdits.salary_type = form.salary_type;
+  }
+  if (loadedEmployee && form.employment_type === 'contractor'
+    && (basisEdits.employment_type || (loadedEmployee.contractor_pay_type || 'flat_fee') !== form.contractor_pay_type)) {
+    basisEdits.contractor_pay_type = form.contractor_pay_type;
+  }
+  const wageRateEdits: NonNullable<EmployeeFormData['compensation_wage_rate_edits']> = [];
+  if (supportsMultipleHourlyRates && !scalarOnly) {
+    for (const rate of formWageRates) {
+      const saved = savedRates.find((previous) => previous.id === rate.id);
+      const amount = roundCurrencyValue(toNumberOrZero(rate.rate));
+      if (!saved || !rate.id) {
+        wageRateEdits.push({ label: rate.label.trim(), rate: amount, is_primary: rate.is_primary, active: true });
+        continue;
+      }
+      const edit: (typeof wageRateEdits)[number] = { id: rate.id };
+      if (saved.label !== rate.label.trim()) edit.label = rate.label.trim();
+      if (roundCurrencyValue(toNumberOrZero(saved.rate)) !== amount) edit.rate = amount;
+      if ((saved.id === savedPrimary?.id) !== rate.is_primary) edit.is_primary = rate.is_primary;
+      if (Object.keys(edit).length > 1) wageRateEdits.push(edit);
+    }
+    for (const saved of savedRates) {
+      if (!formWageRates.some((rate) => rate.id === saved.id)) wageRateEdits.push({ id: saved.id, remove: true });
+    }
+  }
+  const payBasisChanged = Object.keys(basisEdits).length > 0;
+  const payHasChanged = Boolean(compensationHistory && (payBasisChanged || scalarPayChanged || wageRateEdits.length));
+  const canCorrectPay = compensationHistory?.can_correct ?? canManageClientConfiguration;
+
+  const cancelScheduledPay = async (date: string, reason: string) => {
+    if (!id || !compensationHistory?.revision) return;
+    const requestedCompany = companyIdRef.current;
+    const requestedEmployee = employeeRequestIdRef.current;
+    const response = await employeesApi.cancelScheduledCompensation(Number(id), date, reason, compensationHistory.revision, requestedCompany ?? undefined);
+    if (companyIdRef.current !== requestedCompany || employeeRequestIdRef.current !== requestedEmployee) return;
+    setLoadedEmployee((current) => current ? { ...current, compensation_history: response.data.compensation_history } : current);
+    notify({ tone: 'success', message: 'Scheduled pay change cancelled.' });
+  };
+
   const focusFirstInvalidField = (fieldName: string | undefined) => {
     if (!fieldName) return;
     requestAnimationFrame(() => {
-      const field = document.querySelector<HTMLElement>(`[name="${fieldName}"]`);
+      const selector = `[name="${fieldName}"]`;
+      const field = document.querySelector<HTMLElement>(`input[type="date"]${selector}`)
+        || document.querySelector<HTMLElement>(selector);
       field?.focus();
       field?.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
     });
@@ -793,6 +875,9 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && !form.w4_effective_on && !allowsUnverifiedBlank('withholding_election')) {
       newErrors.w4_effective_on = ['Enter the date this W-4 became effective'];
     }
+    if (payHasChanged && compensationHistory) {
+      Object.assign(newErrors, payChangeEffectiveDateErrors(payChangeTiming, compensationHistory.effective_dates, { basisChanged: payBasisChanged, canCorrect: canCorrectPay }));
+    }
     if (isEditing && !isClient && form.employment_type !== 'contractor' && (w4HasChanged || w4ElectionReceived) && !w4ChangeReason.trim()) {
       newErrors.w4_change_reason = ['Explain why this W-4 election is changing'];
     }
@@ -896,11 +981,47 @@ export function EmployeeForm() {
       let portalNotice: string | null = null;
       let portalChangeRequestId: number | null = null;
       let aireMappingNotice: string | null = null;
+      let compensationWarnings: string[] = [];
+      let initialWageRatesSaved = false;
+      let fallbackRates: Awaited<ReturnType<typeof employeeWageRatesApi.list>> | undefined;
+      let fallbackRevision: string | undefined;
       if (isEditing && id) {
+        if (!isClient && !compensationHistory && supportsMultipleHourlyRates) {
+          fallbackRates = await employeeWageRatesApi.list(Number(id), requestedCompanyId);
+          if (!isCurrentSubmission()) return;
+          fallbackRevision = fallbackRates.compensation_revision;
+        }
         // Don't send SSN if it's empty (user didn't update it)
         // Recurring items save through their own endpoints. A stale profile must
         // not restore a legacy allowance another operator has already converted.
-        const updateData = { ...employeePayload, default_payroll_adjustments: undefined, default_custom_earnings: undefined };
+        const updateData = {
+          ...employeePayload,
+          default_payroll_adjustments: undefined,
+          default_custom_earnings: undefined,
+          ...(compensationHistory || fallbackRevision ? {
+            pay_rate: undefined,
+            employment_type: undefined,
+            salary_type: undefined,
+            pay_frequency: undefined,
+            contractor_pay_type: undefined,
+            wage_rates: undefined,
+          } : {}),
+          ...(fallbackRevision ? {
+            ...basisEdits,
+            pay_rate: scalarPayChanged ? formPayRate : undefined,
+            compensation_revision: fallbackRevision,
+          } : {}),
+          ...(payHasChanged && compensationHistory ? {
+            ...basisEdits,
+            pay_rate: scalarPayChanged ? formPayRate : undefined,
+            compensation_wage_rate_edits: wageRateEdits.length ? wageRateEdits : undefined,
+            compensation_revision: compensationHistory.revision,
+            compensation_effective_on: resolvePayChangeEffectiveOn(payChangeTiming, compensationHistory.effective_dates) || undefined,
+            compensation_change_reason: payChangeTiming.reason.trim(),
+            compensation_historical_correction: canCorrectPay && payChangeTiming.historicalCorrection
+              && payChangeTouchesLockedPayroll(payChangeTiming, compensationHistory.effective_dates) || undefined,
+          } : {}),
+        };
         if (!updateData.ssn) {
           delete updateData.ssn;
         }
@@ -914,8 +1035,10 @@ export function EmployeeForm() {
           portalNotice = response.message || null;
           portalChangeRequestId = response.change_request?.id || null;
         } else {
-          const response = await employeesApi.update(parseInt(id, 10), updateData);
+          const response = await employeesApi.update(parseInt(id, 10), updateData, requestedCompanyId);
           savedEmployeeId = response.data.id;
+          compensationWarnings = response.compensation_warnings || [];
+          fallbackRevision = response.data.compensation_history?.revision || fallbackRevision;
         }
       } else {
         if (isClient) {
@@ -926,6 +1049,7 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
           savedEmployeeId = response.data.id;
+          initialWageRatesSaved = Boolean(response.data.compensation_history);
           if (isCurrentSubmission()) {
             // The employee is already saved. Summary recovery must not block
             // navigation or turn a successful create into a duplicate retry.
@@ -935,8 +1059,11 @@ export function EmployeeForm() {
       }
       if (!isCurrentSubmission()) return;
 
-      if (!isClient && supportsMultipleHourlyRates) {
-        const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
+      // A new employee's hourly rates are added after the profile exists. An
+      // edit with pay history saved them with the profile above, together with
+      // their effective date; without it the per-rate endpoints still apply.
+      if (!isClient && (!isEditing || !compensationHistory) && !initialWageRatesSaved && supportsMultipleHourlyRates) {
+        const existingRatesResponse = fallbackRates || await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
         const displayedSavedRateIds = new Set(
@@ -950,30 +1077,33 @@ export function EmployeeForm() {
             .map((rate) => [rate.id as number, rate])
         );
 
-        await Promise.all(
-          existingRates
-            // Removing a displayed row must not delete hidden or newly added definitions.
-            .filter((rate) => rate.active !== false && displayedSavedRateIds.has(rate.id as number) && !normalizedById.has(rate.id as number))
-            .map((rate) => employeeWageRatesApi.delete(rate.id as number, requestedCompanyId))
-        );
-        if (!isCurrentSubmission()) return;
+        let revision = fallbackRevision || existingRatesResponse.compensation_revision;
+        // Keep the revision tied to the preceding successful write. A fresh
+        // list mid-save could adopt a concurrent editor's revision.
+        for (const rate of existingRates) {
+          if (rate.active === false || !rate.id || !displayedSavedRateIds.has(rate.id) || normalizedById.has(rate.id)) continue;
+          const result = await employeeWageRatesApi.delete(rate.id, revision, requestedCompanyId);
+          revision = result.compensation_revision;
+          if (!isCurrentSubmission()) return;
+        }
 
-        for (const rate of normalizedWageRates) {
+        for (const rate of [...normalizedWageRates].sort((left, right) => {
+          const demotesPrimary = (candidate: typeof left) =>
+            !candidate.is_primary && existingRates.some((existing) => existing.id === candidate.id && existing.is_primary);
+          return Number(demotesPrimary(right)) - Number(demotesPrimary(left));
+        })) {
           const payload = {
             label: rate.label,
             rate: roundCurrencyValue(Number(rate.rate) || 0),
             is_primary: rate.is_primary,
             active: rate.active !== false,
+            compensation_revision: revision,
           };
 
-          if (rate.id) {
-            await employeeWageRatesApi.update(rate.id, payload, requestedCompanyId);
-          } else {
-            await employeeWageRatesApi.create({
-              employee_id: savedEmployeeId,
-              ...payload,
-            }, requestedCompanyId);
-          }
+          const result = rate.id
+            ? await employeeWageRatesApi.update(rate.id, payload, requestedCompanyId)
+            : await employeeWageRatesApi.create({ employee_id: savedEmployeeId, ...payload }, requestedCompanyId);
+          revision = result.compensation_revision;
           if (!isCurrentSubmission()) return;
         }
       }
@@ -998,6 +1128,9 @@ export function EmployeeForm() {
 
       if (!isCurrentSubmission()) return;
       notify({ tone: 'success', message: portalNotice || (isEditing ? 'Employee updated.' : 'Employee created.') });
+      // Warnings owned by this form are cleared when it navigates away; an
+      // info notice stays with the employee list.
+      compensationWarnings.forEach((message) => notify({ tone: 'info', message }));
       const saveDestination = isClient && portalChangeRequestId
         ? '/change-requests'
         : !isEditing && airePayPeriodId && aireSourceUserId && aireSourceUserUuid
@@ -1016,6 +1149,20 @@ export function EmployeeForm() {
       });
     } catch (err) {
       if (!isCurrentSubmission()) return;
+      if (err instanceof ApiError) {
+        const data = err.data as { locked_through?: string | null } | undefined;
+        if (data?.locked_through !== undefined) {
+          const lockedThrough = data.locked_through;
+          setLoadedEmployee((current) => current?.compensation_history ? {
+            ...current,
+            compensation_history: {
+              ...current.compensation_history,
+              effective_dates: { ...current.compensation_history.effective_dates, locked_through: lockedThrough },
+            },
+          } : current);
+          setPayChangeTiming((current) => ({ ...current, historicalCorrection: false }));
+        }
+      }
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setErrors(err.fieldErrors);
         const fieldMessages = Object.entries(err.fieldErrors).map(([field, messages]) =>
@@ -1575,8 +1722,20 @@ export function EmployeeForm() {
                 </div>
               </div>
             )}
+
+            {payHasChanged && compensationHistory && (
+              <PayChangeEffectiveDate
+                dates={compensationHistory.effective_dates}
+                canCorrect={canCorrectPay}
+                value={payChangeTiming}
+                onChange={setPayChangeTiming}
+                errors={errors}
+              />
+            )}
           </CardContent>
         </Card>
+
+        {compensationHistory && <PayRateHistory history={compensationHistory} onCancel={compensationHistory.revision ? cancelScheduledPay : undefined} />}
 
         {isEditing && form.employment_type === 'salary' && loadedEmployee && !isClient && (
           <EmployeeWorkProfilePanel

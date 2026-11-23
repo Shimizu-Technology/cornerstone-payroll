@@ -67,7 +67,8 @@ module TestWorkspace
           previous_employee_id: nil,
           portal_pending_approval: false,
           test_workspace_source_employee: employee_lineage ? source : nil,
-          created_by: actor
+          created_by: actor,
+          skip_initial_compensation_history: true
         )
       end
 
@@ -89,7 +90,9 @@ module TestWorkspace
     def copy_employee_setup!(employee_map, deduction_type_map)
       source_company.employees.order(:id).each do |source|
         target = employee_map.fetch(source.id)
-        copy_collection(source.employee_wage_rates, EmployeeWageRate, employee: target)
+        EmployeeCompensationChangeService.copy_history!(source: source, target: target, actor: actor) do
+          copy_collection(source.employee_wage_rates, EmployeeWageRate, employee: target)
+        end
         copy_collection(source.employee_w4_elections, EmployeeW4Election, company: target_company, employee: target)
         copy_collection(source.employee_work_profiles, EmployeeWorkProfile, company: target_company, employee: target)
         copy_collection(source.employee_status_events, EmployeeStatusEvent, company: target_company, employee: target)

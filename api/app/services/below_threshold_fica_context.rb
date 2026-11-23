@@ -100,7 +100,7 @@ class BelowThresholdFicaContext
       balances.map { |balance| [ balance.attributes, balance.historical_ytd_bridge.attributes ] },
       imported_paychecks.map { |row| [ ImportedPaycheckFicaEvidence.source(row),
         (row.fica_basis_proof&.evidence unless reviewing_imports) ] },
-      review.attributes, candidate_employees.map { |person| person.attributes.slice("id", "company_id", "previous_employee_id", "employment_type") }
+      review.attributes, candidate_employees.map { |person| candidate_identity(person, current_item) }
     ])
     review_fields = if saved_review
       saved_review
@@ -157,6 +157,15 @@ class BelowThresholdFicaContext
       end
       people
     end
+  end
+
+  # The pay basis in effect for this check's period, not today's cache, so a
+  # dated basis change after approval leaves the evidence digest unchanged.
+  def candidate_identity(person, current_item)
+    period = current_item.pay_period
+    date = period&.end_date || period&.pay_date
+    employment_type = date ? person.payroll_compensation_on(date).employment_type : person.employment_type
+    person.attributes.slice("id", "company_id", "previous_employee_id").merge("employment_type" => employment_type)
   end
 
   def candidate_employee_ids

@@ -95,7 +95,7 @@ RSpec.describe "Approved-run payroll entry resolutions", type: :request do
   end
 
   it "saves and undoes none and not-paid without changing approval, amounts or the published client revision" do
-    worker.update!(employment_type: "salary", salary_type: "variable", pay_rate: 0)
+    change_compensation!(worker, employment_type: "salary", salary_type: "variable", pay_rate: 0)
     field
     paid_worker = create(:employee, company: company)
     item = create(:payroll_item, company: company, pay_period: period, employee: paid_worker)

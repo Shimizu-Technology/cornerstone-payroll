@@ -117,7 +117,12 @@ export function PayRunBlockers({
             </div>
           </Alert>
         )}
-{part !== 'approval' && payPeriod.compliance_warnings?.filter((warning) => warning !== ficaNote).map((warning) => (
+        {payPeriod.compensation_warnings?.map((warning) => (
+          <Alert key={warning}>
+            <p className="max-w-4xl leading-6"><span className="font-semibold">Mid-period pay change.</span> {warning}</p>
+          </Alert>
+        ))}
+        {part !== 'approval' && payPeriod.compliance_warnings?.filter((warning) => warning !== ficaNote).map((warning) => (
           <Alert key={warning}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <p className="max-w-4xl leading-6">

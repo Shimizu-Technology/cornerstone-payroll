@@ -40,7 +40,7 @@ class ContractorPayrollCalculator < PayrollCalculator
       @base_pay = 0.0
     elsif payroll_item.salary_override.present? && payroll_item.salary_override > 0
       @base_pay = payroll_item.salary_override.to_f
-    elsif employee.contractor_hourly?
+    elsif employee_value(:contractor_pay_type) == "hourly"
       if payroll_item.wage_rate_hours.present?
         calculate_multi_rate_gross_pay
       else
@@ -67,7 +67,7 @@ class ContractorPayrollCalculator < PayrollCalculator
   def record_earnings_breakdown
     payroll_item.payroll_item_earnings.clear
 
-    if employee.contractor_hourly?
+    if employee_value(:contractor_pay_type) == "hourly"
       if @multi_rate_entries.present?
         @multi_rate_entries.each do |entry|
           rate = entry[:rate].to_f

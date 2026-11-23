@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe ApplicationJob do
+  around { |example| Current.with_isolated_actor(nil) { example.run } }
+
   before do
     stub_const("AuditContextProbeJob", Class.new(described_class) do
       def perform(fail: false)

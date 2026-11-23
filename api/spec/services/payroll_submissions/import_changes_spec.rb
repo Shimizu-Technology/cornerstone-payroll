@@ -47,15 +47,17 @@ RSpec.describe PayrollSubmissions::ImportChanges do
   end
 
   it "refuses changed or missing rates, inactive employees and excluded retained source rows" do
-    rate.update!(rate: 36)
+    change_wage_rate!(rate, rate: 36)
     expect(service.proposals.last[:error]).to include("changed")
     expect { service.apply_to(rows, reviewed: reviewed, confirmed: true) }.to raise_error(ArgumentError, /changed/)
-    rate.update!(rate: 35)
+    change_wage_rate!(rate, rate: 35)
     worker.update!(status: "terminated", termination_date: period.start_date - 1)
     expect(service.proposals.last[:error]).to include("terminated")
     worker.update!(status: "active", termination_date: nil)
     expect { service.apply_to(rows.first(1), reviewed: reviewed, confirmed: true, source_employee_ids: [ owner.id, worker.id ]) }.to raise_error(ArgumentError, /included/)
-    rate.destroy!
+    # Wage rates are ended, not deleted, since M3-4; a rate deleted before then is missing.
+    EmployeeWageRateVersion.where(employee_wage_rate_id: rate.id).delete_all
+    EmployeeWageRate.where(id: rate.id).delete_all
     expect(service.proposals.last[:error]).to include("missing")
   end
 
@@ -133,9 +135,7 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     expect(service.proposals.last[:error]).to be_nil
   end
 
-  it "normalizes extra hours with preloaded employee rates" do
-    worker.employee_wage_rates.load
-    allow(Employee).to receive(:where).with(company_id: company.id, id: [ worker.id ]).and_return([ worker ])
+  it "normalizes extra hours with the employee's dated job rate" do
     result = PayrollSubmissions::ChangeRows.normalize!([ changes.last ], company_id: company.id)
     expect(result.sole).to include("employee_wage_rate_id" => rate.id, "hours" => "68")
   end
@@ -178,7 +178,7 @@ RSpec.describe 'Configured entry import provenance' do
       when :deactivated then field.update!(active: false)
       when :none_disabled then field.update!(allow_none: false)
       when :employee_inactive then owner.update!(status: 'inactive')
-      when :job_inactive then field.employee_wage_rate.update!(active: false)
+      when :job_inactive then change_wage_rate!(field.employee_wage_rate, active: false)
       end
       service = PayrollSubmissions::ImportChanges.new(submission: answer, pay_period: period)
       expect(service.manual_review_warnings.join).to include("Jordan's hours", 'Enter the value or ask the client')

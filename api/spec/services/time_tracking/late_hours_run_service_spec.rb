@@ -98,7 +98,7 @@ RSpec.describe TimeTracking::LateHoursRunService do
     end
 
     it "still blocks the hours when the employee has neither company earning" do
-      rate.update!(label: "Aerial Tours")
+      change_wage_rate!(rate, label: "Aerial Tours")
 
       expect(service.review.fetch("cases").sole["blocked_reason"]).to match(/requires this employee's active Admin Duties or Regular rate/)
       expect(client).not_to receive(:create_payroll_late_hours)
@@ -127,7 +127,7 @@ RSpec.describe TimeTracking::LateHoursRunService do
   it "resumes an ambiguous network failure using the same command, destination and captured rate" do
     allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Connection timed out")
     expect { create_run }.to raise_error(TimeTracking::Client::Error, /timed out/)
-    rate.update!(rate: 40)
+    change_wage_rate!(rate, rate: 40)
     run = create_run
     expect(run.adjustment_pay_period.payroll_items.first.wage_rate_hours.first.fetch("rate")).to eq(25)
     expect(TimeTrackingLateHoursRun.count).to eq(1)
@@ -211,7 +211,7 @@ RSpec.describe TimeTracking::LateHoursRunService do
     allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Source offline")
     expect { create_run }.to raise_error(TimeTracking::Client::Error)
     saved = TimeTrackingLateHoursRun.sole
-    employee.update!(employment_type: "salary", pay_rate: 50000)
+    change_compensation!(employee, employment_type: "salary", pay_rate: 50000)
     payload = build_aire_batch_payload
     allow(client).to receive(:create_payroll_late_hours).and_return("payroll_batch" => payload)
     # Source selection verification is independent; this isolates the captured payroll basis guard.

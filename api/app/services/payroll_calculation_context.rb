@@ -51,11 +51,11 @@ class PayrollCalculationContext
   ].freeze
 
   class << self
-    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, retirement_election: nil)
+    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, retirement_election: nil, rates_on: PayrollBusinessClock.today, employee_basis: nil)
       {
         "version" => VERSION,
-        "intake_setup_fingerprint" => employee.intake_exception.present? ? intake_setup_fingerprint(employee: employee) : nil,
-        "employee" => employee_snapshot(employee, w4_election: w4_election),
+        "intake_setup_fingerprint" => employee.intake_exception.present? ? intake_setup_fingerprint(employee: employee, rates_on: rates_on) : nil,
+        "employee" => employee_snapshot(employee, w4_election: w4_election).merge(employee_basis || EmployeeCompensationChangeService.snapshot(employee, rates_on)),
         "employee_deductions" => deduction_snapshots(employee_deductions),
         "payroll_field_assignments" => payroll_field_snapshots(payroll_field_assignments),
         "retirement_election" => retirement_election&.snapshot_attributes&.deep_stringify_keys
@@ -65,7 +65,7 @@ class PayrollCalculationContext
     # For new intake exceptions only. This guards a calculation against later
     # manager reconfirmation of different compensation/configuration without
     # rewriting the immutable evidence on committed payroll items.
-    def intake_setup_fingerprint(employee:)
+    def intake_setup_fingerprint(employee:, rates_on: PayrollBusinessClock.today)
       scalar_fields = SCALAR_ATTRIBUTES + %w[
         pay_rate hire_date intake_payroll_eligible_from contractor_type default_custom_earnings default_payroll_adjustments
       ]
@@ -75,8 +75,8 @@ class PayrollCalculationContext
         association.reorder(:id).map { |row| row.attributes.except(*columns) }
       end
       setup = {
-        "employee" => employee.attributes.slice(*scalar_fields),
-        "wage_rates" => stable_rows.call(employee.employee_wage_rates),
+        "employee" => dated_employee_attributes(employee, rates_on).slice(*scalar_fields),
+        "wage_rates" => dated_wage_rate_attributes(employee, rates_on).map { |row| row.except("created_at", "updated_at") },
         "deductions" => deduction_snapshots(employee.employee_deductions.includes(:deduction_type).reorder(:id)),
         "deduction_assignments" => stable_rows.call(employee.employee_deductions),
         "payroll_fields" => payroll_field_snapshots(employee.employee_payroll_fields.includes(:payroll_field_definition).reorder(:id)),
@@ -86,6 +86,16 @@ class PayrollCalculationContext
         "loans" => stable_rows.call(employee.employee_loans)
       }
       Digest::SHA256.hexdigest(JSON.generate(canonicalize(setup)))
+    end
+
+    # Preserve the pre-history fingerprint payload when only backfilled setup
+    # applies. Later versions affect evidence only on the proof's own date.
+    def dated_employee_attributes(employee, date)
+      employee.attributes.merge(EmployeeCompensationChangeService.snapshot(employee, date))
+    end
+
+    def dated_wage_rate_attributes(employee, date)
+      employee.wage_rates_on(date, include_inactive: true).sort_by(&:id).map { |row| row.attributes.except("company_id") }
     end
 
     def valid_for_correction?(snapshot)

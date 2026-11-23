@@ -83,7 +83,9 @@ module PayrollHistoryReview
         end
         ids.flat_map { |id| batches_by_employee.fetch(id, []) } | batches_by_employee.fetch(nil, [])
       end
-      affected_employees = employees.values.reject { |employee| employee.employment_type == "contractor" || batches_for.fetch(employee.id).empty? }
+      # The annual ledger selects recorded W-2 paychecks. Today's classification
+      # cannot tell us whether those paychecks need review.
+      affected_employees = employees.values.reject { |employee| batches_for.fetch(employee.id).empty? }
       contexts = EmployeeYearFicaContext.batch(company: @company, employees: affected_employees, year: @year,
         excluding_pay_period_id: @excluding_pay_period_id)
       contexts.flat_map do |employee_id, context|
