@@ -43,6 +43,22 @@ RSpec.describe "Native Cable ticket company scope", type: :request do
     expect(response).to have_http_status(:created)
     expect(CableConnectionTicket.last.company_id).to eq(home.id)
   end
+
+  it "issues a development ticket with MFA enabled when Clerk auth is disabled" do
+    previous_auth = ENV["AUTH_ENABLED"]
+    previous_mfa = ENV["REQUIRE_MFA"]
+    ENV["AUTH_ENABLED"] = "false"
+    ENV["REQUIRE_MFA"] = "true"
+
+    expect { post "/api/v1/cable_ticket" }.to change(CableConnectionTicket, :count).by(1)
+    expect(response).to have_http_status(:created)
+    expect(response.parsed_body.fetch("ticket")).to match(/\A[A-Za-z0-9_-]{43}\z/)
+    expect(AuditLog.where(action: "authentication#mfa_required_denied")).to be_empty
+  ensure
+    ENV["AUTH_ENABLED"] = previous_auth
+    ENV["REQUIRE_MFA"] = previous_mfa
+  end
+
   it "does not create a home-company conversation for a revoked explicit client" do
     expect do
       post "/api/v1/admin/portal_threads", headers: { "X-Company-Id" => client.id.to_s },

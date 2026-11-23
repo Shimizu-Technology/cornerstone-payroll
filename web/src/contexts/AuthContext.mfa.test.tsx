@@ -1,19 +1,21 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiClient, ApiError, authApi, setAuthTokenProvider } from '@/services/api';
 
 const clerk = vi.hoisted(() => ({
-  getToken: vi.fn().mockResolvedValue('synthetic-token'),
+  getToken: vi.fn<(options?: { skipCache: boolean }) => Promise<string>>(),
+  isSignedIn: true,
   signOut: vi.fn().mockResolvedValue(undefined),
   openUserProfile: vi.fn(),
 }));
 vi.mock('@clerk/clerk-react', () => ({
-  useAuth: () => ({ isSignedIn: true, isLoaded: true, getToken: clerk.getToken, signOut: clerk.signOut }),
+  useAuth: () => ({ isSignedIn: clerk.isSignedIn, isLoaded: true, getToken: clerk.getToken, signOut: clerk.signOut }),
   useClerk: () => ({ openUserProfile: clerk.openUserProfile }),
   SignIn: () => <div data-testid="clerk-sign-in" />,
-  SignedOut: () => null,
+  SignedOut: ({ children }: { children: ReactNode }) => (clerk.isSignedIn ? null : children),
 }));
 
 const account = {
@@ -24,6 +26,11 @@ const account = {
 };
 const mfaPending = { mfa_required: true, mfa_verified: false } as const;
 const requiredTitle = 'Multi-factor authentication required';
+
+beforeEach(() => {
+  clerk.isSignedIn = true;
+  clerk.getToken.mockReset().mockImplementation(async (options) => options?.skipCache ? 'fresh-token' : 'cached-token');
+});
 
 afterEach(() => {
   cleanup();
@@ -38,7 +45,7 @@ async function renderLogin() {
   vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_test_synthetic');
   const { AuthProvider } = await import('./AuthContext');
   const { Login } = await import('@/pages/Login');
-  render(
+  const ui = () => (
     <MemoryRouter initialEntries={['/login']}>
       <AuthProvider>
         <Routes>
@@ -46,34 +53,43 @@ async function renderLogin() {
           <Route path="/app" element={<h1>Payroll workspace</h1>} />
         </Routes>
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const { rerender } = render(ui());
+  return () => rerender(ui());
 }
 
 it('opens Clerk account security, keeps the session on denial, and retries with a fresh token only on demand', async () => {
-  const me = vi.spyOn(authApi, 'me')
-    .mockResolvedValueOnce(mfaPending)
-    .mockResolvedValueOnce(mfaPending)
-    .mockResolvedValueOnce({ ...account, mfa_required: true, mfa_verified: true });
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(Response.json(mfaPending))
+    .mockResolvedValueOnce(Response.json(mfaPending))
+    .mockResolvedValueOnce(Response.json({ ...account, mfa_required: true, mfa_verified: true }));
+  vi.stubGlobal('fetch', fetch);
   await renderLogin();
 
   expect(await screen.findByRole('heading', { name: requiredTitle })).toBeTruthy();
   expect(screen.queryByTestId('clerk-sign-in')).toBeNull();
   expect(clerk.signOut).not.toHaveBeenCalled();
-  expect(me).toHaveBeenCalledTimes(1);
+  expect(fetch).toHaveBeenCalledExactlyOnceWith(
+    expect.stringMatching(/\/auth\/me$/),
+    expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer cached-token' }) }),
+  );
 
   fireEvent.click(screen.getByRole('button', { name: 'Open account settings' }));
   expect(clerk.openUserProfile).toHaveBeenCalledTimes(1);
-  expect(me).toHaveBeenCalledTimes(1);
+  expect(fetch).toHaveBeenCalledTimes(1);
 
+  clerk.getToken.mockClear();
   fireEvent.click(screen.getByRole('button', { name: 'Check verification' }));
-  await waitFor(() => expect(clerk.getToken).toHaveBeenLastCalledWith({ skipCache: true }));
   await waitFor(() => expect((screen.getByRole('button', { name: 'Check verification' }) as HTMLButtonElement).disabled).toBe(false));
   expect(screen.getByRole('heading', { name: requiredTitle })).toBeTruthy();
 
   fireEvent.click(screen.getByRole('button', { name: 'Check verification' }));
   expect(await screen.findByRole('heading', { name: 'Payroll workspace' })).toBeTruthy();
-  expect(me).toHaveBeenCalledTimes(3);
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(fetch.mock.calls.slice(1).map(([, init]) => new Headers(init?.headers).get('Authorization')))
+    .toEqual(['Bearer fresh-token', 'Bearer fresh-token']);
+  expect(clerk.getToken.mock.calls).toEqual([[{ skipCache: true }], [{ skipCache: true }]]);
   expect(clerk.signOut).not.toHaveBeenCalled();
 });
 
@@ -100,6 +116,60 @@ it('keeps the MFA prompt available when Clerk sign-out fails', async () => {
 
   expect((await screen.findByRole('alert')).textContent).toContain('Could not sign out');
   expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+});
+
+it('clears the MFA prompt when the user signs out of Clerk elsewhere', async () => {
+  vi.spyOn(authApi, 'me').mockResolvedValue(mfaPending);
+  const rerender = await renderLogin();
+  await screen.findByRole('heading', { name: requiredTitle });
+
+  clerk.isSignedIn = false;
+  rerender();
+
+  expect(await screen.findByTestId('clerk-sign-in')).toBeTruthy();
+  await waitFor(() => expect(screen.queryByRole('heading', { name: requiredTitle })).toBeNull());
+});
+
+it('keeps the 401 account notice after Clerk signs out', async () => {
+  vi.spyOn(authApi, 'me').mockRejectedValue(new ApiError('Synthetic unlinked account', 401));
+  const rerender = await renderLogin();
+  await screen.findByRole('alert');
+
+  clerk.isSignedIn = false;
+  rerender();
+
+  expect(await screen.findByTestId('clerk-sign-in')).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toContain('Synthetic unlinked account');
+});
+
+it('clears a user restored by a concurrent refresh when MFA sign-out fails', async () => {
+  vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_test_synthetic');
+  const { AuthProvider, useAuth } = await import('./AuthContext');
+  let rejectSignOut!: (error: Error) => void;
+  const signingOut = new Promise<void>((_, reject) => { rejectSignOut = reject; });
+  clerk.signOut.mockReturnValueOnce(signingOut);
+  vi.spyOn(authApi, 'me').mockResolvedValueOnce(mfaPending).mockResolvedValue(account);
+
+  function Probe() {
+    const { isAuthenticated, user, authProblem, refreshUser, signOut } = useAuth();
+    return (
+      <>
+        <p>{isAuthenticated ? 'Signed in' : 'Signed out'}: {user?.name ?? 'No user'}: {authProblem?.code}</p>
+        <button onClick={() => { void refreshUser(); }}>Refresh</button>
+        <button onClick={() => { void signOut().catch(() => undefined); }}>Sign out</button>
+      </>
+    );
+  }
+
+  render(<AuthProvider><Probe /></AuthProvider>);
+  await screen.findByText('Signed out: No user: mfa_required');
+  fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  await screen.findByText('Signed in: Payroll User:');
+
+  await act(async () => rejectSignOut(new Error('Synthetic sign-out failure')));
+
+  expect(screen.getByText('Signed out: No user: mfa_required')).toBeTruthy();
 });
 
 it('keeps the normal sign-in path when the API switch is off', async () => {

@@ -44,7 +44,7 @@ module Api
       private
 
       def render_mfa_required
-        return super unless action_name == "me" && request.get?
+        return super unless action_name == "me" && (request.get? || request.head?)
 
         render json: { mfa_required: true, mfa_verified: false }
       end

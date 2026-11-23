@@ -47,6 +47,10 @@ RSpec.describe ApplicationCable::Connection, type: :channel do
     expect(connection.current_company).to eq(company)
   end
 
+  it "rejects an array-valued ticket without raising a digest error" do
+    expect { connect params: { ticket: [ "invalid" ] } }.to have_rejected_connection
+  end
+
   describe "MFA at connection time" do
     around do |example|
       previous = ENV["REQUIRE_MFA"]
@@ -60,9 +64,13 @@ RSpec.describe ApplicationCable::Connection, type: :channel do
       ticket = issue_ticket
       ENV["REQUIRE_MFA"] = "true"
 
-      expect { connect params: { ticket: ticket } }.to have_rejected_connection
+      expect do
+        connect params: { ticket: ticket }, headers: { "User-Agent" => "Cable connection spec" },
+          env: { "REMOTE_ADDR" => "192.0.2.81" }
+      end.to have_rejected_connection
       expect(AuditLog.last).to have_attributes(
-        action: "authentication#mfa_required_denied", event_category: "security", metadata: { "source" => "action_cable" }
+        action: "authentication#mfa_required_denied", event_category: "security", metadata: { "source" => "action_cable" },
+        subject_name: user.name, ip_address: "192.0.2.81", user_agent: "Cable connection spec"
       )
     end
 

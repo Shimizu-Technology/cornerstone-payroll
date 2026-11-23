@@ -29,21 +29,67 @@ RSpec.describe "Clerk MFA route coverage" do
       end
 
       clerk_routes << path
-      # Check inherited callback identity. Rails replaces the callback when it
-      # adds a conditional skip, even if the filter still appears in the chain.
-      base = controller < Api::V1::EmployeePortal::BaseController ? Api::V1::EmployeePortal::BaseController : ApplicationController
-      authentication = base == ApplicationController ? :authenticate_user! : :authenticate_employee_user!
-      filters = controller._process_action_callbacks.select { |callback| callback.kind == :before }
-      expected = base._process_action_callbacks.find { |callback| callback.kind == :before && callback.filter == :enforce_mfa! }
-      actual = filters.find { |callback| callback.filter == :enforce_mfa! }
       label = "#{route.verb} #{path} (#{controller_path}##{route.defaults[:action]})"
-      expect(actual && actual.equal?(expected)).to be(true), "#{label} lacks the shared MFA filter"
-      expect(filters.take_while { |callback| callback != actual }.map(&:filter)).to include(authentication), "#{label} must authenticate before MFA"
+      errors = mfa_coverage_errors(controller)
+      expect(errors).to be_empty, "#{label}: #{errors.join(', ')}"
     end
 
     expect(clerk_routes).to include(
       "/api/v1/auth/me(.:format)", "/api/v1/companies(.:format)", "/api/v1/cable_ticket(.:format)",
       "/api/v1/employee/context(.:format)"
     )
+  end
+
+  [
+    [ "a conditional Clerk authentication skip", :authenticate_user!, -> { skip_before_action :authenticate_user!, only: :show } ],
+    [ "a conditional employee authentication skip", :authenticate_employee_user!, -> { skip_before_action :authenticate_employee_user!, except: :show } ],
+    [ "a conditional MFA skip", :enforce_mfa!, -> { skip_before_action :enforce_mfa!, only: :show } ],
+    [ "a conditional MFA callback", :enforce_mfa!, -> { before_action :enforce_mfa!, if: :show } ],
+    [ "an MFA enforcement override", :enforce_mfa!, -> { define_method(:enforce_mfa!) { nil } } ],
+    [ "an MFA response override", :render_mfa_required, -> { define_method(:render_mfa_required) { nil } } ],
+    [ "an authentication bypass override", :auth_disabled?, -> { define_method(:auth_disabled?) { true } } ]
+  ].each do |scenario, method, change|
+    it "detects #{scenario}" do
+      base = method == :authenticate_employee_user! ? Api::V1::EmployeePortal::BaseController : ApplicationController
+      controller = Class.new(base)
+      controller.class_exec(&change)
+
+      expect(mfa_coverage_errors(controller)).to include(a_string_including(method.to_s))
+    end
+  end
+
+  def mfa_coverage_errors(controller)
+    employee_portal = controller <= Api::V1::EmployeePortal::BaseController
+    base = employee_portal ? Api::V1::EmployeePortal::BaseController : ApplicationController
+    authentication = employee_portal ? :authenticate_employee_user! : :authenticate_user!
+    methods = [ authentication, :enforce_mfa! ]
+    filters = controller._process_action_callbacks.select { |callback| callback.kind == :before }
+    base_filters = base._process_action_callbacks.select { |callback| callback.kind == :before }
+    errors = methods.filter_map do |method|
+      actual = filters.find { |callback| callback.filter == method }
+      expected = base_filters.find { |callback| callback.filter == method }
+      # Rails clones a callback when a subclass conditionally skips it. The
+      # sole permitted condition is the existing development Clerk bypass.
+      allowed_unless = employee_portal ? [] : [ :auth_disabled? ]
+      unless actual && actual.equal?(expected) &&
+          actual.instance_variable_get(:@if).empty? && actual.instance_variable_get(:@unless) == allowed_unless
+        "#{method} must use the shared callback without additional conditions"
+      end
+    end
+
+    unless filters.select { |callback| methods.include?(callback.filter) }.map(&:filter) == methods
+      errors << "#{authentication} must run before enforce_mfa!"
+    end
+
+    owners = {
+      authentication => employee_portal ? base : ClerkAuthenticatable,
+      enforce_mfa!: MfaEnforceable,
+      render_mfa_required: controller <= Api::V1::AuthController ? Api::V1::AuthController : MfaEnforceable
+    }
+    owners[:auth_disabled?] = ApplicationController unless employee_portal
+    owners.each do |method, owner|
+      errors << "#{method} must be owned by #{owner}" unless controller.instance_method(method).owner == owner
+    end
+    errors
   end
 end
