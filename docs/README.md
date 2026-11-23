@@ -42,6 +42,7 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 - [MoSa biweekly payroll cycle](runbooks/MOSA_PAYROLL_CYCLE.md) — step-by-step staff guide: two-file import, expected entries, Download preview, client review, commit and printing.
 - [MoSa payroll cycle runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md) — rollout controls: parallel-run, cutover evidence and hard stops.
 - [Cutover gate criteria](rollout/03-CUTOVER-GATE-CRITERIA.md) — per-client parallel-run and cutover evidence.
+- [Effective-dated compensation rollout](rollout/07-EFFECTIVE-DATED-COMPENSATION-DEPLOY.md) — migration, maintenance, reconciliation and verification for the three-PR release.
 
 ## Supporting implementation records
 
