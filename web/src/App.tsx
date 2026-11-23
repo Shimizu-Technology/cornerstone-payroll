@@ -10,6 +10,7 @@ import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostH
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
+import { isPublicPath } from '@/lib/public-routes';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
 
@@ -72,6 +73,8 @@ const PayrollGoLive = lazy(() => import('@/pages/PayrollGoLive').then((module) =
 const Login = lazy(() => import('@/pages/Login').then((module) => ({ default: module.Login })));
 const Invite = lazy(() => import('@/pages/Invite').then((module) => ({ default: module.Invite })));
 const PublicHome = lazy(() => import('@/pages/PublicHome').then((module) => ({ default: module.PublicHome })));
+const PrivacyPolicy = lazy(() => import('@/pages/legal/PrivacyPolicy').then((module) => ({ default: module.PrivacyPolicy })));
+const TermsOfService = lazy(() => import('@/pages/legal/TermsOfService').then((module) => ({ default: module.TermsOfService })));
 
 // Environment flag to bypass auth in development
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
@@ -336,6 +339,8 @@ function AppRoutes() {
       <Route path="/" element={<PublicHome />} />
       <Route path="/login" element={<Login />} />
       <Route path="/invite" element={<Invite />} />
+      <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/terms" element={<TermsOfService />} />
       <Route path="/callback" element={<Navigate to="/app" replace />} />
 
       {/* Protected routes */}
@@ -443,8 +448,7 @@ function AppFeedback({ children }: { children: ReactNode }) {
   const { user, isLoading: authLoading } = useAuth();
   const { activeCompanyId, activeOrganizationId, loading: companyLoading } = useCompany();
   const { pathname } = useLocation();
-  const publicRoute = pathname === '/' || pathname === '/login' || pathname === '/invite';
-  if (!publicRoute && (authLoading || companyLoading)) return <PageLoader />;
+  if (!isPublicPath(pathname) && (authLoading || companyLoading)) return <PageLoader />;
   const financePage = pathname.startsWith('/tools/invoices') || pathname.startsWith('/tools/expenses') || pathname.startsWith('/tools/finance');
   const scope = `${user?.id ?? 'signed-out'}:${activeOrganizationId ?? 'none'}:${financePage ? 'finance' : activeCompanyId ?? 'none'}`;
   return <FeedbackProvider key={scope} scopeKey={scope}>{children}</FeedbackProvider>;

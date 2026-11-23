@@ -273,6 +273,10 @@ export function PublicHome() {
             </div>
           </div>
         </div>
+        <nav aria-label="Legal" className="mx-auto mt-8 flex max-w-7xl flex-wrap gap-x-6 gap-y-2 text-sm font-semibold text-primary-100/80">
+          <Link to="/privacy" className="transition-colors hover:text-accent-200">Privacy Policy</Link>
+          <Link to="/terms" className="transition-colors hover:text-accent-200">Terms of Service</Link>
+        </nav>
       </section>
     </main>
   );
