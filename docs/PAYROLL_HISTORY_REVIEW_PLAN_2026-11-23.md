@@ -100,7 +100,7 @@ Confirm how W-2 boxes 3 and 5 and the quarterly packet treat legacy rows with ni
 **Result (Nov 23, sanitized local clone of production):**
 - `W2GuTaxableWages` falls back to computed wages when a saved base is nil, and the aggregator applies the SS wage base. For every flagged employee (22 AIRE, 14 Spike), box 3 plus box 7 equals the SS tax withheld divided by 6.2%. No one is near the cap. The W-2 amounts are correct.
 - The year-end flow also raises a separate `legacy_tax_bases` judgment warning (`YearEnd::JudgmentWarnings`) for the same employees. PR 3 ties it to the review items. Resolving an employee-year's `legacy_basis_gap` marks that warning reviewed, so admins handle it in one place.
-- Not yet checked: the quarterly packet. Check it in PR 3's clone verification.
+- Quarterly packet: checked. For every quarter Q1–Q3 at AIRE and Spike, 941 lines 5a and 5b equal the combined SS tax divided by 12.4%, within rounding of 1–4 cents. The 941 amounts are correct.
 
 ## Release order
 
