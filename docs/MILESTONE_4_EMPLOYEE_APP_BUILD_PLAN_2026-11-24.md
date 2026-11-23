@@ -1,6 +1,6 @@
 # Milestone 4 ("Employee app, MoSa's first") build plan
 
-**Status:** Revised after an independent cross-family review (Gemini 4 Neon, round 1: "ready with fixes"; all 3 blockers and 4 highs addressed). Waiting for Leon's approval. No application code has changed.
+**Status:** Revised after two rounds of independent cross-family review (Gemini 4 Neon). All findings were checked against the code and fixed (§9). Waiting for Leon's approval. No application code has changed.
 **Date:** November 24, 2026.
 **Codebase baseline:** `Shimizu-Technology/cornerstone-payroll` `origin/main` at `01e6aa52` (includes #545, the Clerk Core 3 upgrade).
 **Builds on:** [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) (§0, §4, §6), [Milestone 3 build plan](MILESTONE_3_FOUNDATIONS_BUILD_PLAN_2026-11-22.md) (§5 legal and WISP, §7 costs), [Employee portal plan](EMPLOYEE_PORTAL_AND_PLATFORM_PLAN_2026-11-17.md) (§3 identity, §4 Phase 1), [Guam legal compliance research](GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md) (Part 1 items 1–3, 21, 23; Q1; Q7; Part 3), and [Client subdomain activation](CLIENT_SUBDOMAIN_ACTIVATION.md).
@@ -61,7 +61,7 @@ Bank changes stay **off** for MoSa's in this milestone. Payroll holds no bank de
 | D9 | Employees' second sign-in step | **Employee-only logins don't need an authenticator app.** They sign in with a password or Google, and Clerk emails a code on each new device. Before any change, they confirm again with a fresh first-step verification (Clerk reverification at the first-factor level, `fva[0]` within 10 minutes). Employees who chose to enroll a second factor confirm with that instead. Staff and client users, including MoSa's admins, require two-step sign-in. | This is what the M3 plan already specifies: employee-only users "pass the global MFA gate… relying on step-up" (M3 plan, M3-2). Most restaurant workers won't set up an authenticator app. The lawyer review adds a question on whether the FTC Safeguards Rule's MFA requirement covers employees viewing their own records (§3 G1). |
 | D10 | How do Leon, Dafne, Mark and Benjo test with real data? | Three layers: (a) **staging**, with full sign-up and real-looking data; (b) **"Preview as employee"** in production, so staff with access to MoSa's see exactly what a given employee sees, read-only and audited; (c) **one real end-to-end sign-up in production** using a Cornerstone employee's own record at company 1, for example Benjo, who has an active company 1 record (§2). Leon confirms who volunteers. | Test workspaces can't turn the employee app on (`api/app/services/company_features.rb:104-108`), and links must belong to a live company. That's enforced in the database (`api/db/migrate/20261122060000_add_payroll_invitation_binding_and_employee_account_links.rb:30`). Staff already have access to MoSa's data, so previewing creates no new exposure. |
 | D11 | Tell employees when a new stub posts? | **Yes, by email.** It says "Your pay stub for <date> is ready" with no amounts and a link to the app. It goes only to the verified personal email, only when the company's `stubs` switch is on, and only while `PORTAL_EMAIL_NOTIFICATIONS_ENABLED` is on. | The portal plan lists it (`EMPLOYEE_PORTAL_AND_PLATFORM_PLAN_2026-11-17.md`, Phase 1), and it's the main reason people open the app. Generic emails with no amounts follow the existing pattern (`api/app/services/portal_notifications/email.rb:6`). |
-| D12 | What happens to an open session when access ends? | **Revoking or retiring a link ends access immediately.** Revoking a link also signs the person out everywhere through the existing revocation path (`PayrollAccess::RevocationDispatcher`, `api/app/models/user.rb:219`) when that was their last eligible link. The `portal_employee` login is deactivated when its last link closes. Former employees keep read-only access until `former_access_until`. | A stolen or shared login shouldn't keep working after Cornerstone revokes it, and a link check alone leaves the Clerk session alive. |
+| D12 | What happens to an open session when access ends? | **Revoking or retiring a link ends access on the next request,** because the link check runs on every call. When it was the person's last eligible link, the `portal_employee` login is also deactivated, which blocks every API call at once (`api/app/controllers/api/v1/employee_portal/base_controller.rb:31`). Their Clerk sessions are ended through Clerk's Backend API. The existing `PayrollAccess::RevocationDispatcher` only drops live Cable connections (`api/app/services/payroll_access/session_revoker.rb:10`), and the employee service has none. Former employees keep read-only access until `former_access_until`. | A stolen or shared login shouldn't keep working after Cornerstone revokes it. |
 
 ---
 
@@ -184,7 +184,7 @@ All of these must be true. Each one maps to a check in the go-live runbook (M4-1
 Each slice is one pull request unless it says otherwise. Every slice merges to `main` **switched off**: the M4 switches stay locked until M4-9 opens them for one company at a time behind the gate checks. "Done" means reviewed, CI green, and deployed, with the switch still off.
 
 **Standing rules for every slice:**
-- **Every new company-scoped table is protected by row-level security from its first migration.** It gets a `company_id` (with composite foreign keys to its parent), is registered in `RlsTables` (`api/lib/rls_tables.rb`), has `ENABLE` and `FORCE ROW LEVEL SECURITY` policies, and has a cross-company isolation spec. CI already fails on an unclassified table (`api/spec/security/company_rls_isolation_spec.rb:16-26`).
+- **Every new company-scoped table is protected by row-level security from its first migration.** It gets a `company_id` (with composite foreign keys to its parent), is registered in `RlsTables` (`api/lib/rls_tables.rb`), gets its policies, and has a cross-company isolation spec. CI already fails on an unclassified table (`api/spec/security/company_rls_isolation_spec.rb:16-26`). Until M3-7 phase 3 turns enforcement on, policies are created but not enabled or forced, as the spec expects for every protected table (`:27`). They're enabled together with the rest in phase 3, or in a follow-up migration if the table lands after it.
 - **Employee endpoints are tested with real authentication**, not stubbed auth, under the RLS guard in `raise` mode.
 - **AIRE's routes, payloads and audit strings don't change.**
 - **Every employee-facing 404 stays non-enumerating.** The web app turns it into a friendly message.
@@ -202,13 +202,14 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   - Split step-up into two helpers:
     - `recently_verified_second_factor?` requires the claim and `fva[1]` within 10 minutes. It's for staff, client users, and employees who enrolled a second factor.
     - `recently_verified_any_factor?` accepts `fva[0]` within 10 minutes. It's for employee-only users with no second factor (D9), using Clerk's first-factor reverification.
-  - Add one `require_recent_verification!` that picks the right helper for the signed-in user, and returns a response the web app turns into Clerk's reverification prompt.
+  - Add one `require_recent_verification!` that picks the right helper for the signed-in user, and returns a response the web app turns into Clerk's reverification prompt (`useReverification`, first-factor level, available in `@clerk/react` 6).
+  - **Google sign-in:** Clerk doesn't accept Google as a reverification factor. Turn on email-code first-factor verification in Clerk, so employees who sign in with Google confirm with an emailed code.
   - Add a readiness check that fails when `REQUIRE_MFA=true` but a test token lacks the claim.
 - **Tests:**
   - A token with `fva [1,0]` and no `two_factor_enabled` is refused for staff. With the claim, it's accepted.
   - An employee-only token with `fva [3,-1]` passes step-up. One with `fva [25,-1]` is refused.
   - A staff token older than 10 minutes on the second factor is refused for step-up.
-- **Acceptance:** repeat the M3 two-step test on the separate Clerk test app, including the new-device email code case and a first-factor reverification.
+- **Acceptance:** repeat the M3 two-step test on the separate Clerk test app. Include the new-device email code case, a first-factor reverification by password, and one by email code for a Google-signed-in user.
 - **Depends on:** nothing. It can start now.
 
 ### M4-2 Employee link lifecycle and sign-up (API)
@@ -221,10 +222,20 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   - Resend keeps the link and rotates the token. Revoke records who, why and when (D12). Every step is audited.
 - **Sign-up for a new person** (`POST /api/v1/employee/activation`, reachable before a link session exists):
   1. **Check:** the token or code, plus DOB and SSN last 4. It compares in constant time and returns one generic error for every failure. It locks after 5 failures per link (24-hour lock, staff can unlock), and alerts staff after 3 locks at one company in an hour.
-  2. **Login:** on success, it creates the `portal_employee` user (home company = the employee's company, email = the address the employee enters and Clerk verifies). It then creates a Clerk invitation with `notify: false` carrying the user id, link id and nonce in its metadata. This extends `PayrollInvitation` (`api/app/services/payroll_invitation.rb:29-98`). It returns the invitation's sign-up URL to the web app (`api/app/services/clerk_invitation_service.rb:22,37`) instead of emailing it.
-  3. **Bind:** after Clerk sign-up, the web app calls `/auth/me`, where `bind_from_metadata` already runs (`api/app/controllers/concerns/clerk_authenticatable.rb:55-62`). The bind step is extended to mark the link `active` with `user_id` and `activated_at`, in the same transaction.
+  2. **Login:** on success, it creates the `portal_employee` user (home company = the employee's company, email = the address the employee enters) and records it on the still-`invited` link. The model allows that, since it requires a user only once a link is active. It then creates a Clerk invitation with `notify: false`, carrying the user id, link id and nonce in its metadata. This extends `PayrollInvitation` (`api/app/services/payroll_invitation.rb:29-98`). It returns the invitation's sign-up URL to the web app (`api/app/services/clerk_invitation_service.rb:22,37`) instead of emailing it.
+     - **Retries:** if the employee abandons Clerk sign-up and comes back, activation reuses the link's pending user. It updates the email if the employee typed a different one and that address is free, and it rotates the invitation. No second user is created.
+     - **An email that already has a login:** activation returns the same generic response and points the employee to "Already have an account? Sign in", which uses the claim path below. It never reveals that the address exists.
+  3. **Bind:** after Clerk sign-up, the web app calls `/auth/me`, where `bind_from_metadata` already runs (`api/app/controllers/concerns/clerk_authenticatable.rb:55-62`). That runs before the auth controller's RLS scope (`api/app/controllers/api/v1/auth_controller.rb:6`), so the extended bind does all of this inside `TenantScope.as_system` and `user.with_lock`, in one transaction:
+     - looks up and locks the link;
+     - re-checks that it's still `invited`, not expired, not locked, `portal_enabled?`, and that a subdomain token's `azp` matches the link's company;
+     - marks it `active` with `activated_at`;
+     - clears `invite_token_digest`.
 - **Claiming a link with an existing login** (`POST /api/v1/employee/links/claim`, signed in): for someone who already has a Payroll login, such as a Cornerstone staff member with a company 1 employee record (D10c) or an employee at a second client. `PayrollInvitation#send_invite` refuses users who are already bound (`payroll_invitation.rb:20-21`), so this path never sends a Clerk invitation. It takes the token or code plus DOB and SSN-4, requires step-up (M4-1), and attaches the link to the signed-in user. Staff and client users keep their own two-step rules. The web app switches roles using `/auth/me` `roles`.
 - **Finding links:** `GET /api/v1/employee/links` (no link header needed) returns the signed-in user's eligible links: id, company name, subdomain slug, status, and former-access end date. The web app uses it for the employer picker and the `X-Employee-Link-Id` header.
+- **Where `links` and `links/claim` live:** neither can inherit `EmployeePortal::BaseController`, which requires the link header (`base_controller.rb:19-23`).
+  - They go in a small `EmployeePortal::AccountController` that verifies the Clerk token the same way, allows client-subdomain tokens (`clerk_authenticatable.rb:30,81-83`), and returns 404 on every failure.
+  - On a client subdomain, both are limited to that subdomain's company (`TenantSubdomainRegistry`, as at `base_controller.rb:44-46`), so a worker's other employers never show up there.
+  - `links/claim` gets the same throttles as activation: it's added to the activation path match and body check (`api/config/initializers/rack_attack.rb:56`).
 - **Termination:** both status-transition services call `EmployeeLinks::Retire` (§1.1).
   - Terminate makes the link *former*, with `former_access_until = termination date + former_access_years`.
   - Deactivating without a termination date revokes the link with a reason. It doesn't start a former window.
@@ -275,10 +286,11 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
     - `GET /api/v1/employee/statements/:id`
     - `GET /api/v1/employee/statements/:id/pdf`
     - All are gated by `employee_portal.features.stubs` through `employee_portal_feature?`, and all are audited (`employee_statement#listed/viewed/pdf_downloaded`, category `employee_portal`).
-  - **Frozen stub as issued (D7):** a stub **posts** to the app when every check in the run has a final payment status (check number issued, or direct deposit confirmed), or at 6am on the pay date, whichever is first.
-    - At posting, the PDF is generated once and stored in R2 with a SHA-256 fingerprint, in an `employee_documents` table with a unique `(payroll_item_id, revision)`. The posting job takes a row lock, so two downloads can't freeze two copies.
-    - Downloads serve the frozen file.
-    - A later payment-status change, void or correction posts a new revision marked "Corrected", and keeps the original visible as replaced.
+  - **Frozen stub as issued (D7):**
+    - **When a stub posts:** the pay period is `reportable_committed` (`api/app/models/pay_period.rb:331`). It's 6am Guam time (`Pacific/Guam`) on the pay date, or later if the run was committed after that. And a paper check has its check number assigned. A paper check with no number waits until one is assigned. Payment evidence (a delivered check, a confirmed deposit) isn't a trigger: it can't be recorded ahead of time (`api/app/services/employee_payroll_payment_evidence.rb:13-27`), and MoSa's records its own ACH outside Payroll.
+    - **What the frozen PDF says about payment:** the employee copy prints only "Direct deposit" or "Check #1234". The staff wording "Direct deposit (stub only; transfer not confirmed)" (`api/app/services/pay_stub_generator.rb:138-143`) is replaced through an employee-copy option on the generator. Live payment status (prepared, printed, delivered, transfer confirmed) is shown in the app from `EmployeePayrollPaymentEvidence`, never baked into the PDF.
+    - **Storage:** at posting, the PDF is generated once and stored in R2 with a SHA-256 fingerprint, in an `employee_documents` table with a unique `(payroll_item_id, revision)`. The posting job takes a row lock, so two downloads can't freeze two copies. Downloads serve the frozen file.
+    - **"Corrected" revisions** happen only on changes that alter the PDF: a delivery-method switch, a check number change or replacement check, a void or reversal, or a correction run. They post a new revision marked "Corrected" and keep the original visible as replaced. Recording a delivery or a deposit confirmation never creates a revision or a second notice.
     - Posting also triggers the D11 notice.
   - **Imported history (D6):** statements start at the first Payroll-run check. A single note covers earlier 2026 pay.
   - **Former links:** read-only, limited to statements dated before `former_access_until`.
@@ -377,7 +389,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   - **Render `employee_web` service** (Starter, $7): `APP_PROCESS_ROLE=employee_web`, `DB_POOL_MAX=3`, the shared Redis rate-limit store, its own health check. Check the connection budget against Neon (M3 plan §6).
   - **Netlify site 2** for `VITE_APP_SURFACE=employee`, with base `web/` and its own build settings beside `web/netlify.toml`. It has its own `_redirects` and headers (CSP, `no-store` on the app shell's data routes). Deploy previews stay off. Build credits are watched, because both sites share the team pool.
   - **`mosas.shimizu-technology.com`**, following `docs/CLIENT_SUBDOMAIN_ACTIVATION.md`: company 6 slug and branding, the Netlify alias on site 2, a DNS-only CNAME, and the Clerk allowed subdomain. CORS and Clerk authorized parties come from the subdomain registry automatically, so there are no static list edits.
-  - **Staging for the internal test (D10a, G8):** allow 4 bound testers on staging (today 1–2, `api/lib/staging_outbound_policy.rb:74`). Allow invitation binding for those named testers on staging's own Clerk development instance, so a real sign-up can be tested there. Give staging an employee origin with its own CORS entry, since the registry reserves `staging` (`api/app/services/tenant_subdomain_registry.rb:4-9`). Staging containment otherwise stays as it is.
+  - **Staging for the internal test (D10a, G8):** allow 4 bound testers on staging (today 1–2, `api/lib/staging_outbound_policy.rb:74`). Allow invitation binding for those named testers on staging's own Clerk development instance, so a real sign-up can be tested there. Today every tester must be listed in advance with user id, email and Clerk id (`staging_outbound_policy.rb:75-78`), so add an email-only tester slot for a fresh sign-up. Staging also locks CORS to one origin (`:174-175`), so the staging employee origin needs a deliberate second entry. Allow the Clerk session-revocation call (D12) in staging's outbound policy. Give staging an employee origin with its own CORS entry, since the registry reserves `staging` (`api/app/services/tenant_subdomain_registry.rb:4-9`). Staging containment otherwise stays as it is.
   - **Runbooks** for both services, and readiness checks for the employee surface.
   - **Alerts:** employee 5xx rate, activation lockouts, rate-limit hits.
 - **Depends on:** M3-0b (Clerk production). Everything else can be prepared earlier.
@@ -453,7 +465,7 @@ Then:
 | **Someone guesses their way in** | DOB and SSN-4 are guessable for someone who knows the person. | A token or one-time code is required as well. Lockout after 5 failures, staff alerts, generic errors, Rack::Attack limits, and an audit of every attempt. |
 | **One employee sees another's pay** | A query not limited to the link's employee, or a header swap. | The employee is resolved from the link only (`base_controller.rb:18-47`). RLS in `raise` mode. A cross-link and cross-company matrix with real auth (M4-11). |
 | **Shared Wi-Fi locks out a whole shift** | Per-IP limits on auth (20 a minute), tenant requests (30), sign-up (10 per 15 minutes) and PDFs (15), all shared by one restaurant IP (§1.5). Throttled responses also lack tenant CORS headers. | Session- or link-keyed limits with a per-IP backstop, plus tenant CORS on 429 and 400, in M4-2, tested with 30 simulated phones on one IP. |
-| **A revoked person keeps using the app** | Revoking a link in the database doesn't end their Clerk session. | D12: revocation signs them out through `PayrollAccess::RevocationDispatcher`, and the login closes with its last link. |
+| **A revoked person keeps using the app** | Revoking a link in the database doesn't end their Clerk session. | D12: the link check blocks the next request, the login is deactivated with its last link, and Clerk sessions are revoked through Clerk's Backend API. |
 | **Stubs change after the employee saw them** | Stubs are regenerated on every download today. | The frozen issued copy plus "Corrected" documents (D7). |
 | **AIRE My Pay breaks** | Extracting the shared statement service changes AIRE's output. | Golden-file comparison and AIRE's specs on every PR. AIRE's routes and audit strings stay frozen. |
 | **Employees in two places see different numbers** | AIRE and the employee app use separate code paths. | One shared service (M4-4). |
@@ -493,6 +505,16 @@ Milestone 4 is done when:
 ---
 
 ## 9. Review log
+
+**Round 2 (Gemini 4 Neon, high, re-check of `cac49720`): "ready with fixes."**
+
+- Round 1's blockers and highs were confirmed fixed, with two caveats now addressed: an email-only staging tester slot, and RLS policies staged but not enforced before M3-7 phase 3.
+- **New, all fixed in this revision:**
+  - D12 overstated what the revocation dispatcher does. It only drops Cable connections, so Clerk sessions are now revoked through Clerk's API.
+  - The stub posting trigger relied on payment evidence that can't be recorded in advance, and would have marked normal stubs "Corrected".
+  - Sign-up retry and email-collision handling, the bind step's RLS and locking, and where `links` and `links/claim` live and how they're throttled.
+  - Google sign-in can't be used for reverification, so it uses an email code.
+- **Lead's own find while checking:** the stub prints staff wording ("transfer not confirmed"). Employee copies use an employee-copy option instead (M4-4).
 
 **Round 1 (Gemini 4 Neon, high, November 24, 2026): "ready with fixes."** Every finding was checked against the code and accepted:
 
