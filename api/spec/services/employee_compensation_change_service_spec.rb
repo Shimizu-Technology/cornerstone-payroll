@@ -55,7 +55,45 @@ RSpec.describe EmployeeCompensationChangeService do
 
     it "records a wage rate added during setup from the start of the employee's history" do
       rate = employee.employee_wage_rates.create!(label: "Regular", rate: 15, is_primary: true)
-      expect(rate.employee_wage_rate_versions.sole).to have_attributes(effective_on: Date.new(2026, 1, 1), rate: 15, active: true)
+      expect(rate.reload.company_id).to eq(company.id)
+      expect(rate.employee_wage_rate_versions.sole).to have_attributes(company_id: company.id,
+        effective_on: Date.new(2026, 1, 1), rate: 15, active: true)
+    end
+
+    it "keeps effective-dated evidence stable when a legacy wage cache gains company ownership" do
+      date = Date.new(2026, 11, 20)
+      change!(effective_on: date, wage_rate_edits: [ { label: "Weekend", rate: 20 } ])
+      rate = employee.employee_wage_rates.reload.sole
+      expect(rate.company_id).to eq(company.id)
+      rate.update_column(:company_id, nil)
+      employee.reload
+      before = PayrollCalculationContext.dated_wage_rate_attributes(employee, date)
+      fingerprint = PayrollCalculationContext.intake_setup_fingerprint(employee: employee, rates_on: date)
+
+      counts = PayrollChildCompanyBackfill.new(connection: ApplicationRecord.connection).backfill
+
+      expect(counts[:employee_wage_rates]).to eq(1)
+      expect(rate.reload.company_id).to eq(company.id)
+      expect(before.sole).not_to have_key("company_id")
+      expect(PayrollCalculationContext.dated_wage_rate_attributes(employee.reload, date)).to eq(before)
+      expect(PayrollCalculationContext.intake_setup_fingerprint(employee: employee, rates_on: date)).to eq(fingerprint)
+    end
+
+    it "enforces employee company and wage-rate ownership on the history tables" do
+      rate = employee.employee_wage_rates.create!(label: "Regular", rate: 15)
+      version = rate.employee_wage_rate_versions.sole
+      compensation = employee.employee_compensation_changes.sole
+      other_company = create(:company)
+      coworker = create(:employee, company: company)
+      [
+        [ compensation, { company_id: other_company.id }, /fk_compensation_employee_company/ ],
+        [ version, { company_id: other_company.id }, /fk_wage_rate_versions_employee_company/ ],
+        [ version, { employee_id: coworker.id }, /fk_wage_rate_versions_rate_employee/ ]
+      ].each do |row, attributes, constraint|
+        expect do
+          ApplicationRecord.transaction(requires_new: true) { row.update_columns(attributes) }
+        end.to raise_error(ActiveRecord::InvalidForeignKey, constraint)
+      end
     end
   end
 

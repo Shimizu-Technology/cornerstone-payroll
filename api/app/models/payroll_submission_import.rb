@@ -3,7 +3,9 @@
 # Immutable selection evidence. Two portal revisions can share identical Revel
 # bytes and therefore an intake package, but never share an implicit checklist.
 class PayrollSubmissionImport < ApplicationRecord
+  include CompanyFromParent
   belongs_to :payroll_submission
+  inherit_company_from :payroll_submission
   belongs_to :payroll_import, class_name: "PayrollImportRecord"
   belongs_to :current_submission, class_name: "PayrollSubmission"
   belongs_to :selected_by, class_name: "User"

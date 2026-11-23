@@ -38,7 +38,7 @@ module TimeTracking
         .includes(:payroll_item_earnings, :pay_period).order(:id).to_a.group_by { |item| item.pay_period_id.to_s }
       @run_checksums = @run_items.to_h do |id, items|
         [ id, CanonicalPayload.checksum({ "run" => @runs.fetch(id).attributes,
-          "items" => items.map { |item| { "item" => item.attributes, "earnings" => item.payroll_item_earnings.sort_by(&:id).map(&:attributes) } } }) ]
+          "items" => items.map { |item| { "item" => item.attributes, "earnings" => item.payroll_item_earnings.sort_by(&:id).map { |row| row.attributes.except("company_id") } } } }) ]
       end
       @rounding_review = HistoricalRoundingReview.new(source: @source, actor: @actor,
         acknowledgements: @rounding_acknowledgements, component_bindings: @component_bindings)

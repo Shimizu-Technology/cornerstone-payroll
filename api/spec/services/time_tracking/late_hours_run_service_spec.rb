@@ -63,6 +63,7 @@ RSpec.describe TimeTracking::LateHoursRunService do
   it "creates exactly four captured-rate hours in an adjustment and replays without another payroll or source claim" do
     original = period.reload.attributes
     run = create_run
+    expect(run.rate_snapshot.sole).not_to have_key("company_id")
     adjustment = run.adjustment_pay_period
     expect(adjustment).to have_attributes(run_purpose: "adjustment", includes_base_salary: false, includes_recurring_items: false)
     expect(adjustment.payroll_items.count).to eq(1)

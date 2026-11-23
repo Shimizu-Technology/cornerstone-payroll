@@ -70,7 +70,9 @@ class PayrollCalculationContext
         pay_rate hire_date intake_payroll_eligible_from contractor_type default_custom_earnings default_payroll_adjustments
       ]
       stable_rows = lambda do |association|
-        association.reorder(:id).map { |row| row.attributes.except("created_at", "updated_at") }
+        columns = %w[created_at updated_at]
+        columns << "company_id" if association.klass < CompanyFromParent
+        association.reorder(:id).map { |row| row.attributes.except(*columns) }
       end
       setup = {
         "employee" => dated_employee_attributes(employee, rates_on).slice(*scalar_fields),
@@ -93,7 +95,7 @@ class PayrollCalculationContext
     end
 
     def dated_wage_rate_attributes(employee, date)
-      employee.wage_rates_on(date, include_inactive: true).sort_by(&:id).map(&:attributes)
+      employee.wage_rates_on(date, include_inactive: true).sort_by(&:id).map { |row| row.attributes.except("company_id") }
     end
 
     def valid_for_correction?(snapshot)

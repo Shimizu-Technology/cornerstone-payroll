@@ -3,7 +3,9 @@
 # Evidence that a transfer was actually completed outside Cornerstone.
 # A pay-stub download and a committed payroll are not payment evidence.
 class DirectDepositPaymentConfirmation < ApplicationRecord
+  include CompanyFromParent
   belongs_to :payroll_item
+  inherit_company_from :payroll_item
   belongs_to :user
 
   validates :settled_on, :bank_reference, presence: true

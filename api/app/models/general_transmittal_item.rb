@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 class GeneralTransmittalItem < ApplicationRecord
+  include CompanyFromParent
   ITEM_TYPES = %w[check payment document report tax_obligation manual other].freeze
 
   belongs_to :general_transmittal, inverse_of: :items
+  inherit_company_from :general_transmittal
 
   before_validation :normalize_details
   before_validation :default_title
@@ -24,6 +26,7 @@ class GeneralTransmittalItem < ApplicationRecord
 
   def self.from_non_employee_check(check, position:)
     new(
+      company_id: check.company_id,
       source_type: "NonEmployeeCheck",
       source_id: check.id,
       item_type: "check",

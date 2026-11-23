@@ -189,7 +189,7 @@ module TimeTracking
       end
       rate_ids = selected.flat_map { |row| row.fetch("adjustments").pluck("employee_wage_rate_id") }.uniq
       captured_rates = EmployeeWageRate.where(id: rate_ids).lock.includes(:employee).map do |row|
-        (row.employee.wage_rates_on(origin.end_date, include_inactive: true).find { |rate| rate.id == row.id } || row).attributes
+        (row.employee.wage_rates_on(origin.end_date, include_inactive: true).find { |rate| rate.id == row.id } || row).attributes.except("company_id")
       end
       workweek = origin.resolved_company_workweek
       raise Error, "Confirm the legal workweek before paying late hours" unless workweek&.confirmed?

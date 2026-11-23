@@ -155,6 +155,7 @@ class ContractorPayrollCalculator < PayrollCalculator
 
   def build_earning(category, label, hours, rate, amount)
     payroll_item.payroll_item_earnings.build(
+      company_id: pay_period.company_id,
       category: category,
       label: label,
       hours: hours,

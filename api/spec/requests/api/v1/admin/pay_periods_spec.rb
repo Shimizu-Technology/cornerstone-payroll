@@ -1446,6 +1446,30 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(audit.metadata).not_to have_key("input_changes")
     end
 
+    it "calculates, approves, and commits with explicit company ownership on saved children" do
+      %w[check_events payroll_item_earnings employee_ytd_totals].each do |table|
+        ApplicationRecord.connection.execute("ALTER TABLE #{table} DISABLE TRIGGER fill_#{table}_company_id")
+      end
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 80, overtime: 0 } }
+      }
+      expect(response).to have_http_status(:ok), response.body
+      expect(pay_period.reload).to be_calculated
+      item = pay_period.payroll_items.sole
+      expect(item.payroll_item_earnings.pluck(:company_id)).to eq([ company.id ])
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+      expect(response).to have_http_status(:ok), response.body
+      expect(pay_period.reload).to be_approved
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+      expect(response).to have_http_status(:ok), response.body
+      expect(pay_period.reload).to be_committed
+      expect(item.check_events.assignments.sole.company_id).to eq(company.id)
+      expect(EmployeeYtdTotal.find_by!(employee: employee, year: pay_period.pay_date.year).company_id).to eq(company.id)
+    end
+
     it "calculates payroll for employees with pay activity" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
         hours: { employee.id.to_s => { regular: 80, overtime: 0 } }

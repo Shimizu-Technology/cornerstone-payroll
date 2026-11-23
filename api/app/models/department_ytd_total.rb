@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class DepartmentYtdTotal < ApplicationRecord
+  include CompanyFromParent
   belongs_to :department
+  inherit_company_from :department
 
   validates :year, presence: true
   validates :year, uniqueness: { scope: :department_id }

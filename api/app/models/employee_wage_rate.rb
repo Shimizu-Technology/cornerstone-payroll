@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
 class EmployeeWageRate < ApplicationRecord
+  include CompanyFromParent
+
   VERSIONED_ATTRIBUTES = %w[label rate is_primary active].freeze
 
   belongs_to :employee
+  inherit_company_from :employee
   # Rows are ended (active: false), never deleted; see guard_compensation_destroy.
   has_many :employee_wage_rate_versions, dependent: :restrict_with_error
 

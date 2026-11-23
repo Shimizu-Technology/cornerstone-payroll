@@ -29,6 +29,18 @@ RSpec.describe PunchEntry, type: :model do
     expect(entry).not_to be_missing_core_punch
   end
 
+  it "keeps the timecard reviewed when a legacy punch gains company ownership" do
+    entry = described_class.create!(timecard: timecard, card_day: 26, date: Date.new(2026, 4, 26),
+      clock_in: "08:25", lunch_out: "12:02")
+    timecard.update!(ocr_status: :reviewed, reviewed_by_name: "Reviewer", reviewed_at: Time.current)
+    entry.update_column(:company_id, nil)
+
+    entry.save!
+
+    expect(entry.reload.company_id).to eq(company.id)
+    expect(timecard.reload).to be_reviewed
+  end
+
   it "clears stale hours when no complete pair remains" do
     entry = described_class.create!(
       timecard: timecard,

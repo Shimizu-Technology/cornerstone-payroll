@@ -308,6 +308,7 @@ module MigrationRehearsal
 
     def copy_record!(source, **overrides)
       attributes = source.attributes.except("id", "created_at", "updated_at")
+      attributes.delete("company_id") if source.is_a?(CompanyFromParent)
       source.class.create!(attributes.merge(overrides.stringify_keys))
     end
 

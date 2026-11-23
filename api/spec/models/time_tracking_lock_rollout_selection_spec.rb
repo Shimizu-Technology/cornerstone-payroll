@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require Rails.root.join("db/migrate/20261123150500_keep_import_rollout_digest_stable")
 
 RSpec.describe TimeTrackingLockRolloutSelection do
   let(:source) { create(:time_tracking_source, source_type: "aire_services") }
@@ -41,6 +42,31 @@ RSpec.describe TimeTrackingLockRolloutSelection do
     create(:time_tracking_import, time_tracking_source: source, pay_period: period)
     expect { described_class.transaction(requires_new: true) { described_class.create!(attributes) } }
       .to raise_error(ActiveRecord::StatementInvalid, /exact reviewed/)
+  end
+
+  it "accepts the same reviewed import digest after adding and backfilling company ownership" do
+    period = create(:pay_period, :committed, company: source.company, start_date: "2026-09-01",
+      end_date: "2026-09-14", pay_date: "2026-09-16", committed_at: Time.zone.parse("2026-09-16"))
+    import = create(:time_tracking_import, pay_period: period, time_tracking_source: source,
+      raw_payload: { "source" => "aire_services" }, created_at: Time.zone.parse("2026-09-15"))
+    connection = ApplicationRecord.connection
+    migration = KeepImportRolloutDigestStable.new
+    review = AirePayrollCalendar::HistoricalImportBoundaryReview.new(source: source)
+
+    connection.remove_column :time_tracking_imports, :company_id
+    connection.clear_cache!
+    migration.down
+    before_expand = review.preview!
+    expect(before_expand.fetch("inventory").sole.fetch("import_id")).to eq(import.id)
+
+    connection.add_column :time_tracking_imports, :company_id, :bigint
+    connection.clear_cache!
+    migration.up
+    expect(review.preview!).to eq(before_expand)
+    expect(PayrollChildCompanyBackfill.new(connection: connection).backfill.fetch(:time_tracking_imports)).to eq(1)
+    expect(review.preview!).to eq(before_expand)
+    expect(described_class.create!(attributes.merge(historical_import_review: before_expand)).historical_import_review)
+      .to eq(before_expand)
   end
 
   it "rejects selection while any source calendar already exists" do

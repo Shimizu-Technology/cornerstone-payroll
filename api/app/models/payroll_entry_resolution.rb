@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class PayrollEntryResolution < ApplicationRecord
+  include CompanyFromParent
   belongs_to :pay_period
+  inherit_company_from :pay_period
   belongs_to :employee
   belongs_to :payroll_standing_change, optional: true
   validates :note, length: { maximum: 500 }
@@ -25,7 +27,7 @@ class PayrollEntryResolution < ApplicationRecord
     AuditLog.record!(user: Current.user, actor: Current.actor || AuditActor.system_job(self.class.name),
       company_id: pay_period.company_id, action: "payroll_entry_resolutions##{destroyed? ? 'destroy' : 'save'}",
       record_type: "PayPeriod", record_id: pay_period_id, subject_name: employee&.full_name,
-      metadata: { resolution: attributes, changes: saved_changes, pay_period_status: pay_period.status,
+      metadata: { resolution: attributes.except("company_id"), changes: saved_changes.except("company_id"), pay_period_status: pay_period.status,
         employee_name: employee&.full_name, field_kind: payroll_standing_change&.kind, field_label: payroll_standing_change&.label.presence,
         client_review_revision: pay_period.payroll_review_packages.current.maximum(:revision) })
   end

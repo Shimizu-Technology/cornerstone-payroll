@@ -714,6 +714,7 @@ module PayrollImport
       payroll_item.payroll_item_field_entries.select { |entry| entry.source == "import" }.each(&:destroy!)
       normalized.each do |component|
         payroll_item.payroll_item_field_entries.build(
+          company_id: pay_period.company_id,
           label: component.fetch(:label),
           kind: component.fetch(:kind),
           tax_treatment: component.fetch(:tax_treatment),

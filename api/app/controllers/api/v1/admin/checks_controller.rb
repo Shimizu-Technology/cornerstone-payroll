@@ -222,6 +222,7 @@ module Api
           event_records = printable_items.map do |item|
             {
               payroll_item_id: item.id,
+              company_id: item.company_id,
               user_id: user.id,
               event_type: "batch_downloaded",
               check_number: item.check_number,

@@ -88,9 +88,9 @@ class PayrollItemLegacyDispositionService
       "pay_period_status" => item.pay_period.status,
       "classification" => inspection.fetch(:classification).to_s,
       "reasons" => inspection.fetch(:reasons),
-      "earnings" => item.payroll_item_earnings.map(&:attributes).sort_by { |row| row.fetch("id", 0).to_i },
-      "deductions" => item.payroll_item_deductions.map(&:attributes).sort_by { |row| row.fetch("id", 0).to_i },
-      "field_entries" => item.payroll_item_field_entries.map(&:attributes).sort_by { |row| row.fetch("id", 0).to_i }
+      "earnings" => item.payroll_item_earnings.map { |row| row.attributes.except("company_id") }.sort_by { |row| row.fetch("id", 0).to_i },
+      "deductions" => item.payroll_item_deductions.map { |row| row.attributes.except("company_id") }.sort_by { |row| row.fetch("id", 0).to_i },
+      "field_entries" => item.payroll_item_field_entries.map { |row| row.attributes.except("company_id") }.sort_by { |row| row.fetch("id", 0).to_i }
     }
   end
 end

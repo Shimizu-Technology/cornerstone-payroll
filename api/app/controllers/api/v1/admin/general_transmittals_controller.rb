@@ -301,7 +301,7 @@ module Api
         def assign_check_snapshot!(item, check, attrs, index)
           snapshot = GeneralTransmittalItem.from_non_employee_check(check, position: item_position(attrs, index))
           item.assign_attributes(
-            snapshot.attributes.except("id", "created_at", "updated_at", "general_transmittal_id")
+            snapshot.attributes.except("id", "created_at", "updated_at", "general_transmittal_id", "company_id")
           )
         end
 
