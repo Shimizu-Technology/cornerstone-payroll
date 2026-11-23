@@ -77,6 +77,24 @@ RSpec.describe PayrollHistoryReview::Detector do
     expect(apply.fetch(:items)).to be_empty
   end
 
+  it "reviews imported history for a recorded W-2 paycheck even when the current profile is a contractor" do
+    create(:tax_table, tax_year: 2026, ss_wage_base: 184500)
+    contractor = create(:employee, :contractor, company: company)
+    paycheck(employee: contractor, employment_type: "hourly", social_security_taxable_wages: nil)
+    imported(contractor)
+
+    expect(apply.fetch(:items).map { |item, _subject| item.subject_type }).to contain_exactly("legacy_basis_gap", "imported_history")
+  end
+
+  it "does not create a review for imports with only contractor payroll" do
+    create(:tax_table, tax_year: 2026, ss_wage_base: 184500)
+    contractor = create(:employee, :contractor, company: company)
+    paycheck(employee: contractor, employment_type: "contractor", social_security_taxable_wages: nil)
+    imported(contractor)
+
+    expect(apply.fetch(:items)).to be_empty
+  end
+
   it "reopens a changed subject once and retains the original decision in the audit" do
     original = paycheck(period(correction_status: "voided", void_reason: "Original payment voided"))
     item = apply.fetch(:items).sole.first
