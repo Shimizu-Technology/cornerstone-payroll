@@ -15,6 +15,7 @@ import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { isPublicPath } from '@/lib/public-routes';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
+import { isMfaRequiredCode } from '@/services/api';
 
 const ClientOperatingProfile = lazy(() => import('@/pages/ClientOperatingProfile').then(module => ({ default: module.ClientOperatingProfile })));
 const EmployeeAppSettings = lazy(() => import('@/pages/EmployeeAppSettings').then(module => ({ default: module.EmployeeAppSettings })));
@@ -72,6 +73,7 @@ const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').the
 const AireHistoryApproval = lazy(() => import('@/pages/AireHistoryApproval').then((module) => ({ default: module.AireHistoryApproval })));
 const AireAccountConnection = lazy(() => import('@/pages/AireAccountConnection').then((module) => ({ default: module.AireAccountConnection })));
 const NotificationSettings = lazy(() => import('@/pages/NotificationSettings').then((module) => ({ default: module.NotificationSettings })));
+const AccountSecurity = lazy(() => import('@/pages/AccountSecurity').then((module) => ({ default: module.AccountSecurity })));
 const PayScheduleSettings = lazy(() => import('@/pages/PayScheduleSettings').then((module) => ({ default: module.PayScheduleSettings })));
 const PriorProviderHistory = lazy(() => import('@/pages/PriorProviderHistory').then(module => ({ default: module.PriorProviderHistory })));
 const HistoricalPayroll = lazy(() => import('@/pages/HistoricalPayroll').then((module) => ({ default: module.HistoricalPayroll })));
@@ -89,7 +91,7 @@ const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user, authProblem } = useAuth();
 
-  if (authProblem?.status === 403 && authProblem.code === 'mfa_required') {
+  if (authProblem?.status === 403 && isMfaRequiredCode(authProblem.code)) {
     return <Navigate to="/login" replace />;
   }
 
@@ -363,6 +365,7 @@ function AppRoutes() {
         <Route path="/payroll-files" element={<PayrollFilesRoute><PayrollPeriodsList audience="client" /></PayrollFilesRoute>} />
         <Route path="/payroll-files/:ref" element={<PayrollFilesRoute><PayrollPeriodPage audience="client" /></PayrollFilesRoute>} />
         <Route path="/app/notifications" element={<NotificationSettings />} />
+        <Route path="/app/account-security" element={<AccountSecurity />} />
         <Route path="/app/aire-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/time-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/aire-history-approval" element={<CapabilityRoute capability="payroll_operations"><AireHistoryApproval /></CapabilityRoute>} />
