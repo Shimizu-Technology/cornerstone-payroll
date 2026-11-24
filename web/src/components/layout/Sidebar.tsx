@@ -1,7 +1,7 @@
 import { usePortalCounts } from '@/hooks/usePortalCounts';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, useNavigate } from 'react-router';
+import { NavLink, useLocation, useNavigate } from 'react-router';
 import {
   UserCog,
   ClipboardList,
@@ -9,6 +9,7 @@ import {
   Building2,
   LayoutDashboard,
   Users,
+  Mail,
   Building,
   CalendarDays,
   CalendarCheck,
@@ -45,7 +46,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
 import { OrganizationSwitcher } from './OrganizationSwitcher';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
-import { employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
+import { employeeContactDetailsPath, employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 
 interface NavItem {
   name: string;
@@ -66,6 +67,7 @@ const clientNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Inbox', href: '/app/client-inbox', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Contact Details', href: '/contact-details', icon: <Mail className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Checks & Payments', href: '/checks-payments', icon: <WalletCards className="h-[18px] w-[18px] shrink-0" /> },
@@ -79,6 +81,7 @@ const portalNavigation: NavItem[] = [
   { name: 'Pay Period Files', href: '/payroll-files', icon: <FileSpreadsheet className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Messages', href: '/messages', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Contact Details', href: '/contact-details', icon: <Mail className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
@@ -180,13 +183,15 @@ function CollapsedNavLink({
 }) {
   const anchorRef = useRef<HTMLAnchorElement | null>(null);
   const [tooltipVisible, setTooltipVisible] = useState(false);
+  const location = useLocation();
+  const isContactDetailsRoute = location.pathname.endsWith('/employees/contact-details');
 
   return (
     <>
       <NavLink
         ref={anchorRef}
         to={item.href}
-        end={item.href === '/app' || item.href === '/reports'}
+        end={item.href === '/app' || item.href === '/reports' || (item.href.endsWith('/employees') && isContactDetailsRoute)}
         onClick={onNavigate}
         aria-label={item.count ? `${item.name}, ${item.count} ${item.href === '/messages' ? 'unread' : 'waiting on staff'}` : item.name}
         onMouseEnter={() => setTooltipVisible(true)}
@@ -288,6 +293,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     if (item.href === '/app/client-inbox') return { ...item, count: counts?.waiting_count };
     if (!activeCompanyId) return item;
     if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
+    if (item.href === '/contact-details') return { ...item, href: employeeContactDetailsPath(activeCompanyId) };
     if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };
     return item;
   });

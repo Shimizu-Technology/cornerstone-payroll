@@ -3,6 +3,7 @@ import { Navigate, useLocation, useParams } from 'react-router';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { useCompany } from '@/contexts/CompanyContext';
 import {
+  employeeContactDetailsPath,
   employeePath,
   employeesPath,
   newEmployeePath,
@@ -12,7 +13,7 @@ import {
 } from '@/lib/routes';
 import { parsePositiveRouteId } from '@/lib/route-params';
 
-type LegacyDestination = 'employees' | 'new-employee' | 'employee' | 'pay-runs' | 'pay-run';
+type LegacyDestination = 'employees' | 'contact-details' | 'new-employee' | 'employee' | 'pay-runs' | 'pay-run';
 
 interface LegacyCompanyRedirectProps {
   destination: LegacyDestination;
@@ -37,6 +38,7 @@ export function LegacyCompanyRedirect({ destination, clientMode = false }: Legac
   let target = recordFallback;
 
   if (destination === 'employees') target = employeesPath(activeCompanyId, location.search);
+  if (destination === 'contact-details') target = employeeContactDetailsPath(activeCompanyId, location.search);
   if (destination === 'new-employee') target = newEmployeePath(activeCompanyId, { returnTo });
   if (destination === 'employee' && recordId) {
     target = employeePath(activeCompanyId, recordId, 'overview', { returnTo });
