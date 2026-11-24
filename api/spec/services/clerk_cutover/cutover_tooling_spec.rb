@@ -177,13 +177,23 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       CSV
     end
 
-    it "builds clerk migrate import records with external_id = dev clerk_id and preserves password digests" do
+    # Column names of the `clerk` source in clerk@4.3.0 (packages/cli-core/src/commands/migrate/sources/clerk.ts, tag v4.3.0).
+    let(:clerk_cli_source_columns) do
+      %w[
+        id primary_email_address verified_email_addresses unverified_email_addresses first_name last_name
+        password_digest password_hasher primary_phone_number verified_phone_numbers unverified_phone_numbers
+        username totp_secret backup_codes_enabled backup_codes public_metadata unsafe_metadata private_metadata
+        created_at legal_accepted_at banned create_organization_enabled create_organizations_limit delete_self_enabled
+      ]
+    end
+
+    it "builds `clerk migrate import --source clerk` records keyed by the dev clerk_id in `id` and preserves password digests" do
       result = described_class.new(inventory: reviewed_inventory, clerk_export: clerk_csv_export, batch: "0").build
 
       expect(result[:records]).to eq([
         {
-          "external_id" => "user_dev_admin",
-          "email_address" => [ "leon@example.com" ],
+          "id" => "user_dev_admin",
+          "primary_email_address" => "leon@example.com",
           "first_name" => "Leon",
           "last_name" => "Shimizu",
           "password_digest" => "$2a$10$examplehash",
@@ -191,6 +201,31 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
         }
       ])
       expect(result[:summary]).to include("selected_for_import" => 1, "with_password_digest" => 1)
+      expect(result[:records].flat_map(&:keys) - clerk_cli_source_columns).to be_empty
+    end
+
+    it "writes the primary email as a string and any further emails as verified_email_addresses, without MFA columns" do
+      multi_email_csv = <<~CSV
+        id,first_name,last_name,primary_email_address,verified_email_addresses,password_digest,password_hasher,totp_enabled,totp_secret,backup_codes_enabled
+        user_dev_admin,Leon,Shimizu,leon@example.com,"leon@example.com,leon+alt@example.com",$2a$10$examplehash,bcrypt,false,,false
+      CSV
+      result = described_class.new(inventory: reviewed_inventory, clerk_export: multi_email_csv, batch: "0").build
+
+      record = result[:records].first
+      expect(record["primary_email_address"]).to eq("leon@example.com")
+      expect(record["verified_email_addresses"]).to eq([ "leon+alt@example.com" ])
+      expect(record.keys).not_to include("totp_enabled", "totp_secret", "backup_codes_enabled", "backup_codes", "external_id")
+    end
+
+    it "refuses a user whose export row has backup_codes_enabled true" do
+      backup_enabled_csv = <<~CSV
+        id,first_name,last_name,primary_email_address,password_digest,password_hasher,backup_codes_enabled
+        user_dev_admin,Leon,Shimizu,leon@example.com,$2a$10$examplehash,bcrypt,true
+      CSV
+
+      expect {
+        described_class.new(inventory: reviewed_inventory, clerk_export: backup_enabled_csv).build
+      }.to raise_error(ClerkCutover::ImportBuilder::ValidationError, /has TOTP enrolled/)
     end
 
     it "never matches by email when old_clerk_id is absent from the Clerk export" do
@@ -255,7 +290,7 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       }.to raise_error(ClerkCutover::ImportBuilder::ValidationError, /disposition must be one of/)
     end
 
-    it "sets skip_password_requirement for OAuth/email-code users, refuses writes without write: true, and chmods existing 0644 files to 0600" do
+    it "omits password columns for OAuth/email-code users, refuses writes without write: true, and chmods existing 0644 files to 0600" do
       json_export = [
         {
           "id" => "user_dev_admin",
@@ -269,10 +304,12 @@ RSpec.describe "ClerkCutover preflight, inventory, and manifest builders" do
       result = builder.build
 
       expect(result[:records].first).to include(
-        "external_id" => "user_dev_admin",
-        "skip_password_requirement" => true
+        "id" => "user_dev_admin",
+        "primary_email_address" => "leon@example.com"
       )
       expect(result[:records].first).not_to have_key("password_digest")
+      expect(result[:records].first).not_to have_key("password_hasher")
+      expect(result[:records].first).not_to have_key("skip_password_requirement")
 
       Tempfile.create([ "import", ".json" ]) do |file|
         File.chmod(0o644, file.path)

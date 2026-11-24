@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../db/migrate/support/m3_7_child_companies"
+require_relative "../db/migrate/support/login_link_decision_function"
 
 # Ruby schema dumps cannot represent PostgreSQL functions and triggers. This
 # versioned snapshot restores the current migration-defined guards without
@@ -11,14 +12,14 @@ module DatabaseIntegrity
   def self.install!(connection = ActiveRecord::Base.connection)
     raise "Payroll database integrity requires PostgreSQL" unless connection.adapter_name == "PostgreSQL"
     connection.transaction do
-      connection.execute(snapshot_sql)
+      connection.execute(snapshot_sql(connection))
       verify!(connection)
     end
     true
   end
 
   def self.verify!(connection = ActiveRecord::Base.connection)
-    sql = snapshot_sql
+    sql = snapshot_sql(connection)
     expected = sql.scan(/CREATE TRIGGER\s+(\w+).*?\bON\s+(\w+)/m).uniq
     actual = connection.select_rows(<<~SQL)
       SELECT t.tgname, c.relname FROM pg_trigger t
@@ -61,8 +62,10 @@ module DatabaseIntegrity
     true
   end
 
-  def self.snapshot_sql
-    File.read(PATH) + M3_7ChildCompanies.schema_sql
+  # The login link decision reads only from the schema it's installed into.
+  def self.snapshot_sql(connection = ActiveRecord::Base.connection)
+    schema = connection.select_value("SELECT current_schema()")
+    File.read(PATH) + M3_7ChildCompanies.schema_sql + LoginLinkDecisionFunction.schema_sql(schema)
   end
 
   def self.normalize_trigger(definition, namespace)

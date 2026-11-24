@@ -294,6 +294,21 @@ RSpec.describe EmployeeContactValidator do
       expect(described_class.call(employee: employee, company: company, email: self_actor.email, confirm_same_person_email: true, actor: self_actor)).not_to be_valid
     end
 
+    it "tells only staff who may confirm an identity why a login email was refused" do
+      linked = create(:user, company: company, organization: organization, role: "client", name: "Elena Mercer", email: "emma.linked@example.com")
+      EmployeeAccountLink.create!(company: company, employee: create(:employee, company: company), user: linked, status: "active")
+      admin_actor = create(:user, company: company, organization: organization, role: "admin")
+      accountant_actor = create(:user, company: company, organization: organization, role: "accountant")
+      CompanyAssignment.create!(user: accountant_actor, company: company, client_management: false)
+
+      admin_result = described_class.call(employee: employee, company: company, email: linked.email, actor: admin_actor)
+      expect(admin_result.errors[:email].first).to match(/already linked to another employee/)
+
+      accountant_result = described_class.call(employee: employee, company: company, email: linked.email, actor: accountant_actor)
+      expect(accountant_result.errors[:email]).to eq([ described_class::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
+      expect(accountant_result.login_email_rejection_reason).to eq("linked_to_other_employee")
+    end
+
     it "allows staff with manage_client_configuration to confirm an unlinked login, and rejects accountants without it" do
       client_login = create(:user, company: company, organization: organization, role: "client", name: "Elena Mercer", email: "emma.login@example.com")
       admin_actor = create(:user, company: company, organization: organization, role: "admin")

@@ -6,7 +6,7 @@ RSpec.describe "Explicit company access with Clerk authentication", type: :reque
   let(:company) { create(:company) }
   let(:user) { create(:user, company: company, organization: company.organization, role: role, clerk_id: "user_explicit_company") }
   let(:period) { create(:pay_period, :committed, company: company) }
-  let(:claims) { { "sub" => user.clerk_id, "fva" => [ 1, 0 ] } }
+  let(:claims) { { "sub" => user.clerk_id, "fva" => [ 1, 0 ], "two_factor_enabled" => true } }
 
   around do |example|
     previous = ENV.to_h.slice("AUTH_ENABLED", "REQUIRE_MFA")

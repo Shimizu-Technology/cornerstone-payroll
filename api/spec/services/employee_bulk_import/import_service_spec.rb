@@ -94,7 +94,11 @@ RSpec.describe EmployeeBulkImport::ImportService, type: :service do
 
     expect(import_service.send(:validate_row_data, complete_row.merge("email" => "marked-placeholder@example.com"))).to include(/placeholder/i)
     expect(import_service.send(:validate_row_data, complete_row.merge("email" => "noemail@example.com"))).to be_empty
-    expect(import_service.send(:validate_row_data, complete_row.merge("email" => "staff.bulk@example.com"))).to include(/another person's payroll login/i)
+    # An actorless preview can't confirm anyone's identity, so it gets the generic rejection.
+    login_errors = import_service.send(:validate_row_data, complete_row.merge("email" => "staff.bulk@example.com"))
+    expect(login_errors).to eq([ "email #{EmployeeContactValidator::CLIENT_GENERIC_LOGIN_EMAIL_ERROR}" ])
+    contact = import_service.send(:validate_contact_for_row, complete_row.merge("email" => "staff.bulk@example.com"))
+    expect(contact).to have_attributes(login_email_rejected: true, login_email_rejection_reason: "other_user_login")
     expect(import_service.send(:validate_row_data, complete_row.merge("phone" => "not-a-phone"))).to include(/valid phone/i)
 
     valid_row = complete_row.merge("email" => "Family.Bulk@Example.com", "phone" => "555-0190")
