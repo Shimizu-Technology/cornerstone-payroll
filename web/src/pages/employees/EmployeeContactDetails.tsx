@@ -955,6 +955,7 @@ export function EmployeeContactDetails({
                           </TableCell>
                           <TableCell className="whitespace-normal px-4 py-4 text-sm">
                             <ContactValue value={employee.email} className="break-all" />
+                            {!open && <SharedEmailNote employee={employee} warnings={state.warnings} />}
                           </TableCell>
                           <TableCell className="whitespace-nowrap px-4 py-4 text-sm tabular-nums">
                             <ContactValue value={formatPhone(employee.phone)} />
@@ -1028,7 +1029,10 @@ export function EmployeeContactDetails({
                         <dl className="space-y-2 text-sm">
                           <div>
                             <dt className="text-xs font-medium text-neutral-500">Email</dt>
-                            <dd><ContactValue value={employee.email} className="break-all" /></dd>
+                            <dd>
+                              <ContactValue value={employee.email} className="break-all" />
+                              <SharedEmailNote employee={employee} warnings={state.warnings} />
+                            </dd>
                           </div>
                           <div>
                             <dt className="text-xs font-medium text-neutral-500">Mobile</dt>
@@ -1148,6 +1152,19 @@ function AddressValue({ employee }: { employee: ContactEmployee }): ReactElement
     <span className="block text-neutral-900">
       {street && <span className="block">{street}</span>}
       {cityLine && <span className="block">{cityLine}</span>}
+    </span>
+  );
+}
+
+// Email invites need a unique address, so keep saying so after the row
+// closes: from the save's warning, or the row's status after a reload.
+function SharedEmailNote({ employee, warnings }: { employee: ContactEmployee; warnings: EmployeeContactWarning[] }): ReactElement | null {
+  const warning = warnings.find((item) => item.code === 'shared_company_email');
+  if (!employee.email?.trim() || (!warning && employee.contact_details_status?.email_issue !== 'shared_with_coworker')) return null;
+  return (
+    <span role="status" className="mt-1 flex items-start gap-1 text-xs text-warning-800">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning-700" aria-hidden="true" />
+      <span>{warning?.message ?? 'Another employee uses this email. Email invites need a unique address.'}</span>
     </span>
   );
 }
