@@ -76,7 +76,7 @@ RSpec.describe ApplicationCable::Connection, type: :channel do
 
     it "accepts a verified ticket once and retains the ticket's company scope" do
       ENV["REQUIRE_MFA"] = "true"
-      ticket = CableTicketService.issue!(user: user, company_id: company.id, clerk_token_payload: { "fva" => [ 5, 0 ] })
+      ticket = CableTicketService.issue!(user: user, company_id: company.id, clerk_token_payload: { "fva" => [ 5, 0 ], "two_factor_enabled" => true })
 
       connect params: { ticket: ticket }
 
