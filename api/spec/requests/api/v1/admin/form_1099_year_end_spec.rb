@@ -804,7 +804,9 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       expect(log.metadata).to include("file_digest" => FilingFileDigest.call(response.body), "digest_alg" => "hmac-sha256-v1")
       expect(log.metadata).not_to have_key("sha256")
       expect(log.metadata.values.map(&:to_s)).not_to include(Digest::SHA256.hexdigest(response.body))
-      expect(log.to_json).not_to include("7890")
+      # Not a bare "7890" substring: ids, timestamps and digests can contain it by chance.
+      expect(log.to_json).not_to match(/345\D{0,3}67\D{0,3}7890|[*xX#•]{3}\D{0,3}[*xX#•]{2}\D{0,3}7890/)
+      expect(log.metadata.values.map(&:to_s)).not_to include("7890", "345677890")
     end
 
     it "sends nothing when the download can't be recorded" do
