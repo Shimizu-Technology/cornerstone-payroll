@@ -26,13 +26,28 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-async function preview() {
+function chooseFile() {
   const file = new File(['pdf'], 'source.pdf', { type: 'application/pdf' });
   render(<QuickbooksStubUpload companyId={2} warnings={[]} enabled />);
   fireEvent.change(screen.getByLabelText('QuickBooks stub PDF'), { target: { files: [file] } });
+  return file;
+}
+
+async function preview() {
+  const file = chooseFile();
   fireEvent.click(screen.getByRole('button', { name: 'Preview matches' }));
   await screen.findByRole('checkbox', { name: 'Select page 2' });
   return file;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
 }
 
 function checkbox(name: string) {
@@ -40,6 +55,41 @@ function checkbox(name: string) {
 }
 
 describe('QuickBooks stub upload', () => {
+  it('announces each pending operation and clears the message after success or failure', async () => {
+    const previewResult = deferred<{ data: object[] }>();
+    const pageResult = deferred<{ blob: Blob }>();
+    const postResult = deferred<{ data: object[] }>();
+    requests.preview.mockReturnValueOnce(previewResult.promise);
+    requests.viewPage.mockReturnValueOnce(pageResult.promise);
+    requests.confirm.mockReturnValueOnce(postResult.promise);
+    chooseFile();
+
+    const status = screen.getByRole('status');
+    const previewButton = screen.getByRole<HTMLButtonElement>('button', { name: 'Preview matches' });
+    fireEvent.click(previewButton);
+    expect(status.textContent).toBe('Checking the file…');
+    expect(previewButton.disabled).toBe(true);
+    previewResult.resolve({ data: [
+      { ...details, page: 1, review_token: 'matched', status: 'matched' },
+      { ...details, page: 2, review_token: 'image', status: 'image_review' },
+    ] });
+    const viewButton = await screen.findByRole('button', { name: 'View page 2' });
+    expect(status.textContent).toBe('');
+
+    fireEvent.click(viewButton);
+    expect(status.textContent).toBe('Opening page…');
+    pageResult.reject(new Error('Page unavailable'));
+    await screen.findByText('Page unavailable');
+    expect(status.textContent).toBe('');
+
+    fireEvent.click(checkbox('Select page 1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Post selected stubs (1)' }));
+    expect(status.textContent).toBe('Posting…');
+    postResult.resolve({ data: [{}] });
+    await screen.findByText('1 original stub posted.');
+    expect(status.textContent).toBe('');
+  });
+
   it('selects only ordinary matches in bulk', async () => {
     const file = await preview();
     fireEvent.click(screen.getByRole('button', { name: 'Select all matched' }));

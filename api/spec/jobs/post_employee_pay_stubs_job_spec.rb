@@ -50,6 +50,15 @@ RSpec.describe PostEmployeePayStubsJob do
   end
 
   it "withdraws a voided check until a numbered replacement and ignores payment evidence" do
+    uploads = []
+    allow(storage).to receive(:upload) do |key, *|
+      uploads << key
+      true
+    end
+    frozen_state = lambda do
+      latest = documents.reload.last
+      [ EmployeeDocument.count, latest.storage_key, latest.sha256, latest.payroll_facts_sha256, uploads.size ]
+    end
     item
     run_at(cutoff)
     travel_to(cutoff + 1.minute) do
@@ -57,7 +66,7 @@ RSpec.describe PostEmployeePayStubsJob do
         payroll_item: item, user: actor, settled_on: period.pay_date, bank_reference: "test confirmation"
       )
     end
-    expect { run_at(cutoff + 5.minutes) }.not_to change(EmployeeDocument, :count)
+    expect { run_at(cutoff + 5.minutes) }.not_to change(&frozen_state)
 
     item.update_columns(payment_delivery_method: "paper_check", check_number: "4012", updated_at: cutoff + 6.minutes)
     expect { run_at(cutoff + 10.minutes) }.to change(EmployeeDocument, :count).by(1)
@@ -74,7 +83,7 @@ RSpec.describe PostEmployeePayStubsJob do
       item.mark_delivered!(user: actor, delivered_on: period.pay_date,
         delivery_method: CheckEvent::DELIVERY_EVIDENCE_TYPES.first, attestation: true)
     end
-    expect { run_at(cutoff + 25.minutes) }.not_to change(EmployeeDocument, :count)
+    expect { run_at(cutoff + 25.minutes) }.not_to change(&frozen_state)
 
     expect(documents.reload.pluck(:status)).to eq(%w[replaced replaced posted])
     expect(documents.pluck(:payment_line)).to eq([ "Direct deposit", "Check #4012", "Check #4013" ])
