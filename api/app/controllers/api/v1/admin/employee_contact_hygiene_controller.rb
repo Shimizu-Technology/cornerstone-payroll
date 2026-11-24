@@ -96,9 +96,12 @@ module Api
           target_company = resolve_target_company
           return render json: { error: "Company not found" }, status: :not_found unless target_company
 
-          # Clear only the client the request is working in, and only a live one,
-          # so a rehearsal can't clear its live source by naming its company ID.
-          unless current_company&.id == target_company.id && !target_company.test_workspace?
+          # Clear only the client the request explicitly names in X-Company-Id,
+          # and only a live one: never the home-company fallback, and a
+          # rehearsal can't clear its live source by naming its company ID.
+          selected_id = request.headers["X-Company-Id"].to_s
+          unless selected_id.present? && authorized_explicit_company_id(selected_id) == target_company.id &&
+              !target_company.test_workspace?
             return render json: {
               error: "Open the live client you want to clear, then clear its emails from there. Test workspaces can't clear emails."
             }, status: :forbidden

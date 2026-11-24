@@ -324,6 +324,15 @@ RSpec.describe "Admin Employee Contact Hygiene", type: :request do
       end.not_to change(live_count, :call)
       expect(response).to have_http_status(:forbidden)
 
+      # Without an explicit header there is no selected client, even though
+      # company A is the staff user's home company.
+      expect(admin_user.company_id).to eq(company_a.id)
+      expect do
+        post "/api/v1/admin/employee_contact_hygiene/clear_shared_emails",
+             params: { company_id: company_a.id, email: "shared-inbox@example.com" }
+      end.not_to change(live_count, :call)
+      expect(response).to have_http_status(:forbidden)
+
       # Selected live client B can't clear live client A either.
       expect do
         post "/api/v1/admin/employee_contact_hygiene/clear_shared_emails",
