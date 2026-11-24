@@ -13,6 +13,7 @@ module ProcessRole
       /(?:up|health/dependencies)(?:\(\.:format\))?
       | /api/v1/(?:employee|kiosk|auth)/.+
       | /api/v1/public/tenant_branding
+      | /api/v1/public/tenant_branding/logo/:slug/:file
     )\z
   }x
   # Primary-pool ceiling for the employee service (M4-10, Neon budget).

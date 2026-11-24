@@ -17,6 +17,8 @@ Rails.application.routes.draw do
     namespace :v1 do
       namespace :public do
         get :tenant_branding, to: "tenant_branding#show", format: false
+        get "tenant_branding/logo/:slug/:file", to: "tenant_branding#logo", format: false,
+            constraints: { slug: /[a-z0-9-]+/, file: /[0-9a-f]{16}\.(?:png|webp|svg)/ }
       end
 
       namespace :finance do
@@ -69,6 +71,13 @@ Rails.application.routes.draw do
 
       namespace :client do
         resource :employee_intake_settings, only: :show
+        resource :employee_app_settings, only: [ :show ] do
+          patch :branding, action: :update_branding
+          put :help_contacts, action: :update_help_contacts
+          get :logo
+          post :logo, action: :upload_logo
+          delete :logo, action: :remove_logo
+        end
         resources :employees, only: [ :index, :show, :create, :update ] do
           resources :document_requirements, only: :index, controller: :employee_document_requirements
         end
@@ -333,6 +342,13 @@ Rails.application.routes.draw do
           end
         end
         resource :portal_notification_recipients, only: [ :show, :update ]
+        resource :employee_app_settings, only: [ :show ] do
+          patch :branding, action: :update_branding
+          put :help_contacts, action: :update_help_contacts
+          get :logo
+          post :logo, action: :upload_logo
+          delete :logo, action: :remove_logo
+        end
         resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
           member do
             post :acknowledge
