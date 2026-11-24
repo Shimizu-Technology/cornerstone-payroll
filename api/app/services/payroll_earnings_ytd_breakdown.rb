@@ -151,7 +151,7 @@ class PayrollEarningsYtdBreakdown
   end
 
   def components_for(item)
-    earnings = item.payroll_item_earnings.to_a
+    earnings = item.earnings_in_entry_order
     return earnings.map { |earning| component_from_earning(earning) } if earnings.any?
 
     fallback_components(item)
