@@ -1,0 +1,111 @@
+# Render service definition for the employee API (M4-10). READY, NOT APPLIED.
+#
+# This file is not named render.yaml and sits outside the repo root, so Render
+# never picks it up on its own. Nothing is created until an operator follows
+# docs/rollout/M4_EMPLOYEE_PLATFORM_RUNBOOK.md (Part 1). The runbook creates the
+# service by hand in the dashboard from these exact values; the file is the
+# reviewed record of what to enter. If you ever apply it as a Blueprint
+# instead, give the Blueprint only this file's path and review the plan Render shows.
+#
+# Build and start commands: copy them from the existing Payroll API web service
+# (Settings > Build & Deploy) if they differ from the defaults below. The two
+# services run the same code from api/.
+services:
+  - type: web
+    name: cornerstone-payroll-employee-api
+    runtime: ruby
+    region: singapore          # same region as the database and the Payroll services
+    plan: starter              # $7 a month: 0.5 CPU, 512 MB. Payroll web's RSS is about 230 MB.
+    rootDir: api
+    branch: main
+    autoDeployTrigger: commit
+    buildFilter:               # docs-only and web-only merges do not redeploy this service
+      paths:
+        - api/**
+    buildCommand: bundle install
+    startCommand: bundle exec puma -C config/puma.rb
+    healthCheckPath: /up       # boots Rails, never touches the database (api/config/routes.rb)
+    # No preDeployCommand on purpose. Payroll web runs `db:safe_prepare`. The employee
+    # service must never migrate, and it never gets MIGRATION_DATABASE_URL.
+    envVars:
+      # --- Specific to this service ---
+      - key: APP_PROCESS_ROLE
+        value: employee_web    # drops payroll routes and /cable (api/lib/process_role.rb)
+      - key: DB_POOL_MAX
+        value: "3"             # per Active Record pool; production:readiness fails above 3
+      - key: RAILS_MAX_THREADS
+        value: "3"             # Puma threads; keep equal to DB_POOL_MAX
+      - key: WEB_CONCURRENCY
+        value: "1"             # one Puma process; cheaper than a second instance
+      - key: SOLID_QUEUE_IN_PUMA
+        value: "false"         # jobs run on the existing Payroll worker until Milestone 6
+      - key: RACK_ATTACK_REDIS_URL
+        sync: false            # same shared Redis/Valkey URL as Payroll web; internal URL
+      # --- Copy from the Payroll API web service (same values; secrets stay out of git) ---
+      - key: RAILS_ENV
+        value: production
+      - key: RAILS_MASTER_KEY
+        sync: false
+      - key: SECRET_KEY_BASE
+        sync: false
+      - key: DATABASE_URL            # Neon pooled endpoint (cache, queue, cable pools)
+        sync: false
+      - key: RLS_DATABASE_URL        # Neon DIRECT endpoint as payroll_app (primary pool); no -pooler host
+        sync: false
+      - key: RLS_CONTEXT_GUARD_MODE
+        sync: false
+      - key: RLS_EXPECT_ENFORCED     # production:readiness checks the RLS phase against this
+        sync: false
+      - key: DB_PREPARED_STATEMENTS
+        sync: false
+      - key: AUTH_ENABLED
+        value: "true"
+      - key: REQUIRE_MFA
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_AUTHORIZED_PARTIES  # static list only; client subdomains come from the registry
+        sync: false
+      - key: CLERK_ISSUER              # copy only if Payroll web sets it; otherwise derived from CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_API_BASE            # same: copy only if Payroll web sets it
+        sync: false
+      - key: CLERK_MFA_ATTESTED_INSTANCE_ID
+        sync: false
+      - key: CLERK_MFA_EVIDENCE_REF
+        sync: false
+      - key: CORS_ORIGINS              # static origins only; client subdomains come from the registry
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: TIME_TRACKING_ALLOWED_HOSTS  # production:readiness checks time-tracking destinations against this
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAILER_FROM_EMAIL
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: PORTAL_EMAIL_NOTIFICATIONS_ENABLED
+        sync: false
+      - key: TRUSTED_PROXY_CIDRS
+        sync: false
+      - key: ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY
+        sync: false
+      - key: ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY
+        sync: false
+      - key: ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT
+        sync: false
+      # The three encryption values must match Payroll web exactly, or encrypted
+      # columns (SSNs, bank data) will not decrypt. Skip them only if Payroll web
+      # reads them from Rails credentials instead (the runbook has the check).

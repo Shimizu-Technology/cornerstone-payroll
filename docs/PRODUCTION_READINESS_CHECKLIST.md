@@ -104,6 +104,10 @@ media types and oversized bodies before dispatching to Rails. PDF limits
 cover pay-stub and W-2 download paths. The existing API-wide limit still
 counts all API traffic per IP.
 
+### Employee web service readiness
+
+When `APP_PROCESS_ROLE=employee_web`, `production:readiness` adds four checks: the booted process has no payroll routes or `/cable`, `DB_POOL_MAX` is 1 to 3, equals the effective primary pool, and Puma runs one process with no Solid Queue inside it, the rate-limit counters are on the shared Redis `RackAttackStore::Failover` store (not process-local memory), and `CLERK_AUTHORIZED_PARTIES` is a list of explicit production HTTPS origins. A live run also writes and deletes a probe key on the shared store, for the employee role or any role with `RACK_ATTACK_REDIS_URL` set. Other roles skip them. Setup steps, the Neon connection budget, alerts and rollback are in the [M4 employee platform runbook](rollout/M4_EMPLOYEE_PLATFORM_RUNBOOK.md). The service definition is in `ops/render/employee-web.render.yaml`.
+
 ### Runtime telemetry
 
 Render logs include JSON payloads with the process role. Filter by `event`.
@@ -126,8 +130,12 @@ The production site uses base `web`, command `npm run build`, and publish
 directory `dist`. Netlify finds [`web/netlify.toml`](../web/netlify.toml) from
 that base. Its command and publish values match the UI and take precedence.
 Keep `VITE_APP_SURFACE=staff` (the default) for the current site. The
-`employee` build is a separate entry scaffold for a future site and excludes
-staff routes and page modules. [Netlify monorepo configuration](https://docs.netlify.com/build/configure-builds/monorepos/)
+`employee` build is a separate entry that excludes staff routes and page
+modules. It is built by a second Netlify site that reads the same
+`web/netlify.toml` and sets `VITE_APP_SURFACE=employee`. For that surface the
+`postbuild` step (`web/scripts/finalize-surface-dist.mjs`) writes `_headers`
+and `_redirects` into `dist` and removes staff-only files; for Payroll it does
+nothing. The employee site also skips every non-production build. [Netlify monorepo configuration](https://docs.netlify.com/build/configure-builds/monorepos/)
 
 The preflight found Git-triggered production builds stopped. Continue the
 existing manual release process. If Git builds are enabled later, the ignore

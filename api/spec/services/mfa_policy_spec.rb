@@ -34,10 +34,18 @@ RSpec.describe MfaPolicy do
   end
 
   describe ".verified_second_factor?" do
+    it "requires boolean enrollment even when Clerk has set a second-factor age" do
+      expect(described_class.verified_second_factor?("fva" => [ 1, 0 ])).to be(false)
+      [ nil, false, "true", 1 ].each do |enrollment|
+        expect(described_class.verified_second_factor?("fva" => [ 1, 0 ], "two_factor_enabled" => enrollment)).to be(false)
+      end
+      expect(described_class.verified_second_factor?("fva" => [ 1, 0 ], "two_factor_enabled" => true)).to be(true)
+    end
+
     it "allows the first factor's unverified sentinel and requires both ages to be valid integers" do
-      expect(described_class.verified_second_factor?("fva" => [ -1, 0 ])).to be(true)
+      expect(described_class.verified_second_factor?("two_factor_enabled" => true, "fva" => [ -1, 0 ])).to be(true)
       [ [ -2, 0 ], [ "5", 0 ], [ nil, 0 ], [ 0.5, 0 ], [ 5, -1 ], [ 5, nil ] ].each do |ages|
-        expect(described_class.verified_second_factor?("fva" => ages)).to be(false)
+        expect(described_class.verified_second_factor?("two_factor_enabled" => true, "fva" => ages)).to be(false)
       end
     end
 
@@ -48,25 +56,36 @@ RSpec.describe MfaPolicy do
     end
   end
 
-  describe ".recently_verified?" do
+  describe ".recently_verified_second_factor?" do
     it "uses an inclusive ten-minute cutoff by default and accepts an explicit window" do
-      expect(described_class.recently_verified?({ "fva" => [ 5, 0 ] })).to be(true)
-      expect(described_class.recently_verified?({ "fva" => [ 5, 10 ] })).to be(true)
-      expect(described_class.recently_verified?({ "fva" => [ 5, 15 ] })).to be(false)
-      expect(described_class.recently_verified?({ "fva" => [ 5, 15 ] }, max_age_minutes: 15)).to be(true)
+      expect(described_class.recently_verified_second_factor?({ "two_factor_enabled" => true, "fva" => [ 5, 0 ] })).to be(true)
+      expect(described_class.recently_verified_second_factor?({ "two_factor_enabled" => true, "fva" => [ 5, 10 ] })).to be(true)
+      expect(described_class.recently_verified_second_factor?({ "two_factor_enabled" => true, "fva" => [ 5, 15 ] })).to be(false)
+      expect(described_class.recently_verified_second_factor?({ "two_factor_enabled" => true, "fva" => [ 5, 15 ] }, max_age_minutes: 15)).to be(true)
     end
 
     it "requires a nonnegative integer window" do
-      payload = { "fva" => [ 5, 0 ] }
-      expect(described_class.recently_verified?(payload, max_age_minutes: 0)).to be(true)
+      payload = { "two_factor_enabled" => true, "fva" => [ 5, 0 ] }
+      expect(described_class.recently_verified_second_factor?(payload, max_age_minutes: 0)).to be(true)
       [ nil, -1, "10", 0.5, Float::INFINITY, Float::NAN ].each do |window|
-        expect(described_class.recently_verified?(payload, max_age_minutes: window)).to be(false)
+        expect(described_class.recently_verified_second_factor?(payload, max_age_minutes: window)).to be(false)
       end
     end
 
     it "rejects missing, unverified and malformed claims" do
-      [ {}, { "fva" => [ 5, -1 ] }, { "fva" => [ 5, nil ] }, { "fva" => [ 5, "0" ] } ].each do |payload|
-        expect(described_class.recently_verified?(payload)).to be(false)
+      [ {}, { "two_factor_enabled" => true, "fva" => [ 5, -1 ] }, { "two_factor_enabled" => true, "fva" => [ 5, nil ] }, { "two_factor_enabled" => true, "fva" => [ 5, "0" ] } ].each do |payload|
+        expect(described_class.recently_verified_second_factor?(payload)).to be(false)
+      end
+    end
+  end
+
+  describe ".recently_verified_any_factor?" do
+    it "requires a fresh first factor regardless of the second factor age" do
+      [ [ 3, -1 ], [ 10, -1 ], [ 3, 25 ] ].each do |ages|
+        expect(described_class.recently_verified_any_factor?("fva" => ages)).to be(true)
+      end
+      [ nil, [ 25, -1 ], [ -1, 0 ], [ "3", -1 ], [ 3 ], [ 3, nil ] ].each do |ages|
+        expect(described_class.recently_verified_any_factor?("fva" => ages)).to be(false)
       end
     end
   end
