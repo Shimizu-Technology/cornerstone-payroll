@@ -119,6 +119,7 @@ class Company < ApplicationRecord
   has_many :payroll_parallel_run_reviews, dependent: :restrict_with_error
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy
+  has_many :help_contacts, -> { order(:position) }, class_name: "CompanyHelpContact", inverse_of: :company, dependent: :delete_all
   # Printer profiles are organization-scoped so every operator in the same
   # accounting firm can share the same physical printer calibration.
 
@@ -317,6 +318,18 @@ class Company < ApplicationRecord
     Array(configured).map(&:to_s)
   end
 
+  BRAND_LOGO_EXTENSIONS = { "image/png" => "png", "image/webp" => "webp" }.freeze
+
+  # The first 16 hex characters of the uploaded logo's SHA-256. Public logo
+  # URLs carry it, so a replaced logo gets a new address.
+  def brand_logo_digest
+    brand_logo_sha256&.first(16) if brand_logo_storage_key.present?
+  end
+
+  def brand_logo_extension
+    BRAND_LOGO_EXTENSIONS[brand_logo_content_type]
+  end
+
   private
 
   def normalize_blanks
@@ -386,6 +399,14 @@ class Company < ApplicationRecord
       if values[key] != nil && !TenantSubdomainRegistry.hex_color(values[key])
         errors.add(:branding, "#{key} must be a six-digit hex color")
       end
+    end
+    { "display_name" => TenantSubdomainRegistry::DISPLAY_NAME_MAX, "app_name" => TenantSubdomainRegistry::APP_NAME_MAX }.each do |key, max|
+      if values[key] != nil && !TenantSubdomainRegistry.display_text(values[key], max)
+        errors.add(:branding, "#{key} must be plain text of #{max} characters or fewer")
+      end
+    end
+    if values.key?("show_main_phone") && ![ true, false ].include?(values["show_main_phone"])
+      errors.add(:branding, "show_main_phone must be true or false")
     end
   end
 
