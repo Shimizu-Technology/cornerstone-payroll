@@ -131,6 +131,7 @@ test('contact details grid handles 409 conflict with keep/discard and partial fi
     employee: { email: 'my.final@example.com' },
     row_revision: '2026-11-24T01:00:00.000000Z',
     baseline_values: { email: 'maria.old@example.com' },
+    response_view: 'contact',
   });
 
   // Clicking Keep yours retries with the latest revision and keeps coworker's address.
@@ -142,6 +143,72 @@ test('contact details grid handles 409 conflict with keep/discard and partial fi
     employee: { email: 'my.final@example.com' },
     row_revision: '2026-11-24T01:05:00.000000Z',
     baseline_values: { email: 'coworker.update@example.com' },
+    response_view: 'contact',
+  });
+});
+
+test('Use theirs drops only the conflicting email draft and keeps the phone edit ready to save', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockClientSession(page);
+
+  const mariaInitial = makeEmployee();
+  const mariaCoworker = makeEmployee({
+    email: 'coworker.update@example.com',
+    contact_revision: '2026-11-24T01:05:00.000000Z',
+    updated_at: '2026-11-24T01:05:00Z',
+  });
+  const patchBodies: Array<Record<string, unknown>> = [];
+
+  await page.route('**/api/v1/client/employees**', async (route) => {
+    const method = route.request().method();
+    if (method === 'GET') {
+      return json(route, {
+        data: [mariaInitial],
+        meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 0 },
+      });
+    }
+    if (method === 'PATCH') {
+      patchBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      if (patchBodies.length === 1) {
+        return json(route, {
+          error: 'Someone else updated this employee while you were editing.',
+          code: 'contact_revision_conflict',
+          conflicting_fields: ['email'],
+          contact_revision: mariaCoworker.contact_revision,
+          current_values: { email: mariaCoworker.email, phone: mariaCoworker.phone },
+          data: mariaCoworker,
+        }, 409);
+      }
+      return json(route, {
+        data: { ...mariaCoworker, phone: '+16715550177', contact_revision: '2026-11-24T01:06:00.000000Z' },
+        contact_warnings: [],
+      });
+    }
+    return route.continue();
+  });
+
+  await page.goto('/companies/6/employees/contact-details');
+  const table = page.locator('table');
+  await expect(table.getByLabel('Email for Maria Cruz')).toHaveValue('maria.old@example.com');
+
+  await table.getByLabel('Email for Maria Cruz').fill('my.final@example.com');
+  await table.getByLabel('Mobile for Maria Cruz').fill('555-0177');
+  await table.getByRole('button', { name: 'Save Maria Cruz' }).click();
+  await expect(table.getByText(/Someone else changed this to/i)).toBeVisible();
+
+  await table.getByRole('button', { name: 'Use theirs' }).click();
+  await expect(table.getByLabel('Email for Maria Cruz')).toHaveValue('coworker.update@example.com');
+  await expect(table.getByLabel('Mobile for Maria Cruz')).toHaveValue('555-0177');
+  await expect(page.getByText(/1 unsaved row/i)).toBeVisible();
+
+  await table.getByRole('button', { name: 'Save Maria Cruz' }).click();
+  await expect(table.getByText('Saved')).toBeVisible();
+  await expect(table.getByLabel('Mobile for Maria Cruz')).toHaveValue('+16715550177');
+  expect(patchBodies[1]).toEqual({
+    employee: { phone: '555-0177' },
+    row_revision: '2026-11-24T01:00:00.000000Z',
+    baseline_values: { phone: '+16715550100' },
+    response_view: 'contact',
   });
 });
 
@@ -246,6 +313,7 @@ test('paging away during a coworker save and returning triggers a 409 conflict b
     employee: { email: 'my.draft@example.com' },
     row_revision: '2026-11-24T01:00:00.000000Z',
     baseline_values: { email: 'maria.old@example.com' },
+    response_view: 'contact',
   });
 
   // 5. Verify the conflict banner is readable without horizontal overflow at 390px mobile width.

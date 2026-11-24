@@ -84,7 +84,7 @@ export function SharedInboxReportPanel({
   }, [loadReport]);
 
   const openConfirmDialog = (company: SharedEmailCompanySummary, entry: SharedEmailReportEntry): void => {
-    if (!entry.clearable) return;
+    if (!entry.clearable || !canClearCompany(company.company_id)) return;
     setPendingTarget({ company, entry });
     setConfirmed(false);
     setClearError(null);
@@ -98,6 +98,9 @@ export function SharedInboxReportPanel({
   };
 
   const allowPlaceholderToggle = !readOnly && canManagePlaceholders && report?.can_manage_placeholders !== false;
+  // Clear only the selected live client; a test workspace sees the report read-only.
+  const canClearCompany = (companyId: number): boolean =>
+    !readOnly && report?.can_clear !== false && companyId === activeCompanyId;
 
   const handleMarkPlaceholder = async (email: string): Promise<void> => {
     if (!allowPlaceholderToggle || markingEmail) return;
@@ -137,7 +140,7 @@ export function SharedInboxReportPanel({
       const response = await staffContactHygieneApi.clearSharedEmails({
         company_id: pendingTarget.company.company_id,
         email: pendingTarget.entry.email,
-      });
+      }, pendingTarget.company.company_id);
       setSuccessMessage(response.message);
       const clearedCompanyId = pendingTarget.company.company_id;
       const clearedEmail = pendingTarget.entry.email;
@@ -288,16 +291,23 @@ export function SharedInboxReportPanel({
                                       Unmark
                                     </Button>
                                   )}
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={readOnly}
-                                    onClick={() => openConfirmDialog(company, entry)}
-                                    className="w-full border-danger-200 text-danger-700 hover:border-danger-300 hover:bg-danger-50 hover:text-danger-800 sm:w-auto"
-                                  >
-                                    <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-                                    Clear to blank
-                                  </Button>
+                                  {canClearCompany(company.company_id) ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => openConfirmDialog(company, entry)}
+                                      className="w-full border-danger-200 text-danger-700 hover:border-danger-300 hover:bg-danger-50 hover:text-danger-800 sm:w-auto"
+                                    >
+                                      <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+                                      Clear to blank
+                                    </Button>
+                                  ) : (
+                                    <span className="text-xs text-neutral-500">
+                                      {report.can_clear === false
+                                        ? "Test workspaces can't clear emails"
+                                        : readOnly ? 'Clearing is off for this client' : 'Open this client to clear it'}
+                                    </span>
+                                  )}
                                 </>
                               ) : allowPlaceholderToggle ? (
                                 <Button

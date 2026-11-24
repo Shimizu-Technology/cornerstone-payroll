@@ -206,6 +206,7 @@ describe('EmployeeContactDetails', () => {
         phone: '555-0199',
         row_revision: '2026-11-24T01:00:00.000000Z',
         baseline_values: { phone: '+16715550100' },
+        response_view: 'contact',
       });
     });
 
@@ -283,6 +284,7 @@ describe('EmployeeContactDetails', () => {
         email: 'my.version@example.com',
         row_revision: 'rev-2',
         baseline_values: { email: 'coworker@example.com' },
+        response_view: 'contact',
       });
     });
 
@@ -417,6 +419,7 @@ describe('EmployeeContactDetails', () => {
         email: 'my.edit@example.com',
         row_revision: 'rev-1',
         baseline_values: { email: 'alice.old@example.com' },
+        response_view: 'contact',
       });
     });
     expect((await screen.findAllByText(/coworker\.new@example\.com/i)).length).toBeGreaterThan(0);
@@ -713,7 +716,7 @@ describe('EmployeeContactDetails', () => {
       expect(apiMocks.clearSharedEmails).toHaveBeenCalledWith({
         company_id: 7,
         email: 'shared-inbox@example.com',
-      });
+      }, 7);
     });
 
     expect(await screen.findByText(/Cleared shared-inbox@example.com from 5 employee records/i)).toBeTruthy();
@@ -761,6 +764,41 @@ describe('EmployeeContactDetails', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Unmark old-inbox@example.com' })).toBeNull();
     });
+  });
+
+  it('shows the shared-inbox report read-only in a test workspace, with no Clear action', async () => {
+    authState.isClient = false;
+    authState.user = { id: 2, company_id: 7, role: 'org_admin', name: 'Cornerstone Admin', email: 'staff@example.com' };
+    capabilityState.manageClientConfiguration = true;
+    companyState.activeCompany = { ...companyState.activeCompany, payroll_environment: 'migration_rehearsal' };
+
+    apiMocks.adminList.mockResolvedValue({
+      data: [buildEmployee({ id: 201, first_name: 'Ana', last_name: 'Reyes', email: 'shared-inbox@example.com' })],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 1 },
+    });
+    apiMocks.sharedEmails.mockResolvedValue({
+      summary: { companies_affected: 1, distinct_flagged_emails: 1, total_employee_records: 2, active_employee_records: 2 },
+      can_manage_placeholders: true,
+      can_clear: false,
+      marked_placeholders: ['shared-inbox@example.com'],
+      placeholder_marks: [{ email: 'shared-inbox@example.com', unmarkable: true }],
+      companies: [{
+        company_id: 7, company_name: "MoSa's Demo", total_flagged_records: 2, active_flagged_records: 2,
+        emails: [{
+          email: 'shared-inbox@example.com', classification: 'placeholder' as const, reasons: ['marked_placeholder'],
+          total_count: 2, active_count: 2, inactive_count: 0, companies_count: 1, organization_total_count: 2,
+          clearable: true, marked_placeholder: true, unmarkable: true,
+        }],
+      }],
+    });
+
+    renderStaffPage('/companies/7/employees/contact-details?tab=shared-emails');
+
+    expect((await screen.findAllByText('shared-inbox@example.com')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /Clear to blank/i })).toBeNull();
+    expect(screen.getByText("Test workspaces can't clear emails")).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Unmark/i })).toBeNull();
+    expect(apiMocks.clearSharedEmails).not.toHaveBeenCalled();
   });
 
   it('hides the shared-inbox report tab from staff without manage_client_configuration', async () => {

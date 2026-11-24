@@ -90,13 +90,22 @@ export interface EmployeeContactDetailsStatus {
   shared_email_count?: number;
 }
 
+/** The contact-only record the Contact details page gets and stores. */
+export const CONTACT_EMPLOYEE_FIELDS = [
+  'id', 'company_id', 'first_name', 'middle_name', 'last_name', 'status',
+  'email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'zip',
+  'email_verified_at', 'phone_confirmed_by_employee_at', 'contact_source',
+  'contact_revision', 'contact_details_status', 'updated_at',
+] as const;
+export type ContactEmployee = Pick<Employee, (typeof CONTACT_EMPLOYEE_FIELDS)[number]>;
+
 export interface EmployeeContactConflictPayload {
   error: string;
   code: 'contact_revision_conflict';
   conflicting_fields: string[];
   contact_revision: string;
   current_values: Record<string, string | null>;
-  data: Employee;
+  data: ContactEmployee;
 }
 
 export interface EmployeeContactWarning {

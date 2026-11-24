@@ -162,7 +162,7 @@ export function StaffEmployeeContactDetails(): ReactElement {
           >
             <SharedInboxReportPanel
               activeCompanyId={companyId}
-              readOnly={!canEdit}
+              readOnly={!canEdit || isTestWorkspace}
               canManagePlaceholders={canManagePlaceholders}
               onReportLoaded={(report) => setSharedReportSummary(report.summary)}
               onCleared={(clearedCompanyId) => {

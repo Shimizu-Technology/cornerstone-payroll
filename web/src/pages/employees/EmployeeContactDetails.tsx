@@ -44,12 +44,12 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
-import { withoutFullSsn } from '@/lib/employee-contact';
+import { toContactRecord } from '@/lib/employee-contact';
 import { employeesPath } from '@/lib/routes';
 import { cn, getInitials } from '@/lib/utils';
 import { ApiError, clientEmployeesApi, employeesApi } from '@/services/api';
 import type {
-  Employee,
+  ContactEmployee,
   EmployeeContactConflictPayload,
   EmployeeContactValidationPayload,
   EmployeeContactWarning,
@@ -106,7 +106,7 @@ export type ContactDraftMap = Record<number, RowFieldDrafts>;
 interface RowConflictState {
   message: string;
   conflictingFields: string[];
-  serverEmployee: Employee;
+  serverEmployee: ContactEmployee;
   userChanges: ContactDraftPatch;
 }
 
@@ -132,7 +132,7 @@ const INITIAL_ROW_STATE: RowSaveState = {
   conflict: null,
 };
 
-function baselineFromEmployee(employee: Employee): ContactDraft {
+function baselineFromEmployee(employee: ContactEmployee): ContactDraft {
   return {
     email: employee.email ?? '',
     phone: employee.phone ?? '',
@@ -144,7 +144,7 @@ function baselineFromEmployee(employee: Employee): ContactDraft {
   };
 }
 
-function effectiveDraft(employee: Employee, rowDraft: RowFieldDrafts | undefined): ContactDraft {
+function effectiveDraft(employee: ContactEmployee, rowDraft: RowFieldDrafts | undefined): ContactDraft {
   const serverValues = baselineFromEmployee(employee);
   if (!rowDraft) return serverValues;
   const merged: ContactDraft = { ...serverValues };
@@ -186,7 +186,7 @@ function extractConflictPayload(error: unknown): EmployeeContactConflictPayload 
     current_values: (raw.current_values && typeof raw.current_values === 'object')
       ? raw.current_values as Record<string, string | null>
       : {},
-    data: withoutFullSsn(raw.data as Employee),
+    data: toContactRecord(raw.data as ContactEmployee),
   };
 }
 
@@ -229,7 +229,7 @@ function extractContactValidation(error: unknown): {
   };
 }
 
-function contactStatusBadge(employee: Employee): { label: string; variant: 'success' | 'warning' | 'danger' | 'info' } {
+function contactStatusBadge(employee: ContactEmployee): { label: string; variant: 'success' | 'warning' | 'danger' | 'info' } {
   const status = employee.contact_details_status;
   if (status?.email_issue === 'shared_inbox') {
     return { label: 'Shared inbox', variant: 'danger' };
@@ -300,7 +300,7 @@ export function EmployeeContactDetails({
   const rawPage = parseInt(searchParams.get('page') || '1', 10);
   const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
 
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employees, setEmployees] = useState<ContactEmployee[]>([]);
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -350,6 +350,7 @@ export function EmployeeContactDetails({
         per_page: PER_PAGE,
         sort_by: 'name' as const,
         sort_direction: 'asc' as const,
+        view: 'contact' as const,
       };
       const payload = isClient
         ? await clientEmployeesApi.list(listParams)
@@ -374,7 +375,7 @@ export function EmployeeContactDetails({
 
       // Refresh server data (updating untouched fields) without touching any
       // edited field's captured baseline value or row revision.
-      setEmployees(payload.data.map(withoutFullSsn));
+      setEmployees(payload.data.map(toContactRecord));
       setMeta(payload.meta);
       setLoadedCompanyId(requestedCompanyId);
     } catch (caught) {
@@ -424,7 +425,7 @@ export function EmployeeContactDetails({
     onNeedsContactCountChange?.(needsContactCount);
   }, [needsContactCount, onNeedsContactCountChange]);
 
-  const updateDraftField = (employee: Employee, field: ContactField, value: string): void => {
+  const updateDraftField = (employee: ContactEmployee, field: ContactField, value: string): void => {
     const serverBaseline = baselineFromEmployee(employee);
     const serverRevision = employee.contact_revision || employee.updated_at;
     setDrafts((prev) => {
@@ -466,7 +467,7 @@ export function EmployeeContactDetails({
     });
   };
 
-  const resetRow = (employee: Employee): void => {
+  const resetRow = (employee: ContactEmployee): void => {
     setDrafts((prev) => {
       if (!prev[employee.id]) return prev;
       const next = { ...prev };
@@ -487,8 +488,8 @@ export function EmployeeContactDetails({
   };
 
   const saveRow = async (
-    employee: Employee,
-    options: { explicitConfirmSamePerson?: boolean; overrideBaselineEmployee?: Employee; overrideChanges?: ContactDraftPatch } = {},
+    employee: ContactEmployee,
+    options: { explicitConfirmSamePerson?: boolean; overrideBaselineEmployee?: ContactEmployee; overrideChanges?: ContactDraftPatch } = {},
   ): Promise<void> => {
     if (!canEdit) return;
     const baseEmployee = options.overrideBaselineEmployee ?? employee;
@@ -546,11 +547,12 @@ export function EmployeeContactDetails({
     };
 
     try {
+      const contactPayload = { ...payload, response_view: 'contact' as const };
       const response = isClient
-        ? await clientEmployeesApi.update(employee.id, payload)
-        : await employeesApi.update(employee.id, { ...payload, response_view: 'contact' }, companyId);
+        ? await clientEmployeesApi.update(employee.id, contactPayload)
+        : await employeesApi.update(employee.id, contactPayload, companyId);
 
-      const updated = withoutFullSsn(response.data);
+      const updated = toContactRecord(response.data);
       const warnings = response.contact_warnings ?? [];
 
       setEmployees((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
@@ -622,7 +624,7 @@ export function EmployeeContactDetails({
     }
   };
 
-  const handleKeepMyVersion = (employee: Employee): void => {
+  const handleKeepMyVersion = (employee: ContactEmployee): void => {
     const conflict = rowStates[employee.id]?.conflict;
     if (!conflict) return;
     // User explicitly chose to keep their version: rebase each edited field's
@@ -651,14 +653,32 @@ export function EmployeeContactDetails({
     });
   };
 
-  const handleDiscardMyVersion = (employee: Employee): void => {
+  // "Use theirs" drops only the drafts that conflicted. Other edits on the row,
+  // such as a phone typed alongside a conflicting email, stay ready to save
+  // with their original baselines.
+  const handleDiscardMyVersion = (employee: ContactEmployee): void => {
     const conflict = rowStates[employee.id]?.conflict;
     if (!conflict) return;
+    const named = conflict.conflictingFields.filter((field): field is ContactField => CONTACT_FIELDS.includes(field as ContactField));
+    const dropped = new Set<ContactField>(named.length > 0 ? named : (Object.keys(conflict.userChanges) as ContactField[]));
     setEmployees((prev) => prev.map((item) => (item.id === employee.id ? { ...item, ...conflict.serverEmployee } : item)));
-    resetRow(employee);
+    setDrafts((prev) => {
+      const existingRow = prev[employee.id];
+      if (!existingRow) return prev;
+      const keptRow: RowFieldDrafts = {};
+      for (const field of CONTACT_FIELDS) {
+        const entry = existingRow[field];
+        if (entry && !dropped.has(field)) keptRow[field] = entry;
+      }
+      const next = { ...prev };
+      if (Object.keys(keptRow).length > 0) next[employee.id] = keptRow;
+      else delete next[employee.id];
+      return next;
+    });
+    setRowStates((prev) => ({ ...prev, [employee.id]: INITIAL_ROW_STATE }));
   };
 
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLInputElement>, employee: Employee): void => {
+  const handleRowKeyDown = (event: KeyboardEvent<HTMLInputElement>, employee: ContactEmployee): void => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
@@ -1276,7 +1296,7 @@ function RowInlineFeedback({
   onToggleSamePerson,
   onConfirmAndSave,
 }: {
-  employee: Employee;
+  employee: ContactEmployee;
   state: RowSaveState;
   field: 'email' | 'phone';
   hidePrimaryFieldError?: boolean;
