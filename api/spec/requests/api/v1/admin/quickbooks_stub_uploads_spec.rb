@@ -134,7 +134,7 @@ RSpec.describe "QuickBooks original stubs", type: :request do
   end
 
   it "requires its own attestation and an audited view before posting a possible SSN" do
-    text = "#{page_text}\nSSN: 123 / 45 / 6789 40"
+    text = "#{page_text}\nSSN: 12-34-56789 40"
     submit("preview", upload: pdf(text))
     page = response.parsed_body.fetch("data").first
     expect(page.fetch("status")).to eq("possible_ssn")

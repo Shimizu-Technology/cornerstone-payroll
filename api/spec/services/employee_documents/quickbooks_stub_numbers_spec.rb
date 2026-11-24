@@ -3,10 +3,10 @@
 require "rails_helper"
 
 RSpec.describe EmployeeDocuments::QuickbooksStubNumbers do
-  it "ignores labeled bank and check numbers, decimal amounts, ordinary columns, and longer numbers" do
+  it "ignores labeled bank and check numbers and decimal amounts" do
     [
-      "Routing 121000358", "Account number: 123-45-6789", "Check #523 05/2026", "812 50 1234",
-      "Amount $1,234,567.89", "812.50 1234", "1234567890", "123-45-67890"
+      "Routing 121000358", "Account number: 123-45-6789", "Check #523 05/2026",
+      "Amount $1,234,567.89", "812.50 1234"
     ].each { |text| expect(described_class.possible_ssn?(text)).to be(false), text }
   end
 
@@ -17,10 +17,15 @@ RSpec.describe EmployeeDocuments::QuickbooksStubNumbers do
     end
   end
 
-  it "keeps an SSN-shaped number separate from a following integer column" do
-    [ "SSN: 123-45-6789 40", "123 45 6789 12", "123-45-6789  7" ].each do |text|
+  it "finds nine digits in any window of whole groups" do
+    [ "123-45-6789 40", "12-34-56789", "SSN: 12-34-56789", "123 45 6789 12",
+      "123-45-6789  7", "40 12-34-56789 8", "812 50 1234" ].each do |text|
       expect(described_class.possible_ssn?(text)).to be(true), text
     end
+  end
+
+  it "does not take part of a digit group to reach nine digits" do
+    [ "1234567890", "123-45-67890" ].each { |text| expect(described_class.possible_ssn?(text)).to be(false), text }
   end
 
   it "recognizes an employee's own SSN even under an exempt label" do
