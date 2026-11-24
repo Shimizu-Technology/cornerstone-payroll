@@ -538,4 +538,24 @@ RSpec.describe TimeTracking::HistoryApproval do
       .and change(CheckEvent, :count).by(0).and change(TimeTrackingManualAllocation, :count).by(0)
     expect(AireHistoryReview.find(page["review_id"]).approved_packet["reviewed_dispositions"].sole["prior_overtime_policy"]).to be_present
   end
+
+  it "requires confirmation when an unmapped payroll employee has a shared inbox email that differs from AIRE, and matches when real or cleared" do
+    TimeTrackingEmployeeMapping.where(company: company, time_tracking_source: source).delete_all
+    employee.update_columns(email: "shared-inbox@example.com")
+    allow(client).to receive(:payroll_cockpit_employees).and_return(
+      "employees" => [ { "id" => "91", "payroll_integration_id" => uuid, "full_name" => employee.full_name, "email" => "real.worker@example.com", "active" => true } ],
+      "pagination" => { "current_page" => 1, "per_page" => 100, "total_count" => 1, "total_pages" => 1, "truncated" => false }
+    )
+
+    with_shared = history_service.prepare!
+    expect(with_shared["mappings"].sole).to include("employee_id" => nil, "confirmation_required" => true)
+
+    employee.update_columns(email: "real.worker@example.com")
+    with_real = history_service.prepare!
+    expect(with_real["mappings"].sole).to include("employee_id" => employee.id, "confirmation_required" => false)
+
+    employee.update_columns(email: nil)
+    with_blank = history_service.prepare!
+    expect(with_blank["mappings"].sole).to include("employee_id" => employee.id, "confirmation_required" => false)
+  end
 end

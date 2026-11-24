@@ -129,8 +129,14 @@ module ClientProfitability
     def staff_suggestion(email)
       return nil if email.blank?
 
-      exact = practice_employees.find { |employee| employee.email.to_s.strip.casecmp?(email) }
-      return { disposition: "employee", employee_id: exact.id, label: exact.full_name, match: "exact" } if exact
+      normalized_email = email.to_s.strip.downcase
+      unless EmployeeContactValidator.placeholder_email?(normalized_email)
+        exact_matches = practice_employees.select { |employee| employee.email.to_s.strip.casecmp?(normalized_email) }
+        if exact_matches.one?
+          exact = exact_matches.first
+          return { disposition: "employee", employee_id: exact.id, label: exact.full_name, match: "exact" }
+        end
+      end
 
       first = email.split("@").first.to_s.split(/[._\-+]/).first.to_s
       matches = practice_employees.select { |employee| employee.first_name.to_s.strip.casecmp?(first) }

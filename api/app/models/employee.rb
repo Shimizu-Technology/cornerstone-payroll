@@ -10,6 +10,7 @@ class Employee < ApplicationRecord
   attr_accessor :ssn_confirmation, :require_ssn_confirmation, :allow_tax_classification_change
 
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
+  CONTACT_SOURCES = %w[client staff employee import].freeze
   CONFIGURATION_REVIEW_STATUSES = %w[complete needs_review].freeze
   CONFIGURATION_SOURCES = %w[quickbooks_history].freeze
   SALARY_TYPES = %w[annual per_period variable].freeze
@@ -132,6 +133,7 @@ class Employee < ApplicationRecord
   validate :valid_supplied_intake_dates
   before_update :invalidate_intake_payroll_confirmation
   before_update :guard_compensation_mutation
+  before_save :clear_verification_on_contact_change
   after_create :record_initial_compensation_history, unless: :skip_initial_compensation_history
   before_validation :normalize_w4_source_reference
   before_validation :normalize_intake_blank_details
@@ -161,6 +163,7 @@ class Employee < ApplicationRecord
   validates :employment_type, inclusion: { in: EMPLOYMENT_TYPES }
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   validates :status, inclusion: { in: %w[active inactive terminated] }
+  validates :contact_source, inclusion: { in: CONTACT_SOURCES }, allow_nil: true
   validates :payment_delivery_method, inclusion: { in: PAYMENT_DELIVERY_METHODS }, allow_nil: true
   validates :configuration_review_status, inclusion: { in: CONFIGURATION_REVIEW_STATUSES }
   validates :configuration_source, inclusion: { in: CONFIGURATION_SOURCES }, allow_nil: true
@@ -205,6 +208,28 @@ class Employee < ApplicationRecord
   }
 
   scope :active, -> { where(status: "active") }
+  scope :needs_contact_details, ->(flagged_emails: []) {
+    clauses = [
+      "COALESCE(TRIM(employees.email), '') = ''",
+      "COALESCE(TRIM(employees.phone), '') = ''",
+      "COALESCE(TRIM(employees.address_line1), '') = ''",
+      "COALESCE(TRIM(employees.city), '') = ''",
+      "COALESCE(TRIM(employees.state), '') = ''",
+      "COALESCE(TRIM(employees.zip), '') = ''",
+      "SPLIT_PART(LOWER(TRIM(employees.email)), '@', 1) IN (:placeholder_locals)",
+      "SPLIT_PART(LOWER(TRIM(employees.email)), '@', 2) IN (:placeholder_domains)"
+    ]
+    bind = {
+      placeholder_locals: EmployeeContactValidator::PLACEHOLDER_LOCAL_PARTS.to_a,
+      placeholder_domains: EmployeeContactValidator::PLACEHOLDER_DOMAINS.to_a
+    }
+    normalized_flagged = Array(flagged_emails).filter_map { |email| EmployeeContactValidator.normalize_email(email) }.uniq
+    if normalized_flagged.any?
+      clauses << "LOWER(TRIM(employees.email)) IN (:flagged_emails)"
+      bind[:flagged_emails] = normalized_flagged
+    end
+    where(clauses.join(" OR "), bind)
+  }
   scope :hourly, -> { where(employment_type: "hourly") }
   scope :salary, -> { where(employment_type: "salary") }
   scope :contractor, -> { where(employment_type: "contractor") }
@@ -798,6 +823,16 @@ class Employee < ApplicationRecord
     return if intake_exception.blank? || will_save_change_to_intake_payroll_confirmed_at?
     sensitive = %w[employment_type salary_type contractor_type contractor_pay_type pay_rate pay_frequency hire_date ssn_encrypted contractor_ein] + EmployeeW4Election::PROFILE_ATTRIBUTES.map(&:to_s)
     self.intake_payroll_confirmed_at = nil if (changes_to_save.keys & sensitive).any?
+  end
+
+  def clear_verification_on_contact_change
+    if email.blank? || (will_save_change_to_email? && !will_save_change_to_email_verified_at?)
+      self.email_verified_at = nil
+    end
+
+    if phone.blank? || (will_save_change_to_phone? && !will_save_change_to_phone_confirmed_by_employee_at?)
+      self.phone_confirmed_by_employee_at = nil
+    end
   end
 
   def configuration_review_allows_blank?(field)

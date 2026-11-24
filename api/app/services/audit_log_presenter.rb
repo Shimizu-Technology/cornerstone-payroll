@@ -68,6 +68,8 @@ class AuditLogPresenter
     "portal_notification_recipients#update" => "updated portal alert recipients for",
     "employees#create" => "added",
     "employees#update" => "updated",
+    "employees#clear_shared_email" => "cleared a shared or placeholder email for",
+    "employee_contact_hygiene#clear_shared_emails" => "cleared a shared or placeholder email for",
     "employee#compensation_changed" => "changed compensation for",
     "employees#destroy" => "terminated",
     "employees#reactivate" => "reactivated",

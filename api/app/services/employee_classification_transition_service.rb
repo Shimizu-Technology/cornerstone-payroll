@@ -20,6 +20,8 @@ class EmployeeClassificationTransitionService
       validate_transition!
 
       new_employee = Employee.new(new_employee_attributes.merge(initial_compensation_source: "classification_transition", initial_compensation_actor: actor))
+      contact_result = validate_contact_details!(new_employee)
+      apply_validated_contact_details!(new_employee, contact_result)
       EmployeeIntakePolicy.prepare!(new_employee, actor: actor)
       new_employee.save!
       create_w4_election!(new_employee)
@@ -31,6 +33,22 @@ class EmployeeClassificationTransitionService
         termination_date: effective_date - 1.day
       )
 
+      audit_metadata = {
+        previous_employee_id: employee.id,
+        new_employee_id: new_employee.id,
+        from_tax_classification: employee.tax_classification,
+        to_tax_classification: new_employee.tax_classification,
+        from_employment_type: employee.employment_type,
+        to_employment_type: new_employee.employment_type,
+        effective_date: effective_date.iso8601,
+        reason: reason,
+        historical_payroll_preserved: true
+      }
+      if contact_result.same_person_confirmed?
+        audit_metadata[:same_person_email_confirmed] = true
+        audit_metadata[:confirmed_login_user_id] = contact_result.matched_login_user&.id
+      end
+
       AuditLog.record!(
         user: actor,
         company_id: employee.company_id,
@@ -38,17 +56,7 @@ class EmployeeClassificationTransitionService
         record_type: "employees",
         record_id: new_employee.id,
         subject_name: new_employee.display_name,
-        metadata: {
-          previous_employee_id: employee.id,
-          new_employee_id: new_employee.id,
-          from_tax_classification: employee.tax_classification,
-          to_tax_classification: new_employee.tax_classification,
-          from_employment_type: employee.employment_type,
-          to_employment_type: new_employee.employment_type,
-          effective_date: effective_date.iso8601,
-          reason: reason,
-          historical_payroll_preserved: true
-        }
+        metadata: audit_metadata
       )
 
       Result.new(previous_employee: employee.reload, new_employee: new_employee.reload)
@@ -125,7 +133,7 @@ class EmployeeClassificationTransitionService
   end
 
   def shared_identity_attributes
-    employee.attributes.symbolize_keys.slice(
+    attrs = employee.attributes.symbolize_keys.slice(
       :company_id,
       :department_id,
       :first_name,
@@ -139,8 +147,39 @@ class EmployeeClassificationTransitionService
       :city,
       :state,
       :zip,
-      :phone
+      :phone,
+      :contact_source
     )
+    attrs[:email] = attributes[:email] if attributes.key?(:email)
+    attrs[:phone] = attributes[:phone] if attributes.key?(:phone)
+    attrs[:email_verified_at] = nil
+    attrs[:phone_confirmed_by_employee_at] = nil
+    attrs
+  end
+
+  def validate_contact_details!(new_employee)
+    result = EmployeeContactValidator.call(
+      employee: new_employee,
+      company: employee.company,
+      email: new_employee.email,
+      phone: new_employee.phone,
+      confirm_same_person_email: attributes[:confirm_same_person_email],
+      actor: actor,
+      source: "staff",
+      exclude_employee_ids: [ employee.id ]
+    )
+    return result if result.valid?
+
+    result.apply_errors_to(new_employee)
+    raise EmployeeContactValidator::ValidationError.new(result: result, record: new_employee)
+  end
+
+  def apply_validated_contact_details!(new_employee, contact_result)
+    new_employee.email = contact_result.normalized_email
+    new_employee.phone = contact_result.normalized_phone
+    new_employee.email_verified_at = nil
+    new_employee.phone_confirmed_by_employee_at = nil
+    new_employee.contact_source = "staff" if attributes.key?(:email) || attributes.key?(:phone)
   end
 
   def target_classification_attributes

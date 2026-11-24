@@ -254,7 +254,7 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       employee.reload
       expect(employee.email).to eq("jamie.updated@example.com")
       expect(employee.job_title).to eq("Senior Payroll Clerk")
-      expect(employee.phone).to eq("671-555-0199")
+      expect(employee.phone).to eq("+16715550199")
       expect(employee.address_line1).to eq("42 Profile Ln")
       expect(response.parsed_body.fetch("change_request")).to be_nil
       expect(response.parsed_body.fetch("applied_direct_fields")).to contain_exactly("email", "job_title", "phone", "address_line1")
