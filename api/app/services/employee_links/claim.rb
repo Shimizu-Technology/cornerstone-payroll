@@ -97,8 +97,7 @@ module EmployeeLinks
 
       # Already locked by Verify (lock_targets).
       invitation_id = pending.clerk_invitation_id
-      pending.update!(active: false, invite_nonce_digest: nil, invite_nonce_expires_at: nil,
-        deactivated_at: Time.current, deactivation_reason: "pending_sign_up_closed")
+      pending.update!(EmployeeLinks.pending_closure_attributes(pending))
       invitation_id
     end
 

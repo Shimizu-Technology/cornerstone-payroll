@@ -14,7 +14,12 @@ class RevokeEmployeeSessionsJob < ApplicationJob
 
   queue_as :default
 
-  retry_on RevocationFailed, StandardError, wait: :polynomially_longer, attempts: 10
+  # Until one full pass (every page listed, every targeted session ended,
+  # none left active) succeeds; ClerkInvitationService#revoke_user_sessions
+  # reports anything less as a failure.
+  retry_on RevocationFailed, StandardError, wait: :polynomially_longer, attempts: 10 do |job, error|
+    Rails.logger.error("[RevokeEmployeeSessionsJob] GAVE UP ending Clerk sessions for user #{job.arguments.first}: #{error.class}")
+  end
 
   def perform(user_id, closed_at = nil)
     user = User.find_by(id: user_id)

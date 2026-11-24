@@ -155,12 +155,16 @@ module Api
             end
           end
 
-          before_values = user_audit_snapshot(@user)
           ActiveRecord::Base.transaction do
-            # Recorded even when the login was already closed (an employee
-            # login whose last link ended): an admin's deactivation is never
-            # lifted by the employee's own rehire reactivation (M4-2).
-            @user.update!(active: false, deactivated_at: Time.current, deactivation_reason: "deactivated")
+            # Locked and re-read first, so a reactivation that committed in
+            # between can't keep the login active: every field is written
+            # from the current row. Recorded even when the login was already
+            # closed (an employee login whose last link ended): an admin's
+            # deactivation is never lifted by the employee's own rehire
+            # reactivation (M4-2). Same login lock as EmployeeLinks.
+            @user.lock!("FOR NO KEY UPDATE")
+            before_values = user_audit_snapshot(@user)
+            @user.update!(active: false, deactivated_at: ApplicationRecord.database_now, deactivation_reason: "deactivated")
             record_user_audit!("deactivated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
           render json: { data: user_json(@user) }

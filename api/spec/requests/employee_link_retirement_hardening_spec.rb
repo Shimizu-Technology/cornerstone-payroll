@@ -27,17 +27,18 @@ RSpec.describe "Employee link retirement hardening", type: :request do
 
   before { enable_employee_app!(company) }
 
-  def reactivate(params, fva: [ 0, -1 ], path: "/api/v1/employee/links/reactivate")
-    post path, params: params.to_json, headers: bearer("user_riley", fva: fva).merge("CONTENT_TYPE" => "application/json")
+  def reactivate(params, fva: [ 0, -1 ], sid: "sess_user_riley", path: "/api/v1/employee/links/reactivate")
+    post path, params: params.to_json, headers: bearer("user_riley", fva: fva, sid: sid).merge("CONTENT_TYPE" => "application/json")
   end
 
-  # The person's last link closed an hour ago.
+  # The person's last link closed. Clerk reports one session from before the
+  # closure (sess_before_closure) and the current one, from after it.
   def close_last_link!
     link
-    travel_to(1.hour.ago) do
-      as_staff_in(company) { EmployeeLinks::Revoke.call(link: link, actor: staff, reason: "Seasonal layoff") }
-    end
+    as_staff_in(company) { EmployeeLinks::Revoke.call(link: link, actor: staff, reason: "Seasonal layoff") }
     expect(worker.reload).to have_attributes(active: false, deactivation_reason: "last_employee_link_closed")
+    clerk_session!("sess_before_closure", user_id: "user_riley", created_at: worker.deactivated_at - 30.minutes)
+    clerk_session!("sess_user_riley", user_id: "user_riley", created_at: worker.deactivated_at + 1.second)
   end
 
   # Jobs run in a system scope (rls_mode :system); calling a step directly does too.
@@ -85,8 +86,8 @@ RSpec.describe "Employee link retirement hardening", type: :request do
     it "refuses a session from before the closure, and keeps refusing it after reactivation" do
       invite = invite!(employee, actor: staff, delivery: "code")
 
-      # Signed in 90 minutes ago, before the closure an hour ago, and stepped up just now.
-      reactivate(activation_params(employee, code: invite.code), fva: [ 90, 0 ])
+      # A session created before the closure, though it stepped up just now.
+      reactivate(activation_params(employee, code: invite.code), fva: [ 0, 0 ], sid: "sess_before_closure")
       expect(response).to have_http_status(:not_found)
       expect(worker.reload).not_to be_active
 
@@ -95,7 +96,7 @@ RSpec.describe "Employee link retirement hardening", type: :request do
       expect(worker.reload).to have_attributes(active: true, deactivation_reason: nil)
       expect(worker.deactivated_at).to be_present
 
-      old_session = bearer("user_riley", fva: [ 90, -1 ])
+      old_session = bearer("user_riley", sid: "sess_before_closure")
       get "/api/v1/employee/context", headers: old_session.merge("X-Employee-Link-Id" => invite.link.id.to_s)
       expect(response).to have_http_status(:not_found)
       get "/api/v1/auth/me", headers: old_session
@@ -260,6 +261,124 @@ RSpec.describe "Employee link retirement hardening", type: :request do
 
       expect(response.parsed_body["next"]).to eq("sign_in")
       expect(other_invite.link.reload.user_id).to be_nil
+    end
+  end
+
+  describe "closure time" do
+    it "is the database's clock at the actual close, not the caller's or the sweep's start time" do
+      link
+      travel_to(1.hour.ago) do
+        as_staff_in(company) { EmployeeLinks::Revoke.call(link: link, actor: staff, reason: "Seasonal layoff") }
+      end
+      expect(worker.reload.deactivated_at).to be_within(1.minute).of(ApplicationRecord.database_now)
+
+      other = create(:employee, company: company, first_name: "Avery", last_name: "Cruz", date_of_birth: Date.new(1988, 1, 2))
+      other_login = create(:user, role: :portal_employee, company: company, name: "Avery Cruz", email: "avery@example.net",
+        clerk_id: "user_avery", invitation_status: "accepted")
+      EmployeeAccountLink.create!(user: other_login, company: company, employee: other, status: "former",
+        activated_at: 1.year.ago, former_at: 1.day.ago, former_access_until: 1.day.from_now)
+      travel_to(15.days.from_now) { ExpireEmployeeLinksJob.perform_now }
+
+      closed_at = other_login.reload.deactivated_at
+      expect(closed_at).to be_within(1.minute).of(ApplicationRecord.database_now)
+      expect(RevokeEmployeeSessionsJob).to have_been_enqueued.with(other_login.id, closed_at.iso8601(6))
+    end
+  end
+
+  describe "admin deactivation" do
+    it "isn't lost to a reactivation that commits after the login was loaded" do
+      close_last_link!
+      allow_any_instance_of(User).to receive(:lock!).and_wrap_original do |original, *args|
+        # The rehire reactivation commits between the controller's read and its lock.
+        User.where(id: worker.id).update_all(active: true, deactivation_reason: nil)
+        original.call(*args)
+      end
+
+      post "/api/v1/admin/users/#{worker.id}/deactivate", headers: bearer("user_staff").merge("X-Company-Id" => company.id.to_s)
+
+      expect(response).to have_http_status(:ok)
+      expect(worker.reload).to have_attributes(active: false, deactivation_reason: "deactivated")
+      expect(worker.deactivated_at).to be_within(1.minute).of(ApplicationRecord.database_now)
+    end
+
+    def admin_deactivated_pending_sign_up
+      invite = invite!(employee, actor: staff, delivery: "code")
+      post_activation(activation_params(employee, code: invite.code, email: "riley.own@example.net"))
+      pending_user = invite.link.reload.user
+      pending_user.update!(active: false, deactivation_reason: "deactivated")
+      [ invite, pending_user ]
+    end
+
+    it "keeps its reason when the pending sign-up closes, so the row is never reused" do
+      invite, pending_user = admin_deactivated_pending_sign_up
+
+      # A retry on the same invite can't restart it.
+      post_activation(activation_params(employee, code: invite.code, email: "riley.own@example.net"))
+      expect(response.parsed_body["next"]).to eq("sign_in")
+
+      as_staff_in(company) { EmployeeLinks::Revoke.call(link: invite.link.reload, actor: staff, reason: "Reissue") }
+      expect(pending_user.reload).to have_attributes(active: false, deactivation_reason: "deactivated", invite_nonce_digest: nil)
+
+      # (An email invite to that address is refused outright; a printed code isn't.)
+      again = invite!(employee.reload, actor: staff, delivery: "code")
+      expect do
+        post_activation(activation_params(employee, code: again.code, email: "riley.own@example.net"))
+      end.not_to(change { pending_user.reload.attributes.slice("active", "deactivation_reason") })
+      expect(response.parsed_body["next"]).to eq("sign_in")
+      expect(again.link.reload.user_id).to be_nil
+    end
+
+    it "keeps its reason when an existing login claims the invite" do
+      invite, pending_user = admin_deactivated_pending_sign_up
+      create(:user, role: :accountant, company: company, name: "Riley Santos", email: "riley.staff@example.net",
+        clerk_id: "user_riley_staff")
+
+      post "/api/v1/employee/links/claim", params: activation_params(employee, code: invite.code).to_json,
+        headers: bearer("user_riley_staff", fva: [ 0, 0 ], two_factor_enabled: true).merge("CONTENT_TYPE" => "application/json")
+
+      expect(response).to have_http_status(:created)
+      expect(pending_user.reload).to have_attributes(active: false, deactivation_reason: "deactivated", invite_nonce_digest: nil)
+      expect(EmployeeLinks.closed_pending_sign_up_for?(pending_user, employee)).to be(false)
+    end
+  end
+
+  describe "retiring links while a sign-up attaches a login" do
+    let!(:pending_link) { invite!(employee, actor: staff, delivery: "code").link }
+    let!(:late_login) do
+      create(:user, role: :portal_employee, company: company, name: "Riley Santos", email: "riley.late@example.net",
+        invitation_status: "pending")
+    end
+
+    def open_links_with_attachment(times:)
+      attempts = 0
+      allow(EmployeeLinks).to receive(:lock_users!).and_wrap_original do |original, ids|
+        attempts += 1
+        # A sign-up attaches its login after the first read, before the link locks.
+        EmployeeAccountLink.where(id: pending_link.id).update_all(user_id: late_login.id) if attempts <= times
+        original.call(ids)
+      end
+      result = as_staff_in(company) do
+        ApplicationRecord.transaction do
+          employee.lock!
+          EmployeeLinks::Retire.open_links(employee)
+        end
+      end
+      [ result, attempts ]
+    end
+
+    it "releases the link locks and starts again from the employee lock instead of locking the login late" do
+      links = attempts = nil
+      locks = row_locks { links, attempts = open_links_with_attachment(times: 1) }
+
+      expect(attempts).to eq(2)
+      expect(links.map(&:id)).to eq([ pending_link.id ])
+      # The link lock, released, then taken again; the attached login is
+      # never locked after a link.
+      expect(locks).to eq(%i[employee link link])
+    end
+
+    it "gives up after three attempts, leaving the caller's change to roll back" do
+      expect { open_links_with_attachment(times: 3) }.to raise_error(EmployeeLinks::Error, /changed while it was being closed/)
     end
   end
 end

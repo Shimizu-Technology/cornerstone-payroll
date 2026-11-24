@@ -126,6 +126,14 @@ class ClerkInvitationService
     { success: false, error: e.class.name }
   end
 
+  # A Clerk session (its id, user_id, status, created_at), or nil.
+  def fetch_session(session_id)
+    return unless session_id.is_a?(String) && SESSION_PATTERN.match?(session_id)
+
+    data = get_json("/sessions/#{session_id}")
+    data if data.is_a?(Hash) && data["id"] == session_id
+  end
+
   # The Clerk users that have this address, or nil when Clerk can't be asked.
   def users_with_email(email)
     return unless configured? && email.is_a?(String) && email.present?

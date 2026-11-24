@@ -31,16 +31,28 @@ module EmployeeLinks
       end
     end
 
+    LOCK_ATTEMPTS = 3
+
     # The caller holds the employee's lock. Logins are locked before their
-    # links (EmployeeLinks lock order). A login attached in between (a
-    # sign-up that just committed) is locked after; it's new, so nothing else
-    # holds it.
+    # links (EmployeeLinks lock order), never after: if a login was attached
+    # to a link between the first read and the link locks (a sign-up that just
+    # committed, whose bind may now hold that login and wait for the link),
+    # the link locks are released (savepoint rollback) and the reads start
+    # again from the employee lock, up to LOCK_ATTEMPTS times.
     def open_links(employee)
       scope = EmployeeAccountLink.where(employee_id: employee.id, company_id: employee.company_id, status: %w[invited active])
-      locked = EmployeeLinks.lock_users!(scope.pluck(:user_id)).map(&:id)
-      links = scope.order(:id).lock.to_a
-      EmployeeLinks.lock_users!(links.map(&:user_id).compact - locked)
-      links
+      LOCK_ATTEMPTS.times do
+        links = EmployeeAccountLink.transaction(requires_new: true) do
+          first_read = scope.order(:id).pluck(:id, :user_id).to_h
+          EmployeeLinks.lock_users!(first_read.values)
+          locked = scope.order(:id).lock.to_a
+          raise ActiveRecord::Rollback unless locked.all? { |link| first_read.key?(link.id) && first_read[link.id] == link.user_id }
+
+          locked
+        end
+        return links if links
+      end
+      raise Error, "This employee's app access changed while it was being closed. Try again."
     end
   end
 end
