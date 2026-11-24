@@ -1,6 +1,11 @@
 "$schema" = "https://open-api.netlify.com/netlify.schema.json"
 
-# The Netlify site's UI sets the base directory to web and finds this file there.
+# Both Netlify sites use base directory web and read this one file: Payroll
+# (VITE_APP_SURFACE unset) and the employee site (VITE_APP_SURFACE=employee).
+# Netlify has no per-site config file, so the surface comes from the site's own
+# environment variables. `npm run build` ends with scripts/finalize-surface-dist.mjs,
+# which writes the employee site's _headers and _redirects and does nothing for Payroll.
+# See docs/rollout/M4_EMPLOYEE_PLATFORM_RUNBOOK.md.
 [build]
   command = "npm run build"
   publish = "dist"
