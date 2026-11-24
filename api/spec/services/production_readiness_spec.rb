@@ -175,7 +175,8 @@ RSpec.describe ProductionReadiness do
     results = readiness.run(live: true).checks.to_h { |check| [ check.name, check.passed ] }
     expect(results).to include(
       "RLS runtime role and kill switch privileges" => false,
-      "RLS policy installation matches the selected phase" => true
+      "RLS policy installation matches the selected phase" => true,
+      "Cross-company login link decision is a restricted SECURITY DEFINER function" => true
     )
     env["RLS_EXPECT_ENFORCED"] = "true"
     expect(readiness.run(live: true).failures.map(&:name)).to include("RLS policy installation matches the selected phase")

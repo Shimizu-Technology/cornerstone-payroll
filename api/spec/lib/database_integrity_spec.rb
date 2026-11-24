@@ -110,6 +110,25 @@ RSpec.describe "Schema database targeting" do
       pool.with_connection do |connection|
         expect(installed_connections).to eq([ connection ])
         expect(DatabaseIntegrity.verify!(connection)).to eq(true)
+
+        # The login link decision lives in, and reads only from, this schema.
+        expect(connection.select_value(<<~SQL)).to eq(namespace)
+          SELECT n.nspname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE p.proname = 'payroll_employee_login_link_decision'
+            AND n.nspname = #{connection.quote(namespace)}
+        SQL
+        connection.transaction do
+          # Fixture rows only; foreign keys aren't the point here.
+          connection.execute("SET LOCAL session_replication_role = replica")
+          connection.execute(<<~SQL)
+            INSERT INTO #{namespace}.employee_account_links (user_id, company_id, employee_id, status, created_at, updated_at)
+            VALUES (987654321, 1, 1, 'active', now(), now())
+          SQL
+          decide = ->(schema) { connection.select_value("SELECT #{schema}.payroll_employee_login_link_decision(987654321, NULL, NULL)") }
+          expect(decide.call(namespace)).to eq("conflict")
+          expect(decide.call("public")).to eq("none")
+          raise ActiveRecord::Rollback
+        end
       end
     end
   ensure
