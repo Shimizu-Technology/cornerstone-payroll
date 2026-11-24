@@ -47,6 +47,19 @@ RSpec.describe YearEnd::Checklist, "for a demo company" do
     expect(result.to_json).not_to match(/practice copy|test workspace|demo/i)
   end
 
+  it "runs no e-file preflight and writes no e-file check, but keeps the paper W-2 checks" do
+    expect(YearEnd::EfileCheck).not_to receive(:record)
+    expect(Efw2W2GuGenerator).not_to receive(:new)
+    employee.update_columns(address_line1: nil)
+
+    result = checklist
+    described_class.new(company: company.reload, year: 2026, user: admin).w2_mark_ready_blockers
+    codes = result[:steps].flat_map { |entry| Array(entry[:issues]) }.map { |issue| issue[:code] }
+    expect(codes).to include("EMPLOYEE_DETAILS_MISSING")
+    expect(codes).not_to include("EMPLOYEE_EFILE_INVALID", "EMPLOYER_EFILE_INVALID")
+    expect(YearEnd::EfileCheck.read_many([ company.id ], 2026)).to be_empty
+  end
+
   it "keeps the official EFW2 validator refusing the reserved area" do
     report = W2GuAggregator.new(company, 2026).generate
     problems = Efw2W2GuGenerator.new(company: company, year: 2026, submitter: nil, report: report).structured_problems

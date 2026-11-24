@@ -46,8 +46,8 @@ module ClientProfitability
       links = WorkHourClientLink.active.where(organization_id: @organization.id).includes(:invoice_recipient)
                                 .where("company_id IS NULL OR company_id IN (?)", Company.where(organization_id: @organization.id).live_payroll.select(:id))
                                 .where("invoice_recipient_id IS NULL OR invoice_recipient_id IN (?)",
-                                       InvoiceRecipient.where(organization_id: @organization.id,
-                                                              finance_book_id: @settings.effective_finance_book&.id).select(:id))
+                                       InvoiceRecipient.eligible_for_firm_reports(@organization)
+                                                       .where(finance_book_id: @settings.effective_finance_book&.id).select(:id))
                                 .index_by(&:tax_client_id)
       stats = rows.where(unassigned: false).where.not(tax_client_id: nil).group(:tax_client_id)
                   .pluck(:tax_client_id, Arel.sql("SUM(hours)"), Arel.sql("MAX(work_date)"), Arel.sql("BOOL_OR(system_kind = 'internal')"))
