@@ -298,5 +298,47 @@ RSpec.describe "Admin Employee Contact Hygiene", type: :request do
       end.not_to change(EmployeePlaceholderEmail, :count)
       expect(response).to have_http_status(:forbidden)
     end
+
+    it "never lets a test workspace launch a live clear, and only clears the selected live client" do
+      test_workspace = create(
+        :company,
+        organization: organization,
+        name: "MoSa Test Copy",
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "sandbox",
+        migration_source_company: company_a,
+        migration_rehearsal_status: "ready"
+      )
+      EmployeePlaceholderEmail.create!(organization: organization, email: "shared-inbox@example.com")
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
+
+      get "/api/v1/admin/employee_contact_hygiene/shared_emails", headers: { "X-Company-Id" => test_workspace.id.to_s }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["can_clear"]).to be(false)
+
+      live_count = -> { company_a.employees.where("LOWER(email) = ?", "shared-inbox@example.com").count }
+      expect do
+        post "/api/v1/admin/employee_contact_hygiene/clear_shared_emails",
+             headers: { "X-Company-Id" => test_workspace.id.to_s },
+             params: { company_id: company_a.id, email: "shared-inbox@example.com" }
+      end.not_to change(live_count, :call)
+      expect(response).to have_http_status(:forbidden)
+
+      # Selected live client B can't clear live client A either.
+      expect do
+        post "/api/v1/admin/employee_contact_hygiene/clear_shared_emails",
+             headers: { "X-Company-Id" => company_b.id.to_s },
+             params: { company_id: company_a.id, email: "shared-inbox@example.com" }
+      end.not_to change(live_count, :call)
+      expect(response).to have_http_status(:forbidden)
+
+      get "/api/v1/admin/employee_contact_hygiene/shared_emails", headers: { "X-Company-Id" => company_a.id.to_s }
+      expect(response.parsed_body["can_clear"]).to be(true)
+      post "/api/v1/admin/employee_contact_hygiene/clear_shared_emails",
+           headers: { "X-Company-Id" => company_a.id.to_s },
+           params: { company_id: company_a.id, email: "shared-inbox@example.com" }
+      expect(response).to have_http_status(:ok), response.body
+      expect(live_count.call).to eq(0)
+    end
   end
 end
