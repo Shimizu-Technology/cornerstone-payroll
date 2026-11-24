@@ -14,6 +14,20 @@ Start with staff and client workflows on the existing Payroll site. Add the empl
 
 ## 0. Decisions
 
+### Owner decision (November 25, 2026): it looks and works like a real client
+
+The demo company must look, act and feel exactly like a real client such as MoSa's, with a fictional name and fictional data. Nothing a client user or employee sees marks it as a demo: no badges, banners, watermarks, "practice" or "draft" stamps on PDFs, separate workspace sections, or demo-specific messages. Staff see it in the client list like any other client. The only visible marker is one company-type field in the org-admin company settings, so nobody mistakes it for a paying client.
+
+Everything behaves the same as a real client up to the point where something would leave the building or touch the firm's own numbers. At that point, server-side containment stays in force, invisibly:
+
+- no real filing transmission or submission and no filing-evidence records; the internal year-end steps, previews, copies and review downloads work and look like a real client's;
+- no outbound email or invitations except to an exact allow-list;
+- no AIRE, Cornerstone Tax or accounting exports or integrations;
+- left out of firm-wide totals: client caps and counts, KPIs, profitability, billing, invoices and finance.
+
+Where a step would transmit, it shows the same neutral wording a real client sees when that step isn't available, not a demo message. This overrides any labeling, read-only, expiry or "test-labeled artifact" wording elsewhere in this plan.
+
+
 | Question | Recommendation |
 |---|---|
 | How is it stored? | A permanent `demo` test-workspace purpose. Keep `payroll_environment = "migration_rehearsal"` and keep the existing meaning of `live_payroll`. |
