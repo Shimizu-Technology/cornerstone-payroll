@@ -13,9 +13,19 @@ module EmployeeLinks
   # transaction; its return value is the outcome. A block that returns nil
   # counts as a generic failure without using up an attempt, because the
   # person proved who they are but the link can't be used this way.
+  #
+  # Only a link that could still be used counts failures: guesses against an
+  # expired, closed or switched-off invite write nothing, so a match there
+  # can't be told apart from a miss by how long the answer takes.
+  #
+  # lock_users: logins the caller will change, given the link as first read
+  # (unlocked). They are locked before the link (EmployeeLinks lock order);
+  # if the link's login changed in between, the check fails generically.
   class Verify
     ALERT_LOCKS = 3
     ALERT_WINDOW = 1.hour
+    # Advisory lock namespace for "lock alerts of one company".
+    ALERT_LOCK_NAMESPACE = 450_402
     DOB_PATTERN = /\A\d{4}-\d{2}-\d{2}\z/
     SSN4_PATTERN = /\A\d{4}\z/
     # Compared against when no link matches, so a miss does the same work.
@@ -25,12 +35,12 @@ module EmployeeLinks
       new(**options).call(&block)
     end
 
-    def initialize(token:, code:, date_of_birth:, ssn_last4:, request: nil)
-      @token = token
-      @code = code
+    def initialize(token:, code:, date_of_birth:, ssn_last4:, request: nil, lock_users: nil)
+      @credential = Credentials.select(token: token, code: code)
       @date_of_birth = date_of_birth
       @ssn_last4 = ssn_last4
       @request = request
+      @lock_users = lock_users
     end
 
     # Returns the block's outcome, or nil for every kind of failure.
@@ -44,7 +54,7 @@ module EmployeeLinks
 
       alert_company = nil
       outcome = ApplicationRecord.transaction do
-        link = EmployeeAccountLink.lock.find_by(lookup)
+        link = lock_link(lookup)
         unless link
           ActiveSupport::SecurityUtils.secure_compare(DUMMY_SECRET, supplied)
           next
@@ -63,7 +73,7 @@ module EmployeeLinks
           next result
         end
 
-        alert_company = record_failure!(link, now) if link.invited? && !link.activation_locked?(now) && !matched
+        alert_company = record_failure!(link, now) if usable && !matched
         nil
       end
       alert_staff!(alert_company) if alert_company
@@ -73,12 +83,21 @@ module EmployeeLinks
     private
 
     def lookup_attributes
-      if @token.is_a?(String) && @token.present? && @token.length <= 256
-        { invite_token_digest: EmployeeAccountLink.token_digest(@token) }
-      elsif @code.is_a?(String) && @code.present? && @code.length <= 64
-        normalized = EmployeeAccountLink.normalize_code(@code)
-        { invite_code_digest: EmployeeAccountLink.code_digest(normalized) } if normalized.length == EmployeeAccountLink::CODE_LENGTH
+      case @credential&.kind
+      when :token then { invite_token_digest: EmployeeAccountLink.token_digest(@credential.value) }
+      when :code then { invite_code_digest: EmployeeAccountLink.code_digest(@credential.value) }
       end
+    end
+
+    def lock_link(lookup)
+      return EmployeeAccountLink.lock.find_by(lookup) unless @lock_users
+
+      first_read = EmployeeAccountLink.find_by(lookup)
+      return unless first_read
+
+      EmployeeLinks.lock_users!(Array(@lock_users.call(first_read)).map(&:id))
+      link = EmployeeAccountLink.lock.find_by(lookup.merge(id: first_read.id))
+      link if link&.user_id == first_read.user_id
     end
 
     def supplied_secret
@@ -117,6 +136,13 @@ module EmployeeLinks
         metadata: { failed_attempts: attempts, locked_until: link.activation_locked_until&.iso8601 })
       return unless locking
 
+      PayrollTelemetry.log(:warn, "employee_links.activation_locked", company_id: link.company_id,
+        employee_account_link_id: link.id, request_id: @request&.request_id)
+      # One count at a time per company, each after the last one committed,
+      # so a burst of simultaneous locks still reaches the alert.
+      ApplicationRecord.connection.select_value(
+        ApplicationRecord.sanitize_sql_array([ "SELECT pg_advisory_xact_lock(?, ?)", ALERT_LOCK_NAMESPACE, Integer(link.company_id) ])
+      )
       recent = AuditLog.where(company_id: link.company_id, action: "employee_links#activation_locked")
         .where(created_at: (now - ALERT_WINDOW)..).count
       already_alerted = AuditLog.where(company_id: link.company_id, action: "employee_links#activation_lock_alert")
@@ -134,9 +160,11 @@ module EmployeeLinks
       link.company_id
     end
 
+    # Staff watch the error-level log events (M4 runbook, Alerts); the audit
+    # row stays the record. M4-9 shows it in the admin screens.
     def alert_staff!(company_id)
-      PayrollTelemetry.log(:warn, "employee_links.activation_lock_alert", company_id: company_id,
-        request_id: @request&.request_id)
+      PayrollTelemetry.log(:error, "employee_links.activation_lock_alert", company_id: company_id,
+        locks: ALERT_LOCKS, window_minutes: (ALERT_WINDOW / 60).to_i, request_id: @request&.request_id)
       Rails.error.report(StandardError.new("Employee app sign-up locks at company #{company_id}"),
         handled: true, severity: :warning, context: { company_id: company_id })
     end

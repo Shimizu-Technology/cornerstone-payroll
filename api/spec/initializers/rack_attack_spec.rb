@@ -223,6 +223,40 @@ RSpec.describe Rack::Attack do
       expect(post.call("/api/v1/employee/links/claim", { code: "", token: "" }, 11).status).to eq(400)
     end
 
+    it "keys the limit on the credential the check verifies: an overlong or blank token falls back to the code" do
+      post = ->(body, i) {
+        client.post("/api/v1/employee/activation", "REMOTE_ADDR" => "203.0.113.#{i + 1}",
+          "CONTENT_TYPE" => "application/json", input: body.to_json)
+      }
+      key = ->(body) {
+        env = Rack::MockRequest.env_for("/api/v1/employee/activation", method: :post, input: body.to_json,
+          "CONTENT_TYPE" => "application/json")
+        request = Rack::Attack::Request.new(env)
+        described_class.activation_payload_status(request)
+        request.env["payroll.activation_token_digest"]
+      }
+      code_only = key.call(code: "ACDEFGHJKM")
+      expect(key.call(code: "ACDEFGHJKM", token: "t" * 257)).to eq(code_only)
+      expect(key.call(code: "ACDEFGHJKM", token: "   ")).to eq(code_only)
+      expect(code_only).to eq(EmployeeLinks::Credentials.select(token: nil, code: "acdef-ghjkm").throttle_key)
+
+      5.times { |i| expect(post.call({ code: "ACDEFGHJKM", token: "x#{i}" * 200 }, i).status).to eq(200) }
+      expect(post.call({ code: "ACDEFGHJKM" }, 9).status).to eq(429)
+      # An overlong token with no usable code names no credential at all.
+      expect(post.call({ token: "t" * 257 }, 10).status).to eq(400)
+      expect(post.call({ code: "TOO-SHORT" }, 11).status).to eq(400)
+    end
+
+    it "refuses a check field in the query string so no layer reads a different credential" do
+      downstream = ->(_env) { raise "a conflicting credential reached the app" }
+      %w[token=other code=ACDEFGHJKM date_of_birth=1990-01-01 ssn_last4=1234].each do |query|
+        env = Rack::MockRequest.env_for("/api/v1/employee/activation?#{query}", method: :post,
+          input: { token: "body-token" }.to_json, "REMOTE_ADDR" => "203.0.113.1", "CONTENT_TYPE" => "application/json")
+        status, _headers, body = described_class.new(downstream).call(env)
+        expect([ status, JSON.parse(body.join) ]).to eq([ 400, { "error" => "Invalid activation request" } ])
+      end
+    end
+
     it "leaves the activation body intact for downstream handlers" do
       downstream = ->(env) { [ 200, { "content-type" => "application/json" }, [ env["rack.input"].read ] ] }
       payload = { token: "secret-activation-token" }.to_json
