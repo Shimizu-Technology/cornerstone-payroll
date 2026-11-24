@@ -7,6 +7,7 @@ class EmployeeAccountLink < ApplicationRecord
   belongs_to :invited_by, class_name: "User", optional: true
   belongs_to :revoked_by, class_name: "User", optional: true
   belongs_to :claim_user, class_name: "User", optional: true
+  belongs_to :sign_up_reset_requested_by, class_name: "User", optional: true
 
   INVITE_LIFETIME = 14.days
   MAX_FAILED_ATTEMPTS = 5
@@ -172,8 +173,14 @@ class EmployeeAccountLink < ApplicationRecord
   end
   private_class_method :code_digest_key
 
+  # A sign-up reset that hasn't finished (EmployeeLinks::ResetSignUp) keeps
+  # the invite closed: nothing started for it can bind or start again.
   def invite_open?(now = Time.current)
-    invited? && invite_expires_at.present? && invite_expires_at > now
+    invited? && !sign_up_reset_pending? && invite_expires_at.present? && invite_expires_at > now
+  end
+
+  def sign_up_reset_pending?
+    sign_up_reset_requested_at.present?
   end
 
   def activation_locked?(now = Time.current)
