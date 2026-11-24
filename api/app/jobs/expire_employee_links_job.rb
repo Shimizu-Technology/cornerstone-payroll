@@ -10,10 +10,10 @@ class ExpireEmployeeLinksJob < ApplicationJob
   queue_as :default
 
   def perform(now: Time.current)
-    EmployeeAccountLink.where(status: "invited").where(invite_expires_at: ..now).order(:id).find_each do |link|
+    EmployeeAccountLink.where(status: "invited").where(invite_expires_at: ..now).find_each do |link|
       close(link) { EmployeeLinks::Close.revoke!(link, reason: "invite_expired", now: now) }
     end
-    EmployeeAccountLink.where(status: "former").where(former_access_until: ..now).order(:id).find_each do |link|
+    EmployeeAccountLink.where(status: "former").where(former_access_until: ..now).find_each do |link|
       close(link) { EmployeeLinks::Close.revoke!(link, reason: "former_access_ended", now: now) }
     end
     deactivate_logins_without_access(now)
@@ -35,7 +35,7 @@ class ExpireEmployeeLinksJob < ApplicationJob
     eligible = EmployeeAccountLink.where(status: "active")
       .or(EmployeeAccountLink.where(status: "former").where("former_access_until > ?", now))
     User.portal_employee.active.where(invitation_status: "accepted").where.not(id: eligible.where.not(user_id: nil).select(:user_id))
-      .where(id: EmployeeAccountLink.where.not(user_id: nil).select(:user_id)).order(:id).find_each do |user|
+      .where(id: EmployeeAccountLink.where.not(user_id: nil).select(:user_id)).find_each do |user|
       ApplicationRecord.transaction do
         link = EmployeeAccountLink.where(user_id: user.id).order(:id).last
         EmployeeLinks::Close.deactivate_if_last!(user, closed_link: link, now: now)
