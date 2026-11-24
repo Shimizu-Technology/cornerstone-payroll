@@ -47,7 +47,7 @@ namespace :clerk do
       end
     end
 
-    desc "Build clerk migrate import JSON from reviewed INVENTORY and Clerk EXPORT using external_id = dev clerk_id (writes OUTPUT=... only when WRITE=true)"
+    desc "Build the file for `npx clerk@4.3.0 migrate import <file> --source clerk` from reviewed INVENTORY and Clerk Dashboard EXPORT; id = dev clerk_id (writes OUTPUT=... only when WRITE=true)"
     task build_import: :environment do
       inventory_path = ENV["INVENTORY"].presence || abort("INVENTORY=/path/to/reviewed_inventory.json is required")
       export_path = ENV["EXPORT"].presence || abort("EXPORT=/path/to/clerk_export.csv is required")
