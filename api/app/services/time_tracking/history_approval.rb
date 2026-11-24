@@ -143,6 +143,9 @@ module TimeTracking
           connection.execute("SET LOCAL lock_timeout = '5s'")
           connection.execute("SET LOCAL statement_timeout = '20s'")
           @company.lock!("FOR SHARE")
+          # Placeholder marks can't change until this approval commits; the
+          # locked refresh below reads them.
+          EmployeePlaceholderEmail.lock_organization!(@company.organization_id, shared: true)
           # Lock only the exact committed evidence runs, never unrelated payroll
           # items. Match the publisher's run-before-source lock order.
           ids = review.snapshot.fetch("local").fetch("runs").keys
@@ -180,6 +183,8 @@ module TimeTracking
       @employees = @company.employees.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes).order(:id).to_a
       @saved_mappings = @source.time_tracking_employee_mappings.order(:id).to_a
       @saved_mapping_fingerprint = checksum(@saved_mappings.map(&:attributes))
+      # A placeholder marked after capture must not slip past the approval locks.
+      @marked_placeholders = nil
     end
 
     def validate_context!
@@ -331,7 +336,9 @@ module TimeTracking
         confirmed = saved&.source_user_uuid.present?
         exact = @employees.select { |employee| exact_name(employee.full_name) == exact_name(remote["full_name"]) &&
           (employee.email.blank? || remote["email"].blank? || employee.email.casecmp?(remote["email"])) }
-        chosen_id = selected[uuid]&.fetch("employee_id", nil) || saved&.employee_id || (exact.one? && exact.sole.id)
+        # A shared or placeholder AIRE address is no evidence, so a person confirms the match.
+        auto_match = exact.one? && !unmatchable_email?(remote["email"])
+        chosen_id = selected[uuid]&.fetch("employee_id", nil) || saved&.employee_id || (auto_match && exact.sole.id)
         employee = @employees.find { |record| record.id == chosen_id.to_s.to_i }
         conflict = @saved_mappings.any? { |mapping| (mapping.source_user_id == remote["id"] || mapping.employee_id == employee&.id) && mapping != saved }
         if !employee || conflict || (saved && (saved.employee_id != employee.id || saved.source_user_id != remote["id"]))
@@ -345,13 +352,28 @@ module TimeTracking
         end
         rows << { "source_user_uuid" => uuid, "source_user_id" => remote["id"], "source_name" => remote["full_name"],
           "employee_id" => employee&.id, "employee_name" => employee&.full_name,
-          "existing" => !!confirmed, "confirmation_required" => !confirmed && (!exact.one? || exact.sole.id != employee&.id),
+          "existing" => !!confirmed, "confirmation_required" => !confirmed && (!auto_match || exact.sole.id != employee&.id),
           "options" => @employees.map { |record| { "id" => record.id, "name" => record.full_name } } }
       end
       if planned.map(&:employee_id).uniq.length != planned.length
         blockers << "Two AIRE people cannot share one Payroll employee"
       end
       [ planned, rows, blockers ]
+    end
+
+    # A placeholder, or an address more than one active employee uses, says
+    # nothing about who an AIRE person is.
+    def unmatchable_email?(raw)
+      email = EmployeeContactValidator.normalize_email(raw)
+      return false if email.blank?
+
+      return true if EmployeeContactValidator.unmatchable_placeholder_email?(email, marked_placeholders: marked_placeholders)
+
+      @employees.count { |employee| employee.active? && EmployeeContactValidator.normalize_email(employee.email) == email } > 1
+    end
+
+    def marked_placeholders
+      @marked_placeholders ||= EmployeeContactValidator.marked_placeholder_emails(organization_id: @company.organization_id)
     end
 
     def exact_component_bindings(blockers)
@@ -448,6 +470,7 @@ module TimeTracking
         "category_configuration" => checksum(TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).map(&:attributes)),
         "company" => checksum(@company.attributes),
         "mappings" => @saved_mapping_fingerprint,
+        "placeholder_emails" => checksum(marked_placeholders.to_a.sort),
         "employees" => checksum(@employees.map { |employee| employee_fingerprint(employee) }),
         "runs" => @company.pay_periods.where(id: run_ids).order(:id).to_h do |run|
           items = run.payroll_items.includes(:payroll_item_earnings).order(:id)

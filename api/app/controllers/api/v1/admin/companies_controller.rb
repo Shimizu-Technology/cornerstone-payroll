@@ -239,12 +239,16 @@ module Api
         # POST /api/v1/admin/companies/:id/migration_promotion
         def apply_migration_promotion
           rehearsal = accessible_company!
-          periods = MigrationPromotion::Apply.new(
+          apply_args = {
             rehearsal: rehearsal,
             actor: current_user,
             acknowledgement: params[:acknowledgement],
             payment_dispositions: payment_disposition_params
-          ).call
+          }
+          if params[:replace_contact_employee_ids].present?
+            apply_args[:replace_contact_employee_ids] = Array(params[:replace_contact_employee_ids])
+          end
+          periods = MigrationPromotion::Apply.new(**apply_args).call
           render json: {
             company: company_payload(rehearsal.migration_source_company.reload, detailed: true),
             promoted_pay_period_ids: periods.map(&:id)

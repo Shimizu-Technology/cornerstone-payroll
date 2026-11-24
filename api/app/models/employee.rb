@@ -10,6 +10,7 @@ class Employee < ApplicationRecord
   attr_accessor :ssn_confirmation, :require_ssn_confirmation, :allow_tax_classification_change
 
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
+  CONTACT_SOURCES = %w[client staff employee import].freeze
   CONFIGURATION_REVIEW_STATUSES = %w[complete needs_review].freeze
   CONFIGURATION_SOURCES = %w[quickbooks_history].freeze
   SALARY_TYPES = %w[annual per_period variable].freeze
@@ -132,6 +133,7 @@ class Employee < ApplicationRecord
   validate :valid_supplied_intake_dates
   before_update :invalidate_intake_payroll_confirmation
   before_update :guard_compensation_mutation
+  before_save :clear_verification_on_contact_change
   after_create :record_initial_compensation_history, unless: :skip_initial_compensation_history
   before_validation :normalize_w4_source_reference
   before_validation :normalize_intake_blank_details
@@ -161,6 +163,7 @@ class Employee < ApplicationRecord
   validates :employment_type, inclusion: { in: EMPLOYMENT_TYPES }
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   validates :status, inclusion: { in: %w[active inactive terminated] }
+  validates :contact_source, inclusion: { in: CONTACT_SOURCES }, allow_nil: true
   validates :payment_delivery_method, inclusion: { in: PAYMENT_DELIVERY_METHODS }, allow_nil: true
   validates :configuration_review_status, inclusion: { in: CONFIGURATION_REVIEW_STATUSES }
   validates :configuration_source, inclusion: { in: CONFIGURATION_SOURCES }, allow_nil: true
@@ -205,6 +208,22 @@ class Employee < ApplicationRecord
   }
 
   scope :active, -> { where(status: "active") }
+
+  def contact_revision
+    updated_at&.iso8601(6)
+  end
+  scope :needs_contact_details, ->(flagged_emails: []) {
+    v = EmployeeContactValidator
+    email = v.normalized_email_node(arel_table[:email])
+    email_part = ->(index) { Arel::Nodes::NamedFunction.new("SPLIT_PART", [ email, Arel::Nodes.build_quoted("@"), Arel::Nodes.build_quoted(index) ]) }
+    # Whitespace-only fields (tabs and newlines too) count as missing.
+    clauses = %i[email phone address_line1 city state zip].map { |field| v.blank_node(arel_table[field]) }
+    clauses << email_part.call(1).in(v::PLACEHOLDER_LOCAL_PARTS.to_a)
+    clauses << email_part.call(2).in(v::PLACEHOLDER_DOMAINS.to_a)
+    normalized_flagged = Array(flagged_emails).filter_map { |flagged| v.normalize_email(flagged) }.uniq
+    clauses << email.in(normalized_flagged) if normalized_flagged.any?
+    where(clauses.reduce { |combined, clause| combined.or(clause) })
+  }
   scope :hourly, -> { where(employment_type: "hourly") }
   scope :salary, -> { where(employment_type: "salary") }
   scope :contractor, -> { where(employment_type: "contractor") }
@@ -798,6 +817,28 @@ class Employee < ApplicationRecord
     return if intake_exception.blank? || will_save_change_to_intake_payroll_confirmed_at?
     sensitive = %w[employment_type salary_type contractor_type contractor_pay_type pay_rate pay_frequency hire_date ssn_encrypted contractor_ein] + EmployeeW4Election::PROFILE_ATTRIBUTES.map(&:to_s)
     self.intake_payroll_confirmed_at = nil if (changes_to_save.keys & sensitive).any?
+  end
+
+  def clear_verification_on_contact_change
+    if email.blank?
+      self.email_verified_at = nil
+    elsif will_save_change_to_email? && !will_save_change_to_email_verified_at?
+      old_email, new_email = changes_to_save["email"]
+      if EmployeeContactValidator.normalize_email(old_email) != EmployeeContactValidator.normalize_email(new_email)
+        self.email_verified_at = nil
+      end
+    end
+
+    if phone.blank?
+      self.phone_confirmed_by_employee_at = nil
+    elsif will_save_change_to_phone? && !will_save_change_to_phone_confirmed_by_employee_at?
+      old_phone, new_phone = changes_to_save["phone"]
+      normalized_old, = EmployeeContactValidator.normalize_phone(old_phone)
+      normalized_new, new_error = EmployeeContactValidator.normalize_phone(new_phone)
+      if new_error.present? || (normalized_old || old_phone.to_s.strip.presence) != normalized_new
+        self.phone_confirmed_by_employee_at = nil
+      end
+    end
   end
 
   def configuration_review_allows_blank?(field)
