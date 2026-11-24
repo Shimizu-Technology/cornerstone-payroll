@@ -31,6 +31,23 @@ module EmployeeLinks
     )
   end
 
+  # sign_up: a new account; claim: sign in with an existing login;
+  # reactivate: sign in again to a login that closed with an earlier link.
+  def self.invite_path(claim_user)
+    return "sign_up" unless claim_user
+
+    claim_user.active? ? "claim" : "reactivate"
+  end
+
+  # Link changes made as a side effect of another action (a termination, a
+  # status change) are audited without suppressing that action's own audit.
+  def self.side_effect_audit
+    previous = Current.domain_audit_recorded
+    yield
+  ensure
+    Current.domain_audit_recorded = previous
+  end
+
   def self.verifier_actor
     AuditActor.system_job("Employee app sign-up check")
   end

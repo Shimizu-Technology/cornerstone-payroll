@@ -70,6 +70,33 @@ class ClerkInvitationService
     }
   end
 
+  # Ends every active Clerk session for a user (D12). Returns
+  # { success:, revoked: } and never raises for a Clerk or network failure.
+  def revoke_user_sessions(subject)
+    return { success: false, error: "Invalid Clerk user ID" } unless subject.is_a?(String) && SUBJECT_PATTERN.match?(subject)
+    if StagingOutboundPolicy.staging? && !StagingOutboundPolicy.bindings.value?(subject)
+      raise StagingOutboundPolicy::Blocked, "Staging Clerk session revocation is limited to bound testers"
+    end
+    return { success: false, error: "CLERK_SECRET_KEY not configured" } unless configured?
+
+    sessions = get_json("/sessions?#{URI.encode_www_form(user_id: subject, status: 'active', limit: 100)}")
+    sessions = sessions["data"] if sessions.is_a?(Hash)
+    return { success: false, error: "Could not list Clerk sessions" } unless sessions.is_a?(Array)
+
+    revoked = 0
+    sessions.each do |session|
+      next unless session.is_a?(Hash) && session["id"].to_s.match?(/\Asess_[a-zA-Z0-9_-]+\z/)
+
+      response = post_json("/sessions/#{session['id']}/revoke", {})
+      return { success: false, error: "Clerk refused a session revocation", revoked: revoked } unless response.is_a?(Net::HTTPSuccess)
+
+      revoked += 1
+    end
+    { success: true, revoked: revoked }
+  rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
+    { success: false, error: e.class.name }
+  end
+
   def invitation_status(invitation_id)
     return if invitation_id.blank?
 

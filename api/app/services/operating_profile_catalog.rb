@@ -414,11 +414,11 @@ class OperatingProfileCatalog
       section: "employee_portal",
       storage: :option,
       type: "integer",
-      default: 6,
+      default: 2,
       allowed: { min: FORMER_ACCESS_YEARS_RANGE.min, max: FORMER_ACCESS_YEARS_RANGE.max }.freeze,
       capability: :manage_client_administration,
       what: "Number of years after termination that a former employee retains read-only access to pay stubs and tax forms.",
-      example: "6 years by default to align with payroll retention expectations.",
+      example: "2 years by default (Leon, November 24, 2026); any value from 1 to 10.",
       effect: "Sets former_access_until when an employee link transitions to former status.",
       requires: [ "employee_portal_enabled" ].freeze
     ),

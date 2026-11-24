@@ -12,6 +12,21 @@ RSpec.describe ClerkInvitationService do
     ENV["CLERK_SECRET_KEY"] = previous
   end
 
+  it "revokes each active Clerk session for a user and reports a refused revocation" do
+    stub_request(:get, "https://api.clerk.com/v1/sessions")
+      .with(query: { user_id: "user_closed", status: "active", limit: "100" })
+      .to_return(status: 200, body: [ { id: "sess_one" }, { id: "sess_two" }, { id: "not-a-session" } ].to_json)
+    one = stub_request(:post, "https://api.clerk.com/v1/sessions/sess_one/revoke").to_return(status: 200, body: "{}")
+    two = stub_request(:post, "https://api.clerk.com/v1/sessions/sess_two/revoke").to_return(status: 200, body: "{}")
+
+    expect(described_class.new.revoke_user_sessions("user_closed")).to eq(success: true, revoked: 2)
+    expect([ one, two ]).to all(have_been_requested.once)
+
+    stub_request(:post, "https://api.clerk.com/v1/sessions/sess_two/revoke").to_return(status: 500, body: "{}")
+    expect(described_class.new.revoke_user_sessions("user_closed")).to include(success: false, revoked: 1)
+    expect(described_class.new.revoke_user_sessions("../users")).to include(success: false)
+  end
+
   it "reads the exact invitation ID from Clerk's list endpoint" do
     stub_request(:get, "https://api.clerk.com/v1/invitations")
       .with(query: { query: "inv_exact", limit: "10" }, headers: { "Authorization" => "Bearer sk_test_synthetic" })
