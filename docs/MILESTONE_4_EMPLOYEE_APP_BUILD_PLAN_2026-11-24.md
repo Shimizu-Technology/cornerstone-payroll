@@ -487,7 +487,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   - stubs, QuickBooks history, and the W-2 copy once posted;
   - a contact change, and an address request approved by Sara or Mo;
   - the rollout page and contact entry.
-- **The rollout runbook:**
+- **The rollout runbook.** Each step starts only when its gates in §3 ("Order of the gates") are met: Emma after G3–G6, G9, G8a, G2 and G1 or a cleared carve-out; wave 1 after all nine gates and G7.
   1. turn on for MoSa's;
   2. invite Emma, Sara and Mo to the client portal (if not already done);
   3. Emma (wave 0);
