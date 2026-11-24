@@ -7,9 +7,18 @@ module Api
       # login, reachable before any session exists. The body carries a token
       # or a one-time code, date of birth, SSN last 4, and the email to sign
       # up with. Rate limited in config/initializers/rack_attack.rb.
+      #
+      # Starting an account and being sent to sign in get the same status and
+      # the same fields. Telling them apart still needs a valid invite secret
+      # plus DOB and SSN-4, under the lockout and per-invite limits; that
+      # remaining "this address has a login" signal is an accepted residual
+      # (M4-2 plan).
       class ActivationsController < ActionController::API
         include EmployeePortalRequestContext
+        include EmployeeLinkCheckParams
         include CompanyRlsScoped
+
+        before_action :reject_query_credentials!
 
         FAILED = "We couldn't verify those details. Check them and try again, or ask your manager for a new invite."
         SIGN_IN = "We couldn't start a new account with that email. If you already have an account, sign in and " \
@@ -20,14 +29,15 @@ module Api
           response.headers["Cache-Control"] = "no-store"
           return render_unavailable if WriteMaintenance.enabled?
 
+          link_check_started!
           result = EmployeeLinks::Activate.call(
-            token: params[:token], code: params[:code], date_of_birth: params[:date_of_birth],
-            ssn_last4: params[:ssn_last4], email: params[:email], use_for_notices: params[:use_for_notices],
+            **link_check_params, email: link_body_param(:email), use_for_notices: link_body_param(:use_for_notices),
             request: request
           )
+          wait_for_response_floor unless result.outcome == :sign_up
           case result.outcome
-          when :sign_up then render json: { next: "sign_up", sign_up_url: result.url }, status: :created
-          when :sign_in then render json: { next: "sign_in", message: SIGN_IN }
+          when :sign_up then render json: { next: "sign_up", sign_up_url: result.url, message: nil }
+          when :sign_in then render json: { next: "sign_in", sign_up_url: nil, message: SIGN_IN }
           when :unavailable then render_unavailable
           else render json: { error: FAILED, code: "activation_failed" }, status: :unprocessable_content
           end
