@@ -30,13 +30,6 @@ module EmployeeContactHygiene
       normalized_email = EmployeeContactValidator.normalize_email(@raw_email)
       raise Error, "Email address is required" if normalized_email.blank?
 
-      # Uses the exact same placeholder classification as SharedEmailReport and
-      # EmployeeContactValidator. Unmarked duplicates (e.g., family emails) can
-      # never be bulk-cleared until staff explicitly mark them as a placeholder.
-      unless EmployeeContactValidator.placeholder_email?(normalized_email, organization_id: @company.organization_id)
-        raise Error, "Only marked or structural placeholder email addresses can be cleared in bulk. Mark this address as a placeholder first."
-      end
-
       result = nil
       now = Time.current
 
@@ -50,7 +43,8 @@ module EmployeeContactHygiene
           .lock
           .to_a
 
-        # Retries after a successful clear return a 200 no-op with zero audit rows.
+        # Retries after a successful clear return a 200 no-op with zero audit rows,
+        # even if the placeholder mark was later removed.
         if matching.empty?
           result = Result.new(
             company_id: @company.id,
@@ -62,6 +56,12 @@ module EmployeeContactHygiene
             employee_ids: []
           )
           next
+        end
+
+        # Only explicitly marked or configured placeholder addresses can be bulk-cleared.
+        # Unmarked duplicates and structural patterns require explicit marking first.
+        unless EmployeeContactValidator.placeholder_email?(normalized_email, organization_id: @company.organization_id)
+          raise Error, "Only marked or configured placeholder email addresses can be cleared in bulk. Mark this address as a placeholder first."
         end
 
         cleared_ids = matching.map(&:id)

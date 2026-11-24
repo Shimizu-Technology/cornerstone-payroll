@@ -58,7 +58,9 @@ module EmployeeContactHygiene
         is_db_marked = db_marked_placeholders.include?(email)
         is_configured = configured_placeholders.include?(email)
         is_structural = EmployeeContactValidator.structural_placeholder_email?(email)
-        clearable = is_db_marked || is_configured || is_structural
+        # Only explicitly marked or configured addresses may be bulk-cleared.
+        # Structural address patterns surface as candidates to review and mark.
+        clearable = is_db_marked || is_configured
 
         reasons = reasons_for(
           company_count: total,
@@ -108,6 +110,7 @@ module EmployeeContactHygiene
           total_employee_records: total_employee_records,
           active_employee_records: active_employee_records
         },
+        can_manage_placeholders: StaffRolePolicy.allowed?(@actor, :manage_organization),
         marked_placeholders: marked_placeholders.to_a.sort,
         companies: company_entries
       }
@@ -123,6 +126,7 @@ module EmployeeContactHygiene
           total_employee_records: 0,
           active_employee_records: 0
         },
+        can_manage_placeholders: StaffRolePolicy.allowed?(@actor, :manage_organization),
         marked_placeholders: [],
         companies: []
       }

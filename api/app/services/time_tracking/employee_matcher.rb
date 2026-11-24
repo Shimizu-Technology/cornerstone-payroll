@@ -5,9 +5,10 @@ module TimeTracking
     THRESHOLD = 0.6
     MAX_FUZZY_CANDIDATES = 100
 
-    def initialize(company:, source:)
+    def initialize(company:, source:, marked_placeholders: nil)
       @company = company
       @source = source
+      @marked_placeholders = marked_placeholders
       @employee_scope = Employee.active.where(company_id: company.id)
       mapping_scope = TimeTrackingEmployeeMapping.includes(:employee).where(company: company, time_tracking_source: source)
       @mappings_by_source_id = mapping_scope.index_by(&:source_user_id)
@@ -34,7 +35,7 @@ module TimeTracking
       return matched(existing.employee, "saved_mapping", 1.0) if existing&.employee&.active?
 
       email = source_employee["email"].to_s.downcase.strip
-      if email.present? && !EmployeeContactValidator.placeholder_email?(email, organization_id: @company&.organization_id)
+      if email.present? && !EmployeeContactValidator.unmatchable_placeholder_email?(email, marked_placeholders: marked_placeholders)
         email_matches = @employee_scope.where("LOWER(TRIM(email)) = ?", email).limit(2).to_a
         return suggested(email_matches.first, "email", 1.0) if email_matches.one?
       end
@@ -56,6 +57,10 @@ module TimeTracking
     end
 
     private
+
+    def marked_placeholders
+      @marked_placeholders ||= EmployeeContactValidator.marked_placeholder_emails(organization_id: @company&.organization_id)
+    end
 
     def fuzzy_candidates(name)
       tokens = normalize(name).split.uniq

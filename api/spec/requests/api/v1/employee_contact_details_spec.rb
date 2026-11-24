@@ -172,6 +172,91 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
       expect(response.parsed_body.dig("details", "email").first).to match(/already linked to another employee/i)
       expect(missing_contact_employee.reload.email).to be_nil
     end
+
+    it "audits blocked login email rejections and rate-limits repeated probing per user" do
+      Rack::Attack.cache.store.clear
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(client_user)
+
+      expect do
+        patch "/api/v1/client/employees/#{missing_contact_employee.id}",
+              headers: { "X-Company-Id" => company.id.to_s },
+              params: { employee: { email: other_tenant_user.email } }
+      end.to change { AuditLog.where(action: "employees#login_email_rejected", event_category: "security").count }.by(1)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "email")).to eq([ EmployeeContactValidator::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
+
+      audit = AuditLog.where(action: "employees#login_email_rejected").newest_first.first
+      expect(audit.user_id).to eq(client_user.id)
+      expect(audit.metadata).to include("rejection_reason" => "other_user_login", "attempted_email_domain" => "example.com")
+
+      # Hit the per-user rejection threshold -> subsequent probes return 429 even for unused emails.
+      (EmployeeContactLoginRejectionGuard::LOGIN_EMAIL_REJECTION_LIMIT - 1).times do
+        patch "/api/v1/client/employees/#{missing_contact_employee.id}",
+              headers: { "X-Company-Id" => company.id.to_s },
+              params: { employee: { email: other_tenant_user.email } }
+        expect(response).to have_http_status(:unprocessable_entity)
+      end
+
+      # Now on cooldown: even an unused email returns 429 with Retry-After so probing stops.
+      patch "/api/v1/client/employees/#{missing_contact_employee.id}",
+            headers: { "X-Company-Id" => company.id.to_s },
+            params: { employee: { email: "brand.new.unused@example.com" } }
+      expect(response).to have_http_status(:too_many_requests)
+      expect(response.headers["Retry-After"]).to be_present
+      expect(response.parsed_body["code"]).to eq("contact_email_rate_limited")
+    ensure
+      Rack::Attack.cache.store.clear
+    end
+
+    it "forwards confirm_same_person_email on bulk import apply_json with the same authorization and audit rules as create" do
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
+      row_payload = {
+        first_name: "Emma",
+        last_name: "Pleadwell",
+        email: client_user.email,
+        employment_type: "hourly",
+        pay_rate: "15.00",
+        pay_frequency: "biweekly",
+        hire_date: "2026-01-01",
+        w4_effective_on: "2026-01-01",
+        address_line1: "123 Marine Corps Dr",
+        city: "Hagatna",
+        state: "GU",
+        zip: "96910",
+        ssn: "123-45-6789"
+      }
+
+      # Without confirmation, import rejects the row.
+      post "/api/v1/admin/employee_bulk_imports/apply_json",
+           headers: { "X-Company-Id" => company.id.to_s },
+           params: { employees: [ row_payload ] }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body["created"]).to eq(0)
+      expect(response.parsed_body["failed"]).to eq(1)
+
+      # With confirm_same_person_email: true, authorized admin succeeds and writes confirmation audit.
+      expect do
+        post "/api/v1/admin/employee_bulk_imports/apply_json",
+             headers: { "X-Company-Id" => company.id.to_s },
+             params: { employees: [ row_payload.merge(confirm_same_person_email: true) ] }
+      end.to change { AuditLog.where(action: "employees#confirm_same_person_email").count }.by(1)
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body["created"]).to eq(1)
+      expect(response.parsed_body["failed"]).to eq(0)
+
+      # Accountant without manage_client_configuration still cannot confirm another person's login via import.
+      accountant = create(:user, company: company, organization: organization, role: "accountant", email: "import-acct@example.com")
+      CompanyAssignment.create!(user: accountant, company: company, client_management: false)
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(accountant)
+
+      post "/api/v1/admin/employee_bulk_imports/apply_json",
+           headers: { "X-Company-Id" => company.id.to_s },
+           params: { employees: [ row_payload.merge(first_name: "Other", email: other_client_user.email, confirm_same_person_email: true) ] }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body["created"]).to eq(0)
+      expect(response.parsed_body["failed"]).to eq(1)
+    end
   end
 
   describe "partial saves, verification clearing, and stale row revision 409 conflicts" do
@@ -283,6 +368,44 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
       history = RecordActivityQuery.new(record_type: "employees", record_id: complete_employee.id, company_id: company.id).call
       latest = history.newest_first.first
       expect(latest.metadata["changed_fields"]).to include("email", "phone", "contact_source", "email_verified_at")
+    end
+
+    it "preserves verification timestamps when admin or client submits reformatted but unchanged email and phone" do
+      complete_employee.update_columns(contact_source: "employee")
+      original_email_verified_at = complete_employee.email_verified_at
+      original_phone_confirmed_at = complete_employee.phone_confirmed_by_employee_at
+
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
+      patch "/api/v1/admin/employees/#{complete_employee.id}",
+            headers: { "X-Company-Id" => company.id.to_s },
+            params: {
+              employee: {
+                email: "  Complete.Worker@Example.COM  ",
+                phone: "+1 (671) 555-0101"
+              }
+            }
+      expect(response).to have_http_status(:ok), response.body
+      complete_employee.reload
+      expect(complete_employee.email).to eq("complete.worker@example.com")
+      expect(complete_employee.phone).to eq("+16715550101")
+      expect(complete_employee.email_verified_at).to be_within(1.second).of(original_email_verified_at)
+      expect(complete_employee.phone_confirmed_by_employee_at).to be_within(1.second).of(original_phone_confirmed_at)
+      expect(complete_employee.contact_source).to eq("employee")
+
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(client_user)
+      patch "/api/v1/client/employees/#{complete_employee.id}",
+            headers: { "X-Company-Id" => company.id.to_s },
+            params: {
+              employee: {
+                email: "COMPLETE.WORKER@EXAMPLE.COM",
+                phone: "555-0101"
+              }
+            }
+      expect(response).to have_http_status(:ok), response.body
+      complete_employee.reload
+      expect(complete_employee.email_verified_at).to be_within(1.second).of(original_email_verified_at)
+      expect(complete_employee.phone_confirmed_by_employee_at).to be_within(1.second).of(original_phone_confirmed_at)
+      expect(complete_employee.contact_source).to eq("employee")
     end
 
     it "supports search by email and AuditRecordSnapshot.subject_name fallback safely" do

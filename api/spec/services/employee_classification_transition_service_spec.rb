@@ -155,9 +155,16 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     )
   end
 
-  it "blocks transition when copied email is a placeholder unless staff supplies a valid replacement" do
+  it "blocks transition when copied email is an explicitly marked placeholder unless staff supplies a valid replacement, while warning on unmarked structural patterns" do
     contractor.update_columns(email: "noemail@example.com")
 
+    # Unmarked structural pattern warns without blocking.
+    unmarked_result = EmployeeContactValidator.call(employee: contractor, company: company, email: "noemail@example.com")
+    expect(unmarked_result).to be_valid
+    expect(unmarked_result.warnings.map { |w| w[:code] }).to include("placeholder_email_pattern")
+
+    # Explicitly marked placeholder blocks transition until replaced.
+    EmployeePlaceholderEmail.create!(organization: company.organization, email: "noemail@example.com")
     expect {
       described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
     }.to raise_error(EmployeeContactValidator::ValidationError)

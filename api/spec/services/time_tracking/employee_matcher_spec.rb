@@ -143,5 +143,21 @@ RSpec.describe TimeTracking::EmployeeMatcher do
         suggestion_method: "name"
       )
     end
+
+    it "loads organization marked placeholders at most once per matcher instance across multiple rows" do
+      company = create(:company)
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      EmployeePlaceholderEmail.create!(organization: company.organization, email: "shared-desk@example.com")
+      create(:employee, company: company, first_name: "One", last_name: "Worker", email: "one@example.com")
+      create(:employee, company: company, first_name: "Two", last_name: "Worker", email: "two@example.com")
+
+      expect(EmployeeContactValidator).to receive(:db_marked_placeholder_emails)
+        .with(company.organization_id).once.and_call_original
+
+      matcher = described_class.new(company: company, source: source)
+      matcher.match("source_user_id" => "s1", "email" => "one@example.com", "display_name" => "One Worker")
+      matcher.match("source_user_id" => "s2", "email" => "shared-desk@example.com", "display_name" => "Two Worker")
+      matcher.match("source_user_id" => "s3", "email" => "two@example.com", "display_name" => "Two Worker")
+    end
   end
 end

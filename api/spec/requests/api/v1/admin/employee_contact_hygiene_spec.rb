@@ -77,9 +77,11 @@ RSpec.describe "Admin Employee Contact Hygiene", type: :request do
       placeholder_entry = company_a_entry["emails"].find { |e| e["email"] == "noemail@example.com" }
       expect(placeholder_entry).to include(
         "total_count" => 1,
-        "classification" => "placeholder",
-        "clearable" => true
+        "classification" => "shared",
+        "clearable" => false,
+        "marked_placeholder" => false
       )
+      expect(placeholder_entry["reasons"]).to include("placeholder_pattern")
 
       # Never leaks unique personal emails, other orgs, or employee names/phones.
       expect(response.body).not_to include("unique.person@example.com", "ActiveA0", "External Co", "+16715550199")
@@ -187,11 +189,48 @@ RSpec.describe "Admin Employee Contact Hygiene", type: :request do
       end.to change(EmployeePlaceholderEmail, :count).by(-1)
         .and change { AuditLog.where(action: "employee_contact_hygiene#unmark_placeholder_email").count }.by(1)
       expect(response).to have_http_status(:ok)
+
+      # Retrying a clear AFTER unmarking when nothing is left still returns 200 with 0 rows and no duplicate audit.
+      expect do
+        post "/api/v1/admin/employee_contact_hygiene/clear_shared_emails",
+             headers: { "X-Company-Id" => company_a.id.to_s },
+             params: { company_id: company_a.id, email: "shared-inbox@example.com" }
+      end.not_to change(AuditLog, :count)
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body["data"]).to include("cleared_count" => 0, "active_cleared_count" => 0, "inactive_cleared_count" => 0)
     end
 
-    it "allows managers on assigned companies to clear structural placeholders and rejects unassigned companies" do
-      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(manager_user)
+    it "requires explicit marking before bulk-clearing structural patterns and restricts mark/unmark to org admins on live companies" do
+      # Company-scoped delegated accountant and manager cannot mark or unmark the organization-wide list.
+      [ delegated_accountant, manager_user ].each do |staff|
+        allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(staff)
 
+        post "/api/v1/admin/employee_contact_hygiene/placeholder_emails",
+             headers: { "X-Company-Id" => company_a.id.to_s },
+             params: { email: "noemail@example.com" }
+        expect(response).to have_http_status(:forbidden), "expected 403 for #{staff.role} mark"
+
+        delete "/api/v1/admin/employee_contact_hygiene/placeholder_emails",
+               headers: { "X-Company-Id" => company_a.id.to_s },
+               params: { email: "noemail@example.com" }
+        expect(response).to have_http_status(:forbidden), "expected 403 for #{staff.role} unmark"
+      end
+
+      # Structural pattern cannot be bulk-cleared until explicitly marked.
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(manager_user)
+      post "/api/v1/admin/employee_contact_hygiene/clear_shared_emails",
+           headers: { "X-Company-Id" => company_a.id.to_s },
+           params: { company_id: company_a.id, email: "noemail@example.com" }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      # Org admin marks it on a live company, then manager can bulk-clear only assigned company_a (not unassigned company_b).
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
+      post "/api/v1/admin/employee_contact_hygiene/placeholder_emails",
+           headers: { "X-Company-Id" => company_a.id.to_s },
+           params: { email: "noemail@example.com" }
+      expect(response).to have_http_status(:ok)
+
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(manager_user)
       post "/api/v1/admin/employee_contact_hygiene/clear_shared_emails",
            headers: { "X-Company-Id" => company_a.id.to_s },
            params: { company_id: company_b.id, email: "noemail@example.com" }
@@ -201,6 +240,34 @@ RSpec.describe "Admin Employee Contact Hygiene", type: :request do
            headers: { "X-Company-Id" => company_a.id.to_s },
            params: { company_id: company_a.id, email: "noemail@example.com" }
       expect(response).to have_http_status(:ok)
+    end
+
+    it "rejects mark and unmark when the selected company is a test workspace" do
+      test_workspace = create(
+        :company,
+        organization: organization,
+        name: "MoSa Test Copy",
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "sandbox",
+        migration_source_company: company_a,
+        migration_rehearsal_status: "ready"
+      )
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
+
+      expect do
+        post "/api/v1/admin/employee_contact_hygiene/placeholder_emails",
+             headers: { "X-Company-Id" => test_workspace.id.to_s },
+             params: { email: "shared-inbox@example.com" }
+      end.not_to change(EmployeePlaceholderEmail, :count)
+      expect(response).to have_http_status(:forbidden)
+
+      EmployeePlaceholderEmail.create!(organization: organization, email: "shared-inbox@example.com")
+      expect do
+        delete "/api/v1/admin/employee_contact_hygiene/placeholder_emails",
+               headers: { "X-Company-Id" => test_workspace.id.to_s },
+               params: { email: "shared-inbox@example.com" }
+      end.not_to change(EmployeePlaceholderEmail, :count)
+      expect(response).to have_http_status(:forbidden)
     end
   end
 end

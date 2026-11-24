@@ -74,4 +74,12 @@ RSpec.describe ClientProfitability::LinkQueue do
     option_ids = result[:employees].map { |option| option[:id] }
     expect(option_ids).to include(inactive_only_staff.id, inactive_prior.id)
   end
+
+  it "loads organization marked placeholders at most once across all staff rows" do
+    EmployeePlaceholderEmail.create!(organization: organization, email: "shared-office@example.com")
+    expect(EmployeeContactValidator).to receive(:db_marked_placeholder_emails)
+      .with(organization.id).once.and_call_original
+
+    described_class.new(organization: organization, settings: settings).call
+  end
 end

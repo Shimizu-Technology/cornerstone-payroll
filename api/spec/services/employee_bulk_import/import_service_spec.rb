@@ -74,13 +74,15 @@ RSpec.describe EmployeeBulkImport::ImportService, type: :service do
     )
   end
 
-  it "runs shared contact validation, normalizes Guam phones, warns on coworker emails, and rejects placeholders" do
+  it "runs shared contact validation, normalizes Guam phones, warns on coworker/structural emails, and rejects marked placeholders" do
     company = create(:company)
+    EmployeePlaceholderEmail.create!(organization: company.organization, email: "marked-placeholder@example.com")
     create(:employee, company: company, first_name: "Existing", last_name: "Family", email: "family.bulk@example.com")
     create(:user, company: company, organization: company.organization, role: "admin", name: "Staff Person", email: "staff.bulk@example.com")
     import_service = described_class.new(company)
 
-    expect(import_service.send(:validate_row_data, complete_row.merge("email" => "noemail@example.com"))).to include(/placeholder/i)
+    expect(import_service.send(:validate_row_data, complete_row.merge("email" => "marked-placeholder@example.com"))).to include(/placeholder/i)
+    expect(import_service.send(:validate_row_data, complete_row.merge("email" => "noemail@example.com"))).to be_empty
     expect(import_service.send(:validate_row_data, complete_row.merge("email" => "staff.bulk@example.com"))).to include(/another person's payroll login/i)
     expect(import_service.send(:validate_row_data, complete_row.merge("phone" => "not-a-phone"))).to include(/valid phone/i)
 

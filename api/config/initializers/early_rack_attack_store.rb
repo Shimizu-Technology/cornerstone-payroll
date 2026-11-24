@@ -42,10 +42,32 @@ module RackAttackStore
     end
 
     def increment(key, amount, **options)
+      with_failover(-> { @shared.increment(key, amount, **options) }, -> { @local.increment(key, amount, **options) })
+    end
+
+    def read(key, **options)
+      with_failover(-> { @shared.read(key, **options) }, -> { @local.read(key, **options) }, treat_nil_as_error: false)
+    end
+
+    def write(key, value, **options)
+      with_failover(-> { @shared.write(key, value, **options) }, -> { @local.write(key, value, **options) })
+    end
+
+    def delete(key, **options)
+      with_failover(-> { @shared.delete(key, **options) }, -> { @local.delete(key, **options) }, treat_nil_as_error: false)
+    end
+
+    private
+
+    def with_failover(shared_op, local_op, treat_nil_as_error: true)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       if now >= @lock.synchronize { @retry_at }
-        count = @shared.increment(key, amount, **options)
-        return count unless count.nil?
+        begin
+          result = shared_op.call
+          return result if !treat_nil_as_error || !result.nil?
+        rescue StandardError
+          # Fall through to failover cooldown and local store.
+        end
 
         @lock.synchronize do
           if now >= @retry_at
@@ -55,7 +77,7 @@ module RackAttackStore
         end
       end
 
-      @local.increment(key, amount, **options)
+      local_op.call
     end
   end
 end

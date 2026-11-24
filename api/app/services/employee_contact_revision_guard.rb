@@ -14,7 +14,7 @@ class EmployeeContactRevisionGuard
       @employee = employee
       @conflicting_fields = conflicting_fields
       @current_values = current_values
-      super("This employee's contact details were updated by someone else. Review the latest values and choose whether to keep or discard your changes.")
+      super("Someone else updated this employee while you were editing.")
     end
   end
 

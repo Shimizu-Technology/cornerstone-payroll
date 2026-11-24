@@ -151,7 +151,7 @@ module AirePayrollCockpit
       source_email = source_employee["email"].to_s.strip.downcase
       source_name = normalize_name(source_employee["full_name"])
       unique_email_match = source_email.present? &&
-        !EmployeeContactValidator.placeholder_email?(source_email, organization_id: @source.company&.organization_id) &&
+        !EmployeeContactValidator.unmatchable_placeholder_email?(source_email, marked_placeholders: marked_placeholders) &&
         active_company_email_counts[source_email] == 1
 
       available_payroll_employees.filter_map do |employee|
@@ -166,6 +166,10 @@ module AirePayrollCockpit
           "basis" => suggestion_basis(same_email:, same_name:)
         }
       end
+    end
+
+    def marked_placeholders
+      @marked_placeholders ||= EmployeeContactValidator.marked_placeholder_emails(organization_id: @source.company&.organization_id)
     end
 
     def active_company_email_counts

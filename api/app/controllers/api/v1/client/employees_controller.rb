@@ -4,6 +4,7 @@ module Api
   module V1
     module Client
       class EmployeesController < BaseController
+        include EmployeeContactLoginRejectionGuard
         SENSITIVE_CHANGE_REQUEST_KEYS = %w[ssn ssn_encrypted contractor_ein sensitive_payload_encrypted].freeze
         DEFAULT_PER_PAGE = 25
         MAX_PER_PAGE = 500
@@ -62,11 +63,7 @@ module Api
             message: "Employee profile created. Payroll-sensitive details were submitted for approval as request ##{result.change_request.id}."
           }, status: :created
         rescue EmployeeContactValidator::ValidationError => e
-          render json: {
-            error: "Validation failed",
-            details: e.record.errors.messages,
-            contact_validation: e.result.contact_validation_payload
-          }, status: :unprocessable_entity
+          render_contact_validation_error!(e, employee: @employee || e.record)
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -113,11 +110,7 @@ module Api
             data: serialize_employee(e.employee, contact_context: contact_context)
           }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
-          render json: {
-            error: "Validation failed",
-            details: e.record.errors.messages,
-            contact_validation: e.result.contact_validation_payload
-          }, status: :unprocessable_entity
+          render_contact_validation_error!(e, employee: @employee || e.record)
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",

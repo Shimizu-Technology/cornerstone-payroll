@@ -89,8 +89,6 @@ module MigrationPromotion
         if target
           if replace_contact_for?(source, target)
             apply_promoted_contact_attributes!(attributes, employee: target, flagged_emails: flagged_emails, strict: true)
-            attributes["email_verified_at"] = nil
-            attributes["phone_confirmed_by_employee_at"] = nil
           else
             attributes.except!(*CONTACT_COLUMNS)
           end
@@ -119,20 +117,27 @@ module MigrationPromotion
     def apply_promoted_contact_attributes!(attributes, employee:, flagged_emails:, strict:)
       raw_email = attributes["email"].presence
       raw_phone = attributes["phone"].presence
+      email_unchanged = employee.present? &&
+        EmployeeContactValidator.normalize_email(employee.email) == EmployeeContactValidator.normalize_email(raw_email)
+      phone_unchanged = employee.present? && same_normalized_phone?(employee.phone, raw_phone)
+
       candidate = employee || Employee.new(
         company: target_company,
         first_name: attributes["first_name"],
         last_name: attributes["last_name"]
       )
 
-      if raw_email.present? || raw_phone.present?
+      check_email = !email_unchanged && raw_email.present?
+      check_phone = !phone_unchanged && raw_phone.present?
+
+      if check_email || check_phone
         result = EmployeeContactValidator.call(
           employee: candidate,
           company: target_company,
-          email: raw_email.present? ? raw_email : :unchanged,
-          phone: raw_phone.present? ? raw_phone : :unchanged,
+          email: check_email ? raw_email : :unchanged,
+          phone: check_phone ? raw_phone : :unchanged,
           actor: strict ? actor : nil,
-          source: strict ? "staff" : "import",
+          source: "import",
           flagged_emails: flagged_emails
         )
         if strict && !result.valid?
@@ -140,16 +145,45 @@ module MigrationPromotion
           raise ActiveRecord::RecordInvalid, candidate
         end
 
-        if raw_email.present?
+        if check_email
           attributes["email"] = result.errors[:email].present? ? nil : result.normalized_email
         end
-        if raw_phone.present?
+        if check_phone
           attributes["phone"] = result.errors[:phone].present? ? nil : result.normalized_phone
         end
       end
 
-      has_contact = EmployeeContactValidator::CONTACT_FIELDS.any? { |field| attributes[field.to_s].present? }
-      attributes["contact_source"] = has_contact ? (strict ? "staff" : "import") : nil
+      if email_unchanged
+        attributes.delete("email")
+      else
+        attributes["email"] = nil if raw_email.blank?
+        attributes["email_verified_at"] = nil
+      end
+
+      if phone_unchanged
+        attributes.delete("phone")
+      else
+        attributes["phone"] = nil if raw_phone.blank?
+        attributes["phone_confirmed_by_employee_at"] = nil
+      end
+
+      has_contact = EmployeeContactValidator::CONTACT_FIELDS.any? do |field|
+        key = field.to_s
+        value = attributes.key?(key) ? attributes[key] : employee&.public_send(field)
+        value.present?
+      end
+      attributes["contact_source"] = has_contact ? "import" : nil
+    end
+
+    def same_normalized_phone?(current_phone, incoming_phone)
+      return true if current_phone.blank? && incoming_phone.blank?
+      return false if current_phone.blank? || incoming_phone.blank?
+
+      normalized_incoming, error = EmployeeContactValidator.normalize_phone(incoming_phone)
+      return false if error.present?
+
+      normalized_current, = EmployeeContactValidator.normalize_phone(current_phone)
+      (normalized_current || current_phone.to_s.strip) == normalized_incoming
     end
 
     def copy_employee_setup!(employee_map, deduction_type_map)

@@ -30,11 +30,14 @@ module EmployeeBulkImport
     ].freeze
     DATE_COLUMNS = %w[date_of_birth hire_date w4_effective_on].freeze
 
-    attr_reader :company, :errors, :actor
+    attr_reader :company, :errors, :actor, :ip_address, :user_agent, :request_id
 
-    def initialize(company, actor: nil)
+    def initialize(company, actor: nil, ip_address: nil, user_agent: nil, request_id: nil)
       @company = company
       @actor = actor
+      @ip_address = ip_address
+      @user_agent = user_agent
+      @request_id = request_id
       @errors = []
     end
 
@@ -126,7 +129,10 @@ module EmployeeBulkImport
               employee: employee,
               result: contact_result,
               actor: actor,
-              company: company
+              company: company,
+              ip_address: ip_address,
+              user_agent: user_agent,
+              request_id: request_id
             )
             create_w4_election!(employee)
             EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)

@@ -242,7 +242,11 @@ class StaffRolePolicy
     "api/v1/admin/historical_paycheck_adjustments#preview" => :manage_client_configuration,
     "api/v1/admin/historical_paycheck_adjustments#create" => :manage_client_configuration,
     "api/v1/admin/historical_paycheck_adjustments#reverse" => :manage_client_configuration,
-    "api/v1/admin/historical_paycheck_adjustments#event" => :manage_client_configuration
+    "api/v1/admin/historical_paycheck_adjustments#event" => :manage_client_configuration,
+    # Placeholder email marks apply across the whole organization, so company-level
+    # client_management / configuration access is never enough.
+    "api/v1/admin/employee_contact_hygiene#mark_placeholder_email" => :manage_organization,
+    "api/v1/admin/employee_contact_hygiene#unmark_placeholder_email" => :manage_organization
   }.freeze
 
   def self.capability_for(controller_path:, action_name:)
