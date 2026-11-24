@@ -95,7 +95,7 @@ RSpec.describe EmployeeLinks::Invite, type: :request do
       post_activation(activation_params(employee, token: first.token))
       expect(response).to have_http_status(:unprocessable_content)
       post_activation(activation_params(employee, token: resent.token))
-      expect(response).to have_http_status(:created)
+      expect_sign_up_started
     end
 
     it "can switch an emailed invite to a printed code" do

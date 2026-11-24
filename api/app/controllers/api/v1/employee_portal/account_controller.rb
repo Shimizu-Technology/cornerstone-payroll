@@ -10,8 +10,10 @@ module Api
       # On a client subdomain both see only that subdomain's company.
       class AccountController < BaseController
         include RecentVerification
+        include EmployeeLinkCheckParams
 
         skip_before_action :require_employee_link!
+        before_action :reject_query_credentials!, only: :claim
         before_action :require_recent_verification!, only: :claim
 
         CLAIM_FAILED = "We couldn't add that employee access. Check the details and try again, or ask your manager for a new invite."
@@ -28,12 +30,13 @@ module Api
         def claim
           return render_write_maintenance if WriteMaintenance.enabled?
 
-          link = EmployeeLinks::Claim.call(
-            user: @current_user, token: params[:token], code: params[:code],
-            date_of_birth: params[:date_of_birth], ssn_last4: params[:ssn_last4], azp: azp, request: request
-          )
+          link_check_started!
+          link = EmployeeLinks::Claim.call(user: @current_user, **link_check_params, azp: azp, request: request)
           response.headers["Cache-Control"] = "no-store"
-          return render json: { error: CLAIM_FAILED, code: "claim_failed" }, status: :not_found unless link
+          unless link
+            wait_for_response_floor
+            return render json: { error: CLAIM_FAILED, code: "claim_failed" }, status: :not_found
+          end
 
           render json: { link: link_payload(link) }, status: :created
         end

@@ -81,14 +81,27 @@ module EmployeeLinkHelpers
       headers: { "CONTENT_TYPE" => "application/json" }.merge(headers)
   end
 
-  # What Clerk reports once the person finishes sign-up with the invitation.
-  def accept_clerk_invitation!(subject, invitation_index: -1)
+  # What Clerk reports once the person finishes sign-up with the invitation:
+  # an account for the invited address, verified by the invitation ticket
+  # unless the spec says otherwise.
+  def accept_clerk_invitation!(subject, invitation_index: -1, email: nil, strategy: "ticket", status: "verified")
     options = clerk_invitations.fetch(invitation_index)
+    address = email || options.fetch(:email)
     allow(clerk).to receive(:fetch_user).with(subject).and_return(
-      "id" => subject, "public_metadata" => options.fetch(:public_metadata).deep_stringify_keys
+      "id" => subject, "public_metadata" => options.fetch(:public_metadata).deep_stringify_keys,
+      "primary_email_address_id" => "idn_#{subject}",
+      "email_addresses" => [ { "id" => "idn_#{subject}", "email_address" => address,
+                               "verification" => { "status" => status, "strategy" => strategy } } ]
     )
-    invitation_id = "inv_#{clerk_invitations.length + invitation_index + 1}"
-    allow(clerk).to receive(:invitation_status).with(invitation_id).and_return("accepted")
+    index = invitation_index.negative? ? clerk_invitations.length + invitation_index : invitation_index
+    allow(clerk).to receive(:invitation_status).with("inv_#{index + 1}").and_return("accepted")
+  end
+
+  # Starting an account and being sent to sign in share one status (200).
+  def expect_sign_up_started
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to include("next" => "sign_up", "message" => nil)
+    expect(response.parsed_body["sign_up_url"]).to be_present
   end
 
   def link_audits(link, action)

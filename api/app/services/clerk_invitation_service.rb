@@ -58,15 +58,25 @@ class ClerkInvitationService
     user = fetch_user(subject)
     return unless user
 
-    emails = Array(user["email_addresses"]).select do |entry|
+    { id: subject, name: user.values_at("first_name", "last_name").compact_blank.join(" ").presence }
+      .merge(self.class.email_summary(user).slice(:verified_emails, :primary_email))
+  end
+
+  # A Clerk user's addresses: the primary one, the verified ones, and how
+  # each verified one was verified (Clerk's strategy, e.g. "email_code" or
+  # "ticket"), keyed by the lowercased address.
+  def self.email_summary(user)
+    entries = Array(user.is_a?(Hash) ? user["email_addresses"] : nil).select do |entry|
       entry.is_a?(Hash) && entry["email_address"].is_a?(String) && entry["email_address"].present?
     end
-    primary = emails.find { |entry| entry["id"] == user["primary_email_address_id"] } if user["primary_email_address_id"].present?
+    primary_id = user["primary_email_address_id"] if user.is_a?(Hash)
+    primary = entries.find { |entry| entry["id"] == primary_id } if primary_id.present?
+    verified = entries.select { |entry| entry.dig("verification", "status") == "verified" }
     {
-      id: subject,
-      name: user.values_at("first_name", "last_name").compact_blank.join(" ").presence,
-      verified_emails: emails.filter_map { |entry| entry["email_address"] if entry.dig("verification", "status") == "verified" },
-      primary_email: primary&.fetch("email_address")
+      primary_email: primary&.fetch("email_address"),
+      primary_verified: primary.present? && primary.dig("verification", "status") == "verified",
+      verified_emails: verified.map { |entry| entry["email_address"] },
+      verification_strategies: verified.to_h { |entry| [ entry["email_address"].downcase, entry.dig("verification", "strategy").to_s ] }
     }
   end
 

@@ -23,7 +23,7 @@ class EmployeeAccountLink < ApplicationRecord
   validates :invite_token_digest, format: { with: DIGEST_PATTERN }, allow_nil: true
   validates :invite_code_digest, format: { with: DIGEST_PATTERN }, allow_nil: true
   validates :invite_delivery, inclusion: { in: %w[email code] }, allow_nil: true
-  validates :failed_activation_attempts, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+  validates :failed_activation_attempts, :invite_generation, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate :employee_belongs_to_live_company
 
   scope :portal_eligible, -> {

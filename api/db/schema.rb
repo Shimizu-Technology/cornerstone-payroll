@@ -938,6 +938,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_120100) do
     t.datetime "activation_locked_until"
     t.boolean "sign_up_email_for_notices", default: false, null: false
     t.datetime "last_invited_at"
+    t.integer "invite_generation", default: 0, null: false
     t.index [ "claim_user_id" ], name: "index_employee_account_links_on_claim_user_id"
     t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
     t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY (ARRAY[('invited'::character varying)::text, ('active'::character varying)::text]))"
@@ -949,6 +950,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_120100) do
     t.index [ "user_id" ], name: "index_employee_account_links_on_user_id"
     t.check_constraint "failed_activation_attempts >= 0", name: "employee_account_links_failed_attempts_check"
     t.check_constraint "invite_delivery IS NULL OR (invite_delivery::text = ANY (ARRAY['email'::character varying, 'code'::character varying]::text[]))", name: "employee_account_links_invite_delivery_check"
+    t.check_constraint "invite_generation >= 0", name: "employee_account_links_invite_generation_check"
     t.check_constraint "payroll_environment::text = 'live'::text", name: "employee_account_links_live_only"
     t.check_constraint "status::text = ANY (ARRAY['invited'::character varying::text, 'active'::character varying::text, 'former'::character varying::text, 'revoked'::character varying::text])", name: "employee_account_links_status_check"
   end
