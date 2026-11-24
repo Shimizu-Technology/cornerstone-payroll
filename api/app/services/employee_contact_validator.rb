@@ -433,6 +433,14 @@ class EmployeeContactValidator
       )
     end
 
+    # Fail closed: links at other clients can't be checked from here.
+    if link_decision == :unknown
+      return rejected_login_conflict(
+        staff_message: "belongs to a payroll login, and its links at other clients can't be checked here; ask Cornerstone to set it",
+        rejection_reason: "link_check_unavailable"
+      )
+    end
+
     if link_decision == :allowed
       return no_login_conflict(user: login_user)
     end

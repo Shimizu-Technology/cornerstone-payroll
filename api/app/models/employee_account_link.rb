@@ -18,31 +18,36 @@ class EmployeeAccountLink < ApplicationRecord
     where(status: "active").or(where(status: "former").where("former_access_until > ?", Time.current))
   }
 
-  # Narrow decision lookup that returns only :conflict, :allowed or :none,
-  # never records. A login linked to any other employee always returns
-  # :conflict, even if an allowed link also exists.
+  # Narrow decision lookup that returns only :conflict, :allowed, :none or
+  # :unknown, never records. A login linked to any other employee always
+  # returns :conflict, even if an allowed link also exists.
   #
   # Outside a tenant scope it reads every company as a system read. Inside a
-  # company scope it reads within that scope, because TenantScope refuses a
-  # nested system read: once RLS is enforced, links at other companies are
-  # not visible here until TenantScope supports one.
+  # company scope TenantScope refuses a nested system read, so once RLS hides
+  # other companies' links from this session the answer is :unknown, which
+  # callers must reject (fail closed).
   def self.contact_email_link_decision(user_id:, company_id:, allowed_employee_ids: [])
     return :none if user_id.blank?
 
     allowed_ids = Array(allowed_employee_ids).filter_map { |id| Integer(id, exception: false) }.uniq
     target_company_id = Integer(company_id, exception: false)
 
-    with_system_decision_read do
-      scope = where(user_id: user_id).where.not(status: "revoked")
-      if target_company_id.present? && allowed_ids.any?
-        return :conflict if scope.where("company_id <> ? OR employee_id NOT IN (?)", target_company_id, allowed_ids).exists?
-        return :allowed if scope.where(company_id: target_company_id, employee_id: allowed_ids).exists?
+    decision = with_system_decision_read { link_decision_for(user_id, target_company_id, allowed_ids) }
+    return :unknown if decision != :conflict && other_company_links_hidden?
 
-        return :none
-      end
+    decision
+  end
 
-      scope.exists? ? :conflict : :none
+  def self.link_decision_for(user_id, company_id, allowed_ids)
+    scope = where(user_id: user_id).where.not(status: "revoked")
+    if company_id.present? && allowed_ids.any?
+      return :conflict if scope.where.not(company_id: company_id).or(scope.where.not(employee_id: allowed_ids)).exists?
+      return :allowed if scope.where(company_id: company_id, employee_id: allowed_ids).exists?
+
+      return :none
     end
+
+    scope.exists? ? :conflict : :none
   end
 
   def self.with_system_decision_read(&block)
@@ -50,7 +55,23 @@ class EmployeeAccountLink < ApplicationRecord
 
     TenantScope.as_system(reason: "Check cross-company employee account link decision", &block)
   end
-  private_class_method :with_system_decision_read
+
+  # True inside a company scope when row-level security applies to this
+  # session's role on employee_account_links, so other companies' links are
+  # invisible here.
+  LINKS_HIDDEN_SQL = <<~SQL.squish.freeze
+    SELECT c.relrowsecurity AND (c.relforcerowsecurity OR c.relowner <> r.oid)
+           AND NOT r.rolbypassrls AND NOT r.rolsuper
+    FROM pg_class c CROSS JOIN pg_roles r
+    WHERE c.oid = 'employee_account_links'::regclass AND r.rolname = current_user
+  SQL
+
+  def self.other_company_links_hidden?
+    return false unless RlsContextGuard.enabled? && TenantScope.current&.mode == "company"
+
+    connection.select_value(LINKS_HIDDEN_SQL) == true
+  end
+  private_class_method :link_decision_for, :with_system_decision_read, :other_company_links_hidden?
 
   def portal_enabled?
     company.active? && company.organization.active? && CompanyFeatures.for(company).employee_portal_enabled?

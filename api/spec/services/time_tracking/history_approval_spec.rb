@@ -585,4 +585,27 @@ RSpec.describe TimeTracking::HistoryApproval do
     directory.call("family@example.com")
     expect(history_service.prepare!["mappings"].sole).to include("employee_id" => nil, "confirmation_required" => true)
   end
+
+  it "stops an approval when a placeholder is marked after the summary or after the final capture" do
+    page = history_service.prepare!
+
+    # Marked after the summary: the final capture sees the change.
+    mark = EmployeePlaceholderEmail.create!(organization: company.organization, email: "late-mark@example.com")
+    expect { approve_review(page) }.to raise_error(described_class::Changed) { |error| expect(error.message).to include("placeholder") }
+
+    mark.destroy!
+    page = history_service.prepare!
+    service = history_service
+    # Marked between the final capture and the approval locks: the locked
+    # refresh reloads the marks instead of reusing the captured set.
+    allow(service).to receive(:with_approval_locks).and_wrap_original do |original, *args, &block|
+      EmployeePlaceholderEmail.create!(organization: company.organization, email: "race-mark@example.com")
+      original.call(*args, &block)
+    end
+    expect do
+      service.approve!(review: AireHistoryReview.find(page.fetch("review_id")), digest: page.fetch("digest"),
+        attestation: described_class::ATTESTATION)
+    end.to raise_error(described_class::Changed)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+  end
 end
