@@ -1,6 +1,7 @@
 import { createContext, useContext, type ComponentType } from 'react';
 import { brandFrom, type EmployeeBrand } from './brand';
 import type { EmployeeApi, EmployeeLink, EmployeeProblem } from './api';
+import type { EmployeeContextInfo } from './contracts';
 
 export const BrandContext = createContext<EmployeeBrand>(brandFrom(null));
 
@@ -11,10 +12,20 @@ export function useBrand(): EmployeeBrand {
 export interface EmployeeAuthValue {
   isLoaded: boolean;
   isSignedIn: boolean;
-  getToken: () => Promise<string | null>;
+  /** `fresh` skips the token cache, so a reverification that just finished counts. */
+  getToken: (options?: { fresh?: boolean }) => Promise<string | null>;
   signOut: () => Promise<void>;
   /** The sign-in form. `redirectTo` is the app path to open after signing in. */
   SignInForm: ComponentType<{ redirectTo: string }>;
+  /** Clerk's sign-up, opened from the invitation link the API returns. `redirectTo` opens after. */
+  SignUpForm: ComponentType<{ redirectTo: string }>;
+  /**
+   * Runs a change behind step-up. When `attempt` throws StepUpRequiredError,
+   * this asks the person to confirm it's them (Clerk reverification, first
+   * factor for employees), then runs `attempt` again. Throws
+   * StepUpCancelledError if they close the prompt.
+   */
+  stepUp: <T>(attempt: () => Promise<T>) => Promise<T>;
   /** Development preview only: signs in without Clerk. */
   previewSignIn?: () => void;
 }
@@ -41,7 +52,9 @@ export function useEmployeeAuth(): EmployeeAuthValue {
 
 export type EmployeeSessionState =
   | { status: 'loading' }
-  | { status: 'ready'; link: EmployeeLink }
+  /** More than one employer on a shared host: the person picks one. */
+  | { status: 'choose'; links: EmployeeLink[] }
+  | { status: 'ready'; link: EmployeeLink; links: EmployeeLink[]; info: EmployeeContextInfo }
   | { status: 'problem'; problem: EmployeeProblem };
 
 export interface EmployeeSessionValue {
@@ -50,6 +63,21 @@ export interface EmployeeSessionValue {
   retry: () => void;
   /** Data screens pass API failures here so a mid-session 404 shows "access ended". */
   reportError: (error: unknown) => void;
+  /** Opens one employer's pay (the picker, or "Switch employer"). Null goes back to the picker. */
+  chooseLink: (linkId: string | null) => void;
+  /** Read-only: a former employee, or a Cornerstone admin's view-only "Sign in as". */
+  readOnly: ReadOnlyReason | null;
+  /** Session memory for data screens. Cleared on sign-out, reload and employer switch; never stored on the device. */
+  memory: Map<string, unknown>;
+}
+
+export type ReadOnlyReason = 'former' | 'view_only';
+
+/** The open session. Only screens inside the ready shell use this. */
+export function useReadySession(): EmployeeSessionValue & { state: Extract<EmployeeSessionState, { status: 'ready' }> } {
+  const session = useEmployeeSession();
+  if (session.state.status !== 'ready') throw new Error('useReadySession needs an open session');
+  return session as EmployeeSessionValue & { state: Extract<EmployeeSessionState, { status: 'ready' }> };
 }
 
 export const EmployeeSessionContext = createContext<EmployeeSessionValue | null>(null);

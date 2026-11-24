@@ -1,7 +1,8 @@
 /** @vitest-environment node */
 import { describe, expect, it, vi } from 'vitest';
 import {
-  chooseLink, createEmployeeApi, EmployeeApiError, employeeUrl, errorForStatus, parseApiBase, parseLinks, problemFor, type EmployeeApi, type EmployeeLink,
+  chooseLink, createEmployeeApi, EmployeeApiError, employeeUrl, errorForStatus, parseApiBase, parseLinks, problemFor, StepUpRequiredError, usableLinks,
+  type EmployeeApi, type EmployeeLink,
 } from './api';
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -183,9 +184,87 @@ describe('chooseLink', () => {
     expect(chooseLink([link({ subdomainSlug: null })], '2026-11-24', 'mosas')).toBe('unavailable');
   });
 
-  it('prefers an active link', () => {
+  it('asks which employer on a shared host, and opens the one chosen', () => {
     const former = link({ id: '1', status: 'former', formerAccessUntil: '2027-01-01' });
     const active = link({ id: '2' });
-    expect(chooseLink([former, active], '2026-11-24', null)).toBe(active);
+    expect(chooseLink([former, active], '2026-11-24', null)).toBe('choose');
+    expect(chooseLink([former, active], '2026-11-24', null, '1')).toBe(former);
+    // A choice that's no longer usable asks again.
+    expect(chooseLink([former, active], '2027-02-01', null, '1')).toBe(active);
+    expect(usableLinks([former, active], '2026-11-24', null)).toEqual([active, former]);
+  });
+
+  it('never shows the picker on a client subdomain, and prefers the active link there', () => {
+    const former = link({ id: '1', subdomainSlug: 'mosas', status: 'former', formerAccessUntil: '2027-01-01' });
+    const active = link({ id: '2', subdomainSlug: 'mosas' });
+    expect(chooseLink([former, active], '2026-11-24', 'mosas')).toBe(active);
+  });
+});
+
+describe('employee API calls (M4-2, M4-4, M4-5, M4-7 contracts)', () => {
+  it('sends sign-up checks without a session token and maps failures to one generic kind', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ error: 'not matched' }, 422));
+    const api = createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1', getToken: async () => null, fetchImpl, isOnline: () => true });
+    await expect(api.verifyActivation({ code: 'ABCDEFGHJK', dateOfBirth: '1990-04-07', ssnLast4: '1234' })).rejects.toMatchObject({ kind: 'invalid' });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://api.example.test/api/v1/employee/activation');
+    expect(init?.headers).not.toHaveProperty('Authorization');
+    expect(JSON.parse(String(init?.body))).toEqual({ code: 'ABCDEFGHJK', date_of_birth: '1990-04-07', ssn_last4: '1234' });
+  });
+
+  it('reports a locked sign-up as locked', async () => {
+    const api = createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1', getToken: async () => null, fetchImpl: async () => new Response(null, { status: 423 }), isOnline: () => true });
+    await expect(api.verifyActivation({ token: 'a'.repeat(32), dateOfBirth: '1990-04-07', ssnLast4: '1234' })).rejects.toMatchObject({ kind: 'locked' });
+  });
+
+  it('only follows an https (or same-site) sign-up URL', async () => {
+    const respondWith = (sign_up_url: string) => createEmployeeApi({
+      baseUrl: 'https://api.example.test/api/v1', getToken: async () => null, fetchImpl: async () => jsonResponse({ status: 'ready', sign_up_url }), isOnline: () => true,
+    });
+    const check = { code: 'ABCDEFGHJK', dateOfBirth: '1990-04-07', ssnLast4: '1234' };
+    const account = { email: 'tala@example.com', noticeEmail: 'sign_in' as const, termsVersion: null };
+    await expect(respondWith('https://accounts.example.test/accept?ticket=x').startActivation(check, account, 'https://mosas.example.test')).resolves.toBe('https://accounts.example.test/accept?ticket=x');
+    await expect(respondWith('javascript:alert(1)').startActivation(check, account, 'https://mosas.example.test')).rejects.toMatchObject({ kind: 'server' });
+    await expect(respondWith('http://evil.example.test/').startActivation(check, account, 'https://mosas.example.test')).rejects.toMatchObject({ kind: 'server' });
+  });
+
+  it('turns a reverification 403 into StepUpRequiredError, with a fresh token', async () => {
+    const hint = { clerk_error: { type: 'forbidden', reason: 'reverification-error', metadata: { reverification: { level: 'first_factor', afterMinutes: 10 } } } };
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(hint, 403));
+    const getToken = vi.fn(async () => 'tok');
+    const api = createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1', getToken, fetchImpl, isOnline: () => true });
+    const error = await api.updatePhone('42', '671-555-0100').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StepUpRequiredError);
+    expect((error as StepUpRequiredError).hint.metadata?.reverification?.level).toBe('first_factor');
+    expect(getToken).toHaveBeenCalledWith({ fresh: true });
+    expect(fetchImpl.mock.calls[0][1]?.method).toBe('PATCH');
+  });
+
+  it('keeps a plain 403 on a read as "not found"', async () => {
+    const api = client(async () => jsonResponse({}, 403));
+    await expect(api.statements('42')).rejects.toMatchObject({ kind: 'not_found' });
+  });
+
+  it('asks for statements by year and page, and refuses unsafe ids', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ statements: [], years: [2026], next_page: null }));
+    const api = client(fetchImpl);
+    await api.statements('42', { year: 2026, page: 2 });
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.example.test/api/v1/employee/statements?page=2&year=2026');
+    await expect(api.statement('42', '../admin')).rejects.toMatchObject({ kind: 'not_found' });
+  });
+
+  it('downloads a PDF as a Blob without caching', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(new Blob(['%PDF-1.7'], { type: 'application/pdf' }), { headers: { 'Content-Type': 'application/pdf' } }));
+    const blob = await client(fetchImpl).statementPdf('42', '901');
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.example.test/api/v1/employee/statements/901/pdf');
+    expect(fetchImpl.mock.calls[0][1]?.cache).toBe('no-store');
+    expect((fetchImpl.mock.calls[0][1]?.headers as Record<string, string>).Accept).toBe('application/pdf');
+    expect(blob.size).toBeGreaterThan(0);
+  });
+
+  it('binds a new sign-up through /auth/me, the one route outside /employee/', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ roles: {} }));
+    await client(fetchImpl).bindAccount();
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.example.test/api/v1/auth/me');
   });
 });
