@@ -38,12 +38,26 @@ module EmployeePortalRequestContext
 
     user = User.find_by(clerk_id: subject)
     return unless user && StagingOutboundPolicy.tester?(user_id: user.id, email: user.email, id: subject)
+    # An inactive login this route refuses anyway never costs a Clerk call.
+    return unless user.payroll_access_allowed? || reactivating_login?(user)
+
     # A session from before the login was deactivated never works again.
-    return if EmployeeLinks::SessionFence.fenced?(user, @clerk_token_payload)
+    if EmployeeLinks::SessionFence.fenced?(user, @clerk_token_payload)
+      @employee_session_fenced = true
+      return
+    end
 
-    return user if user.payroll_access_allowed?
+    user
+  end
 
-    user if allow_deactivated_employee_login? && user.portal_employee? && !user.active? &&
+  # True after verified_employee_portal_user refused only because the
+  # session predates the login's closure: the person must sign in again.
+  def employee_session_fenced?
+    @employee_session_fenced == true
+  end
+
+  def reactivating_login?(user)
+    allow_deactivated_employee_login? && user.portal_employee? && !user.active? &&
       user.deactivation_reason == "last_employee_link_closed" &&
       user.invitation_status == "accepted" && user.organization&.active?
   end

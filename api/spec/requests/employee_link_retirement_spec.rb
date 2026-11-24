@@ -172,7 +172,8 @@ RSpec.describe "Employee link retirement", type: :request do
 
       allow(clerk).to receive(:revoke_user_sessions).and_return(success: true, revoked: 2)
       perform_enqueued_jobs(only: RevokeEmployeeSessionsJob)
-      expect(clerk).to have_received(:revoke_user_sessions).with("user_riley", created_before: worker.reload.deactivated_at)
+      expect(clerk).to have_received(:revoke_user_sessions)
+        .with("user_riley", created_before: worker.reload.deactivated_at + EmployeeLinks::SessionFence::SESSION_SKEW_ALLOWANCE)
     end
 
     it "requires staff and a reason" do
@@ -230,7 +231,8 @@ RSpec.describe "Employee link retirement", type: :request do
       # Clerk's record of an old session and of the person's sign-in after the closure.
       closed_at = worker.reload.deactivated_at
       clerk_session!("sess_before_closure", user_id: "user_riley", created_at: closed_at - 30.minutes)
-      clerk_session!("sess_user_riley", user_id: "user_riley", created_at: closed_at + 1.second)
+      clerk_session!("sess_user_riley", user_id: "user_riley",
+        created_at: closed_at + EmployeeLinks::SessionFence::SESSION_SKEW_ALLOWANCE + 1.second)
       travel 20.minutes
       post "/api/v1/admin/employees/#{employee.id}/reactivate", headers: bearer("user_staff").merge("X-Company-Id" => company.id.to_s), as: :json,
         params: { reactivation: { effective_date: PayrollBusinessClock.today.iso8601 } }
@@ -255,7 +257,8 @@ RSpec.describe "Employee link retirement", type: :request do
 
       # A session created before the login closed is refused outright.
       reactivate(activation_params(employee, token: invite.token), sid: "sess_before_closure")
-      expect(response).to have_http_status(:not_found)
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body["code"]).to eq("session_predates_reactivation")
 
       # One created after the closure, but not verified recently, must step up.
       reactivate(activation_params(employee, token: invite.token), fva: [ 15, -1 ])
@@ -329,7 +332,8 @@ RSpec.describe "Employee link retirement", type: :request do
       worker.update!(active: true)
       described_class.perform_now(worker.id, closed_at.iso8601(6))
 
-      expect(cutoffs).to eq([ [ "user_riley", closed_at ], [ "user_riley", closed_at ] ])
+      cutoff = closed_at + EmployeeLinks::SessionFence::SESSION_SKEW_ALLOWANCE
+      expect(cutoffs).to eq([ [ "user_riley", cutoff ], [ "user_riley", cutoff ] ])
       expect(outcomes).to be_empty
     end
 

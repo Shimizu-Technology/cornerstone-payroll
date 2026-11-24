@@ -81,7 +81,7 @@ module ClerkAuthenticatable
     # refused after it is reactivated (M4-2).
     if EmployeeLinks::SessionFence.fenced?(@current_user, @clerk_token_payload)
       @current_user = nil
-      render json: { error: "Sign in again to continue", code: "session_predates_reactivation" }, status: :unauthorized
+      render json: EmployeeLinks::SessionFence::SIGN_IN_AGAIN, status: :unauthorized
     end
   end
 
