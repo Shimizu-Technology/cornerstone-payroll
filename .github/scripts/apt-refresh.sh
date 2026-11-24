@@ -7,6 +7,11 @@
 set -uo pipefail
 
 echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+# A stalled archive mirror otherwise holds each package download for minutes before apt retries,
+# which has pushed the Playwright dependency install past the browser job's time limit. Fail fast
+# and let the retries pick up the download.
+printf 'Acquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' |
+  sudo tee /etc/apt/apt.conf.d/81-timeouts >/dev/null
 
 use_public_dns() {
   echo "::warning::Package index refresh keeps failing; switching this runner to public DNS resolvers."
