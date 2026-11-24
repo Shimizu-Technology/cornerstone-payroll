@@ -1067,7 +1067,7 @@ BEFORE UPDATE OF payroll_environment, test_workspace_purpose, test_workspace_man
 FOR EACH ROW
 EXECUTE FUNCTION prevent_demo_company_conversion();
 
--- 20261125170000_refuse_demo_company_external_records.rb
+-- 20261125180000_refuse_demo_company_external_records.rb
 CREATE OR REPLACE FUNCTION prevent_demo_company_external_records() RETURNS trigger AS $$
 BEGIN
   IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND COALESCE(test_workspace_purpose, '') = 'demo') THEN
