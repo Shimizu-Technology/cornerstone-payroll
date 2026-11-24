@@ -145,13 +145,28 @@ Use non-payroll actions wherever possible. Record result, timestamp in ChST, ope
 | WebSocket/Cable authentication works where applicable | Pending | Pending |
 | Public health endpoint remains healthy with HSTS | Pending | Pending |
 
-Only after the matrix passes:
+### Payroll session claims and reverification
 
-1. confirm the exact provider instance ID and MFA evidence reference are configured, then set `REQUIRE_MFA=true` in the relevant backend environment;
-2. deploy the attestation change;
-3. run the complete deployed `production:readiness` task;
-4. require Cornerstone to pass 29 of 29 and AIRE to pass 23 of 23; and
-5. keep production payroll paused until operator and recovery acceptance is complete.
+The release lead configures and tests these settings on the separate Clerk development instance first. Apply the reviewed settings on the production instance during the authorized cutover.
+
+1. In the Clerk Dashboard, open **Sessions → Customize session token**. In the Claims editor, add the following entry alongside the existing claims and save. [Clerk session token documentation](https://clerk.com/docs/guides/sessions/customize-session-tokens)
+
+   ```json
+   {
+     "two_factor_enabled": "{{user.two_factor_enabled}}"
+   }
+   ```
+
+2. Open **User & authentication → Email → Sign-in with email**. Enable **Email verification code** and save. Google-only users need email code as a first factor for reverification. [Clerk sign-in options](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options)
+3. Refresh the default session tokens for enrolled and unenrolled test users. Confirm the claim is the JSON boolean `true` for the enrolled user and `false` for the unenrolled user. On a new device, verify that the email code alone does not grant staff access. Verify first-factor reverification by password and by email code after Google sign-in, and verify second-factor reverification for enrolled users.
+
+Complete the following steps after the verification matrix passes.
+
+1. Confirm the exact provider instance ID and MFA evidence reference are configured, then set `REQUIRE_MFA=true` in the relevant backend environment.
+2. Deploy the attestation change.
+3. Run the complete deployed `production:readiness` task. For Payroll with MFA enabled, supply a fresh default Clerk session JWT from that deployment's configured instance and frontend origin using a private temporary file (mode `0600`). Set `CLERK_MFA_SAMPLE_TOKEN_FILE=/path/to/private-file` for this command only and delete the file immediately afterward. The check accepts a correctly signed token issued within the last 15 minutes, even if its 60-second lifetime has run out, so copy it shortly before running the task. Use a dedicated test account and keep the token out of shell history, logs, and retained evidence.
+4. Require all Cornerstone and AIRE readiness checks to pass.
+5. Keep production payroll paused until operator and recovery acceptance is complete.
 
 ## Rollback
 

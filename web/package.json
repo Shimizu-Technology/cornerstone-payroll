@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "postbuild": "node scripts/finalize-surface-dist.mjs",
     "lint": "eslint src --ext .ts,.tsx",
     "test": "vitest run src",
     "preview": "vite preview",
