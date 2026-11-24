@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 import { Badge } from './badge';
 
-const theme = readFileSync(new URL('../../index.css', import.meta.url), 'utf8');
+const theme = readFileSync(new URL('../../theme.css', import.meta.url), 'utf8');
 function luminance(hex: string): number {
   const channels = hex.match(/\w{2}/g)!.map(channel => parseInt(channel, 16) / 255)
     .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
