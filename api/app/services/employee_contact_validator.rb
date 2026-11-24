@@ -542,13 +542,25 @@ class EmployeeContactValidator
   # First and last name, ignoring case, accents and spacing; a middle name on
   # the login is fine. Compared with the employee as stored, so renaming the
   # employee in the same save can't create a match.
+  NAME_SUFFIXES = %w[jr sr ii iii iv].freeze
+
+  # A recognized suffix at the end of the login name ("Jr.", "III") must match
+  # the employee's stored suffix; a login that leaves the suffix off still
+  # matches on first and last name.
   def login_name_matches_employee?(login_user)
     stored = ->(field) { @employee&.persisted? ? @employee.attribute_in_database(field) : @employee&.public_send(field) }
     first = self.class.comparable_name(stored.call("first_name"))
     last = self.class.comparable_name(stored.call("last_name"))
+    suffix = self.class.comparable_name(stored.call("name_suffix"))
     login_name = self.class.comparable_name(login_user.name)
     return false if first.blank? || last.blank? || login_name.blank?
 
+    words = login_name.split
+    if words.length > 2 && NAME_SUFFIXES.include?(words.last)
+      return false unless words.last == suffix
+
+      login_name = words[0...-1].join(" ")
+    end
     login_name == "#{first} #{last}" || (login_name.start_with?("#{first} ") && login_name.end_with?(" #{last}"))
   end
 
