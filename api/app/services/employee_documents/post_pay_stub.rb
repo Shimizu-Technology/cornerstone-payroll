@@ -2,9 +2,10 @@
 
 module EmployeeDocuments
   class PostPayStub
-    def initialize(item, now: Time.current)
+    def initialize(item, now: Time.current, notice_since: nil)
       @item = item
       @now = now
+      @notice_since = notice_since
     end
 
     def call
@@ -20,7 +21,7 @@ module EmployeeDocuments
 
     def reconcile(period)
       latest = documents_for(@item.id).lock.first
-      unless period.committed? && @item.payroll_included?
+      unless period.committed? && @item.payroll_included? && !@item.voided?
         latest.update!(status: :withdrawn) if latest&.posted?
         return
       end
@@ -29,15 +30,21 @@ module EmployeeDocuments
       return unless @item.employee&.company_id == @item.company_id
       return unless EarningsStatementEligibility.printable?(@item)
 
-      payment_line = PayStubGenerator.employee_payment_line(@item)
-      return if latest&.posted? && latest.payment_line == payment_line
+      checked_at = Time.current
+      generator = PayStubGenerator.new(@item, employee_copy: true)
+      fingerprint = generator.employee_payroll_facts_sha256
+      if latest&.posted? && latest.payroll_facts_sha256 == fingerprint
+        latest.update!(payroll_facts_checked_at: checked_at)
+        return
+      end
 
       original = correction_source
       predecessor = latest || original
       document = FreezePdf.call(
-        bytes: PayStubGenerator.new(@item, employee_copy: true).generate,
+        bytes: generator.generate,
         source: @item, posted_at: Time.current, revision: (latest&.revision || 0) + 1,
-        predecessor: predecessor, payment_line: payment_line
+        predecessor: predecessor, payment_line: PayStubGenerator.employee_payment_line(@item),
+        payroll_facts: { payroll_facts_sha256: fingerprint, payroll_facts_checked_at: checked_at }
       )
       latest&.update!(status: :replaced)
       # A delta correction is a separate payment. Its original stays active
@@ -45,7 +52,7 @@ module EmployeeDocuments
       if original && (@item.financial_correction_origin_item_id.present? || !original.payroll_item.payroll_included?)
         original.update!(status: :replaced)
       end
-      enqueue_employee_pay_stub_notice(document) if predecessor.nil?
+      enqueue_employee_pay_stub_notice(document) if predecessor.nil? && @notice_since && period.pay_date >= @notice_since
       document
     end
 

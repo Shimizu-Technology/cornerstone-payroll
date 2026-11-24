@@ -5,6 +5,11 @@ require "rails_helper"
 RSpec.describe EmployeeDocuments::QuickbooksHistory do
   let(:employee) { create(:employee) }
 
+  before do
+    create(:pay_period, :committed, company: employee.company, start_date: Date.new(2026, 8, 24),
+      end_date: Date.new(2026, 9, 6), pay_date: Date.new(2026, 9, 10))
+  end
+
   it "keeps each reconciled check, including separate checks on the same date, and applies adjustments" do
     first = create(:historical_paycheck, employee: employee, hours_total: 35, net_pay: 900)
     second = create(:historical_paycheck, employee: employee, historical_import_batch: first.historical_import_batch,
@@ -20,13 +25,17 @@ RSpec.describe EmployeeDocuments::QuickbooksHistory do
     create(:historical_paycheck, employee: employee, period_type: "opening_summary")
     create(:historical_paycheck, employee: employee, reconciliation_status: "opening_summary")
     create(:historical_paycheck, employee: employee, batch_status: "applied")
-    create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 9, 1))
+    create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 9, 10))
     create(:historical_paycheck, employee: create(:employee, company: employee.company))
     create(:historical_paycheck)
 
+    expect(described_class.review_warnings(employee.company_id)).to eq([
+      { employee_id: employee.id, employee_name: employee.full_name, row_count: 2, duplicate_groups: 1 }
+    ])
+    september = create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 9, 1))
     rows = described_class.for(employee)
-    expect(rows.pluck(:historical_paycheck_id)).to eq([ second.id, first.id ])
-    expect(rows.first).to include(hours_total: 1, net_pay: 900, adjustment_note: nil)
+    expect(rows.pluck(:historical_paycheck_id)).to eq([ september.id, second.id, first.id ])
+    expect(rows.second).to include(hours_total: 1, net_pay: 900, adjustment_note: nil)
     expect(rows.last).to include(hours_total: 37, net_pay: 930, adjustment_note: "Includes recorded payroll adjustments.")
   end
 end

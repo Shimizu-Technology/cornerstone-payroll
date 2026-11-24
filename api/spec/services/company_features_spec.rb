@@ -3,6 +3,21 @@
 require "rails_helper"
 
 RSpec.describe CompanyFeatures do
+  it "finds the first day of the current uninterrupted stubs activation" do
+    company = create(:company)
+    start = Date.new(2026, 8, 1)
+    [ false, true, true, false, true ].each_with_index do |enabled, index|
+      ClientOperatingProfile.create!(
+        company: company, version: index + 1, effective_on: start + index.days, ends_on: start + index.days,
+        offering: "payroll_portals", hours_source: "manual", employee_portal_enabled: enabled,
+        options: { "employee_portal" => { "features" => { "stubs" => enabled } } }
+      )
+    end
+    expect(described_class.for(company, on: start + 2.days).employee_stubs_enabled_since).to eq(start + 1.day)
+    expect(described_class.for(company, on: start + 3.days).employee_stubs_enabled_since).to be_nil
+    expect(described_class.for(company, on: start + 4.days).employee_stubs_enabled_since).to eq(start + 4.days)
+  end
+
   include ActiveSupport::Testing::TimeHelpers
 
   let(:organization) { create(:organization) }

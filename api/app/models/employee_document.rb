@@ -10,5 +10,5 @@ class EmployeeDocument < ApplicationRecord
   enum :status, { posted: "posted", replaced: "replaced", withdrawn: "withdrawn" }
 
   attr_readonly :company_id, :payroll_item_id, :historical_paycheck_id, :employee_id, :tax_year,
-    :revision, :storage_key, :sha256, :posted_at, :payment_line, :corrected, :replaces_document_id
+    :revision, :storage_key, :sha256, :posted_at, :payment_line, :payroll_facts_sha256, :corrected, :replaces_document_id
 end

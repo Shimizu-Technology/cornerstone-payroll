@@ -49,6 +49,7 @@ import {
   type HistoricalImportDetail,
   type HistoricalImportProvider,
   type HistoricalPaycheck,
+  type QuickbooksCheckWarning,
   type HistoricalReport,
   type HistoricalReportColumn,
   type HistoricalReportType,
@@ -260,6 +261,8 @@ export function HistoricalPayroll(): ReactElement {
   const detailQueryRef = useRef<{ page: number; periodId?: number; search: string }>({ page: 1, search: '' });
   const [batches, setBatches] = useState<HistoricalImportBatch[]>([]);
   const [stubUploadCompanyId, setStubUploadCompanyId] = useState<number | null>(null);
+  const [stubUploadEnabled, setStubUploadEnabled] = useState(false);
+  const [quickbooksCheckWarnings, setQuickbooksCheckWarnings] = useState<QuickbooksCheckWarning[]>([]);
   const [archive, setArchive] = useState<HistoricalArchiveSummary | null>(null);
   const [importProviders, setImportProviders] = useState<HistoricalImportProvider[]>([]);
   const [selectedImportProviderKey, setSelectedImportProviderKey] = useState('quickbooks_online');
@@ -362,7 +365,9 @@ export function HistoricalPayroll(): ReactElement {
     const listedBatches = response.data.filter((batch) => batch.source_system !== 'prior_provider');
     setBatches(listedBatches);
     setArchive(response.meta.archive);
-    setStubUploadCompanyId(response.meta.original_stub_upload_enabled ? activeCompanyId : null);
+    setStubUploadCompanyId(activeCompanyId);
+    setStubUploadEnabled(response.meta.original_stub_upload_enabled === true);
+    setQuickbooksCheckWarnings(response.meta.quickbooks_check_warnings ?? []);
     setImportProviders(providers);
     if (providers.length > 0) setSelectedImportProviderKey((current) => (
       providers.some((provider) => provider.key === current)
@@ -1239,8 +1244,8 @@ export function HistoricalPayroll(): ReactElement {
           <ActionFeedback tone={notice.tone} message={notice.message} />
         )}
 
-        {stubUploadCompanyId && stubUploadCompanyId === activeCompanyId && (
-          <QuickbooksStubUpload key={stubUploadCompanyId} companyId={stubUploadCompanyId} />
+        {stubUploadCompanyId && stubUploadCompanyId === activeCompanyId && (stubUploadEnabled || quickbooksCheckWarnings.length > 0) && (
+          <QuickbooksStubUpload key={stubUploadCompanyId} companyId={stubUploadCompanyId} warnings={quickbooksCheckWarnings} enabled={stubUploadEnabled} />
         )}
 
         {selectedBatch && (

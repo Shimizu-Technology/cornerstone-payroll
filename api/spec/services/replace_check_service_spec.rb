@@ -132,6 +132,27 @@ RSpec.describe ReplaceCheckService do
   end
 
   describe ".replace! — :in_place mode (unprinted)" do
+    it "revises the employee stub when in-place replacement keeps the check number" do
+      storage = instance_double(R2StorageService, upload: true)
+      allow(R2StorageService).to receive(:new).and_return(storage)
+      features = instance_double(CompanyFeatures, employee_portal_feature?: true, employee_stubs_enabled_since: nil)
+      allow(CompanyFeatures).to receive(:for).with(company).and_return(features)
+      PostEmployeePayStubsJob.perform_now
+      original = EmployeeDocument.posted.find_by!(payroll_item: original_item)
+
+      described_class.replace!(payroll_item: original_item, corrected_inputs: { hours_worked: 80 },
+        reason: "Client reported 80h not 60h", actor: actor)
+
+      PostEmployeePayStubsJob.perform_now
+      corrected = EmployeeDocument.posted.find_by!(payroll_item: original_item)
+      expect(original.reload).to be_replaced
+      expect(corrected).to have_attributes(corrected: true, replaces_document_id: original.id, payment_line: original.payment_line)
+      expect(corrected.payroll_facts_sha256).not_to eq(original.payroll_facts_sha256)
+      expect(storage).to have_received(:upload).with(corrected.storage_key, satisfy { |bytes|
+        PDF::Reader.new(StringIO.new(bytes)).page(1).text.include?("80.00")
+      }, content_type: "application/pdf")
+    end
+
     it "rewrites the item with corrected values, keeps the same check #, and logs a replaced event" do
       original_check_number = original_item.check_number
       original_gross_ytd    = EmployeeYtdTotal.find_by(employee_id: employee.id, year: 2024).gross_pay
