@@ -3,6 +3,7 @@ import { ClerkInstanceContext } from '@clerk/shared/react';
 import { renderHook } from '@testing-library/react';
 import type { ContextType, PropsWithChildren } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MFA_REQUIRED_EVENT } from '@/services/api';
 import { useStepUpRequest } from './useStepUpRequest';
 
 const { getToken } = vi.hoisted(() => ({ getToken: vi.fn() }));
@@ -58,5 +59,26 @@ describe('useStepUpRequest', () => {
     expect(await received.json()).toEqual(body);
     expect(openReverification).not.toHaveBeenCalled();
     expect(fetchRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('notifies the app MFA flow when a step-up request returns mfa_enrollment_required', async () => {
+    const body = { error: 'Set up two-step sign-in to make this change.', code: 'mfa_enrollment_required' };
+    const response = Response.json(body, { status: 403 });
+    const fetchRequest = vi.fn().mockResolvedValue(response);
+    const onMfa = vi.fn();
+    window.addEventListener(MFA_REQUIRED_EVENT, onMfa);
+    try {
+      const { result } = renderHook(() => useStepUpRequest(fetchRequest), { wrapper });
+      const received = await result.current();
+      expect(received).toBe(response);
+      expect(openReverification).not.toHaveBeenCalled();
+      expect(onMfa).toHaveBeenCalledTimes(1);
+      expect((onMfa.mock.calls[0][0] as CustomEvent).detail).toEqual({
+        code: 'mfa_enrollment_required',
+        message: body.error,
+      });
+    } finally {
+      window.removeEventListener(MFA_REQUIRED_EVENT, onMfa);
+    }
   });
 });

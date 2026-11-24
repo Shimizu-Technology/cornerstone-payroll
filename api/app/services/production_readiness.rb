@@ -235,6 +235,7 @@ class ProductionReadiness
   end
 
   def live_dependency_checks
+    jwks_cache = ActiveSupport::Cache::MemoryStore.new
     [
       check("primary database accepts a query") { select_one(primary_record) },
       check("persisted encrypted data can be decrypted") { encrypted_data_probe.call },
@@ -248,7 +249,8 @@ class ProductionReadiness
       check("R2 upload/read/delete round trip succeeds") { r2_round_trip },
       check("Resend API key and every application sender domain are ready") { resend_ready? },
       check("Clerk Backend API accepts the configured key and matches MFA evidence") { clerk_ready? },
-      check("Clerk session token includes the MFA enrollment claim") { clerk_mfa_sample_ready? },
+      check("Clerk session token includes the MFA enrollment claim") { clerk_mfa_sample_ready?(jwks_cache: jwks_cache) },
+      check("Pre-flip MFA check: Clerk session token includes boolean two_factor_enabled claim") { clerk_mfa_sample_token_valid?(jwks_cache: jwks_cache) },
       check("time tracking destinations resolve only to public addresses") { time_tracking_destinations_resolve? }
     ] + shared_rate_limit_live_checks
   end
@@ -401,13 +403,17 @@ class ProductionReadiness
       body["id"] == env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s.strip
   end
 
-  def clerk_mfa_sample_ready?
+  def clerk_mfa_sample_ready?(jwks_cache: ActiveSupport::Cache::MemoryStore.new)
     return true unless MfaPolicy.enabled?(env: env)
 
+    clerk_mfa_sample_token_valid?(jwks_cache: jwks_cache)
+  end
+
+  def clerk_mfa_sample_token_valid?(jwks_cache: ActiveSupport::Cache::MemoryStore.new)
     path = env["CLERK_MFA_SAMPLE_TOKEN_FILE"].presence
     return false unless path
 
-    verifier = ClerkTokenVerifier.new(env: env, cache: ActiveSupport::Cache::MemoryStore.new,
+    verifier = ClerkTokenVerifier.new(env: env, cache: jwks_cache,
       http_get: ->(uri) { http_get.call(uri, nil) })
     # Clerk session tokens live about 60 seconds, which is shorter than the
     # probes that run before this one. A recently issued, correctly signed
