@@ -28,6 +28,17 @@ RSpec.describe EmployeeBulkImport::ImportService, type: :service do
     expect(service.errors.first).to eq("Missing required columns: last_name, employment_type, pay_rate, pay_frequency. Required: first_name, last_name, employment_type, pay_rate, pay_frequency")
   end
 
+  it "validates each preview row's contact details once" do
+    company = create(:company)
+    import_service = described_class.new(company)
+    headers = complete_row.keys
+    expect(EmployeeContactValidator).to receive(:call).once.and_call_original
+
+    row = import_service.send(:parse_row, headers.map { |key| complete_row[key] }, headers, 2, {}, Set.new, Set.new, Set.new, Hash.new(0))
+
+    expect(row[:errors]).to be_empty
+  end
+
   it "accepts complete W-2 filing data" do
     expect(service.send(:validate_row_data, complete_row)).to be_empty
   end
@@ -71,6 +82,33 @@ RSpec.describe EmployeeBulkImport::ImportService, type: :service do
       effective_on: Date.new(2026, 1, 15),
       source: "employee_creation",
       created_by_id: actor.id
+    )
+  end
+
+  it "runs shared contact validation, normalizes Guam phones, warns on coworker/structural emails, and rejects marked placeholders" do
+    company = create(:company)
+    EmployeePlaceholderEmail.create!(organization: company.organization, email: "marked-placeholder@example.com")
+    create(:employee, company: company, first_name: "Existing", last_name: "Family", email: "family.bulk@example.com")
+    create(:user, company: company, organization: company.organization, role: "admin", name: "Staff Person", email: "staff.bulk@example.com")
+    import_service = described_class.new(company)
+
+    expect(import_service.send(:validate_row_data, complete_row.merge("email" => "marked-placeholder@example.com"))).to include(/placeholder/i)
+    expect(import_service.send(:validate_row_data, complete_row.merge("email" => "noemail@example.com"))).to be_empty
+    expect(import_service.send(:validate_row_data, complete_row.merge("email" => "staff.bulk@example.com"))).to include(/another person's payroll login/i)
+    expect(import_service.send(:validate_row_data, complete_row.merge("phone" => "not-a-phone"))).to include(/valid phone/i)
+
+    valid_row = complete_row.merge("email" => "Family.Bulk@Example.com", "phone" => "555-0190")
+    attrs = import_service.send(:build_attributes, valid_row, {})
+    result = import_service.create_employees!([ { row_number: 2, attributes: attrs, raw: valid_row } ])
+
+    expect(result).to include(created: 1, failed: 0)
+    expect(result[:warnings].first[:warnings].first).to include(code: "shared_company_email")
+    created = company.employees.find_by!(first_name: "Alex", last_name: "Worker")
+    expect(created).to have_attributes(
+      email: "family.bulk@example.com",
+      phone: "+16715550190",
+      contact_source: "import",
+      email_verified_at: nil
     )
   end
 end

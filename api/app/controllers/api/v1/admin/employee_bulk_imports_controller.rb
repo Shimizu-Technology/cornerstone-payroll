@@ -21,7 +21,13 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          service = EmployeeBulkImport::ImportService.new(company, actor: current_user)
+          service = EmployeeBulkImport::ImportService.new(
+            company,
+            actor: current_user,
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent,
+            request_id: request.request_id
+          )
           result = service.parse(file)
 
           if result[:errors].any?
@@ -98,7 +104,13 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          service = EmployeeBulkImport::ImportService.new(company, actor: current_user)
+          service = EmployeeBulkImport::ImportService.new(
+            company,
+            actor: current_user,
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent,
+            request_id: request.request_id
+          )
 
           rows = employees_data.each_with_index.map do |emp, idx|
             {
@@ -118,14 +130,15 @@ module Api
           render json: {
             created: create_result[:created],
             failed: create_result[:failed],
-            errors: create_result[:errors]
+            errors: create_result[:errors],
+            warnings: create_result[:warnings] || []
           }
         end
 
         private
 
         PERMITTED_ATTRS = %i[
-          first_name middle_name last_name email
+          first_name middle_name last_name email confirm_same_person_email
           date_of_birth hire_date employment_type salary_type pay_rate pay_frequency
           filing_status allowances additional_withholding
           w4_dependent_credit w4_step2_multiple_jobs w4_step4a_other_income w4_step4b_deductions
@@ -207,7 +220,8 @@ module Api
             valid: row[:valid],
             duplicate: row[:duplicate],
             new_department: row[:new_department] || false,
-            errors: row[:errors]
+            errors: row[:errors],
+            warnings: row[:warnings] || []
           }
         end
       end

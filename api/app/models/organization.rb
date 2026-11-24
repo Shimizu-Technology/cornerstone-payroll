@@ -4,6 +4,7 @@ class Organization < ApplicationRecord
   STATUSES = %w[active inactive].freeze
 
   has_many :companies, dependent: :restrict_with_error
+  has_many :employee_placeholder_emails, dependent: :destroy
   has_many :finance_books, dependent: :restrict_with_error
   has_many :users, dependent: :restrict_with_error
   has_many :printer_profiles, dependent: :destroy
