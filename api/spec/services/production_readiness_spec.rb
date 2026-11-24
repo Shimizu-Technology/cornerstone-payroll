@@ -7,6 +7,13 @@ RSpec.describe ProductionReadiness do
   class FakeSolidQueueAdapter; end
 
   let(:environment) { ActiveSupport::EnvironmentInquirer.new("production") }
+  let(:clerk_issuer) { "https://clerk.example.com" }
+  let(:signing_key) { OpenSSL::PKey::RSA.generate(2048) }
+  let(:jwk) { JWT::JWK.new(signing_key) }
+  let(:sample_claims) do
+    { iss: clerk_issuer, azp: "https://payroll.example.com", sid: "sess_readiness", sub: "user_readiness",
+      iat: Time.current.to_i, exp: 1.minute.from_now.to_i, two_factor_enabled: true }
+  end
   let(:encryption) do
     Struct.new(:primary_key, :deterministic_key, :key_derivation_salt).new("primary", "deterministic", "salt")
   end
@@ -30,6 +37,7 @@ RSpec.describe ProductionReadiness do
       "FRONTEND_URL" => "https://payroll.example.com",
       "CLERK_PUBLISHABLE_KEY" => "pk_live_publishable",
       "CLERK_SECRET_KEY" => "sk_live_secret",
+      "CLERK_ISSUER" => clerk_issuer,
       "CLERK_AUTHORIZED_PARTIES" => "https://payroll.example.com",
       "R2_ACCESS_KEY_ID" => "r2-access",
       "R2_SECRET_ACCESS_KEY" => "r2-secret",
@@ -102,6 +110,8 @@ RSpec.describe ProductionReadiness do
         [ 200, { "data" => [ { "name" => "example.com", "status" => "verified", "capabilities" => { "sending" => "enabled" } } ] } ]
       when "api.clerk.com"
         [ 200, { "id" => "ins_live" } ]
+      when "clerk.example.com"
+        [ 200, { "keys" => [ jwk.export.deep_stringify_keys ] } ]
       else
         raise "unexpected host"
       end
@@ -135,6 +145,17 @@ RSpec.describe ProductionReadiness do
     allow(ActiveRecord::Migration).to receive(:check_all_pending!).and_return(nil)
   end
 
+  def with_sample_token(claims: sample_claims, key: signing_key)
+    Tempfile.create("clerk-readiness") do |file|
+      file.write(JWT.encode(claims, key, "RS256", kid: jwk.kid))
+      file.flush
+      env["CLERK_MFA_SAMPLE_TOKEN_FILE"] = file.path
+      yield
+    end
+  ensure
+    env.delete("CLERK_MFA_SAMPLE_TOKEN_FILE")
+  end
+
   it "checks real open pay-period tax years in strict guard mode", :rls do
     TenantScope.as_system(reason: "Create readiness fixture") do
       create(:pay_period, start_date: Date.new(2070, 1, 1), end_date: Date.new(2070, 1, 14),
@@ -161,15 +182,66 @@ RSpec.describe ProductionReadiness do
   end
 
   it "passes effective configuration and every safe live dependency probe" do
-    report = readiness.run(live: true)
+    report = with_sample_token { readiness.run(live: true) }
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(31)
+    expect(report.checks.length).to eq(32)
     expect(cache.values).to be_empty
     expect(cache.deleted.length).to eq(1)
     expect(storage.objects).to be_empty
     expect(storage.deleted.length).to eq(1)
     expect(queue_process).to have_received(:where).with(kind: "Worker", last_heartbeat_at: instance_of(Range))
+  end
+
+  describe "the Clerk session claim probe" do
+    let(:check_name) { "Clerk session token includes the MFA enrollment claim" }
+
+    it "requires a sample while MFA enforcement is enabled" do
+      expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
+
+      env["REQUIRE_MFA"] = "false"
+      expect(readiness.run(live: true).failures.map(&:name)).not_to include(check_name)
+    end
+
+    it "fails for a signed session token without a boolean enrollment claim" do
+      with_sample_token(claims: sample_claims.except(:two_factor_enabled)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
+      end
+
+      with_sample_token(claims: sample_claims.merge(two_factor_enabled: "true")) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
+      end
+    end
+
+    it "accepts false as evidence the template supplies the claim for an unenrolled user" do
+      with_sample_token(claims: sample_claims.merge(two_factor_enabled: false)) do
+        expect(readiness.run(live: true).failures.map(&:name)).not_to include(check_name)
+      end
+    end
+
+    it "accepts a recently issued sample that expired while earlier probes ran" do
+      with_sample_token(claims: sample_claims.merge(iat: 2.minutes.ago.to_i, exp: 1.minute.ago.to_i)) do
+        expect(readiness.run(live: true).failures.map(&:name)).not_to include(check_name)
+      end
+    end
+
+    it "does not accept an old, undated or incorrectly signed sample" do
+      with_sample_token(claims: sample_claims.merge(iat: 20.minutes.ago.to_i, exp: 19.minutes.ago.to_i)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
+      end
+
+      with_sample_token(claims: sample_claims.merge(iat: 20.minutes.ago.to_i)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
+      end
+
+      with_sample_token(claims: sample_claims.except(:iat)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
+      end
+
+      with_sample_token(key: OpenSSL::PKey::RSA.generate(2048)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
+      end
+    end
   end
 
   [
@@ -389,7 +461,7 @@ RSpec.describe ProductionReadiness do
     env["RESEND_FROM_EMAIL"] = "Cornerstone Payroll <direct@example.com>"
     env["MAILER_FROM_EMAIL"] = "Cornerstone Invitations <invites@example.com>"
 
-    report = readiness.run(live: true)
+    report = with_sample_token { readiness.run(live: true) }
 
     expect(report).to be_passed
   end

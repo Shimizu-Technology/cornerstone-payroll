@@ -19,25 +19,15 @@ module Api
           UUID_FORMAT = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
 
           def index
-            items = statement_items
+            items = pay_statements.list
             record_access!("worker_statements#listed", record_type: "Employee", record_id: @employee.id, count: items.size)
-            render json: { worker: worker_json, statements: items.map { |item| summary_json(item) } }
+            render json: { worker: worker_json, statements: items.map { |item| EmployeePayStatements::Presenter.new(item).summary } }
           end
 
           def show
-            statement = PayStubGenerator.new(@item).statement
+            payload = EmployeePayStatements::Presenter.new(@item).detail
             record_access!("worker_statement#viewed", record_type: "PayrollItem", record_id: @item.id)
-            render json: summary_json(@item).merge(
-              earnings: statement.fetch(:earnings).map do |row|
-                { label: row[:label], hours: hours(row[:hours]), rate: money(row[:rate]), pay_basis: row[:pay_basis],
-                  amount: money(row[:amount]), ytd: money(row[:ytd]), kind: row[:kind] }
-              end,
-              taxes: statement.fetch(:taxes).map { |row| amount_row(row) },
-              deductions: statement.fetch(:deductions).map { |row| amount_row(row) },
-              other_pay: statement.fetch(:other_pay).map { |row| amount_row(row) },
-              ytd: { gross: money(statement.dig(:ytd, :gross)), net: money(statement.dig(:ytd, :net)) },
-              source_entries: source_entries_json(@item)
-            )
+            render json: payload
           end
 
           def pdf
@@ -85,48 +75,22 @@ module Api
             not_found unless @employee
           end
 
-          # Load the statement as the staff pay stub route does, not from the
-          # list preload, so rows print and serialize in the same order.
           def with_worker_actor(&action)
             Current.with_isolated_actor(AuditActor.source_worker(id: source_user_uuid), &action)
           end
 
           def set_statement_item!
-            listed = statement_scope.find_by(id: params[:id])
-            return not_found unless listed && statement?(listed)
+            @item = pay_statements.find(params[:id])
+            not_found unless @item
+          end
 
-            @item = PayrollItem.includes(:payroll_item_earnings, :payroll_item_field_entries, :time_tracking_entry_allocations,
-              { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company }).find(listed.id)
+          def pay_statements
+            @pay_statements ||= EmployeePayStatements.new(company: @source.company, employee: @employee)
           end
 
           def source_user_uuid
             value = params[:source_user_uuid].to_s.downcase
             value if UUID_FORMAT.match?(value)
-          end
-
-          # Every committed paycheck for this worker in this company, newest first.
-          # Reversed and voided payroll stays listed as voided history; roster rows
-          # without statement activity are not statements.
-          def statement_items
-            @statement_items ||= statement_scope
-              .includes(:pay_period, :check_events, :direct_deposit_payment_confirmation, :payroll_item_earnings,
-                :payroll_item_deductions, :payroll_item_field_entries, :time_tracking_entry_allocations)
-              .order("pay_periods.pay_date DESC, pay_periods.id DESC, payroll_items.id DESC")
-              .select { |item| statement?(item) }
-          end
-
-          def statement_scope
-            @employee.payroll_items.reportable
-              .joins(:pay_period)
-              .where(company_id: @source.company_id, pay_periods: { company_id: @source.company_id, status: "committed" })
-          end
-
-          def statement?(item)
-            EarningsStatementEligibility.printable?(item) || voided_history?(item)
-          end
-
-          def voided_history?(item)
-            !item.payroll_included? && (item.gross_pay.to_d.nonzero? || item.net_pay.to_d.nonzero? || item.check_number.present?)
           end
 
           def worker_json
@@ -135,73 +99,6 @@ module Api
               contractor: @employee.contractor?,
               display_name: [ @employee.first_name, @employee.last_name ].compact_blank.join(" ")
             }
-          end
-
-          def summary_json(item)
-            period = item.pay_period
-            {
-              id: item.id,
-              pay_period: {
-                start_date: period.start_date&.iso8601, end_date: period.end_date&.iso8601,
-                pay_date: period.pay_date&.iso8601, run_purpose: period.run_purpose
-              },
-              check_date: (item.check_date || period.pay_date)&.iso8601,
-              gross_pay: money(item.gross_pay),
-              net_pay: money(item.net_pay),
-              total_hours: hours(item.total_hours),
-              payment: payment_json(item),
-              has_source_entries: item.time_tracking_entry_allocations.any?
-            }
-          end
-
-          # Status follows the recorded payment evidence, the same rules as the
-          # employee pay history and AIRE payment receipts: delivered checks and
-          # confirmed transfers are issued; prepared or printed checks are
-          # prepared; voided checks and reversed or voided payroll are voided.
-          def payment_json(item)
-            method = item.effective_payment_delivery_method
-            evidence = EmployeePayrollPaymentEvidence.new(item).call
-            status = if !item.payroll_included?
-              "voided"
-            else
-              { "voided" => "voided", "issued" => "issued", "printed" => "prepared", "prepared" => "prepared" }.fetch(evidence[:status], "pending")
-            end
-            {
-              method: method,
-              status: status,
-              issued_on: (evidence[:effective_on]&.iso8601 if status == "issued"),
-              check_number_last4: (item.check_number.to_s.last(4).presence if method == "paper_check")
-            }
-          end
-
-          def source_entries_json(item)
-            item.time_tracking_entry_allocations.sort_by { |row| [ row.original_work_date, row.source_time_entry_id.to_s, row.id ] }.map do |row|
-              {
-                source_time_entry_id: row.source_time_entry_id.to_s,
-                work_date: row.original_work_date.iso8601,
-                hours: hours(row.total_hours),
-                regular_hours: hours(row.regular_hours),
-                overtime_hours: hours(row.overtime_hours),
-                source_kind: row.source_kind,
-                category: row.category_snapshot.to_h["name"]
-              }
-            end
-          end
-
-          def amount_row(row)
-            { label: row[:label], amount: money(row[:amount]), ytd: money(row[:ytd]) }
-          end
-
-          def money(value)
-            return nil if value.nil?
-
-            format("%.2f", value.to_d.round(2))
-          end
-
-          def hours(value)
-            return nil if value.nil?
-
-            format("%.2f", value.to_d.round(2))
           end
 
           def record_access!(action, record_type:, record_id:, count: nil)
