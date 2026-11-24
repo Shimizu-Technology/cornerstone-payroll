@@ -17,6 +17,8 @@
 | 05 | [05-ISSUE-REMEDIATION-LOG.md](05-ISSUE-REMEDIATION-LOG.md) | Issue log template + escalation rules |
 | 06 | [06-MANUAL-ENTRY-CYCLE-RUNBOOK.md](06-MANUAL-ENTRY-CYCLE-RUNBOOK.md) | Step-by-step runbook for ST / Cornerstone Internal / DDG / SPR manual-entry cycles |
 | M4 | [M4_EMPLOYEE_PLATFORM_RUNBOOK.md](M4_EMPLOYEE_PLATFORM_RUNBOOK.md) | Set up the employee Render service, Netlify site and client addresses (M4-10) |
+| MFA | [MFA_ROLLOUT_RUNBOOK.md](MFA_ROLLOUT_RUNBOOK.md) | Turn on two-step sign-in (gate G3): Clerk Pro, settings, enrollment window, `REQUIRE_MFA` flip, recovery, code gaps |
+| MFA | [MFA_ROLLOUT_NOTICE_TEMPLATE.md](MFA_ROLLOUT_NOTICE_TEMPLATE.md) | Plain-language notice to staff and client users |
 
 Operator identity, recovery exercises, and the final acceptance record are maintained in [Payroll operator and recovery acceptance](../OPERATOR_AND_RECOVERY_ACCEPTANCE.md).
 
