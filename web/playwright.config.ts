@@ -9,6 +9,8 @@ const fixturePath = process.env.E2E_FIXTURE_PATH || resolve(process.cwd(),
 const apiPort = process.env.E2E_API_PORT || '4317';
 const webPort = process.env.E2E_WEB_PORT || (releaseLane ? '4318' : '4173');
 const localBaseUrl = `http://127.0.0.1:${webPort}`;
+// The employee surface (VITE_APP_SURFACE=employee) runs as its own dev server for public-employee-*.spec.ts.
+const employeeWebPort = process.env.E2E_EMPLOYEE_WEB_PORT || '4175';
 const localApiUrl = `http://127.0.0.1:${apiPort}`;
 
 export default defineConfig({
@@ -82,5 +84,18 @@ export default defineConfig({
             VITE_CLERK_PUBLISHABLE_KEY: '',
           },
         },
+        ...(!releaseLane
+          ? [{
+              command: `npm run dev -- --host 127.0.0.1 --port ${employeeWebPort} --strictPort`,
+              url: `http://127.0.0.1:${employeeWebPort}`,
+              reuseExistingServer: !process.env.CI,
+              env: {
+                ...process.env,
+                VITE_APP_SURFACE: 'employee',
+                VITE_API_URL: `${localApiUrl}/api/v1`,
+                VITE_CLERK_PUBLISHABLE_KEY: '',
+              },
+            }]
+          : []),
       ],
 });

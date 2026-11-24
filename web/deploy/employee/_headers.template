@@ -1,0 +1,14 @@
+# Employee surface headers. scripts/finalize-surface-dist.mjs fills the
+# CSP placeholder from VITE_API_URL and VITE_CLERK_PUBLISHABLE_KEY.
+# Every rule sits under one "/*" block on purpose: Netlify merges overlapping
+# rules, so a second block that re-set Cache-Control could not be trusted to win.
+/*
+  Content-Security-Policy: {{CSP}}
+  Strict-Transport-Security: max-age=31536000
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-store
