@@ -5,6 +5,8 @@ class MfaPolicy
 
   ERROR_MESSAGE = "Multi-factor authentication is required before accessing payroll."
   ERROR_CODE = "mfa_required"
+  STEP_UP_MAX_AGE_MINUTES = 10
+  ENROLLMENT_CLAIM = "two_factor_enabled"
   TRUTHY_VALUES = %w[1 true t yes y on].freeze
 
   def self.enabled?(env: ENV)
@@ -16,20 +18,29 @@ class MfaPolicy
   end
 
   def self.verified_second_factor?(payload)
-    return false unless payload.is_a?(Hash)
-
-    ages = payload["fva"]
-    return false unless ages.is_a?(Array) && ages.length == 2
-
-    first, second = ages
-    first.is_a?(Integer) && first >= -1 && second.is_a?(Integer) && second >= 0
+    second_factor_enrolled?(payload) && (factor_ages(payload)&.last || -1) >= 0
   end
 
-  def self.recently_verified?(payload, max_age_minutes: 10)
+  def self.second_factor_enrolled?(payload)
+    payload.is_a?(Hash) && payload[ENROLLMENT_CLAIM] == true
+  end
+
+  def self.recently_verified_second_factor?(payload, max_age_minutes: STEP_UP_MAX_AGE_MINUTES)
     return false unless max_age_minutes.is_a?(Integer) && max_age_minutes >= 0
 
     verified_second_factor?(payload) && payload["fva"][1] <= max_age_minutes
   end
+
+  def self.recently_verified_any_factor?(payload)
+    age = factor_ages(payload)&.first || -1
+    age.between?(0, STEP_UP_MAX_AGE_MINUTES)
+  end
+
+  def self.factor_ages(payload)
+    ages = payload["fva"] if payload.is_a?(Hash)
+    ages if ages.is_a?(Array) && ages.length == 2 && ages.all? { |age| age.is_a?(Integer) && age >= -1 }
+  end
+  private_class_method :factor_ages
 
   def self.record_denial!(user:, source:, subject_name:, request_id: nil, ip_address: nil, user_agent: nil)
     # Denial is an organization security event with no tenant context.
