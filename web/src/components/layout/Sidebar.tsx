@@ -37,6 +37,7 @@ import {
   Route,
   MessagesSquare,
   PieChart,
+  Smartphone,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
@@ -45,7 +46,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
 import { OrganizationSwitcher } from './OrganizationSwitcher';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
-import { employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
+import { employeeAppSettingsPath, employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 
 interface NavItem {
   name: string;
@@ -84,6 +85,7 @@ const portalNavigation: NavItem[] = [
   { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Documents', href: '/documents', icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Change Requests', href: '/change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employee app', href: '/employee-app', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 const toolsNavigation: NavItem[] = [
@@ -102,6 +104,7 @@ const clientSettingsNavigation: NavItem[] = [
   { name: 'Time tracking account', href: '/app/aire-account-connection', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'How this client runs', href: '/operating-profile', icon: <SlidersHorizontal className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Schedule', href: '/pay-schedule-settings', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employee app', href: '/employee-app', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'My Printer & Checks', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Fields', href: '/payroll-fields', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Reminders', href: '/payroll-reminders', icon: <Bell className="h-[18px] w-[18px] shrink-0" /> },
@@ -261,6 +264,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
   const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration');
+  const canManageClientAdministration = useSelectedCompanyCapability('manage_client_administration');
   const isSuperAdmin = user?.role === 'super_admin';
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -278,19 +282,23 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     if (item.href === '/payroll-fields') return hasCapability('manage_payroll_fields');
     if (item.href === '/time-tracking-sources') return isAdmin;
     if (item.href === '/app/aire-history-approval') return (isAdmin || isAccountant) && hasCapability('payroll_operations');
+    if (item.href === '/employee-app') return !!activeCompanyId && canManageClientAdministration;
     if (!canManageClientConfiguration) return false;
     return true;
-  }).map((item) => item.href === '/operating-profile'
-    ? { ...item, href: `/companies/${activeCompanyId}/operating-profile` }
-    : item);
+  }).map((item) => {
+    if (item.href === '/operating-profile') return { ...item, href: `/companies/${activeCompanyId}/operating-profile` };
+    if (item.href === '/employee-app' && activeCompanyId) return { ...item, href: employeeAppSettingsPath(activeCompanyId) };
+    return item;
+  });
   const primaryNavigation = (isClient ? portalNavigation : clientNavigation).map((item): NavItem => {
     if (item.href === '/messages') return { ...item, count: counts?.unread_count };
     if (item.href === '/app/client-inbox') return { ...item, count: counts?.waiting_count };
     if (!activeCompanyId) return item;
     if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
     if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };
+    if (item.href === '/employee-app') return { ...item, href: employeeAppSettingsPath(activeCompanyId) };
     return item;
-  });
+  }).filter((item) => item.href !== '/employee-app');
   const visibleToolsNavigation = toolsNavigation.filter((item) => {
     if (item.href === '/historical-payroll' || item.href === '/payroll-go-live') return historicalPayrollEnabled;
     if (item.href === '/tools/finance' || item.href === '/tools/invoices' || item.href === '/tools/expenses') return isAdmin;

@@ -38,6 +38,12 @@ class Rack::Attack
     end
   end
 
+  # Logo URLs are content-addressed and cached by browsers, so a shift on one
+  # shared Wi-Fi asks for each logo about once.
+  throttle("tenant_logo/ip", limit: 60, period: 1.minute) do |request|
+    throttle_ip(request) if TenantSubdomainRegistry::LOGO_PATH.match?(throttle_path(request))
+  end
+
   # AIRE proxies every worker from its own servers, so the per-IP API limit is
   # shared. Also bound each worker's statement reads; PDFs are costlier.
   WORKER_STATEMENTS_PATH = %r{\A/api/v1/integrations/time_payroll/workers/([^/]+)/statements(?:/\d+(/pdf)?)?/?\z}

@@ -65,7 +65,7 @@ RSpec.describe "Client subdomains", type: :request do
     end
   end
 
-  it "serves the four public branding fields for either lookup form without authentication" do
+  it "serves only the public branding fields for either lookup form without authentication" do
     # The public response also filters legacy rows written outside validations.
     enabled.update_columns(branding: enabled.branding.merge("contact_email" => "internal@example.test", "company_id" => 123))
 
@@ -76,8 +76,8 @@ RSpec.describe "Client subdomains", type: :request do
       expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
       expect(response.headers["Cache-Control"]).to eq("no-store")
       expect(response.parsed_body).to eq(
-        "name" => "Example Employer", "logo_url" => "https://example.test/mark.png",
-        "primary_color" => "#214F44", "accent_color" => "#FAD625"
+        "name" => "Example Employer", "app_name" => nil, "logo_url" => "https://example.test/mark.png",
+        "primary_color" => "#214F44", "accent_color" => "#FAD625", "main_phone" => "6715551234"
       )
     end
   end
@@ -97,11 +97,17 @@ RSpec.describe "Client subdomains", type: :request do
   end
 
   it "drops unusable logo and color values from the public payload" do
-    enabled.update_columns(branding: { logo_url: "https://public.example.test/mark.png?X-Amz-Signature=test", primary_color: {}, accent_color: "red" })
+    enabled.update_columns(branding: {
+      logo_url: "https://public.example.test/mark.png?X-Amz-Signature=test", primary_color: {}, accent_color: "red",
+      display_name: "<b>Example</b>", app_name: "x" * 31
+    })
 
     get path, params: { host: enabled_host }
 
-    expect(response.parsed_body).to eq("name" => "Example Employer", "logo_url" => nil, "primary_color" => nil, "accent_color" => nil)
+    expect(response.parsed_body).to eq(
+      "name" => "Example Employer", "app_name" => nil, "logo_url" => nil, "primary_color" => nil, "accent_color" => nil,
+      "main_phone" => "6715551234"
+    )
   end
 
   it "uses the effective profile and sees slug, flag and active-status changes on the next request" do

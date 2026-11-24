@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_25_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -673,6 +673,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_090000) do
     t.integer "regular_pay_threshold", default: 3, null: false
     t.string "subdomain_slug"
     t.jsonb "branding", default: {}, null: false
+    t.string "brand_logo_storage_key"
+    t.string "brand_logo_content_type"
+    t.string "brand_logo_sha256"
+    t.integer "brand_logo_byte_size"
     t.index "lower((subdomain_slug)::text)", name: "index_live_companies_on_lower_subdomain_slug", unique: true, where: "(((payroll_environment)::text = 'live'::text) AND (subdomain_slug IS NOT NULL))"
     t.index [ "active_printer_profile_id" ], name: "index_companies_on_active_printer_profile_id"
     t.index [ "created_by_id" ], name: "index_companies_on_created_by_id"
@@ -689,6 +693,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_090000) do
     t.check_constraint "migration_rehearsal_status IS NULL OR (migration_rehearsal_status::text = ANY (ARRAY['pending'::character varying::text, 'ready'::character varying::text, 'failed'::character varying::text]))", name: "companies_migration_rehearsal_status_check"
     t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL AND test_workspace_purpose IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND migration_source_company_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL AND test_workspace_purpose IS NOT NULL AND (test_workspace_purpose::text <> 'migration_rehearsal'::text OR migration_source_batch_id IS NOT NULL)", name: "companies_test_workspace_shape_check"
     t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
+    t.check_constraint "(num_nonnulls(brand_logo_storage_key, brand_logo_content_type, brand_logo_sha256, brand_logo_byte_size) = ANY (ARRAY[0, 4])) AND (brand_logo_content_type IS NULL OR (brand_logo_content_type::text = ANY (ARRAY['image/png'::character varying, 'image/webp'::character varying, 'image/svg+xml'::character varying]::text[]))) AND (brand_logo_sha256 IS NULL OR brand_logo_sha256::text ~ '^[0-9a-f]{64}$'::text)", name: "company_brand_logo_shape"
     t.check_constraint "regular_pay_threshold > 0 AND regular_pay_threshold <= regular_pay_lookback AND regular_pay_lookback <= 24", name: "regular_pay_rule"
     t.check_constraint "subdomain_slug IS NULL OR payroll_environment::text = 'live'::text", name: "company_subdomain_requires_live_payroll"
     t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['sandbox'::character varying::text, 'migration_rehearsal'::character varying::text, 'training_replay'::character varying::text, 'backup_snapshot'::character varying::text]))", name: "companies_test_workspace_purpose_check"
@@ -709,6 +714,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_090000) do
     t.index [ "user_id" ], name: "index_company_assignments_on_user_id"
     t.check_constraint "NOT client_management OR workspace_access_level IS NULL AND granted_by_id IS NOT NULL", name: "company_assignments_client_management_live_shape"
     t.check_constraint "workspace_access_level IS NULL OR (workspace_access_level::text = ANY (ARRAY['operator'::character varying::text, 'reviewer'::character varying::text, 'workspace_admin'::character varying::text]))", name: "company_assignments_workspace_access_level_check"
+  end
+
+  create_table "company_help_contacts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.integer "position", null: false
+    t.string "name", null: false
+    t.string "role"
+    t.string "phone"
+    t.string "email"
+    t.boolean "text_ok", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "position" ], name: "index_company_help_contacts_on_company_id_and_position", unique: true
+    t.check_constraint "NOT text_ok OR phone IS NOT NULL", name: "company_help_contact_text_needs_phone"
+    t.check_constraint "\"position\" >= 1 AND \"position\" <= 5", name: "company_help_contact_position_range"
+    t.check_constraint "char_length(btrim(name::text)) >= 1 AND char_length(btrim(name::text)) <= 80", name: "company_help_contact_name_length"
+    t.check_constraint "num_nonnulls(phone, email) >= 1", name: "company_help_contact_reachable"
   end
 
   create_table "company_pay_schedules", force: :cascade do |t|
@@ -5063,6 +5085,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_090000) do
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"
   add_foreign_key "company_assignments", "users", column: "granted_by_id"
+  add_foreign_key "company_help_contacts", "companies", on_delete: :cascade
   add_foreign_key "company_pay_schedules", "companies"
   add_foreign_key "company_pay_schedules", "users", column: "confirmed_by_id"
   add_foreign_key "company_workweeks", "companies"

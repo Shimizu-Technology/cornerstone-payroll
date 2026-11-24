@@ -74,6 +74,10 @@ export function payRunsPath(companyId: number, query = ''): string {
   return `${companyPath(companyId)}/pay-runs${normalizeQuery(query)}`;
 }
 
+export function employeeAppSettingsPath(companyId: number): string {
+  return `${companyPath(companyId)}/employee-app`;
+}
+
 export function payrollGoLivePath(companyId: number): string {
   return `${companyPath(companyId)}/payroll-go-live`;
 }

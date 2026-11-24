@@ -31,14 +31,16 @@ RSpec.describe "APP_PROCESS_ROLE" do
     result = boot_role("employee_web", "/api/v1/admin/companies")
     expect(result).to include(up: 200, up_queries: [], forbidden: 404)
     expect(result[:cable_mount_path]).to be_nil
-    expect(result[:paths]).to all(match(%r{\A(?:(?:/up|/health/dependencies)\(|/api/v1/(?:employee/|kiosk/|auth/|public/tenant_branding\z))}))
-    expect(result[:paths]).to include("/api/v1/employee/context(.:format)", "/api/v1/public/tenant_branding", "/health/dependencies(.:format)")
+    expect(result[:paths]).to all(match(%r{\A(?:(?:/up|/health/dependencies)\(|/api/v1/(?:employee/|kiosk/|auth/|public/tenant_branding(?:\z|/logo/)))}))
+    expect(result[:paths]).to include("/api/v1/employee/context(.:format)", "/api/v1/public/tenant_branding",
+      "/api/v1/public/tenant_branding/logo/:slug/:file", "/health/dependencies(.:format)")
     expect(result[:paths]).to all(match(ProcessRole::EMPLOYEE_WEB_ROUTE_PATTERN))
   end
 
   it "keeps the employee route allowlist closed to payroll paths" do
     %w[/cable /api/v1/admin/companies(.:format) /api/v1/client/employees(.:format) /api/v1/finance/overview(.:format)
-       /api/v1/integrations/aire/x /rails/active_storage/blobs /api/v1/employee /api/v1/employeex/y].each do |path|
+       /api/v1/integrations/aire/x /rails/active_storage/blobs /api/v1/employee /api/v1/employeex/y
+       /api/v1/public/tenant_branding/logo /api/v1/public/tenant_branding/other].each do |path|
       expect(ProcessRole::EMPLOYEE_WEB_ROUTE_PATTERN).not_to match(path)
     end
   end
@@ -47,7 +49,7 @@ RSpec.describe "APP_PROCESS_ROLE" do
     result = boot_role("payroll_web", "/api/v1/employee/context")
     expect(result).to include(up: 200, up_queries: [], forbidden: 404)
     expect(result[:cable_mount_path]).to eq("/cable")
-    expect(result[:paths]).to all(match(%r{\A(?:/cable\z|(?:/up|/health/dependencies)\(|/api/v1/(?:(?:admin|client|auth|form_500s|finance|integrations)/|(?:companies|cable_ticket|notification_settings)\(|public/tenant_branding\z))}))
+    expect(result[:paths]).to all(match(%r{\A(?:/cable\z|(?:/up|/health/dependencies)\(|/api/v1/(?:(?:admin|client|auth|form_500s|finance|integrations)/|(?:companies|cable_ticket|notification_settings)\(|public/tenant_branding(?:\z|/logo/)))}))
     expect(result[:paths]).to include("/cable", "/health/dependencies(.:format)", "/api/v1/public/tenant_branding",
       "/api/v1/admin/companies(.:format)", "/api/v1/auth/me(.:format)")
   end
