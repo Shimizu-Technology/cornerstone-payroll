@@ -37,7 +37,7 @@ module EmployeeDocuments
       pages.map.with_index(1) do |page, number|
         original_page = original_pages.fetch(number - 1)
         original_text = scan_text(original_page)
-        if issue_for(original_text)
+        if unreadable_text?(original_text)
           next unreadable_page(number)
         end
 
@@ -52,7 +52,7 @@ module EmployeeDocuments
         bytes = split.to_pdf
         archived_page = PDF::Reader.new(StringIO.new(bytes)).page(1)
         archived_text = scan_text(archived_page)
-        next unreadable_page(number) if issue_for(archived_text)
+        next unreadable_page(number) if unreadable_text?(archived_text)
 
         has_image = [ original_page, archived_page ].any? { |candidate| PdfImageReview.new(candidate).required? }
         possible_ssn = [ original_text, archived_text ].any? { |text| QuickbooksStubNumbers.possible_ssn?(text) }
@@ -72,9 +72,9 @@ module EmployeeDocuments
       Page.new(number:, bytes: nil, text: nil, original_text: nil, issue: "unreadable", has_image: false, possible_ssn: false)
     end
 
-    def self.issue_for(text)
-      text.blank? || text.include?("\uFFFD")
+    def self.unreadable_text?(text)
+      text.blank? || text.match?(/[\u25AF\uFFFD]/)
     end
-    private_class_method :issue_for, :unreadable_page
+    private_class_method :unreadable_text?, :unreadable_page
   end
 end

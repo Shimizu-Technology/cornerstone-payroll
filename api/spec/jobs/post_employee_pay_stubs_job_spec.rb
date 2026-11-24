@@ -163,6 +163,65 @@ RSpec.describe PostEmployeePayStubsJob do
     )
   end
 
+  context "with a delta correction" do
+    let(:delta_period) do
+      create(:pay_period, :committed, company: company, committed_at: cutoff, start_date: period.start_date,
+        end_date: period.end_date, pay_date: period.pay_date)
+    end
+    let(:delta) do
+      create(:payroll_item, pay_period: delta_period, employee: employee, gross_pay: 100, net_pay: 80,
+        payment_delivery_method: "direct_deposit", correction_for_payroll_item: item)
+    end
+    let(:delta_documents) { EmployeeDocument.where(payroll_item: delta).order(:revision) }
+
+    it "holds the delta when its origin does not have an active stub" do
+      delta
+      item.update_columns(payment_delivery_method: "paper_check")
+      allow(Rails.logger).to receive(:info).and_call_original
+
+      expect { run_at(cutoff) }.not_to change(EmployeeDocument, :count)
+      expect(storage).not_to have_received(:upload)
+      expect(Rails.logger).to have_received(:info)
+        .with("Employee pay stub waiting for origin document for payroll item #{delta.id}").once
+    end
+
+    it "holds the delta after a failed origin upload and posts it linked on the next successful run" do
+      delta
+      allow(storage).to receive(:upload)
+        .with(include("/payroll_item_#{item.id}/"), anything, content_type: "application/pdf")
+        .and_raise(ArgumentError, "synthetic upload failure")
+
+      expect { run_at(cutoff) }.not_to change(EmployeeDocument, :count)
+      expect(storage).not_to have_received(:upload)
+        .with(include("/payroll_item_#{delta.id}/"), anything, content_type: "application/pdf")
+
+      allow(storage).to receive(:upload)
+        .with(include("/payroll_item_#{item.id}/"), anything, content_type: "application/pdf").and_return(true)
+      expect { run_at(cutoff + 5.minutes) }.to change(EmployeeDocument, :count).by(2)
+      original = documents.first
+      expect(original).to be_posted
+      expect(delta_documents.first).to have_attributes(status: "posted", revision: 1, corrected: true, replaces_document: original)
+    end
+
+    it "repairs an unlinked legacy copy with an unchanged, already checked fingerprint" do
+      item
+      run_at(cutoff)
+      original = documents.first
+      delta.update_columns(updated_at: cutoff - 1.day)
+      delta_period.update_columns(updated_at: cutoff - 1.day)
+      fingerprint = PayStubGenerator.new(delta, employee_copy: true).employee_payroll_facts_sha256
+      legacy = EmployeeDocument.create!(company: company, payroll_item: delta, revision: 1, storage_key: "legacy.pdf",
+        sha256: "0" * 64, posted_at: cutoff, payroll_facts_checked_at: cutoff, payroll_facts_sha256: fingerprint)
+
+      expect { run_at(cutoff + 5.minutes) }.to change { delta_documents.count }.by(1)
+      expect(legacy.reload).to be_replaced
+      expect(original.reload).to be_posted
+      expect(delta_documents.last).to have_attributes(status: "posted", revision: 2, corrected: true,
+        replaces_document: original, payroll_facts_sha256: fingerprint)
+      expect { run_at(cutoff + 10.minutes) }.not_to change { delta_documents.count }
+    end
+  end
+
   it "leaves a reversed item withdrawn when there is no successor" do
     item
     run_at(cutoff)

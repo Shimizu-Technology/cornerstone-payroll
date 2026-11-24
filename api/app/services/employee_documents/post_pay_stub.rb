@@ -30,16 +30,23 @@ module EmployeeDocuments
       return unless @item.employee&.company_id == @item.company_id
       return unless EarningsStatementEligibility.printable?(@item)
 
+      delta = @item.correction_entry?
+      original = correction_source
+      if delta && original.nil?
+        Rails.logger.info("Employee pay stub waiting for origin document for payroll item #{@item.id}")
+        return
+      end
+
+      repairing_link = delta && latest && latest.replaces_document_id.nil?
       checked_at = Time.current
       generator = PayStubGenerator.new(@item, employee_copy: true)
       fingerprint = generator.employee_payroll_facts_sha256
-      if latest&.posted? && latest.payroll_facts_sha256 == fingerprint
+      if latest&.posted? && !repairing_link && latest.payroll_facts_sha256 == fingerprint
         latest.update!(payroll_facts_checked_at: checked_at)
         return
       end
 
-      original = correction_source
-      predecessor = latest || original
+      predecessor = repairing_link ? original : (latest || original)
       document = FreezePdf.call(
         bytes: generator.generate,
         source: @item, posted_at: Time.current, revision: (latest&.revision || 0) + 1,
@@ -51,9 +58,7 @@ module EmployeeDocuments
       latest&.update!(status: :replaced)
       # A delta correction is a separate payment. Its original stays active
       # while the underlying original payroll obligation remains in force.
-      if original && (@item.financial_correction_origin_item_id.present? || !original.payroll_item.payroll_included?)
-        original.update!(status: :replaced)
-      end
+      original.update!(status: :replaced) if original && !delta
       enqueue_employee_pay_stub_notice(document) if predecessor.nil? && @notice_since && period.pay_date >= @notice_since
       document
     end
@@ -71,7 +76,11 @@ module EmployeeDocuments
     end
 
     def correction_source
-      id = @item.financial_correction_origin_item_id || @item.correction_for_payroll_item_id
+      if @item.correction_entry?
+        return documents_for(@item.correction_for_payroll_item_id).posted.lock.first
+      end
+
+      id = @item.financial_correction_origin_item_id
       documents_for(id).lock.first if id
     end
 
