@@ -17,7 +17,7 @@
 # `body` or `reason` keys on other endpoints.
 Rails.application.config.filter_parameters += [
   :passw, :email, :secret, :token, :ticket, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc,
-  :invite_nonce, :code, :state, :upload, /\Afiles?\z/i, /\A(tin|contractor_ein)\z/i,
+  :invite_nonce, :code, :state, :birth, :upload, /\Afiles?\z/i, /\A(tin|contractor_ein)\z/i,
   /(?:\[|%5B)(?:tin|contractor_ein)(?:\]|%5D)/i,
   /(?:\A|\.)(?:employee_)?note\.(?:body|reason|hidden_reason)\z/i,
   /(?:\A|\[|%5B)(?:employee_)?note(?:\]|%5D)?(?:\[|%5B)(?:body|reason|hidden_reason)(?:\]|%5D)/i
