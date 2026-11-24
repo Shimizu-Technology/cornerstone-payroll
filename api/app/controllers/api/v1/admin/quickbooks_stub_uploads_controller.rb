@@ -61,12 +61,7 @@ module Api
         def persist_confirmation(confirmation)
           EmployeeDocument.transaction(requires_new: true) do
             current_company.lock!
-            revalidate_current_company_write_access!
-            unless CompanyFeatures.for(current_company).employee_portal_feature?(:stubs)
-              raise CompanyWriteAccessChanged
-            end
-
-            documents = confirmation.confirm do |match, document|
+            documents = confirmation.confirm(revalidate: method(:revalidate_confirmation!)) do |match, document|
               if match.page.has_image
                 audit_step("image_reviewed", { page: match.page.number, document_id: document.id })
               end
@@ -80,6 +75,13 @@ module Api
         rescue StandardError
           confirmation.cleanup!
           raise
+        end
+
+        def revalidate_confirmation!
+          revalidate_current_company_write_access!
+          unless CompanyFeatures.for(current_company).employee_portal_feature?(:stubs)
+            raise CompanyWriteAccessChanged
+          end
         end
 
         def require_employee_stubs!

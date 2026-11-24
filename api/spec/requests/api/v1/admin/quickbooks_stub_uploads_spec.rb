@@ -134,7 +134,7 @@ RSpec.describe "QuickBooks original stubs", type: :request do
   end
 
   it "requires its own attestation and an audited view before posting a possible SSN" do
-    text = "#{page_text}\nSSN: 123 / 45 / 6789"
+    text = "#{page_text}\nSSN: 123 / 45 / 6789 40"
     submit("preview", upload: pdf(text))
     page = response.parsed_body.fetch("data").first
     expect(page.fetch("status")).to eq("possible_ssn")
@@ -158,6 +158,39 @@ RSpec.describe "QuickBooks original stubs", type: :request do
     admin.update!(role: "accountant")
     submit("view_page", upload: pdf(text), review_token: token)
     expect(response).to have_http_status(:forbidden)
+  end
+
+  it "rejects a remap between the preliminary match and confirmation even when the new employee has the same name" do
+    submit("preview", upload: pdf(page_text))
+    token = response.parsed_body.fetch("data").first.fetch("review_token")
+    replacement = create(:employee, company: company, first_name: employee.first_name, last_name: employee.last_name)
+    batch = check.historical_import_batch
+    allow_any_instance_of(EmployeeDocuments::ReviewQuickbooksStubs).to receive(:prepare).and_wrap_original do |prepare, **options|
+      prepare.call(**options)
+      batch.update_columns(status: "previewed")
+      QuickbooksHistory::MappingService.new(worker: check.historical_worker, employee: replacement, actor: admin).call
+      batch.update_columns(status: "locked")
+    end
+
+    expect { submit("confirm", upload: pdf(page_text), tokens: [ token ]) }.not_to change(EmployeeDocument, :count)
+    expect(check.reload.employee_id).to eq(replacement.id)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("This check's employee changed. Review the page again.")
+    expect(storage).not_to have_received(:upload)
+  end
+
+  it "rejects a batch returned to preview before confirmation locks its source records" do
+    submit("preview", upload: pdf(page_text))
+    token = response.parsed_body.fetch("data").first.fetch("review_token")
+    allow_any_instance_of(EmployeeDocuments::ReviewQuickbooksStubs).to receive(:prepare).and_wrap_original do |prepare, **options|
+      prepare.call(**options)
+      check.historical_import_batch.update_columns(status: "previewed")
+    end
+
+    expect { submit("confirm", upload: pdf(page_text), tokens: [ token ]) }.not_to change(EmployeeDocument, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("This check's employee changed. Review the page again.")
+    expect(storage).not_to have_received(:upload)
   end
 
   it "identifies an already posted page and an expired preview" do
