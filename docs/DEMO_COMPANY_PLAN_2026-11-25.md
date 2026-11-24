@@ -27,6 +27,13 @@ Everything behaves the same as a real client up to the point where something wou
 
 Where a step would transmit, it shows the same neutral wording a real client sees when that step isn't available, not a demo message. This overrides any labeling, read-only, expiry or "test-labeled artifact" wording elsewhere in this plan.
 
+### Owner answers (November 25, 2026)
+
+- **Names:** real-sounding but not a real business. Harbor Finch Kitchen (main) and Harbor Finch Catering (second employer); a web search found no business with either name. Hostnames carry no "demo" wording: `harborfinch` and `harborfinch-catering` on the Payroll root, replacing the `-demo` slugs proposed below.
+- **Persona email:** aliases on one firm-controlled mailbox using plus-addressing (one alias per persona). The exact addresses live only in private configuration (the allow-list), never in this repository. Confirm before invites that Clerk's production restrictions allow subaddresses and that Payroll's shared-inbox and contact guards treat each alias as its own address.
+- **Clerk Pro and two-step sign-in:** expected soon, possibly the weekend of November 28–29. The date will be set with notice to staff and client users.
+- **Early window before database enforcement:** yes, as soon as the readiness checks in §4 pass.
+
 
 | Question | Recommendation |
 |---|---|
