@@ -27,6 +27,9 @@ class StagingReadiness
         checks << check("RLS policy installation matches the selected phase") do
           RlsDatabase.expected_phase?(connection, enforced: @env["RLS_EXPECT_ENFORCED"] == "true")
         end
+        checks << check("Cross-company login link decision is a restricted SECURITY DEFINER function") do
+          RlsDatabase.login_link_decision_ready?(connection)
+        end
       end
     end
     ProductionReadiness::Report.new(checks: checks, connected_payroll: ConnectedPayrollMode.capability(env: @env))

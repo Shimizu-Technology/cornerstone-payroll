@@ -40,6 +40,7 @@ RSpec.describe "RLS owner tasks", :rls do
     expect(transactions).not_to include(nil)
     expect(transactions.uniq.size).to eq(RlsTables::PROTECTED_TABLES.size)
     expect { invoke("rls:status") }.to output(/"table": "pay_component_tax_rules",\s+"enabled": false,\s+"forced": false,\s+"policy": true/).to_stdout
+    expect { invoke("rls:status") }.to output(/"login_link_decision": \{\s+"installed": true,\s+"security_definer": true/).to_stdout
   end
 
   it "disables enforced test policies without removing their staged definitions" do

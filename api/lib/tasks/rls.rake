@@ -21,7 +21,8 @@ namespace :rls do
         direct_runtime_configured: RlsConfiguration.runtime_url.present?,
         role: connection.select_one("SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user"),
         kill_switch: installed && connection.select_value("SELECT bypass_enabled FROM rls_admin.rls_kill_switch WHERE singleton"),
-        tables: RlsDatabase.table_status(connection)
+        tables: RlsDatabase.table_status(connection),
+        login_link_decision: RlsDatabase.login_link_decision_status(connection)
       )
     end
   end

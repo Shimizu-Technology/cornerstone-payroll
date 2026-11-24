@@ -159,6 +159,9 @@ class ProductionReadiness
         primary_record.connection_pool.with_connection do |connection|
           RlsDatabase.expected_phase?(connection, enforced: env["RLS_EXPECT_ENFORCED"] == "true")
         end
+      end,
+      check("Cross-company login link decision is a restricted SECURITY DEFINER function") do
+        primary_record.connection_pool.with_connection { |connection| RlsDatabase.login_link_decision_ready?(connection) }
       end
     ]
   end

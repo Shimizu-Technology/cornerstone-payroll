@@ -22,20 +22,39 @@ class EmployeeAccountLink < ApplicationRecord
   # :unknown, never records. A login linked to any other employee always
   # returns :conflict, even if an allowed link also exists.
   #
-  # Outside a tenant scope it reads every company as a system read. Inside a
-  # company scope TenantScope refuses a nested system read, so once RLS hides
-  # other companies' links from this session the answer is :unknown, which
-  # callers must reject (fail closed).
+  # The decision comes from the payroll_employee_login_link_decision SECURITY
+  # DEFINER function, which sees every company's links even under enforced RLS
+  # without a nested system read (TenantScope refuses those). Until that
+  # function is installed, it falls back to a scoped read that answers
+  # :unknown, which callers reject, whenever RLS hides other companies' links.
   def self.contact_email_link_decision(user_id:, company_id:, allowed_employee_ids: [])
     return :none if user_id.blank?
 
     allowed_ids = Array(allowed_employee_ids).filter_map { |id| Integer(id, exception: false) }.uniq
     target_company_id = Integer(company_id, exception: false)
+    return function_link_decision(user_id, target_company_id, allowed_ids) if decision_function_available?
 
     decision = with_system_decision_read { link_decision_for(user_id, target_company_id, allowed_ids) }
     return :unknown if decision != :conflict && other_company_links_hidden?
 
     decision
+  end
+
+  DECISION_FUNCTION = "payroll_employee_login_link_decision(bigint, bigint, bigint[])"
+  DECISIONS = { "allowed" => :allowed, "conflict" => :conflict, "none" => :none }.freeze
+
+  def self.function_link_decision(user_id, company_id, allowed_ids)
+    sql = sanitize_sql_array([
+      "SELECT payroll_employee_login_link_decision(?::bigint, ?::bigint, ?::bigint[])",
+      Integer(user_id), company_id, PG::TextEncoder::Array.new.encode(allowed_ids)
+    ])
+    DECISIONS.fetch(connection.select_value(sql), :unknown)
+  end
+
+  def self.decision_function_available?
+    connection.select_value(
+      sanitize_sql_array([ "SELECT has_function_privilege(to_regprocedure(?), 'EXECUTE')", DECISION_FUNCTION ])
+    ) == true
   end
 
   def self.link_decision_for(user_id, company_id, allowed_ids)
@@ -71,7 +90,8 @@ class EmployeeAccountLink < ApplicationRecord
 
     connection.select_value(LINKS_HIDDEN_SQL) == true
   end
-  private_class_method :link_decision_for, :with_system_decision_read, :other_company_links_hidden?
+  private_class_method :function_link_decision, :decision_function_available?, :link_decision_for,
+    :with_system_decision_read, :other_company_links_hidden?
 
   def portal_enabled?
     company.active? && company.organization.active? && CompanyFeatures.for(company).employee_portal_enabled?

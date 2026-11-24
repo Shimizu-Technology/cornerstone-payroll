@@ -14,6 +14,20 @@ module RlsDatabase
 
   SWITCH_CACHE = Concurrent::AtomicReference.new
 
+  LOGIN_LINK_DECISION = "payroll_employee_login_link_decision(bigint, bigint, bigint[])"
+  # Read-only facts about the cross-company login link decision function.
+  # The owner must bypass RLS to see every company; PUBLIC must not execute it.
+  LOGIN_LINK_DECISION_STATUS = <<~SQL.squish.freeze
+    SELECT p.prosecdef AS security_definer, p.provolatile = 's' AS stable,
+           coalesce('search_path=pg_catalog, public' = ANY (p.proconfig), false) AS search_path_pinned,
+           (o.rolbypassrls OR o.rolsuper) AS owner_bypasses_rls,
+           EXISTS (SELECT FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+                   WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') AS public_can_execute,
+           (SELECT has_function_privilege(r.oid, p.oid, 'EXECUTE') FROM pg_roles r WHERE r.rolname = 'payroll_app') AS runtime_can_execute
+    FROM pg_proc p JOIN pg_roles o ON o.oid = p.proowner
+    WHERE p.oid = to_regprocedure('#{LOGIN_LINK_DECISION}')
+  SQL
+
   def self.install!(connection)
     schema = connection.select_value("SELECT current_schema()")
     connection.transaction do
@@ -59,6 +73,20 @@ module RlsDatabase
     tables.size == RlsTables::PROTECTED_TABLES.size && tables.all? do |row|
       row.fetch("policy") && row.fetch("enabled") == enforced && row.fetch("forced") == enforced
     end
+  end
+
+  def self.login_link_decision_status(connection)
+    row = connection.select_one(LOGIN_LINK_DECISION_STATUS)
+    return { "installed" => false } unless row
+
+    { "installed" => true }.merge(row)
+  end
+
+  # runtime_can_execute is nil where no payroll_app role exists yet.
+  def self.login_link_decision_ready?(connection)
+    status = login_link_decision_status(connection)
+    status.values_at("installed", "security_definer", "stable", "search_path_pinned", "owner_bypasses_rls").all?(true) &&
+      status["public_can_execute"] == false && status["runtime_can_execute"] != false
   end
 
   def self.bypass_enabled?(connection)
