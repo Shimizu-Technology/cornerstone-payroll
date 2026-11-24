@@ -3,7 +3,8 @@
 require "rails_helper"
 
 RSpec.describe EmployeeContactValidator do
-  let(:company) { create(:company) }
+  let(:organization) { create(:organization) }
+  let(:company) { create(:company, organization: organization) }
   let(:employee) { create(:employee, company: company, first_name: "Emma", last_name: "Pleadwell", email: nil, phone: nil) }
 
   describe ".normalize_phone" do
@@ -67,65 +68,32 @@ RSpec.describe EmployeeContactValidator do
       end
     end
 
-    it "blocks emails on the configurable placeholder list" do
+    it "blocks emails on the configured or staff-marked placeholder list" do
       allow(ENV).to receive(:[]).and_call_original
-      allow(ENV).to receive(:[]).with("EMPLOYEE_PLACEHOLDER_EMAILS").and_return("shared-payroll@example.com, office-temp@example.test")
+      allow(ENV).to receive(:[]).with("EMPLOYEE_PLACEHOLDER_EMAILS").and_return("shared-payroll@example.com")
+      EmployeePlaceholderEmail.create!(organization: organization, email: "mosa-office@example.com")
 
-      result = described_class.call(employee: employee, company: company, email: "Shared-Payroll@example.com")
+      env_result = described_class.call(employee: employee, company: company, email: "Shared-Payroll@example.com")
+      expect(env_result).not_to be_valid
+      expect(env_result.errors[:email].first).to match(/placeholder/i)
 
-      expect(result).not_to be_valid
-      expect(result.errors[:email].first).to match(/placeholder/i)
+      db_result = described_class.call(employee: employee, company: company, email: "Mosa-Office@example.com")
+      expect(db_result).not_to be_valid
+      expect(db_result.errors[:email].first).to match(/placeholder/i)
     end
 
-    it "blocks mass-shared inbox emails detected from existing employee data" do
-      other_company = create(:company, organization: company.organization)
-      3.times { |i| create(:employee, company: company, first_name: "Worker#{i}", last_name: "One", email: "shared-inbox@example.com") }
-      2.times { |i| create(:employee, company: other_company, first_name: "Staff#{i}", last_name: "Two", email: "shared-inbox@example.com") }
-
-      result = described_class.call(employee: employee, company: company, email: "shared-inbox@example.com")
-
-      expect(result).not_to be_valid
-      expect(result.errors[:email].first).to match(/shared inbox/i)
-    end
-
-    it "allows the same person working at two companies without flagging as a shared inbox" do
-      other_company = create(:company, organization: company.organization)
-      create(:employee, company: other_company, first_name: "Emma", last_name: "Pleadwell", email: "emma.personal@example.com")
-
-      result = described_class.call(employee: employee, company: company, email: "emma.personal@example.com")
-
-      expect(result).to be_valid
-      expect(result.warnings).to be_empty
-    end
-
-    it "returns a warning (not an error) when a coworker at the same company shares a family email" do
-      create(:employee, company: company, first_name: "Maria", last_name: "Pleadwell", email: "family@example.com")
+    it "keeps unmarked same-company duplicates warning-only even when 5 or more employees share the family email" do
+      5.times { |i| create(:employee, company: company, first_name: "Family#{i}", last_name: "Pleadwell", email: "family@example.com") }
 
       result = described_class.call(employee: employee, company: company, email: "family@example.com")
 
       expect(result).to be_valid
       expect(result.warnings.size).to eq(1)
-      expect(result.warnings.first).to include(code: "shared_company_email", field: "email", matching_employee_count: 1)
-    end
-
-    it "blocks another person's staff login email even if confirmation is passed" do
-      create(:user, company: company, organization: company.organization, role: "admin", name: "Dafne Admin", email: "dafne.staff@example.com")
-
-      result = described_class.call(
-        employee: employee,
-        company: company,
-        email: "dafne.staff@example.com",
-        confirm_same_person_email: true,
-        actor: create(:user, company: company, organization: company.organization, role: "admin")
-      )
-
-      expect(result).not_to be_valid
-      expect(result.same_person_confirmation_required?).to be(false)
-      expect(result.errors[:email].first).to match(/another person's payroll login/i)
+      expect(result.warnings.first).to include(code: "shared_company_email", field: "email", matching_employee_count: 5)
     end
 
     it "allows an employee's own login email when already linked via employee_account_links" do
-      login_user = create(:user, company: company, organization: company.organization, role: "client", name: "Emma Pleadwell", email: "emma.client@example.com")
+      login_user = create(:user, company: company, organization: organization, role: "client", name: "Different Display Name", email: "emma.client@example.com")
       EmployeeAccountLink.create!(company: company, employee: employee, user: login_user, status: "active")
 
       result = described_class.call(employee: employee, company: company, email: "emma.client@example.com")
@@ -135,17 +103,63 @@ RSpec.describe EmployeeContactValidator do
       expect(result.same_person_confirmed?).to be(false)
     end
 
-    it "requires explicit confirmation when an unlinked login email matches the employee's name, and allows it when confirmed" do
-      client_admin = create(:user, company: company, organization: company.organization, role: "client", name: "Emma Pleadwell", email: "emma.client@example.com")
-      CompanyAssignment.create!(user: client_admin, company: company)
-      staff_actor = create(:user, company: company, organization: company.organization, role: "admin")
+    it "always rejects a login linked to a different employee even with confirmation" do
+      other_employee = create(:employee, company: company, first_name: "Other", last_name: "Worker")
+      login_user = create(:user, company: company, organization: organization, role: "client", name: "Emma Pleadwell", email: "emma.linked@example.com")
+      EmployeeAccountLink.create!(company: company, employee: other_employee, user: login_user, status: "active")
+      staff_actor = create(:user, company: company, organization: organization, role: "admin")
+
+      staff_result = described_class.call(
+        employee: employee,
+        company: company,
+        email: "emma.linked@example.com",
+        confirm_same_person_email: true,
+        actor: staff_actor
+      )
+      expect(staff_result).not_to be_valid
+      expect(staff_result.same_person_confirmation_required?).to be(false)
+      expect(staff_result.errors[:email].first).to match(/already linked to another employee/i)
+
+      self_result = described_class.call(
+        employee: employee,
+        company: company,
+        email: "emma.linked@example.com",
+        confirm_same_person_email: true,
+        actor: login_user
+      )
+      expect(self_result).not_to be_valid
+      expect(self_result.same_person_confirmation_required?).to be(false)
+      expect(self_result.errors[:email]).to eq([ described_class::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
+    end
+
+    it "rejects a client name-match attempt on another person's login with the generic client error" do
+      # Same name as employee, but a different login than client_actor.
+      other_client = create(:user, company: company, organization: organization, role: "client", name: "Emma Pleadwell", email: "emma.other@example.com")
+      CompanyAssignment.create!(user: other_client, company: company)
+      client_actor = create(:user, company: company, organization: organization, role: "client", name: "Mo Owner", email: "mo@example.com")
+
+      result = described_class.call(
+        employee: employee,
+        company: company,
+        email: "emma.other@example.com",
+        confirm_same_person_email: true,
+        actor: client_actor
+      )
+
+      expect(result).not_to be_valid
+      expect(result.same_person_confirmation_required?).to be(false)
+      expect(result.errors[:email]).to eq([ described_class::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
+    end
+
+    it "allows the signed-in user's own login email when they explicitly confirm 'this is me'" do
+      client_actor = create(:user, company: company, organization: organization, role: "client", name: "Different Name", email: "self.client@example.com")
 
       unconfirmed = described_class.call(
         employee: employee,
         company: company,
-        email: "emma.client@example.com",
+        email: "self.client@example.com",
         confirm_same_person_email: false,
-        actor: staff_actor
+        actor: client_actor
       )
       expect(unconfirmed).not_to be_valid
       expect(unconfirmed.same_person_confirmation_required?).to be(true)
@@ -153,29 +167,53 @@ RSpec.describe EmployeeContactValidator do
       confirmed = described_class.call(
         employee: employee,
         company: company,
-        email: "emma.client@example.com",
-        confirm_same_person_email: true,
-        actor: staff_actor
-      )
-      expect(confirmed).to be_valid
-      expect(confirmed.same_person_confirmed?).to be(true)
-      expect(confirmed.matched_login_user).to eq(client_admin)
-    end
-
-    it "prevents a client user from confirming a staff user's login email" do
-      create(:user, company: company, organization: company.organization, role: "manager", name: "Emma Pleadwell", email: "emma.staff@example.com")
-      client_actor = create(:user, company: company, organization: company.organization, role: "client", name: "Mo Owner", email: "mo@example.com")
-
-      result = described_class.call(
-        employee: employee,
-        company: company,
-        email: "emma.staff@example.com",
+        email: "self.client@example.com",
         confirm_same_person_email: true,
         actor: client_actor
       )
+      expect(confirmed).to be_valid
+      expect(confirmed.same_person_confirmed?).to be(true)
+      expect(confirmed.confirmation_basis).to eq("self_confirmed")
+      expect(confirmed.matched_login_user).to eq(client_actor)
+    end
 
-      expect(result).not_to be_valid
-      expect(result.same_person_confirmation_required?).to be(false)
+    it "allows staff with manage_client_configuration to confirm an unlinked login, and rejects accountants without it" do
+      client_login = create(:user, company: company, organization: organization, role: "client", name: "Emma Client", email: "emma.login@example.com")
+      admin_actor = create(:user, company: company, organization: organization, role: "admin")
+      accountant_actor = create(:user, company: company, organization: organization, role: "accountant")
+      CompanyAssignment.create!(user: accountant_actor, company: company, client_management: false)
+
+      unconfirmed = described_class.call(
+        employee: employee,
+        company: company,
+        email: client_login.email,
+        confirm_same_person_email: false,
+        actor: admin_actor
+      )
+      expect(unconfirmed).not_to be_valid
+      expect(unconfirmed.same_person_confirmation_required?).to be(true)
+      expect(unconfirmed.errors[:email].first).to include("Emma Client")
+
+      confirmed = described_class.call(
+        employee: employee,
+        company: company,
+        email: client_login.email,
+        confirm_same_person_email: true,
+        actor: admin_actor
+      )
+      expect(confirmed).to be_valid
+      expect(confirmed.same_person_confirmed?).to be(true)
+      expect(confirmed.confirmation_basis).to eq("staff_confirmed")
+
+      accountant_result = described_class.call(
+        employee: employee,
+        company: company,
+        email: client_login.email,
+        confirm_same_person_email: true,
+        actor: accountant_actor
+      )
+      expect(accountant_result).not_to be_valid
+      expect(accountant_result.same_person_confirmation_required?).to be(false)
     end
   end
 

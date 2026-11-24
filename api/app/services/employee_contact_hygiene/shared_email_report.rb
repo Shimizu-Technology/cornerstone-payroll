@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "set"
+
 module EmployeeContactHygiene
   class SharedEmailReport
     def initialize(actor:, organization_id:, company_id: nil)
@@ -9,21 +11,30 @@ module EmployeeContactHygiene
     end
 
     def call
-      companies = accessible_companies
-      return empty_report if companies.empty?
+      configurable_companies = all_configurable_companies
+      return empty_report if configurable_companies.empty?
 
-      company_ids = companies.map(&:id)
-      company_by_id = companies.index_by(&:id)
-      org_id = @organization_id || companies.first.organization_id
+      target_companies = if @company_id.present?
+        configurable_companies.select { |company| company.id == @company_id.to_i }
+      else
+        configurable_companies
+      end
+      return empty_report if target_companies.empty?
+
+      configurable_ids = configurable_companies.map(&:id)
+      target_ids = target_companies.map(&:id)
+      company_by_id = target_companies.index_by(&:id)
+      org_id = @organization_id || configurable_companies.first.organization_id
 
       configured_placeholders = EmployeeContactValidator.configured_placeholder_emails
-      org_shared_inboxes = EmployeeContactValidator.data_detected_shared_inbox_emails(organization_id: org_id)
+      db_marked_placeholders = EmployeeContactValidator.db_marked_placeholder_emails(org_id)
+      marked_placeholders = configured_placeholders | db_marked_placeholders
 
-      # Aggregate counts across the organization for context (no PII).
-      org_stats = aggregate_org_email_stats(org_id)
+      # Aggregate counts strictly scoped to companies this staff user can configure (no PII).
+      accessible_stats = aggregate_accessible_email_stats(configurable_ids)
 
       # Per-company aggregate counts (no PII — only company_id, normalized email, counts).
-      per_company_rows = Employee.where(company_id: company_ids)
+      per_company_rows = Employee.where(company_id: target_ids)
         .where("COALESCE(TRIM(email), '') <> ''")
         .group(:company_id, Arel.sql("LOWER(TRIM(email))"))
         .pluck(
@@ -42,18 +53,23 @@ module EmployeeContactHygiene
         total = total_count.to_i
         active = active_count.to_i
         inactive = total - active
-        org_entry = org_stats[email] || { total_count: total, companies_count: 1 }
+        scoped_entry = accessible_stats[email] || { total_count: total, companies_count: 1 }
+
+        is_db_marked = db_marked_placeholders.include?(email)
+        is_configured = configured_placeholders.include?(email)
+        is_structural = EmployeeContactValidator.structural_placeholder_email?(email)
+        clearable = is_db_marked || is_configured || is_structural
 
         reasons = reasons_for(
-          email: email,
           company_count: total,
-          org_entry: org_entry,
-          configured_placeholders: configured_placeholders,
-          org_shared_inboxes: org_shared_inboxes
+          scoped_entry: scoped_entry,
+          is_db_marked: is_db_marked,
+          is_configured: is_configured,
+          is_structural: is_structural
         )
         next if reasons.empty?
 
-        classification = classify(reasons)
+        classification = clearable ? "placeholder" : "shared"
         distinct_flagged_emails.add(email)
         total_employee_records += total
         active_employee_records += active
@@ -63,16 +79,19 @@ module EmployeeContactHygiene
           total_count: total,
           active_count: active,
           inactive_count: inactive,
-          companies_count: org_entry[:companies_count],
-          organization_total_count: org_entry[:total_count],
+          companies_count: scoped_entry[:companies_count],
+          organization_total_count: scoped_entry[:total_count],
           reasons: reasons,
-          classification: classification
+          classification: classification,
+          clearable: clearable,
+          marked_placeholder: is_db_marked || is_configured,
+          unmarkable: is_db_marked
         }
       end
 
       company_entries = flagged_by_company.map do |cid, emails|
         company = company_by_id.fetch(cid)
-        sorted_emails = emails.sort_by { |item| [ -item[:total_count], item[:email] ] }
+        sorted_emails = emails.sort_by { |item| [ item[:clearable] ? 0 : 1, -item[:total_count], item[:email] ] }
         {
           company_id: company.id,
           company_name: company.name,
@@ -89,6 +108,7 @@ module EmployeeContactHygiene
           total_employee_records: total_employee_records,
           active_employee_records: active_employee_records
         },
+        marked_placeholders: marked_placeholders.to_a.sort,
         companies: company_entries
       }
     end
@@ -103,18 +123,15 @@ module EmployeeContactHygiene
           total_employee_records: 0,
           active_employee_records: 0
         },
+        marked_placeholders: [],
         companies: []
       }
     end
 
-    def accessible_companies
+    def all_configurable_companies
       scope = Company.where(active: true, test_workspace_archived_at: nil)
       scope = scope.where(organization_id: @organization_id) if @organization_id.present?
-      if @company_id.present?
-        scope = scope.where(id: @company_id)
-      else
-        scope = scope.where(payroll_environment: "live")
-      end
+      scope = scope.where(payroll_environment: "live") unless @company_id.present?
 
       scope.order(:name).to_a.select do |company|
         @actor.can_access_company?(company.id) &&
@@ -122,11 +139,10 @@ module EmployeeContactHygiene
       end
     end
 
-    def aggregate_org_email_stats(organization_id)
-      return {} if organization_id.blank?
+    def aggregate_accessible_email_stats(company_ids)
+      return {} if company_ids.empty?
 
-      Employee.joins(:company)
-        .where(companies: { organization_id: organization_id, payroll_environment: "live" })
+      Employee.where(company_id: company_ids)
         .where("COALESCE(TRIM(employees.email), '') <> ''")
         .group(Arel.sql("LOWER(TRIM(employees.email))"))
         .pluck(
@@ -142,21 +158,14 @@ module EmployeeContactHygiene
         end
     end
 
-    def reasons_for(email:, company_count:, org_entry:, configured_placeholders:, org_shared_inboxes:)
+    def reasons_for(company_count:, scoped_entry:, is_db_marked:, is_configured:, is_structural:)
       reasons = []
-      reasons << "configured_placeholder" if configured_placeholders.include?(email)
-      reasons << "placeholder_pattern" if EmployeeContactValidator.structural_placeholder_email?(email)
-      reasons << "shared_across_companies" if org_entry[:companies_count] >= 2 && org_shared_inboxes.include?(email)
-      reasons << "shared_inbox" if org_shared_inboxes.include?(email)
+      reasons << "marked_placeholder" if is_db_marked
+      reasons << "configured_placeholder" if is_configured
+      reasons << "placeholder_pattern" if is_structural
+      reasons << "shared_across_companies" if scoped_entry[:companies_count] >= 2
       reasons << "shared_within_company" if company_count >= 2
       reasons.uniq
-    end
-
-    def classify(reasons)
-      return "placeholder" if reasons.include?("configured_placeholder") || reasons.include?("placeholder_pattern")
-      return "shared_inbox" if reasons.include?("shared_inbox")
-
-      "shared"
     end
   end
 end

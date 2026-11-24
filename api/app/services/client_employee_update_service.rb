@@ -69,12 +69,14 @@ class ClientEmployeeUpdateService
     keyword_init: true
   )
 
-  def initialize(employee:, attrs:, requested_by:, company:, confirm_same_person_email: false)
+  def initialize(employee:, attrs:, requested_by:, company:, confirm_same_person_email: false, row_revision: nil, baseline_values: nil)
     @employee = employee
     raw_attrs = attrs.deep_symbolize_keys
     @confirm_same_person_email = ActiveModel::Type::Boolean.new.cast(
       confirm_same_person_email || raw_attrs.delete(:confirm_same_person_email)
     ) == true
+    @row_revision = row_revision.presence || raw_attrs.delete(:row_revision).presence || raw_attrs.delete(:contact_revision).presence
+    @baseline_values = baseline_values.presence || raw_attrs.delete(:baseline_values)
     @attrs = without_inapplicable_contractor_fields(normalize_attrs(raw_attrs))
     guard_legacy_recurring_components!
     @requested_by = requested_by
@@ -122,6 +124,12 @@ class ClientEmployeeUpdateService
       employee.intake_exception = candidate.intake_exception
       validate_department_scope!(direct_attrs)
       employee.save!
+      EmployeeContactValidator.record_same_person_confirmation_audit!(
+        employee: employee,
+        result: contact_result,
+        actor: requested_by,
+        company: company
+      )
       EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: requested_by)
 
       approval_attrs = approval_attrs.merge(status: "active", portal_pending_approval: false)
@@ -162,6 +170,12 @@ class ClientEmployeeUpdateService
     ActiveRecord::Base.transaction do
       company.lock!
       employee.lock!
+      EmployeeContactRevisionGuard.check!(
+        employee: employee,
+        row_revision: row_revision,
+        submitted_attrs: attrs.slice(*DIRECT_FIELDS),
+        baseline_values: baseline_values
+      )
       direct_attrs = changed_attributes_subset(attrs.slice(*DIRECT_FIELDS))
       approval_attrs = changed_attributes_subset(attrs.slice(*APPROVAL_FIELDS).except(WAGE_RATES_KEY))
       if ActiveModel::Type::Boolean.new.cast(attrs[:w4_election_received])
@@ -179,12 +193,8 @@ class ClientEmployeeUpdateService
       end
 
       if direct_attrs.key?(:email) || direct_attrs.key?(:phone)
-        contact_target = employee.dup
-        contact_target.id = employee.id
-        contact_target.instance_variable_set(:@new_record, false)
-        contact_target.assign_attributes(direct_attrs.slice(:first_name, :last_name))
         contact_result = validate_contact_details!(
-          target: contact_target,
+          target: employee,
           email: direct_attrs.key?(:email) ? direct_attrs[:email] : :unchanged,
           phone: direct_attrs.key?(:phone) ? direct_attrs[:phone] : :unchanged
         )
@@ -202,6 +212,12 @@ class ClientEmployeeUpdateService
         update_attrs = direct_attrs.dup
         update_attrs[:contact_source] = "client" if (direct_attrs.keys & EmployeeContactValidator::CONTACT_FIELDS).any?
         employee.update!(update_attrs)
+        EmployeeContactValidator.record_same_person_confirmation_audit!(
+          employee: employee,
+          result: contact_result,
+          actor: requested_by,
+          company: company
+        )
       end
       change_request = create_change_request!(
         approval_attrs: approval_attrs,
@@ -229,7 +245,7 @@ class ClientEmployeeUpdateService
 
   private
 
-  attr_reader :employee, :attrs, :requested_by, :company, :confirm_same_person_email
+  attr_reader :employee, :attrs, :requested_by, :company, :confirm_same_person_email, :row_revision, :baseline_values
 
   def validate_contact_details!(target:, email:, phone:)
     result = EmployeeContactValidator.call(

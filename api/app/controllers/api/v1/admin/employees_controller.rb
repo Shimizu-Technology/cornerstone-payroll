@@ -72,19 +72,28 @@ module Api
           attributes[:pay_frequency] = current_company.pay_frequency unless attributes.key?(:pay_frequency)
           @employee = Employee.new(attributes.merge(w4_attributes).merge(company_id: current_company_id))
           require_ssn_confirmation!(@employee)
-          @contact_validation_result = validate_admin_contact_details!(
-            employee: @employee,
-            attributes: attributes,
-            creation: true
-          )
-          apply_admin_contact_details!(attributes, @contact_validation_result, creation: true)
-          @employee.assign_attributes(attributes.slice(:email, :phone, :contact_source))
 
           Employee.transaction do
             current_company.lock!
             revalidate_current_company_write_access!
+            @contact_validation_result = validate_admin_contact_details!(
+              employee: @employee,
+              attributes: attributes,
+              creation: true
+            )
+            apply_admin_contact_details!(attributes, @contact_validation_result, creation: true)
+            @employee.assign_attributes(attributes.slice(:email, :phone, :contact_source))
             EmployeeIntakePolicy.prepare!(@employee, actor: current_user)
             @employee.save!
+            EmployeeContactValidator.record_same_person_confirmation_audit!(
+              employee: @employee,
+              result: @contact_validation_result,
+              actor: current_user,
+              company: current_company,
+              ip_address: request.remote_ip,
+              user_agent: request.user_agent,
+              request_id: request.request_id
+            )
             if params.dig(:employee, :wage_rates).present?
               initial_wage_rates = params.require(:employee).permit(wage_rates: [ :label, :rate, :is_primary, :active ])
               EmployeeCompensationChangeService.new(
@@ -162,6 +171,12 @@ module Api
             current_company.lock!
             revalidate_current_company_write_access!
             @employee.lock!
+            EmployeeContactRevisionGuard.check!(
+              employee: @employee,
+              row_revision: row_revision_param,
+              submitted_attrs: attributes.merge(w4_attributes),
+              baseline_values: baseline_values_param
+            )
             if attributes.key?(:payment_delivery_method)
               @payment_default_service = EmployeePaymentDefaultService.new(
                 employee: @employee, method: attributes.delete(:payment_delivery_method),
@@ -178,6 +193,15 @@ module Api
             )
             apply_admin_contact_details!(attributes, @contact_validation_result, creation: false)
             @employee.update!(attributes.merge(w4_attributes))
+            EmployeeContactValidator.record_same_person_confirmation_audit!(
+              employee: @employee,
+              result: @contact_validation_result,
+              actor: current_user,
+              company: current_company,
+              ip_address: request.remote_ip,
+              user_agent: request.user_agent,
+              request_id: request.request_id
+            )
             @compensation_result = EmployeeCompensationChangeService.new(
               employee: @employee,
               actor: current_user,
@@ -208,6 +232,16 @@ module Api
             compensation_warnings: @compensation_result&.warnings || [],
             contact_warnings: @contact_validation_result&.warnings || []
           }
+        rescue EmployeeContactRevisionGuard::ConflictError => e
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+          render json: {
+            error: e.message,
+            code: "contact_revision_conflict",
+            conflicting_fields: e.conflicting_fields,
+            contact_revision: e.employee.contact_revision,
+            current_values: e.current_values,
+            data: serialize_employee(e.employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true, contact_context: contact_context)
+          }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
           render json: {
             error: "Validation failed",
@@ -574,6 +608,22 @@ module Api
           ActiveModel::Type::Boolean.new.cast(raw) == true
         end
 
+        def row_revision_param
+          params[:row_revision].presence ||
+            params[:contact_revision].presence ||
+            params[:expected_updated_at].presence ||
+            params.dig(:employee, :row_revision).presence ||
+            params.dig(:employee, :contact_revision).presence ||
+            params.dig(:employee, :expected_updated_at).presence
+        end
+
+        def baseline_values_param
+          raw = params[:baseline_values] || params.dig(:employee, :baseline_values)
+          return nil unless raw.respond_to?(:permit)
+
+          raw.permit(*EmployeeContactValidator::CONTACT_FIELDS, :first_name, :middle_name, :name_suffix, :last_name, :job_title).to_h
+        end
+
         def needs_contact_details_filter_active?
           ActiveModel::Type::Boolean.new.cast(params[:needs_contact_details]) == true ||
             params[:contact_status] == "needs_contact_details"
@@ -584,13 +634,8 @@ module Api
           phone_changed = creation ? attributes.key?(:phone) : admin_phone_changed?(employee, attributes)
           return nil unless email_changed || phone_changed
 
-          target = employee.dup
-          target.id = employee.id if employee.persisted?
-          target.instance_variable_set(:@new_record, !employee.persisted?)
-          target.assign_attributes(attributes.slice(:first_name, :last_name))
-
           result = EmployeeContactValidator.call(
-            employee: target,
+            employee: employee,
             company: current_company,
             email: email_changed ? attributes[:email] : :unchanged,
             phone: phone_changed ? attributes[:phone] : :unchanged,
@@ -749,6 +794,7 @@ module Api
           data = employee.as_json(
             except: [ :intake_exception, :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
+          data["contact_revision"] = employee.contact_revision
           data["contact_details_status"] = EmployeeContactValidator.contact_details_status(employee, context: contact_context)
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: can_review_employee_intake?)
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
