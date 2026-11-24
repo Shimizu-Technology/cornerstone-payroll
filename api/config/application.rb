@@ -1,6 +1,7 @@
 require_relative "boot"
 require_relative "../lib/canonical_proxy_headers"
 require_relative "../lib/write_maintenance"
+require_relative "../lib/logo_upload_body_limit"
 
 # Load environment variables from .env
 require "dotenv"
@@ -61,6 +62,8 @@ module Api
 
     # Preserve CORS and the request ID. Gate before the logger can print signed paths.
     config.middleware.insert_after ActionDispatch::RequestId, WriteMaintenance
+    # After CORS, so a refused logo upload is still readable by the browser.
+    config.middleware.insert_after WriteMaintenance, LogoUploadBodyLimit
 
     trusted_proxy_cidrs = ENV.fetch("TRUSTED_PROXY_CIDRS", "")
                                .split(",")
