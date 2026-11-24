@@ -218,8 +218,10 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
         end.not_to change(AuditLog, :count)
         expect(response.headers["Retry-After"].to_i).to be > EmployeeContactLoginRejectionGuard::LOGIN_EMAIL_REJECTION_PERIOD.to_i
         expect(response.parsed_body).to eq(
-          "error" => EmployeeContactLoginRejectionGuard::RATE_LIMIT_ERROR_MESSAGE, "code" => "contact_email_rate_limited"
+          "error" => EmployeeContactLoginRejectionGuard::RATE_LIMIT_ERROR_MESSAGE, "code" => "contact_email_rate_limited",
+          "retry_after_seconds" => response.headers["Retry-After"].to_i
         )
+        expect(response.parsed_body["error"]).to include("this save didn't apply", "phone and address changes")
       end
       expect(missing_contact_employee.reload.email).to be_nil
 

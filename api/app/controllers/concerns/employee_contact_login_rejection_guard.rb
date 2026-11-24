@@ -7,7 +7,9 @@ module EmployeeContactLoginRejectionGuard
 
   LOGIN_EMAIL_REJECTION_LIMIT = 10
   LOGIN_EMAIL_REJECTION_PERIOD = 15.minutes
-  RATE_LIMIT_ERROR_MESSAGE = "Too many blocked email attempts. Please wait a few minutes and try again."
+  # The page adds the retry time from Retry-After.
+  RATE_LIMIT_ERROR_MESSAGE = "Too many blocked email attempts, so this save didn't apply. " \
+    "You can still save phone and address changes on their own."
 
   private
 
@@ -27,10 +29,12 @@ module EmployeeContactLoginRejectionGuard
   end
 
   def render_login_email_cooldown!
-    response.set_header("Retry-After", login_email_cooldown_retry_after.to_s)
+    retry_after = login_email_cooldown_retry_after
+    response.set_header("Retry-After", retry_after.to_s)
     render json: {
       error: RATE_LIMIT_ERROR_MESSAGE,
-      code: "contact_email_rate_limited"
+      code: "contact_email_rate_limited",
+      retry_after_seconds: retry_after
     }, status: :too_many_requests
   end
 
