@@ -33,6 +33,12 @@ BEGIN
     GRANT USAGE ON SCHEMA rls_admin TO payroll_app;
     REVOKE ALL ON rls_admin.rls_kill_switch FROM payroll_app;
     GRANT SELECT ON rls_admin.rls_kill_switch TO payroll_app;
+    -- The cross-company login link decision (a migration-defined SECURITY
+    -- DEFINER function) is the runtime role's only way to see other companies.
+    IF to_regprocedure('payroll_employee_login_link_decision(bigint, bigint, bigint[])') IS NOT NULL THEN
+      REVOKE ALL ON FUNCTION payroll_employee_login_link_decision(bigint, bigint, bigint[]) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION payroll_employee_login_link_decision(bigint, bigint, bigint[]) TO payroll_app;
+    END IF;
   END IF;
 END;
 $$;

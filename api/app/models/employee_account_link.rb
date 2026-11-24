@@ -22,20 +22,51 @@ class EmployeeAccountLink < ApplicationRecord
   # :unknown, never records. A login linked to any other employee always
   # returns :conflict, even if an allowed link also exists.
   #
-  # Outside a tenant scope it reads every company as a system read. Inside a
-  # company scope TenantScope refuses a nested system read, so once RLS hides
-  # other companies' links from this session the answer is :unknown, which
-  # callers must reject (fail closed).
+  # The decision comes from the payroll_employee_login_link_decision SECURITY
+  # DEFINER function, which sees every company's links even under enforced RLS
+  # without a nested system read (TenantScope refuses those). Until that
+  # function is installed, it falls back to a scoped read that answers
+  # :unknown, which callers reject, whenever RLS hides other companies' links.
   def self.contact_email_link_decision(user_id:, company_id:, allowed_employee_ids: [])
     return :none if user_id.blank?
 
     allowed_ids = Array(allowed_employee_ids).filter_map { |id| Integer(id, exception: false) }.uniq
     target_company_id = Integer(company_id, exception: false)
+    return function_link_decision(user_id, target_company_id, allowed_ids) if decision_function_available?
 
     decision = with_system_decision_read { link_decision_for(user_id, target_company_id, allowed_ids) }
     return :unknown if decision != :conflict && other_company_links_hidden?
 
     decision
+  end
+
+  DECISION_FUNCTION = "payroll_employee_login_link_decision(bigint, bigint, bigint[])"
+  DECISIONS = { "allowed" => :allowed, "conflict" => :conflict, "none" => :none }.freeze
+  BIGINT = ActiveRecord::Type::Integer.new(limit: 8)
+  BIGINT_ARRAY = ActiveRecord::ConnectionAdapters::PostgreSQL::OID::Array.new(BIGINT)
+
+  # Any error from the function, including PostgreSQL refusing to read past
+  # RLS when the owner no longer bypasses it (row_security = off), is
+  # :unknown, which callers reject. The savepoint keeps the caller's
+  # transaction usable after such an error.
+  def self.function_link_decision(user_id, company_id, allowed_ids)
+    binds = [
+      ActiveRecord::Relation::QueryAttribute.new("login_user_id", Integer(user_id), BIGINT),
+      ActiveRecord::Relation::QueryAttribute.new("company_id", company_id, BIGINT),
+      ActiveRecord::Relation::QueryAttribute.new("employee_ids", allowed_ids, BIGINT_ARRAY)
+    ]
+    answer = transaction(requires_new: true) do
+      connection.select_value("SELECT payroll_employee_login_link_decision($1, $2, $3)", "Login link decision", binds)
+    end
+    DECISIONS.fetch(answer, :unknown)
+  rescue ActiveRecord::StatementInvalid => e
+    Rails.logger.warn("[EmployeeAccountLink] Login link decision failed closed: #{e.class}")
+    :unknown
+  end
+
+  def self.decision_function_available?
+    bind = ActiveRecord::Relation::QueryAttribute.new("function", DECISION_FUNCTION, ActiveRecord::Type::String.new)
+    connection.select_value("SELECT has_function_privilege(to_regprocedure($1), 'EXECUTE')", "Login link decision check", [ bind ]) == true
   end
 
   def self.link_decision_for(user_id, company_id, allowed_ids)
@@ -71,7 +102,8 @@ class EmployeeAccountLink < ApplicationRecord
 
     connection.select_value(LINKS_HIDDEN_SQL) == true
   end
-  private_class_method :link_decision_for, :with_system_decision_read, :other_company_links_hidden?
+  private_class_method :function_link_decision, :decision_function_available?, :link_decision_for,
+    :with_system_decision_read, :other_company_links_hidden?
 
   def portal_enabled?
     company.active? && company.organization.active? && CompanyFeatures.for(company).employee_portal_enabled?
