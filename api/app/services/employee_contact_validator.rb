@@ -421,6 +421,9 @@ class EmployeeContactValidator
   def check_login_email(normalized_email)
     login_user = User.where(self.class.normalized_email_node(User.arel_table[:email]).eq(normalized_email)).first
     return no_login_conflict unless login_user
+    # An unfinished employee app sign-up closed for this same employee holds
+    # the address for them; it's reused, not a conflict (M4-2).
+    return no_login_conflict if @employee && EmployeeLinks.closed_pending_sign_up_for?(login_user, @employee)
 
     # Check conflicting links FIRST via a narrow tenant-safe decision lookup
     # that sees links in other companies without leaking records. A login with

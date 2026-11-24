@@ -27,6 +27,26 @@ RSpec.describe ClerkInvitationService do
     expect(described_class.new.revoke_user_sessions("../users")).to include(success: false)
   end
 
+  it "ends only sessions created at or before a cutoff, and any without a creation time" do
+    cutoff = Time.utc(2026, 11, 20, 12, 0, 0)
+    stub_request(:get, "https://api.clerk.com/v1/sessions")
+      .with(query: { user_id: "user_back", status: "active", limit: "100" })
+      .to_return(status: 200, body: [
+        { id: "sess_before", created_at: (cutoff.to_f * 1000).to_i - 1 },
+        { id: "sess_at", created_at: (cutoff.to_f * 1000).to_i },
+        { id: "sess_after", created_at: (cutoff.to_f * 1000).to_i + 60_000 },
+        { id: "sess_unknown" }
+      ].to_json)
+    revoked = %w[sess_before sess_at sess_unknown].map do |id|
+      stub_request(:post, "https://api.clerk.com/v1/sessions/#{id}/revoke").to_return(status: 200, body: "{}")
+    end
+    kept = stub_request(:post, "https://api.clerk.com/v1/sessions/sess_after/revoke")
+
+    expect(described_class.new.revoke_user_sessions("user_back", created_before: cutoff)).to eq(success: true, revoked: 3)
+    expect(revoked).to all(have_been_requested.once)
+    expect(kept).not_to have_been_requested
+  end
+
   it "reads the exact invitation ID from Clerk's list endpoint" do
     stub_request(:get, "https://api.clerk.com/v1/invitations")
       .with(query: { query: "inv_exact", limit: "10" }, headers: { "Authorization" => "Bearer sk_test_synthetic" })

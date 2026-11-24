@@ -38,10 +38,13 @@ module EmployeePortalRequestContext
 
     user = User.find_by(clerk_id: subject)
     return unless user && StagingOutboundPolicy.tester?(user_id: user.id, email: user.email, id: subject)
+    # A session from before the login was deactivated never works again.
+    return if EmployeeLinks::SessionFence.fenced?(user, @clerk_token_payload)
 
     return user if user.payroll_access_allowed?
 
     user if allow_deactivated_employee_login? && user.portal_employee? && !user.active? &&
+      user.deactivation_reason == "last_employee_link_closed" &&
       user.invitation_status == "accepted" && user.organization&.active?
   end
 

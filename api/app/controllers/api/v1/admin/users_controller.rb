@@ -157,7 +157,10 @@ module Api
 
           before_values = user_audit_snapshot(@user)
           ActiveRecord::Base.transaction do
-            @user.update!(active: false)
+            # Recorded even when the login was already closed (an employee
+            # login whose last link ended): an admin's deactivation is never
+            # lifted by the employee's own rehire reactivation (M4-2).
+            @user.update!(active: false, deactivated_at: Time.current, deactivation_reason: "deactivated")
             record_user_audit!("deactivated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
           render json: { data: user_json(@user) }

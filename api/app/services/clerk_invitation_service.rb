@@ -80,9 +80,11 @@ class ClerkInvitationService
     }
   end
 
-  # Ends every active Clerk session for a user (D12). Returns
+  # Ends a user's active Clerk sessions (D12): every one, or with
+  # created_before only those Clerk reports as created at or before that time
+  # (a session without a creation time is ended too). Returns
   # { success:, revoked: } and never raises for a Clerk or network failure.
-  def revoke_user_sessions(subject)
+  def revoke_user_sessions(subject, created_before: nil)
     return { success: false, error: "Invalid Clerk user ID" } unless subject.is_a?(String) && SUBJECT_PATTERN.match?(subject)
     if StagingOutboundPolicy.staging? && !StagingOutboundPolicy.bindings.value?(subject)
       raise StagingOutboundPolicy::Blocked, "Staging Clerk session revocation is limited to bound testers"
@@ -96,6 +98,7 @@ class ClerkInvitationService
     revoked = 0
     sessions.each do |session|
       next unless session.is_a?(Hash) && session["id"].to_s.match?(/\Asess_[a-zA-Z0-9_-]+\z/)
+      next if created_before && session["created_at"].is_a?(Integer) && session["created_at"] > (created_before.to_f * 1000).floor
 
       response = post_json("/sessions/#{session['id']}/revoke", {})
       return { success: false, error: "Clerk refused a session revocation", revoked: revoked } unless response.is_a?(Net::HTTPSuccess)

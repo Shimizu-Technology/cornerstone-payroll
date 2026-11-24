@@ -292,20 +292,39 @@ RSpec.describe Rack::Attack do
       end
     end
 
-    # Shaped like a Clerk session token; the limits read only its sid.
-    def bearer(session)
-      payload = Base64.urlsafe_encode64({ sid: session, sub: "user_x" }.to_json, padding: false)
-      "Bearer eyJhbGciOiJSUzI1NiJ9.#{payload}.c2lnbmF0dXJl"
+    let(:issuer) { "https://clerk.wifi.example.test" }
+    let(:signing_key) { OpenSSL::PKey::RSA.generate(2048) }
+    let(:jwk) { JWT::JWK.new(signing_key) }
+
+    # Session limits key only on tokens that verify; this verifier trusts a
+    # local key, as ClerkTokenVerifier does Clerk's JWKS.
+    before do
+      verifier = ClerkTokenVerifier.new(
+        env: { "CLERK_ISSUER" => issuer, "CLERK_AUTHORIZED_PARTIES" => "https://payroll.example.test" },
+        cache: ActiveSupport::Cache::MemoryStore.new,
+        http_get: ->(_uri) { [ 200, { "keys" => [ jwk.export.deep_stringify_keys ] } ] }
+      )
+      allow(ClerkTokenVerifier).to receive(:new).and_return(verifier)
+    end
+
+    def bearer(session, azp: origin, key: signing_key)
+      claims = { sid: session, sub: "user_x", iss: issuer, azp: azp, iat: Time.current.to_i, exp: 5.minutes.from_now.to_i }
+      "Bearer #{JWT.encode(claims, key, 'RS256', kid: jwk.kid)}"
+    end
+
+    # Same shape and kid, but signed with another key.
+    def forged_bearer(session)
+      bearer(session, key: OpenSSL::PKey::RSA.generate(2048))
     end
 
     # The tenant site preflights every call (max_age 0), without a session.
-    def phone(method, path, session: nil, body: nil)
-      preflight = client.options(path, "REMOTE_ADDR" => wifi, "HTTP_ORIGIN" => origin,
+    def phone(method, path, session: nil, body: nil, authorization: nil, from: origin)
+      preflight = client.options(path, "REMOTE_ADDR" => wifi, "HTTP_ORIGIN" => from,
         "HTTP_ACCESS_CONTROL_REQUEST_METHOD" => method.to_s.upcase)
       return preflight if preflight.status == 429
 
-      headers = { "REMOTE_ADDR" => wifi, "HTTP_ORIGIN" => origin }
-      headers["HTTP_AUTHORIZATION"] = bearer(session) if session
+      headers = { "REMOTE_ADDR" => wifi, "HTTP_ORIGIN" => from }
+      headers["HTTP_AUTHORIZATION"] = authorization || bearer(session) if authorization || session
       if body
         headers["CONTENT_TYPE"] = "application/json"
         headers[:input] = body.to_json
@@ -339,9 +358,36 @@ RSpec.describe Rack::Attack do
       expect(phone(:get, "/api/v1/employee/pay_stubs/1/pdf", session: "sess_busy").status).to eq(429)
     end
 
-    it "keeps a per-IP backstop when every request claims a new session" do
-      1500.times { |i| phone(:get, "/api/v1/employee/context", session: "sess_forged#{i}") }
+    it "keeps a per-IP backstop when every request is a new session" do
+      1500.times { |i| phone(:get, "/api/v1/employee/context", session: "sess_many#{i}") }
       expect(phone(:get, "/api/v1/employee/context", session: "sess_fresh").status).to eq(429)
+    end
+
+    it "keys nothing on an unverified session: forged tokens share the per-IP limits and can't drain a real session" do
+      20.times { |i| phone(:get, "/api/v1/auth/me", authorization: forged_bearer("sess_forged#{i}")) }
+      expect(phone(:get, "/api/v1/auth/me", authorization: forged_bearer("sess_one_more")).status).to eq(429)
+
+      # Forging the victim's sid doesn't spend the victim's bucket.
+      described_class.cache.store.clear
+      19.times { phone(:get, "/api/v1/auth/me", authorization: forged_bearer("sess_victim")) }
+      expect(phone(:get, "/api/v1/auth/me", session: "sess_victim").status).to eq(200)
+
+      described_class.cache.store.clear
+      120.times { |i| phone(:get, "/api/v1/employee/context", authorization: forged_bearer("sess_forged#{i}")) }
+      expect(phone(:get, "/api/v1/employee/context", authorization: forged_bearer("sess_next")).status).to eq(429)
+      expect(phone(:get, "/api/v1/employee/context", session: "sess_real").status).to eq(200)
+    end
+
+    it "gives the tenant exemption only to a registered client origin on /auth/me" do
+      unregistered = "https://unknown.shimizu-technology.com"
+      20.times { |i| phone(:get, "/api/v1/auth/me", session: "sess_u#{i}", from: unregistered) }
+      expect(phone(:get, "/api/v1/auth/me", session: "sess_u_next", from: unregistered).status).to eq(429)
+
+      described_class.cache.store.clear
+      20.times { |i| client.post("/api/v1/invitations/accept", "REMOTE_ADDR" => wifi, "HTTP_ORIGIN" => origin,
+        "HTTP_AUTHORIZATION" => bearer("sess_inv#{i}")) }
+      expect(client.post("/api/v1/invitations/accept", "REMOTE_ADDR" => wifi, "HTTP_ORIGIN" => origin,
+        "HTTP_AUTHORIZATION" => bearer("sess_inv_next")).status).to eq(429)
     end
 
     it "keeps strict per-invite limits and adds tenant CORS to a rejected sign-up body" do
