@@ -545,6 +545,12 @@ describe('actionable API errors', () => {
     expect(apiErrorMessage({}, 429, { retryAfterSeconds: 60, now })).toBe('Too many requests were sent. Try again after 9:28 PM.');
     expect(apiErrorMessage({ error: 'Slow down' }, 429)).toBe('Slow down Wait a moment before trying again.');
   });
+  it('preserves MFA 403 error messages without generic permission text', () => {
+    expect(apiErrorMessage({ code: 'mfa_required', error: 'Multi-factor authentication is required before accessing payroll.' }, 403))
+      .toBe('Multi-factor authentication is required before accessing payroll.');
+    expect(apiErrorMessage({ code: 'mfa_enrollment_required', error: 'Set up two-step sign-in to make this change.' }, 403))
+      .toBe('Set up two-step sign-in to make this change.');
+  });
   it('gives specific payroll next steps without treating unknown wages as zero', () => {
     expect(errorRecovery('Verify prior-year employer wages before catch-up payroll')).toContain('Do not enter zero');
     expect(errorRecovery('Review the applied historical 401(k) classification')).toContain('Yearly retirement checks');
