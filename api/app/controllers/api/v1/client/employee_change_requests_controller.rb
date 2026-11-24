@@ -17,8 +17,8 @@ module Api
                                           .recent_first
 
           requests = requests.where(status: params[:status]) if params[:status].present?
-          if params[:search].present?
-            query = "%#{ActiveRecord::Base.sanitize_sql_like(params[:search])}%"
+          if (search = params[:search].to_s.strip.presence)
+            query = "%#{ActiveRecord::Base.sanitize_sql_like(search)}%"
             requests = requests.joins(:employee).where(
               "employees.first_name ILIKE :q OR employees.last_name ILIKE :q OR CONCAT_WS(' ', employees.first_name, employees.last_name) ILIKE :q",
               q: query

@@ -127,8 +127,8 @@ module PortalNotifications
       end
     end
 
-    def employee_contact_changed!(entry)
-      record!(event_type: "employee_contact_changed", company: entry.company, actor: entry.changed_by,
+    def employee_contact_changed!(entry, actor: entry.changed_by)
+      record!(event_type: "employee_contact_changed", company: entry.company, actor: actor,
         subject: entry, dedupe_key: "employee_contact_changed:#{entry.id}")
     end
 

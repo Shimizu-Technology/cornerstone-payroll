@@ -5043,7 +5043,7 @@ type EmployeeContactActivityResponse = {
 
 export const clientEmployeeChangeRequestsApi = {
   list: (params?: { status?: string; search?: string } & BoundedListParams) =>
-    api.get<{ data: EmployeeChangeRequest[]; meta: BoundedListMeta & { profile_requests_enabled?: boolean } }>('/client/employee_change_requests', params),
+    api.get<{ data: EmployeeChangeRequest[]; meta?: BoundedListMeta & { profile_requests_enabled?: boolean } }>('/client/employee_change_requests', params),
   get: (id: number) =>
     api.get<{ data: EmployeeChangeRequest }>(`/client/employee_change_requests/${id}`),
   decide: (id: number, decision: 'approve' | 'reject', reviewNotes?: string) =>

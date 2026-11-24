@@ -60,11 +60,12 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
     patch "#{requests_path}/#{id}/approve", headers: headers(@requester)
     expect(response).to have_http_status(:unprocessable_entity)
 
-    get requests_path, headers: headers(@reviewer)
+    get requests_path, headers: headers(@reviewer), params: { search: "  Demo Requester  " }
     expect(response.parsed_body.fetch("data").pluck("id")).to eq([ id ])
     get "#{requests_path}/#{id}", headers: headers(@reviewer)
     expect(response.parsed_body.fetch("data")).to include("can_review" => true, "original_values" => { "address_line1" => old_address })
     expect(response.parsed_body.fetch("data")).not_to have_key("direct_changes_applied")
+    observer = system_read { create(:user, company: @company, role: "client") }
     patch "#{requests_path}/#{id}/approve", headers: headers(@reviewer)
     expect(response).to have_http_status(:ok), response.body
     system_read do
@@ -72,6 +73,10 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
       entry = EmployeeContactChangeToConfirm.find_by!(employee: @employee, change_kind: "address")
       expect(entry).to have_attributes(changed_by: @requester, before_values: { "address_line1" => old_address },
         after_values: { "address_line1" => new_address })
+      activity = PortalNotificationEvent.find_by!(subject: entry, event_type: "employee_contact_changed")
+      expect(activity.deliveries.pluck(:user_id)).to eq([ observer.id ])
+      decision = PortalNotificationEvent.find_by!(subject_type: "EmployeeChangeRequest", subject_id: id, event_type: "employee_change_decided")
+      expect(decision.deliveries.pluck(:user_id)).to eq([ @requester.id ])
     end
   end
 
@@ -151,7 +156,11 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
       EmployeeAccountLink.create!(user: @staff, company: @company, employee: @employee, status: :revoked)
       address_request_for(@employee)
     end
-    patch "/api/v1/admin/employee_change_requests/#{change_request.id}/approve", headers: headers(@staff)
+    path = "/api/v1/admin/employee_change_requests/#{change_request.id}"
+    get path, headers: headers(@staff)
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("data")).to include("can_review" => false, "profile_address" => true)
+    patch path + "/approve", headers: headers(@staff)
     expect(response).to have_http_status(:unprocessable_entity)
     expect(system_read { change_request.reload }).to be_pending
   end
@@ -179,6 +188,43 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
     end
   end
 
+  it "skips blank-equivalent changes on existing employees" do
+    system_read { @coworker.update!(address_line2: nil) }
+    patch_employee(@coworker, @requester, address_line2: "")
+    expect(response).to have_http_status(:ok), response.body
+    system_read do
+      expect(EmployeeContactChangeToConfirm.where(employee: @coworker)).to be_empty
+      expect(PortalNotificationEvent.where(category: "contact_changes")).to be_empty
+    end
+  end
+
+  it "records a new hire's populated contact fields only after Cornerstone approves the hire" do
+    post "/api/v1/client/employees", headers: headers(@requester), params: { employee: {
+      first_name: "New", last_name: "Example", employment_type: "hourly", salary_type: "hourly", pay_rate: 16.25,
+      filing_status: "single", hire_date: "2026-04-01", w4_effective_on: "2026-04-01",
+      ssn: "999-00-0001", ssn_confirmation: "999-00-0001", address_line1: old_address, address_line2: "",
+      city: "Example City", state: "GU", zip: "96910"
+    } }
+    expect(response).to have_http_status(:created), response.body
+    id = response.parsed_body.dig("change_request", "id")
+    system_read do
+      change_request = EmployeeChangeRequest.find(id)
+      expect(change_request.employee).to have_attributes(portal_pending_approval: true, status: "inactive")
+      expect(EmployeeContactChangeToConfirm.where(employee: change_request.employee)).to be_empty
+      expect(PortalNotificationEvent.where(category: "contact_changes")).to be_empty
+    end
+
+    patch "/api/v1/admin/employee_change_requests/#{id}/approve", headers: headers(@staff)
+    expect(response).to have_http_status(:ok), response.body
+    system_read do
+      entry = EmployeeContactChangeToConfirm.find_by!(change_kind: "address")
+      expect(entry.employee).to have_attributes(portal_pending_approval: false, status: "active")
+      expect(entry).to have_attributes(changed_by: @requester, after_values: {
+        "address_line1" => old_address, "city" => "Example City", "state" => "GU", "zip" => "96910"
+      })
+    end
+  end
+
   it "tracks direct changes, limits Confirm all to the displayed filters and snapshot, and warns without blocking creation" do
     patch_employee(@coworker, @requester, address_line1: new_address, phone: "6715550101")
     expect(response).to have_http_status(:ok), response.body
@@ -189,12 +235,13 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
     expect(response.parsed_body.fetch("data").pluck("change_kind")).to contain_exactly("address", "contact")
     expect(response.parsed_body.fetch("data").first).not_to have_key("confirmed_at")
 
-    get confirm_path, headers: headers(@staff), params: { kind: "address" }
+    search = "  #{system_read { @coworker.full_name }}  "
+    get confirm_path, headers: headers(@staff), params: { kind: "address", search: search }
     expect(response).to have_http_status(:ok), response.body
     through_id = response.parsed_body.dig("meta", "through_id")
     patch_employee(@coworker, @requester, address_line1: "300 Example Lane")
     expect(response).to have_http_status(:ok), response.body
-    patch "#{confirm_path}/confirm_all", headers: headers(@staff), params: { kind: "address", through_id: through_id }
+    patch "#{confirm_path}/confirm_all", headers: headers(@staff), params: { kind: "address", through_id: through_id, search: search }
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.fetch("confirmed_count")).to eq(1)
 

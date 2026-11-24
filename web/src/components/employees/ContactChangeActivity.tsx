@@ -25,12 +25,14 @@ export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: num
   const [reload, setReload] = useState(0);
   const [confirmAllOpen, setConfirmAllOpen] = useState(false);
 
+  const searchFilter = search.trim() || undefined;
+
   useEffect(() => {
     let current = true;
     setLoading(true);
     setError('');
     const request = staffCompanyId
-      ? staffEmployeeContactChangesApi.list(staffCompanyId, { status, kind, search }, page)
+      ? staffEmployeeContactChangesApi.list(staffCompanyId, { status, kind, search: searchFilter }, page)
       : clientEmployeeChangeRequestsApi.contactChanges(page);
     request.then((response) => {
       if (!current) return;
@@ -49,7 +51,9 @@ export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: num
       setLoading(false);
     });
     return () => { current = false; };
-  }, [staffCompanyId, kind, status, search, page, reload]);
+  }, [staffCompanyId, kind, status, searchFilter, page, reload]);
+
+  const totalCount = meta?.total_count ?? 0;
 
   const confirm = async (target: { id: number } | { throughId: number }) => {
     if (!staffCompanyId) return;
@@ -59,7 +63,7 @@ export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: num
     try {
       const result = 'id' in target
         ? await staffEmployeeContactChangesApi.confirm(staffCompanyId, target.id)
-        : await staffEmployeeContactChangesApi.confirmAll(staffCompanyId, { kind, search }, target.throughId);
+        : await staffEmployeeContactChangesApi.confirmAll(staffCompanyId, { kind, search: searchFilter }, target.throughId);
       const count = result.confirmed_count;
       setNotice(count ? `${count} ${count === 1 ? 'change' : 'changes'} confirmed on payroll.` : 'Already confirmed on payroll.');
       setReload((value) => value + 1);
@@ -148,7 +152,7 @@ export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: num
           <DialogHeader>
             <DialogTitle>Confirm all matching changes?</DialogTitle>
             <DialogDescription>
-              Mark {meta?.total_count ?? 0} changes matching these filters as confirmed on payroll, including changes on other pages.
+              Mark {totalCount} {totalCount === 1 ? 'change' : 'changes'} matching these filters as confirmed on payroll{totalCount > 1 ? ', including changes on other pages' : ''}.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

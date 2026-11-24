@@ -54,8 +54,8 @@ module Api
         def filtered_changes
           scope = company_changes
           scope = scope.where(change_kind: params[:kind]) if params[:kind].present?
-          if params[:search].present?
-            query = "%#{ActiveRecord::Base.sanitize_sql_like(params[:search].to_s)}%"
+          if (search = params[:search].to_s.strip.presence)
+            query = "%#{ActiveRecord::Base.sanitize_sql_like(search)}%"
             scope = scope.joins(:employee).where("CONCAT_WS(' ', employees.first_name, employees.last_name) ILIKE ?", query)
           end
           scope

@@ -21,13 +21,8 @@ class CreateEmployeeContactChangesToConfirm < ActiveRecord::Migration[8.1]
     add_foreign_key :employee_contact_changes_to_confirm, :employees, column: %i[employee_id company_id],
       primary_key: %i[id company_id], on_delete: :cascade, name: "fk_contact_changes_employee"
 
-    return unless select_value("SELECT to_regprocedure('app_current_company_id()') IS NOT NULL")
-
-    execute <<~SQL
-      CREATE POLICY company_isolation ON employee_contact_changes_to_confirm
-      USING (current_setting('app.rls_mode', true) = 'system' OR company_id = app_current_company_id())
-      WITH CHECK (current_setting('app.rls_mode', true) = 'system' OR company_id = app_current_company_id())
-    SQL
+    execute File.read(Rails.root.join("db/rls_policies.sql"))
+    execute "SELECT pg_temp.install_company_policy(current_schema(), 'employee_contact_changes_to_confirm', NULL, NULL, false)"
   end
 
   def down
