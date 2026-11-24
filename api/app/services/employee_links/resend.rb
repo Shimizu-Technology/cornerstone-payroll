@@ -18,6 +18,7 @@ module EmployeeLinks
       "Reset their sign-up to send a new invite."
     UNCONFIRMED = "Couldn't confirm with Clerk that the earlier sign-up is closed. Nothing was changed. Try again."
     CHANGED = "This invite changed while it was being resent. Try again."
+    RESET_PENDING = "A reset of this sign-up hasn't finished. Reset the sign-up again to finish it."
 
     def self.call(...)
       new(...).call
@@ -37,6 +38,8 @@ module EmployeeLinks
       raise Error, "Choose email or a printed sign-up code" unless %w[email code].include?(@delivery)
 
       EmployeeLinks.require_staff!(@actor, @link.company)
+      raise Error, RESET_PENDING if EmployeeAccountLink.where(id: @link.id).pick(:sign_up_reset_requested_at)
+
       employee = @link.employee
       # Clerk first, outside the transaction; the locked block re-checks that
       # the login and its invitation are still the ones Clerk closed.
@@ -49,6 +52,7 @@ module EmployeeLinks
         @link.lock!
         raise Error, CHANGED unless @link.user_id == pending_id
         raise Error, "Only an open invite can be resent" unless @link.invited?
+        raise Error, RESET_PENDING if @link.sign_up_reset_pending?
         raise Error, "Only active employees can be invited" unless employee.active?
         raise Error, "The employee app isn't turned on for this company" unless @link.portal_enabled?
 

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_25_140100) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_25_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -939,6 +939,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_140100) do
     t.boolean "sign_up_email_for_notices", default: false, null: false
     t.datetime "last_invited_at"
     t.integer "invite_generation", default: 0, null: false
+    t.datetime "sign_up_reset_requested_at"
+    t.bigint "sign_up_reset_requested_by_id"
+    t.string "sign_up_reset_reason", limit: 500
     t.index [ "claim_user_id" ], name: "index_employee_account_links_on_claim_user_id"
     t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
     t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY (ARRAY[('invited'::character varying)::text, ('active'::character varying)::text]))"
@@ -948,10 +951,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_140100) do
     t.index [ "invite_token_digest" ], name: "index_employee_account_links_on_invite_token_digest", unique: true
     t.index [ "invited_by_id" ], name: "index_employee_account_links_on_invited_by_id"
     t.index [ "revoked_by_id" ], name: "index_employee_account_links_on_revoked_by_id"
+    t.index [ "sign_up_reset_requested_by_id" ], name: "index_employee_account_links_on_sign_up_reset_requested_by_id"
     t.index [ "user_id" ], name: "index_employee_account_links_on_user_id"
     t.check_constraint "failed_activation_attempts >= 0", name: "employee_account_links_failed_attempts_check"
     t.check_constraint "invite_delivery IS NULL OR (invite_delivery::text = ANY (ARRAY['email'::character varying, 'code'::character varying]::text[]))", name: "employee_account_links_invite_delivery_check"
     t.check_constraint "invite_generation >= 0", name: "employee_account_links_invite_generation_check"
+    t.check_constraint "(sign_up_reset_requested_at IS NULL) = (sign_up_reset_reason IS NULL)", name: "employee_account_links_sign_up_reset_check"
     t.check_constraint "payroll_environment::text = 'live'::text", name: "employee_account_links_live_only"
     t.check_constraint "status::text = ANY (ARRAY['invited'::character varying::text, 'active'::character varying::text, 'former'::character varying::text, 'revoked'::character varying::text])", name: "employee_account_links_status_check"
   end
@@ -5177,6 +5182,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_140100) do
   add_foreign_key "employee_account_links", "users", column: "claim_user_id"
   add_foreign_key "employee_account_links", "users", column: "invited_by_id"
   add_foreign_key "employee_account_links", "users", column: "revoked_by_id"
+  add_foreign_key "employee_account_links", "users", column: "sign_up_reset_requested_by_id"
   add_foreign_key "employee_change_requests", "companies"
   add_foreign_key "employee_change_requests", "employee_account_links", column: [ "requested_by_link_id", "employee_id", "company_id" ], primary_key: [ "id", "employee_id", "company_id" ], name: "fk_employee_change_requests_requester_link"
   add_foreign_key "employee_change_requests", "employees"

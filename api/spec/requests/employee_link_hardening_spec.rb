@@ -154,11 +154,16 @@ RSpec.describe "Employee link hardening", type: :request do
         expect(clerk).to have_received(:revoke_user_sessions).with("user_riley", email: "riley.own@example.net")
         expect(clerk).to have_received(:delete_user).with("user_riley", email: "riley.own@example.net")
         expect(clerk).not_to have_received(:delete_user).with("user_unrelated", anything)
-        expect(invite.link.reload).to have_attributes(invite_generation: 2, status: "invited", user_id: pending_user.id)
+        # Phase 1 moved to generation 2 and the new invite is generation 3.
+        expect(invite.link.reload).to have_attributes(invite_generation: 3, status: "invited", user_id: pending_user.id,
+          sign_up_reset_requested_at: nil, sign_up_reset_requested_by_id: nil, sign_up_reset_reason: nil)
         expect(pending_user.reload).to have_attributes(clerk_id: nil, clerk_invitation_id: nil, invite_nonce_digest: nil,
           invite_nonce_expires_at: nil, invitation_status: "pending")
+        expect(link_audits(invite.link, "sign_up_reset_started").sole.metadata)
+          .to include("reason" => "Signed up on a shared phone", "pending_login_id" => pending_user.id)
         audit = link_audits(invite.link, "sign_up_reset").sole
-        expect(audit.metadata).to include("reason" => "Signed up on a shared phone", "deleted_clerk_users" => 1)
+        expect(audit.metadata).to include("reason" => "Signed up on a shared phone", "deleted_clerk_users" => 1,
+          "requested_by_id" => staff.id, "requested_reason" => "Signed up on a shared phone")
 
         # The superseded ticket never binds, by any path.
         get "/api/v1/auth/me", headers: bearer("user_riley")
@@ -168,7 +173,7 @@ RSpec.describe "Employee link hardening", type: :request do
 
         post_activation(activation_params(employee, token: reset.token, email: "riley.own@example.net"))
         expect_sign_up_started
-        expect(clerk_invitations.last.dig(:public_metadata, :payroll_invite_generation)).to eq(2)
+        expect(clerk_invitations.last.dig(:public_metadata, :payroll_invite_generation)).to eq(3)
         accept_clerk_invitation!("user_riley_again")
         get "/api/v1/auth/me", headers: bearer("user_riley_again")
         expect(response).to have_http_status(:ok)
@@ -180,12 +185,87 @@ RSpec.describe "Employee link hardening", type: :request do
         expect(clerk).not_to have_received(:delete_user)
       end
 
-      it "changes nothing when Clerk can't delete the account" do
-        allow(clerk).to receive(:delete_user).and_return(success: false, status: 500)
+      it "refuses when the sign-in bound first, and never touches Clerk" do
+        get "/api/v1/auth/me", headers: bearer("user_riley")
+        expect(response).to have_http_status(:ok)
+
+        expect { reset!(invite.link) }.to raise_error(EmployeeLinks::Error, "Only an open invite can be reset")
+        expect(clerk).not_to have_received(:users_with_email)
+        expect(clerk).not_to have_received(:delete_user)
+        expect(invite.link.reload).to have_attributes(status: "active", sign_up_reset_requested_at: nil)
+        expect(link_audits(invite.link, "sign_up_reset_started")).to be_empty
+      end
+
+      it "refuses to bind once phase 1 committed, even while Clerk still has the account" do
+        allow(clerk).to receive(:users_with_email).with("riley.own@example.net").and_return(nil)
 
         expect { reset!(invite.link) }.to raise_error(EmployeeLinks::Error, EmployeeLinks::ResetSignUp::CLERK_FAILED)
-        expect(invite.link.reload.invite_generation).to eq(1)
-        expect(pending_user.reload.clerk_invitation_id).to eq("inv_1")
+        expect(invite.link.reload).to have_attributes(invite_generation: 2, invite_token_digest: nil, invite_code_digest: nil,
+          sign_up_reset_requested_by_id: staff.id, sign_up_reset_reason: "Signed up on a shared phone")
+        expect(invite.link.sign_up_reset_requested_at).to be_present
+        expect(pending_user.reload).to have_attributes(invite_nonce_digest: nil, clerk_invitation_id: "inv_1")
+
+        get "/api/v1/auth/me", headers: bearer("user_riley")
+        expect(response).to have_http_status(:unauthorized)
+        expect(pending_user.reload.clerk_id).to be_nil
+        expect(invite.link.reload).to be_invited
+        expect(clerk).not_to have_received(:delete_user)
+      end
+
+      it "refuses to bind while the reset is pending, even with a current generation and nonce" do
+        invite.link.update_columns(sign_up_reset_requested_at: Time.current, sign_up_reset_reason: "Stuck")
+
+        get "/api/v1/auth/me", headers: bearer("user_riley")
+        expect(response).to have_http_status(:unauthorized)
+        expect(pending_user.reload.clerk_id).to be_nil
+      end
+
+      it "stays pending when Clerk fails partway, and a retry resumes and finishes it" do
+        second = { "id" => "user_riley_second", "public_metadata" => clerk.fetch_user("user_riley")["public_metadata"] }
+        allow(clerk).to receive(:users_with_email).with("riley.own@example.net")
+          .and_return([ clerk.fetch_user("user_riley"), second ])
+        allow(clerk).to receive(:delete_user).with("user_riley_second", anything).and_return(success: false, status: 500)
+
+        expect { reset!(invite.link) }.to raise_error(EmployeeLinks::Error, EmployeeLinks::ResetSignUp::CLERK_FAILED)
+        expect(clerk).to have_received(:delete_user).with("user_riley", email: "riley.own@example.net")
+        expect(invite.link.reload).to have_attributes(invite_generation: 2, status: "invited")
+        expect(invite.link).to be_sign_up_reset_pending
+        expect(link_audits(invite.link, "sign_up_reset")).to be_empty
+
+        # Nothing restarts the old sign-up while the reset is pending.
+        post_activation(activation_params(employee, token: invite.token, email: "riley.own@example.net"))
+        expect(response).to have_http_status(:unprocessable_content)
+        expect { resend!(invite.link) }.to raise_error(EmployeeLinks::Error, EmployeeLinks::Resend::RESET_PENDING)
+
+        allow(clerk).to receive(:users_with_email).with("riley.own@example.net").and_return([ second ])
+        allow(clerk).to receive(:delete_user).with("user_riley_second", anything).and_return(success: true)
+        reset = reset!(invite.link, reason: "Retrying after a Clerk outage")
+
+        expect(clerk).to have_received(:delete_user).with("user_riley_second", email: "riley.own@example.net").twice
+        expect(invite.link.reload).to have_attributes(invite_generation: 3, sign_up_reset_requested_at: nil)
+        expect(link_audits(invite.link, "sign_up_reset_started").count).to eq(1)
+        expect(link_audits(invite.link, "sign_up_reset_resumed").sole.metadata)
+          .to include("reason" => "Retrying after a Clerk outage")
+        expect(link_audits(invite.link, "sign_up_reset").sole.metadata)
+          .to include("requested_reason" => "Signed up on a shared phone", "reason" => "Retrying after a Clerk outage")
+
+        post_activation(activation_params(employee, token: reset.token, email: "riley.own@example.net"))
+        expect_sign_up_started
+      end
+
+      it "deletes only Clerk accounts whose metadata names both this login and this link" do
+        metadata = clerk.fetch_user("user_riley")["public_metadata"]
+        other_link = { "id" => "user_other_link", "public_metadata" => metadata.merge("payroll_employee_link_id" => invite.link.id + 1) }
+        other_login = { "id" => "user_other_login", "public_metadata" => metadata.merge("payroll_user_id" => pending_user.id + 1) }
+        as_string = { "id" => "user_as_string", "public_metadata" => metadata.merge("payroll_user_id" => pending_user.id.to_s) }
+        allow(clerk).to receive(:users_with_email).with("riley.own@example.net")
+          .and_return([ other_link, other_login, as_string, { "id" => "user_no_metadata" } ])
+
+        reset!(invite.link)
+
+        expect(clerk).not_to have_received(:revoke_user_sessions)
+        expect(clerk).not_to have_received(:delete_user)
+        expect(link_audits(invite.link, "sign_up_reset").sole.metadata).to include("deleted_clerk_users" => 0)
       end
 
       it "never deletes a Clerk account a Payroll login is bound to" do
@@ -193,7 +273,17 @@ RSpec.describe "Employee link hardening", type: :request do
 
         reset!(invite.link)
         expect(clerk).not_to have_received(:delete_user)
-        expect(invite.link.reload.invite_generation).to eq(2)
+        expect(invite.link.reload.invite_generation).to eq(3)
+      end
+
+      it "checks again right before deleting that no Payroll login is bound to the account" do
+        allow(clerk).to receive(:revoke_user_sessions) do
+          create(:user, role: :accountant, company: company, clerk_id: "user_riley")
+          { success: true, revoked: 1 }
+        end
+
+        reset!(invite.link)
+        expect(clerk).not_to have_received(:delete_user)
       end
     end
   end
