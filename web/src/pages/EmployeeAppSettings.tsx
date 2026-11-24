@@ -22,6 +22,7 @@ import { employeeAppSettingsApi, type BrandingUpdate, type EmployeeAppSettings }
 
 const APP_NAME_FITS = 12;
 const LOGO_ACCEPT = '.png,.webp,image/png,image/webp';
+const LOGO_TYPES = ['image/png', 'image/webp'];
 const UNSUPPORTED_LOGO = "Upload a PNG or WebP image. SVG isn't supported.";
 const RECOMMENDED_EDGE = 512;
 const SMALL_EDGE = 256;
@@ -269,6 +270,9 @@ export function EmployeeAppSettings(): ReactElement {
   const colorsValid = !!form && (form.primary_color === '' || isHexColor(form.primary_color)) && (form.accent_color === '' || isHexColor(form.accent_color));
   const readOnlyReason = !canEdit && companyReady ? companyReadOnlyMessage(activeCompany) : null;
   const savedContactCount = settings?.help_contacts.length ?? 0;
+  // Fields lock while a save is in flight, so its response can't discard
+  // edits made after Save was clicked.
+  const brandingLocked = !canEdit || savingBranding;
   const hasLogo = !!(settings?.branding.logo || settings?.branding.external_logo_url);
   const logoWarning = logoSize && hasLogo
     ? (Math.min(logoSize.width, logoSize.height) < SMALL_EDGE
@@ -308,7 +312,9 @@ export function EmployeeAppSettings(): ReactElement {
     event.target.value = '';
     if (!file || activeCompanyId == null || !settings) return;
     setLogoStatus(null);
-    if (!['image/png', 'image/webp'].includes(file.type) && !/\.(png|webp)$/i.test(file.name)) {
+    // Trust the file name only when the browser doesn't know the type.
+    const genericType = !file.type || file.type === 'application/octet-stream';
+    if (!LOGO_TYPES.includes(file.type) && !(genericType && /\.(png|webp)$/i.test(file.name))) {
       setLogoStatus({ tone: 'error', message: UNSUPPORTED_LOGO });
       return;
     }
@@ -417,10 +423,10 @@ export function EmployeeAppSettings(): ReactElement {
                 <CardContent>
                   <form className="space-y-6" onSubmit={(event) => void saveBranding(event)}>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <Input label="Name employees see" value={form.display_name} placeholder={companyName} maxLength={60} disabled={!canEdit}
+                      <Input label="Name employees see" value={form.display_name} placeholder={companyName} maxLength={60} disabled={brandingLocked}
                         helperText={`Leave blank to use ${companyName}.`} onChange={(event) => updateForm({ display_name: event.target.value })} />
                       <div className="space-y-2">
-                        <Input label="Home Screen name" value={form.app_name} placeholder={displayName} maxLength={30} disabled={!canEdit}
+                        <Input label="Home Screen name" value={form.app_name} placeholder={displayName} maxLength={30} disabled={brandingLocked}
                           helperText={form.app_name.trim().length > APP_NAME_FITS
                             ? `Phones may cut this off after about ${APP_NAME_FITS} characters.`
                             : 'The label under the app icon when someone adds it to their phone.'}
@@ -463,12 +469,12 @@ export function EmployeeAppSettings(): ReactElement {
                     <section aria-labelledby="colors-heading" className="space-y-4 border-t border-neutral-200 pt-5">
                       <h3 id="colors-heading" className="text-sm font-semibold text-neutral-950">Colors</h3>
                       <div className="grid gap-4 sm:grid-cols-2">
-                        <ColorField id="brand-color" label="Brand color" value={form.primary_color} placeholder="#1898CF" disabled={!canEdit}
+                        <ColorField id="brand-color" label="Brand color" value={form.primary_color} placeholder="#1898CF" disabled={brandingLocked}
                           onChange={(value) => updateForm({ primary_color: value })} />
-                        <ColorField id="accent-color" label="Accent color (optional)" value={form.accent_color} placeholder="#FADF06" disabled={!canEdit}
+                        <ColorField id="accent-color" label="Accent color (optional)" value={form.accent_color} placeholder="#FADF06" disabled={brandingLocked}
                           onChange={(value) => updateForm({ accent_color: value })} />
                       </div>
-                      {form.accent_color && canEdit && (
+                      {form.accent_color && !brandingLocked && (
                         <button type="button" className="text-sm font-semibold text-primary-700 underline-offset-2 hover:underline" onClick={() => updateForm({ accent_color: '' })}>
                           Clear accent color
                         </button>
@@ -481,7 +487,7 @@ export function EmployeeAppSettings(): ReactElement {
                       <h3 id="phone-heading" className="text-sm font-semibold text-neutral-950">Main phone</h3>
                       {mainPhone ? (
                         <label className="flex min-h-11 items-start gap-3 text-sm text-neutral-800">
-                          <input type="checkbox" className="mt-0.5 size-5 rounded border-neutral-300" checked={form.show_main_phone} disabled={!canEdit}
+                          <input type="checkbox" className="mt-0.5 size-5 rounded border-neutral-300" checked={form.show_main_phone} disabled={brandingLocked}
                             onChange={(event) => updateForm({ show_main_phone: event.target.checked })} />
                           <span>
                             Show {formatPhone(mainPhone)} on the sign-in screen, and on Help when no contacts are set
@@ -495,7 +501,9 @@ export function EmployeeAppSettings(): ReactElement {
 
                     <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 pt-5">
                       <Button type="submit" disabled={!canEdit || !brandingDirty || !colorsValid} loading={savingBranding} loadingLabel="Saving">Save changes</Button>
-                      {brandingDirty && <span className="text-sm text-neutral-600">Unsaved changes. The preview shows them.</span>}
+                      {savingBranding
+                        ? <span className="text-sm text-neutral-600" role="status">Saving… Fields unlock when it's done.</span>
+                        : brandingDirty && <span className="text-sm text-neutral-600">Unsaved changes. The preview shows them.</span>}
                     </div>
                     {brandingStatus && <ActionFeedback tone={brandingStatus.tone} message={brandingStatus.message} />}
                   </form>

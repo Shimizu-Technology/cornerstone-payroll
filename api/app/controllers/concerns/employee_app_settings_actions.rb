@@ -53,13 +53,16 @@ module EmployeeAppSettingsActions
     render json: { data: settings_payload }
   end
 
-  # POST logo (multipart `file`): replaces the logo. The old object is
-  # deleted after the new one is saved.
+  # POST logo (multipart `file`): replaces the logo. Every upload has its
+  # own storage key, so this request only ever deletes the exact object it
+  # replaced, after the change commits, or its own object if the save fails.
+  # A failed delete is logged and never undoes the save.
   def upload_logo
     skip_default_audit_log!
     storage = TenantLogoStorageService.new
     stored = storage.store!(company: current_company, file: params[:file])
     previous_key = nil
+    committed = false
     begin
       current_company.with_lock do
         revalidate_settings_write_access!
@@ -68,11 +71,11 @@ module EmployeeAppSettingsActions
         current_company.update!(stored)
         record_settings_audit!("employee_app_settings#upload_logo", before, logo_values(current_company))
       end
-    rescue StandardError
-      storage.delete_object(stored[:brand_logo_storage_key]) unless stored[:brand_logo_storage_key] == current_company.reload.brand_logo_storage_key
-      raise
+      committed = true
+    ensure
+      storage.delete_object(stored[:brand_logo_storage_key]) unless committed
     end
-    storage.delete_object(previous_key) if previous_key && previous_key != stored[:brand_logo_storage_key]
+    storage.delete_object(previous_key) if previous_key
 
     render json: { data: settings_payload }
   rescue TenantLogoStorageService::InvalidLogo => e

@@ -224,6 +224,74 @@ RSpec.describe "Employee app branding and Help contacts", type: :request do
       expect(AuditLog.where(action: "employee_app_settings#remove_logo").count).to eq(1)
     end
 
+    def stored_files
+      Dir.glob(R2StorageService::LOCAL_STORAGE_ROOT.join("**/*")).select { |path| File.file?(path) }
+    end
+
+    it "keeps a logo re-uploaded while an earlier replacement is finishing" do
+      logo_a = png_logo(width: 64, height: 64)
+      logo_b = png_logo(width: 96, height: 96)
+      post client_path("/logo"), params: { file: logo_upload(logo_a) }, headers: headers_for(company_a)
+      first_a_key = company_a.reload.brand_logo_storage_key
+
+      # Request 1 uploads B and commits. Before it deletes the object it
+      # replaced, request 2 uploads A again and commits.
+      second_request_ran = false
+      allow_any_instance_of(TenantLogoStorageService).to receive(:delete_object).and_wrap_original do |original, key|
+        unless second_request_ran
+          second_request_ran = true
+          service = TenantLogoStorageService.new
+          company_a.reload.update!(service.store!(company: company_a, file: logo_upload(logo_a)))
+        end
+        original.call(key)
+      end
+      post client_path("/logo"), params: { file: logo_upload(logo_b) }, headers: headers_for(company_a)
+
+      expect(response).to have_http_status(:ok)
+      company_a.reload
+      expect(company_a.brand_logo_sha256).to eq(Digest::SHA256.hexdigest(TenantLogoStorageService.new.clean(StringIO.new(logo_a)).first))
+      expect(company_a.brand_logo_storage_key).not_to eq(first_a_key)
+      expect(TenantLogoStorageService.new.download(company_a)).to be_present
+      expect(R2StorageService.new.exists?(first_a_key)).to be(false)
+    end
+
+    it "keeps the saved logo when a second upload of the same file fails to save" do
+      post client_path("/logo"), params: { file: logo_upload(png_logo) }, headers: headers_for(company_a)
+      saved_key = company_a.reload.brand_logo_storage_key
+      # The second upload stores its object, then fails inside the lock.
+      allow(User).to receive(:lock).and_wrap_original do |original|
+        User.where(id: client_a.id).update_all(active: false)
+        original.call
+      end
+
+      post client_path("/logo"), params: { file: logo_upload(png_logo) }, headers: headers_for(company_a)
+
+      expect(response).to have_http_status(:forbidden)
+      expect(company_a.reload.brand_logo_storage_key).to eq(saved_key)
+      expect(TenantLogoStorageService.new.download(company_a)).to be_present
+      expect(stored_files.size).to eq(1)
+    end
+
+    it "keeps the save when deleting the replaced object fails" do
+      post client_path("/logo"), params: { file: logo_upload(png_logo) }, headers: headers_for(company_a)
+      allow_any_instance_of(R2StorageService).to receive(:delete).and_raise(R2StorageService::UploadError, "R2 down")
+
+      post client_path("/logo"), params: { file: logo_upload(webp_logo, filename: "logo.webp", content_type: "image/webp") }, headers: headers_for(company_a)
+
+      expect(response).to have_http_status(:ok)
+      expect(company_a.reload.brand_logo_content_type).to eq("image/webp")
+    end
+
+    it "refuses a request body over 1.5 MB before parsing it" do
+      expect(TenantLogoStorageService).not_to receive(:new)
+
+      post client_path("/logo"), params: { file: logo_upload(png_logo + ("\x00".b * 1_600_000)) }, headers: headers_for(company_a)
+
+      expect(response).to have_http_status(:payload_too_large)
+      expect(response.parsed_body["error"]).to include("1 MB or smaller")
+      expect(company_a.reload.brand_logo_storage_key).to be_nil
+    end
+
     it "refuses SVG, the wrong type, an oversized file and a damaged WebP" do
       svg = %(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30"/></svg>)
       post client_path("/logo"), params: { file: logo_upload(svg, filename: "logo.svg", content_type: "image/svg+xml") }, headers: headers_for(company_a)

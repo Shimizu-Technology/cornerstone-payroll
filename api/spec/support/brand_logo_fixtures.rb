@@ -40,8 +40,10 @@ module BrandLogoFixtures
     webp_chunk("VP8L", "\x2F".b + [ (width - 1) | ((height - 1) << 14) ].pack("V") + ("\x00".b * 8))
   end
 
-  def webp_vp8(width, height)
-    webp_chunk("VP8 ", "\x00\x00\x00".b + "\x9D\x01\x2A".b + [ width, height ].pack("v2") + ("\x00".b * 6))
+  # A key frame whose first partition (6 bytes here) fits in the chunk.
+  def webp_vp8(width, height, start_code: "\x9D\x01\x2A".b, partition: 6)
+    tag = (partition << 5) | 0x10
+    webp_chunk("VP8 ", [ tag ].pack("V")[0, 3] + start_code + [ width, height ].pack("v2") + ("\x00".b * 6))
   end
 
   # An extended WebP header (VP8X) with EXIF, XMP and extra chunks around a
@@ -49,6 +51,11 @@ module BrandLogoFixtures
   def webp_logo(width: 64, height: 64, extra: [])
     webp_file(webp_vp8x(width, height), webp_vp8l(width, height),
       webp_chunk("EXIF", "Exif\x00\x00GPS-and-camera".b), webp_chunk("XMP ", "<x:xmpmeta>owner</x:xmpmeta>".b), *extra)
+  end
+
+  # Real encoder output (ImageMagick and cwebp), 64x64 or smaller.
+  def brand_logo_fixture(name)
+    Rails.root.join("spec/fixtures/files/brand_logos", name).binread
   end
 
   def logo_upload(bytes, filename: "logo.png", content_type: "image/png")
