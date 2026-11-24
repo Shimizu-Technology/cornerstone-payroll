@@ -35,6 +35,18 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
       testMatch: /public-.*\.spec\.ts/,
     },
+    // The employee app on phones. Chromium (Pixel) runs everywhere; WebKit
+    // (iPhone) needs `npx playwright install webkit` and runs in CI.
+    {
+      name: 'employee-mobile',
+      use: { ...devices['Pixel 7'] },
+      testMatch: /employee-mobile-.*\.spec\.ts/,
+    },
+    {
+      name: 'employee-mobile-webkit',
+      use: { ...devices['iPhone 14'] },
+      testMatch: /employee-mobile-.*\.spec\.ts/,
+    },
     {
       name: 'gate0-release',
       use: { ...devices['Desktop Chrome'], timezoneId: 'Pacific/Guam' },
