@@ -14,7 +14,7 @@ module RlsTables
     company_ytd_totals daily_time_records deduction_types department_ytd_totals departments
     direct_deposit_payment_confirmations employee_account_links employee_change_requests
     employee_compensation_changes employee_configuration_review_resolutions employee_deductions
-    employee_document_requirement_events employee_document_requirements employee_loans employee_notes
+    employee_document_requirement_events employee_document_requirements employee_documents employee_loans employee_notes
     employee_payroll_fields employee_retirement_elections employee_retirement_year_inputs
     employee_status_events employee_tipped_occupations employee_w4_elections employee_wage_rate_versions
     employee_wage_rates employee_work_profiles employee_year_fica_source_reviews employee_ytd_totals

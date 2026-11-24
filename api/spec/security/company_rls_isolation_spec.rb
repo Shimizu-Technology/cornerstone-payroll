@@ -283,6 +283,39 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
+    it "isolates frozen employee documents and rejects cross-company source references" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          documents = TenantScope.as_system(reason: "Create employee document fixtures") do
+            employees = create_list(:employee, 2)
+            fixture = { tax_year: 2026, revision: 1, sha256: "a" * 64, storage_key: "fixture", posted_at: Time.current }
+            local, foreign = employees.map do |employee|
+              EmployeeDocument.create!(**fixture, employee: employee, company_id: employee.company_id)
+            end
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeDocument.create!(**fixture, revision: 2, employee_id: foreign.employee_id, company_id: local.company_id)
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            setup_step_three(connection, tables: %w[employee_documents])
+            [ local, foreign ]
+          end
+
+          local, foreign = documents
+          TenantScope.with_company(local.company_id) do
+            expect(EmployeeDocument.pluck(:id)).to eq([ local.id ])
+            expect(EmployeeDocument.where(id: foreign.id).update_all(status: "withdrawn")).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeDocument.create!(foreign.attributes.except("id").merge("revision" => 2))
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
     it "lets tenants read shared rules and only maintain their own rules" do
       pool.with_connection do |connection|
         connection.transaction do
