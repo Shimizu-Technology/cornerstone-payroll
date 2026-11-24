@@ -2,6 +2,15 @@
 
 class EmployeePlaceholderEmail < ApplicationRecord
   MAX_REASON_LENGTH = 500
+  # Advisory lock namespace for "placeholder marks of one organization".
+  ORGANIZATION_LOCK = 450_301
+
+  # Serializes marking and unmarking with history approvals that read the
+  # marks, per organization. Held until the surrounding transaction commits.
+  def self.lock_organization!(organization_id, shared: false)
+    sql = shared ? "SELECT pg_advisory_xact_lock_shared(?, ?)" : "SELECT pg_advisory_xact_lock(?, ?)"
+    connection.select_value(sanitize_sql_array([ sql, ORGANIZATION_LOCK, Integer(organization_id) ]))
+  end
 
   belongs_to :organization
   belongs_to :marked_by, class_name: "User", optional: true

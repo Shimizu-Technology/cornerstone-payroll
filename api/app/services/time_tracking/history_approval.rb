@@ -143,6 +143,9 @@ module TimeTracking
           connection.execute("SET LOCAL lock_timeout = '5s'")
           connection.execute("SET LOCAL statement_timeout = '20s'")
           @company.lock!("FOR SHARE")
+          # Placeholder marks can't change until this approval commits; the
+          # locked refresh below reads them.
+          EmployeePlaceholderEmail.lock_organization!(@company.organization_id, shared: true)
           # Lock only the exact committed evidence runs, never unrelated payroll
           # items. Match the publisher's run-before-source lock order.
           ids = review.snapshot.fetch("local").fetch("runs").keys
