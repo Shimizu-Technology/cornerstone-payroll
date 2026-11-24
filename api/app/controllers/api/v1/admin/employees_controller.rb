@@ -19,6 +19,7 @@ module Api
 
         # GET /api/v1/admin/employees
         def index
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           employees = Employee.where(company_id: current_company_id)
           if params[:eligible_pay_period_id].present?
             period = PayPeriod.find_by(id: params[:eligible_pay_period_id], company_id: current_company_id)
@@ -29,19 +30,24 @@ module Api
             @rates_on = period.end_date
           end
           employees = apply_filters(employees)
+          needs_contact_details_count = employees.needs_contact_details(flagged_emails: contact_context[:flagged_emails]).count
+          if needs_contact_details_filter_active?
+            employees = employees.needs_contact_details(flagged_emails: contact_context[:flagged_emails])
+          end
           employees = apply_sort(employees)
           employees = employees.includes(:department, :employee_wage_rates, :employee_work_profiles, :employee_w4_elections)
             .preload(:employee_wage_rate_versions, :employee_compensation_changes)
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
-            data: employees.map { |e| serialize_employee(e, include_department: true) },
-            meta: pagination_meta(employees)
+            data: employees.map { |e| serialize_employee(e, include_department: true, contact_context: contact_context) },
+            meta: pagination_meta(employees).merge(needs_contact_details_count: needs_contact_details_count)
           }
         end
 
         # GET /api/v1/admin/employees/:id
         def show
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
             data: serialize_employee(
               @employee,
@@ -53,7 +59,8 @@ module Api
               include_retirement_history: true,
               include_configuration_review_history: true,
               include_document_readiness: true,
-              include_compensation_history: true
+              include_compensation_history: true,
+              contact_context: contact_context
             )
           }
         end
@@ -65,6 +72,13 @@ module Api
           attributes[:pay_frequency] = current_company.pay_frequency unless attributes.key?(:pay_frequency)
           @employee = Employee.new(attributes.merge(w4_attributes).merge(company_id: current_company_id))
           require_ssn_confirmation!(@employee)
+          @contact_validation_result = validate_admin_contact_details!(
+            employee: @employee,
+            attributes: attributes,
+            creation: true
+          )
+          apply_admin_contact_details!(attributes, @contact_validation_result, creation: true)
+          @employee.assign_attributes(attributes.slice(:email, :phone, :contact_source))
 
           Employee.transaction do
             current_company.lock!
@@ -88,14 +102,23 @@ module Api
             EmployeeDocumentReadiness.seed_new_hire!(employee: @employee, actor: current_user)
           end
 
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
             data: serialize_employee(
               @employee,
               include_w4_history: true,
               include_document_readiness: true,
-              include_compensation_history: true
-            )
+              include_compensation_history: true,
+              contact_context: contact_context
+            ),
+            contact_warnings: @contact_validation_result&.warnings || []
           }, status: :created
+        rescue EmployeeContactValidator::ValidationError => e
+          render json: {
+            error: "Validation failed",
+            details: e.record.errors.messages,
+            contact_validation: e.result.contact_validation_payload
+          }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           expired_incomplete_entry = @employee&.new_record? && EmployeeIntakePolicy.expired?(current_company) &&
             EmployeeIntakePolicy.missing_fields(@employee).any?
@@ -148,6 +171,12 @@ module Api
             end
             requested_pay_rate = attributes.key?(:pay_rate) ? attributes.delete(:pay_rate) : EmployeeCompensationChangeService::UNCHANGED
             basis = attributes.extract!(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES.map(&:to_sym))
+            @contact_validation_result = validate_admin_contact_details!(
+              employee: @employee,
+              attributes: attributes,
+              creation: false
+            )
+            apply_admin_contact_details!(attributes, @contact_validation_result, creation: false)
             @employee.update!(attributes.merge(w4_attributes))
             @compensation_result = EmployeeCompensationChangeService.new(
               employee: @employee,
@@ -172,11 +201,19 @@ module Api
             ).call!
           end
 
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
-            data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true),
+            data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true, contact_context: contact_context),
             payment_method_review: { reapproval_pay_period_ids: @payment_default_service&.reapproval_pay_period_ids || [] },
-            compensation_warnings: @compensation_result&.warnings || []
+            compensation_warnings: @compensation_result&.warnings || [],
+            contact_warnings: @contact_validation_result&.warnings || []
           }
+        rescue EmployeeContactValidator::ValidationError => e
+          render json: {
+            error: "Validation failed",
+            details: e.record.errors.messages,
+            contact_validation: e.result.contact_validation_payload
+          }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -238,6 +275,12 @@ module Api
           }, status: :created
         rescue EmployeeClassificationTransitionService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue EmployeeContactValidator::ValidationError => e
+          render json: {
+            error: "Validation failed",
+            details: e.record.errors.messages,
+            contact_validation: e.result.contact_validation_payload
+          }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -286,6 +329,15 @@ module Api
 
         def audit_record
           @employee
+        end
+
+        def audit_record_metadata(_record)
+          return {} unless @contact_validation_result&.same_person_confirmed?
+
+          {
+            same_person_email_confirmed: true,
+            confirmed_login_user_id: @contact_validation_result.matched_login_user&.id
+          }
         end
 
         def audit_record_changes
@@ -510,8 +562,86 @@ module Api
             :contractor_type,
             :contractor_pay_type,
             :business_name,
-            :contractor_ein
+            :contractor_ein,
+            :email,
+            :phone,
+            :confirm_same_person_email
           )
+        end
+
+        def confirm_same_person_email_param
+          raw = params.key?(:confirm_same_person_email) ? params[:confirm_same_person_email] : params.dig(:employee, :confirm_same_person_email)
+          ActiveModel::Type::Boolean.new.cast(raw) == true
+        end
+
+        def needs_contact_details_filter_active?
+          ActiveModel::Type::Boolean.new.cast(params[:needs_contact_details]) == true ||
+            params[:contact_status] == "needs_contact_details"
+        end
+
+        def validate_admin_contact_details!(employee:, attributes:, creation:)
+          email_changed = creation ? attributes.key?(:email) : admin_email_changed?(employee, attributes)
+          phone_changed = creation ? attributes.key?(:phone) : admin_phone_changed?(employee, attributes)
+          return nil unless email_changed || phone_changed
+
+          target = employee.dup
+          target.id = employee.id if employee.persisted?
+          target.instance_variable_set(:@new_record, !employee.persisted?)
+          target.assign_attributes(attributes.slice(:first_name, :last_name))
+
+          result = EmployeeContactValidator.call(
+            employee: target,
+            company: current_company,
+            email: email_changed ? attributes[:email] : :unchanged,
+            phone: phone_changed ? attributes[:phone] : :unchanged,
+            confirm_same_person_email: confirm_same_person_email_param,
+            actor: current_user,
+            source: "staff"
+          )
+          return result if result.valid?
+
+          result.apply_errors_to(employee)
+          raise EmployeeContactValidator::ValidationError.new(result: result, record: employee)
+        end
+
+        def apply_admin_contact_details!(attributes, contact_result, creation:)
+          attributes[:email] = nil if attributes.key?(:email) && attributes[:email].blank?
+          attributes[:phone] = nil if attributes.key?(:phone) && attributes[:phone].blank?
+          if contact_result
+            if creation ? attributes.key?(:email) : admin_email_changed?(@employee, attributes)
+              attributes[:email] = contact_result.normalized_email
+            end
+            if creation ? attributes.key?(:phone) : admin_phone_changed?(@employee, attributes)
+              attributes[:phone] = contact_result.normalized_phone
+            end
+          end
+
+          contact_touched = if creation
+            EmployeeContactValidator::CONTACT_FIELDS.any? { |field| attributes[field].present? }
+          else
+            EmployeeContactValidator::CONTACT_FIELDS.any? do |field|
+              next false unless attributes.key?(field)
+
+              @employee.public_send(field).presence != attributes[field].presence
+            end
+          end
+          attributes[:contact_source] = "staff" if contact_touched
+        end
+
+        def admin_email_changed?(employee, attributes)
+          return false unless attributes.key?(:email)
+
+          EmployeeContactValidator.normalize_email(employee.email) != EmployeeContactValidator.normalize_email(attributes[:email])
+        end
+
+        def admin_phone_changed?(employee, attributes)
+          return false unless attributes.key?(:phone)
+
+          normalized_new, error = EmployeeContactValidator.normalize_phone(attributes[:phone])
+          return true if error.present?
+
+          normalized_current, = EmployeeContactValidator.normalize_phone(employee.phone)
+          (normalized_current || employee.phone.presence) != normalized_new
         end
 
         def termination_params
@@ -613,11 +743,13 @@ module Api
           include_retirement_history: false,
           include_configuration_review_history: false,
           include_document_readiness: false,
-          include_compensation_history: false
+          include_compensation_history: false,
+          contact_context: nil
         )
           data = employee.as_json(
             except: [ :intake_exception, :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
+          data["contact_details_status"] = EmployeeContactValidator.contact_details_status(employee, context: contact_context)
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: can_review_employee_intake?)
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
           data["ssn"] = employee.ssn_encrypted if include_sensitive

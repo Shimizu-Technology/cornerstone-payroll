@@ -118,7 +118,8 @@ module Api
           render json: {
             created: create_result[:created],
             failed: create_result[:failed],
-            errors: create_result[:errors]
+            errors: create_result[:errors],
+            warnings: create_result[:warnings] || []
           }
         end
 
@@ -207,7 +208,8 @@ module Api
             valid: row[:valid],
             duplicate: row[:duplicate],
             new_department: row[:new_department] || false,
-            errors: row[:errors]
+            errors: row[:errors],
+            warnings: row[:warnings] || []
           }
         end
       end

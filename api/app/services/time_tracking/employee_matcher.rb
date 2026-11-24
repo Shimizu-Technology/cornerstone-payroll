@@ -34,9 +34,9 @@ module TimeTracking
       return matched(existing.employee, "saved_mapping", 1.0) if existing&.employee&.active?
 
       email = source_employee["email"].to_s.downcase.strip
-      if email.present?
-        employee = @employee_scope.find_by("LOWER(email) = ?", email)
-        return suggested(employee, "email", 1.0) if employee
+      if email.present? && !EmployeeContactValidator.placeholder_email?(email)
+        email_matches = @employee_scope.where("LOWER(TRIM(email)) = ?", email).limit(2).to_a
+        return suggested(email_matches.first, "email", 1.0) if email_matches.one?
       end
 
       source_name = source_employee["display_name"].to_s.presence || [ source_employee["first_name"], source_employee["last_name"] ].compact.join(" ")
@@ -66,8 +66,8 @@ module TimeTracking
       values = []
       tokens.first(3).each do |token|
         pattern = "%#{ActiveRecord::Base.sanitize_sql_like(token)}%"
-        clauses << "first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?"
-        values.concat([ pattern, pattern, pattern ])
+        clauses << "first_name ILIKE ? OR last_name ILIKE ?"
+        values.concat([ pattern, pattern ])
       end
 
       matches = @employee_scope.where(clauses.map { |clause| "(#{clause})" }.join(" OR "), *values)

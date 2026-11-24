@@ -108,7 +108,8 @@ class StaffRolePolicy
     "api/v1/admin/invoice_receivables" => :manage_organization,
     "api/v1/admin/invoice_recipients" => :manage_organization,
     "api/v1/admin/client_profitability" => :view_client_profitability,
-    "api/v1/admin/client_operating_profiles" => :payroll_operations
+    "api/v1/admin/client_operating_profiles" => :payroll_operations,
+    "api/v1/admin/employee_contact_hygiene" => :manage_client_configuration
   }.freeze
 
   ACTION_CAPABILITIES = {

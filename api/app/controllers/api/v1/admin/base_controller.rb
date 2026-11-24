@@ -176,6 +176,8 @@ module Api
             params[:id]
           elsif controller_path == "api/v1/admin/client_operating_profiles"
             params[:company_id]
+          elsif controller_path == "api/v1/admin/employee_contact_hygiene" && params[:company_id].present?
+            params[:company_id]
           end
           target_id.present? ? Company.find_by(id: target_id) : current_company
         end

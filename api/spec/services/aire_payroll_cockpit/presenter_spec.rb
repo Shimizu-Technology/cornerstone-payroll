@@ -18,4 +18,34 @@ RSpec.describe AirePayrollCockpit::Presenter do
     expect(result["settlement_cases"].first.dig("employee", "cornerstone", "status")).to eq("unmapped")
     expect(payload).to eq(original)
   end
+
+  it "suggests by email for a unique real address, and falls back to name when the address is shared" do
+    company = create(:company)
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    unique_emp = create(:employee, company: company, first_name: "Unique", last_name: "Employee", email: "unique.aire@example.com")
+    create(:employee, company: company, first_name: "First", last_name: "Shared", email: "shared.family@example.com")
+    second_shared = create(:employee, company: company, first_name: "Second", last_name: "Shared", email: "shared.family@example.com")
+
+    presenter = described_class.new(source: source)
+
+    real_suggestions = presenter.send(:suggestions_for, "email" => "unique.aire@example.com", "full_name" => "Different Name")
+    expect(real_suggestions).to eq([
+      {
+        "employee_id" => unique_emp.id,
+        "employee_name" => "Unique Employee",
+        "email" => "unique.aire@example.com",
+        "basis" => "same_email"
+      }
+    ])
+
+    shared_suggestions = presenter.send(:suggestions_for, "email" => "shared.family@example.com", "full_name" => "Second Shared")
+    expect(shared_suggestions).to eq([
+      {
+        "employee_id" => second_shared.id,
+        "employee_name" => "Second Shared",
+        "email" => "shared.family@example.com",
+        "basis" => "same_name"
+      }
+    ])
+  end
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_23_150500) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_24_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1473,6 +1473,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_150500) do
     t.boolean "w9_on_file", default: false, null: false
     t.string "zip"
     t.bigint "created_by_id"
+    t.datetime "email_verified_at"
+    t.datetime "phone_confirmed_by_employee_at"
+    t.string "contact_source"
+    t.index "lower(TRIM(BOTH FROM email))", name: "index_employees_on_lower_email", where: "(email IS NOT NULL)"
     t.index [ "company_id", "last_name", "first_name" ], name: "index_employees_on_company_id_and_last_name_and_first_name"
     t.index [ "company_id", "test_workspace_source_employee_id" ], name: "idx_employees_training_source_unique", unique: true, where: "(test_workspace_source_employee_id IS NOT NULL)"
     t.index [ "company_id" ], name: "index_employees_on_company_id"
@@ -1485,6 +1489,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_23_150500) do
     t.index [ "test_workspace_source_employee_id" ], name: "idx_employees_training_source", where: "(test_workspace_source_employee_id IS NOT NULL)"
     t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying::text, 'needs_review'::character varying::text])", name: "employees_configuration_review_status_check"
     t.check_constraint "configuration_source IS NULL OR configuration_source::text = 'quickbooks_history'::text", name: "employees_configuration_source_check"
+    t.check_constraint "contact_source IS NULL OR (contact_source::text = ANY (ARRAY['client'::character varying, 'staff'::character varying, 'employee'::character varying, 'import'::character varying]::text[]))", name: "employees_contact_source_check"
     t.check_constraint "jsonb_typeof(configuration_review_items) = 'array'::text", name: "employees_configuration_review_items_array"
     t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying::text, 'direct_deposit'::character varying::text]))", name: "employees_payment_delivery_method_check"
     t.check_constraint "portal_pending_approval = false OR status::text = 'inactive'::text", name: "employees_portal_pending_inactive_check"

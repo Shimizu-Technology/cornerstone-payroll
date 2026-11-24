@@ -135,4 +135,43 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     expect(contractor.reload).to be_active
     expect(contractor.next_employee).to be_nil
   end
+
+  it "runs shared contact validation, normalizes phone, and never copies email_verified_at or phone_confirmed_by_employee_at" do
+    contractor.update_columns(
+      email: "asia@example.com",
+      phone: "555-0133",
+      email_verified_at: 3.days.ago,
+      phone_confirmed_by_employee_at: 3.days.ago,
+      contact_source: "employee"
+    )
+
+    result = described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+
+    expect(result.new_employee).to have_attributes(
+      email: "asia@example.com",
+      phone: "+16715550133",
+      email_verified_at: nil,
+      phone_confirmed_by_employee_at: nil
+    )
+  end
+
+  it "blocks transition when copied email is a placeholder unless staff supplies a valid replacement" do
+    contractor.update_columns(email: "noemail@example.com")
+
+    expect {
+      described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+    }.to raise_error(EmployeeContactValidator::ValidationError)
+
+    result = described_class.new(
+      employee: contractor,
+      attributes: attributes.merge(email: "asia.real@example.com", phone: "555-0144"),
+      actor: super_admin
+    ).call
+    expect(result.new_employee).to have_attributes(
+      email: "asia.real@example.com",
+      phone: "+16715550144",
+      contact_source: "staff",
+      email_verified_at: nil
+    )
+  end
 end
