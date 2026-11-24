@@ -8,11 +8,7 @@ class AddContactDetailsTrackingToEmployees < ActiveRecord::Migration[8.1]
 
     add_check_constraint :employees,
                          "contact_source IS NULL OR contact_source IN ('client', 'staff', 'employee', 'import')",
-                         name: "employees_contact_source_check"
-
-    add_index :employees,
-              "LOWER(TRIM(email))",
-              name: "index_employees_on_lower_email",
-              where: "email IS NOT NULL"
+                         name: "employees_contact_source_check",
+                         validate: false
   end
 end

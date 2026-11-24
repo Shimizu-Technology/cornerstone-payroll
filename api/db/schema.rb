@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_24_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_24_120300) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1135,6 +1135,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_24_120000) do
     t.index [ "employee_loan_id" ], name: "idx_employee_fields_unique_loan", unique: true, where: "(employee_loan_id IS NOT NULL)"
     t.index [ "employee_loan_id" ], name: "index_employee_payroll_fields_on_employee_loan_id"
     t.index [ "payroll_field_definition_id" ], name: "idx_employee_payroll_fields_definition"
+  end
+
+  create_table "employee_placeholder_emails", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "email", null: false
+    t.bigint "marked_by_id"
+    t.bigint "organization_id", null: false
+    t.string "reason"
+    t.datetime "updated_at", null: false
+    t.index [ "marked_by_id" ], name: "index_employee_placeholder_emails_on_marked_by_id"
+    t.index [ "organization_id", "email" ], name: "idx_employee_placeholder_emails_org_email", unique: true
+    t.index [ "organization_id" ], name: "index_employee_placeholder_emails_on_organization_id"
   end
 
   create_table "employee_retirement_elections", force: :cascade do |t|
@@ -5108,6 +5120,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_24_120000) do
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_payroll_fields_company_parent"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
+  add_foreign_key "employee_placeholder_emails", "organizations"
+  add_foreign_key "employee_placeholder_emails", "users", column: "marked_by_id", on_delete: :nullify
   add_foreign_key "employee_retirement_elections", "companies"
   add_foreign_key "employee_retirement_elections", "employees"
   add_foreign_key "employee_retirement_elections", "users", column: "created_by_id"
