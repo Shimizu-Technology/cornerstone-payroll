@@ -32,7 +32,8 @@ class ClientProfitabilitySetting < ApplicationRecord
   # organization (a company can be transferred to another organization).
   # Every read of practice payroll or employees goes through this.
   def effective_practice_company
-    practice_company if practice_company&.organization_id == organization_id
+    # A stored setting that later points at a non-live company carries no cost.
+    practice_company if practice_company&.organization_id == organization_id && practice_company.live_payroll?
   end
 
   # When the practice company changes, employee links to the old company's

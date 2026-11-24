@@ -7,6 +7,8 @@ class TimeTrackingSource < ApplicationRecord
   has_one :lock_rollout_selection, class_name: "TimeTrackingLockRolloutSelection", dependent: :restrict_with_error
 
   belongs_to :company
+  # A demo company uses manual hours only; no external source can be registered.
+  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.demo? }
   has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
   has_many :time_tracking_legacy_identity_bindings, dependent: :restrict_with_error
   has_many :time_tracking_employee_mappings, dependent: :destroy

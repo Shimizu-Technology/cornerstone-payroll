@@ -85,6 +85,9 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   def initialize(company:, payroll_items: [], non_employee_checks: [], starting_slot: 1, rehearsal_preview: false, preview: false)
+    # Preprinted bank stock carries real bank details and MICR; a demo never uses it.
+    raise ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE if company&.demo?
+
     @preview = preview
     @company = company
     @rehearsal_preview = rehearsal_preview

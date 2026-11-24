@@ -1,13 +1,19 @@
 # frozen_string_literal: true
 
 class Form1096TotalsPdfGenerator
-  def initialize(company:, file:, draft:)
-    @company, @file, @draft = company, file, draft
+  # Either the Pub 1220 file or payee totals (forms, box1_cents, box4_cents).
+  # A demo company has no e-file, so its totals come from the payees directly.
+  def initialize(company:, draft:, file: nil, totals: nil)
+    @company, @file, @totals, @draft = company, file, totals, draft
   end
 
   def generate
-    records = @file.scan(/.{748}\r\n/m)
-    totals = records.find { |r| r.start_with?("C") }
+    forms, box1, box4 = if @totals
+      @totals.values_at(:forms, :box1_cents, :box4_cents)
+    else
+      record = @file.scan(/.{748}\r\n/m).find { |r| r.start_with?("C") }
+      [ record[1, 8].to_i, record[15, 18].to_i, record[69, 18].to_i ]
+    end
     PdfUnicodeFont.document.tap do |pdf|
       pdf.text "#{@draft ? 'DRAFT - ' : ''}1096 totals (for your records)", size: 18
       pdf.move_down 16
@@ -18,9 +24,9 @@ class Form1096TotalsPdfGenerator
       pdf.text @company.full_address
       pdf.move_down 16
       pdf.text "Tax year: 2026 | Form: 1099-NEC"
-      pdf.text "Total forms: #{totals[1, 8].to_i}"
-      pdf.text "Box 1 nonemployee compensation: $#{money(totals[15, 18].to_i)}"
-      pdf.text "Box 4 federal income tax withheld: $#{money(totals[69, 18].to_i)}"
+      pdf.text "Total forms: #{forms}"
+      pdf.text "Box 1 nonemployee compensation: $#{money(box1)}"
+      pdf.text "Box 4 federal income tax withheld: $#{money(box4)}"
       pdf.move_down 16
       pdf.text "These totals match the GuamTax e-file. Keep this sheet with your records."
     end.render

@@ -144,7 +144,7 @@ module Api
         # rehearsals. This deliberately does not allocate check numbers, record
         # a print event, or make a rehearsal eligible for payment/commit.
         def rehearsal_preview_pdf
-          unless @pay_period.company.test_workspace? && %w[calculated approved].include?(@pay_period.status)
+          unless @pay_period.company.practice_copy? && %w[calculated approved].include?(@pay_period.status)
             return render json: { error: "VOID check previews are only available for calculated or approved test payrolls" }, status: :unprocessable_entity
           end
 
@@ -287,6 +287,11 @@ module Api
         # Download a single check PDF.
         # -----------------------------------------------------------------------
         def show
+          # Demo checks are not printable yet; D4 adds plain-paper demo checks.
+          if @payroll_item.pay_period.company.demo?
+            return render json: { error: Company::DEMO_UNAVAILABLE_MESSAGE }, status: :forbidden
+          end
+
           @payroll_item.ensure_financial_source_payment_ready! unless @payroll_item.voided?
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check PDF is only available for committed pay periods" }, status: :unprocessable_entity

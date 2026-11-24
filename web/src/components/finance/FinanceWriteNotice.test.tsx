@@ -10,7 +10,9 @@ const context = vi.hoisted(() => ({
     { id: 2, organization_id: 1, name: 'QA sandbox', active: true, payroll_environment: 'migration_rehearsal', workspace_can_write: true },
     { id: 3, organization_id: 2, name: 'Other firm client', active: true, payroll_environment: 'live', workspace_can_write: true },
     { id: 4, organization_id: 1, name: 'Unavailable client', active: true, payroll_environment: 'live', workspace_can_write: false },
+    { id: 5, organization_id: 1, name: 'Harbor Finch Kitchen', active: true, payroll_environment: 'live', test_workspace: false, workspace_can_write: true },
   ],
+  billingCompanyIds: [ 1, 3, 4 ],
   switchCompany: vi.fn(),
 }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => context }));
@@ -25,6 +27,7 @@ describe('FinanceWriteNotice context recovery', () => {
     expect(screen.queryByRole('option', { name: 'Other firm client' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'Unavailable client' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'QA sandbox' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Harbor Finch Kitchen' })).toBeNull();
     const useClient = screen.getByRole('button', { name: 'Use selected live client' }) as HTMLButtonElement;
     expect(useClient.disabled).toBe(true);
     expect(context.switchCompany).not.toHaveBeenCalled();

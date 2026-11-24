@@ -1066,3 +1066,44 @@ CREATE TRIGGER companies_demo_shape_immutable
 BEFORE UPDATE OF payroll_environment, test_workspace_purpose, test_workspace_manifest ON companies
 FOR EACH ROW
 EXECUTE FUNCTION prevent_demo_company_conversion();
+
+-- 20261125170000_refuse_demo_company_external_records.rb
+CREATE OR REPLACE FUNCTION prevent_demo_company_external_records() RETURNS trigger AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND COALESCE(test_workspace_purpose, '') = 'demo') THEN
+    RAISE EXCEPTION '% cannot belong to a demo company', TG_TABLE_NAME
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS payroll_filing_records_refuse_demo_company ON payroll_filing_records;
+CREATE TRIGGER payroll_filing_records_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON payroll_filing_records
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+DROP TRIGGER IF EXISTS payroll_filing_events_refuse_demo_company ON payroll_filing_events;
+CREATE TRIGGER payroll_filing_events_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON payroll_filing_events
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+DROP TRIGGER IF EXISTS payroll_liability_postings_refuse_demo_company ON payroll_liability_postings;
+CREATE TRIGGER payroll_liability_postings_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON payroll_liability_postings
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+DROP TRIGGER IF EXISTS payroll_liability_entries_refuse_demo_company ON payroll_liability_entries;
+CREATE TRIGGER payroll_liability_entries_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON payroll_liability_entries
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+DROP TRIGGER IF EXISTS time_tracking_sources_refuse_demo_company ON time_tracking_sources;
+CREATE TRIGGER time_tracking_sources_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON time_tracking_sources
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();

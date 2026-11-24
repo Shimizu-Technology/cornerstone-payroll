@@ -12,4 +12,17 @@ class Form500Filing < ApplicationRecord
   validates :fields, presence: true
   validates :status, inclusion: { in: STATUSES }
   validates :payment_amount, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validate :demo_company_records_preparation_only
+
+  private
+
+  # A demo company prepares Form 500 like a live client, but nothing is
+  # ever filed or paid, so it cannot record either outcome.
+  def demo_company_records_preparation_only
+    return unless company&.demo?
+    return if status.in?(%w[prepared exception]) && payment_date.nil? && payment_amount.nil? &&
+      confirmation_number.blank? && !receipt_attached
+
+    errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE)
+  end
 end

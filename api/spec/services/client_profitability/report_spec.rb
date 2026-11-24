@@ -276,6 +276,42 @@ RSpec.describe ClientProfitability::Report do
     WorkHourRow.where(tax_client_id: 346).delete_all
     expect(client(report, "Beta Builders")).to include(hours: "0.00", cost: "0.00", fees: "800.00", margin: "800.00", effective_rate: nil)
   end
+
+  context "with stale data pointing at a demo company" do
+    let(:demo) { create_demo_company(organization: organization) }
+    let(:demo_worker) { create(:employee, company: demo, first_name: "Robin", last_name: "Lantern") }
+
+    before { create_committed_demo_pay_period(company: demo, pay_date: Date.new(2026, 10, 15), employee: demo_worker, gross_pay: 50_000) }
+
+    it "ignores a stored practice-company setting that points at the demo" do
+      before_cost = report.dig(:totals)
+      settings.update_columns(practice_company_id: demo.id)
+      result = report
+
+      expect(settings.reload.effective_practice_company).to be_nil
+      expect(result[:practice_company]).to be_nil
+      expect(result.to_json).not_to include("Lantern")
+      expect(result.dig(:totals)).not_to eq(before_cost)
+      expect(result.dig(:totals).to_json).not_to include("50000")
+    end
+
+    it "drops stale client links, invoice companies and recipient companies that point at the demo" do
+      baseline = report
+      WorkHourClientLink.find_by!(tax_client_id: 346).update_columns(company_id: demo.id)
+      Invoice.where(company: beta).update_all(company_id: demo.id)
+      InvoiceRecipient.where(company: beta).update_all(company_id: demo.id)
+      Invoice.where(company_id: nil).find_each { |invoice| invoice.invoice_recipient.update_columns(company_id: demo.id) }
+      result = report
+
+      expect(result[:clients].map { |line| line[:company_id] }).not_to include(demo.id)
+      expect(result.to_json).not_to include(demo.name)
+      expect(result.dig(:unlinked_fees, :fees)).to eq("0.00")
+      expect(result.dig(:totals, :fees).to_d).to eq(baseline.dig(:totals, :fees).to_d - 800 - 300)
+      queue = ClientProfitability::LinkQueue.new(organization: organization, settings: settings.reload).call
+      expect(queue[:clients].find { |client| client[:tax_client_id] == 346 }[:link]).to be_nil
+      expect(queue[:companies].map { |company| company[:id] }).not_to include(demo.id)
+    end
+  end
 end
 
 RSpec.describe ClientProfitability::Allocation do

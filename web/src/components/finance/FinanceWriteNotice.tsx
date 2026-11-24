@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { Button } from '@/components/ui/button';
-import { canWriteCompany, isTestWorkspaceCompany } from '@/lib/company-write-access';
+import { canWriteCompany, isBillingClient, isTestWorkspaceCompany } from '@/lib/company-write-access';
 
 export const financeWriteBlockedMessage = 'You are in a payroll test workspace. This finance book contains live records, so changes are unavailable. Select a live client to continue.';
 
 export function FinanceWriteNotice() {
-  const { activeCompany, companies = [], switchCompany } = useCompany();
+  const { activeCompany, companies = [], switchCompany, billingCompanyIds } = useCompany();
   const [selected, setSelected] = useState('');
   if (!isTestWorkspaceCompany(activeCompany)) return null;
-  const liveClients = companies.filter(company => company.organization_id === activeCompany?.organization_id && company.active && canWriteCompany(company) && !isTestWorkspaceCompany(company));
+  const liveClients = companies.filter(company => company.organization_id === activeCompany?.organization_id && company.active && canWriteCompany(company) && isBillingClient(company, billingCompanyIds));
   const destination = liveClients.find(company => String(company.id) === selected);
   return <section aria-label="Finance changes unavailable" className="space-y-3 border-b border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-950 sm:px-6">
     <p role="status">{financeWriteBlockedMessage}</p>
