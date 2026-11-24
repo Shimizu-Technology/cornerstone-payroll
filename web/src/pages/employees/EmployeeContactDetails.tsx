@@ -1,4 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type KeyboardEvent,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import { Link, useSearchParams } from 'react-router';
 import {
   AlertCircle,
@@ -81,6 +92,15 @@ interface ContactDraft {
 
 type ContactDraftPatch = Partial<ContactDraft>;
 
+export interface ContactFieldDraft {
+  value: string;
+  baselineValue: string;
+  baselineRevision: string;
+}
+
+export type RowFieldDrafts = Partial<Record<ContactField, ContactFieldDraft>>;
+export type ContactDraftMap = Record<number, RowFieldDrafts>;
+
 interface RowConflictState {
   message: string;
   conflictingFields: string[];
@@ -88,7 +108,7 @@ interface RowConflictState {
   userChanges: ContactDraftPatch;
 }
 
-interface RowSaveState {
+export interface RowSaveState {
   saving: boolean;
   saved: boolean;
   error: string | null;
@@ -122,25 +142,31 @@ function baselineFromEmployee(employee: Employee): ContactDraft {
   };
 }
 
-function effectiveDraft(employee: Employee, patch: ContactDraftPatch | undefined): ContactDraft {
-  const baseline = baselineFromEmployee(employee);
-  return patch ? { ...baseline, ...patch } : baseline;
+function effectiveDraft(employee: Employee, rowDraft: RowFieldDrafts | undefined): ContactDraft {
+  const serverValues = baselineFromEmployee(employee);
+  if (!rowDraft) return serverValues;
+  const merged: ContactDraft = { ...serverValues };
+  for (const field of CONTACT_FIELDS) {
+    const entry = rowDraft[field];
+    if (entry) merged[field] = entry.value;
+  }
+  return merged;
 }
 
-function changedFieldsForRow(employee: Employee, patch: ContactDraftPatch | undefined): ContactDraftPatch {
-  if (!patch) return {};
-  const baseline = baselineFromEmployee(employee);
-  const changed: ContactDraftPatch = {};
+function changedEntriesForRow(rowDraft: RowFieldDrafts | undefined): Array<[ContactField, ContactFieldDraft]> {
+  if (!rowDraft) return [];
+  const changed: Array<[ContactField, ContactFieldDraft]> = [];
   for (const field of CONTACT_FIELDS) {
-    if (patch[field] !== undefined && patch[field].trim() !== baseline[field].trim()) {
-      changed[field] = patch[field].trim();
+    const entry = rowDraft[field];
+    if (entry && entry.value.trim() !== entry.baselineValue.trim()) {
+      changed.push([field, entry]);
     }
   }
   return changed;
 }
 
-function hasAnyChangedField(employee: Employee, patch: ContactDraftPatch | undefined): boolean {
-  return Object.keys(changedFieldsForRow(employee, patch)).length > 0;
+function hasAnyChangedField(rowDraft: RowFieldDrafts | undefined): boolean {
+  return changedEntriesForRow(rowDraft).length > 0;
 }
 
 function extractConflictPayload(error: unknown): EmployeeContactConflictPayload | null {
@@ -209,6 +235,9 @@ function contactStatusBadge(employee: Employee): { label: string; variant: 'succ
   if (status?.email_issue === 'placeholder') {
     return { label: 'Placeholder email', variant: 'danger' };
   }
+  if (status?.email_issue === 'placeholder_pattern') {
+    return { label: 'Possible placeholder', variant: 'warning' };
+  }
   if (status?.needs_contact_details) {
     const missing = status.missing_fields;
     if (missing.length === 1) {
@@ -239,6 +268,12 @@ export interface EmployeeContactDetailsProps {
   onNeedsContactCountChange?: (count: number) => void;
   /** When true, omit the outer Header wrapper because a parent page renders it. */
   embedded?: boolean;
+  /** Optional controlled per-field draft map lifted above tab switches. */
+  drafts?: ContactDraftMap;
+  onDraftsChange?: Dispatch<SetStateAction<ContactDraftMap>>;
+  /** Optional controlled row feedback state lifted above tab switches. */
+  rowStates?: Record<number, RowSaveState>;
+  onRowStatesChange?: Dispatch<SetStateAction<Record<number, RowSaveState>>>;
 }
 
 export function EmployeeContactDetails({
@@ -246,6 +281,10 @@ export function EmployeeContactDetails({
   refreshKey = 0,
   onNeedsContactCountChange,
   embedded = false,
+  drafts: controlledDrafts,
+  onDraftsChange,
+  rowStates: controlledRowStates,
+  onRowStatesChange,
 }: EmployeeContactDetailsProps = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, isClient } = useAuth();
@@ -264,26 +303,39 @@ export function EmployeeContactDetails({
   const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Sparse per-field pending edits keyed by employee ID. Untouched fields always
-  // reflect the latest server values on refetch, while pending edits survive
-  // refetches and page navigation.
-  const [drafts, setDrafts] = useState<Record<number, ContactDraftPatch>>({});
-  const [rowStates, setRowStates] = useState<Record<number, RowSaveState>>({});
+  // Sparse per-field pending edits keyed by employee ID, storing each field's
+  // original baseline value and row revision from when editing started.
+  const [internalDrafts, setInternalDrafts] = useState<ContactDraftMap>({});
+  const [internalRowStates, setInternalRowStates] = useState<Record<number, RowSaveState>>({});
+  const drafts = controlledDrafts ?? internalDrafts;
+  const setDrafts = onDraftsChange ?? setInternalDrafts;
+  const rowStates = controlledRowStates ?? internalRowStates;
+  const setRowStates = onRowStatesChange ?? setInternalRowStates;
+  const isDraftsControlled = controlledDrafts !== undefined;
   const requestIdRef = useRef(0);
   const companyIdRef = useRef(companyId);
+  const prevCompanyIdRef = useRef(companyId);
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
 
   useLayoutEffect(() => {
     companyIdRef.current = companyId;
     setIsLoading(true);
     setLoadError(null);
-    setDrafts({});
-    setRowStates({});
-  }, [companyId]);
+    if (prevCompanyIdRef.current !== companyId) {
+      prevCompanyIdRef.current = companyId;
+      if (!isDraftsControlled) {
+        setInternalDrafts({});
+        setInternalRowStates({});
+      }
+    }
+  }, [companyId, isDraftsControlled]);
 
   const fetchEmployees = useCallback(async () => {
     const requestedCompanyId = companyId;
     if (requestedCompanyId !== companyIdRef.current) return;
     const requestId = ++requestIdRef.current;
+    let clampedPage = false;
 
     setIsLoading(true);
     setLoadError(null);
@@ -302,34 +354,36 @@ export function EmployeeContactDetails({
         : await employeesApi.list({ company_id: requestedCompanyId, ...listParams });
 
       if (requestId !== requestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
+
+      const serverTotalCount = payload.meta.total_count;
+      const serverPerPage = payload.meta.per_page || PER_PAGE;
+      const lastPage = serverTotalCount > 0
+        ? Math.max(1, payload.meta.total_pages || Math.ceil(serverTotalCount / serverPerPage))
+        : 1;
+
+      if (page > lastPage) {
+        clampedPage = true;
+        const next = new URLSearchParams(searchParamsRef.current);
+        if (lastPage <= 1) next.delete('page');
+        else next.set('page', String(lastPage));
+        setSearchParams(next, { replace: true });
+        return;
+      }
+
+      // Refresh server data (updating untouched fields) without touching any
+      // edited field's captured baseline value or row revision.
       setEmployees(payload.data);
       setMeta(payload.meta);
       setLoadedCompanyId(requestedCompanyId);
-      // Clean up any draft field whose value already matches the refreshed server baseline,
-      // while preserving all other user-edited fields (including edits on other pages).
-      setDrafts((prev) => {
-        let changed = false;
-        const next: Record<number, ContactDraftPatch> = { ...prev };
-        for (const emp of payload.data) {
-          const patch = next[emp.id];
-          if (!patch) continue;
-          const remaining = changedFieldsForRow(emp, patch);
-          if (Object.keys(remaining).length === 0) {
-            delete next[emp.id];
-            changed = true;
-          }
-        }
-        return changed ? next : prev;
-      });
     } catch (caught) {
       if (requestId !== requestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       setLoadError(caught instanceof Error ? caught.message : 'Could not load employee contact details.');
     } finally {
-      if (requestId === requestIdRef.current && requestedCompanyId === companyIdRef.current) {
+      if (!clampedPage && requestId === requestIdRef.current && requestedCompanyId === companyIdRef.current) {
         setIsLoading(false);
       }
     }
-  }, [companyId, isClient, needsContactOnly, page, search, statusFilter]);
+  }, [companyId, isClient, needsContactOnly, page, search, setSearchParams, statusFilter]);
 
   useEffect(() => {
     void fetchEmployees();
@@ -353,26 +407,13 @@ export function EmployeeContactDetails({
     [companyId, employees, loadedCompanyId],
   );
 
-  const employeesById = useMemo(() => {
-    const map = new Map<number, Employee>();
-    for (const emp of companyEmployees) map.set(emp.id, emp);
-    return map;
-  }, [companyEmployees]);
-
   const dirtyCount = useMemo(() => {
     let count = 0;
-    for (const [idStr, patch] of Object.entries(drafts)) {
-      const id = Number(idStr);
-      const emp = employeesById.get(id);
-      if (emp) {
-        if (hasAnyChangedField(emp, patch)) count += 1;
-      } else if (Object.keys(patch).length > 0) {
-        // Pending edits on another page are kept and counted too.
-        count += 1;
-      }
+    for (const rowDraft of Object.values(drafts)) {
+      if (hasAnyChangedField(rowDraft)) count += 1;
     }
     return count;
-  }, [drafts, employeesById]);
+  }, [drafts]);
 
   const needsContactCount = meta?.needs_contact_details_count
     ?? companyEmployees.filter((emp) => emp.contact_details_status?.needs_contact_details).length;
@@ -382,20 +423,29 @@ export function EmployeeContactDetails({
   }, [needsContactCount, onNeedsContactCountChange]);
 
   const updateDraftField = (employee: Employee, field: ContactField, value: string) => {
-    const baseline = baselineFromEmployee(employee);
+    const serverBaseline = baselineFromEmployee(employee);
+    const serverRevision = employee.contact_revision || employee.updated_at;
     setDrafts((prev) => {
-      const existing = { ...(prev[employee.id] ?? {}) };
-      if (value.trim() === baseline[field].trim()) {
-        delete existing[field];
+      const existingRow: RowFieldDrafts = { ...(prev[employee.id] ?? {}) };
+      const existingField = existingRow[field];
+      // Capture the original server value and row revision once when editing starts.
+      // Refetches never replace this baseline; only explicit conflict resolution does.
+      const baselineValue = existingField ? existingField.baselineValue : serverBaseline[field];
+      const baselineRevision = existingField ? existingField.baselineRevision : serverRevision;
+
+      if (value.trim() === baselineValue.trim()) {
+        delete existingRow[field];
       } else {
-        existing[field] = value;
+        existingRow[field] = { value, baselineValue, baselineRevision };
       }
-      if (Object.keys(existing).length === 0) {
+
+      if (Object.keys(existingRow).length === 0) {
+        if (!prev[employee.id]) return prev;
         const next = { ...prev };
         delete next[employee.id];
         return next;
       }
-      return { ...prev, [employee.id]: existing };
+      return { ...prev, [employee.id]: existingRow };
     });
     setRowStates((prev) => {
       const current = prev[employee.id];
@@ -440,19 +490,39 @@ export function EmployeeContactDetails({
   ) => {
     if (!canEdit) return;
     const baseEmployee = options.overrideBaselineEmployee ?? employee;
-    const changes = options.overrideChanges ?? changedFieldsForRow(baseEmployee, drafts[employee.id]);
     const currentState = rowStates[employee.id] ?? INITIAL_ROW_STATE;
     const confirmSamePerson = Boolean(
       options.explicitConfirmSamePerson || (currentState.samePersonRequired && currentState.samePersonChecked),
     );
+
+    const changes: ContactDraftPatch = {};
+    const baselineValues: Record<string, string> = {};
+    let rowRevision = baseEmployee.contact_revision || baseEmployee.updated_at;
+
+    if (options.overrideChanges) {
+      const serverBaseline = baselineFromEmployee(baseEmployee);
+      for (const field of CONTACT_FIELDS) {
+        if (options.overrideChanges[field] !== undefined) {
+          changes[field] = options.overrideChanges[field];
+          baselineValues[field] = serverBaseline[field];
+        }
+      }
+    } else {
+      const changedEntries = changedEntriesForRow(drafts[employee.id]);
+      const currentServerRevision = employee.contact_revision || employee.updated_at;
+      let chosenRevision: string | null = null;
+      for (const [field, entry] of changedEntries) {
+        changes[field] = entry.value.trim();
+        baselineValues[field] = entry.baselineValue;
+        if (entry.baselineRevision && entry.baselineRevision !== currentServerRevision) {
+          chosenRevision ??= entry.baselineRevision;
+        }
+      }
+      rowRevision = chosenRevision ?? changedEntries[0]?.[1].baselineRevision ?? currentServerRevision;
+    }
+
     const changedKeys = Object.keys(changes) as ContactField[];
     if (changedKeys.length === 0 && !confirmSamePerson) return;
-
-    const baseline = baselineFromEmployee(baseEmployee);
-    const baselineValues: Record<string, string> = {};
-    for (const key of changedKeys) {
-      baselineValues[key] = baseline[key];
-    }
 
     setRowStates((prev) => ({
       ...prev,
@@ -468,7 +538,7 @@ export function EmployeeContactDetails({
 
     const payload = {
       ...changes,
-      row_revision: baseEmployee.contact_revision || baseEmployee.updated_at,
+      row_revision: rowRevision,
       ...(changedKeys.length > 0 ? { baseline_values: baselineValues } : {}),
       ...(confirmSamePerson ? { confirm_same_person_email: true } : {}),
     };
@@ -553,9 +623,26 @@ export function EmployeeContactDetails({
   const handleKeepMyVersion = (employee: Employee) => {
     const conflict = rowStates[employee.id]?.conflict;
     if (!conflict) return;
-    // Update the row's server baseline (refreshing untouched fields and revision)
-    // and re-submit only the user's edited fields.
+    // User explicitly chose to keep their version: rebase each edited field's
+    // baseline onto the latest server record, refresh untouched fields, and re-submit.
+    const serverBaseline = baselineFromEmployee(conflict.serverEmployee);
+    const serverRevision = conflict.serverEmployee.contact_revision || conflict.serverEmployee.updated_at;
     setEmployees((prev) => prev.map((item) => (item.id === employee.id ? { ...item, ...conflict.serverEmployee } : item)));
+    setDrafts((prev) => {
+      const existingRow = prev[employee.id];
+      if (!existingRow) return prev;
+      const rebasedRow: RowFieldDrafts = {};
+      for (const field of CONTACT_FIELDS) {
+        const entry = existingRow[field];
+        if (!entry) continue;
+        rebasedRow[field] = {
+          value: entry.value,
+          baselineValue: serverBaseline[field],
+          baselineRevision: serverRevision,
+        };
+      }
+      return { ...prev, [employee.id]: rebasedRow };
+    });
     void saveRow(employee, {
       overrideBaselineEmployee: conflict.serverEmployee,
       overrideChanges: conflict.userChanges,
@@ -573,7 +660,7 @@ export function EmployeeContactDetails({
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-      if (!state.saving && (hasAnyChangedField(employee, drafts[employee.id]) || (state.samePersonRequired && state.samePersonChecked))) {
+      if (!state.saving && (hasAnyChangedField(drafts[employee.id]) || (state.samePersonRequired && state.samePersonChecked))) {
         void saveRow(employee);
       }
     }
@@ -728,7 +815,7 @@ export function EmployeeContactDetails({
                 {companyEmployees.map((employee, index) => {
                   const draft = effectiveDraft(employee, drafts[employee.id]);
                   const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-                  const dirty = hasAnyChangedField(employee, drafts[employee.id]);
+                  const dirty = hasAnyChangedField(drafts[employee.id]);
                   const badge = contactStatusBadge(employee);
                   const rowBg = index % 2 === 0 ? 'bg-white' : 'bg-neutral-50/70';
 
@@ -913,7 +1000,7 @@ export function EmployeeContactDetails({
             {companyEmployees.map((employee) => {
               const draft = effectiveDraft(employee, drafts[employee.id]);
               const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-              const dirty = hasAnyChangedField(employee, drafts[employee.id]);
+              const dirty = hasAnyChangedField(drafts[employee.id]);
               const badge = contactStatusBadge(employee);
 
               return (
@@ -1066,40 +1153,40 @@ export function EmployeeContactDetails({
               );
             })}
           </div>
-
-          {totalPages > 1 && (
-            <nav
-              aria-label="Contact details pagination"
-              className="flex flex-col items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 sm:flex-row"
-            >
-              <p className="text-sm text-neutral-600">
-                Page <strong className="tabular-nums text-neutral-900">{currentPage}</strong> of{' '}
-                <strong className="tabular-nums text-neutral-900">{totalPages}</strong>{' '}
-                <span className="text-neutral-500">({rangeStart}–{rangeEnd} of {totalCount})</span>
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={currentPage <= 1 || isLoading}
-                  onClick={() => setPage(currentPage - 1)}
-                >
-                  <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={currentPage >= totalPages || isLoading}
-                  onClick={() => setPage(currentPage + 1)}
-                >
-                  Next
-                  <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
-                </Button>
-              </div>
-            </nav>
-          )}
         </>
+      )}
+
+      {!isLoading && (totalPages > 1 || (currentPage > 1 && totalCount > 0)) && (
+        <nav
+          aria-label="Contact details pagination"
+          className="flex flex-col items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 sm:flex-row"
+        >
+          <p className="text-sm text-neutral-600">
+            Page <strong className="tabular-nums text-neutral-900">{currentPage}</strong> of{' '}
+            <strong className="tabular-nums text-neutral-900">{totalPages}</strong>{' '}
+            <span className="text-neutral-500">({rangeStart}–{rangeEnd} of {totalCount})</span>
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage <= 1 || isLoading}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage >= totalPages || isLoading}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              Next
+              <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        </nav>
       )}
     </>
   );
@@ -1151,26 +1238,27 @@ function RowConflictBanner({
     <div role="alert" className="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-3 text-xs text-warning-950">
       <p className="flex items-start gap-1.5 font-semibold">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" aria-hidden="true" />
-        <span>Conflict: someone else updated this row before you saved.</span>
+        <span>Someone else updated this employee while you were editing.</span>
       </p>
-      <p className="mt-1 text-warning-900">{conflict.message}</p>
-      {fieldsToShow.length > 0 && (
-        <ul className="mt-2 space-y-1 rounded-md border border-warning-200 bg-white/80 p-2 text-neutral-800">
+      {fieldsToShow.length > 0 ? (
+        <ul className="mt-2 space-y-1.5 rounded-md border border-warning-200 bg-white/80 p-2 text-neutral-800">
           {fieldsToShow.map((field) => (
-            <li key={field}>
-              <strong>{FIELD_LABELS[field]}:</strong> current saved value is{' '}
-              <span className="font-mono">{serverValues[field] || '(blank)'}</span>; your draft is{' '}
-              <span className="font-mono">{conflict.userChanges[field] || '(blank)'}</span>.
+            <li key={field} className="break-words leading-relaxed">
+              <strong>{FIELD_LABELS[field]}:</strong> Someone else changed this to{' '}
+              <span className="break-all font-mono font-medium text-neutral-950">{serverValues[field] || '(blank)'}</span>. Keep yours (
+              <span className="break-all font-mono font-medium text-neutral-950">{conflict.userChanges[field] || '(blank)'}</span>) or use theirs?
             </li>
           ))}
         </ul>
+      ) : (
+        <p className="mt-1 text-warning-900">Keep yours or use theirs?</p>
       )}
       <div className="mt-2.5 flex flex-wrap gap-2">
         <Button size="sm" variant="primary" disabled={saving} loading={saving} loadingLabel="Saving..." onClick={onKeep}>
-          Keep my changes
+          Keep yours
         </Button>
         <Button size="sm" variant="outline" disabled={saving} onClick={onDiscard}>
-          Discard my changes
+          Use theirs
         </Button>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { ArrowLeft, MailWarning, Users } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -9,7 +9,11 @@ import { canWriteCompany } from '@/lib/company-write-access';
 import { employeesPath } from '@/lib/routes';
 import { cn } from '@/lib/utils';
 import { staffContactHygieneApi, type SharedEmailReportResponse } from '@/services/staffContactHygieneApi';
-import { EmployeeContactDetails } from './EmployeeContactDetails';
+import {
+  EmployeeContactDetails,
+  type ContactDraftMap,
+  type RowSaveState,
+} from './EmployeeContactDetails';
 
 const SharedInboxReportPanel = lazy(() =>
   import('@/components/employees/SharedInboxReportPanel').then((module) => ({ default: module.SharedInboxReportPanel })),
@@ -19,12 +23,21 @@ const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 
 export function StaffEmployeeContactDetails() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, isClient } = useAuth();
+  const { user, isClient, isAdmin, hasCapability } = useAuth();
   const { activeCompanyId, activeCompany } = useCompany();
   const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration');
+  const canManageOrganization = Boolean(
+    hasCapability?.('manage_organization') ||
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'org_admin' ||
+    user?.role === 'super_admin',
+  );
   const canViewSharedInboxReport = !isClient && canManageClientConfiguration;
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const canEdit = canWriteCompany(activeCompany);
+  const isTestWorkspace = activeCompany?.payroll_environment === 'migration_rehearsal';
+  const canManagePlaceholders = canManageOrganization && !isTestWorkspace;
 
   const requestedTab = searchParams.get('tab');
   const activeTab: 'grid' | 'shared-emails' = (canViewSharedInboxReport && requestedTab === 'shared-emails') ? 'shared-emails' : 'grid';
@@ -32,6 +45,19 @@ export function StaffEmployeeContactDetails() {
   const [sharedReportSummary, setSharedReportSummary] = useState<SharedEmailReportResponse['summary'] | null>(null);
   const [needsContactCount, setNeedsContactCount] = useState(0);
   const [gridRefreshKey, setGridRefreshKey] = useState(0);
+  // Lifted above the tab switch so pending contact drafts and their captured
+  // per-field baselines survive switching to "Shared & placeholder emails" and back.
+  const [drafts, setDrafts] = useState<ContactDraftMap>({});
+  const [rowStates, setRowStates] = useState<Record<number, RowSaveState>>({});
+  const prevCompanyIdRef = useRef(companyId);
+
+  useLayoutEffect(() => {
+    if (prevCompanyIdRef.current !== companyId) {
+      prevCompanyIdRef.current = companyId;
+      setDrafts({});
+      setRowStates({});
+    }
+  }, [companyId]);
 
   useEffect(() => {
     if (!canViewSharedInboxReport) {
@@ -137,6 +163,7 @@ export function StaffEmployeeContactDetails() {
             <SharedInboxReportPanel
               activeCompanyId={companyId}
               readOnly={!canEdit}
+              canManagePlaceholders={canManagePlaceholders}
               onReportLoaded={(report) => setSharedReportSummary(report.summary)}
               onCleared={(clearedCompanyId) => {
                 if (clearedCompanyId === companyId) {
@@ -150,6 +177,10 @@ export function StaffEmployeeContactDetails() {
             embedded
             refreshKey={gridRefreshKey}
             onNeedsContactCountChange={setNeedsContactCount}
+            drafts={drafts}
+            onDraftsChange={setDrafts}
+            rowStates={rowStates}
+            onRowStatesChange={setRowStates}
           />
         )}
       </div>
