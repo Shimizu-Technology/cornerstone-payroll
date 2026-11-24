@@ -94,8 +94,10 @@ RSpec.describe TimeTracking::HistoryApproval, :postgres_concurrency do
     end
     Timeout.timeout(30) { paused.pop }
 
+    marker_pid = Queue.new
     @marker = Thread.new do
-      ActiveRecord::Base.connection_pool.with_connection do
+      ActiveRecord::Base.connection_pool.with_connection do |connection|
+        marker_pid << connection.select_value("SELECT pg_backend_pid()")
         result = TenantScope.as_system(reason: "Mark a placeholder during an approval") do
           EmployeeContactHygiene::PlaceholderEmailService.new(
             organization: company.organization, email: employee.email, actor: actor, company: company
@@ -106,8 +108,19 @@ RSpec.describe TimeTracking::HistoryApproval, :postgres_concurrency do
       end
     end
 
-    # While the approval is held after its check, the mark can't commit.
-    expect(@marker.join(0.5)).to be_nil
+    # While the approval is held after its check, the marker's backend waits
+    # on the organization's advisory lock rather than committing.
+    pid = Timeout.timeout(30) { marker_pid.pop }
+    waiting = <<~SQL
+      SELECT EXISTS (
+        SELECT FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+        WHERE l.pid = #{Integer(pid)} AND l.locktype = 'advisory' AND NOT l.granted AND a.wait_event_type = 'Lock'
+      )
+    SQL
+    Timeout.timeout(10) do
+      sleep 0.02 until ActiveRecord::Base.connection.select_value(waiting)
+    end
+    expect(@marker).to be_alive
     expect(EmployeePlaceholderEmail.where(organization: company.organization).count).to eq(0)
 
     release << true
