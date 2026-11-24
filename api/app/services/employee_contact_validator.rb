@@ -7,6 +7,7 @@ class EmployeeContactValidator
   ADDRESS_REQUIRED_FIELDS = %i[address_line1 city state zip].freeze
   MAX_EMAIL_LENGTH = 254
   CLIENT_GENERIC_LOGIN_EMAIL_ERROR = "This email can't be used here. Ask Cornerstone to set it."
+  LOGIN_NAME_MISMATCH_ERROR = "The name on this login doesn't match this employee"
 
   # Structural placeholder local parts and domains (never put real addresses here).
   PLACEHOLDER_LOCAL_PARTS = %w[
@@ -445,8 +446,15 @@ class EmployeeContactValidator
       return no_login_conflict(user: login_user)
     end
 
+    own_login = @actor.present? && login_user.id == @actor.id
+    # A same-person confirmation needs the login's name to match this
+    # employee's, so nobody can attach their login to someone else's record.
+    if (own_login || staff_can_confirm_login_email?(login_user)) && !login_name_matches_employee?(login_user)
+      return rejected_login_conflict(staff_message: LOGIN_NAME_MISMATCH_ERROR, rejection_reason: "login_name_mismatch")
+    end
+
     # (b) The entered email is the signed-in user's own login email.
-    if @actor.present? && login_user.id == @actor.id
+    if own_login
       if @confirm_same_person_email
         return {
           user: login_user,
@@ -525,6 +533,23 @@ class EmployeeContactValidator
       rejection_reason: rejection_reason,
       error: @actor&.client? ? CLIENT_GENERIC_LOGIN_EMAIL_ERROR : staff_message
     }
+  end
+
+  def self.comparable_name(value)
+    value.to_s.unicode_normalize(:nfkd).gsub(/\p{Mn}/, "").downcase.gsub(/[^\p{Alnum}]+/u, " ").squish
+  end
+
+  # First and last name, ignoring case, accents and spacing; a middle name on
+  # the login is fine. Compared with the employee as stored, so renaming the
+  # employee in the same save can't create a match.
+  def login_name_matches_employee?(login_user)
+    stored = ->(field) { @employee&.persisted? ? @employee.attribute_in_database(field) : @employee&.public_send(field) }
+    first = self.class.comparable_name(stored.call("first_name"))
+    last = self.class.comparable_name(stored.call("last_name"))
+    login_name = self.class.comparable_name(login_user.name)
+    return false if first.blank? || last.blank? || login_name.blank?
+
+    login_name == "#{first} #{last}" || (login_name.start_with?("#{first} ") && login_name.end_with?(" #{last}"))
   end
 
   def own_employee_ids

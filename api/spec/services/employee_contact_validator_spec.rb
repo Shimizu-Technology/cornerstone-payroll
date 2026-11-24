@@ -231,7 +231,8 @@ RSpec.describe EmployeeContactValidator do
     end
 
     it "allows the signed-in user's own login email when they explicitly confirm 'this is me'" do
-      client_actor = create(:user, company: company, organization: organization, role: "client", name: "Different Name", email: "self.client@example.com")
+      # Case, accents and spacing don't matter; a middle name on the login is fine.
+      client_actor = create(:user, company: company, organization: organization, role: "client", name: "  ÉLENA   Rose mercer ", email: "self.client@example.com")
 
       unconfirmed = described_class.call(
         employee: employee,
@@ -256,8 +257,29 @@ RSpec.describe EmployeeContactValidator do
       expect(confirmed.matched_login_user).to eq(client_actor)
     end
 
+    it "refuses a same-person confirmation when the login's name doesn't match the employee, on both paths" do
+      self_actor = create(:user, company: company, organization: organization, role: "client", name: "Sloane Owner", email: "sara.self@example.com")
+      self_result = described_class.call(employee: employee, company: company, email: self_actor.email, confirm_same_person_email: true, actor: self_actor)
+      expect(self_result).not_to be_valid
+      expect(self_result.same_person_confirmed?).to be(false)
+      expect(self_result).to have_attributes(login_email_rejected: true, login_email_rejection_reason: "login_name_mismatch")
+      expect(self_result.errors[:email]).to eq([ described_class::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
+
+      other_login = create(:user, company: company, organization: organization, role: "client", name: "Emma Cruz", email: "emma.cruz@example.com")
+      admin_actor = create(:user, company: company, organization: organization, role: "admin")
+      staff_result = described_class.call(employee: employee, company: company, email: other_login.email, confirm_same_person_email: true, actor: admin_actor)
+      expect(staff_result).not_to be_valid
+      expect(staff_result.same_person_confirmation_required?).to be(false)
+      expect(staff_result.errors[:email]).to eq([ described_class::LOGIN_NAME_MISMATCH_ERROR ])
+
+      # Renaming the employee in the same save doesn't create a match.
+      employee.first_name = "Sara"
+      employee.last_name = "Owner"
+      expect(described_class.call(employee: employee, company: company, email: self_actor.email, confirm_same_person_email: true, actor: self_actor)).not_to be_valid
+    end
+
     it "allows staff with manage_client_configuration to confirm an unlinked login, and rejects accountants without it" do
-      client_login = create(:user, company: company, organization: organization, role: "client", name: "Emma Client", email: "emma.login@example.com")
+      client_login = create(:user, company: company, organization: organization, role: "client", name: "Elena Mercer", email: "emma.login@example.com")
       admin_actor = create(:user, company: company, organization: organization, role: "admin")
       accountant_actor = create(:user, company: company, organization: organization, role: "accountant")
       CompanyAssignment.create!(user: accountant_actor, company: company, client_management: false)
@@ -271,7 +293,7 @@ RSpec.describe EmployeeContactValidator do
       )
       expect(unconfirmed).not_to be_valid
       expect(unconfirmed.same_person_confirmation_required?).to be(true)
-      expect(unconfirmed.errors[:email].first).to include("Emma Client")
+      expect(unconfirmed.errors[:email].first).to include("Elena Mercer")
 
       confirmed = described_class.call(
         employee: employee,
