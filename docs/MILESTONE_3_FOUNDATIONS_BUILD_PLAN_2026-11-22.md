@@ -1,6 +1,7 @@
 # Milestone 3 ("Foundations") build plan
 
 **Status:** Revised after independent technical review (PR #521) and Leon's November 22, 2026 decisions (§9). No application code has changed.
+**Update, November 24, 2026: `M3-0b` is done.** Payroll has run on the Clerk production instance since November 24, 2026 (about 10:39 pm ChST). The practice run and the live switch found gaps between this runbook, the code and the providers; §4 now carries the fixes and §4.9 records the post-cutover state and the one open follow-up.
 **Date:** November 22, 2026.
 **Codebase baseline:** `Shimizu-Technology/cornerstone-payroll` `origin/main` at `be960a50` (includes PR #520 `docs/milestone3-decisions`).
 **Builds on:** [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) (§0, §4, §6, §8), [Platform offerings implementation spec](PLATFORM_OFFERINGS_IMPLEMENTATION_SPEC_2026-11-17.md), [Full build plan](WORKFORCE_PLATFORM_FULL_BUILD_PLAN_2026-11-18.md) (R1), [HR module study and plan](HR_MODULE_ADP_STUDY_AND_PLAN_2026-11-18.md), [Guam legal compliance research](GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md), [Gate 0 trust and release plan](GATE_0_TRUST_AND_RELEASE_PLAN_2026-08-23.md), [Employee portal plan](EMPLOYEE_PORTAL_AND_PLATFORM_PLAN_2026-11-17.md), and [Production identity cutover runbook](PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md).
@@ -435,7 +436,7 @@ flowchart LR
 | 8 | **M3-6:** Client subdomains (`subdomain_slug`, dynamic CORS/`azp`, public branding endpoint) | Code PR | Ready after M3-0a + M3-5a | Parallel after M3-0a + M3-5a | M3-0a, M3-5a | `subdomain_enabled=false` for all clients → 404 |
 | 9 | **M3-7:** Postgres RLS (`payroll_app`, Option B direct endpoint, 26-table expand-and-contract, 194-table CI coverage, caller inventory, permanent query guard, shadow phase, phased `ENABLE/FORCE`) | Code PR(s) | **Expand ready; enforcement waits on Neon preflight + 71-table review** | Expand PR can start; enforcement after schema PRs | M3-1, M3-4, M3-5a + Preflight §1.12 | Phased: shadow logging 1 full pay cycle → batched `ENABLE/FORCE` |
 | 10 | **M3-8:** Reserved capacity (`APP_PROCESS_ROLE`, queue/pool limits, employee/kiosk `Rack::Attack`, telemetry, `netlify.toml`) | Code PR | Waits on Render/Netlify preflight | Parallel from day 1 | Preflight §1.12 (Render RAM + Netlify UI settings) | `APP_PROCESS_ROLE=all` (existing Render topology unchanged) |
-| 11 | **M3-0b:** Live Clerk production cutover on `shimizu-technology.com` (free plan) | Ops step | Waits on M3-0a, M3-1, Preflight | Own window, ≥ 1 pay cycle from M3-7 enforcement | M3-0a, M3-1, `CLERK_AUTHORIZED_PARTIES` + Preflight §1.12 | N/A (live cutover; `REQUIRE_MFA` stays `false`) |
+| 11 | **M3-0b:** Live Clerk production cutover on `shimizu-technology.com` (free plan). **Done Nov 24, 2026** (§4.9) | Ops step | Waits on M3-0a, M3-1, Preflight | Own window, ≥ 1 pay cycle from M3-7 enforcement | M3-0a, M3-1, `CLERK_AUTHORIZED_PARTIES` + Preflight §1.12 | N/A (live cutover; `REQUIRE_MFA` stays `false`) |
 
 ---
 
@@ -707,6 +708,8 @@ flowchart LR
 
 ### Step M3-0b: Live Clerk production cutover (ops step, own window)
 
+- **Status: done.** Live since November 24, 2026 (see §4.9). The acceptance tests below were run as described in §4.9, which also lists the two matrix rows that were covered by request specs instead of a live session.
+
 - **Purpose:** Move live Cornerstone Payroll off Clerk development (`pk_test_`) onto the Clerk production instance on `shimizu-technology.com` (Hobby Free plan), migrating users with `clerk migrate import` (`external_id` = dev user ID + Clerk Dashboard password-digest export, stripping TOTP fields if any exist) and re-linking `users.clerk_id` from an email-free manifest (`clerk:cutover:apply`).
 - **Dependencies (decoupled from M3-7 and M3-6):** `M3-0a`, `M3-1`, `CLERK_AUTHORIZED_PARTIES` configured, Preflight §1.12 passed, and read-only production inventory reviewed days ahead. **Must run in its own maintenance window, at least one full pay cycle separate from `M3-7` RLS enforcement.**
 - **Acceptance tests:** Full verification matrix in §4.5 on `payroll.shimizu-technology.com` (including `M3-1` no-email-match denial, `azp` validation, and `production:readiness` passing production Clerk keys + `CLERK_AUTHORIZED_PARTIES` while `REQUIRE_MFA` stays `false`), followed by Cornerstone's normal live payroll acceptance run (§8).
@@ -716,6 +719,8 @@ flowchart LR
 ## 4. Clerk production migration runbook (Step M3-0b — Payroll only)
 
 This runbook updates [PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md](PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md) for Leon's November 22, 2026 decisions: **Payroll only** (AIRE stays untouched; Cornerstone Tax keeps its own Clerk on `cornerstone-accounting.tax` with shared login deferred to Milestone 6 per §9.1), executed in **its own 60–90 minute maintenance window (at least one full pay cycle separate from `M3-7` RLS enforcement)**, on **Clerk Hobby (Free) plan** (up to 50,000 MRU, custom domain included — [Clerk pricing](https://clerk.com/pricing)), **`shimizu-technology.com` root domain**, **`REQUIRE_MFA=false`** until the Milestone 4 gate, **one-time controlled user re-linking via `external_id`** (never matching by email), and **everyone signs in again**.
+
+> **Status (Nov 24, 2026):** this runbook has been executed. Steps below carry the corrections found by the practice run and the live switch; they are marked "(Nov 24 finding)". Post-cutover state and the one open follow-up are in §4.9.
 
 ### 4.1 Preconditions (no-go if any box is unchecked)
 
@@ -727,6 +732,8 @@ This runbook updates [PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md](PRODUCTION_IDENTIT
 - [ ] All three approved sign-in methods are configured and tested: **email + password** (with compromised-password rejection and strong minimum policy), **verified email codes**, and **Google sign-in** (using a Shimizu-owned production Google OAuth web client whose consent screen is published to **"In production"** status, using the exact redirect URI copied from the Clerk Dashboard).
 - [ ] Recovery administrators **Leon (`lmshimizu@gmail.com`)**, **`shimizutechnology@gmail.com` (`platform_owner` `super_admin` if active)**, and **Dafne (`dmshimizucpa@gmail.com`, verified against live `users`)** are available during the chosen **60–90 minute** ChST maintenance window (scheduled closer to the date, outside Cornerstone, MoSa's, and KPI payroll windows, and ≥ 1 pay cycle away from `M3-7` RLS enforcement) with a fixed rollback deadline.
 - [ ] Current dev keys (`VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `CLERK_ISSUER`, `CLERK_API_BASE`) are backed up in Shimizu's secret manager (never in Git or chat).
+- [ ] **The Clerk account owner is present for the whole window (Nov 24 finding).** Two dashboard steps ask for the owner's Clerk password and cannot be done by an agent or delegate: the dev **Export users** download (§4.4 step 2) and deleting any production secret key (§4.8). The owner types the password themselves.
+- [ ] Key handling follows §4.8 (no key dialog is ever read, screenshotted or inspected).
 
 ### 4.2 Provider & DNS setup (zero user impact; do days before cutover)
 
@@ -736,6 +743,7 @@ This runbook updates [PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md](PRODUCTION_IDENTIT
    - Keep **Clerk Organizations** disabled (tenancy stays in Postgres).
    - Keep **MFA** off in the production instance for now (Pro is not purchased until the M4 gate).
    - Enable **email + password** (compromised-password rejection on), **verified email codes**, and **Google sign-in**.
+   - **Compromised-password rejection also applies at sign-in to imported passwords (Nov 24 finding).** Clerk checks each carried-over password when its owner signs in. A user whose password appears in a known breach is not locked out: Clerk asks them to reset it with a one-time code sent by email, once. **Decision (lead, Nov 24, 2026): keep "Reject compromised passwords" on.** Tell users with a password to expect this prompt on first sign-in; Google and email-code users are unaffected.
 2. **Add DNS records on `shimizu-technology.com`:**
    - Copy the exact records from Clerk Dashboard → **Configure → Domains** (typically five CNAME records: Frontend API `clerk.shimizu-technology.com`, Account Portal `accounts.shimizu-technology.com`, plus three email/DKIM CNAMEs `clkmail`, `clk._domainkey`, `clk2._domainkey`).
    - If DNS is on Cloudflare, set every Clerk CNAME to **DNS only (grey cloud)** — proxying causes Clerk DNS/TLS checks to fail ([Clerk production deployment docs](https://clerk.com/docs/guides/development/deployment/production)).
@@ -759,6 +767,13 @@ This runbook updates [PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md](PRODUCTION_IDENTIT
   2. State plainly in the cutover record that the live `pk_live_` custom-domain path is proven by (a) deterministic RS256 `pk_live_` + `azp` specs in `M3-0a`, and (b) a **pre-switch production JWKS & Backend API self-test** executed against `https://clerk.shimizu-technology.com/.well-known/jwks.json` and `GET https://api.clerk.com/v1/instance` (using the new `sk_live_`) before modifying Render or Netlify env vars.
 - Record the rehearsal path, SHA, timestamp, and pass result before opening the maintenance window.
 
+**What the Nov 24 practice run showed (Path A, throwaway target app; passed):**
+- Import, manifest, dry run and apply worked end to end; a password user signed in with their original password on the target keys, and the rollback restored the old `clerk_id`s.
+- `build_import` now writes the file `npx clerk@4.3.0 migrate import <file> --source clerk` reads (§4.4 step 3). The first version of the task wrote a different shape and had to be converted by hand.
+- `clerk:cutover:apply` needs `CONFIRM_M3_1_DEPLOYED=true` (§4.5 step 2).
+- To clean up the throwaway app's users, `migrate undo` needs `--include-signed-in` once anyone has signed in (§4.7). In a practice run, always undo or delete the app afterwards.
+- The Dashboard export asks for the owner's password (§4.4 step 2); schedule the practice run with the owner present too.
+
 ### 4.4 User inventory & controlled one-time re-linking (never match by email)
 
 Per [Clerk's instance migration docs](https://clerk.com/docs/guides/development/migrating/clerk-to-clerk) (checked 2026-11-22), a new production instance starts with **zero users**. While Clerk's Backend API (`clerk migrate export clerk`) never returns password digests, TOTP secrets, or backup codes, **exporting users from the Clerk Dashboard *does* include password digests and TOTP secrets**. Because MFA/TOTP stays disabled on the Free-plan production target until Milestone 4, **`clerk migrate import` will reject any user record containing TOTP fields** — so Preflight §1.12 must verify no live user has TOTP enrolled, and the import transform must strip any TOTP fields before running `clerk migrate import`. Active browser sessions still reset, so everyone signs in fresh (using their existing password, email code, or Google sign-in).
@@ -769,10 +784,12 @@ Per [Clerk's instance migration docs](https://clerk.com/docs/guides/development/
    - Assign every local `users` row one explicit disposition: `migrate`, `re-invite` (if `pending_`), `deactivate`, or `skip_inactive`. Require an independent reviewer sign-off on every `super_admin`, `org_admin`, `admin`, and cross-company account.
 2. **At window start — freeze user edits & export from Clerk Dashboard:**
    - Freeze user admin changes in Cornerstone Payroll and re-run `clerk:cutover:inventory` to confirm zero diff since the pre-window review.
-   - Export users (including password digests) from the Clerk **development** Dashboard.
+   - Export users (including password digests) from the Clerk **development** Dashboard. **The owner must be present: Export users asks for the account owner's Clerk password (Nov 24 finding), and nobody else can supply it.** Save the file with permissions `600` and shred it when the window closes.
 3. **Import into Clerk production via `clerk migrate import` (email-free manifest):**
    - Transform the Dashboard export to include only approved `migrate` users — **explicitly stripping any TOTP/backup-code fields** — starting with **Batch 0: `shimizutechnology@gmail.com` (`platform_owner` `super_admin`, unless Preflight confirms Leon's `lmshimizu@gmail.com` login already holds `super_admin` and `shimizutechnology@gmail.com` is inactive), Leon (`lmshimizu@gmail.com`), and Dafne (`dmshimizucpa@gmail.com`, verified live email)**, then **Batch 1: remaining active Cornerstone staff and MoSa's/KPI client users**, setting each imported user's **`external_id` = their dev `clerk_id`** (matching `users.clerk_id` in Payroll).
-   - Run `clerk migrate import` into the Clerk production instance.
+   - Build the file with `INVENTORY=<reviewed inventory> EXPORT=<dashboard export> BATCH=<n> OUTPUT=<file> WRITE=true bundle exec rails clerk:cutover:build_import`. It keeps the same user selection as before (`migrate` dispositions in the chosen batch, matched strictly by `id` = old dev `clerk_id`), refuses any user with TOTP or backup codes enrolled, and carries the bcrypt `password_digest` and `password_hasher` through. Users without a password (Google or email code) get no password columns.
+   - **Import format (Nov 24 finding).** `build_import` writes a JSON array that uses the Dashboard export's own column names: `id`, `primary_email_address`, optional `verified_email_addresses`, `first_name`, `last_name`, `password_digest`, `password_hasher`. `clerk@4.3.0` has a built-in `clerk` source that maps exactly these columns (`packages/cli-core/src/commands/migrate/sources/clerk.ts` at tag `v4.3.0` of [github.com/clerk/cli](https://github.com/clerk/cli): `id` → `userId`, `primary_email_address` → `email`, `password_digest` → `password`, `password_hasher` → `passwordHasher`, and so on), and the importer sends `userId` as the new user's `external_id` (`import-users.ts`, same tag). So `id` is the old dev `clerk_id` and the CLI turns it into `external_id` itself. Do not add an `external_id` column, and do not use `--source` with anything but `clerk`.
+   - Run it against the Clerk production instance, dry run first: `npx clerk@4.3.0 migrate import <file> --source clerk --dry-run`, then `npx clerk@4.3.0 migrate import <file> --source clerk --yes`. Both need the production secret key (`--secret-key`, from a `600` file per §4.8, never typed into a retained command line). Note the run ID the CLI prints; `clerk migrate runs` lists it later and §4.7 needs it for `migrate undo`.
    - Build the sealed cutover manifest strictly by joining `new_user.external_id == payroll_user.old_clerk_id` → `{ user_id, old_clerk_id, new_clerk_id }` (**zero email matching** at any step).
    - For any `invitation_pending` user, revoke the old dev invite and queue a fresh production invite (carrying `payroll_user_id` + nonce per `M3-1`) after cutover.
 4. **Dry-run and verify before switching traffic:**
@@ -785,7 +802,8 @@ Per [Clerk's instance migration docs](https://clerk.com/docs/guides/development/
 Plan a **60–90 minute** maintenance window (allowing for Netlify build/publish, Render web + worker deploy, JWKS cache purge, full verification matrix, and rollback headroom):
 
 1. Put payroll operations on pause (announced 48 hours ahead; see §4.6).
-2. Run `APPLY=true bundle exec rails clerk:cutover:apply MANIFEST=/secure/path/prod_manifest.json` (updates `users.clerk_id`, clears `last_session_id_digest` and stale `clerk_invitation_id`, logs `users#clerk_production_relinked` audit events inside one atomic transaction).
+2. Run `APPLY=true CONFIRM_M3_1_DEPLOYED=true TARGET_CLERK_SECRET_KEY="$(cat <key file>)" OPERATOR=<operator id> bundle exec rails clerk:cutover:apply MANIFEST=/secure/path/prod_manifest.json` (updates `users.clerk_id`, clears `last_session_id_digest` and stale `clerk_invitation_id`, logs `users#clerk_production_relinked` audit events inside one atomic transaction).
+   - **`CONFIRM_M3_1_DEPLOYED=true` is required here (Nov 24 finding).** At this step Render still uses the dev issuer (the env switch is step 3), and `apply` refuses to run while the configured issuer is a Clerk dev issuer (`*.clerk.accounts.dev`) or equals `SOURCE_CLERK_ISSUER`. The guard exists because, before `M3-1`, a sign-in could be matched to a user by email and overwrite a freshly re-linked `clerk_id`. Once `M3-1` is deployed (§4.1) that path is gone, so the operator confirms it with the flag. Check that `M3-1` is live on the same revision before setting it; without the flag the task aborts and writes nothing.
 3. Update **Render web and worker** env vars together:
    - `CLERK_PUBLISHABLE_KEY=pk_live_...`
    - `CLERK_SECRET_KEY=sk_live_...`
@@ -797,7 +815,8 @@ Plan a **60–90 minute** maintenance window (allowing for Netlify build/publish
 4. **Purge cached JWKS:** Run `bundle exec rails clerk:jwks:clear` on Render (clears any legacy `"clerk_jwks"` or old-issuer entries from Solid Cache immediately).
 5. Update **Netlify** (`payroll.shimizu-technology.com`) env var:
    - `VITE_CLERK_PUBLISHABLE_KEY=pk_live_...`
-   - Trigger a clean production build and publish.
+   - Trigger a clean production build and publish. The Netlify dashboard's "Clear cache and deploy site" is the normal path.
+   - **If you deploy from the command line, use `netlify-cli@27.16.2` (Nov 24 finding).** `27.17.0` fails `deploy` with "Project not found". From a clean git worktree of the release revision, with `NETLIFY_SITE_ID` set: `npx netlify-cli@27.16.2 build --context production`, then `npx netlify-cli@27.16.2 deploy --prod --no-build --dir web/dist`. Always name the version; do not run `npx netlify-cli` or `netlify` unpinned. No script or other doc in this repository deploys by CLI today; any future one must pin `27.16.2` until a later version is checked.
 6. **Live verification matrix (must pass before rollback deadline):**
    - [ ] Signed-out `https://payroll.shimizu-technology.com/app` redirects to sign-in.
    - [ ] Batch 0 recovery admins (**Leon `lmshimizu@gmail.com`**, **`shimizutechnology@gmail.com`** if active `platform_owner` `super_admin`, and **Dafne** at her verified live email) sign in fresh, verifying password sign-in (carried over via Dashboard export), email code, and Google sign-in, and load `/api/v1/auth/me` with exact expected roles and companies.
@@ -827,6 +846,35 @@ Plan a **60–90 minute** maintenance window (allowing for Netlify build/publish
 5. Run `APPLY=true bundle exec rails clerk:cutover:rollback MANIFEST=/secure/path/prod_manifest.json` (restores `old_clerk_id` per `user_id` from the sealed manifest inside a single transaction).
 6. Verify both Leon and Dafne can sign in again and `/api/v1/auth/me` responds normally.
 7. Leave the Clerk production instance intact for post-mortem; do not delete it.
+
+**Undoing a `clerk migrate import` (Nov 24 finding).** A rollback does not need this: the production users stay in place and `clerk:cutover:rollback` only restores `users.clerk_id`. Use `migrate undo` for a practice or throwaway instance, or when the owner deliberately decides to re-run the import into production after a rollback.
+- Find the run: `npx clerk@4.3.0 migrate runs`. Preview: `npx clerk@4.3.0 migrate undo <run-id> --dry-run`.
+- `npx clerk@4.3.0 migrate undo <run-id> --yes` **does not delete users who have signed in since the import**. When any user from the run has signed in, it stops with a usage error ("Nothing was deleted"), and no user is deleted, including those who never signed in. Add `--include-signed-in` to delete the whole run: `npx clerk@4.3.0 migrate undo <run-id> --yes --include-signed-in`. The CLI is built this way because `--yes` consents to undoing the import, not to deleting accounts people have used (`packages/cli-core/src/commands/migrate/undo.ts` at tag `v4.3.0`).
+- Because `--include-signed-in` deletes accounts people have used, run it against production only with the owner's explicit approval, and after the dry run shows exactly the expected users.
+
+### 4.8 Key handling (Nov 24 finding)
+
+Clerk secret keys are shown once, in a dialog. During the cutover an accessibility read of that dialog put a freshly created production secret key into an agent's tool output. The key was deleted immediately and never used, but the exposure is why these rules are fixed:
+
+- **Never read, inspect, screenshot or record a key dialog or a screen that shows a key.** That includes accessibility-tree reads, OCR, video recording and screen sharing. If a step needs a key, click the dialog's **Copy key** button without looking at the screen content.
+- **Copy with the copy button, then put the key straight into a file.** Create the file with permissions `600` (`umask 077`), write it with `pbpaste > <file>`, then clear the clipboard (`pbcopy < /dev/null`). Pass keys to commands by file (`$(cat <file>)` inside the command, or `--secret-key "$(cat <file>)"`), never typed, echoed or printed, and never into a command whose output is retained.
+- **Shred the files when the window closes** (export file, import payload, inventories, key files, the env-var backup). Keep only the sealed manifest, which holds Clerk and Payroll user IDs and no secrets.
+- **If a key is exposed, delete it at once and issue a new one**, then record that in the cutover notes without the value.
+- **Deleting a production secret key needs the account owner's Clerk password** (the dashboard asks for reverification), the same as the dev **Export users** step. Plan for the owner to be present; an agent cannot finish that deletion.
+
+### 4.9 Post-cutover state and follow-up (Nov 24, 2026)
+
+**`M3-0b` is done.** Payroll has run on the Clerk production instance (`shimizu-technology.com`, free plan) since November 24, 2026, about 10:39 pm ChST, on `main` at `557f833d` for the web app and `455eef28` for the API (the API was unchanged by the later merges).
+
+- **Users:** 6 active users were migrated. 3 had passwords, and those 3 passwords carried over; the other 3 sign in with Google or an email code. Inventory before the switch: 6 migrate, 7 skip_inactive, 0 TOTP.
+- **Re-link:** the manifest matched 6 of 6 by `external_id`, the strict dry run passed, and `apply` re-linked 6 (`APPLY=true CONFIRM_M3_1_DEPLOYED=true`). The audit log holds 6 `users#clerk_production_relinked` rows.
+- **Config:** Render web and worker use the production keys with `CLERK_ISSUER` and `CLERK_API_BASE` set to the production frontend API and `CLERK_AUTHORIZED_PARTIES=https://payroll.shimizu-technology.com`; `REQUIRE_MFA` is still unset. Netlify uses the production publishable key from a clean build. `clerk:jwks:clear` was run after the deploy.
+- **Verified live (§4.5 step 6):** the account owner signed in with Google and landed as Super Admin on their imported user, with no duplicate created. An old dev-issued token gets a clean `401`, with no `500`. Signed-out `/app` goes to `/login` with no loop. An uninvited sign-up is refused. `/up` returns `200` with HSTS. Logs since the switch show 0 JWT failures, 0 `500`s and 0 RLS warnings.
+- **Not run live:** the inactive-user and cross-client rows. No active client users exist, no one else's session was used, and inactive users have no production Clerk identity. The request specs cover both (36 of 36 on code identical to `455eef28`).
+- **`production:readiness`:** 31 of 34. Production Clerk keys and authorized parties pass. The remaining failures are the two MFA-evidence checks (deferred to Milestone 4, as planned) and the 2027 tax tables (unrelated).
+- **Compromised passwords:** "Reject compromised passwords" stays on (§4.2); a user with a breached password gets a one-time email-code reset.
+
+**Remaining follow-up (needs the account owner):** delete the unused September 14 `default` secret key in Clerk production → API keys. Deleting a production key needs the account owner's Clerk password (§4.8), so an agent cannot do it. The key is unused.
 
 ---
 

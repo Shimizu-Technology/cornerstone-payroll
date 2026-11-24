@@ -1,0 +1,667 @@
+/*
+ * Employee app (VITE_APP_SURFACE=employee). Its own Tailwind root, so its
+ * utilities never change the staff app's CSS; the tokens come from theme.css.
+ * On top of that, the phone basics from the M4-8 prototype: 17px body text that
+ * follows the iPhone's Text Size setting, safe areas, 44px tap targets, 16px
+ * inputs, no tap flash, and hover styles only for a mouse.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+@import "tailwindcss" source(none);
+@import "../theme.css";
+@source "./";
+@source "../EmployeeApp.tsx";
+
+/* As in index.css: a bare border uses the light line color, not the text color. */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-neutral-200, currentcolor);
+  }
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  max-width: 100%;
+}
+
+html,
+body {
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background-color: rgba(47, 127, 247, 0.15);
+  color: #0f2548;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-property: opacity, color, background-color, border-color, box-shadow !important;
+    transition-duration: 150ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+html {
+  font-size: 106.25%; /* 17px, the iOS body size */
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  scroll-behavior: auto;
+}
+
+/* Follow the iPhone's own Text Size setting (Settings > Display > Text Size). */
+@supports (font: -apple-system-body) {
+  @media (pointer: coarse) {
+    html { font: -apple-system-body; }
+  }
+}
+
+body {
+  background: #f3f5f8;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.employee-app,
+.emp-boot,
+.emp-auth {
+  --emp-bg: #f3f5f8;
+  --emp-focus: #2f7ff7;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  font-family: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.4;
+  color: #0f172a;
+}
+
+/* 16px or larger, so iOS never zooms into a field. Unlayered, so it also wins over Clerk's inputs. */
+.employee-app input,
+.employee-app select,
+.employee-app textarea {
+  font-size: max(16px, 1rem);
+}
+
+.employee-app :is(button, a, [role="button"], summary) {
+  touch-action: manipulation;
+}
+
+.employee-app :is(button, [role="button"], .emp-tab, .emp-btn) {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Focus stays the product's blue: a ring in a red brand color would read as an error. */
+.employee-app :focus-visible {
+  outline: 3px solid var(--emp-focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.employee-app h1:focus {
+  outline: none;
+}
+
+.font-display,
+.emp-h1 {
+  font-family: "Plus Jakarta Sans", "Source Sans 3", system-ui, sans-serif;
+}
+
+.emp-h1 {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.emp-lead {
+  font-size: 1.06rem;
+  color: #1e293b;
+}
+
+/* ---------- Signed-in shell ----------
+ * Phone (under 600px): header, content, and the five tabs fixed at the bottom.
+ * 600px and up: a top bar with the tabs and Sign out, content centered at 1120px.
+ * 1024px and up: two-column Home and list-and-detail Pay.
+ */
+.emp-shell {
+  --emp-tabbar-height: 56px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  width: 100%;
+  background: var(--emp-bg);
+}
+
+.emp-header {
+  flex: none;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
+}
+
+/* No tabs while the app can't load, so no space is kept for them. */
+.emp-shell[data-nav="hidden"] {
+  --emp-tabbar-height: 0px;
+}
+
+/* The view-only banner takes the top safe area instead. */
+.emp-shell[data-banner] .emp-header {
+  padding-top: 0;
+}
+
+.emp-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 8px 16px;
+}
+
+.emp-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.emp-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.emp-brand-name {
+  font-family: "Plus Jakarta Sans", "Source Sans 3", system-ui, sans-serif;
+  font-size: 1.06rem;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.emp-brand-sub,
+.emp-header .emp-header-signout {
+  display: none;
+}
+
+.emp-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 env(safe-area-inset-right, 0px) calc(var(--emp-tabbar-height) + env(safe-area-inset-bottom, 0px)) env(safe-area-inset-left, 0px);
+}
+
+.emp-container {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+/* Phone tabs, fixed to the bottom. */
+.emp-nav {
+  position: fixed;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  background: #fff;
+  border-top: 1px solid #e2e8f0;
+  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
+.emp-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: var(--emp-tabbar-height);
+  padding: 8px 4px;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.emp-tab-icon {
+  width: 25px;
+  height: 25px;
+}
+
+.emp-tab[aria-current="page"] {
+  color: var(--action);
+}
+
+.emp-tab[aria-current="page"] svg {
+  stroke-width: 2.4;
+}
+
+.emp-tab:active {
+  background: #f1f5f9;
+}
+
+.emp-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px 16px 32px;
+}
+
+.emp-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.emp-home-grid,
+.emp-pay-grid,
+.emp-cards-grid,
+.emp-column {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+/* Secondary columns that only earn their space on a wide screen. */
+.emp-wide-only {
+  display: none;
+}
+
+.emp-card {
+  min-width: 0;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+}
+
+.emp-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 16px 16px 0;
+}
+
+.emp-card-body {
+  padding: 16px;
+}
+
+.emp-card-head + .emp-card-body {
+  padding-top: 8px;
+}
+
+.emp-h2 {
+  margin: 0;
+  font-family: "Plus Jakarta Sans", "Source Sans 3", system-ui, sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.emp-eye {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px;
+  margin-right: -8px;
+  border-radius: 10px;
+  color: #475569;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.emp-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--action);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (min-width: 600px) {
+  .emp-shell { --emp-tabbar-height: 0px; }
+
+  .emp-header-inner {
+    max-width: 1120px;
+    min-height: 68px;
+    margin: 0 auto;
+    padding: 0 24px;
+    gap: 24px;
+  }
+
+  .emp-brand-sub {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #475569;
+  }
+
+  .emp-header .emp-header-signout {
+    display: inline-flex;
+    margin-left: auto;
+    flex: none;
+  }
+
+  /* The tabs join the top bar, as text with an underline on the current one. */
+  .emp-nav {
+    position: static;
+    display: flex;
+    align-self: stretch;
+    gap: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  .emp-tab {
+    flex-direction: row;
+    min-height: 44px;
+    padding: 0 16px;
+    border-bottom: 3px solid transparent;
+    border-top: 3px solid transparent;
+    color: #334155;
+    font-size: 1rem;
+  }
+
+  .emp-tab-icon {
+    display: none;
+  }
+
+  .emp-tab[aria-current="page"] {
+    color: #0f172a;
+    border-bottom-color: var(--indicator);
+  }
+
+  .emp-tab:active {
+    background: none;
+  }
+
+  .emp-page {
+    gap: 24px;
+    padding: 32px 24px 48px;
+  }
+
+  .emp-page .emp-h1 {
+    font-size: 1.75rem;
+  }
+
+  .emp-narrow-button {
+    width: auto;
+    align-self: flex-start;
+  }
+}
+
+/* Until 900px the top bar shows the logo without the name, so the tabs fit. */
+@media (min-width: 600px) and (max-width: 899px) {
+  .emp-brand-text { display: none; }
+}
+
+@media (min-width: 1024px) {
+  .emp-header-inner,
+  .emp-page {
+    padding-inline: 32px;
+  }
+
+  .emp-wide-only {
+    display: grid;
+  }
+
+  .emp-card.emp-wide-only {
+    display: block;
+  }
+
+  .emp-home-grid {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 24px;
+  }
+
+  .emp-pay-grid {
+    grid-template-columns: 360px minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .emp-cards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+  }
+
+  .emp-column {
+    gap: 24px;
+  }
+
+  .emp-card-head { padding: 16px 24px 0; }
+  .emp-card-body { padding: 16px 24px 24px; }
+  .emp-card-head + .emp-card-body { padding-top: 8px; }
+}
+
+.emp-offline-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
+  background: #1e293b;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.emp-viewas {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
+  background: #111827;
+  color: #fff;
+}
+
+.emp-viewas-end {
+  min-height: 44px;
+  padding: 8px 16px;
+  background: #fcd34d;
+  color: #111827;
+  font-size: 0.95rem;
+}
+
+/* ---------- Buttons ---------- */
+.emp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 24px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 1.06rem;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 120ms var(--ease-out), background-color 150ms ease, filter 150ms ease;
+}
+
+.emp-btn:active {
+  transform: scale(0.97);
+}
+
+.emp-btn-block {
+  display: flex;
+  width: 100%;
+}
+
+.emp-btn-primary {
+  background: var(--action);
+  color: #fff;
+}
+
+.emp-btn-secondary {
+  background: #fff;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.emp-btn-quiet {
+  min-height: 44px;
+  background: none;
+  color: var(--action);
+}
+
+.emp-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 8px 0 0;
+  margin-left: -8px;
+  border-radius: 10px;
+  color: var(--action);
+  font-weight: 600;
+  font-size: 1.06rem;
+  text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .emp-btn:active { transform: none; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .emp-btn-primary:hover { filter: brightness(0.94); }
+  .emp-btn-secondary:hover { background: #f8fafc; }
+  .emp-btn-quiet:hover { background: #f1f5f9; }
+  .emp-tab:not([aria-current="page"]):hover { color: #0f172a; }
+  .emp-eye:hover { background: #f1f5f9; color: #0f172a; }
+}
+
+/* ---------- Full-screen and state layouts ---------- */
+.emp-auth {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 32rem;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top, 0px) + 24px) max(20px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 24px) max(20px, env(safe-area-inset-left, 0px));
+  background: #fff;
+}
+
+@media (min-width: 34rem) {
+  .emp-auth { border-inline: 1px solid #e2e8f0; }
+}
+
+.emp-auth-top {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+}
+
+.emp-auth-grow {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 16px;
+  padding-block: 24px;
+}
+
+.emp-auth-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 52px;
+  margin-bottom: 8px;
+}
+
+.emp-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.emp-boot {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: #f3f5f8;
+}
+
+.emp-skel {
+  border-radius: 10px;
+  background: linear-gradient(90deg, #e5e9ef 0%, #f1f4f8 40%, #e5e9ef 80%);
+  background-size: 300% 100%;
+  animation: emp-shimmer 1.3s linear infinite;
+}
+
+@keyframes emp-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -50% 0; }
+}
+
+/* "Couldn't sign you out": above the phone tabs, centered on wider screens. */
+.emp-notice {
+  position: fixed;
+  z-index: 40;
+  left: 16px;
+  right: 16px;
+  bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 16px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: 8px 8px 8px 16px;
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  color: #0f172a;
+}
+
+.employee-app .emp-notice-button {
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 1rem;
+}
+
+@media (min-width: 600px) {
+  .emp-notice { bottom: 24px; }
+}

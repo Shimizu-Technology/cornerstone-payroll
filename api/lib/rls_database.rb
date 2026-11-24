@@ -14,6 +14,28 @@ module RlsDatabase
 
   SWITCH_CACHE = Concurrent::AtomicReference.new
 
+  LOGIN_LINK_DECISION = "payroll_employee_login_link_decision(bigint, bigint, bigint[])"
+  # Read-only facts about the cross-company login link decision function.
+  # The owner must bypass RLS to see every company; only the owner and the
+  # runtime role may execute it, and nobody else may hold a grant option.
+  LOGIN_LINK_DECISION_STATUS = <<~SQL.squish.freeze
+    WITH fn AS (
+      SELECT p.*, coalesce(p.proacl, acldefault('f', p.proowner)) AS acl
+      FROM pg_proc p WHERE p.oid = to_regprocedure('#{LOGIN_LINK_DECISION}')
+    )
+    SELECT fn.prosecdef AS security_definer, fn.provolatile = 's' AS stable,
+           coalesce('search_path=pg_catalog, pg_temp' = ANY (fn.proconfig), false) AS search_path_pinned,
+           coalesce('row_security=off' = ANY (fn.proconfig), false) AS row_security_off,
+           o.rolname AS owner, (o.rolbypassrls OR o.rolsuper) AS owner_bypasses_rls,
+           (SELECT string_agg(g, ',' ORDER BY g) FROM (
+              SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS g
+              FROM aclexplode(fn.acl) a WHERE a.privilege_type = 'EXECUTE') grantees) AS execute_grantees,
+           EXISTS (SELECT FROM aclexplode(fn.acl) a WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') AS public_can_execute,
+           EXISTS (SELECT FROM aclexplode(fn.acl) a WHERE a.is_grantable AND a.grantee <> fn.proowner) AS grant_option_granted,
+           (SELECT has_function_privilege(r.oid, fn.oid, 'EXECUTE') FROM pg_roles r WHERE r.rolname = 'payroll_app') AS runtime_can_execute
+    FROM fn JOIN pg_roles o ON o.oid = fn.proowner
+  SQL
+
   def self.install!(connection)
     schema = connection.select_value("SELECT current_schema()")
     connection.transaction do
@@ -59,6 +81,23 @@ module RlsDatabase
     tables.size == RlsTables::PROTECTED_TABLES.size && tables.all? do |row|
       row.fetch("policy") && row.fetch("enabled") == enforced && row.fetch("forced") == enforced
     end
+  end
+
+  def self.login_link_decision_status(connection)
+    row = connection.select_one(LOGIN_LINK_DECISION_STATUS)
+    return { "installed" => false } unless row
+
+    { "installed" => true }.merge(row).merge("execute_grantees" => row["execute_grantees"].to_s.split(","))
+  end
+
+  # The EXECUTE ACL must be exactly the owner plus payroll_app (or just the
+  # owner where no runtime role exists yet), with no grant options handed out.
+  def self.login_link_decision_ready?(connection)
+    status = login_link_decision_status(connection)
+    expected = [ status["owner"], ("payroll_app" unless status["runtime_can_execute"].nil?) ].compact.uniq.sort
+    status.values_at("installed", "security_definer", "stable", "search_path_pinned", "row_security_off", "owner_bypasses_rls").all?(true) &&
+      status["execute_grantees"].sort == expected && status["grant_option_granted"] == false &&
+      status["runtime_can_execute"] != false
   end
 
   def self.bypass_enabled?(connection)
