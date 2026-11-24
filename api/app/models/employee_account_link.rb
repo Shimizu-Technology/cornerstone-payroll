@@ -18,10 +18,14 @@ class EmployeeAccountLink < ApplicationRecord
     where(status: "active").or(where(status: "former").where("former_access_until > ?", Time.current))
   }
 
-  # Narrow, tenant-safe decision lookup across all companies so contact email
-  # validation sees links in other companies without leaking any records.
-  # Always checks conflicting links first: a login linked to any other employee
-  # always returns :conflict even if an allowed link also exists.
+  # Narrow decision lookup that returns only :conflict, :allowed or :none,
+  # never records. A login linked to any other employee always returns
+  # :conflict, even if an allowed link also exists.
+  #
+  # Outside a tenant scope it reads every company as a system read. Inside a
+  # company scope it reads within that scope, because TenantScope refuses a
+  # nested system read: once RLS is enforced, links at other companies are
+  # not visible here until TenantScope supports one.
   def self.contact_email_link_decision(user_id:, company_id:, allowed_employee_ids: [])
     return :none if user_id.blank?
 
@@ -42,16 +46,9 @@ class EmployeeAccountLink < ApplicationRecord
   end
 
   def self.with_system_decision_read(&block)
-    return yield unless RlsContextGuard.enabled?
+    return yield if !RlsContextGuard.enabled? || TenantScope.current
 
-    context = TenantScope.current
-    if context.nil?
-      TenantScope.as_system(reason: "Check cross-company employee account link decision", &block)
-    elsif context.mode == "system"
-      yield
-    else
-      connection.with_tenant_settings(nil, "system", &block)
-    end
+    TenantScope.as_system(reason: "Check cross-company employee account link decision", &block)
   end
   private_class_method :with_system_decision_read
 

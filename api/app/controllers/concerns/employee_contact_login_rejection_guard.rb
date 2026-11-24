@@ -9,37 +9,18 @@ module EmployeeContactLoginRejectionGuard
   LOGIN_EMAIL_REJECTION_PERIOD = 15.minutes
   RATE_LIMIT_ERROR_MESSAGE = "Too many blocked email attempts. Please wait a few minutes and try again."
 
-  included do
-    before_action :enforce_login_email_rejection_rate_limit!, only: [ :create, :update ]
-  end
-
   private
-
-  def enforce_login_email_rejection_rate_limit!
-    return unless current_user&.id
-    return unless contact_email_submitted_in_request?
-    return unless Rack::Attack.cache.read(login_email_rejection_cooldown_key)
-
-    response.set_header("Retry-After", LOGIN_EMAIL_REJECTION_PERIOD.to_i.to_s)
-    render json: {
-      error: RATE_LIMIT_ERROR_MESSAGE,
-      code: "contact_email_rate_limited"
-    }, status: :too_many_requests
-  end
 
   def render_contact_validation_error!(error, employee: nil)
     result = error.result
     if result&.login_email_rejected? && current_user&.id
-      count = Rack::Attack.cache.count(login_email_rejection_rate_key, LOGIN_EMAIL_REJECTION_PERIOD).to_i
+      count = record_login_email_rejection!
       rate_limited = count > LOGIN_EMAIL_REJECTION_LIMIT
-      if count >= LOGIN_EMAIL_REJECTION_LIMIT
-        Rack::Attack.cache.write(login_email_rejection_cooldown_key, true, LOGIN_EMAIL_REJECTION_PERIOD)
-      end
 
       record_login_email_rejection_audit!(result: result, employee: employee, rejection_count: count, rate_limited: rate_limited)
 
       if rate_limited
-        response.set_header("Retry-After", LOGIN_EMAIL_REJECTION_PERIOD.to_i.to_s)
+        response.set_header("Retry-After", login_email_rejection_retry_after.to_s)
         return render json: {
           error: RATE_LIMIT_ERROR_MESSAGE,
           code: "contact_email_rate_limited"
@@ -81,15 +62,17 @@ module EmployeeContactLoginRejectionGuard
     Rails.logger.error("[EmployeeContactLoginRejectionGuard] Failed to record rejection audit: #{e.class}: #{e.message}")
   end
 
-  def contact_email_submitted_in_request?
-    params[:employee].respond_to?(:key?) && params[:employee][:email].present?
+  # Counts rejections with the same shared-or-local counter Rack::Attack uses,
+  # one fixed window per user.
+  def record_login_email_rejection!
+    period = LOGIN_EMAIL_REJECTION_PERIOD.to_i
+    window = Time.now.to_i / period
+    key = "employee-contact-login-reject/user/#{current_user.id}/#{window}"
+    Rack::Attack.cache.store.increment(key, 1, expires_in: period).to_i
   end
 
-  def login_email_rejection_rate_key
-    "employee-contact-login-reject/user/#{current_user.id}"
-  end
-
-  def login_email_rejection_cooldown_key
-    "employee-contact-login-reject-cooldown/user/#{current_user.id}"
+  def login_email_rejection_retry_after
+    period = LOGIN_EMAIL_REJECTION_PERIOD.to_i
+    period - (Time.now.to_i % period)
   end
 end

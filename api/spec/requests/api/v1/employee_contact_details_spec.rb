@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request do
+  include ActiveSupport::Testing::TimeHelpers
+
   let(:organization) { create(:organization) }
   let(:company) { create(:company, organization: organization) }
   let(:other_organization) { create(:organization) }
@@ -175,6 +177,9 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
 
     it "audits blocked login email rejections and rate-limits repeated probing per user" do
       Rack::Attack.cache.store.clear
+      # Start inside one counter window so the window can't roll over mid-test.
+      period = EmployeeContactLoginRejectionGuard::LOGIN_EMAIL_REJECTION_PERIOD.to_i
+      travel_to(Time.zone.at(((Time.now.to_i / period) * period) + 1))
       allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(client_user)
 
       expect do
@@ -190,7 +195,7 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
       expect(audit.user_id).to eq(client_user.id)
       expect(audit.metadata).to include("rejection_reason" => "other_user_login", "attempted_email_domain" => "example.com")
 
-      # Hit the per-user rejection threshold -> subsequent probes return 429 even for unused emails.
+      # Up to the limit, every rejection is a plain 422 with its own audit event.
       (EmployeeContactLoginRejectionGuard::LOGIN_EMAIL_REJECTION_LIMIT - 1).times do
         patch "/api/v1/client/employees/#{missing_contact_employee.id}",
               headers: { "X-Company-Id" => company.id.to_s },
@@ -198,13 +203,32 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
         expect(response).to have_http_status(:unprocessable_entity)
       end
 
-      # Now on cooldown: even an unused email returns 429 with Retry-After so probing stops.
+      # Rejections past the limit return 429 with Retry-After, and are still audited.
+      expect do
+        patch "/api/v1/client/employees/#{missing_contact_employee.id}",
+              headers: { "X-Company-Id" => company.id.to_s },
+              params: { employee: { email: other_tenant_user.email } }
+      end.to change { AuditLog.where(action: "employees#login_email_rejected").count }.by(1)
+      expect(response).to have_http_status(:too_many_requests)
+      expect(response.headers["Retry-After"].to_i).to be_between(1, EmployeeContactLoginRejectionGuard::LOGIN_EMAIL_REJECTION_PERIOD.to_i)
+      expect(response.parsed_body["code"]).to eq("contact_email_rate_limited")
+      expect(AuditLog.where(action: "employees#login_email_rejected").newest_first.first.metadata).to include("rate_limited" => true)
+      expect(missing_contact_employee.reload.email).to be_nil
+
+      # A real address still saves: only rejected login emails are limited.
       patch "/api/v1/client/employees/#{missing_contact_employee.id}",
             headers: { "X-Company-Id" => company.id.to_s },
             params: { employee: { email: "brand.new.unused@example.com" } }
-      expect(response).to have_http_status(:too_many_requests)
-      expect(response.headers["Retry-After"]).to be_present
-      expect(response.parsed_body["code"]).to eq("contact_email_rate_limited")
+      expect(response).to have_http_status(:ok), response.body
+
+      # The counter is per user: another client user is not limited.
+      another_client = create(:user, company: company, organization: organization, role: "client", email: "second-client@example.com")
+      CompanyAssignment.create!(user: another_client, company: company)
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(another_client)
+      patch "/api/v1/client/employees/#{missing_contact_employee.id}",
+            headers: { "X-Company-Id" => company.id.to_s },
+            params: { employee: { email: other_tenant_user.email } }
+      expect(response).to have_http_status(:unprocessable_entity)
     ensure
       Rack::Attack.cache.store.clear
     end

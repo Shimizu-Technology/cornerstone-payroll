@@ -119,6 +119,20 @@ RSpec.describe "Company RLS", :rls do
     expect(settings).to eq([ "", "" ])
   end
 
+  it "keeps the outer company lease after a nested raw system lease" do
+    # Shows why a nested system read isn't supported on main: the inner lease
+    # clears the outer lease's marker, so later queries in the company scope
+    # look unscoped. Enable with the TenantScope fix (separate PR).
+    pending "RlsConnection#with_tenant_settings is not re-entrant"
+    TenantScope.with_company(1) do
+      pool.with_connection do |connection|
+        connection.with_tenant_settings(nil, "system") { expect(settings).to eq([ "", "system" ]) }
+        expect(settings).to eq([ "1", "company" ])
+        expect(connection.tenant_settings_active?).to be(true)
+      end
+    end
+  end
+
   it "restores an already leased session's prior values on exception" do
     pool.with_connection do |connection|
       connection.raw_connection.exec_params(RlsConnection::WRITE_SETTINGS, [ "42", "" ], &:clear)
@@ -328,35 +342,60 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
-    it "detects cross-company employee account link conflicts under enforced RLS without leaking records or losing company scope" do
+    def create_cross_company_link_fixtures(connection)
+      company = create(:company)
+      other_company = create(:company, organization: company.organization)
+      TenantScope.as_system(reason: "Create cross-company link RLS fixtures") do
+        a = create(:employee, company: company)
+        b = create(:employee, company: other_company)
+        u = create(:user, company: company, organization: company.organization, role: "client")
+        EmployeeAccountLink.create!(company: company, employee: a, user: u, status: "active")
+        EmployeeAccountLink.create!(company: other_company, employee: b, user: u, status: "active")
+        setup_step_three(connection, tables: %w[employee_account_links employees])
+        [ company, other_company, a, b, u ]
+      end
+    end
+
+    it "detects a cross-company account link conflict outside a tenant scope, and keeps a company scope intact" do
       pool.with_connection do |connection|
         connection.transaction do
-          company = create(:company)
-          other_company = create(:company, organization: company.organization)
-          emp_a, emp_b, login_user = TenantScope.as_system(reason: "Create cross-company link RLS fixtures") do
-            a = create(:employee, company: company)
-            b = create(:employee, company: other_company)
-            u = create(:user, company: company, organization: company.organization, role: "client")
-            EmployeeAccountLink.create!(company: company, employee: a, user: u, status: "active")
-            EmployeeAccountLink.create!(company: other_company, employee: b, user: u, status: "active")
-            setup_step_three(connection, tables: %w[employee_account_links employees])
-            [ a, b, u ]
-          end
+          company, other_company, emp_a, emp_b, login_user = create_cross_company_link_fixtures(connection)
+
+          # Outside any scope the decision is a narrow system read across companies.
+          expect(EmployeeAccountLink.contact_email_link_decision(
+            user_id: login_user.id, company_id: company.id, allowed_employee_ids: [ emp_a.id ]
+          )).to eq(:conflict)
+          expect(settings).to eq([ "", "" ])
 
           TenantScope.with_company(company.id) do
-            # Direct query cannot see other_company's link under enforced RLS.
             expect(EmployeeAccountLink.where(company_id: other_company.id).exists?).to be(false)
-            # Narrow decision lookup sees the cross-company link and checks conflict first.
-            decision = EmployeeAccountLink.contact_email_link_decision(
-              user_id: login_user.id,
-              company_id: company.id,
-              allowed_employee_ids: [ emp_a.id ]
-            )
-            expect(decision).to eq(:conflict)
-            # Company scope is fully restored afterward.
+            # Inside a company scope it reads within that scope and never
+            # leaves it, so the outer lease keeps working.
+            expect(EmployeeAccountLink.contact_email_link_decision(
+              user_id: login_user.id, company_id: company.id, allowed_employee_ids: [ emp_a.id ]
+            )).to eq(:allowed)
             expect(settings).to eq([ company.id.to_s, "company" ])
-            expect(EmployeeAccountLink.where(company_id: other_company.id).exists?).to be(false)
+            expect(connection.tenant_settings_active?).to be(true)
             expect(Employee.find_by(id: emp_b.id)).to be_nil
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
+    # Main has no supported system read inside a company scope: TenantScope
+    # raises ConflictingContextError, and the raw lease is not re-entrant.
+    # Enable when TenantScope gains a nested system read (separate PR).
+    it "detects a cross-company account link conflict inside a company scope" do
+      pending "TenantScope has no nested system read yet"
+      pool.with_connection do |connection|
+        connection.transaction do
+          company, _other_company, emp_a, _emp_b, login_user = create_cross_company_link_fixtures(connection)
+
+          TenantScope.with_company(company.id) do
+            expect(EmployeeAccountLink.contact_email_link_decision(
+              user_id: login_user.id, company_id: company.id, allowed_employee_ids: [ emp_a.id ]
+            )).to eq(:conflict)
           end
           raise ActiveRecord::Rollback
         end
