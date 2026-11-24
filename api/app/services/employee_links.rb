@@ -49,11 +49,58 @@ module EmployeeLinks
     )
   end
 
+  # sign_up: a new account; claim: sign in with an existing login;
+  # reactivate: sign in again to a login that closed with an earlier link.
+  def self.invite_path(claim_user)
+    return "sign_up" unless claim_user
+
+    claim_user.active? ? "claim" : "reactivate"
+  end
+
+  # Link changes made as a side effect of another action (a termination, a
+  # status change) are audited without suppressing that action's own audit.
+  def self.side_effect_audit
+    previous = Current.domain_audit_recorded
+    yield
+  ensure
+    Current.domain_audit_recorded = previous
+  end
+
   def self.lock_users!(ids)
     ids = Array(ids).compact.uniq.sort
     return [] if ids.empty?
 
     User.where(id: ids).order(:id).lock("FOR NO KEY UPDATE").to_a
+  end
+
+  # What closing a sign-up nobody finished writes to its pending login. Its
+  # nonce is always cleared. A login that is still active closes now, with
+  # the database's clock; one already closed (an admin's deactivation above
+  # all) keeps its reason and time, so an admin-deactivated row never becomes
+  # a reusable pending_sign_up_closed one.
+  def self.pending_closure_attributes(pending)
+    attributes = { invite_nonce_digest: nil, invite_nonce_expires_at: nil }
+    return attributes unless pending.active?
+
+    attributes.merge(active: false, deactivated_at: ApplicationRecord.database_now,
+      deactivation_reason: "pending_sign_up_closed")
+  end
+
+  # A sign-up nobody finished, closed with its link: never bound, made for
+  # this employee (or the record it replaced) at this company, and linked to
+  # no other employee. Its email stays reserved for that person; a later
+  # sign-up reuses the row instead of finding the address taken.
+  def self.closed_pending_sign_up_for?(user, employee)
+    return false unless user&.portal_employee? && !user.active? && user.awaiting_clerk_binding? &&
+      user.deactivation_reason == "pending_sign_up_closed" && user.company_id == employee.company_id
+
+    links = EmployeeAccountLink.where(user_id: user.id)
+    links.exists? && !links.where.not(employee_id: [ employee.id, employee.previous_employee_id ].compact).exists?
+  end
+
+  def self.reusable_pending_login(email, employee)
+    user = User.where(EmployeeContactValidator.normalized_email_node(User.arel_table[:email]).eq(normalized_email(email))).first
+    user if closed_pending_sign_up_for?(user, employee)
   end
 
   def self.verifier_actor

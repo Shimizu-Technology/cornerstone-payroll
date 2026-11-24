@@ -123,7 +123,7 @@ module EmployeeLinks
         raise Error, CHANGED unless @link.sign_up_reset_pending? && pending&.id == closed.fetch(:user_id) &&
           pending&.clerk_invitation_id == closed.fetch(:invitation_id)
 
-        @link.claim_user = check_email!(@link.employee) if @delivery == "email"
+        @link.claim_user = route_login(@link.employee)
         credentials = Credentials.issue(@link, delivery: @delivery, email: @link.employee.email)
         requested = { requested_at: @link.sign_up_reset_requested_at.iso8601, requested_by_id: @link.sign_up_reset_requested_by_id,
                       requested_reason: @link.sign_up_reset_reason }
@@ -131,7 +131,7 @@ module EmployeeLinks
         @link.save!
         pending&.update!(clerk_invitation_id: nil, invite_nonce_digest: nil, invite_nonce_expires_at: nil,
           invitation_status: "pending")
-        path = @link.claim_user_id ? "claim" : "sign_up"
+        path = EmployeeLinks.invite_path(@link.claim_user)
         EmployeeLinks.audit!(@link, "sign_up_reset", user: @actor, request: @request,
           metadata: requested.merge(reason: @reason, pending_login_id: closed[:user_id],
             deleted_clerk_users: closed[:deleted_clerk_users], delivery: @delivery, path: path,

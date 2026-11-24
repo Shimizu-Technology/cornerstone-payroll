@@ -69,6 +69,25 @@ RSpec.describe ClerkInvitationService do
       expect(Rails.logger).to have_received(:error).with(/SESSION PAGE CAP HIT/)
     end
 
+    it "reports failure when only the confirming pass hits the page cap" do
+      stub_const("#{described_class}::SESSION_PAGE_CAP", 2)
+      cutoff = Time.utc(2026, 11, 20, 12, 0, 0)
+      later = (cutoff.to_f * 1000).to_i + 60_000
+      full = ->(prefix) { Array.new(100) { |index| { id: "sess_#{prefix}#{index}", created_at: later } }.to_json }
+      # The first pass lists one page and ends its one targeted session; the
+      # confirming pass then finds more pages than the cap allows.
+      session_page("user_busy", []).to_return(status: 200, body: [ { id: "sess_old", created_at: later - 120_000 } ].to_json)
+        .then.to_return(status: 200, body: full.call("a"))
+      session_page("user_busy", [], offset: 100).to_return(status: 200, body: full.call("b"))
+      revoke = revoke_stub("sess_old")
+      allow(Rails.logger).to receive(:error)
+
+      expect(described_class.new.revoke_user_sessions("user_busy", created_before: cutoff))
+        .to eq(success: false, error: "Too many Clerk sessions to confirm in one pass", revoked: 1)
+      expect(revoke).to have_been_requested.once
+      expect(Rails.logger).to have_received(:error).with(/SESSION PAGE CAP HIT/)
+    end
+
     it "ends only sessions created at or before a cutoff, and any without a creation time" do
       cutoff = Time.utc(2026, 11, 20, 12, 0, 0)
       millis = (cutoff.to_f * 1000).to_i
@@ -83,6 +102,13 @@ RSpec.describe ClerkInvitationService do
       expect(revoked).to all(have_been_requested.once)
       expect(kept).not_to have_been_requested
     end
+  end
+
+  it "reads one session by its ID, and nothing for a malformed ID" do
+    stub_request(:get, "https://api.clerk.com/v1/sessions/sess_one")
+      .to_return(status: 200, body: { id: "sess_one", user_id: "user_a", created_at: 1_700_000_000_000 }.to_json)
+    expect(described_class.new.fetch_session("sess_one")).to include("user_id" => "user_a", "created_at" => 1_700_000_000_000)
+    expect(described_class.new.fetch_session("../users")).to be_nil
   end
 
   it "finds Clerk users by address and deletes one, counting an already-deleted user as deleted" do

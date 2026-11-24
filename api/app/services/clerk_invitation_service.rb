@@ -117,13 +117,25 @@ class ClerkInvitationService
     end
     return { success: false, error: "Too many Clerk sessions for one pass", revoked: revoked } unless listing[:complete]
 
+    # The confirming pass must see every page too, or a targeted session
+    # past the cap could still be active.
     recheck = active_sessions(subject)
-    return { success: false, error: recheck[:error] || "Sessions were still active after revocation", revoked: revoked } if
-      recheck[:error] || targeted(recheck[:sessions], cutoff).any?
+    return { success: false, error: recheck[:error], revoked: revoked } if recheck[:error]
+    return { success: false, error: "Too many Clerk sessions to confirm in one pass", revoked: revoked } unless recheck[:complete]
+    return { success: false, error: "Sessions were still active after revocation", revoked: revoked } if
+      targeted(recheck[:sessions], cutoff).any?
 
     { success: true, revoked: revoked }
   rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
     { success: false, error: e.class.name }
+  end
+
+  # A Clerk session (its id, user_id, status, created_at), or nil.
+  def fetch_session(session_id)
+    return unless session_id.is_a?(String) && SESSION_PATTERN.match?(session_id)
+
+    data = get_json("/sessions/#{session_id}")
+    data if data.is_a?(Hash) && data["id"] == session_id
   end
 
   # The Clerk users that have this address, or nil when Clerk can't be asked.

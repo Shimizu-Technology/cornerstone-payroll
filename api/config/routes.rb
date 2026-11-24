@@ -68,6 +68,7 @@ Rails.application.routes.draw do
         post :activation, to: "activations#create", format: false
         get :links, to: "account#links", format: false
         post "links/claim", to: "account#claim", format: false
+        post "links/reactivate", to: "reactivations#create", format: false
       end if employee_routes
 
       # Mount future kiosk routes under this same employee_routes guard.

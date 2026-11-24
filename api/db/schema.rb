@@ -4925,6 +4925,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_170000) do
     t.string "workos_id"
     t.string "invite_nonce_digest"
     t.datetime "invite_nonce_expires_at"
+    t.datetime "deactivated_at"
+    t.string "deactivation_reason"
     t.index [ "clerk_id" ], name: "index_users_on_clerk_id", unique: true
     t.index [ "company_id" ], name: "index_users_on_company_id"
     t.index [ "email" ], name: "index_users_on_email", unique: true
@@ -4933,6 +4935,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_170000) do
     t.index [ "practice_company_id" ], name: "index_users_on_practice_company_id"
     t.index [ "workos_id" ], name: "index_users_on_workos_id", unique: true
     t.check_constraint "NOT platform_owner OR role = 5 AND active = true AND lower(email::text) = 'shimizutechnology@gmail.com'::text", name: "users_platform_owner_identity"
+    t.check_constraint "deactivation_reason IS NULL OR (deactivation_reason::text = ANY (ARRAY['last_employee_link_closed'::character varying, 'pending_sign_up_closed'::character varying, 'deactivated'::character varying]::text[]))", name: "users_deactivation_reason_check"
     t.check_constraint "practice_company_id IS NULL OR company_id = practice_company_id AND role = 4", name: "users_practice_scope"
   end
 
