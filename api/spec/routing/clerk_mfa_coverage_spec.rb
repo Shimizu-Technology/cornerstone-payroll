@@ -8,6 +8,7 @@ RSpec.describe "Clerk MFA route coverage" do
       rails/health
       health/dependencies
       api/v1/public/tenant_branding
+      api/v1/employee_portal/activations
       api/v1/finance/access
       api/v1/integrations/aire/events
       api/v1/integrations/aire/cutoff_changes
@@ -36,7 +37,8 @@ RSpec.describe "Clerk MFA route coverage" do
 
     expect(clerk_routes).to include(
       "/api/v1/auth/me(.:format)", "/api/v1/companies(.:format)", "/api/v1/cable_ticket(.:format)",
-      "/api/v1/employee/context(.:format)"
+      "/api/v1/employee/context(.:format)", "/api/v1/employee/links", "/api/v1/employee/links/claim",
+      "/api/v1/employee/links/reactivate"
     )
   end
 
