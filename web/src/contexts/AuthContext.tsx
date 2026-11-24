@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth as useClerkAuth } from '@clerk/react';
-import { ApiError, authApi, MFA_REQUIRED_EVENT, setAuthToken, setAuthTokenProvider } from '@/services/api';
+import { ApiError, authApi, isMfaRequiredCode, MFA_REQUIRED_EVENT, setAuthToken, setAuthTokenProvider } from '@/services/api';
 import { clearAllDrafts } from '@/components/client-portal/messageDrafts';
 
 interface User {
@@ -164,9 +164,18 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isSignedIn) return;
 
-    const requireMfa = () => {
+    const requireMfa = (event: Event) => {
+      const detail = (event as CustomEvent<{ code?: unknown; message?: unknown } | string | undefined>).detail;
+      const code = typeof detail === 'object' && detail && isMfaRequiredCode(detail.code)
+        ? detail.code
+        : 'mfa_required';
+      const message = typeof detail === 'object' && detail && typeof detail.message === 'string'
+        ? detail.message
+        : typeof detail === 'string'
+          ? detail
+          : mfaRequiredProblem.message;
       setUser(null);
-      setAuthProblem(mfaRequiredProblem);
+      setAuthProblem({ status: 403, code, message });
     };
     window.addEventListener(MFA_REQUIRED_EVENT, requireMfa);
     return () => window.removeEventListener(MFA_REQUIRED_EVENT, requireMfa);
@@ -175,7 +184,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async (options?: { skipTokenCache?: boolean }) => {
     if (!isSignedIn) {
       setUser(null);
-      setAuthProblem((problem) => problem?.code === 'mfa_required' ? null : problem);
+      setAuthProblem((problem) => isMfaRequiredCode(problem?.code) ? null : problem);
       backendUnauthorized.current = false;
       setIsLoading(false);
       return;
@@ -221,7 +230,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         setAuthProblem(problem);
-        if (problem.status !== 403 || problem.code !== 'mfa_required') {
+        if (problem.status !== 403 || !isMfaRequiredCode(problem.code)) {
           console.error('Failed to load user:', err);
         }
       }
@@ -276,7 +285,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
           try {
             await clerkSignOut();
           } catch (error) {
-            if (authProblem?.status === 403 && authProblem.code === 'mfa_required') {
+            if (authProblem?.status === 403 && isMfaRequiredCode(authProblem.code)) {
               setUser(null);
               setAuthProblem({ ...authProblem, signOutFailed: true });
             }

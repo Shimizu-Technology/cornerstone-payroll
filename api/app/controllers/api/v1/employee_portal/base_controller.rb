@@ -5,9 +5,12 @@ module Api
     module EmployeePortal
       class BaseController < ActionController::API
         include MfaEnforceable
+        include EmployeePortalRequestContext
 
         before_action :authenticate_employee_user!, :enforce_mfa!, :require_employee_link!
         include CompanyRlsScoped
+        # After the RLS scope, so audit rows are written inside the link's company.
+        include Auditable
 
         private
 
@@ -15,36 +18,42 @@ module Api
           @employee_link&.company_id
         end
 
+        def current_company_id
+          @employee_link&.company_id
+        end
+
+        # Every successful employee view and download is audited, not only writes.
+        def audit_worthy_request?
+          true
+        end
+
         def authenticate_employee_user!
-          link_id = request.headers["X-Employee-Link-Id"]
-          token = request.headers["Authorization"].to_s[/\ABearer (\S+)\z/, 1]
-          unless token && link_id&.match?(/\A[1-9]\d{0,18}\z/) && link_id.to_i <= 2**63 - 1
-            return head :not_found
+          user = verified_employee_portal_user
+          if employee_session_fenced?
+            return render json: EmployeeLinks::SessionFence::SIGN_IN_AGAIN, status: :unauthorized
           end
-
-          @clerk_token_payload = ClerkTokenVerifier.new.verify(token)
-          subject = @clerk_token_payload&.fetch("sub", nil)
-          return head :not_found unless subject.is_a?(String) && subject.present? && !subject.start_with?("pending_")
-
-          user = User.find_by(clerk_id: subject)
-          return head :not_found unless user && StagingOutboundPolicy.tester?(user_id: user.id, email: user.email, id: subject)
-          return head :not_found unless user.payroll_access_allowed?
+          return head :not_found unless user
 
           @current_user = user
+          set_current_employee_user(user)
         end
 
         def require_employee_link!
+          link_id = request.headers["X-Employee-Link-Id"]
+          unless link_id&.match?(/\A[1-9]\d{0,18}\z/) && link_id.to_i <= 2**63 - 1
+            return head :not_found
+          end
+
           @employee_link = TenantScope.as_system(reason: "Resolve employee link for verified Clerk user") do
-            link = @current_user.employee_account_links.portal_eligible.find_by(id: request.headers["X-Employee-Link-Id"])
+            link = @current_user.employee_account_links.portal_eligible.find_by(id: link_id)
             link if link&.portal_enabled?
           end
           return head :not_found unless @employee_link
 
           azp = @clerk_token_payload["azp"]
-          if TenantSubdomainRegistry.client_origin?(azp) &&
-              TenantSubdomainRegistry.enabled_origin_company_id(azp) != @employee_link.company_id
-            head :not_found
-          end
+          return head :not_found unless EmployeeLinks.origin_allows_company?(azp, @employee_link.company_id)
+
+          Current.company_id = @employee_link.company_id
         end
       end
     end

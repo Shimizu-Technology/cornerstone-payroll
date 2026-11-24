@@ -155,9 +155,16 @@ module Api
             end
           end
 
-          before_values = user_audit_snapshot(@user)
           ActiveRecord::Base.transaction do
-            @user.update!(active: false)
+            # Locked and re-read first, so a reactivation that committed in
+            # between can't keep the login active: every field is written
+            # from the current row. Recorded even when the login was already
+            # closed (an employee login whose last link ended): an admin's
+            # deactivation is never lifted by the employee's own rehire
+            # reactivation (M4-2). Same login lock as EmployeeLinks.
+            @user.lock!("FOR NO KEY UPDATE")
+            before_values = user_audit_snapshot(@user)
+            @user.update!(active: false, deactivated_at: ApplicationRecord.database_now, deactivation_reason: "deactivated")
             record_user_audit!("deactivated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
           render json: { data: user_json(@user) }
@@ -210,6 +217,10 @@ module Api
 
           unless @user.invitation_pending?
             return render json: { error: "User has already accepted their invitation" }, status: :unprocessable_entity
+          end
+          # An employee app sign-up binds only through its link (EmployeeLinks).
+          if @user.portal_employee?
+            return render json: { error: "Employee app sign-ups are resent from the employee's record" }, status: :unprocessable_entity
           end
 
           before_values = user_audit_snapshot(@user)
