@@ -45,9 +45,16 @@ module EmployeeDocuments
 
       check = candidates.first
       return Match.new(page:, check: nil, status: "unmatched") unless check
-      return Match.new(page:, check: nil, status: "full_ssn") if employee_ssn?(page.text, check.employee)
+      return Match.new(page:, check: nil, status: "full_ssn") if employee_ssn?(page, check.employee)
 
-      Match.new(page:, check:, status: page.has_image ? "image_review" : "matched")
+      status = if page.possible_ssn
+        "possible_ssn"
+      elsif page.has_image
+        "image_review"
+      else
+        "matched"
+      end
+      Match.new(page:, check:, status:)
     end
 
     def extract(text, pattern)
@@ -68,11 +75,9 @@ module EmployeeDocuments
       ::QuickbooksHistory::NameNormalizer.call(name)
     end
 
-    def employee_ssn?(text, employee)
+    def employee_ssn?(page, employee)
       digits = employee.ssn_digits
-      return false unless digits&.size == 9
-
-      text.gsub(/[\p{Space}\p{Pd}.\/_]/, "").include?(digits)
+      [ page.original_text, page.text ].any? { |text| QuickbooksStubNumbers.employee_ssn?(text, digits) }
     end
   end
 end

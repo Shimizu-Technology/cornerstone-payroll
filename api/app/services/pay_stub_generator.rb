@@ -87,15 +87,23 @@ class PayStubGenerator
     }
   end
 
-  # Fingerprint the printed payroll values, independent of profile details and the PDF timestamp.
+  # Use current rows even when the PDF can attribute its independently computed
+  # YTD amounts. An earlier check can change that attribution without changing this check.
   def employee_payroll_facts_sha256
-    facts = [
+    earnings = unitemized_earning_lines(source_labels: PayrollSourceEarningLabel.new(payroll_item), include_ytd: false)
+      .map { |line| line.except(:ytd) }
+    components = PayrollStatementYtdBreakdown::KINDS.map do |kind|
+      statement_ytd_breakdown.current_rows(kind).map { |row| [ row.label, row.current, row.semantic ] }
+    end
+    amounts = payroll_item.attributes.slice(
+      "gross_pay", "net_pay", "withholding_tax", "withholding_tax_override", "withholding_tax_adjustment",
+      "social_security_tax", "medicare_tax", "additional_withholding",
+      "ytd_net", "ytd_withholding_tax", "ytd_social_security_tax", "ytd_medicare_tax"
+    )
+    Digest::SHA256.hexdigest([
       pay_period.start_date, pay_period.end_date, pay_period.pay_date, payroll_item.check_date,
-      self.class.employee_payment_line(payroll_item), format_currency(payroll_item.gross_pay),
-      format_currency(payroll_item.net_pay), format_currency(pay_ytd_total), format_currency(payroll_item.ytd_net),
-      printable_earning_rows, printable_deduction_rows, printable_addition_rows, printable_employer_rows
-    ]
-    Digest::SHA256.hexdigest(facts.to_json)
+      self.class.employee_payment_line(payroll_item), amounts, earnings, components
+    ].to_json)
   end
 
   def self.employee_payment_line(item)
@@ -363,7 +371,7 @@ class PayStubGenerator
     { label: label, hours: hours, rate: rate, pay_basis: pay_basis, amount: amount, category: category, ytd: ytd }
   end
 
-  def unitemized_earning_lines
+  def unitemized_earning_lines(source_labels: source_earning_labels, include_ytd: true)
     earnings_data = []
 
     # Non-taxable earnings are printed in their own section because they increase
@@ -385,7 +393,7 @@ class PayStubGenerator
 
     if payroll_item.payroll_item_earnings.any? { |earning| earning.category.to_s != "non_taxable" }
       item_earnings.each do |earning|
-        earnings_data << earning_line(source_earning_labels.call(earning.label) || earning.label.presence || earning.category.to_s.titleize,
+        earnings_data << earning_line(source_labels.call(earning.label) || earning.label.presence || earning.category.to_s.titleize,
           earning.hours.presence, earning.rate.presence, earning.amount, earning.category)
       end
     elsif correction_earnings
@@ -468,7 +476,7 @@ class PayStubGenerator
       end
 
       payroll_field_entries_for("taxable_addition").each do |entry|
-        earnings_data << earning_line(entry.label, nil, nil, entry.amount, "other", ytd: ytd_payroll_field_amount(entry)) if entry.amount.to_f.positive?
+        earnings_data << earning_line(entry.label, nil, nil, entry.amount, "other", ytd: (ytd_payroll_field_amount(entry) if include_ytd)) if entry.amount.to_f.positive?
       end
 
     end

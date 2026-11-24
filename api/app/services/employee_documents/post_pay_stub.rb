@@ -10,7 +10,7 @@ module EmployeeDocuments
 
     def call
       period = @item.pay_period
-      period.with_lock("FOR SHARE") do
+      period.with_lock("FOR SHARE", requires_new: true) do
         @item.lock!
         @item.pay_period = period
         reconcile(period)
@@ -21,8 +21,8 @@ module EmployeeDocuments
 
     def reconcile(period)
       latest = documents_for(@item.id).lock.first
-      unless period.committed? && @item.payroll_included? && !@item.voided?
-        latest.update!(status: :withdrawn) if latest&.posted?
+      if (reason = withdrawal_reason(period))
+        latest.update!(status: :withdrawn, withdrawal_reason: reason) if latest&.posted?
         return
       end
       return if latest&.replaced?
@@ -45,7 +45,9 @@ module EmployeeDocuments
         source: @item, posted_at: Time.current, revision: (latest&.revision || 0) + 1,
         predecessor: predecessor, payment_line: PayStubGenerator.employee_payment_line(@item),
         payroll_facts: { payroll_facts_sha256: fingerprint, payroll_facts_checked_at: checked_at }
-      )
+      ) do |key|
+        EmployeeDocument.current_transaction.after_rollback { FreezePdf.remove_uncommitted_object(key) }
+      end
       latest&.update!(status: :replaced)
       # A delta correction is a separate payment. Its original stays active
       # while the underlying original payroll obligation remains in force.
@@ -54,6 +56,14 @@ module EmployeeDocuments
       end
       enqueue_employee_pay_stub_notice(document) if predecessor.nil? && @notice_since && period.pay_date >= @notice_since
       document
+    end
+
+    def withdrawal_reason(period)
+      return "reversal" unless @item.payroll_included?
+      return "uncommitted" unless period.committed?
+      return "void" if @item.voided?
+
+      nil
     end
 
     def documents_for(item_id)

@@ -10,7 +10,7 @@ RSpec.describe PostEmployeePayStubsJob do
   let(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:employee) { create(:employee, company: company) }
   let(:item) { create(:payroll_item, pay_period: period, employee: employee, gross_pay: 1_200, net_pay: 960, payment_delivery_method: "direct_deposit") }
-  let(:storage) { instance_double(R2StorageService, upload: true) }
+  let(:storage) { instance_double(R2StorageService, upload: true, delete: true) }
   let(:cutoff) { Time.utc(2026, 8, 19, 20) }
   let(:documents) { EmployeeDocument.where(payroll_item: item).order(:revision) }
 
@@ -64,6 +64,7 @@ RSpec.describe PostEmployeePayStubsJob do
     item.update_columns(voided: true, updated_at: cutoff + 11.minutes)
     original_check = documents.reload.last
     expect { run_at(cutoff + 15.minutes) }.to change { original_check.reload.status }.from("posted").to("withdrawn")
+    expect(original_check.withdrawal_reason).to eq("void")
     expect(EmployeeDocument.posted.where(payroll_item: item)).to be_empty
     expect(storage).to have_received(:upload).twice
     item.update_columns(voided: false, check_number: "4013", updated_at: cutoff + 16.minutes)
@@ -129,10 +130,19 @@ RSpec.describe PostEmployeePayStubsJob do
     expect { run_at(cutoff + 1.day) }.to change(EmployeeDocument, :count).by(1)
   end
 
-  it "calls the notice hook for a first posting on the activation date" do
+  it "calls the notice hook when activation falls between the period end and pay date" do
     item
+    allow(CompanyFeatures.for(company)).to receive(:employee_stubs_enabled_since).and_return(period.end_date + 3.days)
     expect_any_instance_of(EmployeeDocuments::PostPayStub).to receive(:enqueue_employee_pay_stub_notice)
     run_at(cutoff)
+  end
+
+  it "removes a newly uploaded PDF when a later posting step rolls back" do
+    item
+    allow_any_instance_of(EmployeeDocuments::PostPayStub).to receive(:enqueue_employee_pay_stub_notice)
+      .and_raise(ArgumentError, "synthetic notice failure")
+    expect { run_at(cutoff) }.not_to change(EmployeeDocument, :count)
+    expect(storage).to have_received(:delete).with(include("/payroll_item_#{item.id}/")).once
   end
 
   it "withdraws reversed payroll and links a later full correction to the archived original" do

@@ -16,8 +16,7 @@ module EmployeeDocuments
 
     MAX_BYTES = 10.megabytes
     MAX_PAGES = 50
-    SSN = /(?<![0-9])[0-9]{3}(?:[^0-9]{0,2}|[\p{Space}\p{Pd}.]+)[0-9]{2}(?:[^0-9]{0,2}|[\p{Space}\p{Pd}.]+)[0-9]{4}(?![0-9])/
-    Page = Data.define(:number, :bytes, :text, :issue, :has_image)
+    Page = Data.define(:number, :bytes, :text, :original_text, :issue, :has_image, :possible_ssn)
 
     def self.read(file)
       raise Invalid, "Choose a PDF up to 10 MB." unless file.respond_to?(:read) && file.respond_to?(:size) &&
@@ -38,12 +37,12 @@ module EmployeeDocuments
       pages.map.with_index(1) do |page, number|
         original_page = original_pages.fetch(number - 1)
         original_text = scan_text(original_page)
-        if (issue = issue_for(original_text))
-          next Page.new(number:, bytes: nil, text: nil, issue:, has_image: false)
+        if issue_for(original_text)
+          next unreadable_page(number)
         end
 
         if page[:Annots].present? || page[:AA].present?
-          next Page.new(number:, bytes: nil, text: nil, issue: "unreadable", has_image: false)
+          next unreadable_page(number)
         end
 
         page.except!(:Metadata, :PieceInfo, :Thumb)
@@ -53,11 +52,11 @@ module EmployeeDocuments
         bytes = split.to_pdf
         archived_page = PDF::Reader.new(StringIO.new(bytes)).page(1)
         archived_text = scan_text(archived_page)
-        issue = issue_for(archived_text)
-        has_image = !issue && [ original_page, archived_page ].any? do |candidate|
-          image_xobjects?(candidate.objects, candidate.xobjects)
-        end
-        Page.new(number:, bytes: issue ? nil : bytes, text: issue ? nil : archived_text, issue:, has_image:)
+        next unreadable_page(number) if issue_for(archived_text)
+
+        has_image = [ original_page, archived_page ].any? { |candidate| PdfImageReview.new(candidate).required? }
+        possible_ssn = [ original_text, archived_text ].any? { |text| QuickbooksStubNumbers.possible_ssn?(text) }
+        Page.new(number:, bytes:, text: archived_text, original_text:, issue: nil, has_image:, possible_ssn:)
       end
     rescue PDF::Reader::MalformedPDFError, PDF::Reader::UnsupportedFeatureError, PDF::Reader::InvalidPageError,
       CombinePDF::ParsingError, CombinePDF::EncryptionError, EncodingError
@@ -69,29 +68,13 @@ module EmployeeDocuments
     end
     private_class_method :scan_text
 
+    def self.unreadable_page(number)
+      Page.new(number:, bytes: nil, text: nil, original_text: nil, issue: "unreadable", has_image: false, possible_ssn: false)
+    end
+
     def self.issue_for(text)
-      variants = [ text, text.gsub(/(?<=[0-9]) (?=[0-9])/, "") ]
-      return "full_ssn" if variants.any? { |variant| variant.lines.any? { |line| /\bSSN\b/i.match?(line) && SSN.match?(line) } }
-      return "possible_ssn" if variants.any? { |variant| SSN.match?(variant) }
-      return "unreadable" if text.blank? || text.include?("\uFFFD")
-
-      nil
+      text.blank? || text.include?("\uFFFD")
     end
-    def self.image_xobjects?(objects, xobjects)
-      pending = xobjects.values
-      seen = Set.new
-      until pending.empty?
-        stream = objects.deref(pending.pop)
-        next unless stream.is_a?(PDF::Reader::Stream) && seen.add?(stream.object_id)
-        return true if stream.hash[:Subtype] == :Image
-        next unless stream.hash[:Subtype] == :Form
-
-        resources = objects.deref_hash(stream.hash[:Resources]) || {}
-        pending.concat((objects.deref_hash(resources[:XObject]) || {}).values)
-      end
-      false
-    end
-
-    private_class_method :issue_for, :image_xobjects?
+    private_class_method :issue_for, :unreadable_page
   end
 end

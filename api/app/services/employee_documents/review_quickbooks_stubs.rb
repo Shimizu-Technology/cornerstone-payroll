@@ -24,7 +24,7 @@ module EmployeeDocuments
 
         check = match.check
         result.merge!(employee_name: check.employee.full_name, pay_date: check.pay_date,
-          net_pay: check.net_pay.to_s("F"), check_number: check.check_number)
+          net_pay: check.net_pay.to_s("F"), check_number: check.check_number, has_image: match.page.has_image)
         if (original = originals[check.id])
           result.merge(status: original.sha256 == review_claim(match)["sha256"] ? "already_posted" : "conflicting_original")
         else
@@ -35,15 +35,27 @@ module EmployeeDocuments
 
     # Parse and scan outside the write transaction. Confirm repeats the match
     # against the current source records using only the scanned pages.
-    def prepare(tokens:, image_tokens:)
-      @image_tokens = image_tokens
-      submitted = tokens + image_tokens
+    def prepare(tokens:, image_tokens:, number_tokens:)
+      @token_statuses = { "matched" => tokens, "image_review" => image_tokens, "possible_ssn" => number_tokens }
+      submitted = @token_statuses.values.flatten
       raise Invalid, "Select pages from the current preview." if submitted.empty? || submitted.uniq != submitted
 
       @claims = submitted.to_h { |token| [ token, verifier.verified(token, purpose: PURPOSE) ] }
       raise Invalid, "This preview expired. Upload the file again." if @claims.value?(nil)
 
       reviewed_matches
+    end
+
+    def view_page(token)
+      claim = verifier.verified(token, purpose: PURPOSE)
+      raise Invalid, "This preview expired. Upload the file again." unless claim
+
+      match = matches.find { |candidate| candidate.page.number == claim["page"] }
+      unless match&.check && match.status.in?(%w[image_review possible_ssn]) && claim == review_claim(match)
+        raise Invalid, "The PDF or its matches changed. Upload it again."
+      end
+
+      match.page
     end
 
     def confirm
@@ -55,12 +67,7 @@ module EmployeeDocuments
     end
 
     def cleanup!
-      @storage_keys.each do |key|
-        R2StorageService.new.delete(key)
-      rescue StandardError => error
-        Rails.logger.error("QuickBooks stub rollback cleanup failed (#{error.class})")
-        Rails.error.report(error, handled: true)
-      end
+      @storage_keys.each { |key| FreezePdf.remove_uncommitted_object(key) }
     end
 
     private
@@ -71,12 +78,20 @@ module EmployeeDocuments
         match = by_page[claim["page"]]
         raise Invalid, "The PDF or its matches changed. Upload it again." unless match&.check && claim == review_claim(match)
 
-        if match.page.has_image != @image_tokens.include?(token)
-          raise Invalid, "Page #{match.page.number} has an image. Check it by eye and tick “I checked this page”."
+        unless @token_statuses.fetch(match.status).include?(token) && viewed_if_required?(claim)
+          raise Invalid, "Open page #{match.page.number}, review it, and tick “I checked this page”."
         end
 
         match
       end
+    end
+
+    def viewed_if_required?(claim)
+      return true if claim["review_status"] == "matched"
+
+      AuditLog.where(company_id: @company.id, user_id: @actor.id, action: "quickbooks_stub_uploads#review_page_viewed",
+        created_at: 30.minutes.ago..)
+        .where("metadata @> ?::jsonb", { page: claim.fetch("page"), sha256: claim.fetch("sha256") }.to_json).exists?
     end
 
     def matches
@@ -88,7 +103,7 @@ module EmployeeDocuments
       {
         "company" => @company.id, "actor" => @actor.id, "page" => match.page.number,
         "check" => match.check.id, "sha256" => Digest::SHA256.hexdigest(match.page.bytes),
-        "has_image" => match.page.has_image
+        "review_status" => match.status, "has_image" => match.page.has_image
       }
     end
 

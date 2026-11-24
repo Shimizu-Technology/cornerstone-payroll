@@ -343,8 +343,8 @@ class ApiClient {
   }
 
   // POST multipart form data returning a Blob (for previews built from an unsaved upload)
-  async postFormBlob(endpoint: string, formData: FormData): Promise<BlobDownload> {
-    const initiatingCompanyId = this.activeCompanyId;
+  async postFormBlob(endpoint: string, formData: FormData, options: Pick<RequestOptions, 'companyId'> = {}): Promise<BlobDownload> {
+    const initiatingCompanyId = options.companyId !== undefined ? options.companyId : this.activeCompanyId;
     // Scope headers are read before waiting for the token, so a switch made
     // while it resolves can't redirect this request to another organization.
     const headers: Record<string, string> = this.financeHeaders(endpoint);
@@ -6677,19 +6677,21 @@ export interface HistoricalReportResponse {
 export type QuickbooksStubPreviewPage =
   | {
       page: number;
-      status: 'matched' | 'image_review';
+      status: 'matched' | 'image_review' | 'possible_ssn';
+      has_image?: boolean;
       employee_name: string;
       pay_date: string;
       net_pay: string;
       check_number: string | null;
       review_token: string;
     }
-  | { page: number; status: 'full_ssn' | 'possible_ssn' | 'unreadable' | 'ambiguous' | 'duplicate_page' | 'unmatched' | 'already_posted' | 'conflicting_original' };
+  | { page: number; status: 'full_ssn' | 'unreadable' | 'ambiguous' | 'duplicate_page' | 'unmatched' | 'already_posted' | 'conflicting_original' };
 
 export interface QuickbooksCheckWarning {
   employee_id: number;
   employee_name: string;
   row_count: number;
+  payday_count: number;
   duplicate_groups: number;
 }
 
@@ -6699,11 +6701,18 @@ export const quickbooksStubUploadsApi = {
     form.append('upload', file);
     return api.postForm<{ data: QuickbooksStubPreviewPage[] }>('/admin/quickbooks_stub_upload/preview', form, { companyId });
   },
-  confirm(companyId: number, file: File, tokens: string[], imageTokens: string[]) {
+  viewPage(companyId: number, file: File, token: string) {
+    const form = new FormData();
+    form.append('upload', file);
+    form.append('review_token', token);
+    return api.postFormBlob('/admin/quickbooks_stub_upload/view_page', form, { companyId });
+  },
+  confirm(companyId: number, file: File, tokens: string[], imageTokens: string[], numberTokens: string[]) {
     const form = new FormData();
     form.append('upload', file);
     tokens.forEach((token) => form.append('review_tokens[]', token));
     imageTokens.forEach((token) => form.append('image_review_tokens[]', token));
+    numberTokens.forEach((token) => form.append('number_review_tokens[]', token));
     return api.postForm<{ data: Array<{ document_id: number; historical_paycheck_id: number }> }>(
       '/admin/quickbooks_stub_upload/confirm', form, { companyId },
     );

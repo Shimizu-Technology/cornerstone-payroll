@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_25_103300) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -690,10 +690,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.index [ "migration_source_company_id" ], name: "index_companies_on_migration_source_company_id"
     t.index [ "name" ], name: "index_companies_on_name"
     t.index [ "organization_id" ], name: "index_companies_on_organization_id"
+    t.check_constraint "(num_nonnulls(brand_logo_storage_key, brand_logo_content_type, brand_logo_sha256, brand_logo_byte_size) = ANY (ARRAY[0, 4])) AND (brand_logo_content_type IS NULL OR (brand_logo_content_type::text = ANY (ARRAY['image/png'::character varying::text, 'image/webp'::character varying::text]))) AND (brand_logo_sha256 IS NULL OR brand_logo_sha256::text ~ '^[0-9a-f]{64}$'::text)", name: "company_brand_logo_shape"
     t.check_constraint "migration_rehearsal_status IS NULL OR (migration_rehearsal_status::text = ANY (ARRAY['pending'::character varying::text, 'ready'::character varying::text, 'failed'::character varying::text]))", name: "companies_migration_rehearsal_status_check"
     t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL AND test_workspace_purpose IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND migration_source_company_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL AND test_workspace_purpose IS NOT NULL AND (test_workspace_purpose::text <> 'migration_rehearsal'::text OR migration_source_batch_id IS NOT NULL)", name: "companies_test_workspace_shape_check"
     t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
-    t.check_constraint "(num_nonnulls(brand_logo_storage_key, brand_logo_content_type, brand_logo_sha256, brand_logo_byte_size) = ANY (ARRAY[0, 4])) AND (brand_logo_content_type IS NULL OR (brand_logo_content_type::text = ANY (ARRAY['image/png'::character varying, 'image/webp'::character varying]::text[]))) AND (brand_logo_sha256 IS NULL OR brand_logo_sha256::text ~ '^[0-9a-f]{64}$'::text)", name: "company_brand_logo_shape"
     t.check_constraint "regular_pay_threshold > 0 AND regular_pay_threshold <= regular_pay_lookback AND regular_pay_lookback <= 24", name: "regular_pay_rule"
     t.check_constraint "subdomain_slug IS NULL OR payroll_environment::text = 'live'::text", name: "company_subdomain_requires_live_payroll"
     t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['sandbox'::character varying::text, 'migration_rehearsal'::character varying::text, 'training_replay'::character varying::text, 'backup_snapshot'::character varying::text]))", name: "companies_test_workspace_purpose_check"
@@ -1096,6 +1096,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.string "payment_line"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "payroll_facts_sha256"
+    t.datetime "payroll_facts_checked_at"
+    t.string "withdrawal_reason"
     t.index [ "company_id" ], name: "index_employee_documents_on_company_id"
     t.index [ "employee_id", "tax_year", "revision" ], name: "idx_on_employee_id_tax_year_revision_dbe51f3d5c", unique: true, where: "(tax_year IS NOT NULL)"
     t.index [ "historical_paycheck_id", "revision" ], name: "idx_on_historical_paycheck_id_revision_42100f7406", unique: true, where: "(historical_paycheck_id IS NOT NULL)"
@@ -1189,11 +1192,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
   end
 
   create_table "employee_placeholder_emails", force: :cascade do |t|
-    t.bigint "organization_id", null: false
-    t.string "email", null: false
-    t.string "reason"
-    t.bigint "marked_by_id"
     t.datetime "created_at", null: false
+    t.string "email", null: false
+    t.bigint "marked_by_id"
+    t.bigint "organization_id", null: false
+    t.string "reason"
     t.datetime "updated_at", null: false
     t.index [ "marked_by_id" ], name: "index_employee_placeholder_emails_on_marked_by_id"
     t.index [ "organization_id", "email" ], name: "idx_employee_placeholder_emails_org_email", unique: true
@@ -1552,7 +1555,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.index [ "test_workspace_source_employee_id" ], name: "idx_employees_training_source", where: "(test_workspace_source_employee_id IS NOT NULL)"
     t.check_constraint "configuration_review_status::text = ANY (ARRAY['complete'::character varying::text, 'needs_review'::character varying::text])", name: "employees_configuration_review_status_check"
     t.check_constraint "configuration_source IS NULL OR configuration_source::text = 'quickbooks_history'::text", name: "employees_configuration_source_check"
-    t.check_constraint "contact_source IS NULL OR (contact_source::text = ANY (ARRAY['client'::character varying, 'staff'::character varying, 'employee'::character varying, 'import'::character varying]::text[]))", name: "employees_contact_source_check"
+    t.check_constraint "contact_source IS NULL OR (contact_source::text = ANY (ARRAY['client'::character varying::text, 'staff'::character varying::text, 'employee'::character varying::text, 'import'::character varying::text]))", name: "employees_contact_source_check"
     t.check_constraint "jsonb_typeof(configuration_review_items) = 'array'::text", name: "employees_configuration_review_items_array"
     t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying::text, 'direct_deposit'::character varying::text]))", name: "employees_payment_delivery_method_check"
     t.check_constraint "portal_pending_approval = false OR status::text = 'inactive'::text", name: "employees_portal_pending_inactive_check"

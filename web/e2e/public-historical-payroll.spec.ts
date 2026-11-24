@@ -2039,7 +2039,7 @@ test('posts only reviewed QuickBooks originals', async ({ page }) => {
   await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
     data: [],
     meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50, archive, original_stub_upload_enabled: true,
-      quickbooks_check_warnings: [{ employee_id: 1, employee_name: 'Jesse Example', row_count: 59, duplicate_groups: 1 }] },
+      quickbooks_check_warnings: [{ employee_id: 1, employee_name: 'Jesse Example', row_count: 59, payday_count: 16, duplicate_groups: 1 }] },
   }));
   await page.route('**/api/v1/admin/quickbooks_stub_upload/preview', (route) => fulfillJson(route, {
     data: [
@@ -2048,6 +2048,10 @@ test('posts only reviewed QuickBooks originals', async ({ page }) => {
       { page: 3, status: 'full_ssn' },
       { page: 4, status: 'image_review', employee_name: 'Pat Worker', pay_date: '2026-01-20', net_pay: '700', review_token: 'image-page' },
     ],
+  }));
+  await page.route('**/api/v1/admin/quickbooks_stub_upload/view_page', (route) => route.fulfill({
+    contentType: 'application/pdf',
+    path: '../api/lib/assets/form500_template.pdf',
   }));
   await page.route('**/api/v1/admin/quickbooks_stub_upload/confirm', async (route) => {
     expect(route.request().headers()['x-company-id']).toBe('1');
@@ -2063,17 +2067,23 @@ test('posts only reviewed QuickBooks originals', async ({ page }) => {
   });
   await page.getByRole('button', { name: 'Preview matches' }).click();
   await expect(page.getByText('Page 3 · Re-export without the full SSN.')).toBeVisible();
-  await expect(page.getByText(/Jesse Example has 59 rows/)).toBeVisible();
+  await expect(page.getByText(/Jesse Example has 59 checks on 16 paydays/)).toBeVisible();
   const post = page.getByRole('button', { name: /Post selected stubs/ });
   await expect(post).toBeDisabled();
-  await expect(page.getByRole('checkbox', { name: /^Page [123]/ })).toHaveCount(2);
+  await expect(page.getByRole('checkbox', { name: /^Select page [123]$/ })).toHaveCount(2);
   const imageReview = page.getByRole('checkbox', { name: /I checked this page/ });
   await page.getByRole('button', { name: 'Select all matched' }).click();
-  await expect(page.getByRole('checkbox', { name: /Jesse Example/ })).toBeChecked();
-  await expect(imageReview).not.toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Select page 1' })).toBeChecked();
+  await expect(imageReview).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: 'Select page 4' })).toBeDisabled();
+  await page.getByRole('button', { name: 'View page 4' }).click();
+  await expect(page.getByRole('dialog', { name: 'QuickBooks page 4' })).toBeVisible();
+  await expect(page.getByRole('dialog').locator('canvas[aria-hidden="false"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Back to matches' }).click();
   await imageReview.check();
+  await page.getByRole('checkbox', { name: 'Select page 4' }).check();
   await post.click();
   await expect(page.getByText('1 original stub posted.')).toBeVisible();
-  await expect(page.getByRole('checkbox', { name: /Jesse Example/ })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'Select page 1' })).toHaveCount(0);
   await expect(imageReview).toHaveCount(0);
 });

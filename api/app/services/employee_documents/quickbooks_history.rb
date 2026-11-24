@@ -5,7 +5,7 @@ module EmployeeDocuments
     AMOUNTS = (HistoricalPaycheckAdjustment::MONEY_FIELDS + [ :hours_total ]).freeze
 
     def self.scope(company_id)
-      cutover = PayPeriod.committed.where(company_id: company_id, source_pay_period_id: nil)
+      cutover = PayPeriod.committed.where(company_id: company_id, source_pay_period_id: nil, test_workspace_role: nil, test_workspace_source_pay_period_id: nil)
         .where("promotion_payment_disposition IS DISTINCT FROM 'record_only'").minimum(:pay_date)
       return HistoricalPaycheck.none unless cutover
 
@@ -18,13 +18,17 @@ module EmployeeDocuments
 
     def self.review_warnings(company_id)
       checks = scope(company_id)
-      counts = checks.group(:employee_id).having("COUNT(*) > COUNT(DISTINCT historical_paychecks.pay_date)").count
+      counts = checks.group("historical_paychecks.employee_id")
+        .having("COUNT(*) > COUNT(DISTINCT historical_paychecks.pay_date)")
+        .pluck(Arel.sql("historical_paychecks.employee_id, COUNT(*), COUNT(DISTINCT historical_paychecks.pay_date)"))
+        .to_h { |employee_id, rows, paydays| [ employee_id, [ rows, paydays ] ] }
       duplicate_groups = checks.group(:employee_id, :pay_date, :net_pay, :gross_pay).having("COUNT(*) > 1").count
         .keys.map(&:first).tally
-      Employee.where(company_id: company_id, id: counts.keys | duplicate_groups.keys).map do |employee|
+      Employee.where(company_id: company_id, id: counts.keys).map do |employee|
+        row_count, payday_count = counts.fetch(employee.id)
         {
           employee_id: employee.id, employee_name: employee.full_name,
-          row_count: counts.fetch(employee.id, 0), duplicate_groups: duplicate_groups.fetch(employee.id, 0)
+          row_count: row_count, payday_count: payday_count, duplicate_groups: duplicate_groups.fetch(employee.id, 0)
         }
       end.sort_by { |warning| warning[:employee_name] }
     end
