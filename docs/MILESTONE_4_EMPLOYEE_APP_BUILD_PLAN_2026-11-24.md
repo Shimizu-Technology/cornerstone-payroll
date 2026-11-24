@@ -24,7 +24,7 @@ Bank changes stay **off** for MoSa's in this milestone. Payroll holds no bank de
 ### What milestone 4 deliberately does not do
 
 - **No documents or policy sign-offs.** They move to Milestone 5 with onboarding (§0 D2). The code catalog already puts `employee_portal.features.documents` and `w4_requests` in Milestone 5 (`api/app/services/operating_profile_catalog.rb:73,76`).
-- **No bank changes for MoSa's** (§0 D3). The switch stays off.
+- **No bank changes** (§0 D3). The switch stays locked for every client. Building the bank-change flow waits until a client needs it, an SMS provider is chosen and counsel answers the direct deposit question, no earlier than Milestone 5.
 - **No electronic-only delivery.** Employees keep getting stubs and W-2s the way they do today, and the app is an extra copy. Electronic-only delivery waits for the lawyer's answer on Guam UETA consent and starts with the 2027 W-2s (§0 D5).
 - **No 1099 copies in the app.** MoSa's has no contractors (§2). The 1099 recipient copy can be added when a client with contractors joins.
 - **No text messages.** Codes come from Clerk by email. No SMS provider is chosen (M3 plan, "No SMS provider").
@@ -253,6 +253,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   - Terminate makes the link *former*, with `former_access_until = termination date + former_access_years`.
   - Deactivating without a termination date revokes the link with a reason. It doesn't start a former window.
   - Reactivation and rehire issue a new invite.
+  - **A rehired employee-only person keeps their login.** If their `portal_employee` user was deactivated when their last link closed, the new invite goes through activation, not the claim path. The claim path refuses deactivated users. Activation re-checks the token or code plus DOB and SSN-4, then reactivates the same user and binds the new link in one transaction. The old link stays closed, and the Clerk sessions revoked at deactivation stay revoked, so the person signs in fresh. If they're a staff or client user too, their login was never deactivated and they use the claim path as usual.
   - Closing the last eligible link deactivates the `portal_employee` user and revokes their sessions (D12).
 - **`ExpireEmployeeLinksJob`** runs daily. It expires unused invites and closes former access when the window ends.
 - **Audit and context fixes:**
@@ -371,7 +372,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
 - **Home address goes through MoSa's approval (D4):**
   - Use the existing `EmployeeChangeRequest`. Keep `requested_by_id` as the signed-in user, and add a nullable `requested_by_link_id`. That's simpler than a polymorphic requester and keeps today's validations and serializers (`employee_change_request.rb:63`).
   - **Add a client approval path, limited to employee-submitted address requests:** `requested_by_link_id` is present, the request is an update, the proposed fields are only `address_line1`, `address_line2`, `city`, `state` and `zip`, and there's no sensitive payload. A client user with access to the company approves or rejects those. Every other change request, including client-submitted pay rate, W-4, SSN and new-hire requests, stays staff-only with `manage_client_configuration` (`employee_change_request.rb:129-137`). Cornerstone can still approve address requests too.
-  - **No self-approval:** a request about the approver's own employee record must be approved by someone else. A client admin can still edit their own address directly in the client portal, as any client edit works today. That edit skips approval but goes straight onto Cornerstone's confirm list.
+  - **No self-approval:** a request about the approver's own employee record must be approved by someone else. **A client admin's edit to their own address** goes through the same approval. When a client user edits the employee record linked to their own login (through `employee_account_links`, or the same-person confirmation in M4-3), the client portal turns the address change into an address request for another MoSa's admin or Cornerstone to approve. Direct edits to other employees' addresses still apply right away and go onto Cornerstone's confirm list.
   - On approval the address applies, the employee sees "Your W-2 will be mailed here", and the change goes on Cornerstone's confirm list.
   - The employee sees the request's status and the decision.
 - **Cornerstone's "Changes to confirm" list:** every contact or address change made by an employee or a client user, with before and after, who made it, and a "Confirmed on payroll" button. Starting a payroll run for the company shows a warning while any are unconfirmed, but doesn't block the run. Filters and a "Confirm all" action handle initial entry, such as MoSa's filling in 61 employees' details at once. The list is stored in an RLS-protected table.
@@ -418,7 +419,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   - **The employee's record:** an "Employee app" panel showing status (not invited / invited / active / locked / former / revoked), with invite, resend, print a sign-up code, unlock and revoke. All of them are audited.
   - **Company rollout page:** how many are ready to invite, invited, active, need contact details, or are locked. Bulk-invite a chosen wave.
   - **Sign in as, view only (D10b):**
-    - **Who and what:** an org admin with a separate permission (Leon and Dafne to start) picks a target and sees exactly what that person sees, worked out from that person's roles, company access and link, never more. The target can be a client user or an employee record. It can never be another staff user, or a person or record in another organization.
+    - **Who and what:** an org admin with a separate permission (Leon and Dafne to start), who also passes `payroll_access_allowed?` and has access to the target's company, the same checks payroll-sensitive staff paths use (`api/app/models/employee_change_request.rb:132-133`, `api/app/models/user.rb:109-112`), picks a target and sees exactly what that person sees, worked out from that person's roles, company access and link, never more. The target can be a client user or an employee record. It can never be another staff user, or a person or record in another organization.
     - **The grant:** a server-side row (staff user, one company, target user or target employee, mode, reason, expiry). Starting it needs a fresh two-step check (M4-1) and a reason. It lasts at most 30 minutes, with a banner the whole time ("Viewing as Emma Pleadwell, view only") and an end button.
     - **Where it renders:**
       - Client views render in the main app.
