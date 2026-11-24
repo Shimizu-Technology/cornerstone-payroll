@@ -27,7 +27,16 @@ function messages(value: unknown): string[] {
 }
 
 /** Preserve the server's explanation and validation details in every API path. */
-export function apiErrorMessage(data: unknown, status: number, options: { readOnly?: boolean } = {}): string {
+// "9:42 PM" for a Retry-After delay, so a 429 can say when to try again.
+export function retryTimeLabel(retryAfterSeconds: number, now: Date = new Date()): string {
+  return new Date(now.getTime() + retryAfterSeconds * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+export function apiErrorMessage(
+  data: unknown,
+  status: number,
+  options: { readOnly?: boolean; retryAfterSeconds?: number; now?: Date } = {},
+): string {
   const payload = record(data);
   const primary = messages(payload.error);
   const errors = Array.isArray(payload.errors) ? messages(payload.errors) : [];
@@ -47,6 +56,14 @@ export function apiErrorMessage(data: unknown, status: number, options: { readOn
     422: 'Some values could not be accepted. Check the form and try again.',
     429: 'Too many requests were sent. Wait a moment and try again.',
   };
+  // When the server says how long to wait, say it once as a time instead of "wait a moment".
+  const retryAt = status === 429 && options.retryAfterSeconds && options.retryAfterSeconds > 0
+    ? `Try again after ${retryTimeLabel(options.retryAfterSeconds, options.now)}.`
+    : null;
+  if (retryAt) {
+    const base = explanations.length ? explanations.join('; ') : 'Too many requests were sent.';
+    return `${base} ${retryAt}`;
+  }
   if (!explanations.length) return fallback[status] || (status >= 500
     ? (options.readOnly
       ? 'The server could not prepare this download. Nothing was changed. Try again; if it keeps failing, contact support with the page and action.'
@@ -134,7 +151,10 @@ async function fetchWithFeedback(input: RequestInfo | URL, init?: RequestInit): 
 async function readApiError(response: Response, options?: { readOnly?: boolean; notifyMaintenance?: boolean }): Promise<ApiError> {
   const data: unknown = await response.json().catch(() => ({}));
   const payload = record(data);
-  const message = apiErrorMessage(data, response.status, options);
+  const headerSeconds = Number(response.headers.get('Retry-After'));
+  const payloadSeconds = Number(payload.retry_after_seconds);
+  const retryAfterSeconds = [headerSeconds, payloadSeconds].find((value) => Number.isSafeInteger(value) && value > 0);
+  const message = apiErrorMessage(data, response.status, { ...options, retryAfterSeconds });
   const error = new ApiError(message, response.status, payload.details as ApiError['details'], data);
   if (response.status === 403 && payload.code === 'mfa_required') {
     globalThis.window?.dispatchEvent(new CustomEvent(MFA_REQUIRED_EVENT, { detail: message }));
@@ -554,20 +574,41 @@ export const employeesApi = {
     employment_type?: string;
     configuration_review_status?: 'complete' | 'needs_review';
     intake_status?: 'incomplete';
+    needs_contact_details?: boolean;
+    contact_status?: 'needs_contact_details';
     search?: string;
     sort_by?: 'name' | 'department' | 'rate' | 'status';
     sort_direction?: 'asc' | 'desc';
     page?: number;
     per_page?: number;
     group_by?: string;
+    /** "contact" returns contact-only records for the Contact details page. */
+    view?: 'contact';
   }, signal?: AbortSignal): Promise<{ data: Employee[]; meta: PaginationMeta }> =>
     api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params, { signal }),
   get: (id: number, companyId?: number, statusEffectiveDate?: string): Promise<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }> =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, { status_effective_date: statusEffectiveDate }, { companyId }),
   create: (data: EmployeeFormData & { company_id: number }) =>
-    api.post<{ data: Employee }>('/admin/employees', { employee: data }),
-  update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
-    api.patch<{ data: Employee; payment_method_review?: { reapproval_pay_period_ids: number[] }; compensation_warnings?: string[] }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
+    api.post<{ data: Employee; contact_warnings?: import('@/types').EmployeeContactWarning[] }>('/admin/employees', { employee: data }),
+  update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) => {
+    const { confirm_same_person_email, row_revision, baseline_values, response_view, ...employeePayload } = data;
+    return api.patch<{
+      data: Employee;
+      payment_method_review?: { reapproval_pay_period_ids: number[] };
+      compensation_warnings?: string[];
+      contact_warnings?: import('@/types').EmployeeContactWarning[];
+    }>(
+      `/admin/employees/${id}`,
+      {
+        employee: employeePayload,
+        ...(confirm_same_person_email ? { confirm_same_person_email: true } : {}),
+        ...(row_revision ? { row_revision } : {}),
+        ...(baseline_values ? { baseline_values } : {}),
+        ...(response_view ? { response_view } : {}),
+      },
+      { companyId },
+    );
+  },
   cancelScheduledCompensation: (id: number, date: string, reason: string, revision: string, companyId?: number) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/cancel_scheduled_compensation`, {
       employee: { compensation_effective_on: date, compensation_change_reason: reason, compensation_revision: revision },
@@ -597,7 +638,7 @@ export const employeesApi = {
   updateTimeRecord: (employeeId: number, recordId: number, time_record: import('@/types').DailyTimeRecordInput) =>
     api.patch<{ data: import('@/types').DailyTimeRecord }>(`/admin/employees/${employeeId}/time_records/${recordId}`, { time_record }),
   transitionTaxClassification: (id: number, transition: EmployeeClassificationTransition) =>
-    api.post<{ data: Employee; previous_employee: { id: number; name: string }; message: string }>(
+    api.post<{ data: Employee; previous_employee: { id: number; name: string }; message: string; contact_notices?: string[] }>(
       `/admin/employees/${id}/transition_tax_classification`,
       { transition },
     ),
@@ -776,19 +817,36 @@ export const clientEmployeesApi = {
     status?: string;
     department_id?: number;
     employment_type?: string;
+    needs_contact_details?: boolean;
+    contact_status?: 'needs_contact_details';
     search?: string;
     sort_by?: 'name' | 'department' | 'rate' | 'status';
     sort_direction?: 'asc' | 'desc';
     page?: number;
     per_page?: number;
     group_by?: string;
+    /** "contact" returns contact-only records for the Contact details page. */
+    view?: 'contact';
   }) => api.get<{ data: Employee[]; meta: PaginationMeta }>('/client/employees', params),
   get: (id: number) =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/client/employees/${id}`),
-  create: (data: EmployeeFormData) =>
-    api.post<ClientEmployeeUpdateResponse>('/client/employees', { employee: data }),
-  update: (id: number, data: Partial<EmployeeFormData>) =>
-    api.patch<ClientEmployeeUpdateResponse>(`/client/employees/${id}`, { employee: data }),
+  create: (data: EmployeeFormData) => {
+    const { confirm_same_person_email, ...employeePayload } = data;
+    return api.post<ClientEmployeeUpdateResponse>('/client/employees', {
+      employee: employeePayload,
+      ...(confirm_same_person_email ? { confirm_same_person_email: true } : {}),
+    });
+  },
+  update: (id: number, data: Partial<EmployeeFormData>) => {
+    const { confirm_same_person_email, row_revision, baseline_values, response_view, ...employeePayload } = data;
+    return api.patch<ClientEmployeeUpdateResponse>(`/client/employees/${id}`, {
+      employee: employeePayload,
+      ...(confirm_same_person_email ? { confirm_same_person_email: true } : {}),
+      ...(row_revision ? { row_revision } : {}),
+      ...(baseline_values ? { baseline_values } : {}),
+      ...(response_view ? { response_view } : {}),
+    });
+  },
 };
 
 export const clientDepartmentsApi = {
@@ -4504,6 +4562,7 @@ export interface ClientEmployeeUpdateResponse {
   data: Employee;
   change_request?: EmployeeChangeRequest | null;
   applied_direct_fields?: string[];
+  contact_warnings?: import('@/types').EmployeeContactWarning[];
   message?: string;
 }
 
