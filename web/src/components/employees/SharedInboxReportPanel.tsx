@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Building2, CheckCircle2, MailWarning, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, Building2, CheckCircle2, Flag, FlagOff, MailWarning, RefreshCw, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,11 +13,11 @@ import {
 } from '@/components/ui/dialog';
 import { Alert } from '@/components/ui/alert';
 import {
-  employeeContactHygieneApi,
+  staffContactHygieneApi,
   type SharedEmailCompanySummary,
   type SharedEmailReportEntry,
   type SharedEmailReportResponse,
-} from '@/services/api';
+} from '@/services/staffContactHygieneApi';
 
 interface SharedInboxReportPanelProps {
   activeCompanyId?: number;
@@ -34,14 +34,14 @@ interface PendingClearTarget {
 const CLASSIFICATION_META: Record<SharedEmailReportEntry['classification'], { label: string; variant: 'danger' | 'warning' | 'info' }> = {
   shared_inbox: { label: 'Shared inbox', variant: 'danger' },
   placeholder: { label: 'Placeholder', variant: 'danger' },
-  shared: { label: 'Shared in company', variant: 'warning' },
+  shared: { label: 'Duplicate candidate', variant: 'warning' },
 };
 
 const REASON_LABELS: Record<string, string> = {
+  marked_placeholder: 'Marked placeholder',
   configured_placeholder: 'Configured placeholder',
   placeholder_pattern: 'Placeholder format',
-  shared_across_companies: 'Shared across companies',
-  shared_inbox: 'Mass-shared inbox',
+  shared_across_companies: 'Shared across configurable companies',
   shared_within_company: 'Used by multiple employees',
 };
 
@@ -59,6 +59,7 @@ export function SharedInboxReportPanel({
   const [confirmed, setConfirmed] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearError, setClearError] = useState<string | null>(null);
+  const [markingEmail, setMarkingEmail] = useState<string | null>(null);
   const onReportLoadedRef = useRef(onReportLoaded);
   onReportLoadedRef.current = onReportLoaded;
 
@@ -66,7 +67,7 @@ export function SharedInboxReportPanel({
     setLoading(true);
     setError(null);
     try {
-      const response = await employeeContactHygieneApi.sharedEmails();
+      const response = await staffContactHygieneApi.sharedEmails();
       setReport(response);
       onReportLoadedRef.current?.(response);
     } catch (caught) {
@@ -81,6 +82,7 @@ export function SharedInboxReportPanel({
   }, [loadReport]);
 
   const openConfirmDialog = (company: SharedEmailCompanySummary, entry: SharedEmailReportEntry) => {
+    if (!entry.clearable) return;
     setPendingTarget({ company, entry });
     setConfirmed(false);
     setClearError(null);
@@ -93,12 +95,42 @@ export function SharedInboxReportPanel({
     setClearError(null);
   };
 
+  const handleMarkPlaceholder = async (email: string) => {
+    if (readOnly || markingEmail) return;
+    setMarkingEmail(email);
+    setError(null);
+    try {
+      const response = await staffContactHygieneApi.markPlaceholderEmail({ email });
+      setSuccessMessage(response.message);
+      await loadReport();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not mark this email as a placeholder.');
+    } finally {
+      setMarkingEmail(null);
+    }
+  };
+
+  const handleUnmarkPlaceholder = async (email: string) => {
+    if (readOnly || markingEmail) return;
+    setMarkingEmail(email);
+    setError(null);
+    try {
+      const response = await staffContactHygieneApi.unmarkPlaceholderEmail({ email });
+      setSuccessMessage(response.message);
+      await loadReport();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not remove this email from the placeholder list.');
+    } finally {
+      setMarkingEmail(null);
+    }
+  };
+
   const handleConfirmClear = async () => {
     if (!pendingTarget || !confirmed || clearing) return;
     setClearing(true);
     setClearError(null);
     try {
-      const response = await employeeContactHygieneApi.clearSharedEmails({
+      const response = await staffContactHygieneApi.clearSharedEmails({
         company_id: pendingTarget.company.company_id,
         email: pendingTarget.entry.email,
       });
@@ -123,7 +155,7 @@ export function SharedInboxReportPanel({
         <div>
           <h2 className="font-display text-xl font-bold tracking-tight text-neutral-950">Shared and placeholder emails</h2>
           <p className="mt-1 text-sm text-neutral-600">
-            Summary counts by company across clients you configure. No employee names or other personal data are listed here. Clear one company at a time so cleared records move to Needs contact details.
+            Summary counts by company across clients you configure. No employee names or other personal data are listed here. Unmarked duplicates stay warning-only so families can share; mark confirmed shared inboxes as placeholders before bulk-clearing one company at a time.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void loadReport()} loading={loading} loadingLabel="Refreshing">
@@ -201,6 +233,7 @@ export function SharedInboxReportPanel({
                     <CardContent className="divide-y divide-neutral-200 p-0">
                       {company.emails.map((entry) => {
                         const meta = CLASSIFICATION_META[entry.classification] || CLASSIFICATION_META.shared;
+                        const isMarking = markingEmail === entry.email;
                         return (
                           <div
                             key={`${company.company_id}-${entry.email}`}
@@ -220,7 +253,7 @@ export function SharedInboxReportPanel({
                                 {entry.companies_count > 1 && (
                                   <span className="text-neutral-500">
                                     {' '}· <span className="tabular-nums">{entry.organization_total_count}</span> across{' '}
-                                    <span className="tabular-nums">{entry.companies_count}</span> companies
+                                    <span className="tabular-nums">{entry.companies_count}</span> configurable companies
                                   </span>
                                 )}
                               </p>
@@ -235,17 +268,47 @@ export function SharedInboxReportPanel({
                                 ))}
                               </div>
                             </div>
-                            <div className="shrink-0">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={readOnly}
-                                onClick={() => openConfirmDialog(company, entry)}
-                                className="w-full border-danger-200 text-danger-700 hover:border-danger-300 hover:bg-danger-50 hover:text-danger-800 sm:w-auto"
-                              >
-                                <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                                Clear to blank
-                              </Button>
+                            <div className="flex shrink-0 flex-wrap items-center gap-2">
+                              {entry.clearable ? (
+                                <>
+                                  {entry.unmarkable && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={readOnly || Boolean(markingEmail)}
+                                      loading={isMarking}
+                                      loadingLabel="Updating..."
+                                      onClick={() => void handleUnmarkPlaceholder(entry.email)}
+                                    >
+                                      <FlagOff className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                      Unmark
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={readOnly}
+                                    onClick={() => openConfirmDialog(company, entry)}
+                                    className="w-full border-danger-200 text-danger-700 hover:border-danger-300 hover:bg-danger-50 hover:text-danger-800 sm:w-auto"
+                                  >
+                                    <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                    Clear to blank
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={readOnly || Boolean(markingEmail)}
+                                  loading={isMarking}
+                                  loadingLabel="Marking..."
+                                  onClick={() => void handleMarkPlaceholder(entry.email)}
+                                  className="w-full sm:w-auto"
+                                >
+                                  <Flag className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                  Mark as placeholder
+                                </Button>
+                              )}
                             </div>
                           </div>
                         );
@@ -264,7 +327,7 @@ export function SharedInboxReportPanel({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-danger-800">
               <AlertTriangle className="h-5 w-5 shrink-0 text-danger-600" aria-hidden="true" />
-              Clear shared email for {pendingTarget?.company.company_name}?
+              Clear placeholder email for {pendingTarget?.company.company_name}?
             </DialogTitle>
             <DialogDescription>
               This clears <span className="font-mono font-semibold text-neutral-900">{pendingTarget?.entry.email}</span> to blank on{' '}
