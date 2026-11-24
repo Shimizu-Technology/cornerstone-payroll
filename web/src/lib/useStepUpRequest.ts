@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useAuth, useReverification } from '@clerk/react';
+import { isMfaRequiredCode, MFA_REQUIRED_EVENT } from '@/services/api';
 
 /**
  * Pass a request factory so Clerk can retry it with a fresh session token.
@@ -18,6 +19,10 @@ export function useStepUpRequest<Args extends unknown[]>(
     if (response.status !== 403) return { response };
 
     const hint = await response.clone().json().catch(() => null);
+    if (hint && typeof hint === 'object' && isMfaRequiredCode(hint.code)) {
+      const message = typeof hint.error === 'string' ? hint.error : undefined;
+      globalThis.window?.dispatchEvent(new CustomEvent(MFA_REQUIRED_EVENT, { detail: { code: hint.code, message } }));
+    }
     return { response, clerk_error: hint?.clerk_error };
   });
 

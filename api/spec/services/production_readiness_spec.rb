@@ -186,7 +186,7 @@ RSpec.describe ProductionReadiness do
     report = with_sample_token { readiness.run(live: true) }
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(32)
+    expect(report.checks.length).to eq(33)
     expect(cache.values).to be_empty
     expect(cache.deleted.length).to eq(1)
     expect(storage.objects).to be_empty
@@ -242,6 +242,94 @@ RSpec.describe ProductionReadiness do
       with_sample_token(key: OpenSSL::PKey::RSA.generate(2048)) do
         expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
       end
+    end
+  end
+
+  describe "the pre-flip MFA claim probe" do
+    let(:existing_check_name) { "Clerk session token includes the MFA enrollment claim" }
+    let(:pre_flip_check_name) { "Pre-flip MFA check: Clerk session token includes boolean two_factor_enabled claim" }
+
+    it "validates the sample token even while REQUIRE_MFA is false or unset" do
+      [ "false", nil ].each do |flag|
+        if flag.nil?
+          env.delete("REQUIRE_MFA")
+        else
+          env["REQUIRE_MFA"] = flag
+        end
+
+        report_without_sample = readiness.run(live: true)
+        expect(report_without_sample.failures.map(&:name)).to include(pre_flip_check_name)
+        expect(report_without_sample.failures.map(&:name)).not_to include(existing_check_name)
+
+        with_sample_token(claims: sample_claims.merge(two_factor_enabled: true)) do
+          report = readiness.run(live: true)
+          expect(report.checks.find { |check| check.name == pre_flip_check_name }.passed).to be(true)
+        end
+
+        with_sample_token(claims: sample_claims.merge(two_factor_enabled: false)) do
+          report = readiness.run(live: true)
+          expect(report.checks.find { |check| check.name == pre_flip_check_name }.passed).to be(true)
+        end
+      end
+    end
+
+    it "fails before flipping when the sample token omits two_factor_enabled or sends a non-boolean value" do
+      env["REQUIRE_MFA"] = "false"
+
+      [
+        sample_claims.except(:two_factor_enabled),
+        sample_claims.merge(two_factor_enabled: nil),
+        sample_claims.merge(two_factor_enabled: "true"),
+        sample_claims.merge(two_factor_enabled: "false"),
+        sample_claims.merge(two_factor_enabled: 1)
+      ].each do |claims|
+        with_sample_token(claims: claims) do
+          report = readiness.run(live: true)
+          expect(report.failures.map(&:name)).to include(pre_flip_check_name)
+          expect(report.failures.map(&:name)).not_to include(existing_check_name)
+        end
+      end
+    end
+
+    it "rejects an old, undated, sid-less, or wrongly signed sample token before flipping" do
+      env["REQUIRE_MFA"] = "false"
+
+      with_sample_token(claims: sample_claims.merge(iat: 20.minutes.ago.to_i, exp: 19.minutes.ago.to_i)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(pre_flip_check_name)
+      end
+
+      with_sample_token(claims: sample_claims.except(:iat)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(pre_flip_check_name)
+      end
+
+      with_sample_token(claims: sample_claims.except(:sid)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(pre_flip_check_name)
+      end
+
+      with_sample_token(key: OpenSSL::PKey::RSA.generate(2048)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(pre_flip_check_name)
+      end
+    end
+
+    it "accepts a recently issued sample that expired while earlier probes ran before flipping" do
+      env["REQUIRE_MFA"] = "false"
+
+      with_sample_token(claims: sample_claims.merge(iat: 2.minutes.ago.to_i, exp: 1.minute.ago.to_i)) do
+        expect(readiness.run(live: true).failures.map(&:name)).not_to include(pre_flip_check_name)
+      end
+    end
+
+    it "shares the JWKS lookup within a single readiness run when REQUIRE_MFA is enabled" do
+      jwks_requests = 0
+      allow(http_get).to receive(:call).and_wrap_original do |original, uri, token|
+        jwks_requests += 1 if uri.host == "clerk.example.com"
+        original.call(uri, token)
+      end
+
+      report = with_sample_token { readiness.run(live: true) }
+
+      expect(report).to be_passed
+      expect(jwks_requests).to eq(1)
     end
   end
 

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link, Navigate } from 'react-router';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { isMfaRequiredCode } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
@@ -28,40 +29,111 @@ const highlights = [
 ];
 
 function MfaPrompt() {
-  const { openUserProfile } = useClerk();
+  const clerk = useClerk();
   const { authProblem, refreshUser, signOut } = useAuth();
   const [checking, setChecking] = useState(false);
+  const [openedSettings, setOpenedSettings] = useState(false);
+  const [needsFreshSignIn, setNeedsFreshSignIn] = useState(false);
 
   async function checkVerification() {
     setChecking(true);
+    setNeedsFreshSignIn(false);
     try {
+      try {
+        await clerk.session?.reload?.();
+      } catch {
+        // Proceed to force-refresh the session token even if reload fails.
+      }
       await refreshUser({ skipTokenCache: true });
+      // If MFA is now verified, Login redirects to /app and unmounts this prompt.
+      // Staying mounted means the existing session still lacks a verified second factor
+      // (for example, fva[1] remains -1 after first-time enrollment).
+      setNeedsFreshSignIn(true);
     } finally {
       setChecking(false);
     }
   }
 
   return (
-    <div className="mb-6 space-y-3 rounded-2xl border border-neutral-200 p-4">
-      <h2 className="text-xl font-semibold text-neutral-900">Multi-factor authentication required</h2>
-      <p className="text-sm text-neutral-700">
-        Open your Clerk account settings and add a second factor under Security.
-        Then sign out and sign back in with that factor.
-      </p>
-      {authProblem?.signOutFailed && (
-        <p role="alert" className="text-sm text-neutral-700">Could not sign out. Try again.</p>
+    <div className="mb-6 space-y-4 rounded-2xl border border-neutral-200 bg-neutral-50/60 p-4 sm:p-5">
+      <div className="space-y-1.5">
+        <h2 className="text-xl font-semibold text-neutral-900">Multi-factor authentication required</h2>
+        <p className="text-sm leading-6 text-neutral-700">
+          Cornerstone Payroll requires two-step sign-in on this account before you can open payroll.
+        </p>
+      </div>
+
+      <ol className="list-decimal space-y-2 pl-5 text-sm leading-6 text-neutral-700">
+        <li>
+          Select <span className="font-semibold text-neutral-900">Open account settings</span>, go to{' '}
+          <span className="font-semibold text-neutral-900">Security &rarr; Two-step verification</span>, and add an{' '}
+          <span className="font-semibold text-neutral-900">authenticator app</span> (such as Google Authenticator,
+          Microsoft Authenticator, or 1Password).
+        </li>
+        <li>
+          <span className="font-semibold text-neutral-900">Save your backup codes</span> somewhere safe (such as a
+          password manager or printed copy kept apart from your phone) before closing the setup screen.
+        </li>
+        <li>
+          Select <span className="font-semibold text-neutral-900">Check verification</span> to refresh your session. If
+          that does not clear this screen, select{' '}
+          <span className="font-semibold text-neutral-900">Sign out and sign back in</span> and enter your 6-digit
+          authenticator code.
+        </li>
+      </ol>
+
+      {openedSettings && !needsFreshSignIn && (
+        <p role="status" className="rounded-xl border border-primary-200 bg-primary-50/70 px-3.5 py-2.5 text-sm text-primary-950">
+          Finished adding your authenticator app and saving your backup codes? Select{' '}
+          <span className="font-semibold">Check verification</span> below, or sign out and sign back in with your
+          6-digit code.
+        </p>
       )}
+
+      {needsFreshSignIn && (
+        <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 text-sm text-amber-950">
+          <p className="font-semibold">This sign-in still needs a fresh two-step check.</p>
+          <p className="mt-1 leading-6">
+            Adding an authenticator app updates your account, but a session started before two-step verification stays
+            unverified. Select <span className="font-semibold">Sign out and sign back in</span> below, then enter your
+            6-digit authenticator code.
+          </p>
+        </div>
+      )}
+
+      {authProblem?.signOutFailed && (
+        <p role="alert" className="rounded-xl border border-danger-200 bg-danger-50 px-3.5 py-2.5 text-sm text-danger-900">
+          Could not sign out. Try again.
+        </p>
+      )}
+
       <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={() => openUserProfile()}>
+        <Button
+          type="button"
+          variant={needsFreshSignIn ? 'outline' : 'primary'}
+          onClick={() => {
+            setOpenedSettings(true);
+            clerk.openUserProfile();
+          }}
+        >
           Open account settings
-        </Button>
-        <Button type="button" variant="outline" onClick={() => { void signOut().catch(() => undefined); }}>
-          Sign out
         </Button>
         <Button type="button" variant="outline" loading={checking} onClick={() => { void checkVerification(); }}>
           {checking ? 'Checking verification…' : 'Check verification'}
         </Button>
+        <Button
+          type="button"
+          variant={needsFreshSignIn ? 'primary' : 'outline'}
+          onClick={() => { void signOut().catch(() => undefined); }}
+        >
+          Sign out and sign back in
+        </Button>
       </div>
+
+      <p className="text-xs leading-5 text-neutral-600">
+        Need help setting up your authenticator app or locked out without backup codes? Ask your Cornerstone
+        administrator.
+      </p>
     </div>
   );
 }
@@ -96,7 +168,7 @@ export function Login() {
     return <Navigate to="/app" replace />;
   }
 
-  const mfaRequired = authProblem?.status === 403 && authProblem.code === 'mfa_required';
+  const mfaRequired = authProblem?.status === 403 && isMfaRequiredCode(authProblem.code);
 
   return (
     <div className="min-h-screen bg-transparent px-3 py-4 sm:px-4 sm:py-10 lg:px-8">
