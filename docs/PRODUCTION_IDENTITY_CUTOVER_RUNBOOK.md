@@ -2,6 +2,8 @@
 
 Last reviewed: `2026-09-14T14:32:45+10:00`
 
+> **Status update, November 24, 2026:** the Cornerstone Payroll cutover was executed under the revised procedure in [Milestone 3 build plan §4](MILESTONE_3_FOUNDATIONS_BUILD_PLAN_2026-11-22.md) (Step `M3-0b`) and is live; see §4.9 there for the result. The Cornerstone sections below describe the September 14 starting point and are kept for history. The AIRE sections still apply. The lessons from the Payroll cutover are collected in "Lessons from the Payroll cutover" at the end of this document; apply them to AIRE.
+
 This runbook moves Cornerstone Payroll and AIRE from Clerk development identities to separate production identity environments without performing a production payroll. It is the operating procedure for the identity control in [Payroll operator and recovery acceptance](OPERATOR_AND_RECOVERY_ACCEPTANCE.md); it does not replace the production-readiness gate or authorize a live payroll.
 
 ## Verified starting point
@@ -185,3 +187,15 @@ Rollback immediately if both recovery administrators cannot sign in, a valid loc
 | Final disposition | Go / No-go |
 
 Any missing decision, unreconciled identity, untested recovery path, failed verification row, or incomplete readiness gate is a no-go. The cutover closes identity readiness only; the remaining database, document, queue, monitoring, Chels operator, MoSa parallel-cycle, and AIRE shadow/live-cycle controls remain separate requirements.
+
+## Lessons from the Payroll cutover
+
+Found by the November 24, 2026 practice run and live switch. Details, commands and the code references are in [Milestone 3 build plan §4](MILESTONE_3_FOUNDATIONS_BUILD_PLAN_2026-11-22.md); the points that change this runbook are:
+
+- **The account owner must be present.** The dev Dashboard **Export users** step and the deletion of any production secret key both ask for the owner's Clerk password. Neither can be done by an agent or delegate.
+- **Import format.** `npx clerk@4.3.0 migrate import <file> --source clerk` reads the Dashboard export's column names (`id`, `primary_email_address`, `password_digest`, `password_hasher`, and so on) and turns `id` into `external_id`. `clerk:cutover:build_import` writes that format directly.
+- **`clerk:cutover:apply` needs `CONFIRM_M3_1_DEPLOYED=true`** while the application still uses the development issuer, which is the case at the re-link step.
+- **`migrate undo --yes` does not delete users who have signed in.** Add `--include-signed-in`, and only with the owner's approval against production.
+- **"Reject compromised passwords" applies to imported passwords at sign-in.** A user with a breached password gets a one-time reset by email code. The Payroll decision was to keep the setting on.
+- **Netlify CLI:** use `netlify-cli@27.16.2`. Version `27.17.0` fails `deploy` with "Project not found". This applies to the AIRE frontend publish if it is done from the command line.
+- **Key handling:** never read, inspect or screenshot a key dialog; copy with the copy button straight into a `600` file with `pbpaste`, then clear the clipboard; shred the files afterwards.
