@@ -1,6 +1,9 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { ChangeComparison } from '@/components/employees/ChangeComparison';
+import { ContactChangeActivity } from '@/components/employees/ContactChangeActivity';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { MobileRecordCard } from '@/components/ui/mobile-record';
 import { LoadMoreFooter } from '@/components/ui/load-more';
 import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
-import { clientEmployeeChangeRequestsApi } from '@/services/api';
+import { ApiError, clientEmployeeChangeRequestsApi } from '@/services/api';
 import type { BoundedListMeta, EmployeeChangeRequest } from '@/services/api';
 
 export function ClientChangeRequests() {
@@ -30,37 +33,63 @@ export function ClientChangeRequests() {
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
   const [notice, setNotice] = useState<string | null>(routeState?.portalNotice || null);
-  const [requestedSelection] = useState<number | null>(routeState?.selectedRequestId || null);
+  const query = new URLSearchParams(location.search);
+  const requestedSelection = Number(query.get('request_id')) || routeState?.selectedRequestId || null;
+  const pendingSelection = useRef<number | null>(null);
+  const showingContactChanges = query.get('view') === 'contact';
+  const [profileRequestsEnabled, setProfileRequestsEnabled] = useState(false);
+  const [decision, setDecision] = useState<'approve' | 'reject' | null>(null);
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [deciding, setDeciding] = useState(false);
+  const detailGeneration = useRef(0);
   const detailsRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (requestedSelection !== null) pendingSelection.current = requestedSelection;
+  }, [requestedSelection]);
+
   const load = useCallback(async () => {
-    listGeneration.current += 1;
+    const generation = ++listGeneration.current;
+    const details = ++detailGeneration.current;
     try {
       setLoading(true);
       setError(null);
       const response = await clientEmployeeChangeRequestsApi.list({
-        search: search || undefined,
+        search: search.trim() || undefined,
         status: status || undefined,
       });
+      if (generation !== listGeneration.current) return;
+      setProfileRequestsEnabled(response.meta?.profile_requests_enabled === true);
       setRequests(response.data);
-      setRequestsMeta(response.meta);
+      setRequestsMeta(response.meta ?? null);
       setLoadMoreError(null);
-      const nextSelection = response.data.find((request) => request.id === requestedSelection) || response.data[0] || null;
-      setSelected(nextSelection);
-      if (nextSelection) {
-        const detail = await clientEmployeeChangeRequestsApi.get(nextSelection.id);
-        setSelected(detail.data);
+      setSelected(null);
+      if (showingContactChanges && response.meta?.profile_requests_enabled) return;
+
+      const fallbackId = response.data[0]?.id;
+      const nextSelection = pendingSelection.current ?? fallbackId;
+      pendingSelection.current = null;
+      if (!nextSelection) return;
+
+      let detail = await getRequestIfVisible(nextSelection);
+      if (details !== detailGeneration.current) return;
+      if (!detail && fallbackId && fallbackId !== nextSelection) {
+        detail = await getRequestIfVisible(fallbackId);
       }
+      if (details === detailGeneration.current) setSelected(detail?.data ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load change requests');
+      if (generation === listGeneration.current) {
+        setError(err instanceof Error ? err.message : 'Failed to load change requests');
+      }
     } finally {
-      setLoading(false);
+      if (generation === listGeneration.current) setLoading(false);
     }
-  }, [requestedSelection, search, setError, status]);
+  }, [search, setError, showingContactChanges, status]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    return () => { listGeneration.current += 1; detailGeneration.current += 1; };
+  }, [load, requestedSelection]);
 
   const loadMore = async () => {
     if (!requestsMeta) return;
@@ -69,13 +98,13 @@ export function ClientChangeRequests() {
       setLoadingMore(true);
       setLoadMoreError(null);
       const response = await clientEmployeeChangeRequestsApi.list({
-        search: search || undefined,
+        search: search.trim() || undefined,
         status: status || undefined,
         page: requestsMeta.current_page + 1,
       });
       if (generation !== listGeneration.current) return;
       setRequests((current) => appendUniqueById(current, response.data));
-      setRequestsMeta(response.meta);
+      setRequestsMeta(response.meta ?? null);
     } catch (err) {
       if (generation !== listGeneration.current) return;
       setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more change requests');
@@ -90,27 +119,70 @@ export function ClientChangeRequests() {
   }, [location.pathname, location.search, navigate, routeState]);
 
   const loadRequest = async (id: number) => {
-    const response = await clientEmployeeChangeRequestsApi.get(id);
-    setSelected(response.data);
-    if (window.innerWidth < 1024) {
-      requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    const generation = ++detailGeneration.current;
+    setSelected(null);
+    setError(null);
+    try {
+      const response = await clientEmployeeChangeRequestsApi.get(id);
+      if (generation !== detailGeneration.current) return;
+      setSelected(response.data);
+      if (window.innerWidth < 1024) {
+        requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ block: 'start' }));
+      }
+    } catch (err) {
+      if (generation === detailGeneration.current) {
+        setError(err instanceof Error ? err.message : 'Could not load this request.');
+      }
+    }
+  };
+
+  const submitDecision = async () => {
+    if (!selected || !decision) return;
+    setDeciding(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { data } = await clientEmployeeChangeRequestsApi.decide(selected.id, decision, reviewNotes.trim() || undefined);
+      setSelected(data);
+      if (status && data.status !== status) {
+        setRequests((rows) => rows.filter((row) => row.id !== data.id));
+        setRequestsMeta((meta) => meta && { ...meta, total_count: Math.max(0, meta.total_count - 1) });
+      } else {
+        setRequests((rows) => rows.map((row) => row.id === data.id ? data : row));
+      }
+      setNotice(decision === 'approve' ? 'Address approved and updated on the employee record.' : 'Address request rejected.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not review this request.');
+    } finally {
+      setDeciding(false);
+      setDecision(null);
     }
   };
 
   return (
     <div>
-      <Header title="Change Requests" description="Track payroll-sensitive updates submitted for payroll team approval." />
+      <Header title={profileRequestsEnabled ? 'Employee changes' : 'Change Requests'}
+        description={profileRequestsEnabled ? 'Review address requests and see applied contact changes.' : 'Track payroll-sensitive updates submitted for payroll team approval.'} />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {notice && (
-          <ActionFeedback tone="success" message={notice}><span>{notice}</span>
-            <button type="button" onClick={() => setNotice(null)} className="font-medium text-emerald-700 hover:text-emerald-900">Dismiss</button></ActionFeedback>
+          <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+            <span>{notice}</span>
+            <Button variant="ghost" size="sm" onClick={() => setNotice(null)}>Dismiss</Button>
+          </div>
         )}
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
+        {profileRequestsEnabled && (
+          <nav aria-label="Employee changes" className="flex flex-wrap gap-3">
+            <Link className={tabClass(!showingContactChanges)} to="/change-requests" aria-current={!showingContactChanges ? 'page' : undefined}>Requests</Link>
+            <Link className={tabClass(showingContactChanges)} to="/change-requests?view=contact" aria-current={showingContactChanges ? 'page' : undefined}>Contact changes</Link>
+          </nav>
+        )}
+        {showingContactChanges && profileRequestsEnabled ? <ContactChangeActivity /> : <>
         <div className="flex flex-col gap-4 md:flex-row">
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employees..." className="max-w-md" />
-          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full md:w-44">
+          <Input aria-label="Search employees" value={search} onChange={(e) => { pendingSelection.current = null; setSearch(e.target.value); }} placeholder="Search employees..." className="max-w-md" />
+          <Select aria-label="Request status" value={status} onChange={(e) => { pendingSelection.current = null; setStatus(e.target.value); }} className="w-full md:w-44">
             <option value="">All Statuses</option>
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
@@ -134,7 +206,7 @@ export function ClientChangeRequests() {
                         <p className="min-w-0 font-semibold text-neutral-950">{request.employee_name}</p>
                         <StatusBadge status={request.status} />
                       </div>
-                      <p className="mt-2 text-sm text-neutral-600">{request.request_kind === 'create' ? 'New worker' : 'Update'} · {new Date(request.created_at).toLocaleDateString()}</p>
+                      <p className="mt-2 text-sm text-neutral-600">{requestLabel(request)} · {new Date(request.created_at).toLocaleDateString()}</p>
                       <p className="mt-1 text-xs text-neutral-500">Requested by {request.requested_by_name || '—'}</p>
                       <Button className="mt-4 w-full" variant="outline" onClick={() => void loadRequest(request.id)}>View request</Button>
                     </MobileRecordCard>
@@ -156,7 +228,7 @@ export function ClientChangeRequests() {
                       <TableRow key={request.id}>
                         <TableCell className="font-medium text-gray-900"><button type="button" className="text-left text-primary-700 underline-offset-2 hover:underline focus-visible:underline" onClick={() => void loadRequest(request.id)}>{request.employee_name}</button></TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
-                        <TableCell>{request.request_kind === 'create' ? 'New worker' : 'Update'}</TableCell>
+                        <TableCell>{requestLabel(request)}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
                         <TableCell>{new Date(request.created_at).toLocaleString()}</TableCell>
                       </TableRow>
@@ -195,11 +267,19 @@ export function ClientChangeRequests() {
                     <p className="text-sm font-medium text-gray-900">Employee</p>
                     <p className="text-sm text-gray-600">{selected.employee_name}</p>
                   </div>
-                  <DetailBlock title="Request Type" value={selected.request_kind === 'create' ? 'New worker approval' : 'Employee update'} />
+                  <DetailBlock title="Request Type" value={requestLabel(selected)} />
                   <DetailBlock title="Request Notes" value={selected.request_notes} />
                   <DetailBlock title="Review Notes" value={selected.review_notes} />
-                  <JsonBlock title="Original Values" value={selected.original_values} />
-                  <JsonBlock title="Proposed Changes" value={selected.proposed_changes} />
+                  <ChangeComparison before={selected.original_values} after={selected.proposed_changes} requested={selected.status === 'pending'} />
+                  {selected.can_review && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button onClick={() => { setReviewNotes(''); setDecision('approve'); }}>Approve</Button>
+                      <Button variant="outline" onClick={() => { setReviewNotes(''); setDecision('reject'); }}>Reject</Button>
+                    </div>
+                  )}
+                  {profileRequestsEnabled && selected.profile_address && selected.status === 'pending' && selected.can_review === false && (
+                    <p className="text-sm text-neutral-600">Another administrator or Cornerstone must review this request.</p>
+                  )}
                 </div>
               ) : (
                 <div className="text-sm text-gray-500">Select a change request to view details.</div>
@@ -207,7 +287,28 @@ export function ClientChangeRequests() {
             </CardContent>
           </Card>
         </div>
+        </>}
       </div>
+      <Dialog open={decision !== null} onOpenChange={(open) => { if (!open && !deciding) setDecision(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{decision === 'approve' ? 'Approve address change?' : 'Reject address request?'}</DialogTitle>
+            <DialogDescription>
+              {decision === 'approve' ? 'The requested address will be saved on the employee record.' : 'The current address will stay on file.'}
+            </DialogDescription>
+          </DialogHeader>
+          <label className="space-y-1 text-sm font-medium">
+            <span>Review note (optional)</span>
+            <Input value={reviewNotes} disabled={deciding} onChange={(event) => setReviewNotes(event.target.value)} />
+          </label>
+          <DialogFooter>
+            <Button variant="outline" disabled={deciding} onClick={() => setDecision(null)}>Cancel</Button>
+            <Button variant={decision === 'reject' ? 'danger' : 'default'} disabled={deciding} onClick={() => void submitDecision()}>
+              {deciding ? 'Saving…' : decision === 'approve' ? 'Approve address' : 'Reject request'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -226,13 +327,20 @@ function DetailBlock({ title, value }: { title: string; value?: string | null })
   );
 }
 
-function JsonBlock({ title, value }: { title: string; value?: Record<string, unknown> }) {
-  return (
-    <div>
-      <p className="text-sm font-medium text-gray-900">{title}</p>
-      <pre className="mt-2 overflow-auto rounded-xl bg-gray-950/95 p-3 text-xs text-gray-100">
-        {JSON.stringify(value || {}, null, 2)}
-      </pre>
-    </div>
-  );
+function requestLabel(request: EmployeeChangeRequest) {
+  if (request.profile_address) return 'Address change';
+  return request.request_kind === 'create' ? 'New worker' : 'Employee update';
+}
+
+function tabClass(active: boolean) {
+  return `rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-primary-600 ${active ? 'bg-primary-100 text-primary-800' : 'text-neutral-700 hover:bg-neutral-100'}`;
+}
+
+async function getRequestIfVisible(id: number) {
+  try {
+    return await clientEmployeeChangeRequestsApi.get(id);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
 }

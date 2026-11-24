@@ -118,3 +118,19 @@ it.each(['approved', 'rejected'] as const)('shows a handled %s deep link in its 
   expect(screen.queryByText('No requests found.')).toBeNull();
   expect(apiMocks.list).toHaveBeenCalledWith({ status: undefined });
 });
+
+it('labels address requests and prevents review when the server says it is the reviewer’s own record', async () => {
+  vi.clearAllMocks();
+  const ownAddress = { ...request(8, 'Example Worker', ''), profile_address: true, can_review: false };
+  apiMocks.list.mockResolvedValue({ data: [ownAddress] });
+  apiMocks.get.mockResolvedValue({ data: ownAddress });
+
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
+  await screen.findByText('Request #8');
+  expect(screen.getByRole('button', { name: /Example Worker.*Address change/ })).toBeTruthy();
+  const approve = screen.getByRole<HTMLButtonElement>('button', { name: 'Approve' });
+  expect(approve.disabled).toBe(true);
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Reject' }).disabled).toBe(true);
+  fireEvent.click(approve);
+  expect(apiMocks.approve).not.toHaveBeenCalled();
+});
