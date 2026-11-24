@@ -59,6 +59,8 @@ export function employeeAppSettingsApi(audience: Audience) {
       return apiClient.postForm<{ data: EmployeeAppSettings }>(`${path}/logo`, form, { companyId });
     },
     removeLogo: (companyId: number) => apiClient.delete<{ data: EmployeeAppSettings }>(`${path}/logo`, { companyId }),
-    logo: () => apiClient.getBlob(`${path}/logo`),
+    // The company is explicit so a switch while the preview loads can't show
+    // another client's logo.
+    logo: async (companyId: number) => (await apiClient.getBlobWithParams(`${path}/logo`, undefined, { companyId, notifyMaintenance: false })).blob,
   };
 }

@@ -318,7 +318,7 @@ class Company < ApplicationRecord
     Array(configured).map(&:to_s)
   end
 
-  BRAND_LOGO_EXTENSIONS = { "image/png" => "png", "image/webp" => "webp", "image/svg+xml" => "svg" }.freeze
+  BRAND_LOGO_EXTENSIONS = { "image/png" => "png", "image/webp" => "webp" }.freeze
 
   # The first 16 hex characters of the uploaded logo's SHA-256. Public logo
   # URLs carry it, so a replaced logo gets a new address.

@@ -153,8 +153,12 @@ function ratioText(ratio: number): string {
   return `${(Math.floor(ratio * 10) / 10).toFixed(1)} to 1`;
 }
 
-/** What happens to a brand color, in words an admin can act on. */
-export function brandColorCheck(primaryColor: string): ColorCheck {
+/**
+ * What happens to a brand color, in words an admin can act on. With a custom
+ * accent, a light brand color stays as decoration and the accent takes the
+ * highlights.
+ */
+export function brandColorCheck(primaryColor: string, hasCustomAccent = false): ColorCheck {
   const color = primaryColor.toLowerCase();
   const ratio = contrastWithWhite(color);
   if (ratio >= MIN_TEXT_CONTRAST) {
@@ -164,7 +168,9 @@ export function brandColorCheck(primaryColor: string): ColorCheck {
     return {
       tone: 'light',
       ratio: ratioText(ratio),
-      message: 'This color is too light for white text. Buttons will be dark gray, and this color is used for highlights with dark text.',
+      message: hasCustomAccent
+        ? 'This color is too light for white text. Buttons will be dark gray, this color is used for thin accent lines, and your accent color is used for highlights.'
+        : 'This color is too light for white text. Buttons will be dark gray, and this color is used for highlights with dark text.',
     };
   }
   return { tone: 'adjusted', ratio: ratioText(ratio), message: 'Buttons will use this darker shade so text is readable.' };

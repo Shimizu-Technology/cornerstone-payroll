@@ -173,9 +173,11 @@ module EmployeeAppSettingsActions
     values.slice(*BRANDING_FIELDS, "logo_url")
   end
 
+  # Includes a legacy external logo URL, so removing one is audited too.
   def logo_values(company)
+    branding = company.branding.is_a?(Hash) ? company.branding.stringify_keys : {}
     { "logo_sha256" => company.brand_logo_sha256, "logo_content_type" => company.brand_logo_content_type,
-      "logo_byte_size" => company.brand_logo_byte_size }
+      "logo_byte_size" => company.brand_logo_byte_size, "logo_url" => branding["logo_url"] }
   end
 
   def help_contact_values(company)

@@ -300,9 +300,6 @@ export function EmployeeAppPreview({ brand, screen, device, contacts }: {
         className={cn('relative mx-auto overflow-hidden border border-neutral-300 bg-white shadow-sm', device === 'phone' ? 'rounded-[28px]' : 'rounded-xl')}
         style={{ width: canvas.width * scale, height: canvas.height * scale }}
       >
-        <span aria-hidden="true" className="absolute right-2 top-2 z-10 rounded-full bg-neutral-900/75 px-2 py-0.5 text-[11px] font-semibold text-white">
-          Sample data
-        </span>
         <div
           aria-hidden="true"
           className="pointer-events-none origin-top-left select-none font-sans"

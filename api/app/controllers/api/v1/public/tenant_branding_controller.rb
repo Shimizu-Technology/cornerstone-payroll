@@ -30,8 +30,7 @@ module Api
 
           response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
           response.headers["X-Content-Type-Options"] = "nosniff"
-          # An SVG opened directly is a document on the API's origin. It can't
-          # run scripts or load anything.
+          # Only PNG and WebP are stored; the policy is a second line of defense.
           response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
           response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
           send_data bytes, type: company.brand_logo_content_type, disposition: "inline"

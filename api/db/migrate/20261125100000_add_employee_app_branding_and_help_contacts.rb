@@ -20,7 +20,7 @@ class AddEmployeeAppBrandingAndHelpContacts < ActiveRecord::Migration[8.1]
     add_column :companies, :brand_logo_byte_size, :integer
     add_check_constraint :companies, <<~SQL.squish, name: "company_brand_logo_shape"
       num_nonnulls(brand_logo_storage_key, brand_logo_content_type, brand_logo_sha256, brand_logo_byte_size) IN (0, 4)
-      AND (brand_logo_content_type IS NULL OR brand_logo_content_type IN ('image/png', 'image/webp', 'image/svg+xml'))
+      AND (brand_logo_content_type IS NULL OR brand_logo_content_type IN ('image/png', 'image/webp'))
       AND (brand_logo_sha256 IS NULL OR brand_logo_sha256 ~ '^[0-9a-f]{64}$')
     SQL
 
