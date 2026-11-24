@@ -10,7 +10,8 @@ module EmployeeLinks
   #   reason, and no former window starts.
   # - Either way an invite nobody finished is revoked.
   #
-  # Reactivation and rehire don't reopen old links; a new invite is issued.
+  # Reactivation and rehire don't reopen old links, and nothing is sent
+  # automatically: an admin issues a new invite.
   module Retire
     module_function
 
@@ -30,9 +31,16 @@ module EmployeeLinks
       end
     end
 
+    # The caller holds the employee's lock. Logins are locked before their
+    # links (EmployeeLinks lock order). A login attached in between (a
+    # sign-up that just committed) is locked after; it's new, so nothing else
+    # holds it.
     def open_links(employee)
-      EmployeeAccountLink.where(employee_id: employee.id, company_id: employee.company_id, status: %w[invited active])
-        .order(:id).lock.to_a
+      scope = EmployeeAccountLink.where(employee_id: employee.id, company_id: employee.company_id, status: %w[invited active])
+      locked = EmployeeLinks.lock_users!(scope.pluck(:user_id)).map(&:id)
+      links = scope.order(:id).lock.to_a
+      EmployeeLinks.lock_users!(links.map(&:user_id).compact - locked)
+      links
     end
   end
 end

@@ -41,9 +41,7 @@ module EmployeeLinks
         raise Error, "Only active employees can be invited" unless employee.active?
         raise Error, "The employee app isn't turned on for this company" unless @link.portal_enabled?
 
-        if @delivery == "email"
-          @link.claim_user = check_email!(employee)
-        end
+        @link.claim_user = route_login(employee)
         credentials = Credentials.issue(@link, delivery: @delivery, email: employee.email)
         @link.save!
         superseded_invitation = retire_pending_sign_up!(@link.user)
@@ -76,9 +74,12 @@ module EmployeeLinks
       Rails.logger.warn("[EmployeeLinks::Resend] Could not revoke invitation #{invitation_id}: #{error.class}")
     end
 
-    def check_email!(employee)
-      Invite.new(employee: employee, actor: @actor, delivery: "email",
-        confirm_same_person_email: @confirm_same_person_email, request: @request).send(:check_email!)
+    # Same routing as a new invite (Invite#route_login); a code resend keeps
+    # the login the invite was already routed to.
+    def route_login(employee)
+      Invite.new(employee: employee, actor: @actor, delivery: @delivery,
+        confirm_same_person_email: @confirm_same_person_email, request: @request)
+        .route_login(current: (@link.claim_user if @delivery == "code"))
     end
   end
 end

@@ -43,7 +43,8 @@ module EmployeeLinkHelpers
   end
 
   def clerk_token(subject, azp: PAYROLL_ORIGIN, fva: [ 0, -1 ], **claims)
-    payload = { sub: subject, iss: ISSUER, azp: azp, exp: 5.minutes.from_now.to_i, fva: fva, sid: "sess_#{subject}" }
+    payload = { sub: subject, iss: ISSUER, azp: azp, iat: Time.current.to_i, exp: 5.minutes.from_now.to_i, fva: fva,
+                sid: "sess_#{subject}" }
     JWT.encode(payload.merge(claims), link_signing_key, "RS256", kid: link_jwk.kid)
   end
 

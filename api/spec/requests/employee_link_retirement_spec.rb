@@ -35,7 +35,7 @@ RSpec.describe "Employee link retirement", type: :request do
   def terminate!(on:)
     post "/api/v1/admin/employees/#{employee.id}/terminate", headers: staff_headers, as: :json,
       params: { termination: { effective_date: on.iso8601, reason_category: "voluntary" } }
-    expect(response).to have_http_status(:ok), response.body
+    expect(response).to have_http_status(:ok)
   end
 
   def deactivate!
@@ -78,7 +78,7 @@ RSpec.describe "Employee link retirement", type: :request do
 
       expect(link.reload).to have_attributes(status: "former")
       expect(worker.reload).not_to be_active
-      expect(RevokeEmployeeSessionsJob).to have_been_enqueued.with(worker.id)
+      expect(RevokeEmployeeSessionsJob).to have_been_enqueued.with(worker.id, kind_of(String))
       expect(AuditLog.where(action: "authentication#employee_login_deactivated", record_id: worker.id).sole)
         .to have_attributes(company_id: company.id)
       expect(context_status).to eq(404)
@@ -126,7 +126,7 @@ RSpec.describe "Employee link retirement", type: :request do
       expect(link.reload).to have_attributes(status: "revoked", revoked_reason: "worker_deactivated", former_access_until: nil,
         revoked_by_id: staff.id)
       expect(worker.reload).not_to be_active
-      expect(RevokeEmployeeSessionsJob).to have_been_enqueued.with(worker.id)
+      expect(RevokeEmployeeSessionsJob).to have_been_enqueued.with(worker.id, kind_of(String))
       expect(context_status).to eq(404)
       get "/api/v1/auth/me", headers: bearer("user_riley")
       expect(response).to have_http_status(:unauthorized)
@@ -172,7 +172,7 @@ RSpec.describe "Employee link retirement", type: :request do
 
       allow(clerk).to receive(:revoke_user_sessions).and_return(success: true, revoked: 2)
       perform_enqueued_jobs(only: RevokeEmployeeSessionsJob)
-      expect(clerk).to have_received(:revoke_user_sessions).with("user_riley")
+      expect(clerk).to have_received(:revoke_user_sessions).with("user_riley", created_before: worker.reload.deactivated_at)
     end
 
     it "requires staff and a reason" do
@@ -203,7 +203,7 @@ RSpec.describe "Employee link retirement", type: :request do
       expect(worker.reload).not_to be_active
       expect(leftover.reload).not_to be_active
       expect(link_audits(link, "revoked").sole).to have_attributes(actor_type: "system_job", user_id: nil)
-      expect(RevokeEmployeeSessionsJob).to have_been_enqueued.with(worker.id)
+      expect(RevokeEmployeeSessionsJob).to have_been_enqueued.with(worker.id, kind_of(String))
     end
 
     it "leaves open invites, current former access and active links alone" do
@@ -227,9 +227,13 @@ RSpec.describe "Employee link retirement", type: :request do
     before do
       link
       deactivate!
-      post "/api/v1/admin/employees/#{employee.id}/reactivate", headers: staff_headers, as: :json,
+      # The rehire comes later; the person signs in again after the closure.
+      travel 20.minutes
+      post "/api/v1/admin/employees/#{employee.id}/reactivate", headers: bearer("user_staff").merge("X-Company-Id" => company.id.to_s), as: :json,
         params: { reactivation: { effective_date: PayrollBusinessClock.today.iso8601 } }
     end
+
+    after { travel_back }
 
     it "routes the new invite to reactivation and binds it to the same login after a fresh sign-in" do
       expect(response).to have_http_status(:ok)
@@ -246,7 +250,12 @@ RSpec.describe "Employee link retirement", type: :request do
         headers: bearer("user_riley").merge("CONTENT_TYPE" => "application/json")
       expect(response).to have_http_status(:not_found)
 
+      # A session that signed in before the login closed is refused outright.
       reactivate(activation_params(employee, token: invite.token), fva: [ 30, -1 ])
+      expect(response).to have_http_status(:not_found)
+
+      # One that signed in after the closure, but not recently, must step up.
+      reactivate(activation_params(employee, token: invite.token), fva: [ 15, -1 ])
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body.dig("clerk_error", "metadata", "reverification", "level")).to eq("first_factor")
 
@@ -297,15 +306,22 @@ RSpec.describe "Employee link retirement", type: :request do
   end
 
   describe RevokeEmployeeSessionsJob do
-    it "retries until Clerk confirms, and skips a login that is active again" do
-      worker.update!(active: false)
+    it "retries until Clerk confirms, and still ends pre-closure sessions of a login that is active again" do
+      closed_at = Time.current
+      worker.update!(active: false, deactivated_at: closed_at, deactivation_reason: "last_employee_link_closed")
       allow(clerk).to receive(:revoke_user_sessions).and_return({ success: false, error: "timeout" }, { success: true, revoked: 1 })
 
-      expect { described_class.perform_now(worker.id) }.to have_enqueued_job(described_class)
+      expect { described_class.perform_now(worker.id, closed_at.iso8601(6)) }.to have_enqueued_job(described_class)
       worker.update!(active: true)
-      described_class.perform_now(worker.id)
+      described_class.perform_now(worker.id, closed_at.iso8601(6))
 
-      expect(clerk).to have_received(:revoke_user_sessions).once
+      expect(clerk).to have_received(:revoke_user_sessions).with("user_riley", created_before: closed_at).twice
+    end
+
+    it "skips a login that is active again when no closure time was recorded" do
+      allow(clerk).to receive(:revoke_user_sessions)
+      described_class.perform_now(worker.id)
+      expect(clerk).not_to have_received(:revoke_user_sessions)
     end
   end
 end

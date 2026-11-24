@@ -10,20 +10,25 @@ module Api
       # invite check; 404 on every failure.
       class ReactivationsController < BaseController
         include RecentVerification
+        include EmployeeLinkCheckParams
 
         skip_before_action :require_employee_link!
+        before_action :reject_query_credentials!
         before_action :require_recent_verification!
 
         def create
           response.headers["Cache-Control"] = "no-store"
           return render_write_maintenance if WriteMaintenance.enabled?
 
+          link_check_started!
           link = EmployeeLinks::Reactivate.call(
-            user: @current_user, token: params[:token], code: params[:code],
-            date_of_birth: params[:date_of_birth], ssn_last4: params[:ssn_last4],
-            azp: @clerk_token_payload&.fetch("azp", nil), request: request
+            user: @current_user, **link_check_params, azp: @clerk_token_payload&.fetch("azp", nil),
+            session: @clerk_token_payload, request: request
           )
-          return render json: { error: AccountController::CLAIM_FAILED, code: "claim_failed" }, status: :not_found unless link
+          unless link
+            wait_for_response_floor
+            return render json: { error: AccountController::CLAIM_FAILED, code: "claim_failed" }, status: :not_found
+          end
 
           render json: { link: { id: link.id, company_name: link.company.name, subdomain_slug: link.company.subdomain_slug,
             status: link.status, former_access_until: nil } }, status: :created

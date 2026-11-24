@@ -14,7 +14,9 @@ module EmployeeLinks
       raise Error, "Keep the reason under #{REASON_MAX} characters" if reason.length > REASON_MAX
 
       ApplicationRecord.transaction do
-        link.lock!
+        unless Close.lock_link_and_login!(link)
+          raise Error, "This employee's app access changed while it was being ended. Try again."
+        end
         raise Error, "This employee's app access has already ended" if link.revoked?
 
         Close.revoke!(link, reason: reason, actor: actor, request: request).tap do

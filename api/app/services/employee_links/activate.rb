@@ -19,7 +19,9 @@ module EmployeeLinks
   # it never says whether an address already has a login.
   class Activate
     Result = Data.define(:outcome, :url)
-    Prepared = Data.define(:link, :user, :generation, :changes)
+    # attach: the link gets this login only when the invitation is saved (a
+    # reused closed sign-up row; see EmployeeLinks.closed_pending_sign_up_for?).
+    Prepared = Data.define(:link, :user, :generation, :changes, :attach)
 
     def self.call(...)
       new(...).call
@@ -53,9 +55,14 @@ module EmployeeLinks
       if pending && !(pending.portal_employee? && pending.awaiting_clerk_binding?)
         return :sign_in
       end
-      return :sign_in if EmployeeLinks.login_email_taken?(@email, except_user_id: pending&.id)
       return :sign_in if EmployeeContactValidator.placeholder_email?(@email, organization_id: link.company.organization_id) ||
         EmployeeContactValidator.structural_placeholder_email?(@email)
+      if EmployeeLinks.login_email_taken?(@email, except_user_id: pending&.id)
+        reused = EmployeeLinks.reusable_pending_login(@email, link.employee) unless pending
+        return :sign_in unless reused
+
+        return reuse_closed_sign_up(link, reused)
+      end
 
       retried = pending.present?
       changes = { email: @email, name: link.employee.display_name }
@@ -77,9 +84,20 @@ module EmployeeLinks
       end
       EmployeeLinks.audit!(link, "sign_up_started", actor: AuditActor.employee(link.employee), request: @request,
         metadata: { retry: retried, via: link.invite_delivery })
-      Prepared.new(link: link, user: pending, generation: link.invite_generation, changes: changes)
+      Prepared.new(link: link, user: pending, generation: link.invite_generation, changes: changes, attach: false)
     rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
       :sign_in
+    end
+
+    # The same person's earlier unfinished sign-up: the row comes back (active,
+    # this address and name) only together with its new Clerk invitation,
+    # which first confirms the old one closed. Nothing changes here.
+    def reuse_closed_sign_up(link, user)
+      EmployeeLinks.audit!(link, "sign_up_started", actor: AuditActor.employee(link.employee), request: @request,
+        metadata: { retry: false, reused_login: true, via: link.invite_delivery })
+      Prepared.new(link: link, user: user, generation: link.invite_generation, attach: true,
+        # It never had a session, so no fence date carries over.
+        changes: { email: @email, name: link.employee.display_name, active: true, deactivated_at: nil })
     end
 
     def start_clerk_sign_up(prepared)
@@ -107,7 +125,15 @@ module EmployeeLinks
     # The controller's system scope covers this, as it does the check.
     def commit_retry?(link_id, user, prepared)
       link = EmployeeAccountLink.lock.find_by(id: link_id)
-      return false unless link&.invite_open? && link.user_id == user.id && link.invite_generation == prepared.generation
+      return false unless link&.invite_open? && link.invite_generation == prepared.generation
+      return false unless prepared.attach ? link.user_id.nil? : link.user_id == user.id
+      if prepared.attach
+        # Still the same closed sign-up for this person, re-read under its lock.
+        return false unless EmployeeLinks.closed_pending_sign_up_for?(user, link.employee)
+
+        link.update!(user: user, sign_up_email_for_notices: @use_for_notices)
+        return true
+      end
       return true if prepared.changes.empty?
 
       email = prepared.changes[:email]

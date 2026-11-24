@@ -21,38 +21,46 @@ class Rack::Attack
   end
 
   AUTH_PATH = %r{\A/api/(?:v1/)?(?:auth|sessions|invitations)(?:/|\.[^/]+\z|\z)}
+  # The one auth route a client subdomain calls (the employee app's /auth/me).
+  TENANT_AUTH_PATH = %r{\A/api/v1/auth/me/?\z}
   EMPLOYEE_PATH = %r{\A/api/v1/employee(?:/|\.[^/]+\z|\z)}
   CLERK_SESSION_PATTERN = /\Asess_[A-Za-z0-9]{1,64}\z/
-  BEARER_PAYLOAD = /\ABearer [A-Za-z0-9_-]{1,2048}\.([A-Za-z0-9_-]{1,4096})\.[A-Za-z0-9_-]{1,2048}\z/
+  BEARER_TOKEN = /\ABearer ([A-Za-z0-9_-]{1,2048}\.[A-Za-z0-9_-]{1,4096}\.[A-Za-z0-9_-]{1,2048})\z/
 
   def self.request_origin(request)
     request.get_header("HTTP_ORIGIN") || request.get_header("HTTP_X_ORIGIN")
   end
 
-  # The bearer token's Clerk session ID, read without verifying the token.
-  # It's only a throttle key, so one restaurant's shared Wi-Fi isn't one
-  # bucket. A forged session ID buys nothing past the per-IP backstops below,
-  # and the application still verifies every token.
+  # The Clerk session of a bearer token that verifies (signature, issuer,
+  # expiry, authorized party), as a throttle key, so one restaurant's shared
+  # Wi-Fi isn't one bucket. An unverified or forged token has no session
+  # here and counts against the per-IP limits instead, so it can neither
+  # mint fresh buckets nor spend someone else's. The per-IP backstop below
+  # runs first, so a flood stops before any verification work.
   def self.throttle_session(request)
     request.env.fetch("payroll.throttle_session") do
-      payload = request.get_header("HTTP_AUTHORIZATION").to_s[BEARER_PAYLOAD, 1]
-      sid = begin
-        claims = JSON.parse(Base64.urlsafe_decode64(payload + ("=" * (-payload.length % 4)))) if payload
-        claims["sid"] if claims.is_a?(Hash)
-      rescue ArgumentError, JSON::ParserError
+      token = request.get_header("HTTP_AUTHORIZATION").to_s[BEARER_TOKEN, 1]
+      payload = begin
+        ClerkTokenVerifier.new.verify(token) if token
+      rescue StandardError
         nil
       end
+      sid = payload["sid"] if payload.is_a?(Hash)
       key = "session:#{Digest::SHA256.hexdigest(sid)}" if sid.is_a?(String) && CLERK_SESSION_PATTERN.match?(sid)
       request.env["payroll.throttle_session"] = key
     end
   end
 
-  # Employee app traffic, and auth calls from a client subdomain: counted per
+  # /auth/me from a client subdomain that is registered and switched on. Any
+  # other Origin, or any other auth route, keeps the ordinary auth limit.
+  def self.tenant_auth?(request)
+    TENANT_AUTH_PATH.match?(throttle_path(request)) && TenantSubdomainRegistry.allowed_origin?(request_origin(request))
+  end
+
+  # Employee app traffic, and the tenant site's /auth/me: counted per
   # signed-in session where there is one, under a much higher per-IP ceiling.
   def self.employee_session_traffic?(request)
-    path = throttle_path(request)
-    EMPLOYEE_PATH.match?(path) ||
-      (AUTH_PATH.match?(path) && TenantSubdomainRegistry.client_origin?(request_origin(request)))
+    EMPLOYEE_PATH.match?(throttle_path(request)) || tenant_auth?(request)
   end
 
   # The tenant site's CORS preflights carry no session and are sent before
@@ -70,24 +78,22 @@ class Rack::Attack
     throttle_ip(request) if (path == "/api" || path.start_with?("/api/")) && !employee_session_traffic?(request)
   end
 
+  # The early, unauthenticated backstop for every session-keyed employee and
+  # tenant /auth/me request and its preflight: a full shift browsing at once
+  # stays well under it. It comes before any limit that verifies a token.
+  throttle("employee_session_traffic/ip", limit: 3000, period: 1.minute) do |request|
+    throttle_ip(request) if employee_session_traffic?(request) && !employee_activation?(request)
+  end
+
   throttle("auth/ip", limit: ENV.fetch("AUTH_THROTTLE_LIMIT", 20).to_i, period: 1.minute) do |request|
     next unless AUTH_PATH.match?(throttle_path(request))
+    next if tenant_auth?(request) && (request.options? || throttle_session(request))
 
-    if TenantSubdomainRegistry.client_origin?(request_origin(request))
-      throttle_ip(request) unless request.options? || throttle_session(request)
-    else
-      throttle_ip(request)
-    end
+    throttle_ip(request)
   end
 
   throttle("auth/session", limit: ENV.fetch("AUTH_THROTTLE_LIMIT", 20).to_i, period: 1.minute) do |request|
-    throttle_session(request) if session_keyed?(request) && AUTH_PATH.match?(throttle_path(request))
-  end
-
-  # The backstop for every session-keyed employee and client-subdomain request
-  # and its preflight: a full shift browsing at once stays well under it.
-  throttle("employee_session_traffic/ip", limit: 3000, period: 1.minute) do |request|
-    throttle_ip(request) if employee_session_traffic?(request) && !employee_activation?(request)
+    throttle_session(request) if tenant_auth?(request) && !request.options?
   end
 
   throttle("tenant_branding/ip", limit: 120, period: 1.minute) do |request|

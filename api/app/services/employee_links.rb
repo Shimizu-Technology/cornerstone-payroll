@@ -70,6 +70,23 @@ module EmployeeLinks
     User.where(id: ids).order(:id).lock("FOR NO KEY UPDATE").to_a
   end
 
+  # A sign-up nobody finished, closed with its link: never bound, made for
+  # this employee (or the record it replaced) at this company, and linked to
+  # no other employee. Its email stays reserved for that person; a later
+  # sign-up reuses the row instead of finding the address taken.
+  def self.closed_pending_sign_up_for?(user, employee)
+    return false unless user&.portal_employee? && !user.active? && user.awaiting_clerk_binding? &&
+      user.deactivation_reason == "pending_sign_up_closed" && user.company_id == employee.company_id
+
+    links = EmployeeAccountLink.where(user_id: user.id)
+    links.exists? && !links.where.not(employee_id: [ employee.id, employee.previous_employee_id ].compact).exists?
+  end
+
+  def self.reusable_pending_login(email, employee)
+    user = User.where(EmployeeContactValidator.normalized_email_node(User.arel_table[:email]).eq(normalized_email(email))).first
+    user if closed_pending_sign_up_for?(user, employee)
+  end
+
   def self.verifier_actor
     AuditActor.system_job("Employee app sign-up check")
   end

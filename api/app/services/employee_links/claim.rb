@@ -17,9 +17,11 @@ module EmployeeLinks
       new(...).call
     end
 
-    def initialize(user:, token:, code:, date_of_birth:, ssn_last4:, azp: nil, request: nil,
+    def initialize(user:, token:, code:, date_of_birth:, ssn_last4:, azp: nil, request: nil, session: nil,
       clerk: ClerkInvitationService.new)
       @user = user
+      # The verified Clerk token payload (Reactivate checks when it was issued).
+      @session = session
       @check = { token: token, code: code, date_of_birth: date_of_birth, ssn_last4: ssn_last4 }
       @azp = azp
       @request = request
@@ -35,7 +37,9 @@ module EmployeeLinks
       # before the link, so two claims by one login serialize and the second
       # sees the first's link as open (EmployeeLinks lock order).
       link = Verify.call(**@check, request: @request, lock_users: ->(first_read) { lock_targets(first_read) }) do |candidate|
-        next unless claimable?(candidate)
+        # Re-read the login under its lock (taken before the link's).
+        @user.reload
+        next unless user_allowed? && claimable?(candidate)
 
         replaced_invitation = retire_pending_user!(candidate)
         attach!(candidate)
@@ -93,7 +97,8 @@ module EmployeeLinks
 
       # Already locked by Verify (lock_targets).
       invitation_id = pending.clerk_invitation_id
-      pending.update!(active: false, invite_nonce_digest: nil, invite_nonce_expires_at: nil)
+      pending.update!(active: false, invite_nonce_digest: nil, invite_nonce_expires_at: nil,
+        deactivated_at: Time.current, deactivation_reason: "pending_sign_up_closed")
       invitation_id
     end
 

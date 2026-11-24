@@ -76,6 +76,35 @@ class EmployeeAccountLink < ApplicationRecord
     :unknown
   end
 
+  ELIGIBLE_LINK_FUNCTION = "payroll_employee_login_has_eligible_link(bigint, bigint, timestamp with time zone)"
+
+  # Whether the login has another link usable right now (active, or former
+  # with access still running), anywhere, even under enforced RLS: true,
+  # false, or nil when the check isn't installed or fails (callers then keep
+  # the login open). See db/migrate/support/login_eligible_link_function.rb.
+  def self.login_has_eligible_link?(user_id:, except_link_id:, now: Time.current)
+    return false if user_id.blank?
+    return unless function_available?(ELIGIBLE_LINK_FUNCTION)
+
+    binds = [
+      ActiveRecord::Relation::QueryAttribute.new("login_user_id", Integer(user_id), BIGINT),
+      ActiveRecord::Relation::QueryAttribute.new("except_link_id", except_link_id && Integer(except_link_id), BIGINT),
+      ActiveRecord::Relation::QueryAttribute.new("now", now, ActiveRecord::Type::DateTime.new)
+    ]
+    answer = transaction(requires_new: true) do
+      connection.select_value("SELECT payroll_employee_login_has_eligible_link($1, $2, $3)", "Login eligible link check", binds)
+    end
+    answer.nil? ? nil : ActiveModel::Type::Boolean.new.cast(answer)
+  rescue ActiveRecord::StatementInvalid => e
+    Rails.logger.warn("[EmployeeAccountLink] Login eligible link check failed closed: #{e.class}")
+    nil
+  end
+
+  def self.function_available?(signature)
+    bind = ActiveRecord::Relation::QueryAttribute.new("function", signature, ActiveRecord::Type::String.new)
+    connection.select_value("SELECT has_function_privilege(to_regprocedure($1), 'EXECUTE')", "Login link function check", [ bind ]) == true
+  end
+
   def self.decision_function_available?
     bind = ActiveRecord::Relation::QueryAttribute.new("function", DECISION_FUNCTION, ActiveRecord::Type::String.new)
     connection.select_value("SELECT has_function_privilege(to_regprocedure($1), 'EXECUTE')", "Login link decision check", [ bind ]) == true
@@ -114,7 +143,7 @@ class EmployeeAccountLink < ApplicationRecord
 
     connection.select_value(LINKS_HIDDEN_SQL) == true
   end
-  private_class_method :function_link_decision, :decision_function_available?, :link_decision_for,
+  private_class_method :function_link_decision, :decision_function_available?, :function_available?, :link_decision_for,
     :with_system_decision_read, :other_company_links_hidden?
 
   def self.generate_token

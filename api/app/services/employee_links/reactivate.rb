@@ -9,9 +9,15 @@ module EmployeeLinks
   # are the same login reactivated and the new link bound, in one
   # transaction; any failed check leaves both inactive. The old link stays
   # closed. Staff and client logins were never deactivated and use Claim.
+  #
+  # Only a login closed because its last link closed qualifies; one an admin
+  # deactivated (any other deactivation_reason) never reactivates itself. The
+  # session must have signed in after the closure (SessionFence) and stepped
+  # up recently, so a session from before it can't bring the login back.
   class Reactivate < Claim
     def self.eligible_login?(user, employee)
-      user.portal_employee? && !user.active? && user.clerk_id.present? && !user.clerk_id.start_with?("pending_") &&
+      user.portal_employee? && !user.active? && user.deactivation_reason == "last_employee_link_closed" &&
+        user.deactivated_at.present? && user.clerk_id.present? && !user.clerk_id.start_with?("pending_") &&
         user.invitation_status == "accepted" && user.organization&.active? && user.practice_company_id.nil? &&
         EmployeeAccountLink.where(user_id: user.id, employee_id: [ employee.id, employee.previous_employee_id ].compact,
           status: %w[former revoked]).exists?
@@ -20,7 +26,9 @@ module EmployeeLinks
     private
 
     def user_allowed?
-      @user.is_a?(User) && @user.portal_employee? && !@user.active?
+      @user.is_a?(User) && @user.portal_employee? && !@user.active? &&
+        @user.deactivation_reason == "last_employee_link_closed" && @user.deactivated_at.present? &&
+        !SessionFence.fenced?(@user, @session) && MfaPolicy.recently_verified_any_factor?(@session)
     end
 
     # The earlier link to this same employee record (or the record it
@@ -30,7 +38,7 @@ module EmployeeLinks
     end
 
     def attach!(link)
-      @user.lock!
+      # Locked before the link (Claim#lock_targets) and re-read there.
       @user.update!(active: true)
       super
       AuditLog.record!(
