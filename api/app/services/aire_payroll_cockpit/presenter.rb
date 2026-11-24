@@ -150,8 +150,12 @@ module AirePayrollCockpit
     def suggestions_for(source_employee)
       source_email = source_employee["email"].to_s.strip.downcase
       source_name = normalize_name(source_employee["full_name"])
+      unique_email_match = source_email.present? &&
+        !EmployeeContactValidator.unmatchable_placeholder_email?(source_email, marked_placeholders: marked_placeholders) &&
+        active_company_email_counts[source_email] == 1
+
       available_payroll_employees.filter_map do |employee|
-        same_email = source_email.present? && employee.email.to_s.strip.downcase == source_email
+        same_email = unique_email_match && employee.email.to_s.strip.downcase == source_email
         same_name = source_name.present? && normalize_name(employee.full_name) == source_name
         next unless same_email || same_name
 
@@ -162,6 +166,18 @@ module AirePayrollCockpit
           "basis" => suggestion_basis(same_email:, same_name:)
         }
       end
+    end
+
+    def marked_placeholders
+      @marked_placeholders ||= EmployeeContactValidator.marked_placeholder_emails(organization_id: @source.company&.organization_id)
+    end
+
+    def active_company_email_counts
+      @active_company_email_counts ||= Employee.active
+        .where(company_id: @source.company_id)
+        .where(EmployeeContactValidator.present_node(Employee.arel_table[:email]))
+        .group(EmployeeContactValidator.normalized_email_node)
+        .count
     end
 
     def normalize_name(value)

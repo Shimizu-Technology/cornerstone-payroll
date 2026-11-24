@@ -3,7 +3,9 @@
 class EmployeeClassificationTransitionService
   class Error < StandardError; end
 
-  Result = Struct.new(:previous_employee, :new_employee, keyword_init: true)
+  Result = Struct.new(:previous_employee, :new_employee, :contact_notices, keyword_init: true)
+  BLANKED_EMAIL_NOTICE = "The email on the old record wasn't copied, because it can't be used for this worker. " \
+    "Enter the worker's own email on the new record."
 
   def initialize(employee:, attributes:, actor:)
     @employee = employee
@@ -20,6 +22,8 @@ class EmployeeClassificationTransitionService
       validate_transition!
 
       new_employee = Employee.new(new_employee_attributes.merge(initial_compensation_source: "classification_transition", initial_compensation_actor: actor))
+      contact_result = validate_contact_details!(new_employee)
+      apply_validated_contact_details!(new_employee, contact_result)
       EmployeeIntakePolicy.prepare!(new_employee, actor: actor)
       new_employee.save!
       create_w4_election!(new_employee)
@@ -31,6 +35,22 @@ class EmployeeClassificationTransitionService
         termination_date: effective_date - 1.day
       )
 
+      audit_metadata = {
+        previous_employee_id: employee.id,
+        new_employee_id: new_employee.id,
+        from_tax_classification: employee.tax_classification,
+        to_tax_classification: new_employee.tax_classification,
+        from_employment_type: employee.employment_type,
+        to_employment_type: new_employee.employment_type,
+        effective_date: effective_date.iso8601,
+        reason: reason,
+        historical_payroll_preserved: true
+      }
+      if contact_result.same_person_confirmed?
+        audit_metadata[:same_person_email_confirmed] = true
+        audit_metadata[:confirmed_login_user_id] = contact_result.matched_login_user&.id
+      end
+
       AuditLog.record!(
         user: actor,
         company_id: employee.company_id,
@@ -38,20 +58,10 @@ class EmployeeClassificationTransitionService
         record_type: "employees",
         record_id: new_employee.id,
         subject_name: new_employee.display_name,
-        metadata: {
-          previous_employee_id: employee.id,
-          new_employee_id: new_employee.id,
-          from_tax_classification: employee.tax_classification,
-          to_tax_classification: new_employee.tax_classification,
-          from_employment_type: employee.employment_type,
-          to_employment_type: new_employee.employment_type,
-          effective_date: effective_date.iso8601,
-          reason: reason,
-          historical_payroll_preserved: true
-        }
+        metadata: audit_metadata
       )
 
-      Result.new(previous_employee: employee.reload, new_employee: new_employee.reload)
+      Result.new(previous_employee: employee.reload, new_employee: new_employee.reload, contact_notices: @contact_notices || [])
     end
   end
 
@@ -125,7 +135,7 @@ class EmployeeClassificationTransitionService
   end
 
   def shared_identity_attributes
-    employee.attributes.symbolize_keys.slice(
+    attrs = employee.attributes.symbolize_keys.slice(
       :company_id,
       :department_id,
       :first_name,
@@ -139,8 +149,74 @@ class EmployeeClassificationTransitionService
       :city,
       :state,
       :zip,
-      :phone
+      :phone,
+      :contact_source
     )
+    attrs[:email] = attributes[:email] if attributes.key?(:email)
+    attrs[:phone] = attributes[:phone] if attributes.key?(:phone)
+    attrs[:email_verified_at] = nil
+    attrs[:phone_confirmed_by_employee_at] = nil
+    attrs
+  end
+
+  # Current account links always come first. Evidence that this employee and
+  # address were accepted before (a verified email, or a recorded same-person
+  # confirmation) can only waive asking for that confirmation again; a login
+  # now linked to another worker, or links that can't be checked, still win.
+  # A copied email that can't be used is left blank with a notice for the
+  # operator instead of blocking the change. An edited email gets every check.
+  CURRENT_LINK_REJECTIONS = %w[linked_to_other_employee link_check_unavailable].freeze
+
+  def validate_contact_details!(new_employee)
+    email_unchanged = EmployeeContactValidator.normalize_email(new_employee.email) == EmployeeContactValidator.normalize_email(employee.email)
+    result = run_contact_validator(new_employee, check_login_identity: true)
+    if email_unchanged && result.errors[:email].present?
+      if previously_accepted_email? && !CURRENT_LINK_REJECTIONS.include?(result.login_email_rejection_reason)
+        result = run_contact_validator(new_employee, check_login_identity: false)
+      end
+      if result.errors[:email].present?
+        new_employee.email = nil
+        (@contact_notices ||= []) << BLANKED_EMAIL_NOTICE
+        result = run_contact_validator(new_employee, check_login_identity: true)
+      end
+    end
+    return result if result.valid?
+
+    result.apply_errors_to(new_employee)
+    raise EmployeeContactValidator::ValidationError.new(result: result, record: new_employee)
+  end
+
+  def run_contact_validator(new_employee, check_login_identity:)
+    EmployeeContactValidator.call(
+      employee: new_employee,
+      company: employee.company,
+      email: new_employee.email,
+      phone: new_employee.phone,
+      check_login_identity: check_login_identity,
+      confirm_same_person_email: attributes[:confirm_same_person_email],
+      actor: actor,
+      source: "staff",
+      exclude_employee_ids: [ employee.id ]
+    )
+  end
+
+  def previously_accepted_email?
+    email = EmployeeContactValidator.normalize_email(employee.email)
+    return false if email.blank?
+    return true if employee.email_verified_at.present?
+
+    AuditLog.where(company_id: employee.company_id, record_type: "employees", record_id: employee.id,
+      action: "employees#confirm_same_person_email")
+      .where("LOWER(TRIM(metadata->>'email')) = ?", email)
+      .exists?
+  end
+
+  def apply_validated_contact_details!(new_employee, contact_result)
+    new_employee.email = contact_result.normalized_email
+    new_employee.phone = contact_result.normalized_phone
+    new_employee.email_verified_at = nil
+    new_employee.phone_confirmed_by_employee_at = nil
+    new_employee.contact_source = "staff" if attributes.key?(:email) || attributes.key?(:phone)
   end
 
   def target_classification_attributes

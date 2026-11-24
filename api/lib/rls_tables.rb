@@ -63,6 +63,7 @@ module RlsTables
 
   RLS_EXEMPT_TABLES = %w[
     cable_connection_tickets client_profitability_settings companies company_assignments
+    employee_placeholder_emails
     expense_artifacts expense_payments expense_vendors expenses filing_submitters finance_api_requests
     finance_api_tokens finance_books invoice_artifacts invoice_billing_profiles invoice_chat_messages
     invoice_chat_sessions invoice_credit_notes invoice_deliveries invoice_events invoice_line_items

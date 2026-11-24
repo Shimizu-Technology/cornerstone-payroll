@@ -4,12 +4,19 @@ require "csv"
 require "json"
 
 module ClerkCutover
-  # Builds a `clerk migrate import`-compatible payload from a human-reviewed
-  # Payroll user inventory and a Clerk Dashboard user export (CSV or JSON).
+  # Builds a payload for `npx clerk@4.3.0 migrate import <file> --source clerk`
+  # from a human-reviewed Payroll user inventory and a Clerk Dashboard user
+  # export (CSV or JSON).
   #
-  # Matching is performed STRICTLY by old_clerk_id == export["id"] (the dev
-  # Clerk user ID), setting `external_id` = old_clerk_id on every imported user.
-  # Email addresses are NEVER used as a join key.
+  # The output uses the Dashboard export's own column names (`id`,
+  # `primary_email_address`, `password_digest`, `password_hasher`, ...), which
+  # is what the CLI's built-in `clerk` source maps (see
+  # packages/cli-core/src/commands/migrate/sources/clerk.ts at tag v4.3.0 of
+  # github.com/clerk/cli). The CLI turns `id` into the new user's `external_id`
+  # itself, so `id` is the old (dev) Clerk user ID.
+  #
+  # Matching is performed STRICTLY by old_clerk_id == export["id"]. Email
+  # addresses are NEVER used as a join key.
   class ImportBuilder
     class ValidationError < StandardError; end
     class WriteRefusedError < StandardError; end
@@ -20,6 +27,7 @@ module ClerkCutover
       totp_enabled
       two_factor_enabled
       backup_code_enabled
+      backup_codes_enabled
       totp_secret
       backup_codes
       backup_code_digests
@@ -68,18 +76,19 @@ module ClerkCutover
         end
 
         record = {
-          "external_id" => old_clerk_id,
-          "email_address" => exported[:emails]
+          "id" => old_clerk_id,
+          "primary_email_address" => exported[:emails].first
         }
+        record["verified_email_addresses"] = exported[:emails].drop(1) if exported[:emails].length > 1
         record["first_name"] = exported[:first_name] if exported[:first_name].present?
         record["last_name"] = exported[:last_name] if exported[:last_name].present?
 
         if exported[:password_digest].present?
           record["password_digest"] = exported[:password_digest]
           record["password_hasher"] = exported[:password_hasher].presence || "bcrypt"
-        else
-          record["skip_password_requirement"] = true
         end
+        # No password columns for Google / email-code users: `clerk migrate
+        # import` skips the password requirement by default.
 
         records << record
       end
@@ -200,6 +209,7 @@ module ClerkCutover
       truthy?(hash["totp_enabled"]) ||
         truthy?(hash["two_factor_enabled"]) ||
         truthy?(hash["backup_code_enabled"]) ||
+        truthy?(hash["backup_codes_enabled"]) ||
         non_empty_mfa_material?(hash["totp_secret"]) ||
         non_empty_mfa_material?(hash["backup_codes"]) ||
         non_empty_mfa_material?(hash["backup_code_digests"])

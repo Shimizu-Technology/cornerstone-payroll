@@ -30,11 +30,14 @@ module EmployeeBulkImport
     ].freeze
     DATE_COLUMNS = %w[date_of_birth hire_date w4_effective_on].freeze
 
-    attr_reader :company, :errors, :actor
+    attr_reader :company, :errors, :actor, :ip_address, :user_agent, :request_id
 
-    def initialize(company, actor: nil)
+    def initialize(company, actor: nil, ip_address: nil, user_agent: nil, request_id: nil)
       @company = company
       @actor = actor
+      @ip_address = ip_address
+      @user_agent = user_agent
+      @request_id = request_id
       @errors = []
     end
 
@@ -48,13 +51,17 @@ module EmployeeBulkImport
 
       departments = company.departments.index_by { |d| d.name.downcase.strip }
       existing_employees = company.employees.pluck(:first_name, :last_name).map { |f, l| "#{f.downcase.strip} #{l.downcase.strip}" }.to_set
+      flagged_emails = EmployeeContactValidator.flagged_emails_for_organization(organization_id: company.organization_id)
       seen_in_file = Set.new
+      seen_emails_in_file = Hash.new(0)
 
       parsed_rows = rows.drop(1).each_with_index.map do |row, idx|
-        result = parse_row(row, headers, idx + 2, departments, existing_employees, seen_in_file)
+        result = parse_row(row, headers, idx + 2, departments, existing_employees, seen_in_file, flagged_emails, seen_emails_in_file)
         if result
           name_key = "#{result[:raw]['first_name']&.downcase&.strip} #{result[:raw]['last_name']&.downcase&.strip}"
           seen_in_file.add(name_key)
+          normalized_email = result[:attributes][:email]
+          seen_emails_in_file[normalized_email] += 1 if normalized_email.present?
         end
         result
       end.compact
@@ -63,15 +70,17 @@ module EmployeeBulkImport
     end
 
     def create_employees!(validated_rows)
-      results = { created: 0, failed: 0, errors: [] }
+      results = { created: 0, failed: 0, errors: [], warnings: [] }
 
       ActiveRecord::Base.transaction do
         company.lock!
         dept_cache = company.departments.index_by { |d| d.name.downcase.strip }
+        flagged_emails = EmployeeContactValidator.flagged_emails_for_organization(organization_id: company.organization_id)
 
         validated_rows.each do |row_data|
           attrs = row_data[:attributes].dup
           dept_name = attrs.delete(:_department_name)
+          confirm_same_person_email = attrs.delete(:confirm_same_person_email)
 
           if dept_name.present? && attrs[:department_id].blank?
             dept_key = dept_name.downcase.strip
@@ -86,11 +95,45 @@ module EmployeeBulkImport
           end
 
           employee = company.employees.new(attrs)
+          contact_result = EmployeeContactValidator.call(
+            employee: employee,
+            company: company,
+            email: attrs.key?(:email) ? attrs[:email] : :unchanged,
+            phone: attrs.key?(:phone) ? attrs[:phone] : :unchanged,
+            confirm_same_person_email: confirm_same_person_email,
+            actor: actor,
+            source: "import",
+            flagged_emails: flagged_emails
+          )
+
+          unless contact_result.valid?
+            contact_result.apply_errors_to(employee)
+            results[:failed] += 1
+            results[:errors] << { row: row_data[:row_number], messages: employee.errors.full_messages }
+            next
+          end
+
+          employee.email = contact_result.normalized_email if attrs.key?(:email)
+          employee.phone = contact_result.normalized_phone if attrs.key?(:phone)
+          employee.contact_source = "import" if EmployeeContactValidator::CONTACT_FIELDS.any? { |field| employee.public_send(field).present? }
+          if contact_result.warnings.any?
+            results[:warnings] << { row: row_data[:row_number], warnings: contact_result.warnings }
+          end
+
           employee.created_by = actor
           employee.initial_compensation_source = "bulk_import"
           employee.initial_compensation_actor = actor || Current.user || Current.actor || AuditActor.operator("Employee bulk import")
           EmployeeIntakePolicy.prepare!(employee, actor: actor)
           if employee.save
+            EmployeeContactValidator.record_same_person_confirmation_audit!(
+              employee: employee,
+              result: contact_result,
+              actor: actor,
+              company: company,
+              ip_address: ip_address,
+              user_agent: user_agent,
+              request_id: request_id
+            )
             create_w4_election!(employee)
             EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)
             results[:created] += 1
@@ -207,7 +250,7 @@ module EmployeeBulkImport
       end
     end
 
-    def parse_row(row, headers, row_number, departments, existing_employees, seen_in_file)
+    def parse_row(row, headers, row_number, departments, existing_employees, seen_in_file, flagged_emails = nil, seen_emails_in_file = nil)
       return nil if row.nil? || row.all? { |c| c.to_s.strip.empty? }
 
       data = {}
@@ -216,9 +259,20 @@ module EmployeeBulkImport
         data[header] = row[idx].to_s.strip
       end
 
-      row_errors = validate_row_data(data)
+      contact_result = validate_contact_for_row(data, flagged_emails: flagged_emails)
+      row_errors = validate_row_data(data, contact_result: contact_result)
+      row_warnings = contact_result.warnings.dup
+      if contact_result.normalized_email.present? && seen_emails_in_file && seen_emails_in_file[contact_result.normalized_email] >= 1 &&
+          row_warnings.none? { |warning| warning[:code] == "shared_company_email" }
+        row_warnings << {
+          code: "shared_company_email",
+          field: "email",
+          message: "Another row in this import uses this email address. Family members may share one, but email invites require a unique address.",
+          matching_employee_count: seen_emails_in_file[contact_result.normalized_email]
+        }
+      end
 
-      attrs = build_attributes(data, departments)
+      attrs = build_attributes(data, departments, contact_result: contact_result)
       full_name = "#{data['first_name']&.downcase&.strip} #{data['last_name']&.downcase&.strip}"
       duplicate = existing_employees.include?(full_name) || seen_in_file.include?(full_name)
 
@@ -229,13 +283,31 @@ module EmployeeBulkImport
         raw: data,
         attributes: attrs,
         errors: row_errors,
+        warnings: row_warnings,
         valid: row_errors.empty?,
         duplicate: duplicate,
         new_department: new_dept
       }
     end
 
-    def validate_row_data(data)
+    def validate_contact_for_row(data, flagged_emails: nil)
+      candidate = Employee.new(
+        company: company,
+        first_name: data["first_name"],
+        last_name: data["last_name"]
+      )
+      EmployeeContactValidator.call(
+        employee: candidate,
+        company: company,
+        email: data["email"].presence,
+        phone: data["phone"].presence,
+        actor: actor,
+        source: "import",
+        flagged_emails: flagged_emails
+      )
+    end
+
+    def validate_row_data(data, flagged_emails: nil, contact_result: nil)
       errors = []
 
       required_columns.each do |col|
@@ -342,15 +414,34 @@ module EmployeeBulkImport
         end
       end
 
+      contact_result ||= validate_contact_for_row(data, flagged_emails: flagged_emails)
+      contact_result.errors.each do |field, messages|
+        messages.each { |message| errors << "#{field} #{message}" }
+      end
+
       errors
     end
 
-    def build_attributes(data, departments)
+    def build_attributes(data, departments, contact_result: nil)
       attrs = {}
 
       # String fields
       %w[first_name middle_name last_name email address_line1 address_line2 city state zip phone business_name contractor_ein].each do |col|
         attrs[col.to_sym] = data[col] if data[col].present?
+      end
+
+      if contact_result
+        attrs[:email] = contact_result.normalized_email if attrs.key?(:email)
+        attrs[:phone] = contact_result.normalized_phone if attrs.key?(:phone) && contact_result.errors[:phone].blank?
+      else
+        attrs[:email] = EmployeeContactValidator.normalize_email(attrs[:email]) if attrs.key?(:email)
+        if attrs.key?(:phone)
+          normalized_phone, phone_error = EmployeeContactValidator.normalize_phone(attrs[:phone])
+          attrs[:phone] = normalized_phone if phone_error.blank?
+        end
+      end
+      if EmployeeContactValidator::CONTACT_FIELDS.any? { |field| attrs[field].present? }
+        attrs[:contact_source] = "import"
       end
 
       # SSN → encrypted field
