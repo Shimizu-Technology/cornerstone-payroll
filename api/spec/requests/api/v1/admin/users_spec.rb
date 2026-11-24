@@ -484,5 +484,15 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
         event_category: "security"
       )
     end
+
+    it "leaves a pending employee app sign-up to its employee link" do
+      managed_user.update_columns(role: User.roles.fetch("portal_employee"))
+      expect_any_instance_of(Api::V1::Admin::UsersController).not_to receive(:create_clerk_invitation)
+
+      post "/api/v1/admin/users/#{managed_user.id}/resend_invitation"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("employee's record")
+    end
   end
 end

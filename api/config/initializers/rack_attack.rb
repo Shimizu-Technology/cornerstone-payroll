@@ -59,7 +59,7 @@ class Rack::Attack
   end
 
   EMPLOYEE_PATH = %r{\A/api/v1/employee(?:/|\.[^/]+\z|\z)}
-  EMPLOYEE_ACTIVATION_PATH = %r{\A/api/v1/employee/(?:activate|activation|invites|invitations)(?:[/.]|\z)}
+  EMPLOYEE_ACTIVATION_PATH = %r{\A/api/v1/employee/(?:activate|activation|invites|invitations|links/claim)(?:[/.]|\z)}
   EMPLOYEE_PDF_PATH = %r{\A/api/v1/employee/(?:.*/)?(?:pdf(?:[/.]|\z)|[^/]+\.pdf\z)}
   EMPLOYEE_DOCUMENT_DOWNLOAD_PATH = %r{\A/api/v1/employee/(?:pay_stubs|w[-_]?2s?)(?:/[^/]+)*/download(?:\.[^/]+)?\z}
   KIOSK_PATH = %r{\A/api/v1/kiosk(?:/|\.[^/]+\z|\z)}
@@ -81,12 +81,19 @@ class Rack::Attack
       return 413 if body.bytesize > ACTIVATION_BODY_LIMIT
 
       params = JSON.parse(body)
-      token = params["token"] if params.is_a?(Hash)
-      return 400 unless token.is_a?(String) && !token.empty?
+      return 400 unless params.is_a?(Hash)
+      # The check reads the JSON body only; naming its fields in the query
+      # string too could make layers disagree, so it is refused outright.
+      return 400 if EmployeeLinks::Credentials.conflicting_query?(request.GET)
 
-      request.env["payroll.activation_token_digest"] = Digest::SHA256.hexdigest(token)
+      # The emailed token or the printed code, chosen by the very rule the
+      # check uses, so this limit always counts the credential it verifies.
+      credential = EmployeeLinks::Credentials.select(token: params["token"], code: params["code"])
+      return 400 unless credential
+
+      request.env["payroll.activation_token_digest"] = credential.throttle_key
       nil
-    rescue JSON::ParserError
+    rescue JSON::ParserError, Rack::QueryParser::ParameterTypeError, Rack::QueryParser::InvalidParameterError
       400
     ensure
       input.rewind
