@@ -74,9 +74,35 @@ RSpec.describe RecentVerification, type: :controller do
     end
   end
 
-  it "keeps second-factor step-up for staff even when global enforcement is off" do
+  it "keeps second-factor step-up for enrolled staff even when global enforcement is off" do
     allow(MfaPolicy).to receive(:enabled?).and_return(false)
-    submit(role: :admin, ages: [ 1, 0 ])
+    submit(role: :admin, ages: [ 1, 11 ], enrollment: true)
     expect_reverification("second_factor")
+  end
+
+  [ :admin, :client ].each do |role|
+    it "sends unenrolled #{role} users to enrollment instead of a prompt that can't succeed" do
+      submit(role: role, ages: [ 0, -1 ], enrollment: false)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq(
+        "error" => "Set up two-step sign-in to make this change.",
+        "code" => "mfa_enrollment_required"
+      )
+    end
+  end
+
+  it "does not let the new-device email code stand in for enrollment" do
+    submit(role: :admin, ages: [ 1, 0 ])
+    expect(response.parsed_body["code"]).to eq("mfa_enrollment_required")
+  end
+
+  it "permits a fresh first factor for the legacy employee role" do
+    submit(role: :employee, ages: [ 3, -1 ])
+    expect(response).to have_http_status(:no_content)
+  end
+
+  it "asks the legacy employee role for a fresh first factor, not a second factor" do
+    submit(role: :employee, ages: [ 25, -1 ], enrollment: false)
+    expect_reverification("first_factor")
   end
 end

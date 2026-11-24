@@ -9,6 +9,7 @@ require "stringio"
 require "uri"
 
 class ProductionReadiness
+  MFA_SAMPLE_MAX_AGE = 15.minutes
   MAX_PROVIDER_RESPONSE_BYTES = 1.megabyte
   PRIVATE_PROXY_NETWORKS = [
     IPAddr.new("127.0.0.0/8"),
@@ -330,8 +331,13 @@ class ProductionReadiness
 
     verifier = ClerkTokenVerifier.new(env: env, cache: ActiveSupport::Cache::MemoryStore.new,
       http_get: ->(uri) { http_get.call(uri, nil) })
-    payload = verifier.verify(File.read(path, 16.kilobytes).strip)
-    payload && payload["sid"].present? && [ true, false ].include?(payload[MfaPolicy::ENROLLMENT_CLAIM])
+    # Clerk session tokens live about 60 seconds, which is shorter than the
+    # probes that run before this one. A recently issued, correctly signed
+    # token still proves what the template outputs, so allow a short window.
+    payload = verifier.verify(File.read(path, 16.kilobytes).strip, exp_leeway: MFA_SAMPLE_MAX_AGE.to_i)
+    payload && payload["sid"].present? &&
+      payload["iat"].is_a?(Integer) && payload["iat"] >= MFA_SAMPLE_MAX_AGE.ago.to_i &&
+      [ true, false ].include?(payload[MfaPolicy::ENROLLMENT_CLAIM])
   end
 
   def time_tracking_destinations_resolve?
