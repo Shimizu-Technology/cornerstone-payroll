@@ -4323,6 +4323,8 @@ export interface CompanyDetail extends CompanyListItem {
   simple_payroll_register_enabled?: boolean;
   can_update?: boolean;
   editable_fields?: string[];
+  // Sent to organization admins only.
+  company_type?: 'client' | 'demo';
 }
 
 export interface CompanyFormData {
