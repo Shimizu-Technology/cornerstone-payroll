@@ -223,8 +223,15 @@ module Api
           end
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+          # The Contact details grid asks for a contact-only record so the full
+          # SSN never reaches its state. The full edit form keeps the full record.
+          data = if params[:response_view].to_s == "contact"
+            serialize_employee(@employee, contact_context: contact_context)
+          else
+            serialize_employee(@employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true, contact_context: contact_context)
+          end
           render json: {
-            data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true, contact_context: contact_context),
+            data: data,
             payment_method_review: { reapproval_pay_period_ids: @payment_default_service&.reapproval_pay_period_ids || [] },
             compensation_warnings: @compensation_result&.warnings || [],
             contact_warnings: @contact_validation_result&.warnings || []
@@ -237,7 +244,8 @@ module Api
             conflicting_fields: e.conflicting_fields,
             contact_revision: e.employee.contact_revision,
             current_values: e.current_values,
-            data: serialize_employee(e.employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true, contact_context: contact_context)
+            # Conflict recovery needs contact values and the revision, never the full SSN.
+            data: serialize_employee(e.employee, contact_context: contact_context)
           }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee)

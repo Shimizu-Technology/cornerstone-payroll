@@ -74,9 +74,26 @@ class EmployeeContactValidator
     end
   end
 
+  # The characters String#strip removes, so SQL comparisons match normalize_email.
+  # PostgreSQL TRIM removes spaces only, and has no \v escape.
+  SQL_STRIP_CHARS = %q(E' \t\n\x0B\f\r')
+
   class << self
     def normalize_email(raw)
       raw.to_s.strip.downcase.presence
+    end
+
+    # Matches index_employees_on_lower_email when column is "email".
+    def normalized_email_sql(column = "email")
+      "LOWER(BTRIM(#{column}, #{SQL_STRIP_CHARS}))"
+    end
+
+    def blank_sql(column)
+      "COALESCE(BTRIM(#{column}, #{SQL_STRIP_CHARS}), '') = ''"
+    end
+
+    def present_sql(column)
+      "COALESCE(BTRIM(#{column}, #{SQL_STRIP_CHARS}), '') <> ''"
     end
 
     def normalize_phone(raw)
@@ -107,6 +124,8 @@ class EmployeeContactValidator
         "+#{digits}"
       end
 
+      # North American area codes and exchanges never start with 0 or 1.
+      normalized = nil if normalized&.match?(/\A\+1\d{10}\z/) && !normalized.match?(/\A\+1[2-9]\d{2}[2-9]/)
       return [ normalized, nil ] if normalized
 
       [ nil, "must be a valid phone number (7-digit Guam numbers default to +1 671)" ]
@@ -174,8 +193,8 @@ class EmployeeContactValidator
     def contact_details_context(company:)
       flagged = marked_placeholder_emails(organization_id: company.organization_id)
       company_email_counts = Employee.where(company_id: company.id)
-        .where("COALESCE(TRIM(email), '') <> ''")
-        .group(Arel.sql("LOWER(TRIM(email))"))
+        .where(EmployeeContactValidator.present_sql("email"))
+        .group(Arel.sql(EmployeeContactValidator.normalized_email_sql))
         .count
 
       {
@@ -226,26 +245,28 @@ class EmployeeContactValidator
       return unless result&.same_person_confirmed?
 
       previous_recorded = Current.domain_audit_recorded
-      AuditLog.record!(
-        user: actor,
-        organization_id: company.organization_id,
-        company_id: company.id,
-        action: "employees#confirm_same_person_email",
-        record_type: "employees",
-        record_id: employee.id,
-        subject_name: employee.display_name,
-        metadata: {
-          email: employee.email,
-          same_person_email_confirmed: true,
-          confirmed_login_user_id: result.matched_login_user&.id,
-          confirmation_basis: result.confirmation_basis
-        },
-        ip_address: ip_address,
-        user_agent: user_agent,
-        request_id: request_id
-      )
-    ensure
-      Current.domain_audit_recorded = previous_recorded
+      begin
+        AuditLog.record!(
+          user: actor,
+          organization_id: company.organization_id,
+          company_id: company.id,
+          action: "employees#confirm_same_person_email",
+          record_type: "employees",
+          record_id: employee.id,
+          subject_name: employee.display_name,
+          metadata: {
+            email: employee.email,
+            same_person_email_confirmed: true,
+            confirmed_login_user_id: result.matched_login_user&.id,
+            confirmation_basis: result.confirmation_basis
+          },
+          ip_address: ip_address,
+          user_agent: user_agent,
+          request_id: request_id
+        )
+      ensure
+        Current.domain_audit_recorded = previous_recorded
+      end
     end
 
     def validate_for_invite(employee, company: employee.company, allow_same_person_login: false, actor: nil)
@@ -283,7 +304,8 @@ class EmployeeContactValidator
     actor: nil,
     source: nil,
     exclude_employee_ids: [],
-    flagged_emails: nil
+    flagged_emails: nil,
+    check_login_identity: true
   )
     @employee = employee
     @company = company
@@ -297,6 +319,7 @@ class EmployeeContactValidator
     @exclude_employee_ids << employee.previous_employee_id if employee&.previous_employee_id.present?
     @exclude_employee_ids.uniq!
     @flagged_emails = flagged_emails
+    @check_login_identity = check_login_identity
   end
 
   def call
@@ -331,7 +354,7 @@ class EmployeeContactValidator
           }
         end
 
-        login_check = check_login_email(normalized_email)
+        login_check = @check_login_identity ? check_login_email(normalized_email) : no_login_conflict
         matched_login_user = login_check[:user]
         same_person_confirmation_required = login_check[:confirmation_required]
         same_person_confirmed = login_check[:confirmed]
@@ -383,7 +406,7 @@ class EmployeeContactValidator
   end
 
   def check_login_email(normalized_email)
-    login_user = User.where("LOWER(TRIM(email)) = ?", normalized_email).first
+    login_user = User.where("#{EmployeeContactValidator.normalized_email_sql} = ?", normalized_email).first
     return no_login_conflict unless login_user
 
     # Check conflicting links FIRST via a narrow tenant-safe decision lookup
@@ -507,7 +530,7 @@ class EmployeeContactValidator
   def same_company_coworker_email_count(normalized_email)
     return 0 if @company.blank?
 
-    scope = Employee.where(company_id: @company.id).where("LOWER(TRIM(email)) = ?", normalized_email)
+    scope = Employee.where(company_id: @company.id).where("#{EmployeeContactValidator.normalized_email_sql} = ?", normalized_email)
     scope = scope.where.not(id: @exclude_employee_ids) if @exclude_employee_ids.any?
     scope.count
   end

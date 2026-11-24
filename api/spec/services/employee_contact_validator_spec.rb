@@ -31,6 +31,14 @@ RSpec.describe EmployeeContactValidator do
       expect(described_class.normalize_phone("+1671555").last).to be_present
     end
 
+    it "rejects North American numbers whose area code or exchange starts with 0 or 1" do
+      [ "1234567", "0555019", "671-155-0199", "(171) 555-0199", "071-555-0199", "+1 671 055 0199", "1-271-155-0199" ].each do |raw|
+        expect(described_class.normalize_phone(raw).first).to be_nil, "expected #{raw} to be rejected"
+      end
+      expect(described_class.normalize_phone("2345678")).to eq([ "+16712345678", nil ])
+      expect(described_class.normalize_phone("+1 271 255 0199")).to eq([ "+12712550199", nil ])
+    end
+
     it "allows blank phones" do
       expect(described_class.normalize_phone("")).to eq([ nil, nil ])
       expect(described_class.normalize_phone(nil)).to eq([ nil, nil ])
@@ -90,6 +98,24 @@ RSpec.describe EmployeeContactValidator do
       expect(result).to be_valid
       expect(result.warnings.size).to eq(1)
       expect(result.warnings.first).to include(code: "shared_company_email", field: "email", matching_employee_count: 5)
+    end
+
+    it "counts a coworker whose stored email has a trailing tab or newline, as normalize_email does" do
+      coworker = create(:employee, company: company, first_name: "Ana", last_name: "Family", email: "x@example.com")
+      coworker.update_column(:email, " Family@Example.com\t\n")
+
+      result = described_class.call(employee: employee, company: company, email: "family@example.com")
+      expect(result.warnings.map { |warning| warning[:code] }).to eq([ "shared_company_email" ])
+
+      employee.update!(email: "family@example.com")
+      expect(described_class.validate_for_invite(employee)).not_to be_valid
+    end
+
+    it "does not strip a letter v from the ends of an email in SQL comparisons" do
+      create(:employee, company: company, first_name: "Dav", last_name: "Coworker", email: "vda@example.cov")
+
+      result = described_class.call(employee: employee, company: company, email: "da@example.co")
+      expect(result.warnings).to be_empty
     end
 
     it "allows an employee's own login email when already linked via employee_account_links" do
@@ -267,6 +293,20 @@ RSpec.describe EmployeeContactValidator do
       )
       expect(accountant_result).not_to be_valid
       expect(accountant_result.same_person_confirmation_required?).to be(false)
+    end
+  end
+
+  describe ".record_same_person_confirmation_audit!" do
+    it "keeps an earlier operation's audit flag when no confirmation was recorded" do
+      Current.domain_audit_recorded = true
+      unconfirmed = described_class.call(employee: employee, company: company, email: "own@example.com")
+
+      expect do
+        described_class.record_same_person_confirmation_audit!(employee: employee, result: unconfirmed, actor: nil, company: company)
+      end.not_to change(AuditLog, :count)
+      expect(Current.domain_audit_recorded).to be(true)
+    ensure
+      Current.reset
     end
   end
 

@@ -259,8 +259,8 @@ module EmployeeBulkImport
         data[header] = row[idx].to_s.strip
       end
 
-      row_errors = validate_row_data(data, flagged_emails: flagged_emails)
       contact_result = validate_contact_for_row(data, flagged_emails: flagged_emails)
+      row_errors = validate_row_data(data, contact_result: contact_result)
       row_warnings = contact_result.warnings.dup
       if contact_result.normalized_email.present? && seen_emails_in_file && seen_emails_in_file[contact_result.normalized_email] >= 1 &&
           row_warnings.none? { |warning| warning[:code] == "shared_company_email" }
@@ -307,7 +307,7 @@ module EmployeeBulkImport
       )
     end
 
-    def validate_row_data(data, flagged_emails: nil)
+    def validate_row_data(data, flagged_emails: nil, contact_result: nil)
       errors = []
 
       required_columns.each do |col|
@@ -414,7 +414,7 @@ module EmployeeBulkImport
         end
       end
 
-      contact_result = validate_contact_for_row(data, flagged_emails: flagged_emails)
+      contact_result ||= validate_contact_for_row(data, flagged_emails: flagged_emails)
       contact_result.errors.each do |field, messages|
         messages.each { |message| errors << "#{field} #{message}" }
       end

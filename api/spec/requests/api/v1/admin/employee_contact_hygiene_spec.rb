@@ -129,6 +129,19 @@ RSpec.describe "Admin Employee Contact Hygiene", type: :request do
       expect(company_a.employees.where("LOWER(email) = ?", "cruz.family@example.com").count).to eq(5)
     end
 
+    it "rejects a placeholder reason over the limit with 422, not a server error" do
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
+
+      expect do
+        post "/api/v1/admin/employee_contact_hygiene/placeholder_emails",
+             headers: { "X-Company-Id" => company_a.id.to_s },
+             params: { email: "shared-inbox@example.com", reason: "x" * (EmployeePlaceholderEmail::MAX_REASON_LENGTH + 1) }
+      end.not_to change(EmployeePlaceholderEmail, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/500 characters or fewer/)
+    end
+
     it "allows staff to explicitly mark a placeholder (audited), bulk-clear one company at a time, and retry idempotently as a 200 no-op" do
       allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
 

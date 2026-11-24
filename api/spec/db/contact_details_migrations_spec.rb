@@ -34,7 +34,7 @@ RSpec.describe "M4-3 contact details split migrations" do
     ).ordered
     expect(migration).to receive(:add_index).with(
       :employees,
-      "LOWER(TRIM(email))",
+      IndexEmployeesOnLowerEmail::EXPRESSION,
       name: IndexEmployeesOnLowerEmail::INDEX_NAME,
       where: "email IS NOT NULL",
       algorithm: :concurrently,
@@ -52,8 +52,22 @@ RSpec.describe "M4-3 contact details split migrations" do
     expect(contact_source_check).to be_present
     expect(contact_source_check.validated?).to be(true)
 
-    indexes = connection.indexes(:employees)
-    expect(indexes.map(&:name)).to include("index_employees_on_lower_email")
+    email_index = connection.indexes(:employees).find { |idx| idx.name == "index_employees_on_lower_email" }
+    expect(email_index).to be_present
+    expect(email_index.where).to eq("(email IS NOT NULL)")
+    expect(email_index.columns).to eq("lower(btrim((email)::text, ' \t\n\v\f\r'::text))")
+    expect(connection.select_value(<<~SQL)).to be(true)
+      SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+      WHERE c.relname = 'index_employees_on_lower_email'
+    SQL
+
+    # The lookup expression the app uses is the indexed one.
+    plan = connection.transaction do
+      connection.execute("SET LOCAL enable_seqscan = off")
+      sql = Employee.where("#{EmployeeContactValidator.normalized_email_sql} = ?", "a@example.com").where.not(email: nil).to_sql
+      connection.select_values("EXPLAIN #{sql}").join("\n")
+    end
+    expect(plan).to include("index_employees_on_lower_email")
 
     expect(connection.table_exists?(:employee_placeholder_emails)).to be(true)
     placeholder_indexes = connection.indexes(:employee_placeholder_emails)

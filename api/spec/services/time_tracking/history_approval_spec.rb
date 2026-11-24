@@ -558,4 +558,31 @@ RSpec.describe TimeTracking::HistoryApproval do
     with_blank = history_service.prepare!
     expect(with_blank["mappings"].sole).to include("employee_id" => employee.id, "confirmation_required" => false)
   end
+
+  it "never auto-confirms a name match whose only email evidence is a placeholder or shared address" do
+    TimeTrackingEmployeeMapping.where(company: company, time_tracking_source: source).delete_all
+    directory = lambda do |email|
+      allow(client).to receive(:payroll_cockpit_employees).and_return(
+        "employees" => [ { "id" => "91", "payroll_integration_id" => uuid, "full_name" => employee.full_name, "email" => email, "active" => true } ],
+        "pagination" => { "current_page" => 1, "per_page" => 100, "total_count" => 1, "total_pages" => 1, "truncated" => false }
+      )
+    end
+
+    # A marked placeholder equal on the one name-matched employee.
+    EmployeePlaceholderEmail.create!(organization: company.organization, email: "mosa-office@example.com")
+    employee.update_columns(email: "mosa-office@example.com")
+    directory.call("mosa-office@example.com")
+    expect(history_service.prepare!["mappings"].sole).to include("employee_id" => nil, "confirmation_required" => true)
+
+    # A structural placeholder pattern.
+    employee.update_columns(email: "noemail@example.com")
+    directory.call("noemail@example.com")
+    expect(history_service.prepare!["mappings"].sole).to include("employee_id" => nil, "confirmation_required" => true)
+
+    # An unmarked address two active employees share.
+    employee.update_columns(email: "family@example.com")
+    create(:employee, company: company, first_name: "Other", last_name: "Family", email: "family@example.com", status: "active")
+    directory.call("family@example.com")
+    expect(history_service.prepare!["mappings"].sole).to include("employee_id" => nil, "confirmation_required" => true)
+  end
 end

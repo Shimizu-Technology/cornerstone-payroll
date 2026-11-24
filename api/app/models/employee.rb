@@ -213,23 +213,19 @@ class Employee < ApplicationRecord
     updated_at&.iso8601(6)
   end
   scope :needs_contact_details, ->(flagged_emails: []) {
-    clauses = [
-      "COALESCE(TRIM(employees.email), '') = ''",
-      "COALESCE(TRIM(employees.phone), '') = ''",
-      "COALESCE(TRIM(employees.address_line1), '') = ''",
-      "COALESCE(TRIM(employees.city), '') = ''",
-      "COALESCE(TRIM(employees.state), '') = ''",
-      "COALESCE(TRIM(employees.zip), '') = ''",
-      "SPLIT_PART(LOWER(TRIM(employees.email)), '@', 1) IN (:placeholder_locals)",
-      "SPLIT_PART(LOWER(TRIM(employees.email)), '@', 2) IN (:placeholder_domains)"
-    ]
+    v = EmployeeContactValidator
+    email_sql = v.normalized_email_sql("employees.email")
+    # Whitespace-only fields (tabs and newlines too) count as missing.
+    clauses = %w[email phone address_line1 city state zip].map { |field| v.blank_sql("employees.#{field}") }
+    clauses << "SPLIT_PART(#{email_sql}, '@', 1) IN (:placeholder_locals)"
+    clauses << "SPLIT_PART(#{email_sql}, '@', 2) IN (:placeholder_domains)"
     bind = {
       placeholder_locals: EmployeeContactValidator::PLACEHOLDER_LOCAL_PARTS.to_a,
       placeholder_domains: EmployeeContactValidator::PLACEHOLDER_DOMAINS.to_a
     }
     normalized_flagged = Array(flagged_emails).filter_map { |email| EmployeeContactValidator.normalize_email(email) }.uniq
     if normalized_flagged.any?
-      clauses << "LOWER(TRIM(employees.email)) IN (:flagged_emails)"
+      clauses << "#{email_sql} IN (:flagged_emails)"
       bind[:flagged_emails] = normalized_flagged
     end
     where(clauses.join(" OR "), bind)

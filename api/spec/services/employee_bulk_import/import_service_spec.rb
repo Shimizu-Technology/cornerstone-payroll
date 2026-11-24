@@ -28,6 +28,17 @@ RSpec.describe EmployeeBulkImport::ImportService, type: :service do
     expect(service.errors.first).to eq("Missing required columns: last_name, employment_type, pay_rate, pay_frequency. Required: first_name, last_name, employment_type, pay_rate, pay_frequency")
   end
 
+  it "validates each preview row's contact details once" do
+    company = create(:company)
+    import_service = described_class.new(company)
+    headers = complete_row.keys
+    expect(EmployeeContactValidator).to receive(:call).once.and_call_original
+
+    row = import_service.send(:parse_row, headers.map { |key| complete_row[key] }, headers, 2, {}, Set.new, Set.new, Set.new, Hash.new(0))
+
+    expect(row[:errors]).to be_empty
+  end
+
   it "accepts complete W-2 filing data" do
     expect(service.send(:validate_row_data, complete_row)).to be_empty
   end

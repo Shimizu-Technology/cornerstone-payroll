@@ -4,6 +4,9 @@ class IndexEmployeesOnLowerEmail < ActiveRecord::Migration[8.1]
   disable_ddl_transaction!
 
   INDEX_NAME = "index_employees_on_lower_email"
+  # Same characters as String#strip, matching EmployeeContactValidator.normalized_email_sql.
+  # PostgreSQL has no \v escape, so the vertical tab is \x0B.
+  EXPRESSION = %q(LOWER(BTRIM(email, E' \t\n\x0B\f\r')))
 
   def up
     # A failed concurrent build leaves an INVALID index behind; drop it
@@ -13,7 +16,7 @@ class IndexEmployeesOnLowerEmail < ActiveRecord::Migration[8.1]
     end
 
     add_index :employees,
-              "LOWER(TRIM(email))",
+              EXPRESSION,
               name: INDEX_NAME,
               where: "email IS NOT NULL",
               algorithm: :concurrently,
