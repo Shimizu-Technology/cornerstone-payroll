@@ -75,6 +75,26 @@ RSpec.describe ClientProfitability::LinkQueue do
     expect(option_ids).to include(inactive_only_staff.id, inactive_prior.id)
   end
 
+  it "suggests no one from the local part of a rejected email, but keeps the name fallback for other addresses" do
+    import = WorkHourImport.first
+    create(:employee, company: practice_company, first_name: "Lina", last_name: "Family", email: "ana.family@example.com", status: "active")
+    create(:employee, company: practice_company, first_name: "Joe", last_name: "Family", email: "ana.family@example.com", status: "active")
+    [ [ 201, "ana.family@example.com" ], [ 202, "benjo.cruz@personal.example" ] ].each do |tax_user_id, email|
+      WorkHourRow.create!(organization: organization, work_hour_import: import, tax_user_id: tax_user_id, email: email,
+        client_name: "Client A", approval_state: "approved", work_date: Date.new(2026, 11, 11), hours: 1)
+    end
+    # Marking Benjo's real address as a placeholder must not fall back to "benjo".
+    EmployeePlaceholderEmail.create!(organization: organization, email: "benjo@example.com")
+
+    staff_by_id = described_class.new(organization: organization, settings: settings).call[:staff].index_by { |row| row[:tax_user_id] }
+
+    expect(staff_by_id[101][:suggestion]).to be_nil
+    # Two active employees share this address: no suggestion, even though only Ana Reyes is named Ana.
+    expect(staff_by_id[201][:suggestion]).to be_nil
+    # An address no employee uses still gets the name fallback.
+    expect(staff_by_id[202][:suggestion]).to eq(disposition: "employee", employee_id: unique_staff.id, label: "Benjo Cruz", match: "similar")
+  end
+
   it "loads organization marked placeholders at most once across all staff rows" do
     EmployeePlaceholderEmail.create!(organization: organization, email: "shared-office@example.com")
     expect(EmployeeContactValidator).to receive(:db_marked_placeholder_emails)

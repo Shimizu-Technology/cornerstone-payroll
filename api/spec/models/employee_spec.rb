@@ -480,6 +480,36 @@ RSpec.describe Employee, type: :model do
     end
   end
 
+  describe ".needs_contact_details" do
+    let(:company) { create(:company) }
+    let(:contact) do
+      { email: "own@example.com", phone: "+16715550101", address_line1: "100 Marine Corps Dr", city: "Hagatna", state: "GU", zip: "96910" }
+    end
+
+    it "treats whitespace-only contact fields as missing, as well as NULL and empty strings" do
+      complete = create(:employee, company: company, **contact)
+      tab_phone = create(:employee, company: company, **contact, email: "tab@example.com")
+      tab_phone.update_column(:phone, "\t")
+      newline_city = create(:employee, company: company, **contact, email: "newline@example.com")
+      newline_city.update_column(:city, " \n ")
+      empty_zip = create(:employee, company: company, **contact, email: "empty@example.com")
+      empty_zip.update_column(:zip, "")
+      null_email = create(:employee, company: company, **contact, email: nil)
+
+      expect(described_class.where(company: company).needs_contact_details).to contain_exactly(
+        tab_phone, newline_city, empty_zip, null_email
+      )
+      expect(described_class.where(company: company).needs_contact_details).not_to include(complete)
+    end
+
+    it "matches a flagged email stored with surrounding whitespace" do
+      shared = create(:employee, company: company, **contact)
+      shared.update_column(:email, "Shared@Example.com\t")
+
+      expect(described_class.where(company: company).needs_contact_details(flagged_emails: [ "shared@example.com" ])).to eq([ shared ])
+    end
+  end
+
   describe "address validation" do
     it "requires filing identity and address fields for new W-2 employees" do
       employee = build(:employee, address_line1: "", city: "", state: "", zip: "")

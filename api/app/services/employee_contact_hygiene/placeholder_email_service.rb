@@ -25,11 +25,14 @@ module EmployeeContactHygiene
       unless normalized_email.match?(URI::MailTo::EMAIL_REGEXP) && normalized_email.match?(EmployeeContactValidator::EMAIL_FORMAT_PATTERN)
         raise Error, "Must be a valid email address"
       end
+      if @reason && @reason.length > EmployeePlaceholderEmail::MAX_REASON_LENGTH
+        raise Error, "Reason must be #{EmployeePlaceholderEmail::MAX_REASON_LENGTH} characters or fewer"
+      end
 
       record = nil
       changed = false
 
-      EmployeePlaceholderEmail.transaction do
+      EmployeePlaceholderEmail.transaction(requires_new: true) do
         existing = EmployeePlaceholderEmail.lock.find_by(organization_id: @organization.id, email: normalized_email)
         if existing
           record = existing
@@ -63,8 +66,12 @@ module EmployeeContactHygiene
 
       Result.new(email: normalized_email, reason: record.reason, marked: true, changed: changed, record: record)
     rescue ActiveRecord::RecordNotUnique
-      existing = EmployeePlaceholderEmail.find_by!(organization_id: @organization.id, email: normalized_email)
-      Result.new(email: normalized_email, reason: existing.reason, marked: true, changed: false, record: existing)
+      already_marked(normalized_email)
+    rescue ActiveRecord::RecordInvalid => e
+      # A concurrent mark can commit between the lookup and the uniqueness check.
+      raise unless e.record.is_a?(EmployeePlaceholderEmail) && e.record.errors.of_kind?(:email, :taken)
+
+      already_marked(normalized_email)
     end
 
     def unmark!
@@ -100,6 +107,11 @@ module EmployeeContactHygiene
     end
 
     private
+
+    def already_marked(normalized_email)
+      existing = EmployeePlaceholderEmail.find_by!(organization_id: @organization.id, email: normalized_email)
+      Result.new(email: normalized_email, reason: existing.reason, marked: true, changed: false, record: existing)
+    end
 
     def authorize!
       if @company&.test_workspace?

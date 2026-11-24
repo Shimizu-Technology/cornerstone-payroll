@@ -342,7 +342,29 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
             }
       expect(response).to have_http_status(:conflict), response.body
       expect(response.parsed_body["code"]).to eq("contact_revision_conflict")
+      expect(response.parsed_body["data"]).not_to have_key("ssn")
+      expect(response.parsed_body["data"]["ssn_last_four"]).to be_present
+      expect(response.body).not_to include(complete_employee.ssn_encrypted)
       expect(complete_employee.reload.email).to eq("complete.worker@example.com")
+    end
+
+    it "returns a contact-only record without the full SSN when the contact grid asks for one" do
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
+
+      patch "/api/v1/admin/employees/#{complete_employee.id}",
+            headers: { "X-Company-Id" => company.id.to_s },
+            params: { employee: { phone: "555-0166" }, row_revision: complete_employee.contact_revision, response_view: "contact" }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body["data"]).not_to have_key("ssn")
+      expect(response.parsed_body.dig("data", "phone")).to eq("+16715550166")
+      expect(response.body).not_to include(complete_employee.ssn_encrypted)
+
+      # The full edit form still gets the full record.
+      patch "/api/v1/admin/employees/#{complete_employee.id}",
+            headers: { "X-Company-Id" => company.id.to_s },
+            params: { employee: { job_title: "Lead" } }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "ssn")).to eq(complete_employee.reload.ssn_encrypted)
     end
 
     it "merges cleanly when a coworker edited a different field than the submitted fields" do

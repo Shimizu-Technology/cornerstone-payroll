@@ -36,7 +36,7 @@ module TimeTracking
 
       email = source_employee["email"].to_s.downcase.strip
       if email.present? && !EmployeeContactValidator.unmatchable_placeholder_email?(email, marked_placeholders: marked_placeholders)
-        email_matches = @employee_scope.where("LOWER(TRIM(email)) = ?", email).limit(2).to_a
+        email_matches = @employee_scope.where("#{EmployeeContactValidator.normalized_email_sql} = ?", email).limit(2).to_a
         return suggested(email_matches.first, "email", 1.0) if email_matches.one?
       end
 

@@ -129,13 +129,19 @@ module ClientProfitability
     def staff_suggestion(email)
       return nil if email.blank?
 
-      normalized_email = email.to_s.strip.downcase
-      unless EmployeeContactValidator.unmatchable_placeholder_email?(normalized_email, marked_placeholders: marked_placeholders)
-        exact_matches = practice_employees.select { |employee| employee.active? && employee.email.to_s.strip.casecmp?(normalized_email) }
-        if exact_matches.one?
-          exact = exact_matches.first
-          return { disposition: "employee", employee_id: exact.id, label: exact.full_name, match: "exact" }
-        end
+      normalized_email = EmployeeContactValidator.normalize_email(email)
+      # A placeholder or shared address says nothing about who this is, so its
+      # local part can't suggest anyone either.
+      return nil if EmployeeContactValidator.unmatchable_placeholder_email?(normalized_email, marked_placeholders: marked_placeholders)
+
+      exact_matches = practice_employees.select do |employee|
+        employee.active? && EmployeeContactValidator.normalize_email(employee.email) == normalized_email
+      end
+      return nil if exact_matches.size > 1
+
+      if exact_matches.one?
+        exact = exact_matches.first
+        return { disposition: "employee", employee_id: exact.id, label: exact.full_name, match: "exact" }
       end
 
       first = email.split("@").first.to_s.split(/[._\-+]/).first.to_s

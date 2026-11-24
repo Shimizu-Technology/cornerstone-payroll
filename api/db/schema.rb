@@ -1488,7 +1488,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_24_120300) do
     t.datetime "email_verified_at"
     t.datetime "phone_confirmed_by_employee_at"
     t.string "contact_source"
-    t.index "lower(TRIM(BOTH FROM email))", name: "index_employees_on_lower_email", where: "(email IS NOT NULL)"
+    t.index "lower(btrim((email)::text, ' \t\n\v\f\r'::text))", name: "index_employees_on_lower_email", where: "(email IS NOT NULL)"
     t.index [ "company_id", "last_name", "first_name" ], name: "index_employees_on_company_id_and_last_name_and_first_name"
     t.index [ "company_id", "test_workspace_source_employee_id" ], name: "idx_employees_training_source_unique", unique: true, where: "(test_workspace_source_employee_id IS NOT NULL)"
     t.index [ "company_id" ], name: "index_employees_on_company_id"

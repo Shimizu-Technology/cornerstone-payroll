@@ -181,4 +181,18 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
       email_verified_at: nil
     )
   end
+
+  it "copies an unchanged, already-accepted login email without asking again, but checks an edited one" do
+    login = create(:user, company: company, organization: company.organization, role: "client", email: "asia.login@example.com", name: "Asia Taylor")
+    contractor.update_columns(email: "asia.login@example.com")
+
+    result = described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+    expect(result.new_employee.email).to eq("asia.login@example.com")
+
+    other = create(:employee, :contractor, company: company, first_name: "Ben", last_name: "Cruz", email: "ben@example.com",
+      ssn_encrypted: "123-45-6780", hire_date: Date.new(2024, 1, 1), address_line1: "1 Main St", city: "Hagatna", state: "GU", zip: "96910")
+    expect {
+      described_class.new(employee: other, attributes: attributes.merge(email: login.email, ssn: "123-45-6780", ssn_confirmation: "123-45-6780"), actor: super_admin).call
+    }.to raise_error(EmployeeContactValidator::ValidationError) { |error| expect(error.result.same_person_confirmation_required?).to be(true) }
+  end
 end

@@ -157,12 +157,18 @@ class EmployeeClassificationTransitionService
     attrs
   end
 
+  # The prior record's email was already accepted for this person, so copying
+  # it unchanged skips the login-identity check (as promotion skips unchanged
+  # emails). Format and marked-placeholder checks still apply, and an edited
+  # email gets every check.
   def validate_contact_details!(new_employee)
+    email_unchanged = EmployeeContactValidator.normalize_email(new_employee.email) == EmployeeContactValidator.normalize_email(employee.email)
     result = EmployeeContactValidator.call(
       employee: new_employee,
       company: employee.company,
       email: new_employee.email,
       phone: new_employee.phone,
+      check_login_identity: !email_unchanged,
       confirm_same_person_email: attributes[:confirm_same_person_email],
       actor: actor,
       source: "staff",
