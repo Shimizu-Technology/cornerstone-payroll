@@ -16,6 +16,7 @@ import {
   HandCoins,
   LayoutDashboard,
   Link2,
+  Mail,
   Printer,
   ReceiptText,
   Route,
@@ -33,7 +34,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { analytics } from '@/lib/analytics';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
-import { employeesPath, newEmployeePath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
+import { employeeContactDetailsPath, employeesPath, newEmployeePath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 import { cn } from '@/lib/utils';
 
 type CommandPaletteMode = 'all' | 'companies';
@@ -115,6 +116,17 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       icon: <Users className="h-4 w-4" />,
       kind: 'navigation',
       href: activeCompanyId ? employeesPath(activeCompanyId) : '/employees',
+    });
+
+    add({
+      id: 'go-contact-details',
+      label: 'Contact Details',
+      description: 'Update employee emails, mobile numbers, and mailing addresses in one place.',
+      group: 'Sidebar',
+      keywords: ['email', 'phone', 'mobile', 'address', 'contacts', 'shared inbox'],
+      icon: <Mail className="h-4 w-4" />,
+      kind: 'navigation',
+      href: activeCompanyId ? employeeContactDetailsPath(activeCompanyId) : '/contact-details',
     });
 
     add({

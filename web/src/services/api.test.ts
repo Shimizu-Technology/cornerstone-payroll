@@ -535,6 +535,15 @@ describe('actionable API errors', () => {
   it('offers recovery for expired sessions and concurrent edits while preserving server context', () => {
     expect(apiErrorMessage({ error: 'Token expired' }, 401)).toBe('Token expired Sign in again, then retry.');
     expect(apiErrorMessage({ error: 'Payroll revision changed' }, 409)).toContain('Reload the record');
+    const now = new Date(2026, 10, 24, 21, 27, 0);
+    const cooldown = apiErrorMessage({
+      error: "Too many blocked email attempts, so this save didn't apply. You can still save phone and address changes on their own.",
+      code: 'contact_email_rate_limited',
+    }, 429, { retryAfterSeconds: 900, now });
+    expect(cooldown).toBe("Too many blocked email attempts, so this save didn't apply. You can still save phone and address changes on their own. Try again after 9:42 PM.");
+    expect(cooldown).not.toMatch(/wait a moment/i);
+    expect(apiErrorMessage({}, 429, { retryAfterSeconds: 60, now })).toBe('Too many requests were sent. Try again after 9:28 PM.');
+    expect(apiErrorMessage({ error: 'Slow down' }, 429)).toBe('Slow down Wait a moment before trying again.');
   });
   it('gives specific payroll next steps without treating unknown wages as zero', () => {
     expect(errorRecovery('Verify prior-year employer wages before catch-up payroll')).toContain('Do not enter zero');

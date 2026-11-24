@@ -63,3 +63,9 @@ it('shows Pay Period Files to every portal client', () => {
   view.rerender(<MemoryRouter><Sidebar /></MemoryRouter>);
   expect(screen.getByRole('link', { name: 'Pay Period Files' })).toBeTruthy();
 });
+
+it('highlights only Contact Details when visiting its route', () => {
+  render(<MemoryRouter initialEntries={['/companies/7/employees/contact-details']}><Sidebar /></MemoryRouter>);
+  expect(screen.getByRole('link', { name: 'Employees' }).getAttribute('aria-current')).toBeNull();
+  expect(screen.getByRole('link', { name: 'Contact Details' }).getAttribute('aria-current')).toBe('page');
+});

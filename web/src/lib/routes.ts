@@ -28,6 +28,10 @@ export function employeesPath(companyId: number, query = ''): string {
   return `${companyPath(companyId)}/employees${normalizeQuery(query)}`;
 }
 
+export function employeeContactDetailsPath(companyId: number, query = ''): string {
+  return `${employeesPath(companyId)}/contact-details${normalizeQuery(query)}`;
+}
+
 export function newEmployeePath(companyId: number, context: ReturnContext = {}): string {
   return withReturnContext(`${employeesPath(companyId)}/new`, context);
 }
