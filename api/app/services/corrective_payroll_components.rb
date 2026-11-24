@@ -106,7 +106,8 @@ class CorrectivePayrollComponents
     grouped = {}
     [ [ @corrected, 1 ], *@recorded.map { |item| [ item, -1 ] } ].each do |item, sign|
       seen = Set.new
-      item.public_send(association).each do |row|
+      rows = earnings ? item.earnings_in_entry_order : item.public_send(association)
+      rows.each do |row|
         next if block_given? && !yield(item, row)
         key = identity.call(row)
         raise Error, "Ambiguous #{association} identity; review the component history before correcting this paycheck" unless seen.add?(key)
