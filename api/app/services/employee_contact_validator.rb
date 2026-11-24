@@ -74,26 +74,33 @@ class EmployeeContactValidator
     end
   end
 
-  # The characters String#strip removes, so SQL comparisons match normalize_email.
-  # PostgreSQL TRIM removes spaces only, and has no \v escape.
-  SQL_STRIP_CHARS = %q(E' \t\n\x0B\f\r')
+  # The characters String#strip removes, so SQL comparisons match
+  # normalize_email. PostgreSQL TRIM removes spaces only.
+  STRIP_CHARS = " \t\n\v\f\r"
 
   class << self
     def normalize_email(raw)
       raw.to_s.strip.downcase.presence
     end
 
-    # Matches index_employees_on_lower_email when column is "email".
-    def normalized_email_sql(column = "email")
-      "LOWER(BTRIM(#{column}, #{SQL_STRIP_CHARS}))"
+    # LOWER(BTRIM(column, STRIP_CHARS)), the expression
+    # index_employees_on_lower_email uses for employees.email. Built with Arel
+    # so no SQL is assembled from strings.
+    def normalized_email_node(attribute = Employee.arel_table[:email])
+      Arel::Nodes::NamedFunction.new("LOWER", [ stripped_node(attribute) ])
     end
 
-    def blank_sql(column)
-      "COALESCE(BTRIM(#{column}, #{SQL_STRIP_CHARS}), '') = ''"
+    # Whitespace-only counts as blank, as Ruby's strip does.
+    def blank_node(attribute)
+      Arel::Nodes::NamedFunction.new("COALESCE", [ stripped_node(attribute), Arel::Nodes.build_quoted("") ]).eq("")
     end
 
-    def present_sql(column)
-      "COALESCE(BTRIM(#{column}, #{SQL_STRIP_CHARS}), '') <> ''"
+    def present_node(attribute)
+      Arel::Nodes::NamedFunction.new("COALESCE", [ stripped_node(attribute), Arel::Nodes.build_quoted("") ]).not_eq("")
+    end
+
+    def stripped_node(attribute)
+      Arel::Nodes::NamedFunction.new("BTRIM", [ attribute, Arel::Nodes.build_quoted(STRIP_CHARS) ])
     end
 
     def normalize_phone(raw)
@@ -193,8 +200,8 @@ class EmployeeContactValidator
     def contact_details_context(company:)
       flagged = marked_placeholder_emails(organization_id: company.organization_id)
       company_email_counts = Employee.where(company_id: company.id)
-        .where(EmployeeContactValidator.present_sql("email"))
-        .group(Arel.sql(EmployeeContactValidator.normalized_email_sql))
+        .where(present_node(Employee.arel_table[:email]))
+        .group(normalized_email_node)
         .count
 
       {
@@ -406,7 +413,7 @@ class EmployeeContactValidator
   end
 
   def check_login_email(normalized_email)
-    login_user = User.where("#{EmployeeContactValidator.normalized_email_sql} = ?", normalized_email).first
+    login_user = User.where(self.class.normalized_email_node(User.arel_table[:email]).eq(normalized_email)).first
     return no_login_conflict unless login_user
 
     # Check conflicting links FIRST via a narrow tenant-safe decision lookup
@@ -530,7 +537,7 @@ class EmployeeContactValidator
   def same_company_coworker_email_count(normalized_email)
     return 0 if @company.blank?
 
-    scope = Employee.where(company_id: @company.id).where("#{EmployeeContactValidator.normalized_email_sql} = ?", normalized_email)
+    scope = Employee.where(company_id: @company.id).where(self.class.normalized_email_node.eq(normalized_email))
     scope = scope.where.not(id: @exclude_employee_ids) if @exclude_employee_ids.any?
     scope.count
   end

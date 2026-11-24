@@ -214,21 +214,15 @@ class Employee < ApplicationRecord
   end
   scope :needs_contact_details, ->(flagged_emails: []) {
     v = EmployeeContactValidator
-    email_sql = v.normalized_email_sql("employees.email")
+    email = v.normalized_email_node(arel_table[:email])
+    email_part = ->(index) { Arel::Nodes::NamedFunction.new("SPLIT_PART", [ email, Arel::Nodes.build_quoted("@"), Arel::Nodes.build_quoted(index) ]) }
     # Whitespace-only fields (tabs and newlines too) count as missing.
-    clauses = %w[email phone address_line1 city state zip].map { |field| v.blank_sql("employees.#{field}") }
-    clauses << "SPLIT_PART(#{email_sql}, '@', 1) IN (:placeholder_locals)"
-    clauses << "SPLIT_PART(#{email_sql}, '@', 2) IN (:placeholder_domains)"
-    bind = {
-      placeholder_locals: EmployeeContactValidator::PLACEHOLDER_LOCAL_PARTS.to_a,
-      placeholder_domains: EmployeeContactValidator::PLACEHOLDER_DOMAINS.to_a
-    }
-    normalized_flagged = Array(flagged_emails).filter_map { |email| EmployeeContactValidator.normalize_email(email) }.uniq
-    if normalized_flagged.any?
-      clauses << "#{email_sql} IN (:flagged_emails)"
-      bind[:flagged_emails] = normalized_flagged
-    end
-    where(clauses.join(" OR "), bind)
+    clauses = %i[email phone address_line1 city state zip].map { |field| v.blank_node(arel_table[field]) }
+    clauses << email_part.call(1).in(v::PLACEHOLDER_LOCAL_PARTS.to_a)
+    clauses << email_part.call(2).in(v::PLACEHOLDER_DOMAINS.to_a)
+    normalized_flagged = Array(flagged_emails).filter_map { |flagged| v.normalize_email(flagged) }.uniq
+    clauses << email.in(normalized_flagged) if normalized_flagged.any?
+    where(clauses.reduce { |combined, clause| combined.or(clause) })
   }
   scope :hourly, -> { where(employment_type: "hourly") }
   scope :salary, -> { where(employment_type: "salary") }

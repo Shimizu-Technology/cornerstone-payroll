@@ -64,7 +64,7 @@ RSpec.describe "M4-3 contact details split migrations" do
     # The lookup expression the app uses is the indexed one.
     plan = connection.transaction do
       connection.execute("SET LOCAL enable_seqscan = off")
-      sql = Employee.where("#{EmployeeContactValidator.normalized_email_sql} = ?", "a@example.com").where.not(email: nil).to_sql
+      sql = Employee.where(EmployeeContactValidator.normalized_email_node.eq("a@example.com")).where.not(email: nil).to_sql
       connection.select_values("EXPLAIN #{sql}").join("\n")
     end
     expect(plan).to include("index_employees_on_lower_email")

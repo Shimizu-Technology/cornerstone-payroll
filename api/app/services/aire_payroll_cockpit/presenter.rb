@@ -175,8 +175,8 @@ module AirePayrollCockpit
     def active_company_email_counts
       @active_company_email_counts ||= Employee.active
         .where(company_id: @source.company_id)
-        .where(EmployeeContactValidator.present_sql("email"))
-        .group(Arel.sql(EmployeeContactValidator.normalized_email_sql))
+        .where(EmployeeContactValidator.present_node(Employee.arel_table[:email]))
+        .group(EmployeeContactValidator.normalized_email_node)
         .count
     end
 
