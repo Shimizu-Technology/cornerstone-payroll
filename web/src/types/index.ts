@@ -81,6 +81,44 @@ export type EmploymentType = 'hourly' | 'salary' | 'contractor';
 export type PayFrequency = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
 export type FilingStatus = 'single' | 'married' | 'married_separate' | 'head_of_household';
 export type EmployeeStatus = 'active' | 'inactive' | 'terminated';
+export type EmployeeContactSource = 'client' | 'staff' | 'employee' | 'import';
+
+export interface EmployeeContactDetailsStatus {
+  needs_contact_details: boolean;
+  missing_fields: string[];
+  email_issue: 'placeholder' | 'placeholder_pattern' | 'shared_inbox' | 'shared_with_coworker' | null;
+  shared_email_count?: number;
+}
+
+/** The contact-only record the Contact details page gets and stores. */
+export const CONTACT_EMPLOYEE_FIELDS = [
+  'id', 'company_id', 'first_name', 'middle_name', 'last_name', 'status',
+  'email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'zip',
+  'email_verified_at', 'phone_confirmed_by_employee_at', 'contact_source',
+  'contact_revision', 'contact_details_status', 'updated_at',
+] as const;
+export type ContactEmployee = Pick<Employee, (typeof CONTACT_EMPLOYEE_FIELDS)[number]>;
+
+export interface EmployeeContactConflictPayload {
+  error: string;
+  code: 'contact_revision_conflict';
+  conflicting_fields: string[];
+  contact_revision: string;
+  current_values: Record<string, string | null>;
+  data: ContactEmployee;
+}
+
+export interface EmployeeContactWarning {
+  code: string;
+  field: string;
+  message: string;
+  matching_employee_count?: number;
+}
+
+export interface EmployeeContactValidationPayload {
+  same_person_confirmation_required?: boolean;
+  warnings?: EmployeeContactWarning[];
+}
 export type PaymentDeliveryMethod = 'paper_check' | 'direct_deposit';
 export type ContractorType = 'individual' | 'business';
 export type ContractorPayType = 'hourly' | 'flat_fee';
@@ -290,6 +328,7 @@ export interface Employee {
   last_name: string;
   job_title?: string;
   email?: string;
+  phone?: string;
   ssn?: string | null;
   ssn_last_four?: string | null;
   contractor_ein_last_four?: string | null;
@@ -368,6 +407,11 @@ export interface Employee {
   city?: string;
   state?: string;
   zip?: string;
+  email_verified_at?: string | null;
+  phone_confirmed_by_employee_at?: string | null;
+  contact_source?: EmployeeContactSource | null;
+  contact_revision?: string;
+  contact_details_status?: EmployeeContactDetailsStatus;
   wage_rates?: EmployeeWageRate[];
   default_custom_earnings?: CustomEarning[];
   default_payroll_adjustments?: PayrollAdjustment[];
@@ -624,6 +668,12 @@ export interface EmployeeFormData {
   last_name: string;
   job_title?: string;
   email?: string;
+  phone?: string;
+  confirm_same_person_email?: boolean;
+  row_revision?: string;
+  baseline_values?: Record<string, string | null | undefined>;
+  /** "contact" asks the admin API for a record without the full SSN. */
+  response_view?: 'contact';
   ssn?: string;
   ssn_confirmation?: string;
   date_of_birth?: string;
@@ -2067,6 +2117,7 @@ export interface PaginationMeta {
   total_pages: number;
   total_count: number;
   per_page: number;
+  needs_contact_details_count?: number;
 }
 
 export interface PaginatedResponse<T> {
