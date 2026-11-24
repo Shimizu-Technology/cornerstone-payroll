@@ -5,6 +5,10 @@
 # and normalizing them with EmployeeContactValidator, and whether the write
 # sets who entered the contact details.
 class EmployeeContactChanges
+  # Raised before any validation when the actor may not change an email now
+  # (EmployeeContactLoginRejectionGuard's cooldown).
+  class EmailChangeLocked < StandardError; end
+
   attr_reader :validation, :contact_source
 
   def self.email_changed?(employee, value)
@@ -23,7 +27,10 @@ class EmployeeContactChanges
 
   # employee is the record compared and validated; error_record gets the
   # validation errors (the client create validates a candidate copy).
-  def initialize(employee:, attributes:, company:, actor:, source:, confirm_same_person_email: false, creation: false, error_record: employee)
+  def initialize(
+    employee:, attributes:, company:, actor:, source:,
+    confirm_same_person_email: false, creation: false, error_record: employee, email_locked: false
+  )
     @employee = employee
     @attributes = attributes
     @company = company
@@ -32,6 +39,7 @@ class EmployeeContactChanges
     @confirm_same_person_email = confirm_same_person_email
     @creation = creation
     @error_record = error_record
+    @email_locked = email_locked
   end
 
   # Normalizes email and phone in attributes in place, dropping unchanged ones
@@ -40,6 +48,7 @@ class EmployeeContactChanges
     drop_unchanged_contact! unless @creation
     @attributes[:email] = nil if @attributes.key?(:email) && @attributes[:email].blank?
     @attributes[:phone] = nil if @attributes.key?(:phone) && @attributes[:phone].blank?
+    raise EmailChangeLocked if @email_locked && @attributes[:email].present?
 
     if @attributes.key?(:email) || @attributes.key?(:phone)
       @validation = validate!

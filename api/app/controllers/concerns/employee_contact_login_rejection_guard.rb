@@ -11,21 +11,39 @@ module EmployeeContactLoginRejectionGuard
 
   private
 
+  # A user who reached the limit can't change any email until the cooldown
+  # ends, whatever the address, so a 429 never tells a login address apart
+  # from an unused one. Checked before validation, and only for real changes.
+  def login_email_cooldown_active?
+    return false unless current_user&.id
+
+    window = login_email_rejection_window
+    login_email_rejection_count(window) >= LOGIN_EMAIL_REJECTION_LIMIT ||
+      login_email_rejection_count(window - 1) >= LOGIN_EMAIL_REJECTION_LIMIT
+  end
+
+  def contact_email_submitted_in_request?
+    params[:employee].respond_to?(:key?) && params[:employee][:email].present?
+  end
+
+  def render_login_email_cooldown!
+    response.set_header("Retry-After", login_email_cooldown_retry_after.to_s)
+    render json: {
+      error: RATE_LIMIT_ERROR_MESSAGE,
+      code: "contact_email_rate_limited"
+    }, status: :too_many_requests
+  end
+
   def render_contact_validation_error!(error, employee: nil)
     result = error.result
     if result&.login_email_rejected? && current_user&.id
-      count = record_login_email_rejection!
+      count = login_email_rejection_count(login_email_rejection_window, 1)
+      # Only concurrent requests can pass the cooldown check past the limit.
       rate_limited = count > LOGIN_EMAIL_REJECTION_LIMIT
 
       record_login_email_rejection_audit!(result: result, employee: employee, rejection_count: count, rate_limited: rate_limited)
 
-      if rate_limited
-        response.set_header("Retry-After", login_email_rejection_retry_after.to_s)
-        return render json: {
-          error: RATE_LIMIT_ERROR_MESSAGE,
-          code: "contact_email_rate_limited"
-        }, status: :too_many_requests
-      end
+      return render_login_email_cooldown! if rate_limited
     end
 
     render json: {
@@ -63,16 +81,20 @@ module EmployeeContactLoginRejectionGuard
   end
 
   # Counts rejections with the same shared-or-local counter Rack::Attack uses,
-  # one fixed window per user.
-  def record_login_email_rejection!
-    period = LOGIN_EMAIL_REJECTION_PERIOD.to_i
-    window = Time.now.to_i / period
+  # one fixed window per user. Adding 0 reads the count. Each window's key
+  # lives through the next window, which the cooldown also covers.
+  def login_email_rejection_count(window, amount = 0)
     key = "employee-contact-login-reject/user/#{current_user.id}/#{window}"
-    Rack::Attack.cache.store.increment(key, 1, expires_in: period).to_i
+    Rack::Attack.cache.store.increment(key, amount, expires_in: 2 * LOGIN_EMAIL_REJECTION_PERIOD.to_i).to_i
   end
 
-  def login_email_rejection_retry_after
+  def login_email_rejection_window
+    Time.now.to_i / LOGIN_EMAIL_REJECTION_PERIOD.to_i
+  end
+
+  def login_email_cooldown_retry_after
     period = LOGIN_EMAIL_REJECTION_PERIOD.to_i
-    period - (Time.now.to_i % period)
+    remaining = period - (Time.now.to_i % period)
+    login_email_rejection_count(login_email_rejection_window) >= LOGIN_EMAIL_REJECTION_LIMIT ? remaining + period : remaining
   end
 end

@@ -120,6 +120,8 @@ module Api
           }, status: :created
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee)
+        rescue EmployeeContactChanges::EmailChangeLocked
+          render_login_email_cooldown!
         rescue ActiveRecord::RecordInvalid => e
           expired_incomplete_entry = @employee&.new_record? && EmployeeIntakePolicy.expired?(current_company) &&
             EmployeeIntakePolicy.missing_fields(@employee).any?
@@ -239,6 +241,8 @@ module Api
           }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee)
+        rescue EmployeeContactChanges::EmailChangeLocked
+          render_login_email_cooldown!
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -619,7 +623,8 @@ module Api
         def apply_contact_changes!(attributes, creation:)
           contact = EmployeeContactChanges.new(
             employee: @employee, attributes: attributes, company: current_company, actor: current_user,
-            source: "staff", confirm_same_person_email: confirm_same_person_email_param, creation: creation
+            source: "staff", confirm_same_person_email: confirm_same_person_email_param, creation: creation,
+            email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?
           ).apply!
           @contact_validation_result = contact.validation
           attributes[:contact_source] = contact.contact_source if contact.contact_source
