@@ -17,6 +17,12 @@ RSpec.describe EmployeeDocuments::QuickbooksStubNumbers do
     end
   end
 
+  it "keeps an SSN-shaped number separate from a following integer column" do
+    [ "SSN: 123-45-6789 40", "123 45 6789 12", "123-45-6789  7" ].each do |text|
+      expect(described_class.possible_ssn?(text)).to be(true), text
+    end
+  end
+
   it "recognizes an employee's own SSN even under an exempt label" do
     expect(described_class.employee_ssn?("Routing 123 / 45 / 6789", "123456789")).to be(true)
   end

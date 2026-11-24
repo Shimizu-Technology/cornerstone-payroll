@@ -5,6 +5,7 @@ module EmployeeDocuments
     class Invalid < StandardError; end
 
     PURPOSE = "review_quickbooks_stub"
+    MAPPING_CHANGED = "This check's employee changed. Review the page again."
 
     def initialize(company:, actor:, upload:)
       @company = company
@@ -58,9 +59,11 @@ module EmployeeDocuments
       match.page
     end
 
-    def confirm
-      reviewed_matches.sort_by { |match| match.check.id }.map do |match|
-        document = freeze_match(match)
+    def confirm(revalidate:)
+      locked_checks = lock_sources!
+      revalidate.call
+      reviewed_matches(locked: true).sort_by { |match| match.check.id }.map do |match|
+        document = freeze_match(match.page, locked_checks.fetch(match.check.id))
         yield match, document if block_given?
         document
       end
@@ -72,11 +75,37 @@ module EmployeeDocuments
 
     private
 
-    def reviewed_matches
+    def lock_sources!
+      sources = source_checks
+      batch_ids, worker_ids = sources.pluck(:historical_import_batch_id, :historical_worker_id).transpose
+      # Match MappingService's batch → worker → paycheck lock order. The caller
+      # revalidates staff access after these locks, since MappingService locks the actor last.
+      batches = HistoricalImportBatch.where(company_id: @company.id, id: batch_ids).order(:id).lock.index_by(&:id)
+      HistoricalWorker.where(company_id: @company.id, id: worker_ids).order(:id).lock.load
+      checks = sources.order(:id).lock.index_by(&:id)
+      @claims.each_value do |claim|
+        check = checks[claim.fetch("check")]
+        unless check && check.employee_id == claim["employee"] && batches[check.historical_import_batch_id]&.locked?
+          raise Invalid, MAPPING_CHANGED
+        end
+      end
+      checks
+    end
+
+    def source_checks
+      HistoricalPaycheck.where(company_id: @company.id, id: @claims.values.pluck("check"))
+    end
+
+    def reviewed_matches(locked: false)
       by_page = matches.index_by { |match| match.page.number }
       @claims.map do |token, claim|
         match = by_page[claim["page"]]
-        raise Invalid, "The PDF or its matches changed. Upload it again." unless match&.check && claim == review_claim(match)
+        unless match&.check && claim == review_claim(match)
+          if locked || mapping_changed_since_preview?(claim)
+            raise Invalid, MAPPING_CHANGED
+          end
+          raise Invalid, "The PDF or its matches changed. Upload it again."
+        end
 
         unless @token_statuses.fetch(match.status).include?(token) && viewed_if_required?(claim)
           raise Invalid, "Open page #{match.page.number}, review it, and tick “I checked this page”."
@@ -84,6 +113,12 @@ module EmployeeDocuments
 
         match
       end
+    end
+
+    def mapping_changed_since_preview?(claim)
+      return false unless claim["company"] == @company.id && claim["actor"] == @actor.id
+
+      source_checks.where(id: claim["check"]).pick(:employee_id) != claim["employee"]
     end
 
     def viewed_if_required?(claim)
@@ -102,7 +137,7 @@ module EmployeeDocuments
     def review_claim(match)
       {
         "company" => @company.id, "actor" => @actor.id, "page" => match.page.number,
-        "check" => match.check.id, "sha256" => Digest::SHA256.hexdigest(match.page.bytes),
+        "check" => match.check.id, "employee" => match.check.employee_id, "sha256" => Digest::SHA256.hexdigest(match.page.bytes),
         "review_status" => match.status, "has_image" => match.page.has_image
       }
     end
@@ -111,18 +146,16 @@ module EmployeeDocuments
       Rails.application.message_verifier(PURPOSE)
     end
 
-    def freeze_match(match)
-      check = match.check
-      check.lock!
+    def freeze_match(page, check)
       existing = EmployeeDocument.find_by(company_id: @company.id, historical_paycheck_id: check.id, revision: 1)
       if existing
-        unless existing.sha256 == review_claim(match)["sha256"]
-          raise Invalid, "Page #{match.page.number} conflicts with an already posted original. Check the original before retrying."
+        unless existing.sha256 == Digest::SHA256.hexdigest(page.bytes)
+          raise Invalid, "Page #{page.number} conflicts with an already posted original. Check the original before retrying."
         end
         return existing
       end
 
-      FreezePdf.call(bytes: match.page.bytes, source: check, revision: 1, posted_at: Time.current) do |key|
+      FreezePdf.call(bytes: page.bytes, source: check, revision: 1, posted_at: Time.current) do |key|
         @storage_keys << key
       end
     end
