@@ -33,6 +33,37 @@ RSpec.describe EmployeePayStatements do
     expect(statements.find(original.id)).to eq(original)
   end
 
+  # The paged path restates EarningsStatementEligibility in SQL. Keep the two in step.
+  it "pages exactly the statements the Ruby eligibility rule lists, across mixed rows" do
+    random = Random.new(553)
+    other_fields = EarningsStatementEligibility::FINANCIAL_FIELDS - %i[gross_pay net_pay]
+    reviewer = create(:user, company: company)
+
+    40.times do |index|
+      item = paycheck(Date.new(2026, 1, 1) + (index / 3) * 7,
+        gross_pay: [ 0, 0, 125 ].sample(random: random),
+        net_pay: [ 0, 0, 98.5 ].sample(random: random),
+        # Check numbers are unique per company, so each blank variant differs by length.
+        check_number: [ nil, " " * (index + 1), "\u00A0#{" " * index}", "10#{index}" ].sample(random: random))
+      item.update_columns(other_fields.sample(random: random) => 12.34) if random.rand < 0.3
+      item.payroll_item_earnings.create!(category: "regular", label: "Row #{index}", amount: [ 0, 10 ].sample(random: random)) if random.rand < 0.4
+      item.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: reviewer.id, payroll_reversal_reason: "Probe") if random.rand < 0.2
+      item.pay_period.update_columns(correction_status: "voided") if random.rand < 0.15
+    end
+
+    expected = statements.list.map(&:id)
+    paged = (1..).lazy.map { |page| statements.list(page: page, page_size: 7).map(&:id) }.take_while(&:any?).to_a.flatten
+
+    # The mix must exercise both sides of the rule.
+    expect(expected.size).to be_between(1, 39)
+    expect(paged).to eq(expected)
+  end
+
+  it "refuses page sizes above the maximum" do
+    expect { statements.list(page_size: described_class::MAX_PAGE_SIZE + 1) }.to raise_error(ArgumentError)
+    expect(statements.list(page_size: described_class::MAX_PAGE_SIZE)).to eq([])
+  end
+
   it "scopes pages and detail to the supplied company, employee and committed payroll" do
     date = Date.new(2026, 1, 1)
     own = paycheck(date, gross_pay: 100)
