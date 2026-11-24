@@ -219,15 +219,18 @@ RSpec.describe "Employee link retirement", type: :request do
   end
 
   describe "rehire of an employee-only person" do
-    def reactivate(params, fva: [ 0, -1 ])
+    def reactivate(params, fva: [ 0, -1 ], sid: "sess_user_riley")
       post "/api/v1/employee/links/reactivate", params: params.to_json,
-        headers: bearer("user_riley", fva: fva).merge("CONTENT_TYPE" => "application/json")
+        headers: bearer("user_riley", fva: fva, sid: sid).merge("CONTENT_TYPE" => "application/json")
     end
 
     before do
       link
       deactivate!
-      # The rehire comes later; the person signs in again after the closure.
+      # Clerk's record of an old session and of the person's sign-in after the closure.
+      closed_at = worker.reload.deactivated_at
+      clerk_session!("sess_before_closure", user_id: "user_riley", created_at: closed_at - 30.minutes)
+      clerk_session!("sess_user_riley", user_id: "user_riley", created_at: closed_at + 1.second)
       travel 20.minutes
       post "/api/v1/admin/employees/#{employee.id}/reactivate", headers: bearer("user_staff").merge("X-Company-Id" => company.id.to_s), as: :json,
         params: { reactivation: { effective_date: PayrollBusinessClock.today.iso8601 } }
@@ -250,11 +253,11 @@ RSpec.describe "Employee link retirement", type: :request do
         headers: bearer("user_riley").merge("CONTENT_TYPE" => "application/json")
       expect(response).to have_http_status(:not_found)
 
-      # A session that signed in before the login closed is refused outright.
-      reactivate(activation_params(employee, token: invite.token), fva: [ 30, -1 ])
+      # A session created before the login closed is refused outright.
+      reactivate(activation_params(employee, token: invite.token), sid: "sess_before_closure")
       expect(response).to have_http_status(:not_found)
 
-      # One that signed in after the closure, but not recently, must step up.
+      # One created after the closure, but not verified recently, must step up.
       reactivate(activation_params(employee, token: invite.token), fva: [ 15, -1 ])
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body.dig("clerk_error", "metadata", "reverification", "level")).to eq("first_factor")
@@ -306,16 +309,28 @@ RSpec.describe "Employee link retirement", type: :request do
   end
 
   describe RevokeEmployeeSessionsJob do
+    # A fixed, microsecond-exact closure time (what the job's argument
+    # carries) and a frozen clock, so nothing depends on the run's timing.
+    let(:closed_at) { Time.zone.parse("2026-11-20T02:00:00.123456Z") }
+
+    around { |example| freeze_time { example.run } }
+
     it "retries until Clerk confirms, and still ends pre-closure sessions of a login that is active again" do
-      closed_at = Time.current
       worker.update!(active: false, deactivated_at: closed_at, deactivation_reason: "last_employee_link_closed")
-      allow(clerk).to receive(:revoke_user_sessions).and_return({ success: false, error: "timeout" }, { success: true, revoked: 1 })
+      cutoffs = []
+      outcomes = [ { success: false, error: "timeout" }, { success: true, revoked: 1 } ]
+      allow(clerk).to receive(:revoke_user_sessions) do |subject, created_before:|
+        cutoffs << [ subject, created_before ]
+        outcomes.shift
+      end
 
       expect { described_class.perform_now(worker.id, closed_at.iso8601(6)) }.to have_enqueued_job(described_class)
+        .with(worker.id, closed_at.iso8601(6))
       worker.update!(active: true)
       described_class.perform_now(worker.id, closed_at.iso8601(6))
 
-      expect(clerk).to have_received(:revoke_user_sessions).with("user_riley", created_before: closed_at).twice
+      expect(cutoffs).to eq([ [ "user_riley", closed_at ], [ "user_riley", closed_at ] ])
+      expect(outcomes).to be_empty
     end
 
     it "skips a login that is active again when no closure time was recorded" do

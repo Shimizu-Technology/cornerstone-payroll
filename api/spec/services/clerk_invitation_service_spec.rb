@@ -85,6 +85,13 @@ RSpec.describe ClerkInvitationService do
     end
   end
 
+  it "reads one session by its ID, and nothing for a malformed ID" do
+    stub_request(:get, "https://api.clerk.com/v1/sessions/sess_one")
+      .to_return(status: 200, body: { id: "sess_one", user_id: "user_a", created_at: 1_700_000_000_000 }.to_json)
+    expect(described_class.new.fetch_session("sess_one")).to include("user_id" => "user_a", "created_at" => 1_700_000_000_000)
+    expect(described_class.new.fetch_session("../users")).to be_nil
+  end
+
   it "finds Clerk users by address and deletes one, counting an already-deleted user as deleted" do
     stub_request(:get, "https://api.clerk.com/v1/users").with(query: { email_address: "new@example.test", limit: "100" })
       .to_return(status: 200, body: [ { id: "user_made" } ].to_json)

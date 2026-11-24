@@ -36,7 +36,7 @@ module EmployeeLinks
           metadata: { reason: reason, previous_status: previous_status })
       end
       if pending
-        close_pending_login!(pending, now: now)
+        close_pending_login!(pending)
       elsif link.user
         deactivate_if_last!(link.user, closed_link: link, now: now)
       end
@@ -79,7 +79,11 @@ module EmployeeLinks
       return unless user&.active?
       return if remaining_access?(user, closed_link, now)
 
-      user.update!(active: false, deactivated_at: now, deactivation_reason: "last_employee_link_closed")
+      # The closure time is the database's clock now, under the login's lock,
+      # not the caller's start time: the session fence compares Clerk session
+      # creation times against it.
+      closed_at = ApplicationRecord.database_now
+      user.update!(active: false, deactivated_at: closed_at, deactivation_reason: "last_employee_link_closed")
       EmployeeLinks.side_effect_audit do
         AuditLog.record!(
           user: nil, actor: Current.actor || AuditActor.system_job("Employee app access"),
@@ -89,8 +93,8 @@ module EmployeeLinks
         )
       end
       user_id = user.id
-      closed_at = now.iso8601(6)
-      ActiveRecord.after_all_transactions_commit { RevokeEmployeeSessionsJob.perform_later(user_id, closed_at) }
+      cutoff = closed_at.iso8601(6)
+      ActiveRecord.after_all_transactions_commit { RevokeEmployeeSessionsJob.perform_later(user_id, cutoff) }
     end
 
     # Eligible means usable right now: active, or former with access still
@@ -111,14 +115,14 @@ module EmployeeLinks
 
     # A sign-up nobody finished: the pending login is closed and its email
     # stays reserved for this same employee, so a later invite reuses the row
-    # (Activate) instead of finding the address taken.
-    def close_pending_login!(pending, now: Time.current)
+    # (Activate) instead of finding the address taken. One an admin already
+    # deactivated keeps that reason, so it is never reused.
+    def close_pending_login!(pending)
       pending = EmployeeLinks.lock_users!([ pending.id ]).first
       return unless pending&.awaiting_clerk_binding?
 
       invitation_id = pending.clerk_invitation_id
-      pending.update!(active: false, invite_nonce_digest: nil, invite_nonce_expires_at: nil,
-        deactivated_at: now, deactivation_reason: "pending_sign_up_closed")
+      pending.update!(EmployeeLinks.pending_closure_attributes(pending))
       return if invitation_id.blank?
 
       ActiveRecord.after_all_transactions_commit { revoke_invitation_best_effort(invitation_id) }

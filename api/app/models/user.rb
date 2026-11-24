@@ -210,7 +210,7 @@ class User < ApplicationRecord
     if active?
       self.deactivation_reason = nil
     elsif persisted?
-      self.deactivated_at = Time.current unless will_save_change_to_deactivated_at?
+      self.deactivated_at = ApplicationRecord.database_now unless will_save_change_to_deactivated_at?
       self.deactivation_reason = "deactivated" unless will_save_change_to_deactivation_reason?
     end
   end

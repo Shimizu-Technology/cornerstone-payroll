@@ -52,7 +52,8 @@ module EmployeeLinks
       return :sign_in if link.claim_user_id.present?
 
       pending = link.user
-      if pending && !(pending.portal_employee? && pending.awaiting_clerk_binding?)
+      # A pending login an admin deactivated never restarts a sign-up.
+      if pending && !(pending.portal_employee? && pending.awaiting_clerk_binding? && pending.active?)
         return :sign_in
       end
       return :sign_in if EmployeeContactValidator.placeholder_email?(@email, organization_id: link.company.organization_id) ||
@@ -134,6 +135,7 @@ module EmployeeLinks
         link.update!(user: user, sign_up_email_for_notices: @use_for_notices)
         return true
       end
+      return false unless user.active?
       return true if prepared.changes.empty?
 
       email = prepared.changes[:email]

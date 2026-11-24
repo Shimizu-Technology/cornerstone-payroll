@@ -34,6 +34,9 @@ module EmployeeLinkHelpers
       allow(clerk).to receive(:users_with_email).and_return([])
       allow(clerk).to receive(:revoke_user_sessions).and_return(success: true, revoked: 0)
       allow(clerk).to receive(:delete_user).and_return(success: true)
+      # The session fence reads a reactivated login's session from Clerk;
+      # unknown sessions fail closed. Specs register them (clerk_session!).
+      allow(clerk).to receive(:fetch_session).and_return(nil)
     end
 
     base.around do |example|
@@ -49,6 +52,13 @@ module EmployeeLinkHelpers
     payload = { sub: subject, iss: ISSUER, azp: azp, iat: Time.current.to_i, exp: 5.minutes.from_now.to_i, fva: fva,
                 sid: "sess_#{subject}" }
     JWT.encode(payload.merge(claims), link_signing_key, "RS256", kid: link_jwk.kid)
+  end
+
+  # What Clerk's Backend API reports for a session (SessionFence).
+  def clerk_session!(sid, user_id:, created_at:)
+    allow(clerk).to receive(:fetch_session).with(sid).and_return(
+      "id" => sid, "user_id" => user_id, "status" => "active", "created_at" => (created_at.to_r * 1000).floor
+    )
   end
 
   def bearer(subject, **options)

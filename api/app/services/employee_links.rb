@@ -73,6 +73,19 @@ module EmployeeLinks
     User.where(id: ids).order(:id).lock("FOR NO KEY UPDATE").to_a
   end
 
+  # What closing a sign-up nobody finished writes to its pending login. Its
+  # nonce is always cleared. A login that is still active closes now, with
+  # the database's clock; one already closed (an admin's deactivation above
+  # all) keeps its reason and time, so an admin-deactivated row never becomes
+  # a reusable pending_sign_up_closed one.
+  def self.pending_closure_attributes(pending)
+    attributes = { invite_nonce_digest: nil, invite_nonce_expires_at: nil }
+    return attributes unless pending.active?
+
+    attributes.merge(active: false, deactivated_at: ApplicationRecord.database_now,
+      deactivation_reason: "pending_sign_up_closed")
+  end
+
   # A sign-up nobody finished, closed with its link: never bound, made for
   # this employee (or the record it replaced) at this company, and linked to
   # no other employee. Its email stays reserved for that person; a later
