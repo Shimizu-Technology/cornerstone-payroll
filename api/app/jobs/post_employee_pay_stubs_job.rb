@@ -40,6 +40,7 @@ class PostEmployeePayStubsJob < ApplicationJob
             AND employee_documents.payroll_item_id = payroll_items.id
             AND employee_documents.status = 'posted'
             AND employee_documents.payroll_facts_checked_at >= GREATEST(payroll_items.updated_at, pay_periods.updated_at)
+            AND (payroll_items.correction_for_payroll_item_id IS NULL OR employee_documents.replaces_document_id IS NOT NULL)
         )
       SQL
     withdrawn = items.where(id: posted.select(:payroll_item_id))

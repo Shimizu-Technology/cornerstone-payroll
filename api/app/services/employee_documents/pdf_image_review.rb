@@ -34,7 +34,8 @@ module EmployeeDocuments
 
       entries(dictionary, :XObject).any? { |entry| image_stream?(entry) } ||
         entries(dictionary, :Pattern).any? { |entry| image_stream?(entry) } ||
-        entries(dictionary, :Font).any? { |entry| type_three_images?(entry) }
+        entries(dictionary, :Font).any? { |entry| type_three_images?(entry) } ||
+        entries(dictionary, :ExtGState).any? { |entry| soft_mask_image?(entry) }
     end
 
     def entries(dictionary, key)
@@ -45,6 +46,12 @@ module EmployeeDocuments
       font = @objects.deref_hash(reference)
       font && font[:Subtype] == :Type3 &&
         (images_in_resources?(font[:Resources]) || entries(font, :CharProcs).any? { |entry| image_stream?(entry) })
+    end
+
+    def soft_mask_image?(reference)
+      state = @objects.deref_hash(reference)
+      mask = @objects.deref(state&.[](:SMask))
+      mask.is_a?(Hash) && image_stream?(mask[:G])
     end
 
     def image_stream?(reference)

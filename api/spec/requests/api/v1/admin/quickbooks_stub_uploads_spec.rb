@@ -30,6 +30,7 @@ RSpec.describe "QuickBooks original stubs", type: :request do
         if inline
           pdf.add_content("q 10 0 0 10 0 0 cm BI /W 1 /H 1 /CS /G /BPC 8 ID x EI Q")
         end
+        yield pdf if block_given?
       end
     end.render
 
@@ -131,6 +132,29 @@ RSpec.describe "QuickBooks original stubs", type: :request do
     submit("preview", upload: pdf(page_text, inline: true))
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.fetch("data").first).to include("status" => "image_review")
+  end
+
+  it "rejects a page containing the PDF reader's unknown-glyph box" do
+    upload = pdf(page_text) do |document|
+      document.font("Courier") { document.text("Z") }
+      font = document.state.page.fonts.values.find { |entry| entry.data[:BaseFont] == :Courier }
+      map = document.state.store.ref({})
+      map.stream << <<~CMAP
+        begincmap
+        1 begincodespacerange
+        <00> <FF>
+        endcodespacerange
+        1 beginbfchar
+        <5A> <25AF>
+        endbfchar
+        endcmap
+      CMAP
+      font.data[:ToUnicode] = map
+    end
+
+    submit("preview", upload: upload)
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("data")).to eq([ { "page" => 1, "status" => "unreadable" } ])
   end
 
   it "requires its own attestation and an audited view before posting a possible SSN" do
