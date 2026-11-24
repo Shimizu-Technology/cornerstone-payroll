@@ -50,7 +50,8 @@ module Api
               attrs: employee_params.to_h,
               requested_by: current_user,
               company: current_company,
-              confirm_same_person_email: confirm_same_person_email_param
+              confirm_same_person_email: confirm_same_person_email_param,
+              email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?
             ).create!
           end
 
@@ -64,6 +65,8 @@ module Api
           }, status: :created
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee || e.record)
+        rescue EmployeeContactChanges::EmailChangeLocked
+          render_login_email_cooldown!
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -85,7 +88,8 @@ module Api
               company: current_company,
               confirm_same_person_email: confirm_same_person_email_param,
               row_revision: row_revision_param,
-              baseline_values: baseline_values_param
+              baseline_values: baseline_values_param,
+              email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?
             ).update!
           end
 
@@ -111,6 +115,8 @@ module Api
           }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee || e.record)
+        rescue EmployeeContactChanges::EmailChangeLocked
+          render_login_email_cooldown!
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",

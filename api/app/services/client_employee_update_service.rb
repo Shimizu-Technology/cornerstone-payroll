@@ -69,8 +69,10 @@ class ClientEmployeeUpdateService
     keyword_init: true
   )
 
-  def initialize(employee:, attrs:, requested_by:, company:, confirm_same_person_email: false, row_revision: nil, baseline_values: nil)
+  def initialize(employee:, attrs:, requested_by:, company:, confirm_same_person_email: false, row_revision: nil, baseline_values: nil,
+                 email_locked: false)
     @employee = employee
+    @email_locked = email_locked
     raw_attrs = attrs.deep_symbolize_keys
     @confirm_same_person_email = ActiveModel::Type::Boolean.new.cast(
       confirm_same_person_email || raw_attrs.delete(:confirm_same_person_email)
@@ -236,7 +238,8 @@ class ClientEmployeeUpdateService
   def apply_contact_changes!(direct_attrs, target:, creation:)
     EmployeeContactChanges.new(
       employee: target, attributes: direct_attrs, company: company, actor: requested_by, source: "client",
-      confirm_same_person_email: confirm_same_person_email, creation: creation, error_record: employee
+      confirm_same_person_email: confirm_same_person_email, creation: creation, error_record: employee,
+      email_locked: @email_locked
     ).apply!
   end
 

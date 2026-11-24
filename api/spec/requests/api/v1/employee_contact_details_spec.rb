@@ -203,29 +203,46 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
         expect(response).to have_http_status(:unprocessable_entity)
       end
 
-      # Rejections past the limit return 429 with Retry-After, and are still audited.
-      expect do
+      cooldown = lambda do |email|
         patch "/api/v1/client/employees/#{missing_contact_employee.id}",
               headers: { "X-Company-Id" => company.id.to_s },
-              params: { employee: { email: other_tenant_user.email } }
-      end.to change { AuditLog.where(action: "employees#login_email_rejected").count }.by(1)
-      expect(response).to have_http_status(:too_many_requests)
-      expect(response.headers["Retry-After"].to_i).to be_between(1, EmployeeContactLoginRejectionGuard::LOGIN_EMAIL_REJECTION_PERIOD.to_i)
-      expect(response.parsed_body["code"]).to eq("contact_email_rate_limited")
-      expect(AuditLog.where(action: "employees#login_email_rejected").newest_first.first.metadata).to include("rate_limited" => true)
+              params: { employee: { email: email } }
+        response
+      end
+
+      # In the cooldown every email change gets the same 429, so a login
+      # address and an unused one look alike, and neither is checked.
+      [ other_tenant_user.email, "brand.new.unused@example.com" ].each do |email|
+        expect do
+          expect(cooldown.call(email)).to have_http_status(:too_many_requests)
+        end.not_to change(AuditLog, :count)
+        expect(response.headers["Retry-After"].to_i).to be > EmployeeContactLoginRejectionGuard::LOGIN_EMAIL_REJECTION_PERIOD.to_i
+        expect(response.parsed_body).to eq(
+          "error" => EmployeeContactLoginRejectionGuard::RATE_LIMIT_ERROR_MESSAGE, "code" => "contact_email_rate_limited"
+        )
+      end
       expect(missing_contact_employee.reload.email).to be_nil
 
-      # A real address still saves: only rejected login emails are limited.
+      # Other fields still save during the cooldown.
       patch "/api/v1/client/employees/#{missing_contact_employee.id}",
             headers: { "X-Company-Id" => company.id.to_s },
-            params: { employee: { email: "brand.new.unused@example.com" } }
+            params: { employee: { phone: "555-0123" } }
       expect(response).to have_http_status(:ok), response.body
+
+      # The cooldown also covers the next window.
+      travel(period)
+      expect(cooldown.call("brand.new.unused@example.com")).to have_http_status(:too_many_requests)
+
+      # Once it ends, an email saves again.
+      travel(period)
+      expect(cooldown.call("brand.new.unused@example.com")).to have_http_status(:ok)
+      expect(missing_contact_employee.reload.email).to eq("brand.new.unused@example.com")
 
       # The counter is per user: another client user is not limited.
       another_client = create(:user, company: company, organization: organization, role: "client", email: "second-client@example.com")
       CompanyAssignment.create!(user: another_client, company: company)
       allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(another_client)
-      patch "/api/v1/client/employees/#{missing_contact_employee.id}",
+      patch "/api/v1/client/employees/#{complete_employee.id}",
             headers: { "X-Company-Id" => company.id.to_s },
             params: { employee: { email: other_tenant_user.email } }
       expect(response).to have_http_status(:unprocessable_entity)
