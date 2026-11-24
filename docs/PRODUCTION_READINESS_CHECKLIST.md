@@ -106,7 +106,7 @@ counts all API traffic per IP.
 
 ### Employee web service readiness
 
-When `APP_PROCESS_ROLE=employee_web`, `production:readiness` adds four checks: the booted process has no payroll routes or `/cable`, `DB_POOL_MAX` is 1 to 3 and equals the effective primary pool, the rate-limit counters are on the shared Redis store (not process-local memory), and `CLERK_AUTHORIZED_PARTIES` is set. Other roles skip them. Setup steps, the Neon connection budget, alerts and rollback are in the [M4 employee platform runbook](rollout/M4_EMPLOYEE_PLATFORM_RUNBOOK.md). The service definition is in `ops/render/employee-web.render.yaml`.
+When `APP_PROCESS_ROLE=employee_web`, `production:readiness` adds four checks: the booted process has no payroll routes or `/cable`, `DB_POOL_MAX` is 1 to 3, equals the effective primary pool, and Puma runs one process with no Solid Queue inside it, the rate-limit counters are on the shared Redis `RackAttackStore::Failover` store (not process-local memory), and `CLERK_AUTHORIZED_PARTIES` is a list of explicit production HTTPS origins. A live run also writes and deletes a probe key on the shared store, for the employee role or any role with `RACK_ATTACK_REDIS_URL` set. Other roles skip them. Setup steps, the Neon connection budget, alerts and rollback are in the [M4 employee platform runbook](rollout/M4_EMPLOYEE_PLATFORM_RUNBOOK.md). The service definition is in `ops/render/employee-web.render.yaml`.
 
 ### Runtime telemetry
 
