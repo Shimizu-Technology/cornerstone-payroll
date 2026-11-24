@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -18,9 +19,9 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
+  Pencil,
   ChevronLeft,
   ChevronRight,
-  RotateCcw,
   Save,
   Search,
   ShieldCheck,
@@ -31,7 +32,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { MobileCardActions, MobileRecordCard } from '@/components/ui/mobile-record';
+import { MobileRecordCard } from '@/components/ui/mobile-record';
 import { Select } from '@/components/ui/select';
 import {
   Table,
@@ -44,7 +45,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
-import { toContactRecord } from '@/lib/employee-contact';
+import { formatPhone, toContactRecord } from '@/lib/employee-contact';
 import { employeesPath } from '@/lib/routes';
 import { cn, getInitials } from '@/lib/utils';
 import { ApiError, clientEmployeesApi, employeesApi } from '@/services/api';
@@ -74,7 +75,7 @@ const FIELD_LABELS: Record<ContactField, string> = {
 
 function gridInputClass(extra = '', invalid = false): string {
   return cn(
-    'block h-9 w-full rounded-lg border bg-white py-2 text-sm text-neutral-900 shadow-xs transition-[border-color,background-color,color,box-shadow] duration-150 ease-out placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
+    'block h-11 w-full rounded-lg border bg-white py-2 text-base text-neutral-900 lg:h-9 lg:text-sm shadow-xs transition-[border-color,background-color,color,box-shadow] duration-150 ease-out placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
     invalid
       ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200'
       : 'border-neutral-300 focus-visible:border-primary-400 focus-visible:ring-primary-200',
@@ -232,13 +233,13 @@ function extractContactValidation(error: unknown): {
 function contactStatusBadge(employee: ContactEmployee): { label: string; variant: 'success' | 'warning' | 'danger' | 'info' } {
   const status = employee.contact_details_status;
   if (status?.email_issue === 'shared_inbox') {
-    return { label: 'Shared inbox', variant: 'danger' };
+    return { label: 'Shared email', variant: 'danger' };
   }
   if (status?.email_issue === 'placeholder') {
-    return { label: 'Placeholder email', variant: 'danger' };
+    return { label: 'Not a real email', variant: 'danger' };
   }
   if (status?.email_issue === 'placeholder_pattern') {
-    return { label: 'Possible placeholder', variant: 'warning' };
+    return { label: 'Check this email', variant: 'warning' };
   }
   if (status?.needs_contact_details) {
     const missing = status.missing_fields;
@@ -253,10 +254,10 @@ function contactStatusBadge(employee: ContactEmployee): { label: string; variant
       };
       return { label: labelMap[missing[0]] || 'Needs contact details', variant: 'warning' };
     }
-    return { label: 'Needs contact details', variant: 'warning' };
+    return { label: 'Missing details', variant: 'warning' };
   }
   if (status?.email_issue === 'shared_with_coworker') {
-    return { label: 'Shared with coworker', variant: 'info' };
+    return { label: 'Shared with a coworker', variant: 'info' };
   }
   return { label: 'Complete', variant: 'success' };
 }
@@ -314,6 +315,10 @@ export function EmployeeContactDetails({
   const rowStates = controlledRowStates ?? internalRowStates;
   const setRowStates = onRowStatesChange ?? setInternalRowStates;
   const isDraftsControlled = controlledDrafts !== undefined;
+  const isDesktop = useDesktopLayout();
+  // Rows opened with Edit. A row also stays open while it has unsaved edits
+  // or something to resolve, so drafts kept across pages and tabs reopen.
+  const [editingIds, setEditingIds] = useState<Set<number>>(() => new Set());
   const requestIdRef = useRef(0);
   const companyIdRef = useRef(companyId);
   const prevCompanyIdRef = useRef(companyId);
@@ -467,6 +472,34 @@ export function EmployeeContactDetails({
     });
   };
 
+  const isRowOpen = (employee: ContactEmployee): boolean => {
+    const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+    return editingIds.has(employee.id)
+      || hasAnyChangedField(drafts[employee.id])
+      || Boolean(state.conflict || state.samePersonRequired || state.error)
+      || Object.values(state.fieldErrors).some((messages) => messages.length > 0);
+  };
+
+  const setRowEditing = (employeeId: number, editing: boolean): void => {
+    setEditingIds((prev) => {
+      if (prev.has(employeeId) === editing) return prev;
+      const next = new Set(prev);
+      if (editing) next.add(employeeId);
+      else next.delete(employeeId);
+      return next;
+    });
+  };
+
+  const openRow = (employee: ContactEmployee): void => {
+    setRowEditing(employee.id, true);
+    setRowStates((prev) => (prev[employee.id]?.saved ? { ...prev, [employee.id]: { ...prev[employee.id], saved: false } } : prev));
+  };
+
+  const cancelRow = (employee: ContactEmployee): void => {
+    resetRow(employee);
+    setRowEditing(employee.id, false);
+  };
+
   const resetRow = (employee: ContactEmployee): void => {
     setDrafts((prev) => {
       if (!prev[employee.id]) return prev;
@@ -562,6 +595,7 @@ export function EmployeeContactDetails({
         delete next[updated.id];
         return next;
       });
+      setRowEditing(updated.id, false);
       setRowStates((prev) => ({
         ...prev,
         [updated.id]: {
@@ -695,6 +729,82 @@ export function EmployeeContactDetails({
   const rangeStart = totalCount === 0 ? 0 : (currentPage - 1) * perPage + 1;
   const rangeEnd = totalCount === 0 ? 0 : Math.min(currentPage * perPage, totalCount);
 
+  const renderEditor = (employee: ContactEmployee): ReactElement => {
+    const draft = effectiveDraft(employee, drafts[employee.id]);
+    const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+    const dirty = hasAnyChangedField(drafts[employee.id]);
+    const name = `${employee.first_name} ${employee.last_name}`;
+    const disabled = !canEdit || state.saving;
+    const canSave = !disabled && (dirty || (state.samePersonRequired && state.samePersonChecked));
+    const fieldProps = (field: ContactField): Pick<EditorFieldProps, 'value' | 'disabled' | 'errors' | 'onChange' | 'onKeyDown'> => ({
+      value: draft[field],
+      disabled,
+      errors: state.fieldErrors[field] ?? [],
+      onChange: (value) => updateDraftField(employee, field, field === 'state' ? value.toUpperCase() : value),
+      onKeyDown: (event) => handleRowKeyDown(event, employee),
+    });
+
+    return (
+      <div className="space-y-4 bg-white lg:rounded-xl lg:border lg:border-primary-200 lg:p-4">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <div>
+            <EditorField label="Email" ariaLabel={`Email for ${name}`} type="email" placeholder="name@example.com"
+              {...fieldProps('email')} errors={state.samePersonRequired ? [] : state.fieldErrors.email ?? []} />
+            <RowInlineFeedback
+              employee={employee}
+              state={state}
+              field="email"
+              hidePrimaryFieldError
+              canEdit={canEdit}
+              onToggleSamePerson={(checked) => toggleSamePersonCheck(employee.id, checked)}
+              onConfirmAndSave={() => void saveRow(employee, { explicitConfirmSamePerson: true })}
+            />
+          </div>
+          <EditorField label="Mobile" ariaLabel={`Mobile for ${name}`} type="tel" placeholder="671-555-0100" inputClassName="tabular-nums"
+            hint="For a 7-digit Guam number, +1 671 is added for you." {...fieldProps('phone')} />
+        </div>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_72px_112px]">
+          <EditorField label="Street address" ariaLabel={`Street address for ${name}`} placeholder="Street address" className="col-span-2 lg:col-span-1" {...fieldProps('address_line1')} />
+          <EditorField label="Apt / Unit (optional)" ariaLabel={`Apt or unit for ${name}`} placeholder="Apt, suite, or box" className="col-span-2 lg:col-span-1" {...fieldProps('address_line2')} />
+          <EditorField label="City" ariaLabel={`City for ${name}`} placeholder="Hagatna" className="col-span-2 lg:col-span-1" {...fieldProps('city')} />
+          <EditorField label="State" ariaLabel={`State for ${name}`} placeholder="GU" maxLength={2} inputClassName="uppercase" {...fieldProps('state')} />
+          <EditorField label="ZIP" ariaLabel={`ZIP for ${name}`} placeholder="96910" inputClassName="tabular-nums" {...fieldProps('zip')} />
+        </div>
+
+        {state.conflict && (
+          <RowConflictBanner
+            conflict={state.conflict}
+            saving={state.saving}
+            onKeep={() => handleKeepMyVersion(employee)}
+            onDiscard={() => handleDiscardMyVersion(employee)}
+          />
+        )}
+        {state.error && !state.conflict && !state.samePersonRequired && !Object.values(state.fieldErrors).some((messages) => messages.length > 0) && (
+          <Alert tone="error">{state.error}</Alert>
+        )}
+
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <p className="mr-auto hidden text-xs text-neutral-500 [@media(hover:hover)_and_(pointer:fine)]:block">Press Enter to save.</p>
+          <Button variant="outline" size="sm" aria-label={`Cancel editing ${name}`} disabled={state.saving} onClick={() => cancelRow(employee)} className="min-h-11 flex-1 sm:flex-none lg:min-h-0">
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            aria-label={`Save ${name}`}
+            disabled={!canSave}
+            loading={state.saving}
+            loadingLabel="Saving"
+            onClick={() => void saveRow(employee)}
+            className="min-h-11 flex-1 sm:flex-none lg:min-h-0"
+          >
+            <Save className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+            Save
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   const gridBody = (
     <>
       {topSlot}
@@ -781,9 +891,6 @@ export function EmployeeContactDetails({
             <option value="terminated">Terminated</option>
           </Select>
 
-          <p className="text-xs text-neutral-500 sm:ml-auto">
-            7-digit Guam numbers default to <span className="font-mono font-medium text-neutral-700">+1 671</span>. Press <kbd className="rounded border border-neutral-300 bg-neutral-50 px-2 py-0.5 font-mono text-[11px] text-neutral-700">Enter</kbd> in a row to save.
-          </p>
         </div>
       </div>
 
@@ -821,360 +928,130 @@ export function EmployeeContactDetails({
         </Card>
       ) : (
         <>
-          {/* Desktop editable grid */}
-          <Card className="hidden overflow-hidden lg:block">
-            <Table stickyHeader>
-              <TableHeader>
-                <TableRow>
-                  <TableHead stickyLeft className="w-[168px] px-4 uppercase tracking-wider">Employee</TableHead>
-                  <TableHead className="w-[205px] px-2 uppercase tracking-wider">Email</TableHead>
-                  <TableHead className="w-[144px] px-2 uppercase tracking-wider">Mobile</TableHead>
-                  <TableHead className="min-w-[235px] px-2 uppercase tracking-wider">Mailing address</TableHead>
-                  <TableHead className="w-[94px] px-2 text-right uppercase tracking-wider">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {companyEmployees.map((employee, index) => {
-                  const draft = effectiveDraft(employee, drafts[employee.id]);
-                  const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-                  const dirty = hasAnyChangedField(drafts[employee.id]);
-                  const badge = contactStatusBadge(employee);
-                  const rowBg = index % 2 === 0 ? 'bg-white' : 'bg-neutral-50/70';
+          {isDesktop ? (
+            <Card className="overflow-hidden">
+              <Table stickyHeader>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead stickyLeft className="w-[200px] px-4">Employee</TableHead>
+                    <TableHead className="px-4">Email</TableHead>
+                    <TableHead className="w-[168px] px-4">Mobile</TableHead>
+                    <TableHead className="px-4">Mailing address</TableHead>
+                    <TableHead className="w-[112px] px-4 text-right"><span className="sr-only">Edit</span></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {companyEmployees.map((employee, index) => {
+                    const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+                    const open = isRowOpen(employee);
+                    const rowBg = index % 2 === 0 ? 'bg-white' : 'bg-neutral-50/70';
+                    const name = `${employee.first_name} ${employee.last_name}`;
 
-                  return (
-                    <TableRow key={employee.id} className={cn(rowBg, 'align-top')}>
-                      <TableCell stickyLeft className={cn(rowBg, 'whitespace-normal px-4 py-4')}>
-                        <div className="flex items-start gap-2">
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-[11px] font-semibold text-primary-700">
-                            {getInitials(employee.first_name, employee.last_name)}
-                          </div>
-                          <div className="min-w-0 space-y-1">
-                            <p className="text-sm font-semibold text-neutral-950 leading-snug">
-                              {employee.first_name} {employee.last_name}
-                            </p>
-                            <div className="flex flex-wrap gap-1">
-                              <Badge variant={badge.variant}>{badge.label}</Badge>
-                              {employee.email_verified_at && (
-                                <Badge variant="success">Verified</Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="whitespace-normal px-2 py-4">
-                        <input
-                          type="email"
-                          aria-label={`Email for ${employee.first_name} ${employee.last_name}`}
-                          value={draft.email}
-                          disabled={!canEdit || state.saving}
-                          placeholder="name@example.com"
-                          onChange={(event) => updateDraftField(employee, 'email', event.target.value)}
-                          onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                          className={gridInputClass('px-2', Boolean(state.fieldErrors.email?.length))}
-                        />
-                        <RowInlineFeedback
-                          employee={employee}
-                          state={state}
-                          field="email"
-                          canEdit={canEdit}
-                          onToggleSamePerson={(checked) => toggleSamePersonCheck(employee.id, checked)}
-                          onConfirmAndSave={() => void saveRow(employee, { explicitConfirmSamePerson: true })}
-                        />
-                      </TableCell>
-
-                      <TableCell className="whitespace-normal px-2 py-4">
-                        <input
-                          type="tel"
-                          aria-label={`Mobile for ${employee.first_name} ${employee.last_name}`}
-                          value={draft.phone}
-                          disabled={!canEdit || state.saving}
-                          placeholder="671-555-0100"
-                          onChange={(event) => updateDraftField(employee, 'phone', event.target.value)}
-                          onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                          className={gridInputClass('px-2 tabular-nums', Boolean(state.fieldErrors.phone?.length))}
-                        />
-                        {state.fieldErrors.phone?.map((msg) => (
-                          <p key={msg} role="alert" className="mt-1 text-xs text-danger-700">{msg}</p>
-                        ))}
-                        {employee.phone_confirmed_by_employee_at && !dirty && (
-                          <p className="mt-1 text-[11px] font-medium text-success-700">Confirmed by employee</p>
-                        )}
-                      </TableCell>
-
-                      <TableCell className="whitespace-normal px-2 py-4">
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-[minmax(0,1fr)_72px] gap-2">
-                            <input
-                              type="text"
-                              aria-label={`Street address for ${employee.first_name} ${employee.last_name}`}
-                              value={draft.address_line1}
-                              disabled={!canEdit || state.saving}
-                              placeholder="Street address"
-                              onChange={(event) => updateDraftField(employee, 'address_line1', event.target.value)}
-                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                              className={gridInputClass('px-2', Boolean(state.fieldErrors.address_line1?.length))}
-                            />
-                            <input
-                              type="text"
-                              aria-label={`Apt or unit for ${employee.first_name} ${employee.last_name}`}
-                              value={draft.address_line2}
-                              disabled={!canEdit || state.saving}
-                              placeholder="Apt / Unit"
-                              onChange={(event) => updateDraftField(employee, 'address_line2', event.target.value)}
-                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                              className={gridInputClass('px-2')}
-                            />
-                          </div>
-                          <div className="grid grid-cols-[minmax(0,1fr)_46px_70px] gap-2">
-                            <input
-                              type="text"
-                              aria-label={`City for ${employee.first_name} ${employee.last_name}`}
-                              value={draft.city}
-                              disabled={!canEdit || state.saving}
-                              placeholder="City"
-                              onChange={(event) => updateDraftField(employee, 'city', event.target.value)}
-                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                              className={gridInputClass('px-2', Boolean(state.fieldErrors.city?.length))}
-                            />
-                            <input
-                              type="text"
-                              aria-label={`State for ${employee.first_name} ${employee.last_name}`}
-                              value={draft.state}
-                              disabled={!canEdit || state.saving}
-                              placeholder="GU"
-                              maxLength={2}
-                              onChange={(event) => updateDraftField(employee, 'state', event.target.value.toUpperCase())}
-                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                              className={gridInputClass('px-1 text-center uppercase', Boolean(state.fieldErrors.state?.length))}
-                            />
-                            <input
-                              type="text"
-                              aria-label={`ZIP for ${employee.first_name} ${employee.last_name}`}
-                              value={draft.zip}
-                              disabled={!canEdit || state.saving}
-                              placeholder="96910"
-                              onChange={(event) => updateDraftField(employee, 'zip', event.target.value)}
-                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                              className={gridInputClass('px-2 tabular-nums', Boolean(state.fieldErrors.zip?.length))}
-                            />
-                          </div>
-                        </div>
-                        {state.conflict && (
-                          <RowConflictBanner
-                            conflict={state.conflict}
-                            saving={state.saving}
-                            onKeep={() => handleKeepMyVersion(employee)}
-                            onDiscard={() => handleDiscardMyVersion(employee)}
-                          />
-                        )}
-                      </TableCell>
-
-                      <TableCell className="px-2 py-4 text-right">
-                        <div className="flex flex-col items-end gap-2">
-                          <div className="flex items-center gap-2">
-                            {dirty && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                aria-label={`Reset ${employee.first_name} ${employee.last_name}`}
-                                disabled={state.saving}
-                                onClick={() => resetRow(employee)}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                              </Button>
+                    return (
+                      <Fragment key={employee.id}>
+                        <TableRow className={cn(rowBg, 'align-top')}>
+                          <TableCell stickyLeft className={cn(rowBg, 'whitespace-normal px-4 py-4')}>
+                            <EmployeeNameBlock employee={employee} />
+                          </TableCell>
+                          <TableCell className="whitespace-normal px-4 py-4 text-sm">
+                            <ContactValue value={employee.email} className="break-all" />
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap px-4 py-4 text-sm tabular-nums">
+                            <ContactValue value={formatPhone(employee.phone)} />
+                            {employee.phone_confirmed_by_employee_at && (
+                              <p className="mt-1 text-xs font-medium text-success-700">Confirmed by employee</p>
                             )}
-                            <Button
-                              size="sm"
-                              variant={dirty || (state.samePersonRequired && state.samePersonChecked) ? 'primary' : 'outline'}
-                              disabled={!canEdit || state.saving || (!dirty && !(state.samePersonRequired && state.samePersonChecked))}
-                              loading={state.saving}
-                              loadingLabel="Saving"
-                              aria-label={`Save ${employee.first_name} ${employee.last_name}`}
-                              onClick={() => void saveRow(employee)}
-                            >
-                              <Save className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-                              Save
-                            </Button>
-                          </div>
-                          {state.saved && !dirty && (
-                            <span role="status" className="inline-flex items-center gap-1 text-xs font-semibold text-success-700">
-                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                              Saved
-                            </span>
-                          )}
-                          {state.error && !state.conflict && !state.samePersonRequired && !state.fieldErrors.email?.length && !state.fieldErrors.phone?.length && (
-                            <p role="alert" className="max-w-[180px] whitespace-normal text-right text-xs text-danger-700">
-                              {state.error}
-                            </p>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </Card>
+                          </TableCell>
+                          <TableCell className="whitespace-normal px-4 py-4 text-sm">
+                            <AddressValue employee={employee} />
+                          </TableCell>
+                          <TableCell className="px-4 py-4 text-right">
+                            {open ? (
+                              <span className="text-xs font-semibold text-primary-700">Editing</span>
+                            ) : (
+                              <div className="flex flex-col items-end gap-2">
+                                <Button variant="outline" size="sm" aria-label={`Edit ${name}`} disabled={!canEdit} onClick={() => openRow(employee)}>
+                                  <Pencil className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+                                  Edit
+                                </Button>
+                                {state.saved && (
+                                  <span role="status" className="inline-flex items-center gap-1 text-xs font-semibold text-success-700">
+                                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                                    Saved
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        {open && (
+                          <TableRow className={rowBg}>
+                            <TableCell colSpan={5} className="whitespace-normal border-t-0 px-4 pb-4 pt-0">
+                              {renderEditor(employee)}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {companyEmployees.map((employee) => {
+                const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+                const open = isRowOpen(employee);
+                const name = `${employee.first_name} ${employee.last_name}`;
 
-          {/* Mobile & tablet cards */}
-          <div className="space-y-4 lg:hidden">
-            {companyEmployees.map((employee) => {
-              const draft = effectiveDraft(employee, drafts[employee.id]);
-              const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-              const dirty = hasAnyChangedField(drafts[employee.id]);
-              const badge = contactStatusBadge(employee);
-
-              return (
-                <MobileRecordCard key={employee.id}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-4 min-w-0">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700">
-                        {getInitials(employee.first_name, employee.last_name)}
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="truncate font-semibold text-neutral-950">
-                          {employee.first_name} {employee.last_name}
-                        </h2>
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          <Badge variant={badge.variant}>{badge.label}</Badge>
-                          {employee.email_verified_at && <Badge variant="success">Verified</Badge>}
-                        </div>
-                      </div>
+                return (
+                  <MobileRecordCard key={employee.id}>
+                    <div className="flex items-start justify-between gap-4">
+                      <EmployeeNameBlock employee={employee} />
+                      {state.saved && !open && (
+                        <span role="status" className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-success-700">
+                          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                          Saved
+                        </span>
+                      )}
                     </div>
-                    {state.saved && !dirty && (
-                      <span role="status" className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-success-700">
-                        <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                        Saved
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="mt-4 space-y-4">
-                    <div>
-                      <Input
-                        label="Email"
-                        type="email"
-                        value={draft.email}
-                        disabled={!canEdit || state.saving}
-                        placeholder="name@example.com"
-                        error={state.samePersonRequired ? undefined : state.fieldErrors.email?.[0]}
-                        onChange={(event) => updateDraftField(employee, 'email', event.target.value)}
-                        onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                      />
-                      <RowInlineFeedback
-                        employee={employee}
-                        state={state}
-                        field="email"
-                        hidePrimaryFieldError={!state.samePersonRequired}
-                        canEdit={canEdit}
-                        onToggleSamePerson={(checked) => toggleSamePersonCheck(employee.id, checked)}
-                        onConfirmAndSave={() => void saveRow(employee, { explicitConfirmSamePerson: true })}
-                      />
-                    </div>
-
-                    <Input
-                      label="Mobile number"
-                      type="tel"
-                      value={draft.phone}
-                      disabled={!canEdit || state.saving}
-                      placeholder="671-555-0100"
-                      error={state.fieldErrors.phone?.[0]}
-                      helperText={employee.phone_confirmed_by_employee_at && !dirty ? 'Confirmed by employee' : undefined}
-                      onChange={(event) => updateDraftField(employee, 'phone', event.target.value)}
-                      onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                    />
-
-                    <Input
-                      label="Street address"
-                      value={draft.address_line1}
-                      disabled={!canEdit || state.saving}
-                      placeholder="Street address"
-                      error={state.fieldErrors.address_line1?.[0]}
-                      onChange={(event) => updateDraftField(employee, 'address_line1', event.target.value)}
-                      onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                    />
-
-                    <Input
-                      label="Apt / Unit (optional)"
-                      value={draft.address_line2}
-                      disabled={!canEdit || state.saving}
-                      placeholder="Apt, suite, or box"
-                      onChange={(event) => updateDraftField(employee, 'address_line2', event.target.value)}
-                      onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                    />
-
-                    <div className="grid grid-cols-[minmax(0,1fr)_72px_104px] gap-2">
-                      <Input
-                        label="City"
-                        value={draft.city}
-                        disabled={!canEdit || state.saving}
-                        placeholder="Hagatna"
-                        error={state.fieldErrors.city?.[0]}
-                        onChange={(event) => updateDraftField(employee, 'city', event.target.value)}
-                        onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                      />
-                      <Input
-                        label="State"
-                        value={draft.state}
-                        maxLength={2}
-                        disabled={!canEdit || state.saving}
-                        placeholder="GU"
-                        error={state.fieldErrors.state?.[0]}
-                        onChange={(event) => updateDraftField(employee, 'state', event.target.value.toUpperCase())}
-                        onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                      />
-                      <Input
-                        label="ZIP"
-                        value={draft.zip}
-                        disabled={!canEdit || state.saving}
-                        placeholder="96910"
-                        error={state.fieldErrors.zip?.[0]}
-                        onChange={(event) => updateDraftField(employee, 'zip', event.target.value)}
-                        onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                      />
-                    </div>
-
-                    {state.conflict && (
-                      <RowConflictBanner
-                        conflict={state.conflict}
-                        saving={state.saving}
-                        onKeep={() => handleKeepMyVersion(employee)}
-                        onDiscard={() => handleDiscardMyVersion(employee)}
-                      />
-                    )}
-
-                    {state.error && !state.conflict && !state.samePersonRequired && !state.fieldErrors.email?.length && !state.fieldErrors.phone?.length && (
-                      <Alert tone="error">{state.error}</Alert>
-                    )}
-                  </div>
-
-                  <MobileCardActions>
-                    <Button
-                      disabled={!canEdit || state.saving || (!dirty && !(state.samePersonRequired && state.samePersonChecked))}
-                      loading={state.saving}
-                      loadingLabel="Saving..."
-                      onClick={() => void saveRow(employee)}
-                      className="w-full sm:w-auto"
-                    >
-                      <Save className="mr-2 h-4 w-4" aria-hidden="true" />
-                      Save contact details
-                    </Button>
-                    {dirty && (
-                      <Button
-                        variant="outline"
-                        disabled={state.saving}
-                        onClick={() => resetRow(employee)}
-                        className="w-full sm:w-auto"
+                    {open ? (
+                      <div className="mt-4">{renderEditor(employee)}</div>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Edit ${name}`}
+                        disabled={!canEdit}
+                        onClick={() => openRow(employee)}
+                        className="mt-4 block w-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 disabled:cursor-default"
                       >
-                        Reset changes
-                      </Button>
+                        <dl className="space-y-2 text-sm">
+                          <div>
+                            <dt className="text-xs font-medium text-neutral-500">Email</dt>
+                            <dd><ContactValue value={employee.email} className="break-all" /></dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs font-medium text-neutral-500">Mobile</dt>
+                            <dd className="tabular-nums"><ContactValue value={formatPhone(employee.phone)} /></dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs font-medium text-neutral-500">Mailing address</dt>
+                            <dd><AddressValue employee={employee} /></dd>
+                          </div>
+                        </dl>
+                        {canEdit && (
+                          <span className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-full border border-neutral-300 text-sm font-semibold text-neutral-800">
+                            <Pencil className="h-4 w-4" aria-hidden="true" />
+                            Edit contact details
+                          </span>
+                        )}
+                      </button>
                     )}
-                  </MobileCardActions>
-                </MobileRecordCard>
-              );
-            })}
-          </div>
+                  </MobileRecordCard>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
 
@@ -1237,6 +1114,102 @@ export function EmployeeContactDetails({
         {gridBody}
       </div>
     </div>
+  );
+}
+
+const DESKTOP_QUERY = '(min-width: 1024px)';
+
+// One layout at a time, so each field exists once on the page.
+function useDesktopLayout(): boolean {
+  const query = (): MediaQueryList | null => (typeof window.matchMedia === 'function' ? window.matchMedia(DESKTOP_QUERY) : null);
+  const [desktop, setDesktop] = useState(() => query()?.matches ?? true);
+  useEffect(() => {
+    const list = query();
+    if (!list) return undefined;
+    const update = (): void => setDesktop(list.matches);
+    list.addEventListener('change', update);
+    return () => list.removeEventListener('change', update);
+  }, []);
+  return desktop;
+}
+
+function ContactValue({ value, className }: { value: string | null | undefined; className?: string }): ReactElement {
+  return value?.trim()
+    ? <span className={cn('text-neutral-900', className)}>{value}</span>
+    : <span className="text-neutral-400">Not added yet</span>;
+}
+
+function AddressValue({ employee }: { employee: ContactEmployee }): ReactElement {
+  const street = [employee.address_line1, employee.address_line2].map((part) => part?.trim()).filter(Boolean).join(', ');
+  const cityLine = [employee.city?.trim(), [employee.state?.trim(), employee.zip?.trim()].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  // A state on its own (every record defaults to GU) isn't an address yet.
+  if (!street && !employee.city?.trim() && !employee.zip?.trim()) return <span className="text-neutral-400">Not added yet</span>;
+  return (
+    <span className="block text-neutral-900">
+      {street && <span className="block">{street}</span>}
+      {cityLine && <span className="block">{cityLine}</span>}
+    </span>
+  );
+}
+
+function EmployeeNameBlock({ employee }: { employee: ContactEmployee }): ReactElement {
+  const badge = contactStatusBadge(employee);
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary-700">
+        {getInitials(employee.first_name, employee.last_name)}
+      </div>
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-semibold leading-snug text-neutral-950">
+          {employee.first_name} {employee.last_name}
+        </p>
+        <div className="flex flex-wrap gap-1">
+          <Badge variant={badge.variant}>{badge.label}</Badge>
+          {employee.email_verified_at && <Badge variant="success">Email confirmed</Badge>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface EditorFieldProps {
+  label: string;
+  ariaLabel: string;
+  value: string;
+  disabled: boolean;
+  errors: string[];
+  onChange: (value: string) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  type?: 'text' | 'email' | 'tel';
+  placeholder?: string;
+  maxLength?: number;
+  hint?: string;
+  inputClassName?: string;
+  className?: string;
+}
+
+function EditorField({
+  label, ariaLabel, value, disabled, errors, onChange, onKeyDown, type = 'text', placeholder, maxLength, hint, inputClassName, className,
+}: EditorFieldProps): ReactElement {
+  return (
+    <label className={cn('block', className)}>
+      <span className="text-xs font-medium text-neutral-700">{label}</span>
+      <input
+        type={type}
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        className={gridInputClass(cn('mt-1 px-2', inputClassName), errors.length > 0)}
+      />
+      {errors.map((message) => (
+        <span key={message} role="alert" className="mt-1 block text-xs text-danger-700">{message}</span>
+      ))}
+      {hint && errors.length === 0 && <span className="mt-1 block text-xs text-neutral-500">{hint}</span>}
+    </label>
   );
 }
 
@@ -1331,7 +1304,7 @@ function RowInlineFeedback({
               className="mt-0.5 h-4 w-4 rounded border-warning-400 text-primary-700 focus:ring-primary-500"
             />
             <span className="font-medium text-neutral-900">
-              Confirm this login belongs to {employee.first_name} {employee.last_name} (audited)
+              Yes, this is {employee.first_name} {employee.last_name}&apos;s own email
             </span>
           </label>
           <div className="mt-2">
@@ -1342,7 +1315,7 @@ function RowInlineFeedback({
               loadingLabel="Saving..."
               onClick={onConfirmAndSave}
             >
-              Confirm & save
+              Confirm and save
             </Button>
           </div>
         </div>

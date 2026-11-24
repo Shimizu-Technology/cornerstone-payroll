@@ -28,6 +28,11 @@ async function mockClientSession(page: Page): Promise<void> {
   }));
 }
 
+// Rows show full text until opened with Edit (or a tap on a phone).
+async function openRow(page: Page, name: string): Promise<void> {
+  await page.getByRole('button', { name: `Edit ${name}` }).click();
+}
+
 function makeEmployee(overrides: Record<string, unknown> = {}) {
   return {
     id: 101,
@@ -117,7 +122,8 @@ test('contact details grid handles 409 conflict with keep/discard and partial fi
   await page.goto('/companies/6/employees/contact-details');
   await expect(page.getByRole('heading', { name: 'Contact Details' })).toBeVisible();
   const table = page.locator('table');
-  await expect(table.getByLabel('Email for Maria Cruz')).toHaveValue('maria.old@example.com');
+  await expect(table.getByText('maria.old@example.com')).toBeVisible();
+  await openRow(page, 'Maria Cruz');
 
   await table.getByLabel('Email for Maria Cruz').fill('my.final@example.com');
   await table.getByRole('button', { name: 'Save Maria Cruz' }).click();
@@ -137,8 +143,8 @@ test('contact details grid handles 409 conflict with keep/discard and partial fi
   // Clicking Keep yours retries with the latest revision and keeps coworker's address.
   await table.getByRole('button', { name: 'Keep yours' }).click();
   await expect(table.getByText('Saved')).toBeVisible();
-  await expect(table.getByLabel('Email for Maria Cruz')).toHaveValue('my.final@example.com');
-  await expect(table.getByLabel('Street address for Maria Cruz')).toHaveValue('200 Coworker Blvd');
+  await expect(table.getByText('my.final@example.com')).toBeVisible();
+  await expect(table.getByText('200 Coworker Blvd')).toBeVisible();
   expect(patchBodies[1]).toEqual({
     employee: { email: 'my.final@example.com' },
     row_revision: '2026-11-24T01:05:00.000000Z',
@@ -189,7 +195,8 @@ test('Use theirs drops only the conflicting email draft and keeps the phone edit
 
   await page.goto('/companies/6/employees/contact-details');
   const table = page.locator('table');
-  await expect(table.getByLabel('Email for Maria Cruz')).toHaveValue('maria.old@example.com');
+  await expect(table.getByText('maria.old@example.com')).toBeVisible();
+  await openRow(page, 'Maria Cruz');
 
   await table.getByLabel('Email for Maria Cruz').fill('my.final@example.com');
   await table.getByLabel('Mobile for Maria Cruz').fill('555-0177');
@@ -203,7 +210,7 @@ test('Use theirs drops only the conflicting email draft and keeps the phone edit
 
   await table.getByRole('button', { name: 'Save Maria Cruz' }).click();
   await expect(table.getByText('Saved')).toBeVisible();
-  await expect(table.getByLabel('Mobile for Maria Cruz')).toHaveValue('+16715550177');
+  await expect(table.getByText('+1 671 555-0177')).toBeVisible();
   expect(patchBodies[1]).toEqual({
     employee: { phone: '555-0177' },
     row_revision: '2026-11-24T01:00:00.000000Z',
@@ -287,14 +294,15 @@ test('paging away during a coworker save and returning triggers a 409 conflict b
 
   await page.goto('/companies/6/employees/contact-details');
   const table = page.locator('table');
-  await expect(table.getByLabel('Email for Maria Cruz')).toHaveValue('maria.old@example.com');
+  await expect(table.getByText('maria.old@example.com')).toBeVisible();
+  await openRow(page, 'Maria Cruz');
 
   // 1. Draft an edit on page 1.
   await table.getByLabel('Email for Maria Cruz').fill('my.draft@example.com');
 
   // 2. Page away to page 2 (triggers simulated coworker save).
   await page.getByRole('button', { name: 'Next' }).click();
-  await expect(table.getByLabel('Email for Zoe Zeta')).toHaveValue('zoe@example.com');
+  await expect(table.getByText('zoe@example.com')).toBeVisible();
 
   // 3. Page back to page 1: untouched street address refreshes, drafted email stays intact.
   await page.getByRole('button', { name: 'Previous' }).click();
@@ -304,7 +312,7 @@ test('paging away during a coworker save and returning triggers a 409 conflict b
   // 4. Save -> must send original revision & baseline and show 409 conflict banner, NOT overwrite!
   await table.getByRole('button', { name: 'Save Maria Cruz' }).click();
   await expect(table.getByText(/Someone else changed this to/i)).toBeVisible();
-  await expect(table.getByText('coworker.saved@example.com')).toBeVisible();
+  await expect(table.getByRole('alert').filter({ hasText: 'Someone else changed this to' }).getByText('coworker.saved@example.com')).toBeVisible();
   await expect(table.getByText('my.draft@example.com')).toBeVisible();
   await expect(table.getByRole('button', { name: 'Keep yours' })).toBeVisible();
   await expect(table.getByRole('button', { name: 'Use theirs' })).toBeVisible();
@@ -347,7 +355,7 @@ test('out-of-range page URL clamps to the last page with results while keeping f
 
   await page.goto('/companies/6/employees/contact-details?needs_contact_details=true&page=5');
   const table = page.locator('table');
-  await expect(table.getByLabel('Email for Zoe Zeta')).toBeVisible();
+  await expect(table.getByRole('button', { name: 'Edit Zoe Zeta' })).toBeVisible();
   await expect(page.getByText('Page 2 of 2')).toBeVisible();
   await expect(page.getByRole('button', { name: /Previous/i })).toBeEnabled();
   await expect(page).toHaveURL(/needs_contact_details=true/);
@@ -389,8 +397,8 @@ test('contact details grid paginates on the server while keeping filters and pen
 
   await page.goto('/companies/6/employees/contact-details?needs_contact_details=true');
   const table = page.locator('table');
-  await expect(table.getByLabel('Mobile for Alice Adams')).toBeVisible();
-  await expect(table.getByLabel('Street address for Alice Adams')).toHaveValue('10 First St');
+  await expect(table.getByText('10 First St')).toBeVisible();
+  await openRow(page, 'Alice Adams');
 
   // Make an unsaved edit on page 1.
   await table.getByLabel('Mobile for Alice Adams').fill('555-0142');
@@ -398,7 +406,7 @@ test('contact details grid paginates on the server while keeping filters and pen
 
   // Navigate to page 2 -> filter stays active and unsaved badge persists.
   await page.getByRole('button', { name: 'Next' }).click();
-  await expect(table.getByLabel('Email for Zoe Zeta')).toHaveValue('zoe@example.com');
+  await expect(table.getByText('zoe@example.com')).toBeVisible();
   await expect(page.getByText('Page 2 of 2')).toBeVisible();
   await expect(page.getByText('1 unsaved row')).toBeVisible();
   expect(requestedUrls.some((qs) => qs.includes('page=2') && qs.includes('needs_contact_details=true'))).toBe(true);
@@ -454,7 +462,8 @@ test('staff tab switch to Shared & placeholder emails and back preserves pending
 
   await page.goto('/companies/6/employees/contact-details');
   const table = page.locator('table');
-  await expect(table.getByLabel('Email for Maria Cruz')).toHaveValue('maria.old@example.com');
+  await expect(table.getByText('maria.old@example.com')).toBeVisible();
+  await openRow(page, 'Maria Cruz');
 
   await table.getByLabel('Email for Maria Cruz').fill('maria.unsaved@example.com');
   await expect(page.getByText('1 unsaved row')).toBeVisible();
@@ -466,3 +475,50 @@ test('staff tab switch to Shared & placeholder emails and back preserves pending
   await expect(table.getByLabel('Email for Maria Cruz')).toHaveValue('maria.unsaved@example.com');
   await expect(page.getByText('1 unsaved row')).toBeVisible();
 });
+
+for (const width of [1280, 390]) {
+  test(`shows each full email, formatted phone and address as text at ${width}px, and edits in an inline row editor`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockClientSession(page);
+    const milo = makeEmployee({
+      id: 301,
+      first_name: 'Milo',
+      last_name: 'Tarrant',
+      email: 'milo.tarrant.long.address@seabreeze-kitchen.example.com',
+      phone: '+16715550142',
+      address_line1: '214 Seabreeze Lane',
+      address_line2: 'Apt 3',
+      city: 'Tamuning',
+      zip: '96913',
+    });
+    await page.route('**/api/v1/client/employees**', (route) => json(route, {
+      data: [milo],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 0 },
+    }));
+
+    await page.goto('/companies/6/employees/contact-details');
+    const email = page.getByText('milo.tarrant.long.address@seabreeze-kitchen.example.com', { exact: true });
+    const phone = page.getByText('+1 671 555-0142', { exact: true });
+    await expect(email).toBeVisible();
+    await expect(phone).toBeVisible();
+    await expect(page.getByText('214 Seabreeze Lane, Apt 3')).toBeVisible();
+    await expect(page.getByText('Tamuning, GU 96913')).toBeVisible();
+
+    // Nothing is clipped: each value fits its own box, and the page doesn't scroll sideways.
+    for (const value of [email, phone]) {
+      expect(await value.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+
+    // Edit (or a tap on the card) opens the row editor with the full values.
+    await openRow(page, 'Milo Tarrant');
+    await expect(page.getByLabel('Email for Milo Tarrant')).toHaveValue('milo.tarrant.long.address@seabreeze-kitchen.example.com');
+    await expect(page.getByLabel('Mobile for Milo Tarrant')).toHaveValue('+16715550142');
+    await expect(page.getByLabel('City for Milo Tarrant')).toHaveValue('Tamuning');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+
+    await page.getByRole('button', { name: 'Cancel editing Milo Tarrant' }).click();
+    await expect(page.getByLabel('Email for Milo Tarrant')).toHaveCount(0);
+    await expect(email).toBeVisible();
+  });
+}

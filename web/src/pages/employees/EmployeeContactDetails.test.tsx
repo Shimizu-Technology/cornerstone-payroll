@@ -80,6 +80,15 @@ vi.mock('@/services/staffContactHygieneApi', () => ({
   },
 }));
 
+// Rows show text until opened; open the row with its Edit button when needed.
+function field(label: string): HTMLInputElement {
+  const existing = screen.queryByLabelText(label);
+  if (existing) return existing as HTMLInputElement;
+  const person = label.replace(/^.* for /, '');
+  fireEvent.click(screen.getByRole('button', { name: `Edit ${person}` }));
+  return screen.getByLabelText(label) as HTMLInputElement;
+}
+
 function buildEmployee(overrides: Partial<Employee> = {}): Employee {
   return {
     id: 101,
@@ -198,7 +207,7 @@ describe('EmployeeContactDetails', () => {
     expect(screen.queryByRole('tab', { name: /Shared & placeholder emails/i })).toBeNull();
     expect(apiMocks.sharedEmails).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText('Mobile for Maria Cruz'), { target: { value: '555-0199' } });
+    fireEvent.change(field('Mobile for Maria Cruz'), { target: { value: '555-0199' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Maria Cruz' }));
 
     await waitFor(() => {
@@ -210,8 +219,11 @@ describe('EmployeeContactDetails', () => {
       });
     });
 
-    expect((screen.getByLabelText('Mobile for Maria Cruz') as HTMLInputElement).value).toBe('+16715550199');
-    expect((screen.getByLabelText('Street address for Maria Cruz') as HTMLInputElement).value).toBe('100 Marine Corps Dr');
+    // Saved: the row closes and shows the full, formatted number.
+    expect(await screen.findByText('+1 671 555-0199')).toBeTruthy();
+    expect(screen.queryByLabelText('Mobile for Maria Cruz')).toBeNull();
+    expect((field('Mobile for Maria Cruz') as HTMLInputElement).value).toBe('+16715550199');
+    expect((field('Street address for Maria Cruz') as HTMLInputElement).value).toBe('100 Marine Corps Dr');
   });
 
   it('handles 409 conflict with clear Keep my changes and Discard my changes options', async () => {
@@ -268,7 +280,7 @@ describe('EmployeeContactDetails', () => {
     renderClientPage();
     expect((await screen.findAllByText('Maria Cruz')).length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByLabelText('Email for Maria Cruz'), { target: { value: 'my.version@example.com' } });
+    fireEvent.change(field('Email for Maria Cruz'), { target: { value: 'my.version@example.com' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Maria Cruz' }));
 
     expect((await screen.findAllByText(/Someone else updated this employee while you were editing/i)).length).toBeGreaterThan(0);
@@ -288,8 +300,8 @@ describe('EmployeeContactDetails', () => {
       });
     });
 
-    expect((screen.getByLabelText('Email for Maria Cruz') as HTMLInputElement).value).toBe('my.version@example.com');
-    expect((screen.getByLabelText('Street address for Maria Cruz') as HTMLInputElement).value).toBe('200 Coworker St');
+    expect((field('Email for Maria Cruz') as HTMLInputElement).value).toBe('my.version@example.com');
+    expect((field('Street address for Maria Cruz') as HTMLInputElement).value).toBe('200 Coworker St');
   });
 
   it('supports server-backed pagination that preserves filters, refreshes untouched fields, and keeps pending row edits across pages', async () => {
@@ -334,7 +346,7 @@ describe('EmployeeContactDetails', () => {
     expect((await screen.findAllByText('Alice Adams')).length).toBeGreaterThan(0);
 
     // Edit Alice's phone on page 1 without saving yet.
-    fireEvent.change(screen.getByLabelText('Mobile for Alice Adams'), { target: { value: '555-0142' } });
+    fireEvent.change(field('Mobile for Alice Adams'), { target: { value: '555-0142' } });
 
     // Navigate to page 2 -> filter preserved, pending edit count stays visible.
     fireEvent.click(screen.getByRole('button', { name: /Next/i }));
@@ -348,8 +360,8 @@ describe('EmployeeContactDetails', () => {
     // Return to page 1 -> untouched address refreshed from server, edited phone kept!
     fireEvent.click(screen.getByRole('button', { name: /Previous/i }));
     expect((await screen.findAllByText('Alice Adams')).length).toBeGreaterThan(0);
-    expect((screen.getByLabelText('Mobile for Alice Adams') as HTMLInputElement).value).toBe('555-0142');
-    expect((screen.getByLabelText('Street address for Alice Adams') as HTMLInputElement).value).toBe('99 Updated By Coworker Rd');
+    expect((field('Mobile for Alice Adams') as HTMLInputElement).value).toBe('555-0142');
+    expect((field('Street address for Alice Adams') as HTMLInputElement).value).toBe('99 Updated By Coworker Rd');
   });
 
   it('keeps the original field baseline and row revision after paging away and back so a coworker edit triggers 409 instead of silent overwrite', async () => {
@@ -402,15 +414,15 @@ describe('EmployeeContactDetails', () => {
     renderClientPage();
     expect((await screen.findAllByText('Alice Adams')).length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByLabelText('Email for Alice Adams'), { target: { value: 'my.edit@example.com' } });
+    fireEvent.change(field('Email for Alice Adams'), { target: { value: 'my.edit@example.com' } });
     fireEvent.click(screen.getByRole('button', { name: /Next/i }));
     expect((await screen.findAllByText('Zoe Zeta')).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: /Previous/i }));
     expect((await screen.findAllByText('Alice Adams')).length).toBeGreaterThan(0);
     // Untouched field refreshed, edited field stayed my.edit@example.com.
-    expect((screen.getByLabelText('Street address for Alice Adams') as HTMLInputElement).value).toBe('88 Coworker Ave');
-    expect((screen.getByLabelText('Email for Alice Adams') as HTMLInputElement).value).toBe('my.edit@example.com');
+    expect((field('Street address for Alice Adams') as HTMLInputElement).value).toBe('88 Coworker Ave');
+    expect((field('Email for Alice Adams') as HTMLInputElement).value).toBe('my.edit@example.com');
 
     // Saving must send original rev-1 and baseline alice.old@example.com, NOT coworker's rev-2!
     fireEvent.click(screen.getByRole('button', { name: 'Save Alice Adams' }));
@@ -483,7 +495,7 @@ describe('EmployeeContactDetails', () => {
     renderStaffPage();
     expect((await screen.findAllByText('Ana Reyes')).length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByLabelText('Email for Ana Reyes'), { target: { value: 'ana.draft@example.com' } });
+    fireEvent.change(field('Email for Ana Reyes'), { target: { value: 'ana.draft@example.com' } });
     expect(screen.getByText(/1 unsaved row/i)).toBeTruthy();
 
     fireEvent.click(screen.getByRole('tab', { name: /Shared & placeholder emails/i }));
@@ -491,7 +503,7 @@ describe('EmployeeContactDetails', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /Contact details/i }));
     expect((await screen.findAllByText('Ana Reyes')).length).toBeGreaterThan(0);
-    expect((screen.getByLabelText('Email for Ana Reyes') as HTMLInputElement).value).toBe('ana.draft@example.com');
+    expect((field('Email for Ana Reyes') as HTMLInputElement).value).toBe('ana.draft@example.com');
     expect(screen.getByText(/1 unsaved row/i)).toBeTruthy();
   });
 
@@ -512,7 +524,7 @@ describe('EmployeeContactDetails', () => {
     renderClientPage();
     expect((await screen.findAllByText('Ana Reyes')).length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByLabelText('Mobile for Ana Reyes'), { target: { value: '555-0199' } });
+    fireEvent.change(field('Mobile for Ana Reyes'), { target: { value: '555-0199' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Ana Reyes' }));
 
     await waitFor(() => {
@@ -522,7 +534,7 @@ describe('EmployeeContactDetails', () => {
         7,
       );
     });
-    expect((screen.getByLabelText('Mobile for Ana Reyes') as HTMLInputElement).value).toBe('+16715550199');
+    expect((field('Mobile for Ana Reyes') as HTMLInputElement).value).toBe('+16715550199');
     expect(document.body.textContent).not.toContain('123-45-6789');
   });
 
@@ -560,15 +572,15 @@ describe('EmployeeContactDetails', () => {
     renderClientPage();
     expect((await screen.findAllByText('Emma Pleadwell')).length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByLabelText('Email for Emma Pleadwell'), {
+    fireEvent.change(field('Email for Emma Pleadwell'), {
       target: { value: 'emma.client@example.com' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save Emma Pleadwell' }));
 
     const checkboxes = await screen.findAllByRole('checkbox', {
-      name: /Confirm this login belongs to Emma Pleadwell/i,
+      name: /Yes, this is Emma Pleadwell's own email/i,
     });
-    const confirmButtons = screen.getAllByRole('button', { name: 'Confirm & save' });
+    const confirmButtons = screen.getAllByRole('button', { name: 'Confirm and save' });
     expect((confirmButtons[0] as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(checkboxes[0]);
