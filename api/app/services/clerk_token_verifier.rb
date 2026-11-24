@@ -53,7 +53,9 @@ class ClerkTokenVerifier
     @http_get = http_get
   end
 
-  def verify(token)
+  # exp_leeway (seconds) is for offline evidence checks only, such as the
+  # readiness probe's pasted sample token; request authentication never passes it.
+  def verify(token, exp_leeway: 0)
     return nil if token.blank?
 
     issuer = clerk_issuer
@@ -86,6 +88,7 @@ class ClerkTokenVerifier
       verify_expiration: true,
       verify_not_before: true
     }
+    options[:exp_leeway] = exp_leeway if exp_leeway.positive?
 
     if clerk_audience.present?
       options[:verify_aud] = true
