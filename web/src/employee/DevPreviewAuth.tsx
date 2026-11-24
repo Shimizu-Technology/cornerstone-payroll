@@ -82,6 +82,19 @@ function DevPreviewStepUp({ onConfirm, onCancel }: { onConfirm: () => void; onCa
   );
 }
 
+/** Stands in for Clerk's account settings, where two-step sign-in is set up. */
+function DevPreviewAccountSettings({ onClose }: { onClose: () => void }): ReactElement {
+  return (
+    <div className="emp-dialog-backdrop">
+      <div role="dialog" aria-modal="true" aria-labelledby="dev-account-title" className="emp-dialog" data-testid="dev-preview-account-settings">
+        <h2 id="dev-account-title" className="emp-h1 text-[1.4rem]">Account settings</h2>
+        <p className="text-neutral-600">Clerk's account settings open here, where two-step sign-in is set up. This local preview has no Clerk key.</p>
+        <EmpButton onClick={onClose}>Close</EmpButton>
+      </div>
+    </div>
+  );
+}
+
 export function DevPreviewAuthProvider({ children }: { children: ReactNode }): ReactElement {
   const [signedIn, setSignedIn] = useState(readSignedIn);
   const signOutFailuresLeft = useRef<number | null>(null);
@@ -89,6 +102,7 @@ export function DevPreviewAuthProvider({ children }: { children: ReactNode }): R
   // After the preview prompt, tokens say so, the way a fresh Clerk token carries fva.
   const verified = useRef(false);
   const [prompt, setPrompt] = useState<{ confirm: () => void; cancel: () => void } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const stepUp = useCallback(async <T,>(attempt: () => Promise<T>): Promise<T> => {
     try {
@@ -121,6 +135,7 @@ export function DevPreviewAuthProvider({ children }: { children: ReactNode }): R
     SignInForm: DevPreviewSignInForm,
     SignUpForm: DevPreviewSignUpForm,
     stepUp,
+    openAccountSettings: () => setSettingsOpen(true),
     previewSignIn: () => {
       writeSignedIn(true);
       setSignedIn(true);
@@ -130,6 +145,7 @@ export function DevPreviewAuthProvider({ children }: { children: ReactNode }): R
     <EmployeeAuthContext.Provider value={value}>
       {children}
       {prompt && <DevPreviewStepUp onConfirm={prompt.confirm} onCancel={prompt.cancel} />}
+      {settingsOpen && <DevPreviewAccountSettings onClose={() => setSettingsOpen(false)} />}
     </EmployeeAuthContext.Provider>
   );
 }

@@ -5,18 +5,19 @@
 import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Banknote, CalendarDays, ChevronLeft, ChevronRight, Download, FileText, House } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import { EmployeeApiError } from './api';
 import { askManager } from './brand';
 import type { AmountLine, EarningLine, StatementDetail, StatementPage, StatementSummary } from './contracts';
 import { useBrand, useHideAmounts, useReadySession } from './contexts';
 import { useDownload } from './download';
 import { focusHeadingOnNextScreen } from './focus';
 import {
-  comparisonLine, formatHours, formatMoney, hoursLabel, longDate, parseDay, paymentLine, paymentStatus, periodLabel, shortDate, taxLabel, weekdayDate,
+  comparisonLine, daysUntilLabel, formatHours, formatMoney, hoursLabel, longDate, paymentLine, paymentStatus, periodLabel, shortDate, taxLabel, weekdayDate,
 } from './format';
 import { today } from './config';
 import { Amount, HideAmountsToggle } from './HideAmounts';
 import { Card, Chip, EmpButton, EmpButtonLink, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
-import { useEmployeeData, type DataState } from './useEmployeeData';
+import { isSessionError, useEmployeeData, type DataState } from './useEmployeeData';
 import { useMediaQuery } from './useMediaQuery';
 
 const WIDE_QUERY = '(min-width: 1024px)';
@@ -29,24 +30,49 @@ function Money({ value, fallback = '—' }: { value: string | null | undefined; 
 
 // ---------- Data ----------
 
-/** One year of checks (or the newest page across years when `year` is null), page by page. */
-function useStatements(year: number | null, pages = 1): { state: DataState<StatementPage>; reload: () => void } {
-  const { memory } = useReadySession();
-  const key = `statements:${year ?? 'latest'}:${pages}`;
-  const { state, reload } = useEmployeeData<StatementPage>(key, async (api, linkId, signal) => {
-    const earlier = pages > 1 ? memory.get(`${linkId}:statements:${year ?? 'latest'}:${pages - 1}`) as StatementPage | undefined : undefined;
-    if (earlier) {
-      const next = await api.statements(linkId, { year, page: earlier.nextPage ?? pages }, signal);
-      return { ...next, statements: [...earlier.statements, ...next.statements], years: earlier.years.length ? earlier.years : next.years };
-    }
-    let combined: StatementPage = { statements: [], years: [], nextPage: 1 };
-    for (let page = 1; page <= pages && combined.nextPage; page += 1) {
-      const next = await api.statements(linkId, { year, page }, signal);
-      combined = { statements: [...combined.statements, ...next.statements], years: combined.years.length ? combined.years : next.years, nextPage: next.nextPage };
-    }
-    return combined;
-  });
-  return { state, reload };
+type MoreState = 'idle' | 'working' | 'failed' | 'offline';
+
+interface Statements {
+  state: DataState<StatementPage>;
+  reload: () => void;
+  more: MoreState;
+  /** Loads the next page onto the list, or null when there isn't one (or it's loading). */
+  showMore: (() => void) | null;
+}
+
+/**
+ * One year of checks (or the newest page across years when `year` is null).
+ * "Show more" adds the next page to the year's list in session memory, so the
+ * rows already shown stay while it loads, and are all still there after
+ * opening a stub and coming back.
+ */
+function useStatements(year: number | null): Statements {
+  const { api, state: session, reportError } = useReadySession();
+  const linkId = session.link.id;
+  const { state, reload, update } = useEmployeeData<StatementPage>(
+    `statements:${year ?? 'latest'}`,
+    (client, id, signal) => client.statements(id, { year, page: 1 }, signal),
+  );
+  const [more, setMore] = useState<{ year: number | null; state: MoreState }>({ year, state: 'idle' });
+  const moreState = more.year === year ? more.state : 'idle';
+  const loaded = state.status === 'ready' ? state.data : null;
+  const nextPage = loaded?.nextPage ?? null;
+  const showMore = loaded && nextPage && moreState !== 'working' ? (): void => {
+    setMore({ year, state: 'working' });
+    api.statements(linkId, { year, page: nextPage }).then((next) => {
+      const known = new Set(loaded.statements.map((s) => s.id));
+      update({
+        statements: [...loaded.statements, ...next.statements.filter((s) => !known.has(s.id))],
+        years: loaded.years.length ? loaded.years : next.years,
+        nextPage: next.nextPage,
+      });
+      setMore({ year, state: 'idle' });
+    }, (error: unknown) => {
+      if (isSessionError(error)) reportError(error);
+      else setMore({ year, state: error instanceof EmployeeApiError && error.kind === 'offline' ? 'offline' : 'failed' });
+    });
+  } : null;
+  return { state, reload, more: moreState, showMore };
 }
 
 function useStatement(id: string | null): { state: DataState<StatementDetail>; reload: () => void } {
@@ -60,6 +86,12 @@ function inListOrder(statements: StatementSummary[]): StatementSummary[] {
 
 function yearOf(date: string): number {
   return Number(date.slice(0, 4));
+}
+
+/** ?year=2025 from the address, or null. */
+function yearParam(search: string): number | null {
+  const year = Number(new URLSearchParams(search).get('year'));
+  return Number.isInteger(year) && year > 1900 && year < 3000 ? year : null;
 }
 
 // ---------- Pieces ----------
@@ -203,8 +235,8 @@ function QuestionsCard(): ReactElement {
 }
 
 function FormerNotice(): ReactElement | null {
-  const { state, readOnly } = useReadySession();
-  if (readOnly !== 'former') return null;
+  const { state, isFormer } = useReadySession();
+  if (!isFormer) return null;
   const until = state.link.formerAccessUntil ?? state.info.formerAccessUntil;
   return (
     <div className="emp-notice-inline" role="note">
@@ -217,12 +249,13 @@ function FormerNotice(): ReactElement | null {
 }
 
 function NextPayday(): ReactElement | null {
-  const { state, readOnly } = useReadySession();
+  const { state, isFormer } = useReadySession();
   const date = state.info.nextPayday;
   // Only a date the API is sure of (§8a), never for former employees, and never an amount.
-  if (!date || readOnly === 'former') return null;
-  const days = Math.round((parseDay(date).getTime() - parseDay(today()).getTime()) / 86_400_000);
-  if (days < 0) return null;
+  if (!date || isFormer) return null;
+  // Counted in Guam days, whatever zone the phone is set to.
+  const until = daysUntilLabel(date, today());
+  if (!until) return null;
   return (
     <div className="emp-payday">
       <CalendarDays aria-hidden="true" className="size-6 shrink-0 text-[var(--action)]" />
@@ -230,7 +263,7 @@ function NextPayday(): ReactElement | null {
         <p className="emp-label-quiet">Next payday</p>
         <p className="font-bold">{weekdayDate(date)}</p>
       </div>
-      <Chip tone="brand">{days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `In ${days} days`}</Chip>
+      <Chip tone="brand">{until}</Chip>
     </div>
   );
 }
@@ -325,8 +358,7 @@ function YearPicker({ years, year, onChange }: { years: number[]; year: number; 
 /** The list for one year, with a year switch and "Show more". */
 function PayHistory({ selectedId, linkTo, year, onYear }: { selectedId?: string | null; linkTo: (s: StatementSummary) => string; year: number; onYear: (year: number) => void }): ReactElement {
   const newest = useStatements(null);
-  const [pages, setPages] = useState(1);
-  const { state, reload } = useStatements(year, pages);
+  const { state, reload, more, showMore } = useStatements(year);
   const years = useMemo(() => {
     const known = newest.state.status === 'ready' ? newest.state.data.years : [];
     const listed = state.status === 'ready' ? state.data.years : [];
@@ -336,7 +368,7 @@ function PayHistory({ selectedId, linkTo, year, onYear }: { selectedId?: string 
 
   return (
     <div className="space-y-4">
-      <YearPicker years={years} year={year} onChange={(y) => { setPages(1); onYear(y); }} />
+      <YearPicker years={years} year={year} onChange={onYear} />
       {state.status === 'loading' && <SkeletonRows rows={5} label="Loading your pay stubs" />}
       {state.status === 'error' && <LoadProblem kind={state.kind} onRetry={reload} what="your pay stubs" />}
       {state.status === 'ready' && (state.data.statements.length === 0
@@ -344,18 +376,25 @@ function PayHistory({ selectedId, linkTo, year, onYear }: { selectedId?: string 
         : (
           <>
             <StatementList statements={state.data.statements} selectedId={selectedId} linkTo={linkTo} />
-            {state.data.nextPage && <EmpButton variant="secondary" block onClick={() => setPages((n) => n + 1)}>Show more</EmpButton>}
+            {state.data.nextPage && (
+              <EmpButton variant="secondary" block onClick={() => showMore?.()} disabled={more === 'working'} aria-busy={more === 'working'}>
+                {more === 'working' ? 'Loading more…' : 'Show more'}
+              </EmpButton>
+            )}
+            {more === 'failed' && <p className="emp-field-error" role="alert">Couldn't load more pay stubs. Try again.</p>}
+            {more === 'offline' && <p className="emp-field-error" role="alert">You're offline. Connect to load more pay stubs.</p>}
           </>
         ))}
     </div>
   );
 }
 
-function useDefaultYear(): number | null {
+/** The year Pay opens on: the newest year with checks. Null while the newest checks load or if they failed. */
+function useDefaultYear(): { year: number | null; newest: Statements } {
   const newest = useStatements(null);
-  if (newest.state.status !== 'ready') return null;
+  if (newest.state.status !== 'ready') return { year: null, newest };
   const first = newest.state.data.statements[0];
-  return newest.state.data.years[0] ?? (first ? yearOf(first.payDate) : new Date().getFullYear());
+  return { year: newest.state.data.years[0] ?? (first ? yearOf(first.payDate) : Number(today().slice(0, 4))), newest };
 }
 
 /** /pay, /pay/all and /pay/:id. */
@@ -381,16 +420,21 @@ export function PayTab(): ReactElement {
 
 function PayDesktop(): ReactElement {
   const { statementId } = useParams();
-  const defaultYear = useDefaultYear();
-  const [chosenYear, setChosenYear] = useState<number | null>(null);
+  const location = useLocation();
   const navigate = useNavigate();
-  const year = chosenYear ?? defaultYear;
-  const { state } = useStatements(year, 1);
-  const newest = useStatements(null);
+  const { year: defaultYear, newest } = useDefaultYear();
+  // The year lives in the address (?year=), like the phone's list, so a
+  // reload or Back keeps it. A stub opened without one (from Home or an
+  // email) shows its own year's list.
+  const selected = useStatement(statementId ?? null);
+  const stubYear = selected.state.status === 'ready' ? yearOf(selected.state.data.payDate) : null;
+  const year = yearParam(location.search) ?? stubYear ?? (statementId && selected.state.status === 'loading' ? null : defaultYear);
+  const { state } = useStatements(year);
 
   const listed = state.status === 'ready' ? inListOrder(state.data.statements) : [];
   const fallbackId = listed[0]?.id ?? (newest.state.status === 'ready' ? inListOrder(newest.state.data.statements)[0]?.id : undefined);
   const selectedId = statementId ?? fallbackId ?? null;
+  const suffix = year ? `?year=${year}` : '';
 
   return (
     <Page title="Pay stubs" actions={<HideAmountsToggle />}>
@@ -402,15 +446,15 @@ function PayDesktop(): ReactElement {
               : (
                 <PayHistory
                   year={year}
-                  onYear={(y) => { setChosenYear(y); navigate('/pay', { replace: true }); }}
+                  onYear={(y) => navigate(`/pay?year=${y}`, { replace: true })}
                   selectedId={selectedId}
-                  linkTo={(s) => `/pay/${s.id}`}
+                  linkTo={(s) => `/pay/${s.id}${suffix}`}
                 />
               )}
         </Card>
         <Card title="Pay stub">
           {selectedId
-            ? <StubDetail id={selectedId} siblings={listed} />
+            ? <StubDetail id={selectedId} siblings={listed} linkSuffix={suffix} />
             : (
               <Placeholder icon={FileText} title="Pay stub details will show here">
                 <p>Pick a paycheck to see what you earned, what was taken out and your take-home pay.</p>
@@ -425,7 +469,8 @@ function PayDesktop(): ReactElement {
 function PayPhone(): ReactElement {
   const { statementId } = useParams();
   const location = useLocation();
-  if (statementId) return <StubScreen id={statementId} />;
+  // Keyed, so each stub opens as a new screen: scrolled to the top, focus on its heading.
+  if (statementId) return <StubScreen key={statementId} id={statementId} />;
   if (location.pathname === '/pay/all') return <PayAllPhone />;
   return <PayOverviewPhone />;
 }
@@ -464,18 +509,22 @@ function BackLink({ to, children }: { to: string; children: ReactNode }): ReactE
 }
 
 function PayAllPhone(): ReactElement {
-  const defaultYear = useDefaultYear();
+  const { year: defaultYear, newest } = useDefaultYear();
   const location = useLocation();
   const navigate = useNavigate();
   // The year lives in the address so Back from a stub returns to it.
-  const fromUrl = Number(new URLSearchParams(location.search).get('year')) || null;
-  const year = fromUrl ?? defaultYear;
+  const year = yearParam(location.search) ?? defaultYear;
+  let body: ReactNode;
+  if (year !== null) {
+    body = <PayHistory year={year} onYear={(y) => navigate(`/pay/all?year=${y}`, { replace: true })} linkTo={(s) => `/pay/${s.id}?from=all&year=${year}`} />;
+  } else if (newest.state.status === 'error') {
+    body = <LoadProblem kind={newest.state.kind} onRetry={newest.reload} what="your pay stubs" />;
+  } else {
+    body = <SkeletonRows rows={5} label="Loading your pay stubs" />;
+  }
   return (
     <Page title="All pay stubs" actions={<HideAmountsToggle />} before={<BackLink to="/pay">Pay</BackLink>}>
-      <Card>
-        {year === null ? <SkeletonRows rows={5} label="Loading your pay stubs" />
-          : <PayHistory year={year} onYear={(y) => navigate(`/pay/all?year=${y}`, { replace: true })} linkTo={(s) => `/pay/${s.id}?from=all&year=${year}`} />}
-      </Card>
+      <Card>{body}</Card>
     </Page>
   );
 }
@@ -484,14 +533,14 @@ function StubScreen({ id }: { id: string }): ReactElement {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
   const fromAll = params.get('from') === 'all';
-  const year = Number(params.get('year')) || null;
+  const year = yearParam(location.search);
   const back = fromAll ? `/pay/all${year ? `?year=${year}` : ''}` : '/pay';
   const list = useStatements(fromAll ? year : null);
   const siblings = list.state.status === 'ready' ? inListOrder(list.state.data.statements) : [];
   return (
     <Page title="Pay stub" actions={<HideAmountsToggle />} before={<BackLink to={back}>{fromAll ? 'All pay stubs' : 'Pay'}</BackLink>}>
       <Card>
-        <StubDetail id={id} siblings={siblings} linkSuffix={fromAll ? `?from=all${year ? `&year=${year}` : ''}` : ''} />
+        <StubDetail id={id} siblings={siblings} linkSuffix={fromAll ? `?from=all${year ? `&year=${year}` : ''}` : ''} newScreen />
       </Card>
     </Page>
   );
@@ -578,7 +627,7 @@ function sum(lines: AmountLine[]): string | null {
   return (cents / 100).toFixed(2);
 }
 
-function PrevNext({ siblings, id, linkSuffix, className }: { siblings: StatementSummary[]; id: string; linkSuffix: string; className: string }): ReactElement | null {
+function PrevNext({ siblings, id, linkSuffix, className, newScreen }: { siblings: StatementSummary[]; id: string; linkSuffix: string; className: string; newScreen: boolean }): ReactElement | null {
   const index = siblings.findIndex((s) => s.id === id);
   if (index < 0 || siblings.length < 2) return null;
   // The list is newest first: "Previous" is the older check.
@@ -586,7 +635,12 @@ function PrevNext({ siblings, id, linkSuffix, className }: { siblings: Statement
   const next = siblings[index - 1];
   const link = (target: StatementSummary | undefined, label: string, icon: ReactNode, after = false): ReactElement => (target
     ? (
-      <Link to={`/pay/${target.id}${linkSuffix}`} className="emp-btn emp-btn-secondary emp-btn-small" aria-label={`${label}: ${longDate(target.payDate)}`}>
+      <Link
+        to={`/pay/${target.id}${linkSuffix}`}
+        className="emp-btn emp-btn-secondary emp-btn-small"
+        aria-label={`${label}: ${longDate(target.payDate)}`}
+        onClick={newScreen ? focusHeadingOnNextScreen : undefined}
+      >
         {!after && icon}{label}{after && icon}
       </Link>
     )
@@ -599,7 +653,8 @@ function PrevNext({ siblings, id, linkSuffix, className }: { siblings: Statement
   );
 }
 
-function StubDetail({ id, siblings, linkSuffix = '' }: { id: string; siblings: StatementSummary[]; linkSuffix?: string }): ReactElement {
+/** `newScreen`: on a phone each stub is its own screen, so Previous and Next move focus to its heading. */
+function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: string; siblings: StatementSummary[]; linkSuffix?: string; newScreen?: boolean }): ReactElement {
   const { state, reload } = useStatement(id);
   if (state.status === 'loading') return <SkeletonRows rows={6} label="Loading the pay stub" />;
   if (state.status === 'error') return <LoadProblem kind={state.kind} onRetry={reload} what="this pay stub" />;
@@ -613,7 +668,7 @@ function StubDetail({ id, siblings, linkSuffix = '' }: { id: string; siblings: S
         <div className="flex flex-wrap items-start justify-between gap-2">
           <h2 id={`emp-stub-${stub.id}`} className="emp-stub-title">{longDate(stub.payDate)}</h2>
           {/* Desktop: beside the date. Phone: at the end of the stub, where the thumb is. */}
-          <PrevNext siblings={siblings} id={stub.id} linkSuffix={linkSuffix} className="emp-prevnext-top" />
+          <PrevNext siblings={siblings} id={stub.id} linkSuffix={linkSuffix} className="emp-prevnext-top" newScreen={newScreen} />
         </div>
         {quickbooks && <Chip tone="neutral">From QuickBooks records</Chip>}
         <PaidLine statement={stub} />
@@ -663,7 +718,7 @@ function StubDetail({ id, siblings, linkSuffix = '' }: { id: string; siblings: S
       )}
 
       <DownloadButton statement={stub} />
-      <PrevNext siblings={siblings} id={stub.id} linkSuffix={linkSuffix} className="emp-prevnext-bottom" />
+      <PrevNext siblings={siblings} id={stub.id} linkSuffix={linkSuffix} className="emp-prevnext-bottom" newScreen={newScreen} />
     </article>
   );
 }

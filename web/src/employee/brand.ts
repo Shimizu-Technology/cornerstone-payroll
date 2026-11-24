@@ -177,6 +177,18 @@ export function brandFrom(branding: TenantBranding | null): EmployeeBrand {
   };
 }
 
+/**
+ * On the shared host there's no client branding, but once the person picks an
+ * employer (or has only one) its name is known: the header and copy then name
+ * it ("Ask your manager at Coral Kitchen"). Colors, logo and main phone stay
+ * neutral, since only a client subdomain's branding sets those.
+ */
+export function employerBrand(brand: EmployeeBrand, companyName: string | null | undefined): EmployeeBrand {
+  const name = companyName?.trim();
+  if (!brand.isFallback || !name) return brand;
+  return { ...brand, name, monogram: monogramOf(name), isFallback: false };
+}
+
 /** CSS custom properties for the brand roles. */
 export function brandStyle(brand: EmployeeBrand): Record<string, string> {
   return {
@@ -234,7 +246,13 @@ export function askManager(brand: EmployeeBrand, prefix = 'Ask your manager'): s
   return brand.isFallback ? `${prefix}.` : `${prefix} at ${brand.name}.`;
 }
 
+/** The name of the app itself: the client's own ("MoSa's Team"), or "MoSa's employee app". */
+export function appTitle(brand: EmployeeBrand): string {
+  if (brand.appName) return brand.appName;
+  return brand.isFallback ? FALLBACK_BRAND_NAME : `${possessive(brand.name)} employee app`;
+}
+
 /** The browser tab and Home Screen title: "Pay stubs · MoSa's employee app". */
 export function pageTitle(title: string, brand: EmployeeBrand): string {
-  return brand.isFallback ? `${title} · ${FALLBACK_BRAND_NAME}` : `${title} · ${possessive(brand.name)} employee app`;
+  return `${title} · ${appTitle(brand)}`;
 }

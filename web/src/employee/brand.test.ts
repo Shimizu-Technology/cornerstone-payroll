@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   accentPair, actionColorFor, askManager, brandFrom, brandStyle, contrastRatio, contrastWithWhite, FALLBACK_BRAND_COLOR,
-  FALLBACK_BRAND_NAME, fetchTenantBranding, INK, isLightColor, NEUTRAL_ACTION_COLOR, pageTitle, possessive, readableBrandColor,
+  employerBrand, FALLBACK_BRAND_NAME, fetchTenantBranding, INK, isLightColor, NEUTRAL_ACTION_COLOR, pageTitle, possessive, readableBrandColor,
 } from './brand';
 
 describe('brand color contrast', () => {
@@ -99,6 +99,7 @@ describe('copy helpers', () => {
     expect(pageTitle('Pay stubs', brandFrom({ name: "MoSa's", logo_url: null, primary_color: null, accent_color: null }))).toBe("Pay stubs · MoSa's employee app");
     expect(pageTitle('Help', brandFrom({ name: 'Pelican Row Bakery', logo_url: null, primary_color: null, accent_color: null }))).toBe("Help · Pelican Row Bakery's employee app");
     expect(pageTitle('Help', brandFrom(null))).toBe('Help · Cornerstone Payroll');
+    expect(pageTitle('Help', brandFrom({ name: "MoSa's", app_name: "MoSa's Team", logo_url: null, primary_color: null, accent_color: null }))).toBe("Help · MoSa's Team");
   });
 });
 
@@ -125,5 +126,20 @@ describe('fetchTenantBranding', () => {
     ['an array body', async () => Response.json([{ name: 'Acme' }])],
   ])('returns null for %s, so the app uses the fallback', async (_label, impl) => {
     expect(await fetchTenantBranding('mosas.shimizu-technology.com', { baseUrl, fetchImpl: vi.fn<typeof fetch>(impl) })).toBeNull();
+  });
+});
+
+describe('employerBrand', () => {
+  it('names the chosen employer on the shared host, keeping the neutral colors and no phone', () => {
+    const shared = brandFrom(null);
+    const chosen = employerBrand(shared, 'Pelican Row Bakery');
+    expect(chosen).toMatchObject({ name: 'Pelican Row Bakery', isFallback: false, mainPhone: null, logoUrl: null, action: shared.action });
+    expect(chosen.monogram).not.toBe(shared.monogram);
+  });
+
+  it('never replaces a client subdomain\'s own branding, or names a blank employer', () => {
+    const client = brandFrom({ name: "MoSa's", logo_url: null, primary_color: null, accent_color: null });
+    expect(employerBrand(client, 'Coral Kitchen')).toBe(client);
+    expect(employerBrand(brandFrom(null), '  ')).toEqual(brandFrom(null));
   });
 });

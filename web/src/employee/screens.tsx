@@ -5,6 +5,7 @@ import { useBrand, useEmployeeAuth } from './contexts';
 import { CantSignIn } from './help';
 import { useDocumentTitle } from './hooks';
 import { clearSigningOut, redirectTarget } from './routing';
+import { forgetInviteToken } from './signupState';
 import { BrandMark, EmpButtonLink } from './ui';
 
 function firstTimeLine(name: string | null): string {
@@ -14,7 +15,7 @@ function firstTimeLine(name: string | null): string {
 function SetUpLink(): ReactElement {
   return (
     <p className="text-center text-[0.95rem]">
-      Have a printed sign-up code? <Link to="/sign-up" className="emp-link-inline">Set up your account</Link>
+      Have a printed sign-up code? <Link to="/activate" className="emp-link-inline emp-link-standalone">Set up your account</Link>
     </p>
   );
 }
@@ -22,7 +23,11 @@ function SetUpLink(): ReactElement {
 export function WelcomeScreen(): ReactElement {
   const brand = useBrand();
   useDocumentTitle('Welcome');
-  useEffect(() => clearSigningOut(), []);
+  useEffect(() => {
+    clearSigningOut();
+    // Back to Welcome leaves any sign-up behind.
+    forgetInviteToken();
+  }, []);
   return (
     <main className="emp-auth">
       <div className="emp-auth-grow">
@@ -50,7 +55,7 @@ export function SignInScreen(): ReactElement {
   return (
     <main className="emp-auth emp-auth-top">
       <div className="emp-auth-bar">
-        <Link to="/" className="emp-back">
+        <Link to="/" className="emp-back" onClick={forgetInviteToken}>
           <ChevronLeft aria-hidden="true" className="size-[26px]" />
           Back
         </Link>

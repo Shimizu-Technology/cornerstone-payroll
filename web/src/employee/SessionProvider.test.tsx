@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +18,7 @@ function auth(overrides: Partial<EmployeeAuthValue> = {}): EmployeeAuthValue {
     SignInForm: () => null,
     SignUpForm: () => null,
     stepUp: (attempt) => attempt(),
+    openAccountSettings: () => undefined,
     ...overrides,
   };
 }
@@ -100,8 +101,10 @@ describe('sign-out failures', () => {
     render(<Providers value={auth({ signOut })}><EmployeeSessionProvider><SessionState /></EmployeeSessionProvider></Providers>);
 
     expect(await screen.findByText('problem:signed_out')).toBeTruthy();
-    expect(signOut).toHaveBeenCalled();
+    // Sign-out starts in an effect after that state renders, so it can land a moment later under load.
+    await waitFor(() => expect(signOut).toHaveBeenCalled());
     expect(screen.queryByRole('alert')).toBeNull();
+    expect(stateText()).toBe('problem:signed_out');
   });
 });
 

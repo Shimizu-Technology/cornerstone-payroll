@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type ComponentProps, type ReactNode, type ReactElement } from 'react';
-import { ClerkProvider, SignIn, SignUp, useAuth, useReverification } from '@clerk/react';
+import { ClerkProvider, SignIn, SignUp, useAuth, useClerk, useReverification } from '@clerk/react';
 import { isReverificationCancelledError } from '@clerk/react/errors';
 // Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
 import { ui as clerkUi } from '@clerk/ui';
@@ -62,6 +62,7 @@ type Attempt = () => Promise<unknown>;
 
 function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
   const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
+  const { openUserProfile } = useClerk();
   // Clerk shows its "confirm it's you" prompt when the fetcher returns the
   // API's reverification hint, then runs the same attempt again.
   const reverify = useReverification(async (attempt: Attempt) => {
@@ -91,7 +92,8 @@ function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
     SignInForm: ClerkSignInForm,
     SignUpForm: ClerkSignUpForm,
     stepUp,
-  }), [isLoaded, isSignedIn, getToken, signOut, stepUp]);
+    openAccountSettings: () => openUserProfile(),
+  }), [isLoaded, isSignedIn, getToken, signOut, stepUp, openUserProfile]);
   return <EmployeeAuthContext.Provider value={value}>{children}</EmployeeAuthContext.Provider>;
 }
 
@@ -120,7 +122,7 @@ export function ClerkAuthProvider({ publishableKey, brand, children }: { publish
       appearance={appearance}
       localization={localization}
       signInUrl="/sign-in"
-      signUpUrl="/sign-up/account"
+      signUpUrl="/sign-up"
       afterSignOutUrl="/"
     >
       <ClerkAuthBridge>{children}</ClerkAuthBridge>

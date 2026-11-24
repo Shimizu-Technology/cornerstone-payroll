@@ -24,8 +24,30 @@ function bool(value: unknown): boolean {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}/;
 
-function isoDate(value: unknown): string | null {
+/** The calendar day of an ISO date or datetime ("2027-06-30T23:59:59Z" -> "2027-06-30"), or null. */
+export function isoDate(value: unknown): string | null {
   return typeof value === 'string' && ISO_DATE.test(value) ? value.slice(0, 10) : null;
+}
+
+const GUAM_DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'Pacific/Guam', year: 'numeric', month: '2-digit', day: '2-digit' });
+
+/** The Guam calendar day (YYYY-MM-DD) of an instant: every client is on Guam time. */
+export function guamDay(at: Date): string {
+  const parts = Object.fromEntries(GUAM_DAY.formatToParts(at).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+/**
+ * The day an access date falls on in Guam. The API sends former_access_until
+ * as an instant ("2028-03-01T23:59:59+10:00", end of that Guam day); a plain
+ * date passes through.
+ */
+export function accessDay(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (!ISO_DATE.test(value)) return null;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? null : guamDay(at);
 }
 
 const DECIMAL = /^-?\d+(?:\.\d+)?$/;
@@ -76,7 +98,7 @@ export function parseContext(data: unknown): EmployeeContextInfo {
   return {
     firstName: text(body.first_name),
     status: body.status === 'former' ? 'former' : 'active',
-    formerAccessUntil: isoDate(body.former_access_until),
+    formerAccessUntil: accessDay(body.former_access_until),
     nextPayday: isoDate(body.next_payday),
     w2Delivery: oneOf(body.w2_delivery, ['mailed', 'handed_out'] as const),
     features: { stubs: bool(features.stubs), taxForms: bool(features.tax_forms), profileRequests: bool(features.profile_requests) },
@@ -267,13 +289,30 @@ export interface HelpContact {
   textOk: boolean;
 }
 
+// Checked before they become tel:, sms: and mailto: links, so a stray value
+// can't add a query (?cc=, ?body=) or a second address.
+const DIALABLE = /^\+?[\d\s().-]+$/;
+const EMAIL_ADDRESS = /^[^\s@<>()[\]\\,;:"?&#%/]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
+
+function dialable(value: unknown): string | null {
+  const phone = text(value);
+  if (!phone || !DIALABLE.test(phone)) return null;
+  const digits = phone.replace(/\D/g, '').length;
+  return digits >= 7 && digits <= 15 ? phone : null;
+}
+
+function emailAddress(value: unknown): string | null {
+  const email = text(value);
+  return email && email.length <= 254 && EMAIL_ADDRESS.test(email) ? email : null;
+}
+
 export function parseHelpContacts(data: unknown): HelpContact[] {
   return list(data, 'help_contacts').flatMap((item) => {
     const contact = record(item);
     const name = text(contact?.name);
     if (!contact || !name) return [];
-    const phone = text(contact.phone);
-    const email = text(contact.email);
+    const phone = dialable(contact.phone);
+    const email = emailAddress(contact.email);
     if (!phone && !email) return [];
     return [{ name, role: text(contact.role), phone, email, textOk: Boolean(phone) && bool(contact.text_ok) }];
   });
@@ -396,16 +435,25 @@ export function verificationIdFrom(data: unknown): string | null {
   return id(record(data)?.verification_id);
 }
 
-// ---------- Sign-up and claim (M4-2) ----------
-// POST /employee/activation, before any session. ASSUMED two calls on one route:
-//   1. { token | code, date_of_birth, ssn_last4 }
-//        -> 200 { status: "verified", company_name, record_email_hint }
-//   2. the same fields plus { email, notice_email: "sign_in" | "record", terms_version }
-//        -> 200 { status: "ready", sign_up_url }
-// POST /employee/links/claim, signed in, behind step-up:
-//   { token | code, date_of_birth, ssn_last4, terms_version } -> 200 { link: {...} }
-// Every failed check is the same 422. A locked link is 423 (5 failures, 24 hours).
-// 429 is the shared rate limit.
+// ---------- Sign-up, claim and reactivation (M4-2, served) ----------
+// Every check sends a token (from the invite link's #token) or a printed
+// code, plus date of birth and SSN last 4, in the JSON body only: the API
+// refuses any of them in the query string (EmployeeLinkCheckParams).
+//
+// POST /employee/activation, before any session (ActivationsController):
+//   { token | code, date_of_birth, ssn_last4, email, use_for_notices, terms_version? }
+//   -> 200 { next: "sign_up", sign_up_url, message: null }
+//   -> 200 { next: "sign_in", sign_up_url: null, message }: this email can't start a new
+//      account (it may already have one). One answer for every reason, so it never says which.
+//   -> 422 { code: "activation_failed" } for every failed check, including a locked invite
+//   -> 503 { code: "activation_unavailable" }
+// POST /employee/links/claim (AccountController#claim) and
+// POST /employee/links/reactivate (ReactivationsController), signed in, behind step-up:
+//   { token | code, date_of_birth, ssn_last4 } -> 201 { link: { id, company_name, ... } }
+//   -> 404 { code: "claim_failed" } for every failed check, including a locked invite
+// 5 failed checks lock the invite for 24 hours, but the answer stays the same
+// 422 or 404 (no 423), so a lock never says the details were close.
+// terms_version is sent when the build has it; the API ignores it until M4-6.
 
 export interface IdentityCheck {
   token?: string;
@@ -421,16 +469,7 @@ export function identityBody(check: IdentityCheck): Record<string, string> {
   return body;
 }
 
-export interface ActivationVerified {
-  companyName: string | null;
-  /** A masked form of the email on the employee record ("m•••@example.com"), when it differs from none. */
-  recordEmailHint: string | null;
-}
-
-export function parseActivationVerified(data: unknown): ActivationVerified {
-  const body = record(data) ?? {};
-  return { companyName: text(body.company_name), recordEmailHint: text(body.record_email_hint) };
-}
+export type ActivationOutcome = { next: 'sign_up'; signUpUrl: string } | { next: 'sign_in' };
 
 /** The Clerk invitation URL the API returns. Only https (or this site, in development) is followed. */
 export function signUpUrlFrom(data: unknown, pageOrigin: string): string | null {
@@ -442,4 +481,13 @@ export function signUpUrlFrom(data: unknown, pageOrigin: string): string | null 
   } catch {
     return null;
   }
+}
+
+/** Null when the answer is neither outcome, or a sign-up without a URL this app will open. */
+export function parseActivation(data: unknown, pageOrigin: string): ActivationOutcome | null {
+  const next = record(data)?.next;
+  if (next === 'sign_in') return { next: 'sign_in' };
+  if (next !== 'sign_up') return null;
+  const signUpUrl = signUpUrlFrom(data, pageOrigin);
+  return signUpUrl ? { next: 'sign_up', signUpUrl } : null;
 }

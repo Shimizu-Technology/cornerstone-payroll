@@ -122,6 +122,13 @@ describe('employee API client', () => {
 });
 
 describe('parseLinks', () => {
+  it('reads former_access_until, an instant, as its Guam day', () => {
+    const [former] = parseLinks({ links: [{ id: 7, company_name: 'A', status: 'former', former_access_until: '2028-03-01T23:59:59+10:00' }] });
+    expect(former.formerAccessUntil).toBe('2028-03-01');
+    expect(parseLinks([{ id: 8, former_access_until: '2028-03-01T13:59:59Z' }])[0].formerAccessUntil).toBe('2028-03-01');
+    expect(parseLinks([{ id: 9, former_access_until: 'soon' }])[0].formerAccessUntil).toBeNull();
+  });
+
   it('accepts numeric ids only while they are safe integers', () => {
     // 9007199254740993 parses as 9007199254740992, a different link.
     const rounded = JSON.parse('[{"id": 9007199254740993}, {"id": 9007199254740991}]');
@@ -202,30 +209,60 @@ describe('chooseLink', () => {
 });
 
 describe('employee API calls (M4-2, M4-4, M4-5, M4-7 contracts)', () => {
-  it('sends sign-up checks without a session token and maps failures to one generic kind', async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ error: 'not matched' }, 422));
-    const api = createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1', getToken: async () => null, fetchImpl, isOnline: () => true });
-    await expect(api.verifyActivation({ code: 'ABCDEFGHJK', dateOfBirth: '1990-04-07', ssnLast4: '1234' })).rejects.toMatchObject({ kind: 'invalid' });
+  const check = { code: 'ABCDEFGHJK', dateOfBirth: '1990-04-07', ssnLast4: '1234' };
+  const account = { email: ' tala@example.com ', useForNotices: true, termsVersion: null };
+  const anonymous = (fetchImpl: typeof fetch): EmployeeApi => createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1', getToken: async () => null, fetchImpl, isOnline: () => true });
+
+  it('sends sign-up as one check without a session token, as ActivationsController reads it', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ next: 'sign_up', sign_up_url: 'https://accounts.example.test/accept?ticket=x', message: null }));
+    await expect(anonymous(fetchImpl).activate(check, account, 'https://mosas.example.test')).resolves.toEqual({ next: 'sign_up', signUpUrl: 'https://accounts.example.test/accept?ticket=x' });
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe('https://api.example.test/api/v1/employee/activation');
+    expect(init?.method).toBe('POST');
     expect(init?.headers).not.toHaveProperty('Authorization');
-    expect(JSON.parse(String(init?.body))).toEqual({ code: 'ABCDEFGHJK', date_of_birth: '1990-04-07', ssn_last4: '1234' });
+    expect(JSON.parse(String(init?.body))).toEqual({ code: 'ABCDEFGHJK', date_of_birth: '1990-04-07', ssn_last4: '1234', email: 'tala@example.com', use_for_notices: true });
   });
 
-  it('reports a locked sign-up as locked', async () => {
-    const api = createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1', getToken: async () => null, fetchImpl: async () => new Response(null, { status: 423 }), isOnline: () => true });
-    await expect(api.verifyActivation({ token: 'a'.repeat(32), dateOfBirth: '1990-04-07', ssnLast4: '1234' })).rejects.toMatchObject({ kind: 'locked' });
+  it('reads "sign_in" as its own outcome, and every failed check as one generic kind', async () => {
+    const signIn = anonymous(async () => jsonResponse({ next: 'sign_in', sign_up_url: null, message: 'We couldn\'t start a new account with that email.' }));
+    await expect(signIn.activate(check, account, 'https://mosas.example.test')).resolves.toEqual({ next: 'sign_in' });
+    const failed = anonymous(async () => jsonResponse({ error: 'We couldn\'t verify those details.', code: 'activation_failed' }, 422));
+    await expect(failed.activate(check, account, 'https://mosas.example.test')).rejects.toMatchObject({ kind: 'invalid' });
+    // A paused invite answers the same 422; there's no 423 to tell it apart.
+    expect(errorForStatus(423).kind).toBe('server');
   });
 
   it('only follows an https (or same-site) sign-up URL', async () => {
-    const respondWith = (sign_up_url: string) => createEmployeeApi({
-      baseUrl: 'https://api.example.test/api/v1', getToken: async () => null, fetchImpl: async () => jsonResponse({ status: 'ready', sign_up_url }), isOnline: () => true,
-    });
-    const check = { code: 'ABCDEFGHJK', dateOfBirth: '1990-04-07', ssnLast4: '1234' };
-    const account = { email: 'tala@example.com', noticeEmail: 'sign_in' as const, termsVersion: null };
-    await expect(respondWith('https://accounts.example.test/accept?ticket=x').startActivation(check, account, 'https://mosas.example.test')).resolves.toBe('https://accounts.example.test/accept?ticket=x');
-    await expect(respondWith('javascript:alert(1)').startActivation(check, account, 'https://mosas.example.test')).rejects.toMatchObject({ kind: 'server' });
-    await expect(respondWith('http://evil.example.test/').startActivation(check, account, 'https://mosas.example.test')).rejects.toMatchObject({ kind: 'server' });
+    const respondWith = (sign_up_url: string) => anonymous(async () => jsonResponse({ next: 'sign_up', sign_up_url, message: null }));
+    await expect(respondWith('javascript:alert(1)').activate(check, account, 'https://mosas.example.test')).rejects.toMatchObject({ kind: 'server' });
+    await expect(respondWith('http://evil.example.test/').activate(check, account, 'https://mosas.example.test')).rejects.toMatchObject({ kind: 'server' });
+    await expect(respondWith('/sign-up?__clerk_ticket=x').activate(check, account, 'https://mosas.example.test')).resolves.toEqual({ next: 'sign_up', signUpUrl: 'https://mosas.example.test/sign-up?__clerk_ticket=x' });
+  });
+
+  it('claims and reactivates with step-up, and reads the link back', async () => {
+    const link = { id: 9, company_name: 'Coral Kitchen', subdomain_slug: 'coral', status: 'active', former_access_until: null };
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ link }, 201));
+    const getToken = vi.fn(async () => 'tok');
+    const api = createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1', getToken, fetchImpl, isOnline: () => true });
+    await expect(api.claimLink({ token: 't'.repeat(32), dateOfBirth: '1990-04-07', ssnLast4: '1234' }, null)).resolves.toMatchObject({ id: '9', companyName: 'Coral Kitchen' });
+    await api.reactivate(check, 'v1');
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      'https://api.example.test/api/v1/employee/links/claim',
+      'https://api.example.test/api/v1/employee/links/reactivate',
+    ]);
+    expect(fetchImpl.mock.calls[0][1]?.headers).not.toHaveProperty('X-Employee-Link-Id');
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).toEqual({ token: 't'.repeat(32), date_of_birth: '1990-04-07', ssn_last4: '1234' });
+    expect(JSON.parse(String(fetchImpl.mock.calls[1][1]?.body))).toEqual({ code: 'ABCDEFGHJK', date_of_birth: '1990-04-07', ssn_last4: '1234', terms_version: 'v1' });
+    expect(getToken).toHaveBeenCalledWith({ fresh: true });
+    // A failed claim is the API's one 404.
+    await expect(client(async () => jsonResponse({ code: 'claim_failed' }, 404)).claimLink(check, null)).rejects.toMatchObject({ kind: 'not_found' });
+  });
+
+  it('reads two-step sign-in 403s as their own kinds, never "not found"', async () => {
+    await expect(client(async () => jsonResponse({ error: 'Multi-factor authentication is required', code: 'mfa_required' }, 403)).context('42')).rejects.toMatchObject({ kind: 'mfa_required' });
+    await expect(client(async () => jsonResponse({ error: 'Set up two-step sign-in', code: 'mfa_enrollment_required' }, 403)).claimLink(check, null)).rejects.toMatchObject({ kind: 'mfa_enrollment_required' });
+    expect(problemFor(new EmployeeApiError('mfa_enrollment_required', 403), { opened: true })).toBe('mfa_setup');
+    expect(problemFor(new EmployeeApiError('mfa_required', 403), { opened: false })).toBe('mfa_required');
   });
 
   it('turns a reverification 403 into StepUpRequiredError, with a fresh token', async () => {

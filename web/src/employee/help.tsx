@@ -1,14 +1,16 @@
 // Help: the company's own contacts, set by its admins (M4-9a). With none set
 // up, it says "Ask your manager at {company}", plus the company's main phone
 // if there is one. It never falls back to Cornerstone (§8a).
-import { useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { CircleHelp, Mail, MessageSquare, Phone } from 'lucide-react';
+import { EmployeeApiError } from './api';
 import { askManager, possessive } from './brand';
 import { TERMS } from './config';
 import type { HelpContact } from './contracts';
 import { useBrand, useReadySession } from './contexts';
 import { formatPhone, smsHref, telHref } from './format';
-import { Card, Page, Placeholder, SkeletonRows } from './ui';
+import { Card, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
+import { isSessionError } from './useEmployeeData';
 
 function CallCompany({ variant = 'primary' }: { variant?: 'primary' | 'secondary' }): ReactElement | null {
   const brand = useBrand();
@@ -77,38 +79,54 @@ const QUESTIONS: ReadonlyArray<{ q: string; a: (company: string) => string }> = 
   { q: 'Something on my pay stub looks wrong', a: (company) => `Ask your manager at ${company}. They can check it with payroll.` },
 ];
 
-/** Help contacts are optional on the API until M4-9 serves them: a 404 here means "none yet", never "access ended". */
-function useHelpContacts(): { contacts: HelpContact[] | null } {
-  const { api, state } = useReadySession();
+type ContactsState = { status: 'loading' } | { status: 'ready'; contacts: HelpContact[] } | { status: 'error'; kind: 'offline' | 'rate_limited' | 'server' };
+
+/**
+ * Help contacts are optional on the API until M4-9 serves them, so only a 404
+ * here means "none yet" (never "access ended"). A 401 or a two-step sign-in
+ * 403 goes to the session like anywhere else; other failures offer Try again.
+ */
+function useHelpContacts(): { state: ContactsState; reload: () => void } {
+  const { api, state, reportError } = useReadySession();
   const linkId = state.link.id;
-  const [contacts, setContacts] = useState<HelpContact[] | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [contacts, setContacts] = useState<ContactsState>({ status: 'loading' });
   useEffect(() => {
     const controller = new AbortController();
-    api.helpContacts(linkId, controller.signal).then(setContacts, () => {
-      if (!controller.signal.aborted) setContacts([]);
+    setContacts({ status: 'loading' });
+    api.helpContacts(linkId, controller.signal).then((list) => setContacts({ status: 'ready', contacts: list }), (error: unknown) => {
+      if (controller.signal.aborted) return;
+      if (error instanceof EmployeeApiError && error.kind === 'not_found') setContacts({ status: 'ready', contacts: [] });
+      else if (isSessionError(error)) reportError(error);
+      else {
+        const kind = error instanceof EmployeeApiError && (error.kind === 'offline' || error.kind === 'rate_limited') ? error.kind : 'server';
+        setContacts({ status: 'error', kind });
+      }
     });
     return () => controller.abort();
-  }, [api, linkId]);
-  return { contacts };
+  }, [api, linkId, reportError, attempt]);
+  const reload = useCallback(() => setAttempt((n) => n + 1), []);
+  return { state: contacts, reload };
 }
 
 export function HelpTab(): ReactElement {
   const brand = useBrand();
-  const { contacts } = useHelpContacts();
+  const { state, reload } = useHelpContacts();
   const company = brand.isFallback ? 'your employer' : brand.name;
   return (
     <Page title="Help">
       <div className="emp-cards-grid">
         <Card title={brand.isFallback ? 'Questions about your pay?' : `Ask ${brand.name}`}>
-          {contacts === null ? <SkeletonRows rows={2} label="Loading Help contacts" />
-            : contacts.length > 0 ? (
+          {state.status === 'loading' ? <SkeletonRows rows={2} label="Loading Help contacts" />
+            : state.status === 'ready' && state.contacts.length > 0 ? (
               <div className="space-y-4">
                 <p className="text-neutral-700">Questions about your pay or this app? These people can help.</p>
-                <ul className="space-y-2">{contacts.map((contact) => <ContactCard key={`${contact.name}-${contact.phone ?? contact.email}`} contact={contact} />)}</ul>
+                <ul className="space-y-2">{state.contacts.map((contact, index) => <ContactCard key={`${index}-${contact.name}`} contact={contact} />)}</ul>
                 <CallCompany variant="secondary" />
               </div>
             ) : (
               <div className="space-y-4">
+                {state.status === 'error' && <LoadProblem kind={state.kind} onRetry={reload} what="the Help contacts" />}
                 <Placeholder icon={CircleHelp} title="Questions about your pay or this app?">
                   <p>{askManager(brand)}</p>
                 </Placeholder>

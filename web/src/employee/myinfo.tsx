@@ -13,7 +13,7 @@ import { useBrand, useEmployeeAuth, useReadySession } from './contexts';
 import { addressLines, formatPhone, longDate } from './format';
 import { useSignOut } from './hooks';
 import { Card, Chip, EmpButton, Field, FormMessage, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
-import { useEmployeeData } from './useEmployeeData';
+import { isSessionError, useEmployeeData } from './useEmployeeData';
 
 const PHONE_DIGITS = /^\+?[\d\s().-]+$/;
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -45,30 +45,57 @@ function changeMessage(error: unknown, what: string): string {
   return `Couldn't save your ${what}. Try again in a minute.`;
 }
 
+interface Change {
+  run: <T>(what: string, attempt: () => Promise<T>) => Promise<T | null>;
+  saving: boolean;
+  error: string | null;
+  /** The change needs two-step sign-in set up first (staff and client logins that are also employees). */
+  needsTwoStep: boolean;
+}
+
 /**
  * Runs one change: step-up first if the API asks for it, then the change.
- * Returns the new profile, or null after showing why it didn't save.
+ * Returns the result, or null after showing why it didn't save.
  */
-function useChange(): { run: (what: string, attempt: () => Promise<EmployeeProfile>) => Promise<EmployeeProfile | null>; saving: boolean; error: string | null; clearError: () => void } {
+function useChange(): Change {
   const { stepUp } = useEmployeeAuth();
   const { reportError } = useReadySession();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = async (what: string, attempt: () => Promise<EmployeeProfile>): Promise<EmployeeProfile | null> => {
+  const [needsTwoStep, setNeedsTwoStep] = useState(false);
+  const run = async <T,>(what: string, attempt: () => Promise<T>): Promise<T | null> => {
     setSaving(true);
     setError(null);
+    setNeedsTwoStep(false);
     try {
       return await stepUp(attempt);
     } catch (failure) {
-      // An ended link or session goes to the session screens, as everywhere else.
-      if (failure instanceof EmployeeApiError && (failure.kind === 'not_found' || failure.kind === 'unauthorized')) reportError(failure);
-      else setError(changeMessage(failure, what));
+      if (failure instanceof EmployeeApiError && failure.kind === 'mfa_enrollment_required') {
+        setNeedsTwoStep(true);
+        setError(`Not saved. To change your ${what}, set up two-step sign-in first.`);
+      } else if (isSessionError(failure)) {
+        // An ended link or session, or a sign-in that needs its second step: the session's screens, as everywhere else.
+        reportError(failure);
+      } else {
+        setError(changeMessage(failure, what));
+      }
       return null;
     } finally {
       setSaving(false);
     }
   };
-  return { run, saving, error, clearError: () => setError(null) };
+  return { run, saving, error, needsTwoStep };
+}
+
+function ChangeProblem({ change }: { change: Change }): ReactElement | null {
+  const { openAccountSettings } = useEmployeeAuth();
+  if (!change.error) return null;
+  return (
+    <FormMessage tone="bad">
+      <p>{change.error}</p>
+      {change.needsTwoStep && <EmpButton variant="secondary" className="emp-btn-small mt-2" onClick={openAccountSettings}>Set up two-step sign-in</EmpButton>}
+    </FormMessage>
+  );
 }
 
 function StepUpNote(): ReactElement {
@@ -145,7 +172,7 @@ function PhoneEditor({ profile, onSaved, onClose }: { profile: EmployeeProfile; 
     <form className="emp-form" onSubmit={(event) => { void submit(event); }} noValidate>
       <Field label="Mobile phone" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} error={problem} autoFocus />
       <StepUpNote />
-      {change.error && <FormMessage tone="bad">{change.error}</FormMessage>}
+      <ChangeProblem change={change} />
       <FormButtons saving={change.saving} label="Save phone" onCancel={onClose} />
     </form>
   );
@@ -153,29 +180,20 @@ function PhoneEditor({ profile, onSaved, onClose }: { profile: EmployeeProfile; 
 
 function EmailEditor({ profile, onSaved, onClose }: { profile: EmployeeProfile; onSaved: ProfileProps['onSaved']; onClose: () => void }): ReactElement {
   const { api, state } = useReadySession();
-  const { stepUp } = useEmployeeAuth();
   const [email, setEmail] = useState(profile.email ?? '');
   const [code, setCode] = useState('');
   const [verificationId, setVerificationId] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const change = useChange();
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const sending = useChange();
 
   const send = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     const invalid = emailProblem(email);
     setProblem(invalid);
     if (invalid) return;
-    setSending(true);
-    setSendError(null);
-    try {
-      setVerificationId(await stepUp(() => api.startEmailChange(state.link.id, email.trim())));
-    } catch (failure) {
-      setSendError(changeMessage(failure, 'email'));
-    } finally {
-      setSending(false);
-    }
+    const id = await sending.run('email', () => api.startEmailChange(state.link.id, email.trim()));
+    if (id) setVerificationId(id);
   };
 
   const confirm = async (event: FormEvent): Promise<void> => {
@@ -198,7 +216,7 @@ function EmailEditor({ profile, onSaved, onClose }: { profile: EmployeeProfile; 
       <form className="emp-form" onSubmit={(event) => { void confirm(event); }} noValidate>
         <p className="text-neutral-800">We sent a code to <strong className="break-all">{email.trim()}</strong>. Enter it here to finish.</p>
         <Field label="Code from the email" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} error={problem} autoFocus />
-        {change.error && <FormMessage tone="bad">{change.error}</FormMessage>}
+        <ChangeProblem change={change} />
         <FormButtons saving={change.saving} label="Confirm email" onCancel={onClose} />
       </form>
     );
@@ -219,8 +237,8 @@ function EmailEditor({ profile, onSaved, onClose }: { profile: EmployeeProfile; 
         autoFocus
       />
       <StepUpNote />
-      {sendError && <FormMessage tone="bad">{sendError}</FormMessage>}
-      <FormButtons saving={sending} label="Send code" onCancel={onClose} />
+      <ChangeProblem change={sending} />
+      <FormButtons saving={sending.saving} label="Send code" onCancel={onClose} />
     </form>
   );
 }
@@ -258,7 +276,8 @@ const EMPTY_ADDRESS: Address = { line1: '', line2: '', city: '', state: 'GU', zi
 
 function AddressBlock({ address }: { address: Address | null }): ReactElement {
   if (!address) return <p className="text-neutral-500">Not added yet</p>;
-  return <address className="not-italic">{addressLines(address).map((line) => <span key={line} className="block">{line}</span>)}</address>;
+  // Keyed by position: two lines can read the same ("PO Box 1" and "PO Box 1").
+  return <address className="not-italic">{addressLines(address).map((line, index) => <span key={index} className="block">{line}</span>)}</address>;
 }
 
 function AddressForm({ initial, requestId, onSaved, onClose }: { initial: Address; requestId?: string; onSaved: ProfileProps['onSaved']; onClose: () => void }): ReactElement {
@@ -294,7 +313,7 @@ function AddressForm({ initial, requestId, onSaved, onClose }: { initial: Addres
       <Field label="ZIP code" autoComplete="postal-code" inputMode="numeric" value={address.zip} onChange={set('zip')} error={problems.zip} className="emp-field-short" />
       <p className="emp-hint">{brand.isFallback ? 'Your employer' : brand.name} checks the new address before it's used.</p>
       <StepUpNote />
-      {change.error && <FormMessage tone="bad">{change.error}</FormMessage>}
+      <ChangeProblem change={change} />
       <FormButtons saving={change.saving} label={requestId ? 'Save request' : 'Send request'} onCancel={onClose} />
     </form>
   );
@@ -352,13 +371,15 @@ function AddressCard({ profile, onSaved, editable, notice }: ProfileProps): Reac
                   <EmpButton variant="quiet" onClick={() => { void cancelRequest(); }} disabled={cancel.saving}>{cancel.saving ? 'Cancelling…' : 'Cancel request'}</EmpButton>
                 </div>
               )}
-              {cancel.error && <FormMessage tone="bad">{cancel.error}</FormMessage>}
+              <ChangeProblem change={cancel} />
             </div>
           ) : (
             <div className="space-y-4">
               <AddressBlock address={profile.address} />
-              {request?.status === 'approved' && request.decidedAt && (
-                <FormMessage tone="good">Your new address was approved on {longDate(request.decidedAt)}. Your W-2 will be mailed here.</FormMessage>
+              {request?.status === 'approved' && (
+                <FormMessage tone="good">
+                  {request.decidedAt ? `Your new address was approved on ${longDate(request.decidedAt)}.` : 'Your new address was approved.'} Your W-2 will be mailed here.
+                </FormMessage>
               )}
               {request?.status === 'rejected' && (
                 <div className="space-y-1">
@@ -407,7 +428,7 @@ function EmergencyForm({ contact, onSaved, onClose }: { contact?: EmergencyConta
       <Field id={`${prefix}-relationship`} label="Relationship (optional)" hint="For example: mother, partner, friend" autoComplete="off" value={draft.relationship} onChange={(e) => setDraft((d) => ({ ...d, relationship: e.target.value }))} />
       <Field id={`${prefix}-phone`} label="Phone" type="tel" inputMode="tel" autoComplete="off" value={draft.phone} onChange={(e) => setDraft((d) => ({ ...d, phone: e.target.value }))} error={problems.phone} />
       <StepUpNote />
-      {change.error && <FormMessage tone="bad">{change.error}</FormMessage>}
+      <ChangeProblem change={change} />
       <FormButtons
         saving={change.saving}
         label="Save"
@@ -423,10 +444,15 @@ function EmergencyForm({ contact, onSaved, onClose }: { contact?: EmergencyConta
 function EmergencyCard({ profile, onSaved, editable, notice }: ProfileProps): ReactElement {
   const { api, state } = useReadySession();
   const [editing, setEditing] = useState<string | 'new' | null>(null);
+  // Removing asks once, in the row itself, so a slip of the thumb can't delete someone.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const remove = useChange();
   const removeContact = async (contact: EmergencyContact): Promise<void> => {
-    const saved = await remove.run('emergency contact', () => api.removeEmergencyContact(state.link.id, contact.id));
-    if (saved) onSaved(saved, `${contact.name} removed.`);
+    const saved = await remove.run('emergency contacts', () => api.removeEmergencyContact(state.link.id, contact.id));
+    if (saved) {
+      setConfirming(null);
+      onSaved(saved, `${contact.name} removed.`);
+    }
   };
   return (
     <Card title="Emergency contacts">
@@ -438,15 +464,29 @@ function EmergencyCard({ profile, onSaved, editable, notice }: ProfileProps): Re
             {profile.emergencyContacts.map((contact) => (
               <li key={contact.id}>
                 {editing === contact.id ? <EmergencyForm contact={contact} onSaved={onSaved} onClose={() => setEditing(null)} /> : (
-                  <div className="emp-detail">
-                    <div className="min-w-0 flex-1">
-                      <p className="emp-detail-value break-words">{contact.name}</p>
-                      <p className="emp-row-sub">{[contact.relationship, contact.phone && formatPhone(contact.phone)].filter(Boolean).join(' · ')}</p>
+                  <div className="space-y-2">
+                    <div className="emp-detail">
+                      <div className="min-w-0 flex-1">
+                        <p className="emp-detail-value break-words">{contact.name}</p>
+                        <p className="emp-row-sub">{[contact.relationship, contact.phone && formatPhone(contact.phone)].filter(Boolean).join(' · ')}</p>
+                      </div>
+                      {editable && !editing && confirming !== contact.id && (
+                        <div className="flex gap-1">
+                          <EmpButton variant="quiet" className="emp-icon-button" aria-label={`Edit ${contact.name}`} onClick={() => setEditing(contact.id)}><Pencil aria-hidden="true" className="size-5" /></EmpButton>
+                          <EmpButton variant="quiet" className="emp-icon-button" aria-label={`Remove ${contact.name}`} onClick={() => setConfirming(contact.id)} disabled={remove.saving}><Trash2 aria-hidden="true" className="size-5" /></EmpButton>
+                        </div>
+                      )}
                     </div>
-                    {editable && !editing && (
-                      <div className="flex gap-1">
-                        <EmpButton variant="quiet" className="emp-icon-button" aria-label={`Edit ${contact.name}`} onClick={() => setEditing(contact.id)}><Pencil aria-hidden="true" className="size-5" /></EmpButton>
-                        <EmpButton variant="quiet" className="emp-icon-button" aria-label={`Remove ${contact.name}`} onClick={() => { void removeContact(contact); }} disabled={remove.saving}><Trash2 aria-hidden="true" className="size-5" /></EmpButton>
+                    {editable && confirming === contact.id && (
+                      <div className="emp-confirm" role="group" aria-label={`Remove ${contact.name}?`}>
+                        <p className="font-semibold">Remove {contact.name} from your emergency contacts?</p>
+                        <div className="emp-form-buttons">
+                          <EmpButton variant="danger" onClick={() => { void removeContact(contact); }} disabled={remove.saving} aria-busy={remove.saving}>
+                            {remove.saving ? 'Removing…' : 'Remove'}
+                          </EmpButton>
+                          <EmpButton variant="quiet" onClick={() => setConfirming(null)} disabled={remove.saving}>Keep</EmpButton>
+                        </div>
+                        <ChangeProblem change={remove} />
                       </div>
                     )}
                   </div>
@@ -455,9 +495,8 @@ function EmergencyCard({ profile, onSaved, editable, notice }: ProfileProps): Re
             ))}
           </ul>
         )}
-        {remove.error && <FormMessage tone="bad">{remove.error}</FormMessage>}
         {editing === 'new' && <EmergencyForm onSaved={onSaved} onClose={() => setEditing(null)} />}
-        {editable && !editing && (
+        {editable && !editing && !confirming && (
           <EmpButton variant="secondary" className="emp-narrow-button" block onClick={() => setEditing('new')}>
             <Plus aria-hidden="true" className="size-5" />Add a contact
           </EmpButton>
@@ -475,8 +514,10 @@ function LegalCard({ profile }: { profile: EmployeeProfile }): ReactElement {
       <div className="space-y-4">
         <DetailRow label="Legal name" value={profile.legalName} />
         <div className="emp-notice-inline" role="note">
-          <p className="font-bold">To change these, contact Cornerstone</p>
-          <p className="text-neutral-700">Cornerstone runs payroll and keeps these on your tax records. Bring:</p>
+          <p className="font-bold">To change these, ask your manager</p>
+          <p className="text-neutral-700">
+            Cornerstone runs payroll and keeps these on your tax records. Ask your manager to put you in touch with Cornerstone, and have these ready:
+          </p>
           <ul className="emp-bullets">
             <li>Your Social Security card showing the new name or number</li>
             <li>For a name change, the paper that changed it, such as a marriage certificate or court order</li>
@@ -514,13 +555,13 @@ function AccountCard(): ReactElement {
 }
 
 function ProfileCards(): ReactElement {
-  const { readOnly } = useReadySession();
+  const { readOnly, isFormer, isViewOnly } = useReadySession();
   const brand = useBrand();
   const { state, reload, update } = useEmployeeData<EmployeeProfile>('profile', (api, linkId, signal) => api.profile(linkId, signal));
   const [saved, setSaved] = useState<{ card: 'contact' | 'address' | 'emergency'; message: string } | null>(null);
   if (state.status === 'loading') return <Card><SkeletonRows rows={4} label="Loading your details" /></Card>;
   if (state.status === 'error') return <Card><LoadProblem kind={state.kind} onRetry={reload} what="your details" /></Card>;
-  const editable = readOnly === null;
+  const editable = !readOnly;
   const props = (card: 'contact' | 'address' | 'emergency'): ProfileProps => ({
     profile: state.data,
     editable,
@@ -532,12 +573,13 @@ function ProfileCards(): ReactElement {
   });
   return (
     <>
-      {readOnly === 'former' && (
+      {/* A view-only look at a former employee shows what they'd see; the banner already says it's view only. */}
+      {isFormer && (
         <div className="emp-notice-inline emp-span-all" role="note">
           <p className="text-neutral-700">Your details can't be changed here after your job ends. If you move, tell {brand.isFallback ? 'your employer' : brand.name} so your W-2 reaches you.</p>
         </div>
       )}
-      {readOnly === 'view_only' && (
+      {isViewOnly && !isFormer && (
         <div className="emp-notice-inline emp-span-all" role="note"><p className="text-neutral-700">View only. Changes are turned off.</p></div>
       )}
       <ContactCard {...props('contact')} />
