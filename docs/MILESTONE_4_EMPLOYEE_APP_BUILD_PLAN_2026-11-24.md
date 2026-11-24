@@ -1,6 +1,6 @@
 # Milestone 4 ("Employee app, MoSa's first") build plan
 
-**Status:** Revised after two rounds of independent cross-family review (Gemini 4 Neon), then updated with Leon's answers on November 24 (§0, §9). The answer-round changes haven't had an independent review yet. Waiting for Leon's approval. No application code has changed.
+**Status:** Approved by Leon on November 24, 2026, after two rounds of independent cross-family review (Gemini 4 Neon) and Leon's answers (§0, §9). No application code has changed.
 **Date:** November 24, 2026.
 **Codebase baseline:** `Shimizu-Technology/cornerstone-payroll` `origin/main` at `01e6aa52` (includes #545, the Clerk Core 3 upgrade).
 **Builds on:** [Product architecture decision](PRODUCT_ARCHITECTURE_DECISION_2026-11-19.md) (§0, §4, §6), [Milestone 3 build plan](MILESTONE_3_FOUNDATIONS_BUILD_PLAN_2026-11-22.md) (§5 legal and WISP, §7 costs), [Employee portal plan](EMPLOYEE_PORTAL_AND_PLATFORM_PLAN_2026-11-17.md) (§3 identity, §4 Phase 1), [Guam legal compliance research](GUAM_PAYROLL_HR_LEGAL_COMPLIANCE_RESEARCH_2026-11-19.md) (Part 1 items 1–3, 21, 23; Q1; Q7; Part 3), and [Client subdomain activation](CLIENT_SUBDOMAIN_ACTIVATION.md).
@@ -66,7 +66,7 @@ Bank changes stay **off** for MoSa's in this milestone. Payroll holds no bank de
 | D7 | Save the stub as issued | **Recommended.** Post each stub to the app at a defined moment and freeze it then, with a fingerprint (M4-4 defines the moment). Corrections become a separate "Corrected" document. Today the staff download serves an archived R2 copy only in narrow cases and otherwise regenerates (`api/app/controllers/api/v1/admin/pay_stubs_controller.rb:64-79`). AIRE always regenerates (`api/app/controllers/api/v1/integrations/aire/worker_statements_controller.rb:43-52`). | Regenerating can change the "Generated on" time, the check number or payment line, and, after reversals, the YTD figures. An employee's earlier download should match what the app shows later. |
 | D8 | Languages | **Decided.** English only. | No translation setup exists in `web/`, and there's no known need. |
 | D9 | Employees' second sign-in step | **Decided.** Employee-only logins don't need an authenticator app. They sign in with a password, Google, or an emailed code from Clerk, and Clerk emails a code on each new device. Before any change, they confirm again with a fresh first-step verification (Clerk reverification at the first-factor level, `fva[0]` within 10 minutes). Employees who chose to enroll a second factor confirm with that instead. Staff and client users, including Emma, Sara and Mo, require two-step sign-in. | This matches the M3 plan: employee-only users "pass the global MFA gate… relying on step-up" (M3 plan, M3-2). Most restaurant workers won't set up an authenticator app. The lawyer review asks whether the FTC Safeguards Rule's MFA requirement covers employees viewing their own records (§3 G1). |
-| D10 | How is it tested with real data? | **Decided:** (a) **no staging** for this milestone; agents test locally, in CI and on the Clerk test app; (b) **view-only "Sign in as"** in production (M4-9): Leon and Dafne see exactly what a given employee or client user sees, with that person's permissions, before and after they sign up; (d) **Emma is the first real user** (D1). **Recommended, Leon to confirm:** (c) before Emma, **Benjo does one real sign-up** on his own Cornerstone (company 1) employee record, so any sign-up problem is found by us and not by the client. The **full "Sign in as"**, acting for a user, is planned properly in M4-13. | Test workspaces can't turn the employee app on (`api/app/services/company_features.rb:104-108`), and links must belong to a live company, which the database enforces (`api/db/migrate/20261122060000_add_payroll_invitation_binding_and_employee_account_links.rb:30`). View-only creates no new exposure, because staff with access to MoSa's already see this data. Acting for someone does, and some actions are the person's own legal acts, so the full version gets its own design. |
+| D10 | How is it tested with real data? | **Decided:** (a) **no staging** for this milestone; agents test locally, in CI and on the Clerk test app; (b) **view-only "Sign in as"** in production (M4-9): Leon and Dafne see exactly what a given employee or client user sees, with that person's permissions, before and after they sign up; (d) **Emma is the first real user** (D1). (c) before Emma, **the Cornerstone team does a real sign-up itself** on a Cornerstone (company 1) employee record, such as Benjo's, so any sign-up problem is found by us and not by the client (Leon: "we'll test it first before Emma is in there"). The **full "Sign in as"**, acting for a user, is planned properly in M4-13. | Test workspaces can't turn the employee app on (`api/app/services/company_features.rb:104-108`), and links must belong to a live company, which the database enforces (`api/db/migrate/20261122060000_add_payroll_invitation_binding_and_employee_account_links.rb:30`). View-only creates no new exposure, because staff with access to MoSa's already see this data. Acting for someone does, and some actions are the person's own legal acts, so the full version gets its own design. |
 | D11 | Tell employees when a new stub posts? | **Recommended: yes, by email.** It says "Your pay stub for <date> is ready" with no amounts and a link to the app. It goes only to the verified personal email, only when the company's `stubs` switch is on, and only while `PORTAL_EMAIL_NOTIFICATIONS_ENABLED` is on. | The portal plan lists it (`EMPLOYEE_PORTAL_AND_PLATFORM_PLAN_2026-11-17.md`, Phase 1), and it's the main reason people open the app. Generic emails with no amounts follow the existing pattern (`api/app/services/portal_notifications/email.rb:6`). |
 | D12 | What happens to an open session when access ends? | **Recommended.** Revoking or retiring a link ends access on the next request, because the link check runs on every call. When it was the person's last eligible link, the `portal_employee` login is also deactivated, which blocks every API call at once (`api/app/controllers/api/v1/employee_portal/base_controller.rb:31`). Their Clerk sessions are ended through Clerk's Backend API. The existing `PayrollAccess::RevocationDispatcher` only drops live Cable connections (`api/app/services/payroll_access/session_revoker.rb:10`), and the employee service has none. Former employees keep read-only access until `former_access_until`. | A stolen or shared login shouldn't keep working after Cornerstone revokes it. |
 
@@ -183,7 +183,7 @@ All of these must be true. Each one maps to a check in the go-live runbook (M4-1
 | G5 | **Employee website and API service live:** Netlify site 2, Render `employee_web`, `mosas.shimizu-technology.com`, Clerk allowed subdomain. | Lead | M4-10. |
 | G6 | **MoSa's admins have client logins:** Emma, Sara and Mo invited to the client portal, with `PORTAL_EMAIL_NOTIFICATIONS_ENABLED` on. | Leon's go | This follows the November 15 client-portal steps (Leon tests, Dafne re-runs a practice copy, then Emma is invited). |
 | G7 | **Contact details entered** by MoSa's admins for each wave (D1). | Emma, Sara and Mo | Emma's first. |
-| G8 | **Internal sign-off, then Emma:** in production with nobody invited, Leon and Dafne check employees and Emma's client view with view-only Sign in as, Benjo does one real sign-up (D10c, if confirmed), Mark and Benjo run the written script, and Dafne signs off. Then Emma completes her acceptance as the first real user. | Leon, Dafne, Mark, Benjo, Emma | The go-live rule's steps 3–4 (architecture decision §6), without staging (D10a). |
+| G8 | **Internal sign-off, then Emma:** in production with nobody invited, Leon and Dafne check employees and Emma's client view with view-only Sign in as, the team does one real sign-up on a company 1 record (D10c), Mark and Benjo run the written script, and Dafne signs off. Then Emma completes her acceptance as the first real user. | Leon, Dafne, Mark, Benjo, Emma | The go-live rule's steps 3–4 (architecture decision §6), without staging (D10a). |
 | G9 | **Security check of the employee surface and Sign in as:** cross-company, cross-link and former-access tests under RLS `raise`; an adversarial review by a different model family; an automated scan of the employee site and API. | Lead | M4-11. A full penetration test is due before onboarding clients outside Cornerstone's current book (M3 plan §5.2). |
 
 **Emma before the lawyer gates (recommendation; ask counsel in the G1 packet):** Emma is the client, so she could agree in writing to use the app on her own record before G1 and G2 are done. G3, G4, G5, G6 and G9 still come first. Every other employee waits for all nine gates.
@@ -283,7 +283,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
 - **Shared inbox cleanup:**
   - At the November 24 check, one address was on 405 employee records at 5 companies (221 active), and a second address was shared by 5 more (§2).
   - A staff "Shared and placeholder emails" report lists them by company.
-  - Cornerstone clears them to blank in bulk, company by company, with an audit, after Dafne confirms nothing depends on them. A blank shows up as "needs contact details", which is better than a wrong address.
+  - Cornerstone clears them to blank in bulk, company by company, with an audit. Nothing depends on the shared address (Leon, November 24). A blank shows up as "needs contact details", which is better than a wrong address.
   - No production data changes without Cornerstone's go.
 - **Easy to set and update:**
   - **Client portal:** a "Contact details" page lists every employee's email, mobile and address in one editable grid, with a "needs contact details" filter and save per row. Edits apply directly, as they do today, and are audited.
@@ -318,7 +318,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
     - Posting also triggers the D11 notice.
   - **Earlier 2026 pay (D6),** possibly as its own PR:
     - The Pay list shows January–August checks from `historical_paychecks`, labeled "From QuickBooks records". It uses only rows matched to the employee and to a reviewed import batch, never opening-summary rows.
-    - **Original QuickBooks PDFs:** a staff upload takes Cornerstone's files. If they come as one file per pay run, it splits them by employee and check. It previews matches by name, pay date, check number and net pay, and posts only confirmed matches as "Original QuickBooks stub", frozen with a fingerprint. Unmatched pages stay unposted.
+    - **Original QuickBooks PDFs:** a staff upload takes Cornerstone's files, which are one file or page per check (Leon, November 24). It previews matches by name, pay date, check number and net pay, and posts only confirmed matches as "Original QuickBooks stub", frozen with a fingerprint. Unmatched pages stay unposted.
     - **Before anything posts:** check that the PDFs don't print a full SSN (if they do, they aren't posted as they are), and confirm the imported rows group into one entry per check (Emma has 59 rows, §2).
     - Gated by the same `stubs` switch.
   - **Former links:** read-only, limited to statements dated before `former_access_until`.
@@ -388,7 +388,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
     - **Pay:** a list by year, then the check (gross, taxes, deductions, net, YTD), then the PDF. Earlier 2026 checks appear under "From QuickBooks records", with the original PDF once posted.
     - **Tax forms.**
     - **My info:** contact details plus "Request a change", with the request's status.
-    - **Help:** who to contact (§5 Q3).
+    - **Help:** who to contact (§5 Q2).
   - **Former employees:** a read-only mode.
   - **Rules:** pay data is never cached in the service worker or local storage, and PDFs are served `no-store`. **PostHog is removed from the employee build** (`web/src/employee-main.tsx:4,11`), and `appSurfaceBuild.test.ts` asserts it's absent.
   - **Legal:** links to counsel's Employee App Terms and Privacy Notice (G1) on sign-up and in Help. Sign-up records acceptance with the version.
@@ -449,7 +449,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
 
 - **The internal check (G8):**
   - In production, with the app on for MoSa's and nobody invited, Leon and Dafne use view-only Sign in as on several MoSa's employees (hourly, salaried, direct deposit, paper check) and on Emma's client view, and compare stubs with the printed ones.
-  - Benjo's real sign-up on his company 1 record (D10c, if confirmed): sign-up, stubs, a contact change with a code, lockout and unlock.
+  - A real sign-up by the Cornerstone team on a company 1 record, such as Benjo's (D10c): sign-up, stubs, a contact change with a code, lockout and unlock.
   - Mark and Benjo run the written script, and Dafne signs off.
 - **Emma's acceptance** (wave 0): Emma gets her client portal login, claims her employee access, and runs the script as both admin and employee:
   - stubs, QuickBooks history, and the W-2 copy once posted;
@@ -463,7 +463,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   5. one full pay period;
   6. wave 2, everyone else.
 - **Rollback:** switch off for MoSa's. Links and records stay. The API returns its usual 404, and the app shows "The employee app isn't available right now".
-- **Support:** who answers employee questions (§5 Q3), and a one-page "how to sign up" sheet for MoSa's to hand out.
+- **Support:** who answers employee questions (§5 Q2), and a one-page "how to sign up" sheet for MoSa's to hand out.
 
 ### M4-13 Full "Sign in as" (acting for a user)
 
@@ -531,12 +531,10 @@ After wave 1:
 
 ### Questions for Cornerstone (through Leon or Dafne)
 
-1. How are the original QuickBooks stub PDFs organized: one file per check, or one file per pay run? Do they print a full SSN (D6)?
-2. Does anything depend on the shared inbox on employee records before it's cleared (M4-3)?
-3. Who answers employees' app questions: MoSa's admins, Cornerstone, or both? Whose phone or email goes on the Help screen?
-4. Which 5 or so employees should be in wave 1?
-5. Should Benjo do one real sign-up before Emma (D10c)?
-6. Which law firm reviews the packet (G1)?
+1. Do the original QuickBooks stub PDFs print a full SSN (D6)? They're one file or page per check.
+2. Who answers employees' app questions: MoSa's admins, Cornerstone, or both? Whose phone or email goes on the Help screen?
+3. Which 5 or so employees should be in wave 1?
+4. Which law firm reviews the packet (G1)?
 
 ---
 
@@ -561,7 +559,7 @@ After wave 1:
 | **An admin approves their own change** | Emma is both a MoSa's admin and an employee. | No self-approval (M4-7). |
 | **QuickBooks PDFs expose too much or reach the wrong person** | An original stub prints a full SSN, or a page is matched to the wrong employee. | SSN check before posting, staff-reviewed matches only, and unmatched pages stay unposted (M4-4). |
 | **Clearing the shared inbox breaks something** | Some process may rely on the address. | A report first, Dafne's confirmation, then clearing company by company with an audit (M4-3). |
-| **The client is the first to hit a bug** | There's no staging round, and Emma is the first real user. | Local, CI and Clerk test-app runs, view-only checks in production, and Benjo's sign-up before Emma (D10c). |
+| **The client is the first to hit a bug** | There's no staging round, and Emma is the first real user. | Local, CI and Clerk test-app runs, view-only checks in production, and the team's own sign-up before Emma (D10c). |
 
 ---
 
@@ -600,7 +598,7 @@ Milestone 4 is done when:
 - The shared inbox is a mistake to fix (M4-3).
 - The full Sign in as is planned in M4-13.
 - A read-only production check confirmed Emma's record and the shared inbox's reach (§2).
-- These changes haven't had an independent review yet.
+- Later the same day: the team signs up first, before Emma (D10c); nothing depends on the shared inbox; the QuickBooks PDFs are one per check. Leon approved the plan.
 
 **Round 2 (Gemini 4 Neon, high, re-check of `cac49720`): "ready with fixes."**
 
