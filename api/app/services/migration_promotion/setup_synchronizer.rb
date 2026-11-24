@@ -4,14 +4,18 @@ module MigrationPromotion
   class SetupSynchronizer
     EMPLOYEE_COLUMNS_EXCLUDED = %w[
       id company_id department_id previous_employee_id test_workspace_source_employee_id created_at updated_at
-      created_by_id
+      created_by_id email_verified_at phone_confirmed_by_employee_at
+    ].freeze
+    CONTACT_COLUMNS = %w[
+      email phone address_line1 address_line2 city state zip contact_source
     ].freeze
 
-    def initialize(rehearsal:, target_company:, actor:, mapping:)
+    def initialize(rehearsal:, target_company:, actor:, mapping:, replace_contact_employee_ids: [])
       @rehearsal = rehearsal
       @target_company = target_company
       @actor = actor
       @mapping = mapping
+      @replace_contact_employee_ids = Array(replace_contact_employee_ids).filter_map { |id| Integer(id, exception: false) }.to_set
     end
 
     def call
@@ -40,7 +44,7 @@ module MigrationPromotion
 
     private
 
-    attr_reader :rehearsal, :target_company, :actor, :mapping
+    attr_reader :rehearsal, :target_company, :actor, :mapping, :replace_contact_employee_ids
 
     def clear_replaceable_setup!
       # Company-scoped payroll fields, deductions, and loans must be replaced
@@ -72,21 +76,30 @@ module MigrationPromotion
 
     def sync_employees!(department_map)
       employee_map = mapping.map.dup
+      flagged_emails = EmployeeContactValidator.marked_placeholder_emails(organization_id: target_company.organization_id)
       rehearsal.employees.order(:id).each do |source|
         attributes = source.attributes.except(*EMPLOYEE_COLUMNS_EXCLUDED).merge(
-          company_id: target_company.id,
-          department_id: source.department_id && department_map.fetch(source.department_id).id,
-          previous_employee_id: nil,
-          test_workspace_source_employee_id: nil,
-          portal_pending_approval: false
+          "company_id" => target_company.id,
+          "department_id" => source.department_id && department_map.fetch(source.department_id).id,
+          "previous_employee_id" => nil,
+          "test_workspace_source_employee_id" => nil,
+          "portal_pending_approval" => false
         )
         target = employee_map[source.id]
         if target
+          if replace_contact_for?(source, target)
+            apply_promoted_contact_attributes!(attributes, employee: target, flagged_emails: flagged_emails, strict: true)
+          else
+            attributes.except!(*CONTACT_COLUMNS)
+          end
           target.allow_tax_classification_change = true
           # The rehearsal's compensation history replaces the target's below.
           EmployeeCompensationChangeService.writing_for(target.id) { target.update!(attributes) }
         else
-          target = Employee.create!(attributes.merge(created_by: actor, skip_initial_compensation_history: true))
+          apply_promoted_contact_attributes!(attributes, employee: nil, flagged_emails: flagged_emails, strict: false)
+          attributes["email_verified_at"] = nil
+          attributes["phone_confirmed_by_employee_at"] = nil
+          target = Employee.create!(attributes.merge("created_by" => actor, "skip_initial_compensation_history" => true))
           employee_map[source.id] = target
         end
       end
@@ -95,6 +108,82 @@ module MigrationPromotion
         employee_map.fetch(source.id).update!(previous_employee: employee_map.fetch(source.previous_employee_id))
       end
       employee_map
+    end
+
+    def replace_contact_for?(source, target)
+      replace_contact_employee_ids.include?(source.id) || replace_contact_employee_ids.include?(target.id)
+    end
+
+    def apply_promoted_contact_attributes!(attributes, employee:, flagged_emails:, strict:)
+      raw_email = attributes["email"].presence
+      raw_phone = attributes["phone"].presence
+      email_unchanged = employee.present? &&
+        EmployeeContactValidator.normalize_email(employee.email) == EmployeeContactValidator.normalize_email(raw_email)
+      phone_unchanged = employee.present? && same_normalized_phone?(employee.phone, raw_phone)
+
+      candidate = employee || Employee.new(
+        company: target_company,
+        first_name: attributes["first_name"],
+        last_name: attributes["last_name"]
+      )
+
+      check_email = !email_unchanged && raw_email.present?
+      check_phone = !phone_unchanged && raw_phone.present?
+
+      if check_email || check_phone
+        result = EmployeeContactValidator.call(
+          employee: candidate,
+          company: target_company,
+          email: check_email ? raw_email : :unchanged,
+          phone: check_phone ? raw_phone : :unchanged,
+          actor: strict ? actor : nil,
+          source: "import",
+          flagged_emails: flagged_emails
+        )
+        if strict && !result.valid?
+          result.apply_errors_to(candidate)
+          raise ActiveRecord::RecordInvalid, candidate
+        end
+
+        if check_email
+          attributes["email"] = result.errors[:email].present? ? nil : result.normalized_email
+        end
+        if check_phone
+          attributes["phone"] = result.errors[:phone].present? ? nil : result.normalized_phone
+        end
+      end
+
+      if email_unchanged
+        attributes.delete("email")
+      else
+        attributes["email"] = nil if raw_email.blank?
+        attributes["email_verified_at"] = nil
+      end
+
+      if phone_unchanged
+        attributes.delete("phone")
+      else
+        attributes["phone"] = nil if raw_phone.blank?
+        attributes["phone_confirmed_by_employee_at"] = nil
+      end
+
+      has_contact = EmployeeContactValidator::CONTACT_FIELDS.any? do |field|
+        key = field.to_s
+        value = attributes.key?(key) ? attributes[key] : employee&.public_send(field)
+        value.present?
+      end
+      attributes["contact_source"] = has_contact ? "import" : nil
+    end
+
+    def same_normalized_phone?(current_phone, incoming_phone)
+      return true if current_phone.blank? && incoming_phone.blank?
+      return false if current_phone.blank? || incoming_phone.blank?
+
+      normalized_incoming, error = EmployeeContactValidator.normalize_phone(incoming_phone)
+      return false if error.present?
+
+      normalized_current, = EmployeeContactValidator.normalize_phone(current_phone)
+      (normalized_current || current_phone.to_s.strip) == normalized_incoming
     end
 
     def copy_employee_setup!(employee_map, deduction_type_map)

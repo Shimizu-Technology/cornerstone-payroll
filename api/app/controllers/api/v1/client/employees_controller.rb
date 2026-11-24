@@ -4,6 +4,7 @@ module Api
   module V1
     module Client
       class EmployeesController < BaseController
+        include EmployeeContactLoginRejectionGuard
         SENSITIVE_CHANGE_REQUEST_KEYS = %w[ssn ssn_encrypted contractor_ein sensitive_payload_encrypted].freeze
         DEFAULT_PER_PAGE = 25
         MAX_PER_PAGE = 500
@@ -15,22 +16,28 @@ module Api
         before_action :set_employee, only: [ :show, :update ]
 
         def index
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           employees = Employee.where(company_id: current_company_id)
           employees = apply_filters(employees)
+          needs_contact_details_count = employees.needs_contact_details(flagged_emails: contact_context[:flagged_emails]).count
+          if needs_contact_details_filter_active?
+            employees = employees.needs_contact_details(flagged_emails: contact_context[:flagged_emails])
+          end
           employees = apply_sort(employees)
           employees = employees.includes(:department, :employee_wage_rates, :employee_w4_elections)
             .preload(:employee_wage_rate_versions, :employee_compensation_changes)
           employees = employees.page(params[:page]).per(bounded_per_page(default: DEFAULT_PER_PAGE, max: MAX_PER_PAGE))
 
           render json: {
-            data: employees.map { |employee| serialize_employee(employee) },
-            meta: pagination_meta(employees)
+            data: employees.map { |employee| contact_page_or_full(employee, contact_context) },
+            meta: pagination_meta(employees).merge(needs_contact_details_count: needs_contact_details_count)
           }
         end
 
         def show
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
-            data: serialize_employee(@employee, include_department: true, include_document_readiness: true)
+            data: serialize_employee(@employee, include_department: true, include_document_readiness: true, contact_context: contact_context)
           }
         end
 
@@ -42,16 +49,24 @@ module Api
               employee: employee,
               attrs: employee_params.to_h,
               requested_by: current_user,
-              company: current_company
+              company: current_company,
+              confirm_same_person_email: confirm_same_person_email_param,
+              email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?
             ).create!
           end
 
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
-            data: serialize_employee(result.employee),
+            data: serialize_employee(result.employee, contact_context: contact_context),
             change_request: serialize_change_request(result.change_request),
             applied_direct_fields: result.applied_direct_fields,
+            contact_warnings: result.contact_warnings || [],
             message: "Employee profile created. Payroll-sensitive details were submitted for approval as request ##{result.change_request.id}."
           }, status: :created
+        rescue EmployeeContactValidator::ValidationError => e
+          render_contact_validation_error!(e, employee: @employee || e.record)
+        rescue EmployeeContactChanges::EmailChangeLocked
+          render_login_email_cooldown!
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -70,18 +85,38 @@ module Api
               employee: @employee,
               attrs: employee_params.to_h,
               requested_by: current_user,
-              company: current_company
+              company: current_company,
+              confirm_same_person_email: confirm_same_person_email_param,
+              row_revision: row_revision_param,
+              baseline_values: baseline_values_param,
+              email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?
             ).update!
           end
 
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
-            data: serialize_employee(result.employee),
+            data: contact_page_or_full(result.employee, contact_context),
             change_request: serialize_change_request(result.change_request),
             applied_direct_fields: result.applied_direct_fields,
+            contact_warnings: result.contact_warnings || [],
             message: result.change_request ?
               "Profile updates saved. Payroll-sensitive changes were submitted for approval as request ##{result.change_request.id}." :
               "Employee profile updated successfully."
           }
+        rescue EmployeeContactRevisionGuard::ConflictError => e
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+          render json: {
+            error: e.message,
+            code: "contact_revision_conflict",
+            conflicting_fields: e.conflicting_fields,
+            contact_revision: e.employee.contact_revision,
+            current_values: e.current_values,
+            data: contact_page_or_full(e.employee, contact_context)
+          }, status: :conflict
+        rescue EmployeeContactValidator::ValidationError => e
+          render_contact_validation_error!(e, employee: @employee || e.record)
+        rescue EmployeeContactChanges::EmailChangeLocked
+          render_login_email_cooldown!
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -243,10 +278,19 @@ module Api
           }
         end
 
-        def serialize_employee(employee, include_department: false, include_document_readiness: false)
+        # The Contact details page asks for contact fields only.
+        def contact_page_or_full(employee, contact_context)
+          return EmployeeContactProjection.call(employee, context: contact_context) if EmployeeContactProjection.requested?(params)
+
+          serialize_employee(employee, contact_context: contact_context)
+        end
+
+        def serialize_employee(employee, include_department: false, include_document_readiness: false, contact_context: nil)
           data = employee.as_json(
             except: [ :intake_exception, :ssn_encrypted, :contractor_ein, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
+          data["contact_revision"] = employee.contact_revision
+          data["contact_details_status"] = EmployeeContactValidator.contact_details_status(employee, context: contact_context)
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: false)
           data["ssn_last_four"] = employee.ssn_last_four
           data["contractor_ein_last_four"] = employee.contractor_ein.to_s.gsub(/\D/, "").last(4).presence
@@ -325,8 +369,34 @@ module Api
           end
         end
 
+        def confirm_same_person_email_param
+          raw = params.key?(:confirm_same_person_email) ? params[:confirm_same_person_email] : params.dig(:employee, :confirm_same_person_email)
+          ActiveModel::Type::Boolean.new.cast(raw) == true
+        end
+
+        def row_revision_param
+          params[:row_revision].presence ||
+            params[:contact_revision].presence ||
+            params[:expected_updated_at].presence ||
+            params.dig(:employee, :row_revision).presence ||
+            params.dig(:employee, :contact_revision).presence ||
+            params.dig(:employee, :expected_updated_at).presence
+        end
+
+        def baseline_values_param
+          raw = params[:baseline_values] || params.dig(:employee, :baseline_values)
+          return nil unless raw.respond_to?(:permit)
+
+          raw.permit(*ClientEmployeeUpdateService::DIRECT_FIELDS).to_h
+        end
+
+        def needs_contact_details_filter_active?
+          ActiveModel::Type::Boolean.new.cast(params[:needs_contact_details]) == true ||
+            params[:contact_status] == "needs_contact_details"
+        end
+
         def audit_metadata_for(result)
-          {
+          metadata = {
             source: "client_portal",
             employee_name: result.employee.display_name,
             changed_fields: result.changed_fields,
@@ -336,6 +406,11 @@ module Api
             before_values: sanitized_audit_values(result.before_values),
             after_values: sanitized_audit_values(result.after_values)
           }
+          if result.same_person_email_confirmed
+            metadata[:same_person_email_confirmed] = true
+            metadata[:confirmed_login_user_id] = result.confirmed_login_user_id
+          end
+          metadata
         end
 
         def sanitized_audit_values(values)

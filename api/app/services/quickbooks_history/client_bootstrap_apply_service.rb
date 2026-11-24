@@ -38,10 +38,20 @@ module QuickbooksHistory
         end
 
         definition_cache = {}
+        flagged_emails = EmployeeContactValidator.marked_placeholder_emails(organization_id: bootstrap.company.organization_id)
         created_employee_count = 0
+        blanked_email_count = plan.summary.fetch("blanked_contact_email_count", 0)
+        blanked_phone_count = plan.summary.fetch("blanked_contact_phone_count", 0)
         plan.profiles.each do |profile|
+          attrs, extra_blanked = sanitize_bootstrap_contact_attributes(
+            profile.employee_attributes,
+            flagged_emails: flagged_emails
+          )
+          blanked_email_count += 1 if extra_blanked.include?("email")
+          blanked_phone_count += 1 if extra_blanked.include?("phone")
+
           employee = bootstrap.company.employees.create!(
-            profile.employee_attributes.merge(created_by: actor, initial_compensation_source: "quickbooks_history", initial_compensation_actor: actor)
+            attrs.merge(created_by: actor, initial_compensation_source: "quickbooks_history", initial_compensation_actor: actor)
           )
           create_w4_election!(employee)
           create_wage_rates!(employee, profile.wage_rates)
@@ -56,7 +66,12 @@ module QuickbooksHistory
           applied_at: Time.current,
           applied_by: actor
         )
-        record_audit!(plan, created_employee_count)
+        record_audit!(
+          plan,
+          created_employee_count,
+          blanked_contact_email_count: blanked_email_count,
+          blanked_contact_phone_count: blanked_phone_count
+        )
         bootstrap
       end
     end
@@ -144,7 +159,50 @@ module QuickbooksHistory
       worker.historical_paychecks.update_all(employee_id: employee.id, updated_at: Time.current)
     end
 
-    def record_audit!(plan, created_employee_count)
+    def sanitize_bootstrap_contact_attributes(raw_attributes, flagged_emails:)
+      attrs = raw_attributes.dup
+      raw_email = attrs[:email].presence
+      raw_phone = attrs[:phone].presence
+      blanked = []
+
+      if raw_email.present? || raw_phone.present?
+        candidate = bootstrap.company.employees.new(attrs.slice(:first_name, :last_name))
+        result = EmployeeContactValidator.call(
+          employee: candidate,
+          company: bootstrap.company,
+          email: raw_email.present? ? raw_email : :unchanged,
+          phone: raw_phone.present? ? raw_phone : :unchanged,
+          actor: nil,
+          source: "import",
+          flagged_emails: flagged_emails
+        )
+        if raw_email.present?
+          if result.errors[:email].present?
+            attrs[:email] = nil
+            blanked << "email"
+          else
+            attrs[:email] = result.normalized_email
+          end
+        end
+        if raw_phone.present?
+          if result.errors[:phone].present?
+            attrs[:phone] = nil
+            blanked << "phone"
+          else
+            attrs[:phone] = result.normalized_phone
+          end
+        end
+      end
+
+      attrs[:email_verified_at] = nil
+      attrs[:phone_confirmed_by_employee_at] = nil
+      has_contact = EmployeeContactValidator::CONTACT_FIELDS.any? { |field| attrs[field].present? }
+      attrs[:contact_source] = has_contact ? "import" : nil
+
+      [ attrs, blanked ]
+    end
+
+    def record_audit!(plan, created_employee_count, blanked_contact_email_count: 0, blanked_contact_phone_count: 0)
       AuditLog.record!(
         user: actor,
         organization_id: bootstrap.company.organization_id,
@@ -159,7 +217,9 @@ module QuickbooksHistory
           created_employee_count: created_employee_count,
           active_employee_count: plan.summary.fetch("active_employee_count"),
           wage_rate_count: plan.summary.fetch("wage_rate_count"),
-          payroll_field_assignment_count: plan.summary.fetch("payroll_field_assignment_count")
+          payroll_field_assignment_count: plan.summary.fetch("payroll_field_assignment_count"),
+          blanked_contact_email_count: blanked_contact_email_count,
+          blanked_contact_phone_count: blanked_contact_phone_count
         }
       )
     end

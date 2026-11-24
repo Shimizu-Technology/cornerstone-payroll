@@ -3,7 +3,8 @@
 class AuditRecordSnapshot
   SAFE_FIELDS = {
     "Employee" => %w[
-      first_name middle_name last_name name_suffix email hire_date termination_date department_id job_title
+      first_name middle_name last_name name_suffix email email_verified_at phone_confirmed_by_employee_at contact_source
+      hire_date termination_date department_id job_title
       employment_type salary_type pay_rate pay_frequency payment_delivery_method filing_status allowances additional_withholding
       retirement_rate roth_retirement_rate employer_retirement_match_rate employer_roth_match_rate
       business_name contractor_type contractor_pay_type w9_on_file address_line1 address_line2 city state zip phone status
