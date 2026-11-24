@@ -503,6 +503,25 @@ RSpec.describe PayStubGenerator do
       end
     end
 
+    context "when the database returns saved earnings out of entry order" do
+      it "still prints them in entry order on the row-level and fallback paths" do
+        worker = hourly_worker
+        apply_historical_ytd_balance(company: company, employee: worker,
+          through_period_end: Date.new(2026, 3, 31), through_pay_date: Date.new(2026, 4, 1),
+          gross_pay: 5_000, non_taxable_pay: 0, source_breakdown: { "earnings_breakdown" => [] })
+        item = calculated_item(worker, "hourly", Date.new(2026, 4, 15), hours_worked: 80, reported_tips: 80)
+        allow(PayrollItem).to receive(:find).and_wrap_original do |original, *args|
+          original.call(*args).tap do |found|
+            reversed = found.association(:payroll_item_earnings).reader.to_a.sort_by(&:id).reverse
+            allow(found).to receive(:payroll_item_earnings).and_return(reversed)
+          end
+        end
+
+        expect(statement_rows(item).map(&:first)).to eq([ "Regular Pay", "Tips" ])
+        expect(statement_lines(item).last.index("Regular Pay")).to be < statement_lines(item).last.index("Tips")
+      end
+    end
+
     context "when an applied opening balance has a malformed earnings breakdown" do
       [ nil, [], [ { "label" => "Regular Pay", "amount" => "5000" } ], "not itemized", 7, { "Regular Pay" => "NaN" }, { "Reimb" => "NaN" } ].each do |breakdown|
         it "renders with dashes and the YTD total for #{breakdown.inspect}" do
