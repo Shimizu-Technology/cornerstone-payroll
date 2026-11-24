@@ -114,6 +114,8 @@ interface RowConflictState {
 export interface RowSaveState {
   saving: boolean;
   saved: boolean;
+  submittedAddressRequestId?: number;
+  pendingAddressRequestId?: number;
   error: string | null;
   fieldErrors: Record<string, string[]>;
   warnings: EmployeeContactWarning[];
@@ -196,6 +198,7 @@ function extractContactValidation(error: unknown): {
   samePersonRequired: boolean;
   warnings: EmployeeContactWarning[];
   message: string;
+  pendingAddressRequestId?: number;
 } {
   if (error instanceof ApiError) {
     const raw = (error.data && typeof error.data === 'object') ? error.data as Record<string, unknown> : {};
@@ -219,7 +222,9 @@ function extractContactValidation(error: unknown): {
       fieldErrors,
       samePersonRequired: Boolean(contactValidation?.same_person_confirmation_required),
       warnings: Array.isArray(contactValidation?.warnings) ? contactValidation.warnings : [],
-      message: error.message,
+      message: fieldErrors.base?.join(' ') || error.message,
+      pendingAddressRequestId: raw.code === 'address_request_pending' && typeof raw.pending_request_id === 'number'
+        ? raw.pending_request_id : undefined,
     };
   }
   return {
@@ -566,6 +571,8 @@ export function EmployeeContactDetails({
         ...(prev[employee.id] ?? INITIAL_ROW_STATE),
         saving: true,
         saved: false,
+        submittedAddressRequestId: undefined,
+        pendingAddressRequestId: undefined,
         error: null,
         fieldErrors: {},
         conflict: null,
@@ -587,6 +594,7 @@ export function EmployeeContactDetails({
 
       const updated = toContactRecord(response.data);
       const warnings = response.contact_warnings ?? [];
+      const addressRequest = 'change_request' in response && response.change_request?.profile_address ? response.change_request : null;
 
       setEmployees((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
       setDrafts((prev) => {
@@ -601,6 +609,7 @@ export function EmployeeContactDetails({
         [updated.id]: {
           saving: false,
           saved: true,
+          submittedAddressRequestId: addressRequest?.id,
           error: null,
           fieldErrors: {},
           warnings,
@@ -648,6 +657,7 @@ export function EmployeeContactDetails({
           saving: false,
           saved: false,
           error: parsed.message,
+          pendingAddressRequestId: parsed.pendingAddressRequestId,
           fieldErrors: parsed.fieldErrors,
           warnings: parsed.warnings,
           samePersonRequired: parsed.samePersonRequired,
@@ -779,8 +789,12 @@ export function EmployeeContactDetails({
             onDiscard={() => handleDiscardMyVersion(employee)}
           />
         )}
-        {state.error && !state.conflict && !state.samePersonRequired && !Object.values(state.fieldErrors).some((messages) => messages.length > 0) && (
-          <Alert tone="error">{state.error}</Alert>
+        {state.error && !state.conflict && !state.samePersonRequired && !Object.entries(state.fieldErrors).some(([field, messages]) => field !== 'base' && messages.length > 0) && (
+          <Alert tone="error">
+            {state.error}{state.pendingAddressRequestId && (
+              <> <Link className="font-medium underline" to={`/change-requests?request_id=${state.pendingAddressRequestId}`}>View address request</Link></>
+            )}
+          </Alert>
         )}
 
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -977,8 +991,7 @@ export function EmployeeContactDetails({
                                 </Button>
                                 {state.saved && (
                                   <span role="status" className="inline-flex items-center gap-1 text-xs font-semibold text-success-700">
-                                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                                    Saved
+                                    <ContactSaveResult requestId={state.submittedAddressRequestId} />
                                   </span>
                                 )}
                               </div>
@@ -1011,8 +1024,7 @@ export function EmployeeContactDetails({
                       <EmployeeNameBlock employee={employee} />
                       {state.saved && !open && (
                         <span role="status" className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-success-700">
-                          <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                          Saved
+                          <ContactSaveResult requestId={state.submittedAddressRequestId} />
                         </span>
                       )}
                     </div>
@@ -1346,4 +1358,11 @@ function RowInlineFeedback({
       ))}
     </div>
   );
+}
+
+function ContactSaveResult({ requestId }: { requestId?: number }) {
+  if (requestId) {
+    return <Link className="text-primary-700 underline" to={`/change-requests?request_id=${requestId}`}>Address sent for review</Link>;
+  }
+  return <><Check className="h-3.5 w-3.5" aria-hidden="true" />Saved</>;
 }

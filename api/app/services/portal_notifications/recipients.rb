@@ -22,7 +22,11 @@ module PortalNotifications
       def resolve(event)
         return [ [], "no_recipients" ] unless subject_available?(event) && company_open?(event.company_id)
 
-        targets = event.audience == "staff" ? staff_targets(event) : client_targets(event)
+        targets = case event.audience
+        when "staff" then staff_targets(event)
+        when "employee" then [ employee_target(event) ].compact
+        else client_targets(event)
+        end
         [ targets, targets.any? ? "recipients" : "no_recipients" ]
       end
 
@@ -38,6 +42,9 @@ module PortalNotifications
         event = delivery.event
         return "access_revoked" unless company_open?(event.company_id)
 
+        if event.audience == "employee"
+          return employee_target(event)&.email == delivery.recipient_email ? nil : "access_revoked"
+        end
         if event.audience == "staff"
           listed = delivery.user_id ? listed_user?(event.company_id, delivery.user_id) : listed_email?(event.company_id, delivery.recipient_email)
           return "recipient_removed" unless listed
@@ -49,14 +56,39 @@ module PortalNotifications
 
       def subject_available?(event)
         subject = event.subject
+        if %w[address_approvals contact_changes employee_address_decisions].include?(event.category)
+          return false unless CompanyFeatures.for(event.company).employee_portal_feature?(:profile_requests)
+        end
+        if event.category == "address_approvals"
+          return subject.is_a?(EmployeeChangeRequest) && subject.company_id == event.company_id &&
+            subject.pending? && subject.profile_address?
+        end
+
         case subject
         when ClientDocument then !subject.archived? && (event.audience == "staff" || subject.visible_to_client?)
-        when ClientPortalThread, EmployeeChangeRequest, PayrollSubmissionPeriod, PayPeriod then subject.company_id == event.company_id
+        when ClientPortalThread, EmployeeChangeRequest, EmployeeContactChangeToConfirm, PayrollSubmissionPeriod, PayPeriod then subject.company_id == event.company_id
         else false
         end
       end
 
       private
+
+      def employee_target(event)
+        request = event.subject
+        return unless request.is_a?(EmployeeChangeRequest) && request.company_id == event.company_id &&
+          request.profile_address? && !request.pending? && Email.employee_portal_url(event.company).present?
+
+        link = EmployeeAccountLink.portal_eligible.find_by(
+          id: request.requested_by_link_id, company_id: request.company_id, employee_id: request.employee_id,
+          user_id: request.requested_by_id
+        )
+        return unless link&.user&.payroll_access_allowed?
+
+        employee = link.employee
+        return unless employee.email_verified_at? && employee.email.present?
+
+        Target.new(nil, employee.email)
+      end
 
       def staff_targets(event)
         listed = PortalNotificationRecipient.where(company_id: event.company_id)
@@ -91,8 +123,15 @@ module PortalNotifications
         else
           user.client? && user.payroll_access_allowed? && user.organization_id == company.organization_id &&
             user.can_access_company?(company.id) &&
-            (event.category != "employee_change_decisions" || event.subject.requested_by_id == user.id)
+            (event.category != "employee_change_decisions" || event.subject.requested_by_id == user.id) &&
+            (event.category != "address_approvals" || can_review_address?(event.subject, user))
         end
+      end
+
+      def can_review_address?(request, user)
+        !request.same_person_reviewer?(user)
+      rescue EmployeeProfileIdentity::LinkCheckUnavailable
+        false
       end
 
       def staff_can_view_company?(user, company)

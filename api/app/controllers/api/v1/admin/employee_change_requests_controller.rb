@@ -9,6 +9,10 @@ module Api
         before_action :require_admin_or_manager!
         before_action :set_change_request, only: [ :show, :approve, :reject ]
 
+        rescue_from EmployeeProfileIdentity::LinkCheckUnavailable do |error|
+          render json: { error: error.message }, status: :service_unavailable
+        end
+
         def index
           requests = EmployeeChangeRequest.for_company(current_company_id)
                                           .includes(:employee, :requested_by, :reviewed_by)
@@ -84,6 +88,7 @@ module Api
             id: change_request.id,
             status: change_request.status,
             request_kind: change_request.request_kind,
+            profile_address: change_request.profile_address?,
             employee_id: change_request.employee_id,
             employee_name: change_request.employee.full_name,
             requested_by_id: change_request.requested_by_id,

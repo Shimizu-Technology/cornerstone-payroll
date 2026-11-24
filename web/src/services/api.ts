@@ -1454,6 +1454,7 @@ export interface PayPeriodListResponse {
 }
 
 export interface PayPeriodResponse {
+  unconfirmed_contact_changes?: number | null;
   pay_period: PayPeriod & { payroll_items?: PayrollItem[] };
 }
 
@@ -4735,6 +4736,8 @@ export interface ClientPortalThread {
 }
 
 export interface EmployeeChangeRequest {
+  profile_address?: boolean;
+  can_review?: boolean;
   proposed_compensation_effective_on?: string | null;
   id: number;
   status: 'pending' | 'approved' | 'rejected';
@@ -5014,11 +5017,50 @@ export const adminPortalFileRequestsApi = {
     api.post<PortalFileRequestStep>(`/admin/portal_file_requests/${id}/withdraw`, data),
 };
 
+export interface EmployeeContactActivity {
+  id: number;
+  employee_id: number;
+  employee_name: string;
+  changed_by_name: string | null;
+  change_kind: 'contact' | 'address';
+  before_values: Record<string, unknown>;
+  after_values: Record<string, unknown>;
+  created_at: string;
+  confirmed_at?: string | null;
+  confirmed_by_name?: string | null;
+}
+
+export type ContactActivityFilters = {
+  search?: string;
+  kind?: 'contact' | 'address';
+  status?: 'unconfirmed' | 'confirmed';
+};
+
+type EmployeeContactActivityResponse = {
+  data: EmployeeContactActivity[];
+  meta: BoundedListMeta & { through_id?: number | null };
+};
+
 export const clientEmployeeChangeRequestsApi = {
   list: (params?: { status?: string; search?: string } & BoundedListParams) =>
-    api.get<{ data: EmployeeChangeRequest[]; meta: BoundedListMeta }>('/client/employee_change_requests', params),
+    api.get<{ data: EmployeeChangeRequest[]; meta: BoundedListMeta & { profile_requests_enabled?: boolean } }>('/client/employee_change_requests', params),
   get: (id: number) =>
     api.get<{ data: EmployeeChangeRequest }>(`/client/employee_change_requests/${id}`),
+  decide: (id: number, decision: 'approve' | 'reject', reviewNotes?: string) =>
+    api.patch<{ data: EmployeeChangeRequest }>(`/client/employee_change_requests/${id}/${decision}`, { review_notes: reviewNotes }),
+  contactChanges: (page: number) =>
+    api.get<EmployeeContactActivityResponse>('/client/employee_change_requests/contact_changes', { page, per_page: 25 }),
+};
+
+export const staffEmployeeContactChangesApi = {
+  list: (companyId: number, filters: ContactActivityFilters, page: number) =>
+    api.get<EmployeeContactActivityResponse>('/admin/employee_contact_changes_to_confirm', { ...filters, page, per_page: 25 }, { companyId }),
+  confirm: (companyId: number, id: number) =>
+    api.patch<{ confirmed_count: number }>(`/admin/employee_contact_changes_to_confirm/${id}/confirm`, {}, { companyId }),
+  confirmAll: (companyId: number, filters: ContactActivityFilters, throughId: number) =>
+    api.patch<{ confirmed_count: number }>('/admin/employee_contact_changes_to_confirm/confirm_all', {
+      ...filters, through_id: throughId,
+    }, { companyId }),
 };
 
 export const adminEmployeeChangeRequestsApi = {
@@ -6439,8 +6481,8 @@ export const payrollHistoryApi = {
   list: (
     params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' | 'prior_provider'; register_eligible?: boolean },
     companyId: number,
-  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }> =>
-    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }>('/admin/payroll_history', params, { companyId }),
+  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; unconfirmed_contact_changes?: number | null; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }> =>
+    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; unconfirmed_contact_changes?: number | null; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }>('/admin/payroll_history', params, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },
