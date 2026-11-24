@@ -57,6 +57,8 @@ module Api
               total_count: total,
               total_pages: (total.to_f / per_page).ceil,
               archive: archive,
+              original_stub_upload_enabled: StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: current_company) &&
+                CompanyFeatures.for(current_company).employee_portal_feature?(:stubs),
               import_providers: import_registry.contracts
             }
           }

@@ -2033,3 +2033,39 @@ test('withholds unapproved cutover evidence from an accountant', async ({ page }
   await expect(page.getByText('Checklist needed')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Evidence workbook' })).toHaveCount(0);
 });
+
+test('posts only reviewed QuickBooks originals', async ({ page }) => {
+  await mockApplicationShell(page);
+  await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
+    data: [],
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50, archive, original_stub_upload_enabled: true },
+  }));
+  await page.route('**/api/v1/admin/quickbooks_stub_upload/preview', (route) => fulfillJson(route, {
+    data: [
+      { page: 1, status: 'matched', employee_name: 'Jesse Example', pay_date: '2026-01-20', net_pay: '900', review_token: 'first-page' },
+      { page: 2, status: 'matched', employee_name: 'Sam Worker', pay_date: '2026-01-20', net_pay: '800', review_token: 'second-page' },
+      { page: 3, status: 'full_ssn' },
+    ],
+  }));
+  await page.route('**/api/v1/admin/quickbooks_stub_upload/confirm', async (route) => {
+    expect(route.request().headers()['x-company-id']).toBe('1');
+    expect(route.request().postData()).toContain('first-page');
+    expect(route.request().postData()).not.toContain('second-page');
+    await fulfillJson(route, { data: [{ document_id: 12, historical_paycheck_id: 10 }] });
+  });
+
+  await page.goto('/historical-payroll');
+  await page.getByLabel('QuickBooks stub PDF').setInputFiles({
+    name: 'quickbooks.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-test'),
+  });
+  await page.getByRole('button', { name: 'Preview matches' }).click();
+  await expect(page.getByText(/blocked because the page may show a full SSN/i)).toBeVisible();
+  const post = page.getByRole('button', { name: /Post selected stubs/ });
+  await expect(post).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: /^Page [123]/ })).toHaveCount(2);
+  await page.getByRole('checkbox', { name: /Jesse Example/ }).check();
+  await post.click();
+  await expect(page.getByText('1 original stub posted.')).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /Jesse Example/ })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: /Sam Worker/ })).toBeVisible();
+});

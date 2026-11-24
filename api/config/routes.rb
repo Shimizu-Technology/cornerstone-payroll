@@ -285,6 +285,10 @@ Rails.application.routes.draw do
             get "source_files/:source_file_id", action: :source_file
           end
         end
+        resource :quickbooks_stub_upload, only: [] do
+          post :preview
+          post :confirm
+        end
         resources :historical_imports, only: %i[index show] do
           collection do
             post :preview

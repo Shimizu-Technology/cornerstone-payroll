@@ -87,6 +87,18 @@ class PayStubGenerator
     }
   end
 
+  def self.employee_payment_line(item)
+    if !item.net_pay.to_d.positive?
+      [ "Earnings statement only - no payment issued", item.check_number.presence ].compact.join(" · ")
+    elsif item.effective_payment_delivery_method == "direct_deposit"
+      "Direct deposit"
+    elsif item.voided?
+      "Check ##{item.check_number} (voided)"
+    else
+      "Check ##{item.check_number}"
+    end
+  end
+
   private
 
   def render_header(pdf)
@@ -135,17 +147,17 @@ class PayStubGenerator
       data = [
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
         [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
-        if !payroll_item.net_pay.to_d.positive?
+        if @employee_copy && !@preview
+          [ "Payment:", self.class.employee_payment_line(payroll_item) ]
+        elsif !payroll_item.net_pay.to_d.positive?
           [ "Payment:", @preview ? "Earnings statement only" : "Earnings statement only - no payment issued" ]
         elsif payroll_item.effective_payment_delivery_method == "direct_deposit"
-          [ "Payment:", (@preview || @employee_copy) ? "Direct deposit" : "Direct deposit (stub only; transfer not confirmed)" ]
-        elsif @employee_copy && !@preview && payroll_item.check_number.present?
-          [ "Payment:", "Check ##{payroll_item.check_number}" ]
+          [ "Payment:", @preview ? "Direct deposit" : "Direct deposit (stub only; transfer not confirmed)" ]
         else
           [ "Check #:", @preview ? "" : payroll_item.check_number.presence || "No check issued" ]
         end
       ]
-      if !@preview && !payroll_item.net_pay.to_d.positive? && payroll_item.check_number.present?
+      if !@preview && !@employee_copy && !payroll_item.net_pay.to_d.positive? && payroll_item.check_number.present?
         data << [ "Check reference:", payroll_item.check_number ]
       end
 

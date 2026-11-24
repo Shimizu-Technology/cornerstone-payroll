@@ -176,8 +176,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.bigint "financial_correction_link_id"
     t.jsonb "wire_payload", default: {}, null: false
     t.bigint "company_id"
-    t.index [ "company_id", "payroll_item_id" ], name: "idx_on_company_id_payroll_item_id_72b0cfdc5e"
     t.index [ "check_event_id" ], name: "index_aire_payroll_entry_acknowledgements_on_check_event_id"
+    t.index [ "company_id", "payroll_item_id" ], name: "idx_on_company_id_payroll_item_id_72b0cfdc5e"
     t.index [ "delivered_at", "enqueued_at" ], name: "idx_aire_entry_ack_dispatch"
     t.index [ "event_id" ], name: "index_aire_payroll_entry_acknowledgements_on_event_id", unique: true
     t.index [ "financial_correction_link_id" ], name: "idx_on_financial_correction_link_id_0706d8c7fe"
@@ -614,8 +614,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.index [ "organization_id" ], name: "index_client_profitability_settings_on_organization_id", unique: true
     t.index [ "practice_company_id" ], name: "index_client_profitability_settings_on_practice_company_id"
     t.index [ "updated_by_id" ], name: "index_client_profitability_settings_on_updated_by_id"
-    t.check_constraint "cost_basis::text = ANY (ARRAY['pay_date'::character varying, 'work_period'::character varying]::text[])", name: "client_profitability_cost_basis_valid"
-    t.check_constraint "default_period::text = ANY (ARRAY['month'::character varying, 'quarter'::character varying, 'custom'::character varying]::text[])", name: "client_profitability_default_period_valid"
+    t.check_constraint "cost_basis::text = ANY (ARRAY['pay_date'::character varying::text, 'work_period'::character varying::text])", name: "client_profitability_cost_basis_valid"
+    t.check_constraint "default_period::text = ANY (ARRAY['month'::character varying::text, 'quarter'::character varying::text, 'custom'::character varying::text])", name: "client_profitability_default_period_valid"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -680,10 +680,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.index "lower((subdomain_slug)::text)", name: "index_live_companies_on_lower_subdomain_slug", unique: true, where: "(((payroll_environment)::text = 'live'::text) AND (subdomain_slug IS NOT NULL))"
     t.index [ "active_printer_profile_id" ], name: "index_companies_on_active_printer_profile_id"
     t.index [ "created_by_id" ], name: "index_companies_on_created_by_id"
-    t.index [ "id", "payroll_environment" ], name: "idx_companies_payroll_environment_key", unique: true
     t.index [ "ein" ], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
     t.index [ "employee_intake_enabled_by_id" ], name: "index_companies_on_employee_intake_enabled_by_id"
     t.index [ "id", "organization_id" ], name: "index_companies_on_id_and_organization_id", unique: true
+    t.index [ "id", "payroll_environment" ], name: "idx_companies_payroll_environment_key", unique: true
     t.index [ "migration_rehearsal_created_by_id" ], name: "index_companies_on_migration_rehearsal_created_by_id"
     t.index [ "migration_source_batch_id" ], name: "index_companies_on_migration_source_batch_id"
     t.index [ "migration_source_company_id", "test_workspace_purpose" ], name: "idx_companies_active_test_workspaces", unique: true, where: "(((payroll_environment)::text = 'migration_rehearsal'::text) AND (active = true) AND (test_workspace_archived_at IS NULL) AND ((test_workspace_purpose)::text = ANY (ARRAY[('migration_rehearsal'::character varying)::text, ('training_replay'::character varying)::text, ('backup_snapshot'::character varying)::text])))"
@@ -930,14 +930,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
-    t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY ((ARRAY['invited'::character varying, 'active'::character varying])::text[]))"
+    t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY (ARRAY[('invited'::character varying)::text, ('active'::character varying)::text]))"
     t.index [ "employee_id" ], name: "index_employee_account_links_on_employee_id"
     t.index [ "invite_token_digest" ], name: "index_employee_account_links_on_invite_token_digest", unique: true
     t.index [ "invited_by_id" ], name: "index_employee_account_links_on_invited_by_id"
     t.index [ "revoked_by_id" ], name: "index_employee_account_links_on_revoked_by_id"
     t.index [ "user_id" ], name: "index_employee_account_links_on_user_id"
     t.check_constraint "payroll_environment::text = 'live'::text", name: "employee_account_links_live_only"
-    t.check_constraint "status::text = ANY (ARRAY['invited'::character varying, 'active'::character varying, 'former'::character varying, 'revoked'::character varying]::text[])", name: "employee_account_links_status_check"
+    t.check_constraint "status::text = ANY (ARRAY['invited'::character varying::text, 'active'::character varying::text, 'former'::character varying::text, 'revoked'::character varying::text])", name: "employee_account_links_status_check"
   end
 
   create_table "employee_change_requests", force: :cascade do |t|
@@ -1080,6 +1080,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.index [ "reviewed_by_id" ], name: "index_employee_document_requirements_on_reviewed_by_id"
   end
 
+  create_table "employee_documents", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payroll_item_id"
+    t.bigint "historical_paycheck_id"
+    t.bigint "employee_id"
+    t.integer "tax_year"
+    t.integer "revision", null: false
+    t.string "status", default: "posted", null: false
+    t.string "storage_key", null: false
+    t.string "sha256", null: false
+    t.datetime "posted_at", null: false
+    t.boolean "corrected", default: false, null: false
+    t.bigint "replaces_document_id"
+    t.string "payment_line"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_employee_documents_on_company_id"
+    t.index [ "employee_id", "tax_year", "revision" ], name: "idx_on_employee_id_tax_year_revision_dbe51f3d5c", unique: true, where: "(tax_year IS NOT NULL)"
+    t.index [ "historical_paycheck_id", "revision" ], name: "idx_on_historical_paycheck_id_revision_42100f7406", unique: true, where: "(historical_paycheck_id IS NOT NULL)"
+    t.index [ "id", "company_id" ], name: "index_employee_documents_on_id_and_company_id", unique: true
+    t.index [ "payroll_item_id", "revision" ], name: "index_employee_documents_on_payroll_item_id_and_revision", unique: true, where: "(payroll_item_id IS NOT NULL)"
+    t.index [ "replaces_document_id" ], name: "index_employee_documents_on_replaces_document_id"
+    t.check_constraint "corrected = (replaces_document_id IS NOT NULL) AND replaces_document_id IS DISTINCT FROM id", name: "employee_documents_correction_link"
+    t.check_constraint "num_nonnulls(payroll_item_id, historical_paycheck_id, tax_year) = 1 AND (tax_year IS NULL) = (employee_id IS NULL)", name: "employee_documents_one_source"
+    t.check_constraint "revision > 0", name: "employee_documents_positive_revision"
+    t.check_constraint "sha256::text ~ '^[a-f0-9]{64}$'::text", name: "employee_documents_sha256"
+    t.check_constraint "status::text = ANY (ARRAY['posted'::character varying, 'replaced'::character varying, 'withdrawn'::character varying]::text[])", name: "employee_documents_valid_status"
+  end
+
   create_table "employee_loans", force: :cascade do |t|
     t.date "balance_as_of"
     t.string "balance_source"
@@ -1150,9 +1179,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.date "start_date"
     t.datetime "updated_at", null: false
     t.bigint "company_id"
+    t.index [ "company_id", "employee_id" ], name: "index_employee_payroll_fields_on_company_id_and_employee_id"
     t.index [ "employee_id", "active" ], name: "idx_employee_payroll_fields_employee_active"
     t.index [ "employee_id", "payroll_field_definition_id" ], name: "idx_employee_payroll_fields_unique", unique: true
-    t.index [ "company_id", "employee_id" ], name: "index_employee_payroll_fields_on_company_id_and_employee_id"
     t.index [ "employee_id" ], name: "index_employee_payroll_fields_on_employee_id"
     t.index [ "employee_loan_id" ], name: "idx_employee_fields_unique_loan", unique: true, where: "(employee_loan_id IS NOT NULL)"
     t.index [ "employee_loan_id" ], name: "index_employee_payroll_fields_on_employee_loan_id"
@@ -1160,11 +1189,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
   end
 
   create_table "employee_placeholder_emails", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "email", null: false
-    t.bigint "marked_by_id"
     t.bigint "organization_id", null: false
+    t.string "email", null: false
     t.string "reason"
+    t.bigint "marked_by_id"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index [ "marked_by_id" ], name: "index_employee_placeholder_emails_on_marked_by_id"
     t.index [ "organization_id", "email" ], name: "idx_employee_placeholder_emails_org_email", unique: true
@@ -1289,8 +1318,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.string "source"
     t.datetime "updated_at", null: false
     t.bigint "company_id"
-    t.index [ "employee_id", "occupation_code", "effective_from" ], name: "idx_employee_tipped_occupations_unique_start", unique: true
     t.index [ "company_id", "employee_id" ], name: "idx_on_company_id_employee_id_0a2ee4b589"
+    t.index [ "employee_id", "occupation_code", "effective_from" ], name: "idx_employee_tipped_occupations_unique_start", unique: true
     t.index [ "employee_id" ], name: "index_employee_tipped_occupations_on_employee_id"
     t.check_constraint "effective_to IS NULL OR effective_to >= effective_from", name: "employee_tipped_occupation_date_order"
     t.check_constraint "occupation_code::text ~ '^[0-9]{3}$'::text", name: "employee_tipped_occupation_code_format"
@@ -1784,8 +1813,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.string "title", null: false
     t.datetime "updated_at", null: false
     t.bigint "company_id"
-    t.index [ "general_transmittal_id", "position" ], name: "idx_general_transmittal_items_on_transmittal_position"
     t.index [ "company_id", "general_transmittal_id" ], name: "idx_on_company_id_general_transmittal_id_f3b5b33f2a"
+    t.index [ "general_transmittal_id", "position" ], name: "idx_general_transmittal_items_on_transmittal_position"
     t.index [ "general_transmittal_id", "source_key" ], name: "idx_transmittal_items_on_transmittal_source_key", unique: true, where: "(source_key IS NOT NULL)"
     t.index [ "general_transmittal_id" ], name: "idx_general_transmittal_items_on_transmittal"
     t.index [ "source_type", "source_id" ], name: "idx_general_transmittal_items_on_source"
@@ -2293,11 +2322,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.index [ "id", "finance_book_id" ], name: "index_invoice_billing_profiles_on_id_and_finance_book_id", unique: true
     t.index [ "logo_storage_key" ], name: "index_invoice_billing_profiles_on_logo_storage_key", unique: true
     t.index [ "organization_id" ], name: "index_invoice_billing_profiles_on_organization_id"
-    t.check_constraint "(numbering_style::text = ANY (ARRAY['yearly'::character varying, 'continuing'::character varying]::text[])) AND next_invoice_number > 0", name: "invoice_numbering_valid"
+    t.check_constraint "(numbering_style::text = ANY (ARRAY['yearly'::character varying::text, 'continuing'::character varying::text])) AND next_invoice_number > 0", name: "invoice_numbering_valid"
     t.check_constraint "accent_color IS NULL OR accent_color::text ~ '^#[0-9A-F]{6}$'::text", name: "invoice_billing_profile_accent_color_valid"
-    t.check_constraint "invoice_theme::text = ANY (ARRAY['classic'::character varying, 'modern'::character varying, 'professional'::character varying, 'banner'::character varying]::text[])", name: "invoice_billing_profile_theme_valid"
-    t.check_constraint "logo_size::text = ANY (ARRAY['small'::character varying, 'medium'::character varying, 'large'::character varying]::text[])", name: "invoice_billing_profile_logo_size_valid"
     t.check_constraint "invoice_number_width IS NULL OR invoice_number_width >= 1 AND invoice_number_width <= 12", name: "invoice_billing_profile_number_width_valid"
+    t.check_constraint "invoice_theme::text = ANY (ARRAY['classic'::character varying::text, 'modern'::character varying::text, 'professional'::character varying::text, 'banner'::character varying::text])", name: "invoice_billing_profile_theme_valid"
+    t.check_constraint "logo_size::text = ANY (ARRAY['small'::character varying::text, 'medium'::character varying::text, 'large'::character varying::text])", name: "invoice_billing_profile_logo_size_valid"
   end
 
   create_table "invoice_chat_messages", force: :cascade do |t|
@@ -2420,7 +2449,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.boolean "reimbursement_review_required", default: false, null: false
     t.index [ "invoice_id", "position" ], name: "index_invoice_line_items_on_invoice_id_and_position"
     t.index [ "invoice_id" ], name: "index_invoice_line_items_on_invoice_id"
-    t.check_constraint "line_kind::text = ANY (ARRAY['service_fee'::character varying, 'reimbursement'::character varying]::text[])", name: "invoice_line_kind_valid"
+    t.check_constraint "line_kind::text = ANY (ARRAY['service_fee'::character varying::text, 'reimbursement'::character varying::text])", name: "invoice_line_kind_valid"
   end
 
   create_table "invoice_number_sequences", force: :cascade do |t|
@@ -2580,6 +2609,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.datetime "voided_at"
     t.boolean "due_date_manual", default: false, null: false
     t.boolean "service_period_manual", default: false, null: false
+    t.index "invoice_billing_profile_id, ltrim((invoice_number)::text, '0'::text)", name: "index_invoices_on_billing_profile_normalized_number", unique: true, where: "((invoice_number)::text ~ '^[0-9]+$'::text)"
     t.index [ "company_id", "invoice_date" ], name: "index_invoices_on_company_id_and_invoice_date"
     t.index [ "company_id", "status" ], name: "index_invoices_on_company_id_and_status"
     t.index [ "company_id" ], name: "index_invoices_on_company_id"
@@ -2587,7 +2617,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.index [ "finance_book_id" ], name: "index_invoices_on_finance_book_id"
     t.index [ "id", "finance_book_id" ], name: "index_invoices_on_id_and_finance_book_id", unique: true
     t.index [ "invoice_billing_profile_id", "invoice_number" ], name: "index_invoices_on_billing_profile_invoice_number", unique: true
-    t.index "invoice_billing_profile_id, ltrim((invoice_number)::text, '0'::text)", name: "index_invoices_on_billing_profile_normalized_number", unique: true, where: "((invoice_number)::text ~ '^[0-9]+$'::text)"
     t.index [ "invoice_billing_profile_id", "status", "due_date" ], name: "idx_invoices_on_profile_status_due_date"
     t.index [ "invoice_billing_profile_id" ], name: "index_invoices_on_invoice_billing_profile_id"
     t.index [ "invoice_recipient_id" ], name: "index_invoices_on_invoice_recipient_id"
@@ -2620,9 +2649,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.string "transaction_type", null: false
     t.datetime "updated_at", null: false
     t.bigint "company_id"
+    t.index [ "company_id", "employee_loan_id" ], name: "index_loan_transactions_on_company_id_and_employee_loan_id"
     t.index [ "employee_loan_id", "pay_period_id" ], name: "idx_loan_txns_on_loan_and_pp"
     t.index [ "employee_loan_id", "payroll_item_id" ], name: "idx_loan_txns_unique_payroll_payment", unique: true, where: "(((source)::text = 'payroll'::text) AND ((transaction_type)::text = 'payment'::text) AND (payroll_item_id IS NOT NULL))"
-    t.index [ "company_id", "employee_loan_id" ], name: "index_loan_transactions_on_company_id_and_employee_loan_id"
     t.index [ "employee_loan_id" ], name: "index_loan_transactions_on_employee_loan_id"
     t.index [ "pay_period_id" ], name: "index_loan_transactions_on_pay_period_id"
     t.index [ "payroll_item_id" ], name: "index_loan_transactions_on_payroll_item_id"
@@ -2658,9 +2687,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.string "service_period"
     t.datetime "updated_at", null: false
     t.bigint "company_id"
+    t.index [ "company_id", "non_employee_check_id" ], name: "idx_on_company_id_non_employee_check_id_26324526eb"
     t.index [ "non_employee_check_id", "position" ], name: "idx_ne_check_line_items_on_check_position"
     t.index [ "non_employee_check_id" ], name: "idx_ne_check_line_items_on_check"
-    t.index [ "company_id", "non_employee_check_id" ], name: "idx_on_company_id_non_employee_check_id_26324526eb"
     t.check_constraint "amount > 0::numeric", name: "non_employee_check_line_items_amount_positive"
   end
 
@@ -3095,6 +3124,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'setup_applied'::character varying::text, 'approved'::character varying::text])", name: "payroll_go_live_reviews_status_check"
   end
 
+  create_table "payroll_history_review_items", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "pay_period_id"
+    t.bigint "payroll_item_id"
+    t.bigint "employee_id"
+    t.bigint "historical_import_batch_id"
+    t.bigint "resolved_by_id"
+    t.integer "tax_year", null: false
+    t.string "subject_type", null: false
+    t.string "subject_digest", null: false
+    t.string "status", default: "open", null: false
+    t.string "resolution_code"
+    t.text "resolution_reference"
+    t.datetime "resolved_at"
+    t.datetime "reopened_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "tax_year", "employee_id" ], name: "idx_payroll_history_review_gap", unique: true, where: "((subject_type)::text = 'legacy_basis_gap'::text)"
+    t.index [ "company_id", "tax_year", "subject_type", "pay_period_id", "payroll_item_id", "historical_import_batch_id" ], name: "idx_payroll_history_review_subject", unique: true, where: "((subject_type)::text <> 'legacy_basis_gap'::text)", nulls_not_distinct: true
+    t.index [ "company_id" ], name: "index_payroll_history_review_items_on_company_id"
+    t.index [ "employee_id" ], name: "index_payroll_history_review_items_on_employee_id"
+    t.index [ "historical_import_batch_id" ], name: "idx_on_historical_import_batch_id_48322a42e5"
+    t.index [ "pay_period_id" ], name: "index_payroll_history_review_items_on_pay_period_id"
+    t.index [ "payroll_item_id" ], name: "index_payroll_history_review_items_on_payroll_item_id"
+    t.index [ "resolved_by_id" ], name: "index_payroll_history_review_items_on_resolved_by_id"
+    t.check_constraint "\nCASE\n    WHEN subject_type::text = 'voided_pay_period'::text THEN pay_period_id IS NOT NULL AND num_nonnulls(payroll_item_id, employee_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = ANY (ARRAY['reversed_payroll_item'::character varying::text, 'legacy_disposition'::character varying::text]) THEN payroll_item_id IS NOT NULL AND employee_id IS NOT NULL AND num_nonnulls(pay_period_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = 'legacy_basis_gap'::text THEN employee_id IS NOT NULL AND num_nonnulls(pay_period_id, payroll_item_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = 'imported_history'::text THEN historical_import_batch_id IS NOT NULL AND num_nonnulls(pay_period_id, payroll_item_id, employee_id) = 0\n    ELSE false\nEND", name: "payroll_history_review_subject_shape"
+    t.check_constraint "status::text = 'open'::text AND num_nonnulls(resolution_code, resolution_reference, resolved_at, resolved_by_id) = 0 OR status::text = 'resolved'::text AND num_nonnulls(resolution_code, resolution_reference, resolved_at) = 3 AND (resolved_by_id IS NOT NULL OR resolution_code::text = 'legacy_basis_proven'::text) AND char_length(btrim(resolution_reference)) >= 10 AND char_length(btrim(resolution_reference)) <= 1000", name: "payroll_history_review_resolution_shape"
+  end
+
   create_table "payroll_imports", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "excel_filename"
@@ -3179,8 +3237,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.decimal "week2_hours", precision: 8, scale: 2, default: "0.0", null: false
     t.decimal "week2_tips", precision: 10, scale: 2, default: "0.0", null: false
     t.bigint "company_id"
-    t.index [ "company_id", "payroll_intake_session_id" ], name: "idx_on_company_id_payroll_intake_session_id_75cec87bce"
     t.index [ "applied_payroll_item_id" ], name: "index_payroll_intake_rows_on_applied_payroll_item_id"
+    t.index [ "company_id", "payroll_intake_session_id" ], name: "idx_on_company_id_payroll_intake_session_id_75cec87bce"
     t.index [ "dispositioned_by_id" ], name: "idx_payroll_intake_rows_dispositioned_by"
     t.index [ "employee_id" ], name: "index_payroll_intake_rows_on_employee_id"
     t.index [ "payroll_intake_session_id", "disposition" ], name: "idx_payroll_intake_rows_session_disposition"
@@ -3269,38 +3327,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.decimal "rate", precision: 12, scale: 6
     t.datetime "updated_at", null: false
     t.bigint "company_id"
-    t.index [ "payroll_item_id", "category", "label" ], name: "idx_pi_earnings_on_pi_cat_label", unique: true
     t.index [ "company_id", "payroll_item_id" ], name: "index_payroll_item_earnings_on_company_id_and_payroll_item_id"
+    t.index [ "payroll_item_id", "category", "label" ], name: "idx_pi_earnings_on_pi_cat_label", unique: true
     t.index [ "payroll_item_id" ], name: "index_payroll_item_earnings_on_payroll_item_id"
-  end
-
-  create_table "payroll_history_review_items", force: :cascade do |t|
-    t.bigint "company_id", null: false
-    t.bigint "pay_period_id"
-    t.bigint "payroll_item_id"
-    t.bigint "employee_id"
-    t.bigint "historical_import_batch_id"
-    t.bigint "resolved_by_id"
-    t.integer "tax_year", null: false
-    t.string "subject_type", null: false
-    t.string "subject_digest", null: false
-    t.string "status", default: "open", null: false
-    t.string "resolution_code"
-    t.text "resolution_reference"
-    t.datetime "resolved_at"
-    t.datetime "reopened_at"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index [ "company_id", "tax_year", "employee_id" ], name: "idx_payroll_history_review_gap", unique: true, where: "((subject_type)::text = 'legacy_basis_gap'::text)"
-    t.index [ "company_id", "tax_year", "subject_type", "pay_period_id", "payroll_item_id", "historical_import_batch_id" ], name: "idx_payroll_history_review_subject", unique: true, where: "((subject_type)::text <> 'legacy_basis_gap'::text)", nulls_not_distinct: true
-    t.index [ "company_id" ], name: "index_payroll_history_review_items_on_company_id"
-    t.index [ "employee_id" ], name: "index_payroll_history_review_items_on_employee_id"
-    t.index [ "historical_import_batch_id" ], name: "idx_on_historical_import_batch_id_48322a42e5"
-    t.index [ "pay_period_id" ], name: "index_payroll_history_review_items_on_pay_period_id"
-    t.index [ "payroll_item_id" ], name: "index_payroll_history_review_items_on_payroll_item_id"
-    t.index [ "resolved_by_id" ], name: "index_payroll_history_review_items_on_resolved_by_id"
-    t.check_constraint "\nCASE\n    WHEN subject_type::text = 'voided_pay_period'::text THEN pay_period_id IS NOT NULL AND num_nonnulls(payroll_item_id, employee_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = ANY (ARRAY['reversed_payroll_item'::character varying, 'legacy_disposition'::character varying]::text[]) THEN payroll_item_id IS NOT NULL AND employee_id IS NOT NULL AND num_nonnulls(pay_period_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = 'legacy_basis_gap'::text THEN employee_id IS NOT NULL AND num_nonnulls(pay_period_id, payroll_item_id, historical_import_batch_id) = 0\n    WHEN subject_type::text = 'imported_history'::text THEN historical_import_batch_id IS NOT NULL AND num_nonnulls(pay_period_id, payroll_item_id, employee_id) = 0\n    ELSE false\nEND", name: "payroll_history_review_subject_shape"
-    t.check_constraint "status::text = 'open'::text AND num_nonnulls(resolution_code, resolution_reference, resolved_at, resolved_by_id) = 0 OR status::text = 'resolved'::text AND num_nonnulls(resolution_code, resolution_reference, resolved_at) = 3 AND (resolved_by_id IS NOT NULL OR resolution_code::text = 'legacy_basis_proven'::text) AND char_length(btrim(resolution_reference)) >= 10 AND char_length(btrim(resolution_reference)) <= 1000", name: "payroll_history_review_resolution_shape"
   end
 
   create_table "payroll_item_fica_basis_proofs", force: :cascade do |t|
@@ -4510,8 +4539,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.string "request_digest", null: false
     t.datetime "updated_at", null: false
     t.bigint "company_id"
-    t.index [ "company_id", "payroll_item_id" ], name: "idx_on_company_id_payroll_item_id_b591709100"
     t.index [ "command_id" ], name: "index_time_tracking_financial_correction_links_on_command_id", unique: true
+    t.index [ "company_id", "payroll_item_id" ], name: "idx_on_company_id_payroll_item_id_b591709100"
     t.index [ "event_id" ], name: "index_time_tracking_financial_correction_links_on_event_id", unique: true
     t.index [ "original_allocation_id", "payroll_item_id" ], name: "idx_financial_source_successor_item", unique: true
     t.index [ "original_allocation_id", "predecessor_payroll_item_id" ], name: "idx_financial_source_successor_generation", unique: true
@@ -4552,8 +4581,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.jsonb "warnings", default: [], null: false
     t.bigint "company_id"
     t.index [ "applied_by_id" ], name: "index_time_tracking_imports_on_applied_by_id"
-    t.index [ "pay_period_id", "time_tracking_source_id", "start_date", "end_date", "source_payload_hash" ], name: "idx_time_tracking_imports_idempotency", unique: true
     t.index [ "company_id", "pay_period_id" ], name: "index_time_tracking_imports_on_company_id_and_pay_period_id"
+    t.index [ "pay_period_id", "time_tracking_source_id", "start_date", "end_date", "source_payload_hash" ], name: "idx_time_tracking_imports_idempotency", unique: true
     t.index [ "pay_period_id" ], name: "index_time_tracking_imports_on_pay_period_id"
     t.index [ "reconciled_by_id" ], name: "index_time_tracking_imports_on_reconciled_by_id"
     t.index [ "source_processing_status" ], name: "index_time_tracking_imports_on_source_processing_status"
@@ -4923,13 +4952,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.decimal "total_hours", precision: 12, scale: 2, default: "0.0", null: false
     t.string "trigger", default: "manual", null: false
     t.datetime "updated_at", null: false
-    t.index [ "organization_id" ], name: "index_work_hour_imports_on_organization_id"
-    t.index [ "organization_id" ], name: "index_work_hour_imports_one_active_per_organization", unique: true, where: "((status)::text = ANY ((ARRAY['queued'::character varying, 'running'::character varying])::text[]))"
     t.index [ "organization_id", "created_at" ], name: "index_work_hour_imports_on_organization_id_and_created_at"
+    t.index [ "organization_id" ], name: "index_work_hour_imports_on_organization_id"
+    t.index [ "organization_id" ], name: "index_work_hour_imports_one_active_per_organization", unique: true, where: "((status)::text = ANY (ARRAY[('queued'::character varying)::text, ('running'::character varying)::text]))"
     t.index [ "requested_by_id" ], name: "index_work_hour_imports_on_requested_by_id"
     t.check_constraint "range_end >= range_start", name: "work_hour_import_range_order"
-    t.check_constraint "status::text = ANY (ARRAY['queued'::character varying, 'running'::character varying, 'succeeded'::character varying, 'failed'::character varying]::text[])", name: "work_hour_import_status_valid"
-    t.check_constraint "trigger::text = ANY (ARRAY['manual'::character varying, 'scheduled'::character varying]::text[])", name: "work_hour_import_trigger_valid"
+    t.check_constraint "status::text = ANY (ARRAY['queued'::character varying::text, 'running'::character varying::text, 'succeeded'::character varying::text, 'failed'::character varying::text])", name: "work_hour_import_status_valid"
+    t.check_constraint "trigger::text = ANY (ARRAY['manual'::character varying::text, 'scheduled'::character varying::text])", name: "work_hour_import_trigger_valid"
   end
 
   create_table "work_hour_rows", force: :cascade do |t|
@@ -4959,7 +4988,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
     t.index [ "organization_id", "tax_user_id" ], name: "index_work_hour_rows_on_organization_id_and_tax_user_id"
     t.index [ "organization_id", "work_date" ], name: "index_work_hour_rows_on_organization_id_and_work_date"
     t.index [ "work_hour_import_id" ], name: "index_work_hour_rows_on_work_hour_import_id"
-    t.check_constraint "approval_state::text = ANY (ARRAY['approved'::character varying, 'clock'::character varying, 'pending'::character varying]::text[])", name: "work_hour_row_approval_state_valid"
+    t.check_constraint "approval_state::text = ANY (ARRAY['approved'::character varying::text, 'clock'::character varying::text, 'pending'::character varying::text])", name: "work_hour_row_approval_state_valid"
   end
 
   create_table "work_hour_staff_links", force: :cascade do |t|
@@ -5130,6 +5159,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
   add_foreign_key "employee_document_requirements", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_document_requirements_employee_tenant"
   add_foreign_key "employee_document_requirements", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "employee_document_requirements", "users", column: "reviewed_by_id", on_delete: :nullify
+  add_foreign_key "employee_documents", "companies"
+  add_foreign_key "employee_documents", "employee_documents", column: [ "replaces_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_replaces_document_id"
+  add_foreign_key "employee_documents", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_employee_id"
+  add_foreign_key "employee_documents", "historical_paychecks", column: [ "historical_paycheck_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_historical_paycheck_id"
+  add_foreign_key "employee_documents", "payroll_items", column: [ "payroll_item_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_payroll_item_id"
   add_foreign_key "employee_loans", "companies"
   add_foreign_key "employee_loans", "deduction_types"
   add_foreign_key "employee_loans", "employees"
@@ -5414,6 +5448,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
   add_foreign_key "payroll_go_live_reviews", "users", column: "operations_signed_by_id", on_delete: :nullify
   add_foreign_key "payroll_go_live_reviews", "users", column: "setup_applied_by_id", on_delete: :nullify
   add_foreign_key "payroll_go_live_reviews", "users", column: "technical_signed_by_id", on_delete: :nullify
+  add_foreign_key "payroll_history_review_items", "companies", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "employees", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "historical_import_batches", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "pay_periods", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "payroll_items", on_delete: :restrict
+  add_foreign_key "payroll_history_review_items", "users", column: "resolved_by_id", on_delete: :restrict
   add_foreign_key "payroll_imports", "pay_periods"
   add_foreign_key "payroll_imports", "pay_periods", column: [ "pay_period_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_imports_company_parent"
   add_foreign_key "payroll_imports", "payroll_intake_sessions", on_delete: :restrict
@@ -5438,12 +5478,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_100000) do
   add_foreign_key "payroll_item_deductions", "payroll_items"
   add_foreign_key "payroll_item_deductions", "payroll_items", column: [ "payroll_item_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_item_deductions_company_parent"
   add_foreign_key "payroll_item_earnings", "payroll_items"
-  add_foreign_key "payroll_history_review_items", "companies", on_delete: :restrict
-  add_foreign_key "payroll_history_review_items", "employees", on_delete: :restrict
-  add_foreign_key "payroll_history_review_items", "historical_import_batches", on_delete: :restrict
-  add_foreign_key "payroll_history_review_items", "pay_periods", on_delete: :restrict
-  add_foreign_key "payroll_history_review_items", "payroll_items", on_delete: :restrict
-  add_foreign_key "payroll_history_review_items", "users", column: "resolved_by_id", on_delete: :restrict
   add_foreign_key "payroll_item_earnings", "payroll_items", column: [ "payroll_item_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_item_earnings_company_parent"
   add_foreign_key "payroll_item_fica_basis_proofs", "companies", on_delete: :restrict
   add_foreign_key "payroll_item_fica_basis_proofs", "payroll_items", on_delete: :restrict

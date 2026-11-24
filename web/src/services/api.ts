@@ -6674,8 +6674,36 @@ export interface HistoricalReportResponse {
   meta: PaginationMeta;
 }
 
+export type QuickbooksStubPreviewPage =
+  | {
+      page: number;
+      status: 'matched';
+      employee_name: string;
+      pay_date: string;
+      net_pay: string;
+      check_number: string | null;
+      review_token: string;
+    }
+  | { page: number; status: 'full_ssn' | 'unreadable' | 'ambiguous' | 'duplicate_page' | 'unmatched' };
+
+export const quickbooksStubUploadsApi = {
+  preview(companyId: number, file: File) {
+    const form = new FormData();
+    form.append('upload', file);
+    return api.postForm<{ data: QuickbooksStubPreviewPage[] }>('/admin/quickbooks_stub_upload/preview', form, { companyId });
+  },
+  confirm(companyId: number, file: File, tokens: string[]) {
+    const form = new FormData();
+    form.append('upload', file);
+    tokens.forEach((token) => form.append('review_tokens[]', token));
+    return api.postForm<{ data: Array<{ document_id: number; historical_paycheck_id: number }> }>(
+      '/admin/quickbooks_stub_upload/confirm', form, { companyId },
+    );
+  },
+};
+
 export const historicalImportsApi = {
-  list: (params?: { page?: number; per_page?: number; exclude_source_system?: string }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }> =>
+  list: (params?: { page?: number; per_page?: number; exclude_source_system?: string }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; original_stub_upload_enabled?: boolean; import_providers: HistoricalImportProvider[] } }> =>
     api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }>('/admin/historical_imports', params),
   show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }): Promise<{ data: HistoricalImportDetail; meta: PaginationMeta }> =>
     api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),
