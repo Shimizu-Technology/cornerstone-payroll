@@ -35,11 +35,11 @@ module EmployeeContactHygiene
 
       # Per-company aggregate counts (no PII — only company_id, normalized email, counts).
       per_company_rows = Employee.where(company_id: target_ids)
-        .where(EmployeeContactValidator.present_sql("email"))
-        .group(:company_id, Arel.sql(EmployeeContactValidator.normalized_email_sql))
+        .where(EmployeeContactValidator.present_node(Employee.arel_table[:email]))
+        .group(:company_id, EmployeeContactValidator.normalized_email_node)
         .pluck(
           :company_id,
-          Arel.sql(EmployeeContactValidator.normalized_email_sql),
+          EmployeeContactValidator.normalized_email_node,
           Arel.sql("COUNT(*)"),
           Arel.sql("SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END)")
         )
@@ -153,10 +153,10 @@ module EmployeeContactHygiene
       return {} if company_ids.empty?
 
       Employee.where(company_id: company_ids)
-        .where(EmployeeContactValidator.present_sql("employees.email"))
-        .group(Arel.sql(EmployeeContactValidator.normalized_email_sql("employees.email")))
+        .where(EmployeeContactValidator.present_node(Employee.arel_table[:email]))
+        .group(EmployeeContactValidator.normalized_email_node)
         .pluck(
-          Arel.sql(EmployeeContactValidator.normalized_email_sql("employees.email")),
+          EmployeeContactValidator.normalized_email_node,
           Arel.sql("COUNT(*)"),
           Arel.sql("COUNT(DISTINCT employees.company_id)")
         )

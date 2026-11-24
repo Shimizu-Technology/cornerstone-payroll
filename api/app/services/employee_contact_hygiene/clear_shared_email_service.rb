@@ -38,7 +38,7 @@ module EmployeeContactHygiene
         authorize!
 
         matching = @company.employees
-          .where("#{EmployeeContactValidator.normalized_email_sql} = ?", normalized_email)
+          .where(EmployeeContactValidator.normalized_email_node.eq(normalized_email))
           .order(:id)
           .lock
           .to_a
