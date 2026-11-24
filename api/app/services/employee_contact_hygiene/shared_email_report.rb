@@ -112,6 +112,11 @@ module EmployeeContactHygiene
         },
         can_manage_placeholders: StaffRolePolicy.allowed?(@actor, :manage_organization),
         marked_placeholders: marked_placeholders.to_a.sort,
+        # Listed even when no employee uses the address any more, so staff can
+        # still unmark it. Configured addresses can't be unmarked here.
+        placeholder_marks: marked_placeholders.to_a.sort.map do |email|
+          { email: email, unmarkable: db_marked_placeholders.include?(email) && !configured_placeholders.include?(email) }
+        end,
         companies: company_entries
       }
     end
@@ -128,6 +133,7 @@ module EmployeeContactHygiene
         },
         can_manage_placeholders: StaffRolePolicy.allowed?(@actor, :manage_organization),
         marked_placeholders: [],
+        placeholder_marks: [],
         companies: []
       }
     end
