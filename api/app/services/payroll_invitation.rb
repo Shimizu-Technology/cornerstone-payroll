@@ -144,6 +144,25 @@ class PayrollInvitation
     raise BindingRefused, "This Clerk user ID is already bound"
   end
 
+  # Makes sure a Clerk invitation can't be accepted any more: :closed (it
+  # expired, was revoked, is gone, or was revoked now), :accepted (someone
+  # already created a Clerk account with it), or :unconfirmed (Clerk couldn't
+  # be asked or refused). A pending invitation counts as closed only once
+  # Clerk confirms its revocation, because acceptance can race this call.
+  def close_invitation(invitation_id)
+    case @clerk.invitation_status(invitation_id)
+    when "accepted" then :accepted
+    when "expired", "revoked", :not_found then :closed
+    when "pending"
+      result = @clerk.revoke_invitation(invitation_id)
+      return :closed if result[:success]
+
+      result[:error_code] == "invitation_already_accepted" ? :accepted : :unconfirmed
+    else
+      :unconfirmed
+    end
+  end
+
   private
 
   def locked_bind(user, binding)
@@ -211,19 +230,12 @@ class PayrollInvitation
   end
 
   def close_previous_invitation(invitation_id)
-    case @clerk.invitation_status(invitation_id)
-    when "accepted"
-      return { success: false, error: ACCEPTED_MESSAGE }
-    when "expired", "revoked", :not_found
-      return
-    when "pending"
-      # Acceptance can race this request. Only rotate once Clerk confirms revocation.
-      result = @clerk.revoke_invitation(invitation_id)
-      return if result[:success]
-      return { success: false, error: ACCEPTED_MESSAGE } if result[:error_code] == "invitation_already_accepted"
+    case close_invitation(invitation_id)
+    when :closed then nil
+    when :accepted then { success: false, error: ACCEPTED_MESSAGE }
+    else
+      { success: false, error: "Could not confirm the previous invitation is closed. Its sign-in details were preserved. Try again or contact an administrator." }
     end
-
-    { success: false, error: "Could not confirm the previous invitation is closed. Its sign-in details were preserved. Try again or contact an administrator." }
   end
 
   def bind!(user, subject, actor:, request:, source:, **metadata)

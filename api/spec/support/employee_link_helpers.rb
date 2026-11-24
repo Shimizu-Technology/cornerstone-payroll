@@ -31,6 +31,9 @@ module EmployeeLinkHelpers
       allow(clerk).to receive(:invitation_status) { |id| id.present? ? "pending" : nil }
       allow(clerk).to receive(:revoke_invitation).and_return(success: true)
       allow(clerk).to receive(:fetch_user).and_return(nil)
+      allow(clerk).to receive(:users_with_email).and_return([])
+      allow(clerk).to receive(:revoke_user_sessions).and_return(success: true, revoked: 0)
+      allow(clerk).to receive(:delete_user).and_return(success: true)
     end
 
     base.around do |example|

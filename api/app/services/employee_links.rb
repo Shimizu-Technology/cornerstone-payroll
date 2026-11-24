@@ -21,6 +21,9 @@
 module EmployeeLinks
   class Error < StandardError; end
   class Forbidden < Error; end
+  # A resend found that the person already created their Clerk account from
+  # the open sign-up (it isn't bound yet), so nothing was rotated.
+  class SignUpAccepted < Error; end
 
   AUDIT_RECORD_TYPE = "employee_account_links"
 

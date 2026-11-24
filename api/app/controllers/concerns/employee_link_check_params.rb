@@ -7,10 +7,20 @@
 # never act on different values.
 #
 # Controllers add `before_action :reject_query_credentials!` to those actions.
+#
+# The response floor (EmployeeLinks::ResponseFloor) is applied by the
+# outermost around_action, after the action, its RLS scope and its database
+# connection lease have all finished, and after this thread's connections
+# are handed back to the pool: the wait never holds a connection from the
+# employee API's small pool.
 module EmployeeLinkCheckParams
   extend ActiveSupport::Concern
 
   INVALID = "Invalid activation request"
+
+  included do
+    around_action :apply_response_floor, prepend: true
+  end
 
   private
 
@@ -36,7 +46,17 @@ module EmployeeLinkCheckParams
     @link_check_started_at = EmployeeLinks::ResponseFloor.now
   end
 
+  # Asks for the floor on this response; apply_response_floor waits once the
+  # action is done.
   def wait_for_response_floor
-    EmployeeLinks::ResponseFloor.wait_since(@link_check_started_at) if @link_check_started_at
+    @response_floor_requested = true
+  end
+
+  def apply_response_floor
+    yield
+    return unless @response_floor_requested && @link_check_started_at
+
+    ActiveRecord::Base.connection_handler.clear_active_connections!(:all)
+    EmployeeLinks::ResponseFloor.wait_since(@link_check_started_at)
   end
 end
