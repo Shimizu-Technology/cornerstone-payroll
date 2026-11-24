@@ -119,18 +119,19 @@ RSpec.describe "Company RLS", :rls do
     expect(settings).to eq([ "", "" ])
   end
 
-  it "keeps the outer company lease after a nested raw system lease" do
-    # Shows why a nested system read isn't supported on main: the inner lease
-    # clears the outer lease's marker, so later queries in the company scope
-    # look unscoped. Enable with the TenantScope fix (separate PR).
-    pending "RlsConnection#with_tenant_settings is not re-entrant"
+  it "refuses a nested raw lease and keeps the outer company lease intact" do
+    # A nested lease used to clear the outer lease's marker on exit, so later
+    # queries in the company scope looked unscoped.
     TenantScope.with_company(1) do
       pool.with_connection do |connection|
-        connection.with_tenant_settings(nil, "system") { expect(settings).to eq([ "", "system" ]) }
+        expect { connection.with_tenant_settings(nil, "system") { raise "never runs" } }
+          .to raise_error(RlsConnection::NestedTenantSettingsError, /nest TenantScope instead/)
         expect(settings).to eq([ "1", "company" ])
         expect(connection.tenant_settings_active?).to be(true)
+        expect { Department.where(company_id: 1).exists? }.not_to raise_error
       end
     end
+    expect(settings).to eq([ "", "" ])
   end
 
   it "restores an already leased session's prior values on exception" do

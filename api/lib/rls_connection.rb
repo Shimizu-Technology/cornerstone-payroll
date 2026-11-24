@@ -14,7 +14,29 @@ module RlsConnection
     @payroll_tenant_settings.present? && owner == ActiveSupport::IsolatedExecutionState.context
   end
 
-  def with_tenant_settings(company_id, mode)
+  class NestedTenantSettingsError < StandardError; end
+
+  # A nested lease would clear the outer lease's marker on exit, so the outer
+  # scope's later queries would look unscoped. Refuse it before touching any
+  # setting; nest TenantScope instead, which allows only identical nesting.
+  def with_tenant_settings(company_id, mode, &block)
+    if tenant_settings_active?
+      raise NestedTenantSettingsError, "Tenant settings are already active on this connection; nest TenantScope instead"
+    end
+
+    lease_tenant_settings(company_id, mode, &block)
+  end
+
+  def reset_tenant_settings
+    return unless RlsContextGuard.enabled? && pool.db_config.primary?
+
+    @payroll_tenant_settings = nil
+    restore_tenant_settings([ "", "" ])
+  end
+
+  private
+
+  def lease_tenant_settings(company_id, mode)
     previous = nil
     with_raw_connection(materialize_transactions: false) do |raw|
       flush_tenant_restore
@@ -29,15 +51,6 @@ module RlsConnection
     restore_tenant_settings(previous || [ "", "" ])
     clear_query_cache
   end
-
-  def reset_tenant_settings
-    return unless RlsContextGuard.enabled? && pool.db_config.primary?
-
-    @payroll_tenant_settings = nil
-    restore_tenant_settings([ "", "" ])
-  end
-
-  private
 
   # Cached tenant rows are only usable inside the lease that produced them.
   # Outside a scope, run through the normal adapter log/guard before executing.
