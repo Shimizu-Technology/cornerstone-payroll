@@ -1,0 +1,493 @@
+// Every shape the employee app reads from or sends to /api/v1/employee/*, in
+// one file, so wiring the real endpoints is a small diff.
+//
+// Where a shape is already served, it says so. The rest are written against
+// the M4 build plan (docs/MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md)
+// and marked ASSUMED. Each parser accepts what the plan describes, drops
+// entries it can't use, and never throws, so a field the API adds or renames
+// later degrades to "hidden" instead of a broken screen.
+
+/** Money arrives as a decimal string ("1234.50"), as EmployeePayStatements::Presenter#money writes it. */
+export type Money = string;
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
+
+function bool(value: unknown): boolean {
+  return value === true;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}/;
+
+/** The calendar day of an ISO date or datetime ("2027-06-30T23:59:59Z" -> "2027-06-30"), or null. */
+export function isoDate(value: unknown): string | null {
+  return typeof value === 'string' && ISO_DATE.test(value) ? value.slice(0, 10) : null;
+}
+
+const GUAM_DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'Pacific/Guam', year: 'numeric', month: '2-digit', day: '2-digit' });
+
+/** The Guam calendar day (YYYY-MM-DD) of an instant: every client is on Guam time. */
+export function guamDay(at: Date): string {
+  const parts = Object.fromEntries(GUAM_DAY.formatToParts(at).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+/**
+ * The day an access date falls on in Guam. The API sends former_access_until
+ * as an instant ("2028-03-01T23:59:59+10:00", end of that Guam day); a plain
+ * date passes through.
+ */
+export function accessDay(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (!ISO_DATE.test(value)) return null;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? null : guamDay(at);
+}
+
+const DECIMAL = /^-?\d+(?:\.\d+)?$/;
+
+function money(value: unknown): Money | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value.toFixed(2);
+  return typeof value === 'string' && DECIMAL.test(value.trim()) ? value.trim() : null;
+}
+
+/** Ids are opaque strings: payroll items and QuickBooks checks share one list. */
+function id(value: unknown): string | null {
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0 ? String(value) : null;
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : null;
+}
+
+function list(value: unknown, key: string): unknown[] {
+  if (Array.isArray(value)) return value;
+  const items = record(value)?.[key];
+  return Array.isArray(items) ? items : [];
+}
+
+function oneOf<T extends string>(value: unknown, options: readonly T[]): T | null {
+  return typeof value === 'string' && (options as readonly string[]).includes(value) ? value as T : null;
+}
+
+// ---------- GET /employee/context ----------
+// Served today as 204 with no body (M4-8a). ASSUMED (M4-2, M4-4, M4-5, §8a):
+// { first_name, status, former_access_until, next_payday, w2_delivery,
+//   features: { stubs, tax_forms, profile_requests } }
+
+export type W2Delivery = 'mailed' | 'handed_out';
+
+export interface EmployeeContextInfo {
+  firstName: string | null;
+  status: 'active' | 'former';
+  formerAccessUntil: string | null;
+  /** Shown only when the API knows it from a real upcoming pay period or a confirmed schedule (§8a). */
+  nextPayday: string | null;
+  /** Per-company W-2 setting (§8a). Null when the company hasn't set it. */
+  w2Delivery: W2Delivery | null;
+  /** The company's employee_portal.features switches. A missing switch counts as off. */
+  features: { stubs: boolean; taxForms: boolean; profileRequests: boolean };
+}
+
+export function parseContext(data: unknown): EmployeeContextInfo {
+  const body = record(data) ?? {};
+  const features = record(body.features) ?? {};
+  return {
+    firstName: text(body.first_name),
+    status: body.status === 'former' ? 'former' : 'active',
+    formerAccessUntil: accessDay(body.former_access_until),
+    nextPayday: isoDate(body.next_payday),
+    w2Delivery: oneOf(body.w2_delivery, ['mailed', 'handed_out'] as const),
+    features: { stubs: bool(features.stubs), taxForms: bool(features.tax_forms), profileRequests: bool(features.profile_requests) },
+  };
+}
+
+// ---------- GET /employee/statements?year=&page= ----------
+// Each row is EmployeePayStatements::Presenter#summary (served to AIRE today),
+// plus ASSUMED M4-4 fields: source, original_pdf, corrected, pdf_available.
+// The list is ASSUMED to be { statements: [...], years: [2026, 2025], next_page }.
+
+export type StatementSource = 'payroll' | 'quickbooks';
+export type PaymentMethod = 'direct_deposit' | 'paper_check';
+export type PaymentStatus = 'issued' | 'prepared' | 'pending' | 'voided';
+
+export interface StatementPayment {
+  method: PaymentMethod | null;
+  status: PaymentStatus;
+  issuedOn: string | null;
+  checkNumberLast4: string | null;
+}
+
+export interface StatementSummary {
+  id: string;
+  source: StatementSource;
+  payDate: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** "regular", "bonus", "adjustment"…: only regular checks are compared with the one before. */
+  runPurpose: string | null;
+  grossPay: Money | null;
+  netPay: Money | null;
+  totalHours: string | null;
+  payment: StatementPayment;
+  /** A frozen PDF can be downloaded (payroll checks once posted). */
+  pdfAvailable: boolean;
+  /** QuickBooks checks only: Cornerstone's original stub was posted for this check. */
+  originalPdf: boolean;
+  /** A corrected revision replaced the first one posted. */
+  corrected: boolean;
+}
+
+function parsePayment(value: unknown): StatementPayment {
+  const payment = record(value) ?? {};
+  return {
+    method: oneOf(payment.method, ['direct_deposit', 'paper_check'] as const),
+    status: oneOf(payment.status, ['issued', 'prepared', 'pending', 'voided'] as const) ?? 'pending',
+    issuedOn: isoDate(payment.issued_on),
+    checkNumberLast4: text(payment.check_number_last4),
+  };
+}
+
+export function parseStatementSummary(value: unknown): StatementSummary | null {
+  const row = record(value);
+  if (!row) return null;
+  const period = record(row.pay_period) ?? {};
+  const statementId = id(row.id);
+  // QuickBooks rows (EmployeeDocuments::QuickbooksHistory) say pay_date at the top level.
+  const payDate = isoDate(row.check_date) ?? isoDate(period.pay_date) ?? isoDate(row.pay_date);
+  if (!statementId || !payDate) return null;
+  const source = row.source === 'quickbooks' ? 'quickbooks' : 'payroll';
+  return {
+    id: statementId,
+    source,
+    payDate,
+    periodStart: isoDate(period.start_date) ?? isoDate(row.period_start),
+    periodEnd: isoDate(period.end_date) ?? isoDate(row.period_end),
+    runPurpose: text(period.run_purpose),
+    grossPay: money(row.gross_pay),
+    netPay: money(row.net_pay),
+    totalHours: money(row.total_hours ?? row.hours_total),
+    payment: parsePayment(row.payment),
+    pdfAvailable: source === 'payroll' && row.pdf_available !== false,
+    originalPdf: source === 'quickbooks' && bool(row.original_pdf),
+    corrected: bool(row.corrected),
+  };
+}
+
+export interface StatementPage {
+  statements: StatementSummary[];
+  years: number[];
+  nextPage: number | null;
+}
+
+export function parseStatementPage(data: unknown): StatementPage {
+  const body = record(data) ?? {};
+  const statements = list(data, 'statements').flatMap((row) => parseStatementSummary(row) ?? []);
+  const years = Array.isArray(body.years)
+    ? body.years.filter((year): year is number => Number.isInteger(year) && year > 1900 && year < 3000)
+    : [];
+  const nextPage = Number.isInteger(body.next_page) && (body.next_page as number) > 0 ? body.next_page as number : null;
+  return { statements, years, nextPage };
+}
+
+// ---------- GET /employee/statements/:id ----------
+// EmployeePayStatements::Presenter#detail (served to AIRE today).
+
+export interface EarningLine {
+  label: string;
+  hours: string | null;
+  rate: Money | null;
+  amount: Money | null;
+  ytd: Money | null;
+  /** "regular", "overtime", "tips"… from PayStubGenerator#statement_earning_kind. */
+  kind: string | null;
+}
+
+export interface AmountLine {
+  label: string;
+  amount: Money | null;
+  ytd: Money | null;
+}
+
+export interface StatementDetail extends StatementSummary {
+  earnings: EarningLine[];
+  taxes: AmountLine[];
+  deductions: AmountLine[];
+  otherPay: AmountLine[];
+  ytdGross: Money | null;
+  ytdNet: Money | null;
+  /** QuickBooks checks with recorded adjustments: "Includes recorded payroll adjustments." */
+  note: string | null;
+}
+
+function amountLines(value: unknown): AmountLine[] {
+  return (Array.isArray(value) ? value : []).flatMap((item) => {
+    const line = record(item);
+    const label = text(line?.label);
+    return line && label ? [{ label, amount: money(line.amount), ytd: money(line.ytd) }] : [];
+  });
+}
+
+export function parseStatementDetail(data: unknown): StatementDetail | null {
+  const body = record(data);
+  const summary = parseStatementSummary(body);
+  if (!body || !summary) return null;
+  const ytd = record(body.ytd) ?? {};
+  const earnings = (Array.isArray(body.earnings) ? body.earnings : []).flatMap((item) => {
+    const line = record(item);
+    const label = text(line?.label);
+    return line && label ? [{ label, hours: money(line.hours), rate: money(line.rate), amount: money(line.amount), ytd: money(line.ytd), kind: text(line.kind) }] : [];
+  });
+  return {
+    ...summary,
+    earnings,
+    taxes: amountLines(body.taxes),
+    deductions: amountLines(body.deductions),
+    otherPay: amountLines(body.other_pay),
+    ytdGross: money(ytd.gross),
+    ytdNet: money(ytd.net),
+    note: text(body.adjustment_note) ?? text(body.note),
+  };
+}
+
+// ---------- GET /employee/tax_forms ----------
+// ASSUMED (M4-5): { tax_forms: [{ id, tax_year, kind: "w2gu", status, corrected }] }
+// status "posted" can be downloaded; "withdrawn" means staff pulled it and a
+// corrected form is being prepared (no W-2c yet). PDF: /employee/tax_forms/:id/pdf.
+
+export interface TaxForm {
+  id: string;
+  taxYear: number;
+  status: 'posted' | 'withdrawn';
+  corrected: boolean;
+}
+
+export function parseTaxForms(data: unknown): TaxForm[] {
+  return list(data, 'tax_forms').flatMap((item) => {
+    const form = record(item);
+    const formId = id(form?.id);
+    const year = form?.tax_year;
+    if (!form || !formId || !Number.isInteger(year)) return [];
+    if (form.kind !== undefined && form.kind !== 'w2gu') return [];
+    return [{ id: formId, taxYear: year as number, status: form.status === 'withdrawn' ? 'withdrawn' : 'posted', corrected: bool(form.corrected) }];
+  });
+}
+
+// ---------- GET /employee/help ----------
+// Each contact is CompanyHelpContact#as_help_json (M4-9a). The endpoint is ASSUMED:
+// { help_contacts: [{ name, role, phone, email, text_ok }] }. The company's main
+// phone comes from the public branding response instead.
+
+export interface HelpContact {
+  name: string;
+  role: string | null;
+  phone: string | null;
+  email: string | null;
+  textOk: boolean;
+}
+
+// Checked before they become tel:, sms: and mailto: links, so a stray value
+// can't add a query (?cc=, ?body=) or a second address.
+const DIALABLE = /^\+?[\d\s().-]+$/;
+const EMAIL_ADDRESS = /^[^\s@<>()[\]\\,;:"?&#%/]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
+
+function dialable(value: unknown): string | null {
+  const phone = text(value);
+  if (!phone || !DIALABLE.test(phone)) return null;
+  const digits = phone.replace(/\D/g, '').length;
+  return digits >= 7 && digits <= 15 ? phone : null;
+}
+
+function emailAddress(value: unknown): string | null {
+  const email = text(value);
+  return email && email.length <= 254 && EMAIL_ADDRESS.test(email) ? email : null;
+}
+
+export function parseHelpContacts(data: unknown): HelpContact[] {
+  return list(data, 'help_contacts').flatMap((item) => {
+    const contact = record(item);
+    const name = text(contact?.name);
+    if (!contact || !name) return [];
+    const phone = dialable(contact.phone);
+    const email = emailAddress(contact.email);
+    if (!phone && !email) return [];
+    return [{ name, role: text(contact.role), phone, email, textOk: Boolean(phone) && bool(contact.text_ok) }];
+  });
+}
+
+// ---------- GET /employee/profile ----------
+// ASSUMED (M4-3, M4-7):
+// { legal_name, email, email_verified, phone, phone_confirmed,
+//   address: { address_line1, address_line2, city, state, zip },
+//   payment_method, emergency_contacts: [{ id, name, relationship, phone }],
+//   address_request: { id, status, requested: {...}, submitted_at, decided_at, decision_note } | null,
+//   other_request_pending }
+
+export interface Address {
+  line1: string;
+  line2: string;
+  city: string;
+  state: string;
+  zip: string;
+}
+
+export interface EmergencyContact {
+  id: string;
+  name: string;
+  relationship: string;
+  phone: string;
+}
+
+export type AddressRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface AddressRequest {
+  id: string;
+  status: AddressRequestStatus;
+  requested: Address;
+  submittedAt: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+}
+
+export interface EmployeeProfile {
+  legalName: string | null;
+  email: string | null;
+  emailVerified: boolean;
+  phone: string | null;
+  /** Without SMS, a code proves who the employee is, not that they own the phone (M4-3). */
+  phoneConfirmed: boolean;
+  address: Address | null;
+  paymentMethod: PaymentMethod | null;
+  emergencyContacts: EmergencyContact[];
+  addressRequest: AddressRequest | null;
+  /** A client user's change request for this employee is open, so a new one can't start yet (M4-7). */
+  otherRequestPending: boolean;
+}
+
+function parseAddress(value: unknown): Address | null {
+  const address = record(value);
+  if (!address) return null;
+  const parsed = {
+    line1: text(address.address_line1) ?? text(address.line1) ?? '',
+    line2: text(address.address_line2) ?? text(address.line2) ?? '',
+    city: text(address.city) ?? '',
+    state: text(address.state) ?? '',
+    zip: text(address.zip) ?? '',
+  };
+  return parsed.line1 || parsed.city || parsed.zip ? parsed : null;
+}
+
+export function parseProfile(data: unknown): EmployeeProfile {
+  const body = record(record(data)?.profile) ?? record(data) ?? {};
+  const request = record(body.address_request);
+  const requested = parseAddress(request?.requested);
+  const requestId = id(request?.id);
+  const status = oneOf(request?.status, ['pending', 'approved', 'rejected'] as const);
+  return {
+    legalName: text(body.legal_name),
+    email: text(body.email),
+    emailVerified: bool(body.email_verified),
+    phone: text(body.phone),
+    phoneConfirmed: bool(body.phone_confirmed),
+    address: parseAddress(body.address),
+    paymentMethod: oneOf(body.payment_method, ['direct_deposit', 'paper_check'] as const),
+    emergencyContacts: list(body.emergency_contacts, 'emergency_contacts').flatMap((item) => {
+      const contact = record(item);
+      const contactId = id(contact?.id);
+      const name = text(contact?.name);
+      return contact && contactId && name
+        ? [{ id: contactId, name, relationship: text(contact.relationship) ?? '', phone: text(contact.phone) ?? '' }] : [];
+    }),
+    addressRequest: request && requestId && status && requested ? {
+      id: requestId,
+      status,
+      requested,
+      submittedAt: isoDate(request.submitted_at),
+      decidedAt: isoDate(request.decided_at),
+      decisionNote: text(request.decision_note),
+    } : null,
+    otherRequestPending: bool(body.other_request_pending),
+  };
+}
+
+/** The address fields the API takes, named as on the employees table. */
+export function addressBody(address: Address): Record<string, string> {
+  return { address_line1: address.line1.trim(), address_line2: address.line2.trim(), city: address.city.trim(), state: address.state.trim(), zip: address.zip.trim() };
+}
+
+// ---------- Changes (M4-7), all behind step-up (M4-1) ----------
+// ASSUMED routes. Each returns the updated profile, except where noted:
+//   PATCH  /employee/profile/phone            { phone }
+//   POST   /employee/profile/email            { email }  -> 202 { verification_id }; the API emails a code
+//   POST   /employee/profile/email/confirm    { verification_id, code }
+//   POST   /employee/emergency_contacts       { name, relationship, phone }
+//   PATCH  /employee/emergency_contacts/:id   { name, relationship, phone }
+//   DELETE /employee/emergency_contacts/:id
+//   POST   /employee/address_requests         { address: {...} }
+//   PATCH  /employee/address_requests/:id     { address: {...} }
+//   DELETE /employee/address_requests/:id
+// A step-up refusal is RecentVerification's 403 { clerk_error: { reason: "reverification-error" } }.
+
+export function verificationIdFrom(data: unknown): string | null {
+  return id(record(data)?.verification_id);
+}
+
+// ---------- Sign-up, claim and reactivation (M4-2, served) ----------
+// Every check sends a token (from the invite link's #token) or a printed
+// code, plus date of birth and SSN last 4, in the JSON body only: the API
+// refuses any of them in the query string (EmployeeLinkCheckParams).
+//
+// POST /employee/activation, before any session (ActivationsController):
+//   { token | code, date_of_birth, ssn_last4, email, use_for_notices, terms_version? }
+//   -> 200 { next: "sign_up", sign_up_url, message: null }
+//   -> 200 { next: "sign_in", sign_up_url: null, message }: this email can't start a new
+//      account (it may already have one). One answer for every reason, so it never says which.
+//   -> 422 { code: "activation_failed" } for every failed check, including a locked invite
+//   -> 503 { code: "activation_unavailable" }
+// POST /employee/links/claim (AccountController#claim) and
+// POST /employee/links/reactivate (ReactivationsController), signed in, behind step-up:
+//   { token | code, date_of_birth, ssn_last4 } -> 201 { link: { id, company_name, ... } }
+//   -> 404 { code: "claim_failed" } for every failed check, including a locked invite
+// 5 failed checks lock the invite for 24 hours, but the answer stays the same
+// 422 or 404 (no 423), so a lock never says the details were close.
+// terms_version is sent when the build has it; the API ignores it until M4-6.
+
+export interface IdentityCheck {
+  token?: string;
+  code?: string;
+  dateOfBirth: string;
+  ssnLast4: string;
+}
+
+export function identityBody(check: IdentityCheck): Record<string, string> {
+  const body: Record<string, string> = { date_of_birth: check.dateOfBirth, ssn_last4: check.ssnLast4 };
+  if (check.token) body.token = check.token;
+  else if (check.code) body.code = check.code;
+  return body;
+}
+
+export type ActivationOutcome = { next: 'sign_up'; signUpUrl: string } | { next: 'sign_in' };
+
+/** The Clerk invitation URL the API returns. Only https (or this site, in development) is followed. */
+export function signUpUrlFrom(data: unknown, pageOrigin: string): string | null {
+  const raw = text(record(data)?.sign_up_url);
+  if (!raw) return null;
+  try {
+    const url = new URL(raw, pageOrigin);
+    return url.protocol === 'https:' || url.origin === pageOrigin ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Null when the answer is neither outcome, or a sign-up without a URL this app will open. */
+export function parseActivation(data: unknown, pageOrigin: string): ActivationOutcome | null {
+  const next = record(data)?.next;
+  if (next === 'sign_in') return { next: 'sign_in' };
+  if (next !== 'sign_up') return null;
+  const signUpUrl = signUpUrlFrom(data, pageOrigin);
+  return signUpUrl ? { next: 'sign_up', signUpUrl } : null;
+}
