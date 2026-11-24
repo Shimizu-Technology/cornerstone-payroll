@@ -87,6 +87,35 @@ class PayStubGenerator
     }
   end
 
+  # Use current rows even when the PDF can attribute its independently computed
+  # YTD amounts. An earlier check can change that attribution without changing this check.
+  def employee_payroll_facts_sha256
+    earnings = unitemized_earning_lines(source_labels: PayrollSourceEarningLabel.new(payroll_item), include_ytd: false)
+      .map { |line| line.except(:ytd) }
+    components = PayrollStatementYtdBreakdown::KINDS.map do |kind|
+      statement_ytd_breakdown.current_rows(kind).map { |row| [ row.label, row.current, row.semantic ] }
+    end
+    amounts = payroll_item.attributes.slice(
+      "gross_pay", "net_pay", "withholding_tax", "withholding_tax_override", "withholding_tax_adjustment",
+      "social_security_tax", "medicare_tax", "additional_withholding",
+      "ytd_net", "ytd_withholding_tax", "ytd_social_security_tax", "ytd_medicare_tax"
+    )
+    Digest::SHA256.hexdigest([
+      pay_period.start_date, pay_period.end_date, pay_period.pay_date, payroll_item.check_date,
+      self.class.employee_payment_line(payroll_item), amounts, earnings, components
+    ].to_json)
+  end
+
+  def self.employee_payment_line(item)
+    if !item.net_pay.to_d.positive?
+      [ "Earnings statement only - no payment issued", item.check_number.presence ].compact.join(" · ")
+    elsif item.effective_payment_delivery_method == "direct_deposit"
+      "Direct deposit"
+    else
+      "Check ##{item.check_number}"
+    end
+  end
+
   private
 
   def render_header(pdf)
@@ -135,17 +164,17 @@ class PayStubGenerator
       data = [
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
         [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
-        if !payroll_item.net_pay.to_d.positive?
+        if @employee_copy && !@preview
+          [ "Payment:", self.class.employee_payment_line(payroll_item) ]
+        elsif !payroll_item.net_pay.to_d.positive?
           [ "Payment:", @preview ? "Earnings statement only" : "Earnings statement only - no payment issued" ]
         elsif payroll_item.effective_payment_delivery_method == "direct_deposit"
-          [ "Payment:", (@preview || @employee_copy) ? "Direct deposit" : "Direct deposit (stub only; transfer not confirmed)" ]
-        elsif @employee_copy && !@preview && payroll_item.check_number.present?
-          [ "Payment:", "Check ##{payroll_item.check_number}" ]
+          [ "Payment:", @preview ? "Direct deposit" : "Direct deposit (stub only; transfer not confirmed)" ]
         else
           [ "Check #:", @preview ? "" : payroll_item.check_number.presence || "No check issued" ]
         end
       ]
-      if !@preview && !payroll_item.net_pay.to_d.positive? && payroll_item.check_number.present?
+      if !@preview && !@employee_copy && !payroll_item.net_pay.to_d.positive? && payroll_item.check_number.present?
         data << [ "Check reference:", payroll_item.check_number ]
       end
 
@@ -164,7 +193,7 @@ class PayStubGenerator
     pdf.move_down 3
 
     earnings_data = [ [ "Description", "Hours", "Rate", "Current", "YTD" ] ]
-    earnings_data.concat(itemized_earnings_rows&.map { |row| itemized_earnings_row(row) } || unitemized_earnings_rows)
+    earnings_data.concat(printable_earning_rows)
 
     # Gross total
     earnings_data << [
@@ -342,12 +371,13 @@ class PayStubGenerator
     { label: label, hours: hours, rate: rate, pay_basis: pay_basis, amount: amount, category: category, ytd: ytd }
   end
 
-  def unitemized_earning_lines
+  def unitemized_earning_lines(source_labels: source_earning_labels, include_ytd: true)
     earnings_data = []
 
     # Non-taxable earnings are printed in their own section because they increase
     # net pay but are intentionally excluded from gross pay.
     item_earnings = payroll_item.earnings_in_entry_order.reject { |earning| earning.category.to_s == "non_taxable" }
+    has_stored_earnings = item_earnings.any?
     correction_earnings = SignedCorrectionEarnings.call(payroll_item)
     # Calculators materialize each taxable field as an `other` earning. Prefer
     # the field row below, which also carries its field-specific YTD. Consume
@@ -362,9 +392,9 @@ class PayStubGenerator
       item_earnings.delete_at(index) if index
     end
 
-    if payroll_item.payroll_item_earnings.any? { |earning| earning.category.to_s != "non_taxable" }
+    if has_stored_earnings
       item_earnings.each do |earning|
-        earnings_data << earning_line(source_earning_labels.call(earning.label) || earning.label.presence || earning.category.to_s.titleize,
+        earnings_data << earning_line(source_labels.call(earning.label) || earning.label.presence || earning.category.to_s.titleize,
           earning.hours.presence, earning.rate.presence, earning.amount, earning.category)
       end
     elsif correction_earnings
@@ -447,7 +477,7 @@ class PayStubGenerator
       end
 
       payroll_field_entries_for("taxable_addition").each do |entry|
-        earnings_data << earning_line(entry.label, nil, nil, entry.amount, "other", ytd: ytd_payroll_field_amount(entry)) if entry.amount.to_f.positive?
+        earnings_data << earning_line(entry.label, nil, nil, entry.amount, "other", ytd: (ytd_payroll_field_amount(entry) if include_ytd)) if entry.amount.to_f.positive?
       end
 
     end
@@ -455,13 +485,12 @@ class PayStubGenerator
     earnings_data
   end
 
-  def render_deductions(pdf)
-    pdf.font_size(10) do
-      pdf.text "DEDUCTIONS", style: :bold
-    end
-    pdf.move_down 3
+  def printable_earning_rows
+    itemized_earnings_rows&.map { |row| itemized_earnings_row(row) } || unitemized_earnings_rows
+  end
 
-    deductions_data = [ [ "Description", "Current", "YTD" ] ]
+  def printable_deduction_rows
+    deductions_data = []
 
     taxes = tax_lines
     taxes.first(3).each { |label, amount, ytd| deductions_data << [ label, format_currency(amount), format_currency(ytd) ] }
@@ -485,6 +514,16 @@ class PayStubGenerator
     statement_ytd_breakdown.deductions.each do |row|
       deductions_data << [ pay_stub_deduction_label(row), format_currency(row.current), format_currency(row.ytd) ]
     end
+
+    deductions_data
+  end
+
+  def render_deductions(pdf)
+    pdf.font_size(10) do
+      pdf.text "DEDUCTIONS", style: :bold
+    end
+    pdf.move_down 3
+    deductions_data = [ [ "Description", "Current", "YTD" ], *printable_deduction_rows ]
 
     # Total deductions
     deductions_data << [
@@ -521,10 +560,16 @@ class PayStubGenerator
     lines
   end
 
+  def printable_addition_rows
+    statement_ytd_breakdown.other_pay.map { |row| [ row.label, format_currency(row.current), format_currency(row.ytd) ] }
+  end
+
+  def printable_employer_rows
+    statement_ytd_breakdown.employer_contributions.map { |row| [ row.label, format_currency(row.current), format_currency(row.ytd) ] }
+  end
+
   def render_non_taxable_additions(pdf)
-    additions = statement_ytd_breakdown.other_pay.map do |row|
-      [ row.label, format_currency(row.current), format_currency(row.ytd) ]
-    end
+    additions = printable_addition_rows
 
     return if additions.empty?
 
@@ -555,9 +600,7 @@ class PayStubGenerator
     end
     pdf.move_down 3
 
-    rows = [ [ "Description", "Current", "YTD" ] ] + entries.map do |entry|
-      [ entry.label, format_currency(entry.current), format_currency(entry.ytd) ]
-    end
+    rows = [ [ "Description", "Current", "YTD" ], *printable_employer_rows ]
     rows << [
       { content: "TOTAL EMPLOYER CONTRIBUTIONS", font_style: :bold },
       { content: format_currency(entries.sum(0.to_d) { |entry| entry.current.to_d }), font_style: :bold },

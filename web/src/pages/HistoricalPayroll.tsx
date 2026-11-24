@@ -22,6 +22,7 @@ import {
   UploadCloud,
   UsersRound,
 } from 'lucide-react';
+import { QuickbooksStubUpload } from '@/components/import/QuickbooksStubUpload';
 import { Header } from '@/components/layout/Header';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { Badge } from '@/components/ui/badge';
@@ -48,6 +49,7 @@ import {
   type HistoricalImportDetail,
   type HistoricalImportProvider,
   type HistoricalPaycheck,
+  type QuickbooksCheckWarning,
   type HistoricalReport,
   type HistoricalReportColumn,
   type HistoricalReportType,
@@ -258,6 +260,9 @@ export function HistoricalPayroll(): ReactElement {
   const batchPageRef = useRef(1);
   const detailQueryRef = useRef<{ page: number; periodId?: number; search: string }>({ page: 1, search: '' });
   const [batches, setBatches] = useState<HistoricalImportBatch[]>([]);
+  const [stubUploadCompanyId, setStubUploadCompanyId] = useState<number | null>(null);
+  const [stubUploadEnabled, setStubUploadEnabled] = useState(false);
+  const [quickbooksCheckWarnings, setQuickbooksCheckWarnings] = useState<QuickbooksCheckWarning[]>([]);
   const [archive, setArchive] = useState<HistoricalArchiveSummary | null>(null);
   const [importProviders, setImportProviders] = useState<HistoricalImportProvider[]>([]);
   const [selectedImportProviderKey, setSelectedImportProviderKey] = useState('quickbooks_online');
@@ -360,6 +365,9 @@ export function HistoricalPayroll(): ReactElement {
     const listedBatches = response.data.filter((batch) => batch.source_system !== 'prior_provider');
     setBatches(listedBatches);
     setArchive(response.meta.archive);
+    setStubUploadCompanyId(activeCompanyId);
+    setStubUploadEnabled(response.meta.original_stub_upload_enabled === true);
+    setQuickbooksCheckWarnings(response.meta.quickbooks_check_warnings ?? []);
     setImportProviders(providers);
     if (providers.length > 0) setSelectedImportProviderKey((current) => (
       providers.some((provider) => provider.key === current)
@@ -373,7 +381,7 @@ export function HistoricalPayroll(): ReactElement {
         ? currentPreferredBatchId
         : listedBatches[0]?.id ?? null,
     );
-  }, [selectBatch, selectBatchPage]);
+  }, [activeCompanyId, selectBatch, selectBatchPage]);
 
   const loadDetail = useCallback(async (
     requestedBatchId: number | null = selectedBatchIdRef.current,
@@ -1234,6 +1242,10 @@ export function HistoricalPayroll(): ReactElement {
         )}
         {notice && (
           <ActionFeedback tone={notice.tone} message={notice.message} />
+        )}
+
+        {stubUploadCompanyId && stubUploadCompanyId === activeCompanyId && (stubUploadEnabled || quickbooksCheckWarnings.length > 0) && (
+          <QuickbooksStubUpload key={stubUploadCompanyId} companyId={stubUploadCompanyId} warnings={quickbooksCheckWarnings} enabled={stubUploadEnabled} />
         )}
 
         {selectedBatch && (

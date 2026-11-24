@@ -10,6 +10,11 @@
 #     schedule: at 5am every day
 
 production:
+  post_employee_pay_stubs:
+    class: PostEmployeePayStubsJob
+    queue: default
+    schedule: every 5 minutes
+
   expire_practice_portal_access:
     class: ExpirePracticePortalAccessJob
     queue: default

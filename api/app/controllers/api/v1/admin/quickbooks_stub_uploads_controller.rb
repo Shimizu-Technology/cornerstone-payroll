@@ -1,0 +1,107 @@
+# frozen_string_literal: true
+
+module Api
+  module V1
+    module Admin
+      class QuickbooksStubUploadsController < BaseController
+        before_action :require_historical_payroll_enabled!
+        before_action :require_employee_stubs!
+
+        rescue_from EmployeeDocuments::QuickbooksStubPdf::Invalid, EmployeeDocuments::ReviewQuickbooksStubs::Invalid do |error|
+          audit_step("#{action_name}_rejected")
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+
+        rescue_from R2StorageService::ConfigurationError, R2StorageService::UploadError do
+          audit_step("storage_failed")
+          render json: { error: "Document storage is unavailable. Try again." }, status: :service_unavailable
+        end
+
+        def preview
+          response.headers["Cache-Control"] = "no-store"
+          audit_step("upload")
+          pages = review.preview
+          audit_step("preview", { results: pages.pluck(:status).tally })
+          render json: { data: pages }
+        end
+
+        def view_page
+          response.headers["Cache-Control"] = "no-store"
+          page = review.view_page(params[:review_token].to_s)
+          audit_step("review_page_viewed", { page: page.number, sha256: Digest::SHA256.hexdigest(page.bytes) })
+          send_data page.bytes, type: "application/pdf", disposition: "attachment", filename: "quickbooks-page-#{page.number}.pdf"
+        end
+
+        def confirm
+          tokens = token_list(:review_tokens)
+          image_tokens = token_list(:image_review_tokens)
+          number_tokens = token_list(:number_review_tokens)
+          count = tokens.size + image_tokens.size + number_tokens.size
+          if count > EmployeeDocuments::QuickbooksStubPdf::MAX_PAGES
+            raise EmployeeDocuments::ReviewQuickbooksStubs::Invalid, "Select up to 50 pages."
+          end
+
+          response.headers["Cache-Control"] = "no-store"
+          audit_step("confirm_requested", { page_count: count })
+          confirmation = review
+          confirmation.prepare(tokens: tokens, image_tokens: image_tokens, number_tokens: number_tokens)
+          documents = persist_confirmation(confirmation)
+          render json: { data: documents.map { |document| { document_id: document.id, historical_paycheck_id: document.historical_paycheck_id } } }
+        end
+
+        private
+
+        def token_list(key)
+          tokens = params.fetch(key, [])
+          return tokens if tokens.is_a?(Array) && tokens.all? { |token| token.is_a?(String) && token.bytesize <= 2.kilobytes }
+
+          raise EmployeeDocuments::ReviewQuickbooksStubs::Invalid, "Select pages from the current preview."
+        end
+
+        def persist_confirmation(confirmation)
+          EmployeeDocument.transaction(requires_new: true) do
+            current_company.lock!
+            documents = confirmation.confirm(revalidate: method(:revalidate_confirmation!)) do |match, document|
+              if match.page.has_image
+                audit_step("image_reviewed", { page: match.page.number, document_id: document.id })
+              end
+              if match.page.possible_ssn
+                audit_step("possible_ssn_reviewed", { page: match.page.number, document_id: document.id })
+              end
+            end
+            audit_step("confirmed", { document_ids: documents.map(&:id) })
+            documents
+          end
+        rescue StandardError
+          confirmation.cleanup!
+          raise
+        end
+
+        def revalidate_confirmation!
+          revalidate_current_company_write_access!
+          unless CompanyFeatures.for(current_company).employee_portal_feature?(:stubs)
+            raise CompanyWriteAccessChanged
+          end
+        end
+
+        def require_employee_stubs!
+          return if current_company && CompanyFeatures.for(current_company).employee_portal_feature?(:stubs)
+
+          render json: { error: "Employee pay stubs are unavailable for this client." }, status: :forbidden
+        end
+
+        def review
+          EmployeeDocuments::ReviewQuickbooksStubs.new(company: current_company, actor: current_user, upload: params[:upload])
+        end
+
+        def audit_step(step, metadata = {})
+          AuditLog.record!(
+            user: current_user, company_id: current_company_id,
+            organization_id: current_company.organization_id, action: "quickbooks_stub_uploads##{step}",
+            record_type: "employee_documents", metadata: metadata, event_category: "employee_portal"
+          )
+        end
+      end
+    end
+  end
+end
