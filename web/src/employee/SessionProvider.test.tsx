@@ -16,6 +16,8 @@ function auth(overrides: Partial<EmployeeAuthValue> = {}): EmployeeAuthValue {
     getToken: async () => 'tok',
     signOut: async () => undefined,
     SignInForm: () => null,
+    SignUpForm: () => null,
+    stepUp: (attempt) => attempt(),
     ...overrides,
   };
 }

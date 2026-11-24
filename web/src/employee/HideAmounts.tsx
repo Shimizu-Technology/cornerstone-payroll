@@ -14,15 +14,31 @@ export function HideAmountsProvider({ children }: { children: ReactNode }): Reac
   return <HideAmountsContext.Provider value={value}>{children}</HideAmountsContext.Provider>;
 }
 
+// Once per page load, the first time someone hides amounts, one line says what it does (§8a).
+let explained = false;
+
 /** The eye button. Its label says what tapping it will do. */
 export function HideAmountsToggle(): ReactElement {
   const { hidden, setHidden } = useHideAmounts();
+  const [note, setNote] = useState(false);
   const Icon = hidden ? EyeOff : Eye;
+  const toggle = (): void => {
+    if (!hidden && !explained) {
+      explained = true;
+      setNote(true);
+    } else {
+      setNote(false);
+    }
+    setHidden(!hidden);
+  };
   return (
-    <button type="button" className="emp-eye" onClick={() => setHidden(!hidden)}>
-      <Icon aria-hidden="true" className="size-5" />
-      {hidden ? 'Show amounts' : 'Hide amounts'}
-    </button>
+    <span className="emp-eye-wrap">
+      <button type="button" className="emp-eye" onClick={toggle}>
+        <Icon aria-hidden="true" className="size-5" />
+        {hidden ? 'Show amounts' : 'Hide amounts'}
+      </button>
+      {note && hidden && <span className="emp-eye-note" role="status">Amounts stay hidden on this device until you tap Show amounts.</span>}
+    </span>
   );
 }
 

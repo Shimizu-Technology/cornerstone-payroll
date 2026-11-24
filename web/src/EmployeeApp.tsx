@@ -16,7 +16,13 @@ import { SignOutProvider } from './employee/SignOut';
 import {
   AccessEndedScreen, BootScreen, ErrorState, LoadingState, OfflineState, RateLimitedState, UnavailableScreen,
 } from './employee/StateScreens';
-import { HelpTab, HomeTab, MyInfoTab, PayTab, SignInScreen, TaxesTab, WelcomeScreen } from './employee/screens';
+import { HelpTab } from './employee/help';
+import { MyInfoTab } from './employee/myinfo';
+import { HomeTab, PayTab } from './employee/pay';
+import { EmployerPicker } from './employee/picker';
+import { SignInScreen, WelcomeScreen } from './employee/screens';
+import { AddAccessScreen, FinishSignUpScreen, SignedInInvite, SignUpAccountScreen, SignUpScreen } from './employee/signup';
+import { TaxesTab } from './employee/taxes';
 import type { ViewOnlyGrant } from './employee/ViewOnlyBanner';
 import './employee/employee.css';
 
@@ -46,13 +52,14 @@ function useTenantBrand(): EmployeeBrand | null {
 }
 
 function SignedInApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
-  const { state, retry } = useEmployeeSession();
+  const { state, retry, chooseLink } = useEmployeeSession();
   const signOutAsync = useSignOut();
   const signOut = (): void => { void signOutAsync(); };
 
   if (state.status === 'problem' && state.problem === 'unavailable') return <UnavailableScreen onRetry={retry} onSignOut={signOut} />;
   if (state.status === 'problem' && state.problem === 'ended') return <AccessEndedScreen onSignOut={signOut} />;
   if (state.status === 'problem' && state.problem === 'signed_out') return <BootScreen />;
+  if (state.status === 'choose') return <EmployerPicker links={state.links} onChoose={chooseLink} onSignOut={signOut} />;
 
   if (state.status === 'problem') {
     const actions = { onRetry: retry, onSignOut: signOut };
@@ -69,6 +76,8 @@ function SignedInApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElemen
         <Routes>
           <Route index element={<HomeTab />} />
           <Route path="pay" element={<PayTab />} />
+          <Route path="pay/all" element={<PayTab />} />
+          <Route path="pay/:statementId" element={<PayTab />} />
           <Route path="taxes" element={<TaxesTab />} />
           <Route path="my-info" element={<MyInfoTab />} />
           <Route path="help" element={<HelpTab />} />
@@ -87,13 +96,20 @@ function AppRoutes({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement 
   if (!isSignedIn) {
     if (location.pathname === '/sign-in') return <SignInScreen />;
     if (location.pathname === '/') return <WelcomeScreen />;
+    if (location.pathname === '/sign-up') return <SignUpScreen />;
+    if (location.pathname === '/sign-up/account') return <SignUpAccountScreen />;
     if (isSigningOut()) return <Navigate to="/" replace />;
     // A deep link (for example from a "pay stub ready" email) signs in first, then opens.
     return <Navigate to="/sign-in" replace state={{ from: `${location.pathname}${location.search}` }} />;
   }
   if (location.pathname === '/sign-in') return <Navigate to={redirectTarget(location.state)} replace />;
+  // Signed in, before the employee session: sign-up's last step and adding access to this login.
+  if (location.pathname === '/sign-up') return <SignedInInvite />;
+  if (location.pathname === '/sign-up/account') return <Navigate to="/sign-up/done" replace />;
+  if (location.pathname === '/sign-up/done') return <FinishSignUpScreen />;
+  if (location.pathname === '/add-access') return <AddAccessScreen />;
   return (
-    <EmployeeSessionProvider>
+    <EmployeeSessionProvider viewOnly={Boolean(viewAs)}>
       <SignedInApp viewAs={viewAs} />
     </EmployeeSessionProvider>
   );

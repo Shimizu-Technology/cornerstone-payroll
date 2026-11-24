@@ -1,6 +1,6 @@
 // Tenant branding for the employee app. GET /api/v1/public/tenant_branding
-// returns { name, logo_url, primary_color, accent_color } for an enabled client
-// subdomain, or 404. Anything else falls back to a neutral Cornerstone brand.
+// returns { name, app_name, logo_url, primary_color, accent_color, main_phone }
+// for an enabled client subdomain, or 404 (TenantSubdomainRegistry.branding_for). Anything else falls back to a neutral Cornerstone brand.
 //
 // A client's colors become roles, never raw paint:
 // - action: buttons, links and the active tab. Always passes 4.5:1 under white text.
@@ -13,15 +13,22 @@
 
 export interface TenantBranding {
   name: string;
+  app_name?: string | null;
   logo_url: string | null;
   primary_color: string | null;
   accent_color: string | null;
+  /** The company's main phone, unless the client turned it off. Public, so it can show before sign-in. */
+  main_phone?: string | null;
 }
 
 export interface EmployeeBrand {
   name: string;
+  /** The client's own name for the app ("MoSa's Team"), if set. */
+  appName: string | null;
   logoUrl: string | null;
   monogram: string;
+  /** The company's main phone, for "Can't sign in?" and Help. Never a named person before sign-in. */
+  mainPhone: string | null;
   /** True when no client branding was found; copy then avoids naming an employer. */
   isFallback: boolean;
   action: string;
@@ -134,6 +141,12 @@ function httpsUrl(value: unknown): string | null {
   }
 }
 
+function dialable(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const digits = value.replace(/\D/g, '');
+  return /^\+?[\d\s().-]+$/.test(value.trim()) && digits.length >= 7 && digits.length <= 15 ? value.trim() : null;
+}
+
 function hexOrNull(value: unknown): string | null {
   return typeof value === 'string' && HEX_COLOR.test(value) ? value.toLowerCase() : null;
 }
@@ -149,8 +162,10 @@ export function brandFrom(branding: TenantBranding | null): EmployeeBrand {
   const { accent, ink } = accentPair(accentSource);
   return {
     name,
+    appName: branding && typeof branding.app_name === 'string' && branding.app_name.trim() ? branding.app_name.trim() : null,
     logoUrl: branding ? httpsUrl(branding.logo_url) : null,
     monogram: monogramOf(name),
+    mainPhone: branding ? dialable(branding.main_phone) : null,
     isFallback: !branding,
     action,
     actionAdjusted: adjusted,
@@ -182,7 +197,8 @@ function isTenantBranding(value: unknown): value is TenantBranding {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const branding = value as Record<string, unknown>;
   return typeof branding.name === 'string' && branding.name.trim() !== ''
-    && stringOrNull(branding.logo_url) && stringOrNull(branding.primary_color) && stringOrNull(branding.accent_color);
+    && stringOrNull(branding.logo_url) && stringOrNull(branding.primary_color) && stringOrNull(branding.accent_color)
+    && stringOrNull(branding.app_name) && stringOrNull(branding.main_phone);
 }
 
 /** Returns null on 404, a network failure or a malformed response, so the caller falls back. */

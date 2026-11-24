@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
-import { chooseLink, createEmployeeApi, problemFor } from './api';
+import { chooseLink, createEmployeeApi, problemFor, usableLinks } from './api';
 import { API_BASE_URL, TENANT_SLUG, today } from './config';
-import { EmployeeSessionContext, useEmployeeAuth, type EmployeeSessionState, type EmployeeSessionValue } from './contexts';
+import { EmployeeSessionContext, useEmployeeAuth, type EmployeeSessionState, type EmployeeSessionValue, type ReadOnlyReason } from './contexts';
 import { useSignOut } from './hooks';
 
 /** How long opening the app may take before it shows the error screen with Try again. */
@@ -11,17 +11,20 @@ class SessionLoadTimeout extends Error {}
 
 /**
  * Opens the signed-in employee's pay: finds their link for this client
- * (GET /employee/links), then checks it (GET /employee/context). Data screens
+ * (GET /employee/links), asks them to pick an employer when there's more than
+ * one on a shared host, then checks it (GET /employee/context). Data screens
  * use the same client, which sends the link in X-Employee-Link-Id. Nothing is
- * stored on the device.
+ * stored on the device: the chosen employer and loaded pay live in memory.
  */
-export function EmployeeSessionProvider({ children }: { children: ReactNode }): ReactElement {
+export function EmployeeSessionProvider({ viewOnly = false, children }: { viewOnly?: boolean; children: ReactNode }): ReactElement {
   const { getToken } = useEmployeeAuth();
   const signOut = useSignOut();
   const api = useMemo(() => createEmployeeApi({ baseUrl: API_BASE_URL, getToken }), [getToken]);
   const [state, setState] = useState<EmployeeSessionState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  const [chosenId, setChosenId] = useState<string | null>(null);
   const opened = useRef(false);
+  const [memory, setMemory] = useState(() => new Map<string, unknown>());
 
   useEffect(() => {
     // `cancelled` is cleanup (unmount, or a newer attempt): stay quiet.
@@ -42,16 +45,23 @@ export function EmployeeSessionProvider({ children }: { children: ReactNode }): 
     setState({ status: 'loading' });
     void (async (): Promise<void> => {
       try {
-        const choice = chooseLink(await bounded(api.links(controller.signal)), today(), TENANT_SLUG);
+        const links = await bounded(api.links(controller.signal));
+        const choice = chooseLink(links, today(), TENANT_SLUG, chosenId);
         if (cancelled) return;
+        if (choice === 'choose') {
+          const usable = usableLinks(links, today(), TENANT_SLUG);
+          setState({ status: 'choose', links: typeof usable === 'string' ? [] : usable });
+          return;
+        }
         if (typeof choice === 'string') {
           setState({ status: 'problem', problem: choice });
           return;
         }
-        await bounded(api.context(choice.id, controller.signal));
+        const info = await bounded(api.context(choice.id, controller.signal));
         if (cancelled) return;
         opened.current = true;
-        setState({ status: 'ready', link: choice });
+        const usable = usableLinks(links, today(), TENANT_SLUG);
+        setState({ status: 'ready', link: choice, links: typeof usable === 'string' ? [choice] : usable, info });
       } catch (error) {
         if (cancelled) return;
         const problem = error instanceof SessionLoadTimeout || controller.signal.aborted ? 'error' : problemFor(error, { opened: opened.current });
@@ -65,7 +75,7 @@ export function EmployeeSessionProvider({ children }: { children: ReactNode }): 
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [api, attempt]);
+  }, [api, attempt, chosenId]);
 
   const problem = state.status === 'problem' ? state.problem : null;
 
@@ -101,6 +111,20 @@ export function EmployeeSessionProvider({ children }: { children: ReactNode }): 
     setState({ status: 'problem', problem: problemFor(error, { opened: opened.current }) });
   }, []);
 
-  const value = useMemo<EmployeeSessionValue>(() => ({ state, api, retry, reportError }), [state, api, retry, reportError]);
+  const chooseLinkId = useCallback((linkId: string | null): void => {
+    // Another employer's pay never shows from this one's memory.
+    setMemory(new Map());
+    opened.current = false;
+    setChosenId(linkId);
+    setAttempt((n) => n + 1);
+  }, []);
+
+  const readOnly: ReadOnlyReason | null = viewOnly ? 'view_only'
+    : state.status === 'ready' && (state.link.status === 'former' || state.info.status === 'former') ? 'former' : null;
+
+  const value = useMemo<EmployeeSessionValue>(
+    () => ({ state, api, retry, reportError, chooseLink: chooseLinkId, readOnly, memory }),
+    [state, api, retry, reportError, chooseLinkId, readOnly, memory],
+  );
   return <EmployeeSessionContext.Provider value={value}>{children}</EmployeeSessionContext.Provider>;
 }

@@ -1,8 +1,10 @@
-import { useMemo, type ComponentProps, type ReactNode, type ReactElement } from 'react';
-import { ClerkProvider, SignIn, useAuth } from '@clerk/react';
+import { useCallback, useMemo, type ComponentProps, type ReactNode, type ReactElement } from 'react';
+import { ClerkProvider, SignIn, SignUp, useAuth, useReverification } from '@clerk/react';
+import { isReverificationCancelledError } from '@clerk/react/errors';
 // Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
 import { ui as clerkUi } from '@clerk/ui';
 import type { EmployeeBrand } from './brand';
+import { EmployeeApiError, StepUpCancelledError, StepUpRequiredError } from './api';
 import { EmployeeAuthContext, type EmployeeAuthValue } from './contexts';
 
 type ClerkProviderProps = ComponentProps<typeof ClerkProvider>;
@@ -50,15 +52,46 @@ function ClerkSignInForm({ redirectTo }: { redirectTo: string }): ReactElement {
   return <SignIn routing="hash" withSignUp={false} forceRedirectUrl={redirectTo} fallbackRedirectUrl="/" />;
 }
 
+// Opened from the Clerk invitation the API returns (M4-2); Clerk reads the
+// ticket from the address, so the email can't be changed here.
+function ClerkSignUpForm({ redirectTo }: { redirectTo: string }): ReactElement {
+  return <SignUp routing="hash" forceRedirectUrl={redirectTo} fallbackRedirectUrl={redirectTo} signInUrl="/sign-in" />;
+}
+
+type Attempt = () => Promise<unknown>;
+
 function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
   const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
+  // Clerk shows its "confirm it's you" prompt when the fetcher returns the
+  // API's reverification hint, then runs the same attempt again.
+  const reverify = useReverification(async (attempt: Attempt) => {
+    try {
+      return { result: await attempt() };
+    } catch (error) {
+      if (error instanceof StepUpRequiredError) return { clerk_error: error.hint };
+      throw error;
+    }
+  });
+  const stepUp = useCallback(async <T,>(attempt: () => Promise<T>): Promise<T> => {
+    try {
+      const outcome = await reverify(attempt as Attempt) as { result?: unknown; clerk_error?: unknown };
+      // A hint that comes back again after reverifying means the API still refused.
+      if ('clerk_error' in outcome) throw new EmployeeApiError('server', 403);
+      return outcome.result as T;
+    } catch (error) {
+      if (isReverificationCancelledError(error)) throw new StepUpCancelledError();
+      throw error;
+    }
+  }, [reverify]);
   const value = useMemo<EmployeeAuthValue>(() => ({
     isLoaded,
     isSignedIn: Boolean(isSignedIn),
-    getToken: () => getToken(),
+    getToken: (options) => getToken(options?.fresh ? { skipCache: true } : undefined),
     signOut: () => signOut({ redirectUrl: '/' }),
     SignInForm: ClerkSignInForm,
-  }), [isLoaded, isSignedIn, getToken, signOut]);
+    SignUpForm: ClerkSignUpForm,
+    stepUp,
+  }), [isLoaded, isSignedIn, getToken, signOut, stepUp]);
   return <EmployeeAuthContext.Provider value={value}>{children}</EmployeeAuthContext.Provider>;
 }
 
@@ -73,6 +106,12 @@ export function ClerkAuthProvider({ publishableKey, brand, children }: { publish
         subtitleCombined: brand.isFallback ? 'See your pay stubs and tax forms.' : `See your pay from ${brand.name}.`,
       },
     },
+    signUp: {
+      start: {
+        title: 'Create your account',
+        subtitle: 'Choose how you want to sign in.',
+      },
+    },
   }), [brand]);
   return (
     <ClerkProvider
@@ -81,6 +120,7 @@ export function ClerkAuthProvider({ publishableKey, brand, children }: { publish
       appearance={appearance}
       localization={localization}
       signInUrl="/sign-in"
+      signUpUrl="/sign-up/account"
       afterSignOutUrl="/"
     >
       <ClerkAuthBridge>{children}</ClerkAuthBridge>

@@ -15,3 +15,36 @@ export const TENANT_SLUG: string | null = TENANT_HOST ? TENANT_HOST.split('.')[0
 export function today(): string {
   return new Date().toLocaleDateString('en-CA');
 }
+
+export interface TermsConfig {
+  /** Recorded with each sign-up and claim (§8a). */
+  version: string;
+  termsUrl: string;
+  privacyUrl: string;
+}
+
+function documentUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  if (value.startsWith('/') && !value.startsWith('//')) return value;
+  try {
+    return new URL(value).protocol === 'https:' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function termsFrom(env: Record<string, string | undefined>): TermsConfig | null {
+  const version = env.VITE_EMPLOYEE_TERMS_VERSION?.trim();
+  const termsUrl = documentUrl(env.VITE_EMPLOYEE_TERMS_URL?.trim());
+  const privacyUrl = documentUrl(env.VITE_EMPLOYEE_PRIVACY_URL?.trim());
+  return version && termsUrl && privacyUrl ? { version, termsUrl, privacyUrl } : null;
+}
+
+/**
+ * Counsel's Employee App Terms and Privacy Notice (G1). Until all three
+ * settings exist, the clickwrap checkbox and the links stay hidden, and
+ * sign-up records no terms version.
+ */
+export const TERMS: TermsConfig | null = termsFrom(import.meta.env);
+
+export { termsFrom };
