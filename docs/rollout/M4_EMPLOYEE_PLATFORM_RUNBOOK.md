@@ -88,12 +88,19 @@ Then in a Render shell on the **employee** service:
 bundle exec rails production:readiness
 ```
 
-✅ Every line says PASS, including these four:
+✅ Every line says PASS, including these four (and `shared rate-limit store accepts a write and delete round trip`, which proves Redis is reachable):
 
 - `employee_web: process role booted as employee_web without payroll routes or Cable`
-- `employee_web: database pool is capped at 3 and matches DB_POOL_MAX`
+- `employee_web: database pool is capped at 3, matches DB_POOL_MAX and runs one Puma process` (also needs `WEB_CONCURRENCY` of 1 or less and `SOLID_QUEUE_IN_PUMA` off)
 - `employee_web: rate-limit counters use the shared Redis store`
-- `employee_web: Clerk authorized parties are set`
+- `employee_web: Clerk authorized parties are explicit production HTTPS origins`
+
+**Before Clerk Pro and `REQUIRE_MFA=true` (gate G3), two MFA lines are expected to FAIL.** Nothing else may fail, and all four `employee_web:` lines must pass:
+
+- `MFA enforcement has instance-bound evidence` (needs `REQUIRE_MFA=true` plus `CLERK_MFA_ATTESTED_INSTANCE_ID` and `CLERK_MFA_EVIDENCE_REF`)
+- `Clerk Backend API accepts the configured key and matches MFA evidence` (fails while `CLERK_MFA_ATTESTED_INSTANCE_ID` is empty or differs from the Clerk instance id)
+
+The command ends with `Production readiness failed`, so judge the list by line, not by the exit code. After G3 sets the MFA values, every line passes.
 
 `/up` doesn't touch the database, so a database problem won't restart the service. `/health/dependencies` does check the database. Use it for monitors, not as the Render health check.
 
@@ -242,18 +249,25 @@ curl -si -X OPTIONS "$API/api/v1/public/tenant_branding?host=$HOST" \
   -H "Origin: https://$HOST" -H "Access-Control-Request-Method: GET"
 curl -si "$API/api/v1/public/tenant_branding?host=other-client.shimizu-technology.com" \
   -H "Origin: https://other-client.shimizu-technology.com" | head -3
+
+# Credentialed CORS (sign-in calls): preflight for the auth endpoint
+curl -si -X OPTIONS "$API/api/v1/auth/me" \
+  -H "Origin: https://$HOST" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization"
 ```
 
 Expected, **while `subdomain_enabled` is still off** (the state before M4-9):
 
 - TLS valid, headers present.
-- Branding: `404`. The preflight has **no** `access-control-allow-origin`. The unknown client also gets `404` and no CORS header.
+- Branding: `404`. The branding preflight has **no** `access-control-allow-origin`. The unknown client also gets `404` and no CORS header.
 
 Expected **after M4-9 turns the company on** (re-run the same block, wait 45 seconds after the switch):
 
 - Branding: `200` with `{"name":…,"logo_url":…,"primary_color":…,"accent_color":…}` for **this** company only.
-- The preflight has `access-control-allow-origin: https://mosas.shimizu-technology.com` and `access-control-allow-credentials: true`.
+- The branding preflight has `access-control-allow-origin: https://mosas.shimizu-technology.com` and **no** `access-control-allow-credentials` header. The branding endpoint is credential-free (`api/config/initializers/cors.rb`).
+- The `/api/v1/auth/me` preflight has `access-control-allow-origin: https://mosas.shimizu-technology.com` **and** `access-control-allow-credentials: true`. This one carries sign-in, so it is credentialed.
 - The unknown client still gets `404` and no CORS header.
+
+While `subdomain_enabled` is off, the `/api/v1/auth/me` preflight has no `access-control-allow-origin` either.
 
 Then look in the browser (on a phone too): the page loads over HTTPS with no certificate warning. Until M4-8 ships, you see the "coming soon" placeholder. After M4-8, you also see the client's name and logo. Open the browser console and make sure there are **no Content-Security-Policy errors**.
 
@@ -264,7 +278,7 @@ Write the date and result for each address in the go-live record (M4-12).
 The policy is written for Clerk's production sign-in, but no Clerk screen exists in the employee build yet. When M4-8 deploys, sign in on the team address with a test login and watch the console. A blocked script or request is a CSP error.
 
 - Fix it in `web/scripts/finalize-surface-dist.mjs` (the policy) or `web/deploy/employee/_headers.template` (the other headers), then deploy.
-- Add only the exact origin that was blocked. Don't add `*`, `unsafe-eval`, or `unsafe-inline` for scripts, and don't relax `frame-ancestors`, `object-src` or `connect-src`.
+- Add only the exact origin that was blocked. The policy already carries the hosts Clerk documents for production sign-in, bot protection and fraud protection ([Clerk CSP guide](https://clerk.com/docs/guides/secure/best-practices/csp-headers)): `https://challenges.cloudflare.com`, `https://*.protect.clerk.com` (scripts and frames), `https://*.protect.clerk.com:*` (connections) and `https://img.clerk.com`. Those are the only wildcards allowed. Don't add a bare `*`, any other wildcard, `unsafe-eval`, or `unsafe-inline` for scripts, and don't relax `frame-ancestors`, `object-src` or `connect-src`.
 
 ## 5. Alerts
 
@@ -286,15 +300,15 @@ A 429 burst from one restaurant on shared Wi-Fi is the thing to watch. M4-2 re-s
 
 Go in this order. Stop as soon as the problem is fixed.
 
-1. **Turn the address off for the client.** Set `subdomain_enabled` to false in the company's operating profile (M4-9 screen). Within 45 seconds the branding endpoint gives 404 and CORS stops allowing the address. Employees see "isn't available".
+1. **Turn the address off for the client.** Set `subdomain_enabled` to false in the company's current operating profile (M4-9 screen), **and** in any scheduled future operating profile that would turn it back on (see [`CLIENT_SUBDOMAIN_ACTIVATION.md`](../CLIENT_SUBDOMAIN_ACTIVATION.md)). Within 45 seconds the branding endpoint gives 404 and CORS stops allowing the address. Employees see "isn't available".
 2. **Bad website deploy.** Netlify → Site 2 → Deploys → pick the last good deploy → Publish deploy. That locks auto-publishing. Unlock it after the fix is merged.
 3. **Bad API deploy.** Render → employee service → Events → roll back to the last good deploy.
-4. **Take the whole thing down** (in this order):
+4. **Take the whole thing down** (in this order). Do steps 2 to 5 for **every enabled address**: MoSa's (company 6, `mosas`) **and** the team address (company 1, `cornerstone`).
    1. Suspend the Render employee service. A suspended service isn't billed.
    2. Remove the address from Clerk's allowed subdomains.
    3. Delete the Cloudflare CNAME. Wait for it to stop resolving.
    4. Remove the Netlify alias.
-   5. Clear the slug: `TenantScope.as_system(reason: "M4-10 rollback") { Company.find(6).update!(subdomain_slug: nil) }`. It only works with `subdomain_enabled` off.
+   5. Clear the slug: `TenantScope.as_system(reason: "M4-10 rollback") { [6, 1].each { |id| Company.find(id).update!(subdomain_slug: nil) } }`. It only works with `subdomain_enabled` off (including scheduled profiles), so do step 1 above for both companies first.
 5. **Delete** the Netlify site and the Render service only when you're sure. The employee service owns no data and runs no migrations. Payroll isn't touched by any of these steps.
 
 If Redis is down, the API falls back to per-process counters and keeps serving. Don't roll back for that.

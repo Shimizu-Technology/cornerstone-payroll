@@ -54,6 +54,8 @@ services:
         sync: false
       - key: RLS_CONTEXT_GUARD_MODE
         sync: false
+      - key: RLS_EXPECT_ENFORCED     # production:readiness checks the RLS phase against this
+        sync: false
       - key: DB_PREPARED_STATEMENTS
         sync: false
       - key: AUTH_ENABLED
@@ -66,6 +68,10 @@ services:
         sync: false
       - key: CLERK_AUTHORIZED_PARTIES  # static list only; client subdomains come from the registry
         sync: false
+      - key: CLERK_ISSUER              # copy only if Payroll web sets it; otherwise derived from CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_API_BASE            # same: copy only if Payroll web sets it
+        sync: false
       - key: CLERK_MFA_ATTESTED_INSTANCE_ID
         sync: false
       - key: CLERK_MFA_EVIDENCE_REF
@@ -73,6 +79,8 @@ services:
       - key: CORS_ORIGINS              # static origins only; client subdomains come from the registry
         sync: false
       - key: FRONTEND_URL
+        sync: false
+      - key: TIME_TRACKING_ALLOWED_HOSTS  # production:readiness checks time-tracking destinations against this
         sync: false
       - key: R2_ACCESS_KEY_ID
         sync: false

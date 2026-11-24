@@ -25,27 +25,46 @@ export function apiOrigin(apiUrl) {
   return url.origin
 }
 
+// Same host rule as ClerkTokenVerifier::HOSTNAME_PATTERN (api/app/services/clerk_token_verifier.rb),
+// so the build accepts exactly the frontend API hosts the API would verify tokens for.
+const CLERK_HOSTNAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i
+
 // A Clerk publishable key is `pk_<env>_` plus base64 of "<frontend API host>$".
-export function clerkFrontendOrigin(publishableKey) {
-  const match = /^pk_(?:test|live)_([A-Za-z0-9+/=_-]+)$/.exec(String(publishableKey ?? ''))
-  const host = match && Buffer.from(match[1], 'base64').toString('utf8')
-  if (!host || !host.endsWith('$') || !/^[a-z0-9.-]+\$$/i.test(host)) {
+// A production build refuses a `pk_test_` (development instance) key.
+export function clerkFrontendOrigin(publishableKey, { production = false } = {}) {
+  const match = /^pk_(test|live)_([A-Za-z0-9+/=_-]+)$/.exec(String(publishableKey ?? ''))
+  const decoded = match && Buffer.from(match[2], 'base64').toString('utf8')
+  const host = decoded?.endsWith('$') ? decoded.slice(0, -1) : ''
+  if (!match || !CLERK_HOSTNAME.test(host)) {
     throw new Error('VITE_CLERK_PUBLISHABLE_KEY must be a Clerk publishable key for the employee build')
   }
-  return `https://${host.slice(0, -1).toLowerCase()}`
+  if (production && match[1] !== 'live') {
+    throw new Error('VITE_CLERK_PUBLISHABLE_KEY must be a pk_live_ key when VITE_DEPLOYMENT_ENV=production')
+  }
+  return `https://${host.toLowerCase()}`
 }
 
+// Sources follow Clerk's CSP guide for a self-hosted frontend (production instance, own
+// Clerk frontend API domain): https://clerk.com/docs/guides/secure/best-practices/csp-headers
+//   script-src  frontend API host, https://challenges.cloudflare.com, https://*.protect.clerk.com
+//   connect-src frontend API host, https://*.protect.clerk.com:*  (":*" is required: those hosts use ports other than 443)
+//   frame-src   https://challenges.cloudflare.com, https://*.protect.clerk.com
+//   img-src     https://img.clerk.com
+//   worker-src  'self' blob:      style-src 'self' 'unsafe-inline'      form-action 'self'
+// Beyond that guide: the employee API, Clerk telemetry, Google Fonts and tenant logo hosts. The only
+// wildcards allowed are the documented Clerk ones (employeeSurfaceDeploy.test.ts enforces that).
 export function contentSecurityPolicy({ apiOrigin: api, clerkOrigin }) {
   return [
     "default-src 'self'",
-    `script-src 'self' ${clerkOrigin} https://challenges.cloudflare.com`,
+    `script-src 'self' ${clerkOrigin} https://challenges.cloudflare.com https://*.protect.clerk.com`,
     // Clerk's components and the Google Fonts stylesheet in index.html inject styles.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
-    // Tenant logos come from a public HTTPS asset host that differs per client.
-    "img-src 'self' data: blob: https:",
-    `connect-src 'self' ${api} ${clerkOrigin} https://clerk-telemetry.com`,
-    "frame-src 'self' blob: https://challenges.cloudflare.com",
+    // https://img.clerk.com is Clerk's avatar host. Tenant logos come from a public HTTPS asset host
+    // that differs per client, so any HTTPS image source stays allowed.
+    "img-src 'self' data: blob: https://img.clerk.com https:",
+    `connect-src 'self' ${api} ${clerkOrigin} https://*.protect.clerk.com:* https://clerk-telemetry.com https://*.clerk-telemetry.com`,
+    "frame-src 'self' blob: https://challenges.cloudflare.com https://*.protect.clerk.com",
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
@@ -66,7 +85,9 @@ export function finalizeEmployeeDist({ distDir, deployDir, env }) {
   if (!existsSync(path.join(distDir, 'index.html'))) throw new Error(`No build output in ${distDir}`)
   const origins = {
     apiOrigin: apiOrigin(env.VITE_API_URL),
-    clerkOrigin: clerkFrontendOrigin(env.VITE_CLERK_PUBLISHABLE_KEY),
+    clerkOrigin: clerkFrontendOrigin(env.VITE_CLERK_PUBLISHABLE_KEY, {
+      production: env.VITE_DEPLOYMENT_ENV === 'production',
+    }),
   }
   writeFileSync(
     path.join(distDir, '_headers'),
