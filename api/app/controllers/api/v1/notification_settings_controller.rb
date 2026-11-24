@@ -58,9 +58,10 @@ module Api
         payload = {
           email_delivery_enabled: PortalNotifications.delivery_enabled?,
           digest_time_label: PortalNotifications::DIGEST_TIME_LABEL,
-          categories: PortalNotifications::Preferences.categories_for(current_user).map do |key, category|
+          categories: modes.map do |key, mode|
+            category = PortalNotifications::CATEGORIES.fetch(key)
             { key: key, label: category[:label], description: category[:description],
-              delivery_mode: modes.fetch(key), default_mode: category[:default_mode] }
+              delivery_mode: mode, default_mode: category[:default_mode] }
           end,
           recent_alerts: recent_alerts
         }

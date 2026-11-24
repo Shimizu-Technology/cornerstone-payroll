@@ -99,10 +99,13 @@ module Api
             change_request: serialize_change_request(result.change_request),
             applied_direct_fields: result.applied_direct_fields,
             contact_warnings: result.contact_warnings || [],
-            message: result.change_request ?
-              "Profile updates saved. Payroll-sensitive changes were submitted for approval as request ##{result.change_request.id}." :
-              "Employee profile updated successfully."
+            message: update_message(result.change_request)
           }
+        rescue ClientEmployeeUpdateService::PendingAddressRequest => e
+          render json: { error: e.message, code: "address_request_pending", pending_request_id: e.request_id },
+            status: :conflict
+        rescue EmployeeProfileIdentity::LinkCheckUnavailable => e
+          render json: { error: e.message }, status: :service_unavailable
         rescue EmployeeContactRevisionGuard::ConflictError => e
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
@@ -321,6 +324,13 @@ module Api
           data
         end
 
+        def update_message(change_request)
+          return "Employee profile updated successfully." unless change_request
+          return "Your address request was sent for review. Your current address stays on file until it’s approved." if change_request.profile_address?
+
+          "Profile updates saved. Payroll-sensitive changes were submitted for approval as request ##{change_request.id}."
+        end
+
         def serialize_change_request(change_request)
           return nil unless change_request
 
@@ -328,6 +338,7 @@ module Api
             id: change_request.id,
             status: change_request.status,
             request_kind: change_request.request_kind,
+            profile_address: change_request.profile_address?,
             employee_id: change_request.employee_id,
             employee_name: change_request.employee.full_name,
             requested_by_id: change_request.requested_by_id,
