@@ -192,7 +192,7 @@ module Api
             user_email: assignment.user.email,
             company_id: assignment.company_id,
             company_name: assignment.company.name,
-            test_workspace: assignment.company.test_workspace?,
+            test_workspace: assignment.company.practice_copy?,
             workspace_access_level: assignment.workspace_access_level,
             client_management: assignment.client_management,
             expires_at: assignment.expires_at,

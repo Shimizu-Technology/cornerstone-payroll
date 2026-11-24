@@ -14,6 +14,7 @@ module TestWorkspace
 
       Company.transaction do
         company.lock!
+        raise ArgumentError, "Demo companies are permanent. Deactivate the client instead." if company.demo?
         raise ArgumentError, "Read-only backup snapshots cannot be archived manually" if company.backup_snapshot?
         raise ArgumentError, "This test workspace is already archived" if company.test_workspace_archived_at.present?
 
@@ -29,6 +30,7 @@ module TestWorkspace
       authorize!
       Company.transaction do
         company.lock!
+        raise ArgumentError, "Demo companies are permanent and never archive or expire" if company.demo?
         raise ArgumentError, "Read-only backup snapshots cannot be restored manually" if company.backup_snapshot?
         unless company.test_workspace_archived_at.present? || company.test_workspace_expired?
           raise ArgumentError, "This test workspace is neither archived nor expired"
