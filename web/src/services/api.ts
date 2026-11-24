@@ -554,6 +554,8 @@ export const employeesApi = {
     employment_type?: string;
     configuration_review_status?: 'complete' | 'needs_review';
     intake_status?: 'incomplete';
+    needs_contact_details?: boolean;
+    contact_status?: 'needs_contact_details';
     search?: string;
     sort_by?: 'name' | 'department' | 'rate' | 'status';
     sort_direction?: 'asc' | 'desc';
@@ -565,9 +567,23 @@ export const employeesApi = {
   get: (id: number, companyId?: number, statusEffectiveDate?: string): Promise<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }> =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, { status_effective_date: statusEffectiveDate }, { companyId }),
   create: (data: EmployeeFormData & { company_id: number }) =>
-    api.post<{ data: Employee }>('/admin/employees', { employee: data }),
-  update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
-    api.patch<{ data: Employee; payment_method_review?: { reapproval_pay_period_ids: number[] }; compensation_warnings?: string[] }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
+    api.post<{ data: Employee; contact_warnings?: import('@/types').EmployeeContactWarning[] }>('/admin/employees', { employee: data }),
+  update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) => {
+    const { confirm_same_person_email, ...employeePayload } = data;
+    return api.patch<{
+      data: Employee;
+      payment_method_review?: { reapproval_pay_period_ids: number[] };
+      compensation_warnings?: string[];
+      contact_warnings?: import('@/types').EmployeeContactWarning[];
+    }>(
+      `/admin/employees/${id}`,
+      {
+        employee: employeePayload,
+        ...(confirm_same_person_email ? { confirm_same_person_email: true } : {}),
+      },
+      { companyId },
+    );
+  },
   cancelScheduledCompensation: (id: number, date: string, reason: string, revision: string, companyId?: number) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/cancel_scheduled_compensation`, {
       employee: { compensation_effective_on: date, compensation_change_reason: reason, compensation_revision: revision },
@@ -771,11 +787,61 @@ export const departmentsApi = {
     api.patch<{ data: Department }>(`/admin/departments/${id}`, { department: data }),
 };
 
+export interface SharedEmailReportEntry {
+  email: string;
+  total_count: number;
+  active_count: number;
+  inactive_count: number;
+  companies_count: number;
+  organization_total_count: number;
+  reasons: string[];
+  classification: 'placeholder' | 'shared_inbox' | 'shared';
+}
+
+export interface SharedEmailCompanySummary {
+  company_id: number;
+  company_name: string;
+  total_flagged_records: number;
+  active_flagged_records: number;
+  emails: SharedEmailReportEntry[];
+}
+
+export interface SharedEmailReportResponse {
+  summary: {
+    companies_affected: number;
+    distinct_flagged_emails: number;
+    total_employee_records: number;
+    active_employee_records: number;
+  };
+  companies: SharedEmailCompanySummary[];
+}
+
+export interface ClearSharedEmailResponse {
+  data: {
+    company_id: number;
+    company_name: string;
+    email: string;
+    cleared_count: number;
+    active_cleared_count: number;
+    inactive_cleared_count: number;
+  };
+  message: string;
+}
+
+export const employeeContactHygieneApi = {
+  sharedEmails: (params?: { company_id?: number }) =>
+    api.get<SharedEmailReportResponse>('/admin/employee_contact_hygiene/shared_emails', params),
+  clearSharedEmails: (data: { company_id: number; email: string }) =>
+    api.post<ClearSharedEmailResponse>('/admin/employee_contact_hygiene/clear_shared_emails', data, { companyId: data.company_id }),
+};
+
 export const clientEmployeesApi = {
   list: (params?: {
     status?: string;
     department_id?: number;
     employment_type?: string;
+    needs_contact_details?: boolean;
+    contact_status?: 'needs_contact_details';
     search?: string;
     sort_by?: 'name' | 'department' | 'rate' | 'status';
     sort_direction?: 'asc' | 'desc';
@@ -785,10 +851,20 @@ export const clientEmployeesApi = {
   }) => api.get<{ data: Employee[]; meta: PaginationMeta }>('/client/employees', params),
   get: (id: number) =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/client/employees/${id}`),
-  create: (data: EmployeeFormData) =>
-    api.post<ClientEmployeeUpdateResponse>('/client/employees', { employee: data }),
-  update: (id: number, data: Partial<EmployeeFormData>) =>
-    api.patch<ClientEmployeeUpdateResponse>(`/client/employees/${id}`, { employee: data }),
+  create: (data: EmployeeFormData) => {
+    const { confirm_same_person_email, ...employeePayload } = data;
+    return api.post<ClientEmployeeUpdateResponse>('/client/employees', {
+      employee: employeePayload,
+      ...(confirm_same_person_email ? { confirm_same_person_email: true } : {}),
+    });
+  },
+  update: (id: number, data: Partial<EmployeeFormData>) => {
+    const { confirm_same_person_email, ...employeePayload } = data;
+    return api.patch<ClientEmployeeUpdateResponse>(`/client/employees/${id}`, {
+      employee: employeePayload,
+      ...(confirm_same_person_email ? { confirm_same_person_email: true } : {}),
+    });
+  },
 };
 
 export const clientDepartmentsApi = {
@@ -4504,6 +4580,7 @@ export interface ClientEmployeeUpdateResponse {
   data: Employee;
   change_request?: EmployeeChangeRequest | null;
   applied_direct_fields?: string[];
+  contact_warnings?: import('@/types').EmployeeContactWarning[];
   message?: string;
 }
 

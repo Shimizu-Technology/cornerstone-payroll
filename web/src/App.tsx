@@ -23,6 +23,7 @@ const PayrollPeriodsList = lazy(() => import('@/pages/payroll-submissions/Payrol
 const PayrollPeriodPage = lazy(() => import('@/pages/payroll-submissions/PayrollPeriodPage').then(module => ({ default: module.PayrollPeriodPage })));
 const Dashboard = lazy(() => import('@/pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const EmployeeList = lazy(() => import('@/pages/employees/EmployeeList').then((module) => ({ default: module.EmployeeList })));
+const EmployeeContactDetails = lazy(() => import('@/pages/employees/EmployeeContactDetails').then((module) => ({ default: module.EmployeeContactDetails })));
 const EmployeeForm = lazy(() => import('@/pages/employees/EmployeeForm').then((module) => ({ default: module.EmployeeForm })));
 const EmployeeWorkspace = lazy(() => import('@/pages/employees/EmployeeWorkspace').then((module) => ({ default: module.EmployeeWorkspace })));
 const ClientEmployeeOverview = lazy(() => import('@/pages/employees/ClientEmployeeOverview').then((module) => ({ default: module.ClientEmployeeOverview })));
@@ -363,6 +364,8 @@ function AppRoutes() {
         <Route path="/app/time-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/aire-history-approval" element={<CapabilityRoute capability="payroll_operations"><AireHistoryApproval /></CapabilityRoute>} />
         <Route path="employees" element={<LegacyCompanyRedirect destination="employees" />} />
+        <Route path="employees/contact-details" element={<LegacyCompanyRedirect destination="contact-details" />} />
+        <Route path="contact-details" element={<LegacyCompanyRedirect destination="contact-details" />} />
         <Route path="employees/new" element={<LegacyCompanyRedirect destination="new-employee" />} />
         <Route path="employees/:id" element={<LegacyCompanyRedirect destination="employee" clientMode={isClient} />} />
         <Route path="departments" element={<Departments />} />
@@ -376,6 +379,7 @@ function AppRoutes() {
           <Route path="payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
           <Route path="client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
           <Route path="employees" element={<EmployeeList />} />
+          <Route path="employees/contact-details" element={<EmployeeContactDetails />} />
           <Route path="employees/new" element={<EmployeeForm />} />
           <Route path="employees/:id/edit" element={<EmployeeForm />} />
           <Route path="employees/:id/:tab?" element={isClient ? <ClientEmployeeOverview /> : <EmployeeWorkspace />} />

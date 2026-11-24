@@ -11,6 +11,7 @@ import {
   ArrowDown,
   ArrowUpDown,
   Users,
+  Mail,
   Upload
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -38,7 +39,7 @@ import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi 
 import { useAuth } from '@/contexts/AuthContext';
 import { canWriteClientEmployeeProfile, canWriteCompany } from '@/lib/company-write-access';
 import { useCompany } from '@/contexts/CompanyContext';
-import { currentAppPath, employeePath, newEmployeePath } from '@/lib/routes';
+import { currentAppPath, employeeContactDetailsPath, employeePath, newEmployeePath } from '@/lib/routes';
 import { EmployeeIntakeSettingsPanel } from '@/components/employees/EmployeeIntakeSettingsPanel';
 import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
@@ -298,20 +299,29 @@ export function EmployeeList() {
         title="Employees"
         description="Manage your company's employees"
         actions={
-          !canAddEmployee ? undefined : (
-            <div className="flex items-center gap-2">
-              {!isClient && (
-                <Button variant="outline" onClick={() => setShowBulkImport(true)}>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Bulk Import
-                </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={() => navigate(employeeContactDetailsPath(companyId))}>
+              <Mail className="w-4 h-4 mr-2" />
+              Contact Details
+              {typeof companyMeta?.needs_contact_details_count === 'number' && companyMeta.needs_contact_details_count > 0 && (
+                <Badge variant="warning" className="ml-2">
+                  {companyMeta.needs_contact_details_count}
+                </Badge>
               )}
+            </Button>
+            {canAddEmployee && !isClient && (
+              <Button variant="outline" onClick={() => setShowBulkImport(true)}>
+                <Upload className="w-4 h-4 mr-2" />
+                Bulk Import
+              </Button>
+            )}
+            {canAddEmployee && (
               <Button onClick={() => navigate(newEmployeePath(companyId, { returnTo }))}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add Employee
               </Button>
-            </div>
-          )
+            )}
+          </div>
         }
       />
 
