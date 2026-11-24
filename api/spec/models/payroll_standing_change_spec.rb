@@ -17,7 +17,7 @@ RSpec.describe PayrollStandingChange do
     expect(logs.last.metadata.dig("changes", "active")).to eq([ true, false ])
     expect(item.attributes.keys).not_to include("amount", "hours")
     item.destroy!
-    expect(logs.reload.last.action).to eq("payroll_standing_changes#destroy")
+    expect(logs.order(:id).last.action).to eq("payroll_standing_changes#destroy")
   end
 
   it "refuses cross-company employees and another employee's rate" do
