@@ -18,7 +18,7 @@ Rails.application.routes.draw do
       namespace :public do
         get :tenant_branding, to: "tenant_branding#show", format: false
         get "tenant_branding/logo/:slug/:file", to: "tenant_branding#logo", format: false,
-            constraints: { slug: /[a-z0-9-]+/, file: /[0-9a-f]{16}\.(?:png|webp|svg)/ }
+            constraints: { slug: /[a-z0-9-]+/, file: /[0-9a-f]{16}\.(?:png|webp)/ }
       end
 
       namespace :finance do

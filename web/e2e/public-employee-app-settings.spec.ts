@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-// A plain round badge. Set E2E_LOGO_PATH to a PNG to take screenshots with a
-// real client logo.
-const SAMPLE_LOGO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#FADF06"/><circle cx="32" cy="32" r="22" fill="#1898CF"/><text x="32" y="38" font-size="16" text-anchor="middle" font-family="sans-serif" fill="#040707">EG</text></svg>`;
+// The mocked preview endpoint serves a plain round badge (uploads only accept
+// PNG and WebP; this only stands in for the stored file). Set E2E_LOGO_PATH to a
+// PNG to take screenshots with a real client logo.
+const SAMPLE_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#FADF06"/><circle cx="32" cy="32" r="22" fill="#1898CF"/><text x="32" y="38" font-size="16" text-anchor="middle" font-family="sans-serif" fill="#040707">EG</text></svg>`;
 
 function json(route: Route, body: unknown, status = 200): Promise<void> {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -27,18 +28,18 @@ async function mockClientWithSettings(page: Page): Promise<{ saved: () => Settin
     company_name: "MoSa's Joint",
     branding: {
       display_name: null, app_name: null, primary_color: null, accent_color: null, show_main_phone: true,
-      logo: { content_type: 'image/svg+xml', byte_size: 400, digest: '0123456789abcdef' }, external_logo_url: null,
+      logo: { content_type: 'image/png', byte_size: 400, digest: '0123456789abcdef' }, external_logo_url: null,
     },
     main_phone: '6715550100',
     subdomain: { slug: 'mosas', host: 'mosas.shimizu-technology.com' },
     help_contacts: [],
     max_help_contacts: 5,
-    logo_limits: { max_bytes: 1048576, content_types: ['image/png', 'image/webp', 'image/svg+xml'] },
+    logo_limits: { max_bytes: 1048576, content_types: ['image/png', 'image/webp'] },
   };
   const logoPath = process.env.E2E_LOGO_PATH;
   const logo = logoPath
     ? { contentType: 'image/png', body: readFileSync(logoPath) }
-    : { contentType: 'image/svg+xml', body: SAMPLE_LOGO };
+    : { contentType: 'image/svg+xml', body: SAMPLE_LOGO_SVG };
 
   await page.route('**/api/v1/client/employee_app_settings**', async (route) => {
     const request = route.request();
@@ -80,7 +81,7 @@ for (const width of [390, 1280]) {
     await page.getByLabel('Accent color (optional)', { exact: true }).fill('#FADF06');
     await expect(page.getByText('Buttons will use this darker shade so text is readable.')).toBeVisible();
     await expect(page.getByText('Highlights use this color with dark text.')).toBeVisible();
-    await page.getByRole('button', { name: 'Save name and colors' }).click();
+    await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText(/Employees see the new look/)).toBeVisible();
     expect(api.saved().branding).toMatchObject({ display_name: "MoSa's", app_name: "MoSa's Pay", primary_color: '#1898CF', accent_color: '#FADF06' });
 
@@ -99,10 +100,10 @@ for (const width of [390, 1280]) {
     await expect(page.getByText('Help contacts not set up')).toHaveCount(0);
     expect(api.saved().help_contacts).toHaveLength(2);
 
-    // Every tap target in the editor is at least 40px tall, 44px on touch.
+    // Editor tap targets: 44px on a phone, 40px with a mouse on desktop.
     const buttons = page.getByRole('button', { name: /Move|Remove|Save Help contacts|Add another contact/ });
     for (const box of await buttons.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height))) {
-      expect(box).toBeGreaterThanOrEqual(36);
+      expect(box).toBeGreaterThanOrEqual(width === 390 ? 44 : 40);
     }
 
     await noSideScroll(page);

@@ -23,7 +23,7 @@ For local browser QA, a Vite dev server on loopback accepts `/?tenantHost=<slug>
 The **Employee app** page sets, per company:
 
 - **Name employees see** (`branding.display_name`, up to 60 characters; blank uses the company name) and **Home Screen name** (`branding.app_name`, up to 30; phones cut labels off at about 12).
-- **Logo:** PNG, SVG or WebP, up to 1 MB and 2,400 pixels a side. PNG text and EXIF chunks, WebP EXIF and XMP, and SVG comments and metadata are removed. SVGs with scripts, event handlers, links or outside references are refused. Stored in R2 under `tenant-brand/company-<id>/<sha256>`.
+- **Logo:** PNG or WebP, up to 1 MB and 2,400 pixels a side. **SVG isn't supported**, because denylist sanitizing is unreliable and phones need a raster Home Screen icon. Only image chunks are kept: PNG text, EXIF and time chunks are dropped, and WebP keeps only `VP8 `, `VP8L`, `VP8X`, `ALPH`, `ICCP`, `ANIM` and `ANMF`. A square logo, at least 512×512, works best. The page warns, without blocking, about a non-square logo or one under 256 pixels. Stored in R2 under `tenant-brand/company-<id>/<sha256>`.
 - **Brand color** and an optional **accent**. The page shows the button shade the employee app will use (`web/src/lib/tenant-brand-colors.ts`): white text always gets at least 4.5:1, and a light color is never used behind white text.
 - **Main phone:** the company's phone on file, shown on the sign-in screen and on Help when no contacts are set, unless the switch is off.
 - **Help contacts:** up to 5 people (name, role, phone, email, "text OK"), in order. They are served only to signed-in employees of that company and never in the public branding response.
@@ -36,7 +36,7 @@ The public branding response is `name`, `app_name`, `logo_url`, `primary_color`,
 
 Set it on MoSa's Employee app page when its subdomain is prepared (M4-10), and confirm the badge with MoSa's:
 
-- **Logo:** the "Joint" badge from the official site, `https://mosasjointguam.com/assets/image_1771348149002-8oH8FEyv.png` (351×429 PNG, SHA-256 `c279dbfd…60000dc`). It's the header, footer and hero logo on the site. The "HotBox" badge is the 2014 food-truck origin and is the current Instagram profile picture. Ask MoSa's for a vector or larger file and a square icon.
+- **Logo:** upload the "Joint" badge PNG from the official site, `https://mosasjointguam.com/assets/image_1771348149002-8oH8FEyv.png` (351×429 PNG, SHA-256 `c279dbfd…60000dc`). It's the header, footer and hero logo on the site. The "HotBox" badge is the 2014 food-truck origin and is the current Instagram profile picture. The page will warn that it isn't square; ask MoSa's for a square PNG of at least 512×512 (or a larger master file) for the Home Screen icon.
 - **Name employees see:** `MoSa's`. **Home Screen name:** `MoSa's Pay`.
 - **Brand color:** `#1898CF` (logo blue). Buttons automatically use `#137AA7`, the computed shade with white text at 4.5:1 or better. The audit's hand-picked `#1A6F99` (5.56:1) also passes if MoSa's prefers it; enter it as the brand color.
 - **Accent color:** `#FADF06` (logo yellow). It only ever appears with dark text.

@@ -21,7 +21,10 @@ import { ApiError } from '@/services/api';
 import { employeeAppSettingsApi, type BrandingUpdate, type EmployeeAppSettings } from '@/services/employee-app-settings-api';
 
 const APP_NAME_FITS = 12;
-const LOGO_ACCEPT = '.png,.svg,.webp,image/png,image/svg+xml,image/webp';
+const LOGO_ACCEPT = '.png,.webp,image/png,image/webp';
+const UNSUPPORTED_LOGO = "Upload a PNG or WebP image. SVG isn't supported.";
+const RECOMMENDED_EDGE = 512;
+const SMALL_EDGE = 256;
 
 function brandingForm(settings: EmployeeAppSettings): BrandingUpdate {
   const { branding } = settings;
@@ -120,9 +123,21 @@ function ColorField({ id, label, value, placeholder, disabled, onChange }: {
 }
 
 function ColorResult({ primary, accent }: { primary: string; accent: string }): ReactElement | null {
-  if (!isHexColor(primary)) return null;
-  const check = brandColorCheck(primary);
-  const roles = brandRoles(primary, isHexColor(accent) ? accent : null);
+  const hasAccent = isHexColor(accent);
+  if (!isHexColor(primary)) {
+    if (!hasAccent) return null;
+    const roles = brandRoles(null, accent);
+    return (
+      <div className="rounded-2xl border border-neutral-200 bg-neutral-50/60 p-4">
+        <span className="inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold" style={{ background: roles.accent, color: roles.accentInk }}>
+          Highlight
+        </span>
+        <p className="mt-3 text-sm text-neutral-700" role="status">{accentColorCheck(accent)}</p>
+      </div>
+    );
+  }
+  const check = brandColorCheck(primary, hasAccent);
+  const roles = brandRoles(primary, hasAccent ? accent : null);
   return (
     <div className={cn('rounded-2xl border p-4', check.tone === 'ok' ? 'border-success-200 bg-success-50/40' : 'border-primary-100 bg-primary-50/40')}>
       <div className="flex flex-wrap items-center gap-3">
@@ -134,7 +149,7 @@ function ColorResult({ primary, accent }: { primary: string; accent: string }): 
         <span className="inline-flex min-h-10 items-center rounded-full px-4 text-sm font-semibold text-white" style={{ background: roles.action }}>
           Buttons look like this
         </span>
-        {isHexColor(accent) && (
+        {hasAccent && (
           <span className="inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold" style={{ background: roles.accent, color: roles.accentInk }}>
             Highlight
           </span>
@@ -145,7 +160,7 @@ function ColorResult({ primary, accent }: { primary: string; accent: string }): 
         White text on your color: {check.ratio}. Buttons need 4.5 to 1.
         {check.tone !== 'ok' && ` Button color: ${roles.action.toUpperCase()}.`}
       </p>
-      {isHexColor(accent) && <p className="mt-1 text-xs text-neutral-600">{accentColorCheck(accent)}</p>}
+      {hasAccent && <p className="mt-1 text-xs text-neutral-600">{accentColorCheck(accent)}</p>}
     </div>
   );
 }
@@ -185,6 +200,7 @@ export function EmployeeAppSettings(): ReactElement {
   const [savingBranding, setSavingBranding] = useState(false);
   const [savingContacts, setSavingContacts] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
+  const [logoSize, setLogoSize] = useState<{ width: number; height: number } | null>(null);
   const [showProblems, setShowProblems] = useState(false);
   const [serverErrors, setServerErrors] = useState<Record<number, string[]>>({});
   const [screen, setScreen] = useState<PreviewScreen>('sign-in');
@@ -219,14 +235,16 @@ export function EmployeeAppSettings(): ReactElement {
   // before the client's subdomain is on.
   const logoDigest = settings?.branding.logo?.digest ?? null;
   const externalLogo = settings?.branding.external_logo_url ?? null;
+  const settingsCompanyId = settings?.company_id ?? null;
   useEffect(() => {
-    if (!logoDigest) {
+    setLogoSize(null);
+    if (!logoDigest || settingsCompanyId == null) {
       setLogoUrl(externalLogo);
       return undefined;
     }
     let objectUrl: string | null = null;
     let cancelled = false;
-    api.logo()
+    api.logo(settingsCompanyId)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -237,7 +255,7 @@ export function EmployeeAppSettings(): ReactElement {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [api, externalLogo, logoDigest]);
+  }, [api, externalLogo, logoDigest, settingsCompanyId]);
 
   if (!authLoading && !companyLoading && !canOpen) return <Navigate to="/app" replace />;
 
@@ -251,6 +269,14 @@ export function EmployeeAppSettings(): ReactElement {
   const colorsValid = !!form && (form.primary_color === '' || isHexColor(form.primary_color)) && (form.accent_color === '' || isHexColor(form.accent_color));
   const readOnlyReason = !canEdit && companyReady ? companyReadOnlyMessage(activeCompany) : null;
   const savedContactCount = settings?.help_contacts.length ?? 0;
+  const hasLogo = !!(settings?.branding.logo || settings?.branding.external_logo_url);
+  const logoWarning = logoSize && hasLogo
+    ? (Math.min(logoSize.width, logoSize.height) < SMALL_EDGE
+      ? `This logo is ${logoSize.width}×${logoSize.height} pixels, so it may look blurry as a Home Screen icon. Use one at least ${RECOMMENDED_EDGE}×${RECOMMENDED_EDGE} if you can.`
+      : Math.abs(logoSize.width - logoSize.height) / Math.max(logoSize.width, logoSize.height) > 0.1
+        ? `This logo isn't square (${logoSize.width}×${logoSize.height}), so it will be shrunk to fit the square Home Screen icon.`
+        : null)
+    : null;
 
   const updateForm = (patch: Partial<BrandingUpdate>): void => {
     setForm((current) => (current ? { ...current, ...patch } : current));
@@ -282,8 +308,12 @@ export function EmployeeAppSettings(): ReactElement {
     event.target.value = '';
     if (!file || activeCompanyId == null || !settings) return;
     setLogoStatus(null);
+    if (!['image/png', 'image/webp'].includes(file.type) && !/\.(png|webp)$/i.test(file.name)) {
+      setLogoStatus({ tone: 'error', message: UNSUPPORTED_LOGO });
+      return;
+    }
     if (file.size > settings.logo_limits.max_bytes) {
-      setLogoStatus({ tone: 'error', message: 'That file is over 1 MB. Export a smaller PNG, SVG or WebP and try again.' });
+      setLogoStatus({ tone: 'error', message: 'That file is over 1 MB. Export a smaller PNG or WebP and try again.' });
       return;
     }
     setLogoBusy(true);
@@ -406,7 +436,8 @@ export function EmployeeAppSettings(): ReactElement {
                       <h3 id="logo-heading" className="text-sm font-semibold text-neutral-950">Logo</h3>
                       <div className="flex flex-wrap items-center gap-4">
                         <span className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-2xl border border-neutral-200 bg-white">
-                          {logoUrl ? <img src={logoUrl} alt={`${displayName} logo`} className="size-[85%] object-contain" />
+                          {logoUrl ? <img src={logoUrl} alt={`${displayName} logo`} className="size-[85%] object-contain"
+                            onLoad={(event) => setLogoSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
                             : <span className="px-2 text-center text-xs text-neutral-500">No logo yet</span>}
                         </span>
                         <div className="space-y-2">
@@ -414,17 +445,18 @@ export function EmployeeAppSettings(): ReactElement {
                             <Button type="button" variant="secondary" disabled={!canEdit} loading={logoBusy} loadingLabel="Saving logo"
                               onClick={() => fileRef.current?.click()}>
                               <ImageUp aria-hidden="true" className="mr-1 size-4" />
-                              {settings.branding.logo ? 'Replace logo' : 'Upload logo'}
+                              {hasLogo ? 'Replace logo' : 'Upload logo'}
                             </Button>
-                            {settings.branding.logo && (
+                            {hasLogo && (
                               <Button type="button" variant="ghost" disabled={!canEdit || logoBusy} onClick={() => void removeLogo()}>Remove</Button>
                             )}
                           </div>
-                          <p className="text-xs text-neutral-600">PNG, SVG or WebP, up to 1 MB. A square or round logo on a clear background works best.</p>
+                          <p className="text-xs text-neutral-600">PNG or WebP, up to 1 MB. Square, at least 512×512, works best for the Home Screen icon.</p>
                         </div>
                         <input ref={fileRef} type="file" accept={LOGO_ACCEPT} className="sr-only" tabIndex={-1} aria-label="Logo file"
                           onChange={(event) => void chooseLogo(event)} />
                       </div>
+                      {logoWarning && <p className="text-sm text-warning-800" role="status">{logoWarning}</p>}
                       {logoStatus && <p role={logoStatus.tone === 'error' ? 'alert' : 'status'} className={cn('text-sm', logoStatus.tone === 'error' ? 'text-danger-700' : 'text-success-700')}>{logoStatus.message}</p>}
                     </section>
 
@@ -462,7 +494,7 @@ export function EmployeeAppSettings(): ReactElement {
                     </section>
 
                     <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 pt-5">
-                      <Button type="submit" disabled={!canEdit || !brandingDirty || !colorsValid} loading={savingBranding} loadingLabel="Saving">Save name and colors</Button>
+                      <Button type="submit" disabled={!canEdit || !brandingDirty || !colorsValid} loading={savingBranding} loadingLabel="Saving">Save changes</Button>
                       {brandingDirty && <span className="text-sm text-neutral-600">Unsaved changes. The preview shows them.</span>}
                     </div>
                     {brandingStatus && <ActionFeedback tone={brandingStatus.tone} message={brandingStatus.message} />}
@@ -472,7 +504,10 @@ export function EmployeeAppSettings(): ReactElement {
 
               <Card className="min-w-0 self-start xl:sticky xl:top-40 xl:col-start-2 xl:row-span-2 xl:row-start-1">
                 <CardHeader>
-                  <CardTitle>Preview</CardTitle>
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle>Preview</CardTitle>
+                    <span className="rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-semibold text-neutral-700">Sample data</span>
+                  </div>
                   <CardDescription>What employees will see, including unsaved changes. The pay shown is sample data.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">

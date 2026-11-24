@@ -19,6 +19,7 @@ module Api
         # client user can't finish a save that started before the change.
         def revalidate_settings_write_access!
           actor = User.lock.find_by(id: current_user&.id)
+          current_company.company_assignments.where(user_id: actor&.id).lock.load
           allowed = actor&.active? && actor.client? && actor.payroll_access_allowed? && actor.can_access_company?(current_company.id)
           raise ClientAccessChanged unless allowed
         end

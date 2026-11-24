@@ -51,7 +51,8 @@ describe('tenant brand colors', () => {
       tone: 'adjusted', ratio: '3.2 to 1', message: 'Buttons will use this darker shade so text is readable.',
     });
     expect(brandColorCheck('#FADF06').tone).toBe('light');
-    expect(brandColorCheck('#FADF06').message).toContain('too light for white text');
+    expect(brandColorCheck('#FADF06').message).toContain('used for highlights with dark text');
+    expect(brandColorCheck('#FADF06', true).message).toContain('your accent color is used for highlights');
     expect(brandColorCheck('#0F263D').tone).toBe('ok');
     expect(accentColorCheck('#FADF06')).toBe('Highlights use this color with dark text.');
     expect(accentColorCheck('#0F263D')).toBe('Highlights use this color with white text.');

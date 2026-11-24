@@ -27,29 +27,28 @@ module BrandLogoFixtures
     type.b + [ data.bytesize ].pack("V") + padded
   end
 
-  # An extended WebP header (VP8X) with EXIF and XMP chunks around a lossless
-  # bitstream header. The specs check headers and metadata only.
-  def webp_logo(width: 64, height: 64)
-    flags = 0x08 | 0x04 | 0x10
-    vp8x = [ flags, 0, 0, 0 ].pack("C4") + [ width - 1 ].pack("V")[0, 3] + [ height - 1 ].pack("V")[0, 3]
-    bits = (width - 1) | ((height - 1) << 14)
-    vp8l = "\x2F".b + [ bits ].pack("V") + "\x00".b * 8
-    body = "WEBP".b + webp_chunk("VP8X", vp8x) + webp_chunk("VP8L", vp8l) +
-      webp_chunk("EXIF", "Exif\x00\x00GPS-and-camera".b) + webp_chunk("XMP ", "<x:xmpmeta>owner</x:xmpmeta>".b)
+  def webp_file(*chunks)
+    body = "WEBP".b + chunks.join.b
     ("RIFF".b + [ body.bytesize ].pack("V") + body).b
   end
 
-  def svg_logo(extra = "")
-    <<~SVG
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!-- Created with an editor by Jordan Example -->
-      <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 64 64" inkscape:version="1.3">
-        <metadata>Owner: Jordan Example</metadata>
-        <defs><linearGradient id="g"><stop offset="0" stop-color="#1898CF"/></linearGradient></defs>
-        <circle cx="32" cy="32" r="30" fill="url(#g)"/>
-        #{extra}
-      </svg>
-    SVG
+  def webp_vp8x(width, height, flags: 0x08 | 0x04 | 0x10)
+    webp_chunk("VP8X", [ flags, 0, 0, 0 ].pack("C4") + [ width - 1 ].pack("V")[0, 3] + [ height - 1 ].pack("V")[0, 3])
+  end
+
+  def webp_vp8l(width, height)
+    webp_chunk("VP8L", "\x2F".b + [ (width - 1) | ((height - 1) << 14) ].pack("V") + ("\x00".b * 8))
+  end
+
+  def webp_vp8(width, height)
+    webp_chunk("VP8 ", "\x00\x00\x00".b + "\x9D\x01\x2A".b + [ width, height ].pack("v2") + ("\x00".b * 6))
+  end
+
+  # An extended WebP header (VP8X) with EXIF, XMP and extra chunks around a
+  # lossless bitstream header. The specs check headers and metadata only.
+  def webp_logo(width: 64, height: 64, extra: [])
+    webp_file(webp_vp8x(width, height), webp_vp8l(width, height),
+      webp_chunk("EXIF", "Exif\x00\x00GPS-and-camera".b), webp_chunk("XMP ", "<x:xmpmeta>owner</x:xmpmeta>".b), *extra)
   end
 
   def logo_upload(bytes, filename: "logo.png", content_type: "image/png")

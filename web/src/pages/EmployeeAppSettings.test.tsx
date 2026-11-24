@@ -51,7 +51,7 @@ function settings(overrides: Partial<Settings> = {}, contacts: HelpContact[] = [
     subdomain: { slug: 'example-grill', host: 'example-grill.shimizu-technology.com' },
     help_contacts: contacts,
     max_help_contacts: 5,
-    logo_limits: { max_bytes: 1048576, content_types: ['image/png', 'image/webp', 'image/svg+xml'] },
+    logo_limits: { max_bytes: 1048576, content_types: ['image/png', 'image/webp'] },
     ...overrides,
   };
 }
@@ -106,11 +106,52 @@ describe('EmployeeAppSettings', () => {
     await user.type(screen.getByLabelText('Home Screen name'), "Grill's Pay Stubs");
     expect(screen.getByText(/cut this off after about 12 characters/)).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'Save name and colors' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mocks.updateBranding).toHaveBeenCalledWith(6, {
       display_name: '', app_name: "Grill's Pay Stubs", primary_color: '#FADF06', accent_color: '', show_main_phone: true,
     }));
     expect(await screen.findByText(/Employees see the new look/)).toBeTruthy();
+  });
+
+  it('checks the accent even without a brand color', async () => {
+    renderPage();
+    await screen.findByText('Help contacts not set up');
+
+    fireEvent.change(screen.getByLabelText('Accent color (optional)'), { target: { value: '#FADF06' } });
+
+    expect(screen.getByText('Highlights use this color with dark text.')).toBeTruthy();
+    expect(screen.getByText('Without a brand color, the app uses Cornerstone Payroll blue.')).toBeTruthy();
+  });
+
+  it('refuses an SVG before uploading and recommends a square PNG or WebP', async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    renderPage();
+    await screen.findByText('Help contacts not set up');
+    expect(screen.getByText(/Square, at least 512×512, works best/)).toBeTruthy();
+
+    await user.upload(screen.getByLabelText('Logo file'), new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' }));
+
+    expect(await screen.findByText("Upload a PNG or WebP image. SVG isn't supported.")).toBeTruthy();
+    expect(mocks.uploadLogo).not.toHaveBeenCalled();
+  });
+
+  it('fetches the saved logo for the shown company and lets admins remove a legacy logo', async () => {
+    const user = userEvent.setup();
+    mocks.get.mockResolvedValue({ data: settings({ branding: { ...settings().branding, external_logo_url: 'https://images.example.test/grill.png' } }) });
+    mocks.removeLogo.mockResolvedValue({ data: settings() });
+    renderPage();
+    await screen.findByText('Help contacts not set up');
+
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(mocks.removeLogo).toHaveBeenCalledWith(6));
+    expect(mocks.logo).not.toHaveBeenCalled();
+
+    cleanup();
+    mocks.get.mockResolvedValue({ data: settings({ branding: { ...settings().branding, logo: { content_type: 'image/png', byte_size: 900, digest: 'abc' } } }) });
+    renderPage();
+    await screen.findByText('Help contacts not set up');
+    await waitFor(() => expect(mocks.logo).toHaveBeenCalledWith(6));
   });
 
   it('blocks saving an invalid color code', async () => {
@@ -120,7 +161,7 @@ describe('EmployeeAppSettings', () => {
     fireEvent.change(screen.getByLabelText('Accent color (optional)'), { target: { value: '#FAD' } });
 
     expect(screen.getByText('Use a six-digit color code like #1898CF.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Save name and colors' }).matches(':disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Save changes' }).matches(':disabled')).toBe(true);
   });
 
   it('adds, checks and saves Help contacts in order', async () => {

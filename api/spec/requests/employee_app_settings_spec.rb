@@ -95,6 +95,44 @@ RSpec.describe "Employee app branding and Help contacts", type: :request do
       expect(company_a.reload.branding).to eq({})
     end
 
+    it "lets an accountant with delegated client management change that client only" do
+      CompanyAssignment.find_by!(user: accountant, company: company_a).update!(client_management: true, granted_by: staff)
+      act_as(accountant)
+
+      patch admin_path("/branding"), params: { branding: { display_name: "Example Grill" } }, headers: headers_for(company_a), as: :json
+      expect(response).to have_http_status(:ok)
+      expect(company_a.reload.branding["display_name"]).to eq("Example Grill")
+
+      CompanyAssignment.create!(user: accountant, company: company_b)
+      patch admin_path("/branding"), params: { branding: { display_name: "Not delegated" } }, headers: headers_for(company_b), as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(company_b.reload.branding).to eq({})
+    end
+
+    it "keeps employee-only logins out of both namespaces" do
+      employee_login = create(:user, company: company_a, organization: organization, role: "portal_employee")
+      act_as(employee_login)
+
+      [ admin_path("/branding"), client_path("/branding") ].each do |path|
+        patch path, params: { branding: { display_name: "Employee edit" } }, headers: headers_for(company_a), as: :json
+        expect(response.status).to be_in([ 403, 404 ])
+      end
+      expect(company_a.reload.branding).to eq({})
+    end
+
+    it "refuses changes to a closed practice copy" do
+      act_as(client_a)
+      allow_any_instance_of(Company).to receive(:test_workspace_read_only?).and_return(true)
+
+      patch client_path("/branding"), params: { branding: { display_name: "Practice" } }, headers: headers_for(company_a), as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to include("read-only")
+      post client_path("/logo"), params: { file: logo_upload(png_logo) }, headers: headers_for(company_a)
+      expect(response).to have_http_status(:forbidden)
+      expect(company_a.reload.branding).to eq({})
+      expect(company_a.brand_logo_storage_key).to be_nil
+    end
+
     it "refuses a client user whose access ends before the save" do
       act_as(client_a)
       # The user is deactivated after the request passed its first checks.
@@ -146,6 +184,19 @@ RSpec.describe "Employee app branding and Help contacts", type: :request do
   describe "logo upload" do
     before { act_as(client_a) }
 
+    it "audits removing a legacy external logo" do
+      company_a.update!(branding: { "logo_url" => "https://images.example.test/grill.png" })
+
+      get client_path, headers: headers_for(company_a)
+      expect(response.parsed_body.dig("data", "branding", "external_logo_url")).to eq("https://images.example.test/grill.png")
+      delete client_path("/logo"), headers: headers_for(company_a)
+
+      expect(response).to have_http_status(:ok)
+      expect(company_a.reload.branding).not_to have_key("logo_url")
+      audit = AuditLog.find_by!(action: "employee_app_settings#remove_logo")
+      expect(audit.metadata["before_values"]).to eq("logo_url" => "https://images.example.test/grill.png")
+    end
+
     it "stores a cleaned PNG, serves the preview and replaces the old object" do
       post client_path("/logo"), params: { file: logo_upload(png_logo) }, headers: headers_for(company_a)
 
@@ -162,9 +213,9 @@ RSpec.describe "Employee app branding and Help contacts", type: :request do
       expect(response.body).not_to include("Jordan Example")
       expect(response.headers["Cache-Control"]).to include("no-store")
 
-      post client_path("/logo"), params: { file: logo_upload(svg_logo, filename: "logo.svg", content_type: "image/svg+xml") }, headers: headers_for(company_a)
+      post client_path("/logo"), params: { file: logo_upload(webp_logo, filename: "logo.webp", content_type: "image/webp") }, headers: headers_for(company_a)
       expect(response).to have_http_status(:ok)
-      expect(company_a.reload.brand_logo_content_type).to eq("image/svg+xml")
+      expect(company_a.reload.brand_logo_content_type).to eq("image/webp")
       expect(R2StorageService.new.exists?(first_key)).to be(false)
 
       delete client_path("/logo"), headers: headers_for(company_a)
@@ -173,11 +224,16 @@ RSpec.describe "Employee app branding and Help contacts", type: :request do
       expect(AuditLog.where(action: "employee_app_settings#remove_logo").count).to eq(1)
     end
 
-    it "refuses the wrong type, an oversized file and an unsafe SVG" do
+    it "refuses SVG, the wrong type, an oversized file and a damaged WebP" do
+      svg = %(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30"/></svg>)
+      post client_path("/logo"), params: { file: logo_upload(svg, filename: "logo.svg", content_type: "image/svg+xml") }, headers: headers_for(company_a)
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["error"]).to eq("Upload a PNG or WebP image. SVG isn't supported.")
+
       [
         logo_upload("\xFF\xD8\xFF\xE0jpeg".b, filename: "logo.png"),
         logo_upload(png_logo + ("\x00".b * 1.megabyte)),
-        logo_upload(svg_logo("<script>alert(1)</script>"), filename: "logo.svg", content_type: "image/svg+xml")
+        logo_upload(webp_file(webp_chunk("VP8X", "\x00".b * 4)), filename: "logo.webp", content_type: "image/webp")
       ].each do |file|
         post client_path("/logo"), params: { file: file }, headers: headers_for(company_a)
         expect(response).to have_http_status(:unprocessable_content)
@@ -185,6 +241,34 @@ RSpec.describe "Employee app branding and Help contacts", type: :request do
       end
       expect(company_a.reload.brand_logo_storage_key).to be_nil
       expect(Dir.glob(R2StorageService::LOCAL_STORAGE_ROOT.join("**/*")).select { |path| File.file?(path) }).to be_empty
+    end
+  end
+
+  describe "when the audit row can't be written" do
+    before do
+      act_as(client_a)
+      allow(AuditLog).to receive(:record!).and_wrap_original do |original, **kwargs|
+        raise ActiveRecord::StatementInvalid, "audit unavailable" if kwargs[:action].to_s.start_with?("employee_app_settings#")
+
+        original.call(**kwargs)
+      end
+    end
+
+    it "rolls back the change and deletes the uploaded logo object" do
+      post client_path("/logo"), params: { file: logo_upload(png_logo) }, headers: headers_for(company_a)
+
+      expect(response).to have_http_status(:internal_server_error)
+      expect(response.parsed_body["error"]).to include("weren't saved")
+      expect(company_a.reload.brand_logo_storage_key).to be_nil
+      expect(Dir.glob(R2StorageService::LOCAL_STORAGE_ROOT.join("**/*")).select { |path| File.file?(path) }).to be_empty
+
+      patch client_path("/branding"), params: { branding: { display_name: "Unaudited" } }, headers: headers_for(company_a), as: :json
+      expect(response).to have_http_status(:internal_server_error)
+      expect(company_a.reload.branding).to eq({})
+
+      put client_path("/help_contacts"), params: { help_contacts: [ contact ] }, headers: headers_for(company_a), as: :json
+      expect(response).to have_http_status(:internal_server_error)
+      expect(company_a.help_contacts.reload).to be_empty
     end
   end
 
