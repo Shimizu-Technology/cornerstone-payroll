@@ -569,7 +569,7 @@ export const employeesApi = {
   create: (data: EmployeeFormData & { company_id: number }) =>
     api.post<{ data: Employee; contact_warnings?: import('@/types').EmployeeContactWarning[] }>('/admin/employees', { employee: data }),
   update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) => {
-    const { confirm_same_person_email, row_revision, baseline_values, ...employeePayload } = data;
+    const { confirm_same_person_email, row_revision, baseline_values, response_view, ...employeePayload } = data;
     return api.patch<{
       data: Employee;
       payment_method_review?: { reapproval_pay_period_ids: number[] };
@@ -582,6 +582,7 @@ export const employeesApi = {
         ...(confirm_same_person_email ? { confirm_same_person_email: true } : {}),
         ...(row_revision ? { row_revision } : {}),
         ...(baseline_values ? { baseline_values } : {}),
+        ...(response_view ? { response_view } : {}),
       },
       { companyId },
     );

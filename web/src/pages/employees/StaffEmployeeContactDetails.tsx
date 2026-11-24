@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { ArrowLeft, MailWarning, Users } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -21,7 +21,7 @@ const SharedInboxReportPanel = lazy(() =>
 
 const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 
-export function StaffEmployeeContactDetails() {
+export function StaffEmployeeContactDetails(): ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, isClient, isAdmin, hasCapability } = useAuth();
   const { activeCompanyId, activeCompany } = useCompany();
@@ -76,7 +76,7 @@ export function StaffEmployeeContactDetails() {
     return () => { cancelled = true; };
   }, [canViewSharedInboxReport, companyId]);
 
-  const setTab = (tab: 'grid' | 'shared-emails') => {
+  const setTab = (tab: 'grid' | 'shared-emails'): void => {
     const next = new URLSearchParams(searchParams);
     if (tab === 'grid') next.delete('tab');
     else next.set('tab', tab);
@@ -99,9 +99,9 @@ export function StaffEmployeeContactDetails() {
         }
       />
 
-      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-8 p-4 sm:p-6 lg:p-8">
         {canViewSharedInboxReport && (
-          <div role="tablist" aria-label="Contact details sections" className="flex flex-wrap gap-2 border-b border-neutral-200 pb-3">
+          <div role="tablist" aria-label="Contact details sections" className="flex flex-wrap gap-2 border-b border-neutral-200 pb-4">
             <button
               type="button"
               role="tab"

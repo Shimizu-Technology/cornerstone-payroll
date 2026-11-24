@@ -7,6 +7,7 @@ import {
   useState,
   type Dispatch,
   type KeyboardEvent,
+  type ReactElement,
   type ReactNode,
   type SetStateAction,
 } from 'react';
@@ -43,6 +44,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { withoutFullSsn } from '@/lib/employee-contact';
 import { employeesPath } from '@/lib/routes';
 import { cn, getInitials } from '@/lib/utils';
 import { ApiError, clientEmployeesApi, employeesApi } from '@/services/api';
@@ -72,7 +74,7 @@ const FIELD_LABELS: Record<ContactField, string> = {
 
 function gridInputClass(extra = '', invalid = false): string {
   return cn(
-    'block h-9 w-full rounded-lg border bg-white py-1.5 text-sm text-neutral-900 shadow-xs transition-[border-color,background-color,color,box-shadow] duration-150 ease-out placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
+    'block h-9 w-full rounded-lg border bg-white py-2 text-sm text-neutral-900 shadow-xs transition-[border-color,background-color,color,box-shadow] duration-150 ease-out placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
     invalid
       ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200'
       : 'border-neutral-300 focus-visible:border-primary-400 focus-visible:ring-primary-200',
@@ -184,7 +186,7 @@ function extractConflictPayload(error: unknown): EmployeeContactConflictPayload 
     current_values: (raw.current_values && typeof raw.current_values === 'object')
       ? raw.current_values as Record<string, string | null>
       : {},
-    data: raw.data as Employee,
+    data: withoutFullSsn(raw.data as Employee),
   };
 }
 
@@ -285,7 +287,7 @@ export function EmployeeContactDetails({
   onDraftsChange,
   rowStates: controlledRowStates,
   onRowStatesChange,
-}: EmployeeContactDetailsProps = {}) {
+}: EmployeeContactDetailsProps = {}): ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, isClient } = useAuth();
   const { activeCompanyId, activeCompany } = useCompany();
@@ -331,7 +333,7 @@ export function EmployeeContactDetails({
     }
   }, [companyId, isDraftsControlled]);
 
-  const fetchEmployees = useCallback(async () => {
+  const fetchEmployees = useCallback(async (): Promise<void> => {
     const requestedCompanyId = companyId;
     if (requestedCompanyId !== companyIdRef.current) return;
     const requestId = ++requestIdRef.current;
@@ -372,7 +374,7 @@ export function EmployeeContactDetails({
 
       // Refresh server data (updating untouched fields) without touching any
       // edited field's captured baseline value or row revision.
-      setEmployees(payload.data);
+      setEmployees(payload.data.map(withoutFullSsn));
       setMeta(payload.meta);
       setLoadedCompanyId(requestedCompanyId);
     } catch (caught) {
@@ -389,7 +391,7 @@ export function EmployeeContactDetails({
     void fetchEmployees();
   }, [fetchEmployees, refreshKey]);
 
-  const updateFilter = (key: string, value: string, replace = false) => {
+  const updateFilter = (key: string, value: string, replace = false): void => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
@@ -397,7 +399,7 @@ export function EmployeeContactDetails({
     setSearchParams(next, { replace });
   };
 
-  const setPage = (nextPage: number) => {
+  const setPage = (nextPage: number): void => {
     const clamped = Math.max(1, Math.min(nextPage, meta?.total_pages || nextPage));
     updateFilter('page', clamped <= 1 ? '' : String(clamped));
   };
@@ -422,7 +424,7 @@ export function EmployeeContactDetails({
     onNeedsContactCountChange?.(needsContactCount);
   }, [needsContactCount, onNeedsContactCountChange]);
 
-  const updateDraftField = (employee: Employee, field: ContactField, value: string) => {
+  const updateDraftField = (employee: Employee, field: ContactField, value: string): void => {
     const serverBaseline = baselineFromEmployee(employee);
     const serverRevision = employee.contact_revision || employee.updated_at;
     setDrafts((prev) => {
@@ -464,7 +466,7 @@ export function EmployeeContactDetails({
     });
   };
 
-  const resetRow = (employee: Employee) => {
+  const resetRow = (employee: Employee): void => {
     setDrafts((prev) => {
       if (!prev[employee.id]) return prev;
       const next = { ...prev };
@@ -474,7 +476,7 @@ export function EmployeeContactDetails({
     setRowStates((prev) => ({ ...prev, [employee.id]: INITIAL_ROW_STATE }));
   };
 
-  const toggleSamePersonCheck = (employeeId: number, checked: boolean) => {
+  const toggleSamePersonCheck = (employeeId: number, checked: boolean): void => {
     setRowStates((prev) => ({
       ...prev,
       [employeeId]: {
@@ -487,7 +489,7 @@ export function EmployeeContactDetails({
   const saveRow = async (
     employee: Employee,
     options: { explicitConfirmSamePerson?: boolean; overrideBaselineEmployee?: Employee; overrideChanges?: ContactDraftPatch } = {},
-  ) => {
+  ): Promise<void> => {
     if (!canEdit) return;
     const baseEmployee = options.overrideBaselineEmployee ?? employee;
     const currentState = rowStates[employee.id] ?? INITIAL_ROW_STATE;
@@ -546,9 +548,9 @@ export function EmployeeContactDetails({
     try {
       const response = isClient
         ? await clientEmployeesApi.update(employee.id, payload)
-        : await employeesApi.update(employee.id, payload, companyId);
+        : await employeesApi.update(employee.id, { ...payload, response_view: 'contact' }, companyId);
 
-      const updated = response.data;
+      const updated = withoutFullSsn(response.data);
       const warnings = response.contact_warnings ?? [];
 
       setEmployees((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
@@ -620,7 +622,7 @@ export function EmployeeContactDetails({
     }
   };
 
-  const handleKeepMyVersion = (employee: Employee) => {
+  const handleKeepMyVersion = (employee: Employee): void => {
     const conflict = rowStates[employee.id]?.conflict;
     if (!conflict) return;
     // User explicitly chose to keep their version: rebase each edited field's
@@ -649,14 +651,14 @@ export function EmployeeContactDetails({
     });
   };
 
-  const handleDiscardMyVersion = (employee: Employee) => {
+  const handleDiscardMyVersion = (employee: Employee): void => {
     const conflict = rowStates[employee.id]?.conflict;
     if (!conflict) return;
     setEmployees((prev) => prev.map((item) => (item.id === employee.id ? { ...item, ...conflict.serverEmployee } : item)));
     resetRow(employee);
   };
 
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLInputElement>, employee: Employee) => {
+  const handleRowKeyDown = (event: KeyboardEvent<HTMLInputElement>, employee: Employee): void => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
@@ -683,14 +685,14 @@ export function EmployeeContactDetails({
 
       {/* Summary strip + filter bar */}
       <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               aria-pressed={needsContactOnly}
               onClick={() => updateFilter('needs_contact_details', needsContactOnly ? '' : 'true')}
               className={cn(
-                'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold transition',
+                'inline-flex min-h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition',
                 needsContactOnly
                   ? 'border-warning-400 bg-warning-100 text-warning-950 shadow-sm'
                   : 'border-neutral-300 bg-white text-neutral-700 hover:border-warning-300 hover:bg-warning-50',
@@ -714,7 +716,7 @@ export function EmployeeContactDetails({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-600">
+          <div className="flex flex-wrap items-center gap-4 text-xs text-neutral-600">
             <span>
               {totalPages > 1 ? (
                 <>
@@ -734,7 +736,7 @@ export function EmployeeContactDetails({
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
           <div className="relative w-full sm:w-72">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" aria-hidden="true" />
             <Input
@@ -760,13 +762,13 @@ export function EmployeeContactDetails({
           </Select>
 
           <p className="text-xs text-neutral-500 sm:ml-auto">
-            7-digit Guam numbers default to <span className="font-mono font-medium text-neutral-700">+1 671</span>. Press <kbd className="rounded border border-neutral-300 bg-neutral-50 px-1.5 py-0.5 font-mono text-[11px] text-neutral-700">Enter</kbd> in a row to save.
+            7-digit Guam numbers default to <span className="font-mono font-medium text-neutral-700">+1 671</span>. Press <kbd className="rounded border border-neutral-300 bg-neutral-50 px-2 py-0.5 font-mono text-[11px] text-neutral-700">Enter</kbd> in a row to save.
           </p>
         </div>
       </div>
 
       {loadError && (
-        <Alert tone="error" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Alert tone="error" className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <span>{loadError}</span>
           <Button variant="outline" size="sm" onClick={() => void fetchEmployees()}>
             Retry
@@ -781,7 +783,7 @@ export function EmployeeContactDetails({
       ) : companyEmployees.length === 0 ? (
         <Card className="p-10 text-center">
           <CheckCircle2 className="mx-auto h-10 w-10 text-success-600" aria-hidden="true" />
-          <h2 className="mt-3 text-base font-semibold text-neutral-900">
+          <h2 className="mt-4 text-base font-semibold text-neutral-900">
             {needsContactOnly ? 'Everyone in this view has contact details' : 'No employees match these filters'}
           </h2>
           <p className="mt-1 text-sm text-neutral-600">
@@ -804,11 +806,11 @@ export function EmployeeContactDetails({
             <Table stickyHeader>
               <TableHeader>
                 <TableRow>
-                  <TableHead stickyLeft className="w-[168px] px-3 uppercase tracking-wider">Employee</TableHead>
+                  <TableHead stickyLeft className="w-[168px] px-4 uppercase tracking-wider">Employee</TableHead>
                   <TableHead className="w-[205px] px-2 uppercase tracking-wider">Email</TableHead>
                   <TableHead className="w-[144px] px-2 uppercase tracking-wider">Mobile</TableHead>
                   <TableHead className="min-w-[235px] px-2 uppercase tracking-wider">Mailing address</TableHead>
-                  <TableHead className="w-[94px] px-2.5 text-right uppercase tracking-wider">Action</TableHead>
+                  <TableHead className="w-[94px] px-2 text-right uppercase tracking-wider">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -821,7 +823,7 @@ export function EmployeeContactDetails({
 
                   return (
                     <TableRow key={employee.id} className={cn(rowBg, 'align-top')}>
-                      <TableCell stickyLeft className={cn(rowBg, 'whitespace-normal px-3 py-3')}>
+                      <TableCell stickyLeft className={cn(rowBg, 'whitespace-normal px-4 py-4')}>
                         <div className="flex items-start gap-2">
                           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-[11px] font-semibold text-primary-700">
                             {getInitials(employee.first_name, employee.last_name)}
@@ -840,7 +842,7 @@ export function EmployeeContactDetails({
                         </div>
                       </TableCell>
 
-                      <TableCell className="whitespace-normal px-2 py-3">
+                      <TableCell className="whitespace-normal px-2 py-4">
                         <input
                           type="email"
                           aria-label={`Email for ${employee.first_name} ${employee.last_name}`}
@@ -849,7 +851,7 @@ export function EmployeeContactDetails({
                           placeholder="name@example.com"
                           onChange={(event) => updateDraftField(employee, 'email', event.target.value)}
                           onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                          className={gridInputClass('px-2.5', Boolean(state.fieldErrors.email?.length))}
+                          className={gridInputClass('px-2', Boolean(state.fieldErrors.email?.length))}
                         />
                         <RowInlineFeedback
                           employee={employee}
@@ -861,7 +863,7 @@ export function EmployeeContactDetails({
                         />
                       </TableCell>
 
-                      <TableCell className="whitespace-normal px-2 py-3">
+                      <TableCell className="whitespace-normal px-2 py-4">
                         <input
                           type="tel"
                           aria-label={`Mobile for ${employee.first_name} ${employee.last_name}`}
@@ -880,9 +882,9 @@ export function EmployeeContactDetails({
                         )}
                       </TableCell>
 
-                      <TableCell className="whitespace-normal px-2 py-3">
-                        <div className="space-y-1.5">
-                          <div className="grid grid-cols-[minmax(0,1fr)_72px] gap-1.5">
+                      <TableCell className="whitespace-normal px-2 py-4">
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-[minmax(0,1fr)_72px] gap-2">
                             <input
                               type="text"
                               aria-label={`Street address for ${employee.first_name} ${employee.last_name}`}
@@ -904,7 +906,7 @@ export function EmployeeContactDetails({
                               className={gridInputClass('px-2')}
                             />
                           </div>
-                          <div className="grid grid-cols-[minmax(0,1fr)_46px_70px] gap-1.5">
+                          <div className="grid grid-cols-[minmax(0,1fr)_46px_70px] gap-2">
                             <input
                               type="text"
                               aria-label={`City for ${employee.first_name} ${employee.last_name}`}
@@ -948,9 +950,9 @@ export function EmployeeContactDetails({
                         )}
                       </TableCell>
 
-                      <TableCell className="px-2.5 py-3 text-right">
-                        <div className="flex flex-col items-end gap-1.5">
-                          <div className="flex items-center gap-1.5">
+                      <TableCell className="px-2 py-4 text-right">
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="flex items-center gap-2">
                             {dirty && (
                               <Button
                                 variant="ghost"
@@ -971,7 +973,7 @@ export function EmployeeContactDetails({
                               aria-label={`Save ${employee.first_name} ${employee.last_name}`}
                               onClick={() => void saveRow(employee)}
                             >
-                              <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                              <Save className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
                               Save
                             </Button>
                           </div>
@@ -1005,8 +1007,8 @@ export function EmployeeContactDetails({
 
               return (
                 <MobileRecordCard key={employee.id}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-4 min-w-0">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700">
                         {getInitials(employee.first_name, employee.last_name)}
                       </div>
@@ -1014,7 +1016,7 @@ export function EmployeeContactDetails({
                         <h2 className="truncate font-semibold text-neutral-950">
                           {employee.first_name} {employee.last_name}
                         </h2>
-                        <div className="mt-1 flex flex-wrap gap-1.5">
+                        <div className="mt-1 flex flex-wrap gap-2">
                           <Badge variant={badge.variant}>{badge.label}</Badge>
                           {employee.email_verified_at && <Badge variant="success">Verified</Badge>}
                         </div>
@@ -1028,7 +1030,7 @@ export function EmployeeContactDetails({
                     )}
                   </div>
 
-                  <div className="mt-4 space-y-3">
+                  <div className="mt-4 space-y-4">
                     <div>
                       <Input
                         label="Email"
@@ -1135,7 +1137,7 @@ export function EmployeeContactDetails({
                       onClick={() => void saveRow(employee)}
                       className="w-full sm:w-auto"
                     >
-                      <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                      <Save className="mr-2 h-4 w-4" aria-hidden="true" />
                       Save contact details
                     </Button>
                     {dirty && (
@@ -1159,7 +1161,7 @@ export function EmployeeContactDetails({
       {!isLoading && (totalPages > 1 || (currentPage > 1 && totalCount > 0)) && (
         <nav
           aria-label="Contact details pagination"
-          className="flex flex-col items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 sm:flex-row"
+          className="flex flex-col items-center justify-between gap-4 rounded-xl border border-neutral-200 bg-white px-4 py-4 sm:flex-row"
         >
           <p className="text-sm text-neutral-600">
             Page <strong className="tabular-nums text-neutral-900">{currentPage}</strong> of{' '}
@@ -1211,7 +1213,7 @@ export function EmployeeContactDetails({
         }
       />
 
-      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-8 p-4 sm:p-6 lg:p-8">
         {gridBody}
       </div>
     </div>
@@ -1228,20 +1230,20 @@ function RowConflictBanner({
   saving: boolean;
   onKeep: () => void;
   onDiscard: () => void;
-}) {
+}): ReactElement {
   const fieldsToShow = conflict.conflictingFields.filter(
     (field): field is ContactField => CONTACT_FIELDS.includes(field as ContactField),
   );
   const serverValues = baselineFromEmployee(conflict.serverEmployee);
 
   return (
-    <div role="alert" className="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-3 text-xs text-warning-950">
-      <p className="flex items-start gap-1.5 font-semibold">
+    <div role="alert" className="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-4 text-xs text-warning-950">
+      <p className="flex items-start gap-2 font-semibold">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" aria-hidden="true" />
         <span>Someone else updated this employee while you were editing.</span>
       </p>
       {fieldsToShow.length > 0 ? (
-        <ul className="mt-2 space-y-1.5 rounded-md border border-warning-200 bg-white/80 p-2 text-neutral-800">
+        <ul className="mt-2 space-y-2 rounded-md border border-warning-200 bg-white/80 p-2 text-neutral-800">
           {fieldsToShow.map((field) => (
             <li key={field} className="break-words leading-relaxed">
               <strong>{FIELD_LABELS[field]}:</strong> Someone else changed this to{' '}
@@ -1253,7 +1255,7 @@ function RowConflictBanner({
       ) : (
         <p className="mt-1 text-warning-900">Keep yours or use theirs?</p>
       )}
-      <div className="mt-2.5 flex flex-wrap gap-2">
+      <div className="mt-2 flex flex-wrap gap-2">
         <Button size="sm" variant="primary" disabled={saving} loading={saving} loadingLabel="Saving..." onClick={onKeep}>
           Keep yours
         </Button>
@@ -1281,12 +1283,12 @@ function RowInlineFeedback({
   canEdit: boolean;
   onToggleSamePerson: (checked: boolean) => void;
   onConfirmAndSave: () => void;
-}) {
+}): ReactElement {
   const fieldErrors = state.fieldErrors[field] ?? [];
   const fieldWarnings = state.warnings.filter((warning) => warning.field === field);
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {!hidePrimaryFieldError && !state.samePersonRequired && fieldErrors.map((msg) => (
         <p key={msg} role="alert" className="mt-1 flex items-start gap-1 text-xs text-danger-700">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1295,8 +1297,8 @@ function RowInlineFeedback({
       ))}
 
       {field === 'email' && state.samePersonRequired && (
-        <div role="alert" className="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-2.5 text-xs text-warning-950">
-          <p className="flex items-start gap-1.5 font-medium">
+        <div role="alert" className="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-2 text-xs text-warning-950">
+          <p className="flex items-start gap-2 font-medium">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" aria-hidden="true" />
             <span>{fieldErrors[0] || `This email belongs to an existing payroll login for ${employee.first_name} ${employee.last_name}.`}</span>
           </p>
@@ -1327,7 +1329,7 @@ function RowInlineFeedback({
       )}
 
       {fieldWarnings.map((warning) => (
-        <p key={`${warning.code}-${warning.message}`} role="status" className="mt-1 flex items-start gap-1.5 rounded-lg border border-warning-200 bg-warning-50 px-2 py-1.5 text-xs text-warning-900">
+        <p key={`${warning.code}-${warning.message}`} role="status" className="mt-1 flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 px-2 py-2 text-xs text-warning-900">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning-700" aria-hidden="true" />
           <span>{warning.message}</span>
         </p>
