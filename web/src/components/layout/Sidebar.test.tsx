@@ -41,10 +41,22 @@ describe('Accountant personal connection navigation', () => {
 });
 
 describe('Account menu', () => {
-  it('links to personal notification settings', () => {
-    render(<MemoryRouter><Sidebar /></MemoryRouter>);
+  it('links to account & security and personal notification settings for staff and clients', () => {
+    const onNavigate = vi.fn();
+    const view = render(<MemoryRouter><Sidebar onNavigate={onNavigate} /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Open account menu' }));
+
+    const securityLink = screen.getByRole('link', { name: 'Account & security' });
+    expect(securityLink.getAttribute('href')).toBe('/app/account-security');
     expect(screen.getByRole('link', { name: 'Notifications' }).getAttribute('href')).toBe('/app/notifications');
+
+    fireEvent.click(securityLink);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+
+    actor.role = 'client';
+    view.rerender(<MemoryRouter><Sidebar onNavigate={onNavigate} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Open account menu' }));
+    expect(screen.getByRole('link', { name: 'Account & security' }).getAttribute('href')).toBe('/app/account-security');
   });
 });
 

@@ -277,6 +277,11 @@ class EmployeeContactValidator
       end
     end
 
+    # The same first-and-last-name rule a same-person email confirmation uses.
+    def login_name_matches?(login_user, employee)
+      new(employee: employee, company: employee.company).send(:login_name_matches_employee?, login_user)
+    end
+
     def validate_for_invite(employee, company: employee.company, allow_same_person_login: false, actor: nil)
       result = new(
         employee: employee,
@@ -416,6 +421,9 @@ class EmployeeContactValidator
   def check_login_email(normalized_email)
     login_user = User.where(self.class.normalized_email_node(User.arel_table[:email]).eq(normalized_email)).first
     return no_login_conflict unless login_user
+    # An unfinished employee app sign-up closed for this same employee holds
+    # the address for them; it's reused, not a conflict (M4-2).
+    return no_login_conflict if @employee && EmployeeLinks.closed_pending_sign_up_for?(login_user, @employee)
 
     # Check conflicting links FIRST via a narrow tenant-safe decision lookup
     # that sees links in other companies without leaking records. A login with

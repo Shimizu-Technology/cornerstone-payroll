@@ -33,7 +33,7 @@ import {
   PanelLeftOpen,
   Files,
   LogOut,
-  UserCircle,
+  ShieldCheck,
   ArchiveRestore,
   Route,
   MessagesSquare,
@@ -514,14 +514,14 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
                   <p className="mt-1 truncate text-xs text-neutral-600">{user?.company_name}</p>
                 </div>
               )}
-              <button
-                type="button"
-                disabled
-                className="flex w-full cursor-not-allowed items-center gap-2 px-4 py-2.5 text-left text-sm text-neutral-400"
+              <NavLink
+                to="/app/account-security"
+                onClick={() => { setUserMenuOpen(false); onNavigate?.(); }}
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-neutral-700 hover:bg-neutral-50"
               >
-                <UserCircle className="h-4 w-4" />
-                Profile
-              </button>
+                <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+                Account &amp; security
+              </NavLink>
               {user?.role !== 'employee' && (
                 <NavLink
                   to="/app/notifications"
