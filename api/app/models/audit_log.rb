@@ -39,6 +39,10 @@ class AuditLog < ApplicationRecord
     current_user = Current.user
     if user.nil? && current_user && actor && %w[staff_user client_user].include?(actor.type)
       user = current_user if actor.id == current_user.id.to_s && actor.type == AuditActor.for_user(current_user).type
+    elsif user.nil? && current_user && actor&.type == "employee" && actor == AuditActor.for_user(current_user)
+      # An employee app login; AuditActor.employee (an Employee record, no
+      # login) never matches, because its role and email differ.
+      user = current_user
     end
     organization_id ||= Current.organization_id || user&.organization_id || Company.where(id: company_id).pick(:organization_id)
 
