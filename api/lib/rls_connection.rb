@@ -16,7 +16,6 @@ module RlsConnection
 
   def with_tenant_settings(company_id, mode)
     previous = nil
-    previous_settings = @payroll_tenant_settings
     with_raw_connection(materialize_transactions: false) do |raw|
       flush_tenant_restore
       previous = raw.exec(READ_SETTINGS, &:values).fetch(0)
@@ -26,7 +25,7 @@ module RlsConnection
     @payroll_tenant_settings = [ company_id.to_s, mode ]
     yield
   ensure
-    @payroll_tenant_settings = previous_settings
+    @payroll_tenant_settings = nil
     restore_tenant_settings(previous || [ "", "" ])
     clear_query_cache
   end
