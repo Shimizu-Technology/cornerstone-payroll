@@ -54,6 +54,17 @@ describe('getCompanySwitchRedirect', (): void => {
     });
   });
 
+  it('keeps the contact details page open for the newly selected client', (): void => {
+    expect(getCompanySwitchRedirect('/companies/7/employees/contact-details', 12, '?needs_contact_details=true')).toEqual({
+      notice: 'Switched clients. Showing employee contact details for the selected client.',
+      to: '/companies/12/employees/contact-details?needs_contact_details=true',
+    });
+    expect(getCompanySwitchRedirect('/contact-details', 12)).toEqual({
+      notice: 'Switched clients. Showing employee contact details for the selected client.',
+      to: '/companies/12/employees/contact-details',
+    });
+  });
+
   it('leaves legacy employee creation in place', (): void => {
     expect(getCompanySwitchRedirect('/employees/new', 12)).toBeNull();
   });
