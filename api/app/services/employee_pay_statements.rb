@@ -2,6 +2,7 @@
 
 class EmployeePayStatements
   LIST_ASSOCIATIONS = %i[pay_period check_events direct_deposit_payment_confirmation time_tracking_entry_allocations].freeze
+  MAX_PAGE_SIZE = 100
 
   def initialize(company:, employee:)
     @company_id = company.id
@@ -19,8 +20,8 @@ class EmployeePayStatements
         .select { |item| statement?(item) }
     end
 
-    unless [ page, page_size ].all? { |value| value.is_a?(Integer) && value.positive? }
-      raise ArgumentError, "page and page_size must be positive integers"
+    unless [ page, page_size ].all? { |value| value.is_a?(Integer) && value.positive? } && page_size <= MAX_PAGE_SIZE
+      raise ArgumentError, "page and page_size must be positive integers, with page_size at most #{MAX_PAGE_SIZE}"
     end
 
     scope.where(statement_condition).limit(page_size).offset((page - 1) * page_size).preload(*LIST_ASSOCIATIONS).to_a
