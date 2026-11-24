@@ -177,6 +177,7 @@ class ProductionReadiness
       check("R2 upload/read/delete round trip succeeds") { r2_round_trip },
       check("Resend API key and every application sender domain are ready") { resend_ready? },
       check("Clerk Backend API accepts the configured key and matches MFA evidence") { clerk_ready? },
+      check("Clerk session token includes the MFA enrollment claim") { clerk_mfa_sample_ready? },
       check("time tracking destinations resolve only to public addresses") { time_tracking_destinations_resolve? }
     ]
   end
@@ -319,6 +320,18 @@ class ProductionReadiness
     status == 200 &&
       body["id"].present? &&
       body["id"] == env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s.strip
+  end
+
+  def clerk_mfa_sample_ready?
+    return true unless MfaPolicy.enabled?(env: env)
+
+    path = env["CLERK_MFA_SAMPLE_TOKEN_FILE"].presence
+    return false unless path
+
+    verifier = ClerkTokenVerifier.new(env: env, cache: ActiveSupport::Cache::MemoryStore.new,
+      http_get: ->(uri) { http_get.call(uri, nil) })
+    payload = verifier.verify(File.read(path, 16.kilobytes).strip)
+    payload && payload["sid"].present? && [ true, false ].include?(payload[MfaPolicy::ENROLLMENT_CLAIM])
   end
 
   def time_tracking_destinations_resolve?
