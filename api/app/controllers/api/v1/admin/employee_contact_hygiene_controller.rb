@@ -19,7 +19,8 @@ module Api
             company_id: company_id
           ).call
 
-          render json: report
+          # A test workspace may look at the report but never launch a clear.
+          render json: report.merge(can_clear: current_company.present? && !current_company.test_workspace?)
         end
 
         # POST /api/v1/admin/employee_contact_hygiene/placeholder_emails
@@ -94,6 +95,14 @@ module Api
         def clear_shared_emails
           target_company = resolve_target_company
           return render json: { error: "Company not found" }, status: :not_found unless target_company
+
+          # Clear only the client the request is working in, and only a live one,
+          # so a rehearsal can't clear its live source by naming its company ID.
+          unless current_company&.id == target_company.id && !target_company.test_workspace?
+            return render json: {
+              error: "Open the live client you want to clear, then clear its emails from there. Test workspaces can't clear emails."
+            }, status: :forbidden
+          end
 
           unless current_user.can_access_company?(target_company.id) &&
               StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: target_company)
