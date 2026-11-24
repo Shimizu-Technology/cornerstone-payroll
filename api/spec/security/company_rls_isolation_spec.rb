@@ -342,98 +342,137 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
-    def create_cross_company_link_fixtures(connection)
+    # Mirrors production: the function's owner is a non-superuser role that
+    # bypasses RLS (like the migration owner), not the test superuser.
+    def own_decision_function_like_production(connection)
+      connection.execute("CREATE ROLE payroll_owner_sim NOLOGIN NOSUPERUSER BYPASSRLS")
+      connection.execute("GRANT SELECT ON employees, employee_account_links TO payroll_owner_sim")
+      connection.execute("ALTER FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION} OWNER TO payroll_owner_sim")
+    end
+
+    def decide(user, company, employees)
+      EmployeeAccountLink.contact_email_link_decision(user_id: user.id, company_id: company.id, allowed_employee_ids: employees.map(&:id))
+    end
+
+    def create_link_decision_fixtures(connection)
       company = create(:company)
       other_company = create(:company, organization: company.organization)
-      TenantScope.as_system(reason: "Create cross-company link RLS fixtures") do
-        a = create(:employee, company: company)
-        b = create(:employee, company: other_company)
-        u = create(:user, company: company, organization: company.organization, role: "client")
-        EmployeeAccountLink.create!(company: company, employee: a, user: u, status: "active")
-        EmployeeAccountLink.create!(company: other_company, employee: b, user: u, status: "active")
-        setup_step_three(connection, tables: %w[employee_account_links employees])
-        [ company, other_company, a, b, u ]
+      TenantScope.as_system(reason: "Create login link decision RLS fixtures") do
+        login = ->(name) { create(:user, company: company, organization: company.organization, role: "client", name: name) }
+        here, here_other = create(:employee, company: company), create(:employee, company: company)
+        there, there_invited = create(:employee, company: other_company), create(:employee, company: other_company)
+        users = %w[elsewhere own none revoked former both].index_with { |name| login.call(name.titleize) }
+        EmployeeAccountLink.create!(company: other_company, employee: there, user: users["elsewhere"], status: "active")
+        EmployeeAccountLink.create!(company: company, employee: here, user: users["own"], status: "active")
+        EmployeeAccountLink.create!(company: other_company, employee: there, user: users["revoked"], status: "revoked", revoked_at: 1.day.ago)
+        EmployeeAccountLink.create!(company: other_company, employee: there, user: users["former"], status: "former",
+          former_at: 2.months.ago, former_access_until: 1.month.ago)
+        EmployeeAccountLink.create!(company: company, employee: here_other, user: users["both"], status: "active")
+        EmployeeAccountLink.create!(company: other_company, employee: there_invited, user: users["both"], status: "invited")
+        own_decision_function_like_production(connection)
+        setup_step_three(connection, tables: %w[employee_account_links employees], read_tables: %w[users])
+        { company: company, other_company: other_company, here: here, here_other: here_other, there: there, users: users }
       end
     end
 
-    it "detects a cross-company account link conflict outside a tenant scope, and keeps a company scope intact" do
+    it "decides cross-company login links through the decision function inside a company scope without exposing rows" do
       pool.with_connection do |connection|
         connection.transaction do
-          company, other_company, emp_a, emp_b, login_user = create_cross_company_link_fixtures(connection)
+          f = create_link_decision_fixtures(connection)
+          users = f[:users]
 
-          # Outside any scope the decision is a narrow system read across companies.
-          expect(EmployeeAccountLink.contact_email_link_decision(
-            user_id: login_user.id, company_id: company.id, allowed_employee_ids: [ emp_a.id ]
-          )).to eq(:conflict)
-          expect(settings).to eq([ "", "" ])
+          TenantScope.with_company(f[:company].id) do
+            # payroll_app still can't read company B's links directly.
+            expect(EmployeeAccountLink.where(company_id: f[:other_company].id).exists?).to be(false)
+            expect(connection.select_value("SELECT count(*) FROM employee_account_links WHERE company_id = #{f[:other_company].id}")).to eq(0)
 
-          TenantScope.with_company(company.id) do
-            expect(EmployeeAccountLink.where(company_id: other_company.id).exists?).to be(false)
-            # Inside a company scope the other company's link is hidden, so
-            # the decision fails closed, and the outer lease keeps working.
-            expect(EmployeeAccountLink.contact_email_link_decision(
-              user_id: login_user.id, company_id: company.id, allowed_employee_ids: [ emp_a.id ]
-            )).to eq(:unknown)
-            expect(settings).to eq([ company.id.to_s, "company" ])
-            expect(connection.tenant_settings_active?).to be(true)
-            expect(Employee.find_by(id: emp_b.id)).to be_nil
-          end
-          raise ActiveRecord::Rollback
-        end
-      end
-    end
-
-    it "rejects a login linked only at another company when RLS hides that link" do
-      pool.with_connection do |connection|
-        connection.transaction do
-          company = create(:company)
-          other_company = create(:company, organization: company.organization)
-          employee, login_user = TenantScope.as_system(reason: "Create other-company link RLS fixtures") do
-            target = create(:employee, company: company, first_name: "Emma", last_name: "Mercer", email: nil)
-            elsewhere = create(:employee, company: other_company)
-            user = create(:user, company: company, organization: company.organization, role: "client", name: "Elena Mercer")
-            EmployeeAccountLink.create!(company: other_company, employee: elsewhere, user: user, status: "active")
-            setup_step_three(connection, tables: %w[employee_account_links employees], read_tables: %w[users])
-            [ target, user ]
-          end
-
-          TenantScope.with_company(company.id) do
-            expect(EmployeeAccountLink.where(user_id: login_user.id).exists?).to be(false)
-            expect(EmployeeAccountLink.contact_email_link_decision(
-              user_id: login_user.id, company_id: company.id, allowed_employee_ids: [ employee.id ]
-            )).to eq(:unknown)
+            expect(decide(users["elsewhere"], f[:company], [ f[:here] ])).to eq(:conflict)
+            expect(decide(users["own"], f[:company], [ f[:here] ])).to eq(:allowed)
+            expect(decide(users["own"], f[:company], [ f[:here_other] ])).to eq(:conflict)
+            expect(decide(users["none"], f[:company], [ f[:here] ])).to eq(:none)
+            # Revoked links never count; a former link still belongs to that employee.
+            expect(decide(users["revoked"], f[:company], [ f[:here] ])).to eq(:none)
+            expect(decide(users["former"], f[:company], [ f[:here] ])).to eq(:conflict)
+            # An allowed link here doesn't hide an open invite elsewhere.
+            expect(decide(users["both"], f[:company], [ f[:here_other] ])).to eq(:conflict)
+            # It can't confirm another company's employee from this scope.
+            expect(decide(users["elsewhere"], f[:other_company], [ f[:there] ])).to eq(:conflict)
 
             # Even the login's own "this is me" confirmation is refused.
             result = EmployeeContactValidator.call(
-              employee: employee, company: company, email: login_user.email,
-              confirm_same_person_email: true, actor: login_user, flagged_emails: Set.new
+              employee: f[:here], company: f[:company], email: users["elsewhere"].email,
+              confirm_same_person_email: true, actor: users["elsewhere"], flagged_emails: Set.new
             )
+            expect(result).to have_attributes(login_email_rejected: true, login_email_rejection_reason: "linked_to_other_employee")
             expect(result).not_to be_valid
-            expect(result).to have_attributes(login_email_rejected: true, login_email_rejection_reason: "link_check_unavailable")
-            expect(settings).to eq([ company.id.to_s, "company" ])
+            expect(settings).to eq([ f[:company].id.to_s, "company" ])
+            expect(connection.tenant_settings_active?).to be(true)
           end
           raise ActiveRecord::Rollback
         end
       end
     end
 
-    # Main has no supported system read inside a company scope: TenantScope
-    # raises ConflictingContextError, and the raw lease is not re-entrant.
-    # Enable when TenantScope gains a nested system read (separate PR).
-    it "detects a cross-company account link conflict inside a company scope" do
-      pending "TenantScope has no nested system read yet"
+    it "returns only the three decision strings, and only payroll_app may execute it" do
       pool.with_connection do |connection|
         connection.transaction do
-          company, _other_company, emp_a, _emp_b, login_user = create_cross_company_link_fixtures(connection)
-
-          TenantScope.with_company(company.id) do
-            expect(EmployeeAccountLink.contact_email_link_decision(
-              user_id: login_user.id, company_id: company.id, allowed_employee_ids: [ emp_a.id ]
-            )).to eq(:conflict)
+          f = create_link_decision_fixtures(connection)
+          TenantScope.with_company(f[:company].id) do
+            answers = f[:users].values.flat_map do |user|
+              [ [ user.id, f[:company].id, "{#{f[:here].id}}" ], [ user.id, nil, nil ], [ user.id, f[:company].id, "{}" ] ].map do |args|
+                connection.select_value(ActiveRecord::Base.sanitize_sql_array([ "SELECT payroll_employee_login_link_decision(?::bigint, ?::bigint, ?::bigint[])", *args ]))
+              end
+            end
+            expect(answers.uniq - %w[allowed conflict none]).to be_empty
+            expect(connection.select_value("SELECT payroll_employee_login_link_decision(NULL, NULL, NULL)")).to eq("none")
+            # Without allowed employees any link conflicts, so a missing input never accepts a login.
+            expect(connection.select_value("SELECT payroll_employee_login_link_decision(#{f[:users]['own'].id}, NULL, NULL)")).to eq("conflict")
+            expect(connection.select_rows("SELECT * FROM payroll_employee_login_link_decision(1, 1, '{1}')").sole.size).to eq(1)
           end
+          connection.execute("RESET ROLE")
+          expect(connection.select_value("SELECT has_function_privilege('payroll_app', '#{RlsDatabase::LOGIN_LINK_DECISION}', 'EXECUTE')")).to be(true)
+          connection.execute("CREATE ROLE payroll_probe NOLOGIN")
+          expect(connection.select_value("SELECT has_function_privilege('payroll_probe', '#{RlsDatabase::LOGIN_LINK_DECISION}', 'EXECUTE')")).to be(false)
+          expect(RlsDatabase.login_link_decision_status(connection)).to include(
+            "installed" => true, "security_definer" => true, "stable" => true, "search_path_pinned" => true,
+            "owner_bypasses_rls" => true, "public_can_execute" => false, "runtime_can_execute" => true
+          )
+          expect(RlsDatabase.login_link_decision_ready?(connection)).to be(true)
           raise ActiveRecord::Rollback
         end
       end
+    end
+
+    it "fails closed while the decision function is missing" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          f = TenantScope.as_system(reason: "Create missing-function fixtures") do
+            connection.execute("DROP FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION}")
+            create_link_decision_fixtures_without_function(connection)
+          end
+
+          # Outside a scope the system read still sees every company.
+          expect(decide(f[:users]["elsewhere"], f[:company], [ f[:here] ])).to eq(:conflict)
+          TenantScope.with_company(f[:company].id) do
+            expect(decide(f[:users]["elsewhere"], f[:company], [ f[:here] ])).to eq(:unknown)
+            expect(decide(f[:users]["own"], f[:company], [ f[:here] ])).to eq(:unknown)
+            expect(settings).to eq([ f[:company].id.to_s, "company" ])
+          end
+          expect(RlsDatabase.login_link_decision_ready?(connection)).to be(false)
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
+    def create_link_decision_fixtures_without_function(connection)
+      company = create(:company)
+      other_company = create(:company, organization: company.organization)
+      here, there = create(:employee, company: company), create(:employee, company: other_company)
+      users = %w[elsewhere own].index_with { |name| create(:user, company: company, organization: company.organization, role: "client", name: name.titleize) }
+      EmployeeAccountLink.create!(company: other_company, employee: there, user: users["elsewhere"], status: "active")
+      EmployeeAccountLink.create!(company: company, employee: here, user: users["own"], status: "active")
+      setup_step_three(connection, tables: %w[employee_account_links employees], read_tables: %w[users], decision_function: false)
+      { company: company, here: here, users: users }
     end
 
     [ [ true, "SELECT" ], [ false, "SELECT, UPDATE" ] ].each do |bypass, privileges|
@@ -457,9 +496,11 @@ RSpec.describe "Company RLS", :rls do
       }
     end
 
-    def setup_step_three(connection, tables: %w[departments], bypass: false, switch_privileges: "SELECT", read_tables: [])
+    def setup_step_three(connection, tables: %w[departments], bypass: false, switch_privileges: "SELECT", read_tables: [], decision_function: true)
       connection.execute("CREATE ROLE payroll_app NOSUPERUSER #{bypass ? 'BYPASSRLS' : 'NOBYPASSRLS'}")
       connection.execute("GRANT USAGE ON SCHEMA public, rls_admin TO payroll_app")
+      # As rls_runtime_role.sql grants it in production.
+      connection.execute("GRANT EXECUTE ON FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION} TO payroll_app") if decision_function
       read_tables.each { |table| connection.execute("GRANT SELECT ON #{connection.quote_table_name(table)} TO payroll_app") }
       tables.each do |table|
         quoted = connection.quote_table_name(table)
