@@ -12,6 +12,118 @@ RSpec.describe ClerkInvitationService do
     ENV["CLERK_SECRET_KEY"] = previous
   end
 
+  describe "#revoke_user_sessions" do
+    let(:sessions_url) { "https://api.clerk.com/v1/sessions" }
+
+    def session_page(subject, sessions, offset: nil)
+      query = { user_id: subject, status: "active", limit: "100" }
+      query[:offset] = offset.to_s if offset
+      stub_request(:get, sessions_url).with(query: query)
+    end
+
+    def revoke_stub(id, status: 200)
+      stub_request(:post, "#{sessions_url}/#{id}/revoke").to_return(status: status, body: "{}")
+    end
+
+    it "lists every page before revoking, then confirms nothing targeted is left" do
+      first = Array.new(100) { |index| { id: "sess_a#{index}" } }
+      session_page("user_closed", first).to_return(status: 200, body: first.to_json).then
+        .to_return(status: 200, body: "[]")
+      session_page("user_closed", [], offset: 100).to_return(status: 200, body: [ { id: "sess_old" }, { id: "not-a-session" } ].to_json)
+      stub_request(:post, %r{\A#{sessions_url}/sess_[a-z0-9]+/revoke\z}).to_return(status: 200, body: "{}")
+
+      expect(described_class.new.revoke_user_sessions("user_closed")).to eq(success: true, revoked: 101)
+      expect(a_request(:post, "#{sessions_url}/sess_old/revoke")).to have_been_made.once
+      expect(described_class.new.revoke_user_sessions("../users")).to include(success: false)
+    end
+
+    it "counts an already-ended or missing session as revoked" do
+      session_page("user_closed", []).to_return(status: 200, body: [ { id: "sess_gone" }, { id: "sess_ended" } ].to_json)
+        .then.to_return(status: 200, body: "[]")
+      revoke_stub("sess_gone", status: 404)
+      revoke_stub("sess_ended", status: 400)
+      stub_request(:get, "#{sessions_url}/sess_ended").to_return(status: 200, body: { id: "sess_ended", status: "revoked" }.to_json)
+
+      expect(described_class.new.revoke_user_sessions("user_closed")).to eq(success: true, revoked: 2)
+    end
+
+    it "fails when a revocation is refused or a session is still active afterwards, so the job retries" do
+      session_page("user_closed", []).to_return(status: 200, body: [ { id: "sess_one" } ].to_json)
+      revoke_stub("sess_one", status: 500)
+      stub_request(:get, "#{sessions_url}/sess_one").to_return(status: 200, body: { id: "sess_one", status: "active" }.to_json)
+      expect(described_class.new.revoke_user_sessions("user_closed")).to include(success: false, revoked: 0)
+
+      revoke_stub("sess_one")
+      expect(described_class.new.revoke_user_sessions("user_closed")).to include(success: false, revoked: 1)
+    end
+
+    it "stops at the page cap, revokes what it listed, logs loudly and reports failure" do
+      stub_const("#{described_class}::SESSION_PAGE_CAP", 2)
+      full = ->(prefix) { Array.new(100) { |index| { id: "sess_#{prefix}#{index}" } }.to_json }
+      session_page("user_busy", []).to_return(status: 200, body: full.call("a"))
+      session_page("user_busy", [], offset: 100).to_return(status: 200, body: full.call("b"))
+      stub_request(:post, %r{\A#{sessions_url}/sess_[a-z0-9]+/revoke\z}).to_return(status: 200, body: "{}")
+      allow(Rails.logger).to receive(:error)
+
+      expect(described_class.new.revoke_user_sessions("user_busy")).to include(success: false, revoked: 200)
+      expect(Rails.logger).to have_received(:error).with(/SESSION PAGE CAP HIT/)
+    end
+
+    it "reports failure when only the confirming pass hits the page cap" do
+      stub_const("#{described_class}::SESSION_PAGE_CAP", 2)
+      cutoff = Time.utc(2026, 11, 20, 12, 0, 0)
+      later = (cutoff.to_f * 1000).to_i + 60_000
+      full = ->(prefix) { Array.new(100) { |index| { id: "sess_#{prefix}#{index}", created_at: later } }.to_json }
+      # The first pass lists one page and ends its one targeted session; the
+      # confirming pass then finds more pages than the cap allows.
+      session_page("user_busy", []).to_return(status: 200, body: [ { id: "sess_old", created_at: later - 120_000 } ].to_json)
+        .then.to_return(status: 200, body: full.call("a"))
+      session_page("user_busy", [], offset: 100).to_return(status: 200, body: full.call("b"))
+      revoke = revoke_stub("sess_old")
+      allow(Rails.logger).to receive(:error)
+
+      expect(described_class.new.revoke_user_sessions("user_busy", created_before: cutoff))
+        .to eq(success: false, error: "Too many Clerk sessions to confirm in one pass", revoked: 1)
+      expect(revoke).to have_been_requested.once
+      expect(Rails.logger).to have_received(:error).with(/SESSION PAGE CAP HIT/)
+    end
+
+    it "ends only sessions created at or before a cutoff, and any without a creation time" do
+      cutoff = Time.utc(2026, 11, 20, 12, 0, 0)
+      millis = (cutoff.to_f * 1000).to_i
+      after = { id: "sess_after", created_at: millis + 60_000 }
+      session_page("user_back", []).to_return(status: 200, body: [
+        { id: "sess_before", created_at: millis - 1 }, { id: "sess_at", created_at: millis }, after, { id: "sess_unknown" }
+      ].to_json).then.to_return(status: 200, body: [ after ].to_json)
+      revoked = %w[sess_before sess_at sess_unknown].map { |id| revoke_stub(id) }
+      kept = revoke_stub("sess_after")
+
+      expect(described_class.new.revoke_user_sessions("user_back", created_before: cutoff)).to eq(success: true, revoked: 3)
+      expect(revoked).to all(have_been_requested.once)
+      expect(kept).not_to have_been_requested
+    end
+  end
+
+  it "reads one session by its ID, and nothing for a malformed ID" do
+    stub_request(:get, "https://api.clerk.com/v1/sessions/sess_one")
+      .to_return(status: 200, body: { id: "sess_one", user_id: "user_a", created_at: 1_700_000_000_000 }.to_json)
+    expect(described_class.new.fetch_session("sess_one")).to include("user_id" => "user_a", "created_at" => 1_700_000_000_000)
+    expect(described_class.new.fetch_session("../users")).to be_nil
+  end
+
+  it "finds Clerk users by address and deletes one, counting an already-deleted user as deleted" do
+    stub_request(:get, "https://api.clerk.com/v1/users").with(query: { email_address: "new@example.test", limit: "100" })
+      .to_return(status: 200, body: [ { id: "user_made" } ].to_json)
+    expect(described_class.new.users_with_email("new@example.test")).to eq([ { "id" => "user_made" } ])
+
+    stub_request(:delete, "https://api.clerk.com/v1/users/user_made").to_return(status: 200, body: "{}")
+    stub_request(:delete, "https://api.clerk.com/v1/users/user_gone").to_return(status: 404, body: "{}")
+    stub_request(:delete, "https://api.clerk.com/v1/users/user_stuck").to_return(status: 500, body: "{}")
+    expect(described_class.new.delete_user("user_made", email: "new@example.test")).to eq(success: true)
+    expect(described_class.new.delete_user("user_gone", email: "new@example.test")).to eq(success: true)
+    expect(described_class.new.delete_user("user_stuck", email: "new@example.test")).to include(success: false)
+  end
+
   it "reads the exact invitation ID from Clerk's list endpoint" do
     stub_request(:get, "https://api.clerk.com/v1/invitations")
       .with(query: { query: "inv_exact", limit: "10" }, headers: { "Authorization" => "Bearer sk_test_synthetic" })
