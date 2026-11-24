@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeContactDetails } from './EmployeeContactDetails';
+import { StaffEmployeeContactDetails } from './StaffEmployeeContactDetails';
 import { ApiError } from '@/services/api';
 import type { Employee } from '@/types';
 
@@ -32,6 +33,8 @@ const apiMocks = vi.hoisted(() => ({
   clientList: vi.fn(),
   clientUpdate: vi.fn(),
   sharedEmails: vi.fn(),
+  markPlaceholderEmail: vi.fn(),
+  unmarkPlaceholderEmail: vi.fn(),
   clearSharedEmails: vi.fn(),
 }));
 
@@ -65,12 +68,17 @@ vi.mock('@/services/api', async (importOriginal) => {
       list: apiMocks.clientList,
       update: apiMocks.clientUpdate,
     },
-    employeeContactHygieneApi: {
-      sharedEmails: apiMocks.sharedEmails,
-      clearSharedEmails: apiMocks.clearSharedEmails,
-    },
   };
 });
+
+vi.mock('@/services/staffContactHygieneApi', () => ({
+  staffContactHygieneApi: {
+    sharedEmails: apiMocks.sharedEmails,
+    markPlaceholderEmail: apiMocks.markPlaceholderEmail,
+    unmarkPlaceholderEmail: apiMocks.unmarkPlaceholderEmail,
+    clearSharedEmails: apiMocks.clearSharedEmails,
+  },
+}));
 
 function buildEmployee(overrides: Partial<Employee> = {}): Employee {
   return {
@@ -102,6 +110,7 @@ function buildEmployee(overrides: Partial<Employee> = {}): Employee {
     email_verified_at: null,
     phone_confirmed_by_employee_at: null,
     contact_source: null,
+    contact_revision: '2026-11-01T00:00:00.000000Z',
     contact_details_status: {
       needs_contact_details: true,
       missing_fields: ['email', 'phone', 'address_line1', 'city', 'zip'],
@@ -113,11 +122,22 @@ function buildEmployee(overrides: Partial<Employee> = {}): Employee {
   };
 }
 
-function renderPage(initialEntry = '/companies/7/employees/contact-details') {
+function renderClientPage(initialEntry = '/companies/7/employees/contact-details') {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/companies/:companyId/employees/contact-details" element={<EmployeeContactDetails />} />
+        <Route path="/companies/:companyId/employees" element={<div>Employees list</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+function renderStaffPage(initialEntry = '/companies/7/employees/contact-details') {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path="/companies/:companyId/employees/contact-details" element={<StaffEmployeeContactDetails />} />
         <Route path="/companies/:companyId/employees" element={<div>Employees list</div>} />
       </Routes>
     </MemoryRouter>,
@@ -142,100 +162,190 @@ describe('EmployeeContactDetails', () => {
 
   afterEach(cleanup);
 
-  it('lets a client user filter needs-contact-details, edit and save a row, and see coworker warnings inline', async () => {
-    const maria = buildEmployee({ id: 101, first_name: 'Maria', last_name: 'Cruz' });
-    const jose = buildEmployee({
-      id: 102,
-      first_name: 'Jose',
-      last_name: 'Santos',
-      email: 'jose.santos@example.com',
-      phone: '+16715550199',
+  it('sends only changed fields with row_revision and baseline_values on a phone-only save, leaving address untouched', async () => {
+    const maria = buildEmployee({
+      id: 101,
+      first_name: 'Maria',
+      last_name: 'Cruz',
+      email: 'maria@example.com',
+      phone: '+16715550100',
       address_line1: '100 Marine Corps Dr',
       city: 'Hagatna',
       state: 'GU',
       zip: '96910',
+      contact_revision: '2026-11-24T01:00:00.000000Z',
       contact_details_status: { needs_contact_details: false, missing_fields: [], email_issue: null },
     });
 
     apiMocks.clientList.mockResolvedValue({
-      data: [maria, jose],
-      meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 250, needs_contact_details_count: 1 },
+      data: [maria],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 0 },
     });
 
     apiMocks.clientUpdate.mockResolvedValue({
       data: {
         ...maria,
-        email: 'jose.santos@example.com',
-        phone: '+16715550101',
-        address_line1: '200 Pale San Vitores Rd',
-        city: 'Tamuning',
-        state: 'GU',
-        zip: '96913',
-        contact_source: 'client',
-        contact_details_status: {
-          needs_contact_details: false,
-          missing_fields: [],
-          email_issue: 'shared_with_coworker',
-        },
+        phone: '+16715550199',
+        contact_revision: '2026-11-24T01:05:00.000000Z',
       },
-      contact_warnings: [
-        {
-          code: 'duplicate_company_email',
-          field: 'email',
-          message: 'Another employee at this company already uses this email address (Jose Santos).',
-        },
-      ],
+      contact_warnings: [],
     });
 
-    renderPage();
-
+    renderClientPage();
     expect((await screen.findAllByText('Maria Cruz')).length).toBeGreaterThan(0);
-    // Client portal never shows the staff-only shared inbox report tab.
+
+    // Client grid never shows the staff report tab or calls staff hygiene API.
     expect(screen.queryByRole('tab', { name: /Shared & placeholder emails/i })).toBeNull();
     expect(apiMocks.sharedEmails).not.toHaveBeenCalled();
 
-    // Edit Maria's email, mobile (7-digit Guam number), and address in the desktop grid
-    const emailInput = screen.getByLabelText('Email for Maria Cruz');
-    const phoneInput = screen.getByLabelText('Mobile for Maria Cruz');
-    const streetInput = screen.getByLabelText('Street address for Maria Cruz');
-    const cityInput = screen.getByLabelText('City for Maria Cruz');
-    const zipInput = screen.getByLabelText('ZIP for Maria Cruz');
-
-    fireEvent.change(emailInput, { target: { value: 'jose.santos@example.com' } });
-    fireEvent.change(phoneInput, { target: { value: '555-0101' } });
-    fireEvent.change(streetInput, { target: { value: '200 Pale San Vitores Rd' } });
-    fireEvent.change(cityInput, { target: { value: 'Tamuning' } });
-    fireEvent.change(zipInput, { target: { value: '96913' } });
-
+    fireEvent.change(screen.getByLabelText('Mobile for Maria Cruz'), { target: { value: '555-0199' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Maria Cruz' }));
 
     await waitFor(() => {
       expect(apiMocks.clientUpdate).toHaveBeenCalledWith(101, {
-        email: 'jose.santos@example.com',
-        phone: '555-0101',
-        address_line1: '200 Pale San Vitores Rd',
-        address_line2: '',
-        city: 'Tamuning',
-        state: 'GU',
-        zip: '96913',
+        phone: '555-0199',
+        row_revision: '2026-11-24T01:00:00.000000Z',
+        baseline_values: { phone: '+16715550100' },
       });
     });
 
-    expect((await screen.findAllByText(/Another employee at this company already uses this email address/i)).length).toBeGreaterThan(0);
-    expect((screen.getByLabelText('Mobile for Maria Cruz') as HTMLInputElement).value).toBe('+16715550101');
+    expect((screen.getByLabelText('Mobile for Maria Cruz') as HTMLInputElement).value).toBe('+16715550199');
+    expect((screen.getByLabelText('Street address for Maria Cruz') as HTMLInputElement).value).toBe('100 Marine Corps Dr');
+  });
 
-    // Toggle "Needs contact details" filter
-    apiMocks.clientList.mockResolvedValueOnce({
-      data: [],
-      meta: { current_page: 1, total_pages: 1, total_count: 0, per_page: 250, needs_contact_details_count: 0 },
+  it('handles 409 conflict with clear Keep my changes and Discard my changes options', async () => {
+    const maria = buildEmployee({
+      id: 101,
+      first_name: 'Maria',
+      last_name: 'Cruz',
+      email: 'old@example.com',
+      phone: '+16715550100',
+      address_line1: '100 Old St',
+      city: 'Hagatna',
+      state: 'GU',
+      zip: '96910',
+      contact_revision: 'rev-1',
     });
-    fireEvent.click(screen.getByRole('button', { name: /Needs contact details/i }));
+
+    const serverLatest: Employee = {
+      ...maria,
+      email: 'coworker@example.com',
+      address_line1: '200 Coworker St',
+      contact_revision: 'rev-2',
+    };
+
+    apiMocks.clientList.mockResolvedValue({
+      data: [maria],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 0 },
+    });
+
+    apiMocks.clientUpdate
+      .mockRejectedValueOnce(
+        new ApiError(
+          'This employee was updated by someone else.',
+          409,
+          undefined,
+          {
+            error: 'This employee was updated by someone else.',
+            code: 'contact_revision_conflict',
+            conflicting_fields: ['email'],
+            contact_revision: 'rev-2',
+            current_values: { email: 'coworker@example.com' },
+            data: serverLatest,
+          },
+        ),
+      )
+      .mockResolvedValueOnce({
+        data: {
+          ...serverLatest,
+          email: 'my.version@example.com',
+          contact_revision: 'rev-3',
+        },
+        contact_warnings: [],
+      });
+
+    renderClientPage();
+    expect((await screen.findAllByText('Maria Cruz')).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Email for Maria Cruz'), { target: { value: 'my.version@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Maria Cruz' }));
+
+    expect((await screen.findAllByText(/Conflict: someone else updated this row before you saved/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/coworker@example\.com/i).length).toBeGreaterThan(0);
+
+    // Choose "Keep my changes" -> retries with latest revision rev-2 and keeps coworker's address change.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Keep my changes' })[0]);
 
     await waitFor(() => {
-      expect(apiMocks.clientList).toHaveBeenLastCalledWith(
-        expect.objectContaining({ needs_contact_details: true }),
-      );
+      expect(apiMocks.clientUpdate).toHaveBeenLastCalledWith(101, {
+        email: 'my.version@example.com',
+        row_revision: 'rev-2',
+        baseline_values: { email: 'coworker@example.com' },
+      });
     });
+
+    expect((screen.getByLabelText('Email for Maria Cruz') as HTMLInputElement).value).toBe('my.version@example.com');
+    expect((screen.getByLabelText('Street address for Maria Cruz') as HTMLInputElement).value).toBe('200 Coworker St');
+  });
+
+  it('supports server-backed pagination that preserves filters, refreshes untouched fields, and keeps pending row edits across pages', async () => {
+    const page1EmpInitial = buildEmployee({
+      id: 101,
+      first_name: 'Alice',
+      last_name: 'Adams',
+      email: 'alice@example.com',
+      phone: '',
+      address_line1: '10 First St',
+      city: 'Hagatna',
+      state: 'GU',
+      zip: '96910',
+    });
+    const page2Emp = buildEmployee({
+      id: 201,
+      first_name: 'Zoe',
+      last_name: 'Zeta',
+      email: 'zoe@example.com',
+      phone: '',
+    });
+    const page1EmpRefreshed = {
+      ...page1EmpInitial,
+      address_line1: '99 Updated By Coworker Rd',
+    };
+
+    apiMocks.clientList
+      .mockResolvedValueOnce({
+        data: [page1EmpInitial],
+        meta: { current_page: 1, total_pages: 2, total_count: 60, per_page: 50, needs_contact_details_count: 2 },
+      })
+      .mockResolvedValueOnce({
+        data: [page2Emp],
+        meta: { current_page: 2, total_pages: 2, total_count: 60, per_page: 50, needs_contact_details_count: 2 },
+      })
+      .mockResolvedValueOnce({
+        data: [page1EmpRefreshed],
+        meta: { current_page: 1, total_pages: 2, total_count: 60, per_page: 50, needs_contact_details_count: 2 },
+      });
+
+    renderClientPage('/companies/7/employees/contact-details?needs_contact_details=true');
+    expect((await screen.findAllByText('Alice Adams')).length).toBeGreaterThan(0);
+
+    // Edit Alice's phone on page 1 without saving yet.
+    fireEvent.change(screen.getByLabelText('Mobile for Alice Adams'), { target: { value: '555-0142' } });
+
+    // Navigate to page 2 -> filter preserved, pending edit count stays visible.
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    expect((await screen.findAllByText('Zoe Zeta')).length).toBeGreaterThan(0);
+    expect(apiMocks.clientList).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ page: 2, per_page: 50, needs_contact_details: true }),
+    );
+    expect(screen.getByText(/1 unsaved row/i)).toBeTruthy();
+
+    // Return to page 1 -> untouched address refreshed from server, edited phone kept!
+    fireEvent.click(screen.getByRole('button', { name: /Previous/i }));
+    expect((await screen.findAllByText('Alice Adams')).length).toBeGreaterThan(0);
+    expect((screen.getByLabelText('Mobile for Alice Adams') as HTMLInputElement).value).toBe('555-0142');
+    expect((screen.getByLabelText('Street address for Alice Adams') as HTMLInputElement).value).toBe('99 Updated By Coworker Rd');
   });
 
   it('offers inline same-person confirmation when saving an employee login email and retries with confirm_same_person_email', async () => {
@@ -243,15 +353,15 @@ describe('EmployeeContactDetails', () => {
 
     apiMocks.clientList.mockResolvedValue({
       data: [emma],
-      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 250, needs_contact_details_count: 1 },
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 1 },
     });
 
     apiMocks.clientUpdate
       .mockRejectedValueOnce(
         new ApiError(
-          'This email belongs to an existing payroll login. Confirm it belongs to this employee to save.',
+          'This is your own payroll login email. Confirm "this is me" to assign it to this employee.',
           422,
-          { email: ['This email belongs to an existing payroll login. Confirm it belongs to this employee to save.'] },
+          { email: ['This is your own payroll login email. Confirm "this is me" to assign it to this employee.'] },
           {
             contact_validation: {
               same_person_confirmation_required: true,
@@ -265,12 +375,11 @@ describe('EmployeeContactDetails', () => {
           ...emma,
           email: 'emma.client@example.com',
           contact_source: 'client',
-          contact_details_status: { needs_contact_details: true, missing_fields: ['phone', 'address_line1', 'city', 'zip'], email_issue: null },
         },
         contact_warnings: [],
       });
 
-    renderPage();
+    renderClientPage();
     expect((await screen.findAllByText('Emma Pleadwell')).length).toBeGreaterThan(0);
 
     fireEvent.change(screen.getByLabelText('Email for Emma Pleadwell'), {
@@ -301,137 +410,90 @@ describe('EmployeeContactDetails', () => {
     expect((await screen.findAllByText('Saved')).length).toBeGreaterThan(0);
   });
 
-  it('shows the staff-only shared-inbox report with single-company confirmation dialog for authorized staff', async () => {
+  it('shows the staff-only shared-inbox report with mark-as-placeholder before bulk clear for authorized staff', async () => {
     authState.isClient = false;
     authState.user = { id: 2, company_id: 7, role: 'org_admin', name: 'Cornerstone Admin', email: 'staff@example.com' };
     capabilityState.manageClientConfiguration = true;
 
     apiMocks.adminList.mockResolvedValue({
       data: [buildEmployee({ id: 201, first_name: 'Ana', last_name: 'Reyes', email: 'shared-inbox@example.com' })],
-      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 250, needs_contact_details_count: 1 },
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 1 },
     });
 
+    const candidateReport = {
+      summary: {
+        companies_affected: 1,
+        distinct_flagged_emails: 1,
+        total_employee_records: 5,
+        active_employee_records: 4,
+      },
+      marked_placeholders: [],
+      companies: [
+        {
+          company_id: 7,
+          company_name: "MoSa's Demo",
+          total_flagged_records: 5,
+          active_flagged_records: 4,
+          emails: [
+            {
+              email: 'shared-inbox@example.com',
+              classification: 'shared' as const,
+              reasons: ['shared_within_company'],
+              total_count: 5,
+              active_count: 4,
+              inactive_count: 1,
+              companies_count: 1,
+              organization_total_count: 5,
+              clearable: false,
+              marked_placeholder: false,
+              unmarkable: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    const markedReport = {
+      ...candidateReport,
+      marked_placeholders: ['shared-inbox@example.com'],
+      companies: [
+        {
+          ...candidateReport.companies[0],
+          emails: [
+            {
+              ...candidateReport.companies[0].emails[0],
+              classification: 'placeholder' as const,
+              reasons: ['marked_placeholder', 'shared_within_company'],
+              clearable: true,
+              marked_placeholder: true,
+              unmarkable: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    const clearedReport = {
+      summary: {
+        companies_affected: 0,
+        distinct_flagged_emails: 0,
+        total_employee_records: 0,
+        active_employee_records: 0,
+      },
+      marked_placeholders: ['shared-inbox@example.com'],
+      companies: [],
+    };
+
     apiMocks.sharedEmails
-      .mockResolvedValueOnce({
-        summary: {
-          companies_affected: 2,
-          distinct_flagged_emails: 1,
-          total_employee_records: 8,
-          active_employee_records: 6,
-        },
-        companies: [
-          {
-            company_id: 7,
-            company_name: "MoSa's Demo",
-            total_flagged_records: 5,
-            active_flagged_records: 4,
-            emails: [
-              {
-                email: 'shared-inbox@example.com',
-                classification: 'shared_inbox',
-                reasons: ['shared_across_companies'],
-                total_count: 5,
-                active_count: 4,
-                inactive_count: 1,
-                companies_count: 2,
-                organization_total_count: 8,
-              },
-            ],
-          },
-          {
-            company_id: 8,
-            company_name: 'Island Bakery',
-            total_flagged_records: 3,
-            active_flagged_records: 2,
-            emails: [
-              {
-                email: 'shared-inbox@example.com',
-                classification: 'shared_inbox',
-                reasons: ['shared_across_companies'],
-                total_count: 3,
-                active_count: 2,
-                inactive_count: 1,
-                companies_count: 2,
-                organization_total_count: 8,
-              },
-            ],
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        summary: {
-          companies_affected: 2,
-          distinct_flagged_emails: 1,
-          total_employee_records: 8,
-          active_employee_records: 6,
-        },
-        companies: [
-          {
-            company_id: 7,
-            company_name: "MoSa's Demo",
-            total_flagged_records: 5,
-            active_flagged_records: 4,
-            emails: [
-              {
-                email: 'shared-inbox@example.com',
-                classification: 'shared_inbox',
-                reasons: ['shared_across_companies'],
-                total_count: 5,
-                active_count: 4,
-                inactive_count: 1,
-                companies_count: 2,
-                organization_total_count: 8,
-              },
-            ],
-          },
-          {
-            company_id: 8,
-            company_name: 'Island Bakery',
-            total_flagged_records: 3,
-            active_flagged_records: 2,
-            emails: [
-              {
-                email: 'shared-inbox@example.com',
-                classification: 'shared_inbox',
-                reasons: ['shared_across_companies'],
-                total_count: 3,
-                active_count: 2,
-                inactive_count: 1,
-                companies_count: 2,
-                organization_total_count: 8,
-              },
-            ],
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        summary: {
-          companies_affected: 1,
-          distinct_flagged_emails: 1,
-          total_employee_records: 3,
-          active_employee_records: 2,
-        },
-        companies: [
-          {
-            company_id: 8,
-            company_name: 'Island Bakery',
-            total_flagged_records: 3,
-            active_flagged_records: 2,
-            emails: [
-              {
-                email: 'shared-inbox@example.com',
-                classification: 'shared_inbox',
-                reasons: ['shared_across_companies'],
-                total_count: 3,
-                active_count: 2,
-                inactive_count: 1,
-                companies_count: 1,
-                organization_total_count: 3,
-              },
-            ],
-          },
-        ],
-      });
+      .mockResolvedValueOnce(candidateReport)
+      .mockResolvedValueOnce(candidateReport)
+      .mockResolvedValueOnce(markedReport)
+      .mockResolvedValueOnce(clearedReport);
+
+    apiMocks.markPlaceholderEmail.mockResolvedValue({
+      data: { email: 'shared-inbox@example.com', marked: true, changed: true },
+      message: 'Marked shared-inbox@example.com as a placeholder email.',
+    });
 
     apiMocks.clearSharedEmails.mockResolvedValue({
       data: {
@@ -442,19 +504,27 @@ describe('EmployeeContactDetails', () => {
         active_cleared_count: 4,
         inactive_cleared_count: 1,
       },
-      message: "Cleared shared-inbox@example.com on 5 employee records for MoSa's Demo.",
+      message: "Cleared shared-inbox@example.com from 5 employee records at MoSa's Demo.",
     });
 
-    renderPage();
+    renderStaffPage();
 
     const sharedTab = await screen.findByRole('tab', { name: /Shared & placeholder emails/i });
     fireEvent.click(sharedTab);
 
     expect(await screen.findByText('Shared and placeholder emails')).toBeTruthy();
-    expect(screen.getAllByText('shared-inbox@example.com').length).toBe(2);
+    // Unmarked candidate shows Mark as placeholder, NOT Clear to blank.
+    const markButton = await screen.findByRole('button', { name: /Mark as placeholder/i });
+    expect(screen.queryByRole('button', { name: /Clear to blank/i })).toBeNull();
+    fireEvent.click(markButton);
 
-    const clearButtons = screen.getAllByRole('button', { name: /Clear to blank/i });
-    fireEvent.click(clearButtons[0]);
+    await waitFor(() => {
+      expect(apiMocks.markPlaceholderEmail).toHaveBeenCalledWith({ email: 'shared-inbox@example.com' });
+    });
+
+    // After marking as placeholder, Clear to blank becomes available.
+    const clearButton = await screen.findByRole('button', { name: /Clear to blank/i });
+    fireEvent.click(clearButton);
 
     const dialog = await screen.findByRole('dialog');
     const confirmAction = within(dialog).getByRole('button', { name: /Clear 5 records/i }) as HTMLButtonElement;
@@ -462,7 +532,6 @@ describe('EmployeeContactDetails', () => {
 
     fireEvent.click(within(dialog).getByRole('checkbox'));
     expect(confirmAction.disabled).toBe(false);
-
     fireEvent.click(confirmAction);
 
     await waitFor(() => {
@@ -472,9 +541,7 @@ describe('EmployeeContactDetails', () => {
       });
     });
 
-    expect(await screen.findByText(/Cleared shared-inbox@example.com on 5 employee records/i)).toBeTruthy();
-    // Initial badge load + opening panel + post-clear refresh = 3 calls (never an infinite reload loop).
-    expect(apiMocks.sharedEmails).toHaveBeenCalledTimes(3);
+    expect(await screen.findByText(/Cleared shared-inbox@example.com from 5 employee records/i)).toBeTruthy();
   });
 
   it('hides the shared-inbox report tab from staff without manage_client_configuration', async () => {
@@ -484,10 +551,10 @@ describe('EmployeeContactDetails', () => {
 
     apiMocks.adminList.mockResolvedValue({
       data: [],
-      meta: { current_page: 1, total_pages: 1, total_count: 0, per_page: 250, needs_contact_details_count: 0 },
+      meta: { current_page: 1, total_pages: 1, total_count: 0, per_page: 50, needs_contact_details_count: 0 },
     });
 
-    renderPage('/companies/7/employees/contact-details?tab=shared-emails');
+    renderStaffPage('/companies/7/employees/contact-details?tab=shared-emails');
 
     await waitFor(() => {
       expect(apiMocks.adminList).toHaveBeenCalled();

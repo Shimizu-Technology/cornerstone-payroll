@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import {
   AlertCircle,
@@ -6,12 +6,12 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
-  MailWarning,
+  ChevronLeft,
+  ChevronRight,
   RotateCcw,
   Save,
   Search,
   ShieldCheck,
-  Users,
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Alert } from '@/components/ui/alert';
@@ -29,28 +29,35 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { SharedInboxReportPanel } from '@/components/employees/SharedInboxReportPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
-import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { employeesPath } from '@/lib/routes';
 import { cn, getInitials } from '@/lib/utils';
-import {
-  ApiError,
-  clientEmployeesApi,
-  employeeContactHygieneApi,
-  employeesApi,
-  type SharedEmailReportResponse,
-} from '@/services/api';
+import { ApiError, clientEmployeesApi, employeesApi } from '@/services/api';
 import type {
   Employee,
+  EmployeeContactConflictPayload,
   EmployeeContactValidationPayload,
   EmployeeContactWarning,
   PaginationMeta,
 } from '@/types';
 
 const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
+const PER_PAGE = 50;
+
+const CONTACT_FIELDS = ['email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'zip'] as const;
+type ContactField = (typeof CONTACT_FIELDS)[number];
+
+const FIELD_LABELS: Record<ContactField, string> = {
+  email: 'Email',
+  phone: 'Mobile',
+  address_line1: 'Street address',
+  address_line2: 'Apt / Unit',
+  city: 'City',
+  state: 'State',
+  zip: 'ZIP',
+};
 
 function gridInputClass(extra = '', invalid = false): string {
   return cn(
@@ -72,6 +79,15 @@ interface ContactDraft {
   zip: string;
 }
 
+type ContactDraftPatch = Partial<ContactDraft>;
+
+interface RowConflictState {
+  message: string;
+  conflictingFields: string[];
+  serverEmployee: Employee;
+  userChanges: ContactDraftPatch;
+}
+
 interface RowSaveState {
   saving: boolean;
   saved: boolean;
@@ -80,6 +96,7 @@ interface RowSaveState {
   warnings: EmployeeContactWarning[];
   samePersonRequired: boolean;
   samePersonChecked: boolean;
+  conflict: RowConflictState | null;
 }
 
 const INITIAL_ROW_STATE: RowSaveState = {
@@ -90,32 +107,59 @@ const INITIAL_ROW_STATE: RowSaveState = {
   warnings: [],
   samePersonRequired: false,
   samePersonChecked: false,
+  conflict: null,
 };
 
-function draftFromEmployee(employee: Employee): ContactDraft {
+function baselineFromEmployee(employee: Employee): ContactDraft {
   return {
     email: employee.email ?? '',
     phone: employee.phone ?? '',
     address_line1: employee.address_line1 ?? '',
     address_line2: employee.address_line2 ?? '',
     city: employee.city ?? '',
-    state: employee.state ?? 'GU',
+    state: employee.state ?? '',
     zip: employee.zip ?? '',
   };
 }
 
-function isDraftDirty(draft: ContactDraft | undefined, employee: Employee): boolean {
-  if (!draft) return false;
-  const baseline = draftFromEmployee(employee);
-  return (
-    draft.email.trim() !== baseline.email.trim()
-    || draft.phone.trim() !== baseline.phone.trim()
-    || draft.address_line1.trim() !== baseline.address_line1.trim()
-    || draft.address_line2.trim() !== baseline.address_line2.trim()
-    || draft.city.trim() !== baseline.city.trim()
-    || draft.state.trim() !== baseline.state.trim()
-    || draft.zip.trim() !== baseline.zip.trim()
-  );
+function effectiveDraft(employee: Employee, patch: ContactDraftPatch | undefined): ContactDraft {
+  const baseline = baselineFromEmployee(employee);
+  return patch ? { ...baseline, ...patch } : baseline;
+}
+
+function changedFieldsForRow(employee: Employee, patch: ContactDraftPatch | undefined): ContactDraftPatch {
+  if (!patch) return {};
+  const baseline = baselineFromEmployee(employee);
+  const changed: ContactDraftPatch = {};
+  for (const field of CONTACT_FIELDS) {
+    if (patch[field] !== undefined && patch[field].trim() !== baseline[field].trim()) {
+      changed[field] = patch[field].trim();
+    }
+  }
+  return changed;
+}
+
+function hasAnyChangedField(employee: Employee, patch: ContactDraftPatch | undefined): boolean {
+  return Object.keys(changedFieldsForRow(employee, patch)).length > 0;
+}
+
+function extractConflictPayload(error: unknown): EmployeeContactConflictPayload | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null;
+  const raw = (error.data && typeof error.data === 'object') ? error.data as Record<string, unknown> : {};
+  if (raw.code !== 'contact_revision_conflict' || !raw.data || typeof raw.data !== 'object') return null;
+
+  return {
+    error: typeof raw.error === 'string' ? raw.error : error.message,
+    code: 'contact_revision_conflict',
+    conflicting_fields: Array.isArray(raw.conflicting_fields)
+      ? raw.conflicting_fields.filter((f): f is string => typeof f === 'string')
+      : [],
+    contact_revision: typeof raw.contact_revision === 'string' ? raw.contact_revision : '',
+    current_values: (raw.current_values && typeof raw.current_values === 'object')
+      ? raw.current_values as Record<string, string | null>
+      : {},
+    data: raw.data as Employee,
+  };
 }
 
 function extractContactValidation(error: unknown): {
@@ -186,29 +230,45 @@ function contactStatusBadge(employee: Employee): { label: string; variant: 'succ
   return { label: 'Complete', variant: 'success' };
 }
 
-export function EmployeeContactDetails() {
+export interface EmployeeContactDetailsProps {
+  /** Optional wrapper chrome (e.g. staff-only tabs) rendered above the grid. */
+  topSlot?: ReactNode;
+  /** Incrementing this triggers a reload of the current page while preserving pending edits. */
+  refreshKey?: number;
+  /** Callback notified when needs_contact_details_count updates. */
+  onNeedsContactCountChange?: (count: number) => void;
+  /** When true, omit the outer Header wrapper because a parent page renders it. */
+  embedded?: boolean;
+}
+
+export function EmployeeContactDetails({
+  topSlot,
+  refreshKey = 0,
+  onNeedsContactCountChange,
+  embedded = false,
+}: EmployeeContactDetailsProps = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, isClient } = useAuth();
   const { activeCompanyId, activeCompany } = useCompany();
-  const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration');
-  const canViewSharedInboxReport = !isClient && canManageClientConfiguration;
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const canEdit = isClient ? canWriteClientEmployeeProfile(activeCompany) : canWriteCompany(activeCompany);
 
   const search = searchParams.get('search') || '';
   const statusFilter = searchParams.get('status') ?? 'active';
   const needsContactOnly = searchParams.get('needs_contact_details') === 'true';
-  const requestedTab = searchParams.get('tab');
-  const activeTab: 'grid' | 'shared-emails' = (canViewSharedInboxReport && requestedTab === 'shared-emails') ? 'shared-emails' : 'grid';
+  const rawPage = parseInt(searchParams.get('page') || '1', 10);
+  const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<number, ContactDraft>>({});
+  // Sparse per-field pending edits keyed by employee ID. Untouched fields always
+  // reflect the latest server values on refetch, while pending edits survive
+  // refetches and page navigation.
+  const [drafts, setDrafts] = useState<Record<number, ContactDraftPatch>>({});
   const [rowStates, setRowStates] = useState<Record<number, RowSaveState>>({});
-  const [sharedReportSummary, setSharedReportSummary] = useState<SharedEmailReportResponse['summary'] | null>(null);
   const requestIdRef = useRef(0);
   const companyIdRef = useRef(companyId);
 
@@ -228,35 +288,38 @@ export function EmployeeContactDetails() {
     setIsLoading(true);
     setLoadError(null);
     try {
+      const listParams = {
+        search: search || undefined,
+        status: statusFilter === 'all' ? undefined : (statusFilter || undefined),
+        needs_contact_details: needsContactOnly ? true : undefined,
+        page,
+        per_page: PER_PAGE,
+        sort_by: 'name' as const,
+        sort_direction: 'asc' as const,
+      };
       const payload = isClient
-        ? await clientEmployeesApi.list({
-            search: search || undefined,
-            status: statusFilter === 'all' ? undefined : (statusFilter || undefined),
-            needs_contact_details: needsContactOnly ? true : undefined,
-            per_page: 250,
-            sort_by: 'name',
-            sort_direction: 'asc',
-          })
-        : await employeesApi.list({
-            company_id: requestedCompanyId,
-            search: search || undefined,
-            status: statusFilter === 'all' ? undefined : (statusFilter || undefined),
-            needs_contact_details: needsContactOnly ? true : undefined,
-            per_page: 250,
-            sort_by: 'name',
-            sort_direction: 'asc',
-          });
+        ? await clientEmployeesApi.list(listParams)
+        : await employeesApi.list({ company_id: requestedCompanyId, ...listParams });
 
       if (requestId !== requestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       setEmployees(payload.data);
       setMeta(payload.meta);
       setLoadedCompanyId(requestedCompanyId);
+      // Clean up any draft field whose value already matches the refreshed server baseline,
+      // while preserving all other user-edited fields (including edits on other pages).
       setDrafts((prev) => {
-        const next: Record<number, ContactDraft> = {};
+        let changed = false;
+        const next: Record<number, ContactDraftPatch> = { ...prev };
         for (const emp of payload.data) {
-          next[emp.id] = prev[emp.id] ?? draftFromEmployee(emp);
+          const patch = next[emp.id];
+          if (!patch) continue;
+          const remaining = changedFieldsForRow(emp, patch);
+          if (Object.keys(remaining).length === 0) {
+            delete next[emp.id];
+            changed = true;
+          }
         }
-        return next;
+        return changed ? next : prev;
       });
     } catch (caught) {
       if (requestId !== requestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
@@ -266,38 +329,23 @@ export function EmployeeContactDetails() {
         setIsLoading(false);
       }
     }
-  }, [companyId, isClient, needsContactOnly, search, statusFilter]);
+  }, [companyId, isClient, needsContactOnly, page, search, statusFilter]);
 
   useEffect(() => {
     void fetchEmployees();
-  }, [fetchEmployees]);
-
-  useEffect(() => {
-    if (!canViewSharedInboxReport) {
-      setSharedReportSummary(null);
-      return;
-    }
-    let cancelled = false;
-    void employeeContactHygieneApi.sharedEmails().then(
-      (report) => {
-        if (!cancelled) setSharedReportSummary(report.summary);
-      },
-      () => {
-        // Non-blocking badge summary; full panel shows errors if opened.
-      },
-    );
-    return () => { cancelled = true; };
-  }, [canViewSharedInboxReport, companyId]);
+  }, [fetchEmployees, refreshKey]);
 
   const updateFilter = (key: string, value: string, replace = false) => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
+    if (key !== 'page') next.delete('page');
     setSearchParams(next, { replace });
   };
 
-  const setTab = (tab: 'grid' | 'shared-emails') => {
-    updateFilter('tab', tab === 'grid' ? '' : tab);
+  const setPage = (nextPage: number) => {
+    const clamped = Math.max(1, Math.min(nextPage, meta?.total_pages || nextPage));
+    updateFilter('page', clamped <= 1 ? '' : String(clamped));
   };
 
   const companyEmployees = useMemo(
@@ -305,22 +353,50 @@ export function EmployeeContactDetails() {
     [companyId, employees, loadedCompanyId],
   );
 
-  const dirtyCount = useMemo(
-    () => companyEmployees.filter((emp) => isDraftDirty(drafts[emp.id], emp)).length,
-    [companyEmployees, drafts],
-  );
+  const employeesById = useMemo(() => {
+    const map = new Map<number, Employee>();
+    for (const emp of companyEmployees) map.set(emp.id, emp);
+    return map;
+  }, [companyEmployees]);
+
+  const dirtyCount = useMemo(() => {
+    let count = 0;
+    for (const [idStr, patch] of Object.entries(drafts)) {
+      const id = Number(idStr);
+      const emp = employeesById.get(id);
+      if (emp) {
+        if (hasAnyChangedField(emp, patch)) count += 1;
+      } else if (Object.keys(patch).length > 0) {
+        // Pending edits on another page are kept and counted too.
+        count += 1;
+      }
+    }
+    return count;
+  }, [drafts, employeesById]);
 
   const needsContactCount = meta?.needs_contact_details_count
     ?? companyEmployees.filter((emp) => emp.contact_details_status?.needs_contact_details).length;
 
-  const updateDraftField = (employee: Employee, field: keyof ContactDraft, value: string) => {
-    setDrafts((prev) => ({
-      ...prev,
-      [employee.id]: {
-        ...(prev[employee.id] ?? draftFromEmployee(employee)),
-        [field]: value,
-      },
-    }));
+  useEffect(() => {
+    onNeedsContactCountChange?.(needsContactCount);
+  }, [needsContactCount, onNeedsContactCountChange]);
+
+  const updateDraftField = (employee: Employee, field: ContactField, value: string) => {
+    const baseline = baselineFromEmployee(employee);
+    setDrafts((prev) => {
+      const existing = { ...(prev[employee.id] ?? {}) };
+      if (value.trim() === baseline[field].trim()) {
+        delete existing[field];
+      } else {
+        existing[field] = value;
+      }
+      if (Object.keys(existing).length === 0) {
+        const next = { ...prev };
+        delete next[employee.id];
+        return next;
+      }
+      return { ...prev, [employee.id]: existing };
+    });
     setRowStates((prev) => {
       const current = prev[employee.id];
       if (!current) return prev;
@@ -330,6 +406,7 @@ export function EmployeeContactDetails() {
           ...current,
           saved: false,
           error: null,
+          conflict: null,
           fieldErrors: { ...current.fieldErrors, [field]: [] },
           ...(field === 'email' ? { samePersonRequired: false, samePersonChecked: false } : {}),
         },
@@ -338,7 +415,12 @@ export function EmployeeContactDetails() {
   };
 
   const resetRow = (employee: Employee) => {
-    setDrafts((prev) => ({ ...prev, [employee.id]: draftFromEmployee(employee) }));
+    setDrafts((prev) => {
+      if (!prev[employee.id]) return prev;
+      const next = { ...prev };
+      delete next[employee.id];
+      return next;
+    });
     setRowStates((prev) => ({ ...prev, [employee.id]: INITIAL_ROW_STATE }));
   };
 
@@ -352,11 +434,25 @@ export function EmployeeContactDetails() {
     }));
   };
 
-  const saveRow = async (employee: Employee, explicitConfirmSamePerson = false) => {
+  const saveRow = async (
+    employee: Employee,
+    options: { explicitConfirmSamePerson?: boolean; overrideBaselineEmployee?: Employee; overrideChanges?: ContactDraftPatch } = {},
+  ) => {
     if (!canEdit) return;
-    const draft = drafts[employee.id] ?? draftFromEmployee(employee);
+    const baseEmployee = options.overrideBaselineEmployee ?? employee;
+    const changes = options.overrideChanges ?? changedFieldsForRow(baseEmployee, drafts[employee.id]);
     const currentState = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-    const confirmSamePerson = explicitConfirmSamePerson || (currentState.samePersonRequired && currentState.samePersonChecked);
+    const confirmSamePerson = Boolean(
+      options.explicitConfirmSamePerson || (currentState.samePersonRequired && currentState.samePersonChecked),
+    );
+    const changedKeys = Object.keys(changes) as ContactField[];
+    if (changedKeys.length === 0 && !confirmSamePerson) return;
+
+    const baseline = baselineFromEmployee(baseEmployee);
+    const baselineValues: Record<string, string> = {};
+    for (const key of changedKeys) {
+      baselineValues[key] = baseline[key];
+    }
 
     setRowStates((prev) => ({
       ...prev,
@@ -366,17 +462,14 @@ export function EmployeeContactDetails() {
         saved: false,
         error: null,
         fieldErrors: {},
+        conflict: null,
       },
     }));
 
     const payload = {
-      email: draft.email.trim(),
-      phone: draft.phone.trim(),
-      address_line1: draft.address_line1.trim(),
-      address_line2: draft.address_line2.trim(),
-      city: draft.city.trim(),
-      state: draft.state.trim(),
-      zip: draft.zip.trim(),
+      ...changes,
+      row_revision: baseEmployee.contact_revision || baseEmployee.updated_at,
+      ...(changedKeys.length > 0 ? { baseline_values: baselineValues } : {}),
       ...(confirmSamePerson ? { confirm_same_person_email: true } : {}),
     };
 
@@ -389,7 +482,12 @@ export function EmployeeContactDetails() {
       const warnings = response.contact_warnings ?? [];
 
       setEmployees((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
-      setDrafts((prev) => ({ ...prev, [updated.id]: draftFromEmployee(updated) }));
+      setDrafts((prev) => {
+        if (!prev[updated.id]) return prev;
+        const next = { ...prev };
+        delete next[updated.id];
+        return next;
+      });
       setRowStates((prev) => ({
         ...prev,
         [updated.id]: {
@@ -400,11 +498,11 @@ export function EmployeeContactDetails() {
           warnings,
           samePersonRequired: false,
           samePersonChecked: false,
+          conflict: null,
         },
       }));
 
-      // Keep the needs-contact-details counter accurate as rows are completed.
-      const wasNeeding = employee.contact_details_status?.needs_contact_details ?? false;
+      const wasNeeding = baseEmployee.contact_details_status?.needs_contact_details ?? false;
       const nowNeeding = updated.contact_details_status?.needs_contact_details ?? false;
       if (wasNeeding !== nowNeeding) {
         setMeta((prev) => prev && typeof prev.needs_contact_details_count === 'number'
@@ -412,6 +510,29 @@ export function EmployeeContactDetails() {
           : prev);
       }
     } catch (caught) {
+      const conflictPayload = extractConflictPayload(caught);
+      if (conflictPayload) {
+        setRowStates((prev) => ({
+          ...prev,
+          [employee.id]: {
+            saving: false,
+            saved: false,
+            error: conflictPayload.error,
+            fieldErrors: {},
+            warnings: [],
+            samePersonRequired: false,
+            samePersonChecked: false,
+            conflict: {
+              message: conflictPayload.error,
+              conflictingFields: conflictPayload.conflicting_fields,
+              serverEmployee: conflictPayload.data,
+              userChanges: changes,
+            },
+          },
+        }));
+        return;
+      }
+
       const parsed = extractContactValidation(caught);
       setRowStates((prev) => ({
         ...prev,
@@ -423,20 +544,569 @@ export function EmployeeContactDetails() {
           warnings: parsed.warnings,
           samePersonRequired: parsed.samePersonRequired,
           samePersonChecked: parsed.samePersonRequired ? Boolean(prev[employee.id]?.samePersonChecked) : false,
+          conflict: null,
         },
       }));
     }
+  };
+
+  const handleKeepMyVersion = (employee: Employee) => {
+    const conflict = rowStates[employee.id]?.conflict;
+    if (!conflict) return;
+    // Update the row's server baseline (refreshing untouched fields and revision)
+    // and re-submit only the user's edited fields.
+    setEmployees((prev) => prev.map((item) => (item.id === employee.id ? { ...item, ...conflict.serverEmployee } : item)));
+    void saveRow(employee, {
+      overrideBaselineEmployee: conflict.serverEmployee,
+      overrideChanges: conflict.userChanges,
+    });
+  };
+
+  const handleDiscardMyVersion = (employee: Employee) => {
+    const conflict = rowStates[employee.id]?.conflict;
+    if (!conflict) return;
+    setEmployees((prev) => prev.map((item) => (item.id === employee.id ? { ...item, ...conflict.serverEmployee } : item)));
+    resetRow(employee);
   };
 
   const handleRowKeyDown = (event: KeyboardEvent<HTMLInputElement>, employee: Employee) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-      if (!state.saving && (isDraftDirty(drafts[employee.id], employee) || (state.samePersonRequired && state.samePersonChecked))) {
+      if (!state.saving && (hasAnyChangedField(employee, drafts[employee.id]) || (state.samePersonRequired && state.samePersonChecked))) {
         void saveRow(employee);
       }
     }
   };
+
+  const totalCount = meta?.total_count ?? companyEmployees.length;
+  const currentPage = meta?.current_page ?? page;
+  const totalPages = meta?.total_pages ?? 1;
+  const perPage = meta?.per_page ?? PER_PAGE;
+  const rangeStart = totalCount === 0 ? 0 : (currentPage - 1) * perPage + 1;
+  const rangeEnd = totalCount === 0 ? 0 : Math.min(currentPage * perPage, totalCount);
+
+  const gridBody = (
+    <>
+      {topSlot}
+
+      {!canEdit && (
+        <Alert tone="info">{companyReadOnlyMessage(activeCompany)}</Alert>
+      )}
+
+      {/* Summary strip + filter bar */}
+      <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              aria-pressed={needsContactOnly}
+              onClick={() => updateFilter('needs_contact_details', needsContactOnly ? '' : 'true')}
+              className={cn(
+                'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold transition',
+                needsContactOnly
+                  ? 'border-warning-400 bg-warning-100 text-warning-950 shadow-sm'
+                  : 'border-neutral-300 bg-white text-neutral-700 hover:border-warning-300 hover:bg-warning-50',
+              )}
+            >
+              <AlertTriangle className="h-4 w-4 text-warning-700" aria-hidden="true" />
+              Needs contact details
+              <span className="rounded-full bg-white/90 px-2 py-0.5 text-xs font-bold tabular-nums text-warning-900">
+                {needsContactCount}
+              </span>
+            </button>
+
+            {needsContactOnly && (
+              <button
+                type="button"
+                onClick={() => updateFilter('needs_contact_details', '')}
+                className="text-sm font-semibold text-primary-700 underline-offset-2 hover:underline"
+              >
+                Show all
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-600">
+            <span>
+              {totalPages > 1 ? (
+                <>
+                  Showing <strong className="tabular-nums text-neutral-900">{rangeStart}–{rangeEnd}</strong> of{' '}
+                  <strong className="tabular-nums text-neutral-900">{totalCount}</strong> employees
+                </>
+              ) : (
+                <>
+                  Showing <strong className="tabular-nums text-neutral-900">{totalCount}</strong>{' '}
+                  {totalCount === 1 ? 'employee' : 'employees'}
+                </>
+              )}
+            </span>
+            {dirtyCount > 0 && (
+              <Badge variant="info">{dirtyCount} unsaved {dirtyCount === 1 ? 'row' : 'rows'}</Badge>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" aria-hidden="true" />
+            <Input
+              type="text"
+              aria-label="Search employees"
+              placeholder="Search by name or email..."
+              value={search}
+              onChange={(event) => updateFilter('search', event.target.value, true)}
+              className="pl-10"
+            />
+          </div>
+
+          <Select
+            aria-label="Employee status"
+            value={statusFilter}
+            onChange={(event) => updateFilter('status', event.target.value)}
+            className="w-full sm:w-40"
+          >
+            <option value="active">Active</option>
+            <option value="all">All status</option>
+            <option value="inactive">Inactive</option>
+            <option value="terminated">Terminated</option>
+          </Select>
+
+          <p className="text-xs text-neutral-500 sm:ml-auto">
+            7-digit Guam numbers default to <span className="font-mono font-medium text-neutral-700">+1 671</span>. Press <kbd className="rounded border border-neutral-300 bg-neutral-50 px-1.5 py-0.5 font-mono text-[11px] text-neutral-700">Enter</kbd> in a row to save.
+          </p>
+        </div>
+      </div>
+
+      {loadError && (
+        <Alert tone="error" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <span>{loadError}</span>
+          <Button variant="outline" size="sm" onClick={() => void fetchEmployees()}>
+            Retry
+          </Button>
+        </Alert>
+      )}
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600" />
+        </div>
+      ) : companyEmployees.length === 0 ? (
+        <Card className="p-10 text-center">
+          <CheckCircle2 className="mx-auto h-10 w-10 text-success-600" aria-hidden="true" />
+          <h2 className="mt-3 text-base font-semibold text-neutral-900">
+            {needsContactOnly ? 'Everyone in this view has contact details' : 'No employees match these filters'}
+          </h2>
+          <p className="mt-1 text-sm text-neutral-600">
+            {needsContactOnly
+              ? 'Switch off the Needs contact details filter to review or update all employees.'
+              : 'Try clearing your search or changing the status filter.'}
+          </p>
+          {needsContactOnly && (
+            <div className="mt-4">
+              <Button variant="outline" size="sm" onClick={() => updateFilter('needs_contact_details', '')}>
+                Show all employees
+              </Button>
+            </div>
+          )}
+        </Card>
+      ) : (
+        <>
+          {/* Desktop editable grid */}
+          <Card className="hidden overflow-hidden lg:block">
+            <Table stickyHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead stickyLeft className="w-[168px] px-3 uppercase tracking-wider">Employee</TableHead>
+                  <TableHead className="w-[205px] px-2 uppercase tracking-wider">Email</TableHead>
+                  <TableHead className="w-[144px] px-2 uppercase tracking-wider">Mobile</TableHead>
+                  <TableHead className="min-w-[235px] px-2 uppercase tracking-wider">Mailing address</TableHead>
+                  <TableHead className="w-[94px] px-2.5 text-right uppercase tracking-wider">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {companyEmployees.map((employee, index) => {
+                  const draft = effectiveDraft(employee, drafts[employee.id]);
+                  const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+                  const dirty = hasAnyChangedField(employee, drafts[employee.id]);
+                  const badge = contactStatusBadge(employee);
+                  const rowBg = index % 2 === 0 ? 'bg-white' : 'bg-neutral-50/70';
+
+                  return (
+                    <TableRow key={employee.id} className={cn(rowBg, 'align-top')}>
+                      <TableCell stickyLeft className={cn(rowBg, 'whitespace-normal px-3 py-3')}>
+                        <div className="flex items-start gap-2">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-[11px] font-semibold text-primary-700">
+                            {getInitials(employee.first_name, employee.last_name)}
+                          </div>
+                          <div className="min-w-0 space-y-1">
+                            <p className="text-sm font-semibold text-neutral-950 leading-snug">
+                              {employee.first_name} {employee.last_name}
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              <Badge variant={badge.variant}>{badge.label}</Badge>
+                              {employee.email_verified_at && (
+                                <Badge variant="success">Verified</Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+
+                      <TableCell className="whitespace-normal px-2 py-3">
+                        <input
+                          type="email"
+                          aria-label={`Email for ${employee.first_name} ${employee.last_name}`}
+                          value={draft.email}
+                          disabled={!canEdit || state.saving}
+                          placeholder="name@example.com"
+                          onChange={(event) => updateDraftField(employee, 'email', event.target.value)}
+                          onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                          className={gridInputClass('px-2.5', Boolean(state.fieldErrors.email?.length))}
+                        />
+                        <RowInlineFeedback
+                          employee={employee}
+                          state={state}
+                          field="email"
+                          canEdit={canEdit}
+                          onToggleSamePerson={(checked) => toggleSamePersonCheck(employee.id, checked)}
+                          onConfirmAndSave={() => void saveRow(employee, { explicitConfirmSamePerson: true })}
+                        />
+                      </TableCell>
+
+                      <TableCell className="whitespace-normal px-2 py-3">
+                        <input
+                          type="tel"
+                          aria-label={`Mobile for ${employee.first_name} ${employee.last_name}`}
+                          value={draft.phone}
+                          disabled={!canEdit || state.saving}
+                          placeholder="671-555-0100"
+                          onChange={(event) => updateDraftField(employee, 'phone', event.target.value)}
+                          onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                          className={gridInputClass('px-2 tabular-nums', Boolean(state.fieldErrors.phone?.length))}
+                        />
+                        {state.fieldErrors.phone?.map((msg) => (
+                          <p key={msg} role="alert" className="mt-1 text-xs text-danger-700">{msg}</p>
+                        ))}
+                        {employee.phone_confirmed_by_employee_at && !dirty && (
+                          <p className="mt-1 text-[11px] font-medium text-success-700">Confirmed by employee</p>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="whitespace-normal px-2 py-3">
+                        <div className="space-y-1.5">
+                          <div className="grid grid-cols-[minmax(0,1fr)_72px] gap-1.5">
+                            <input
+                              type="text"
+                              aria-label={`Street address for ${employee.first_name} ${employee.last_name}`}
+                              value={draft.address_line1}
+                              disabled={!canEdit || state.saving}
+                              placeholder="Street address"
+                              onChange={(event) => updateDraftField(employee, 'address_line1', event.target.value)}
+                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                              className={gridInputClass('px-2', Boolean(state.fieldErrors.address_line1?.length))}
+                            />
+                            <input
+                              type="text"
+                              aria-label={`Apt or unit for ${employee.first_name} ${employee.last_name}`}
+                              value={draft.address_line2}
+                              disabled={!canEdit || state.saving}
+                              placeholder="Apt / Unit"
+                              onChange={(event) => updateDraftField(employee, 'address_line2', event.target.value)}
+                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                              className={gridInputClass('px-2')}
+                            />
+                          </div>
+                          <div className="grid grid-cols-[minmax(0,1fr)_46px_70px] gap-1.5">
+                            <input
+                              type="text"
+                              aria-label={`City for ${employee.first_name} ${employee.last_name}`}
+                              value={draft.city}
+                              disabled={!canEdit || state.saving}
+                              placeholder="City"
+                              onChange={(event) => updateDraftField(employee, 'city', event.target.value)}
+                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                              className={gridInputClass('px-2', Boolean(state.fieldErrors.city?.length))}
+                            />
+                            <input
+                              type="text"
+                              aria-label={`State for ${employee.first_name} ${employee.last_name}`}
+                              value={draft.state}
+                              disabled={!canEdit || state.saving}
+                              placeholder="GU"
+                              maxLength={2}
+                              onChange={(event) => updateDraftField(employee, 'state', event.target.value.toUpperCase())}
+                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                              className={gridInputClass('px-1 text-center uppercase', Boolean(state.fieldErrors.state?.length))}
+                            />
+                            <input
+                              type="text"
+                              aria-label={`ZIP for ${employee.first_name} ${employee.last_name}`}
+                              value={draft.zip}
+                              disabled={!canEdit || state.saving}
+                              placeholder="96910"
+                              onChange={(event) => updateDraftField(employee, 'zip', event.target.value)}
+                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                              className={gridInputClass('px-2 tabular-nums', Boolean(state.fieldErrors.zip?.length))}
+                            />
+                          </div>
+                        </div>
+                        {state.conflict && (
+                          <RowConflictBanner
+                            conflict={state.conflict}
+                            saving={state.saving}
+                            onKeep={() => handleKeepMyVersion(employee)}
+                            onDiscard={() => handleDiscardMyVersion(employee)}
+                          />
+                        )}
+                      </TableCell>
+
+                      <TableCell className="px-2.5 py-3 text-right">
+                        <div className="flex flex-col items-end gap-1.5">
+                          <div className="flex items-center gap-1.5">
+                            {dirty && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label={`Reset ${employee.first_name} ${employee.last_name}`}
+                                disabled={state.saving}
+                                onClick={() => resetRow(employee)}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant={dirty || (state.samePersonRequired && state.samePersonChecked) ? 'primary' : 'outline'}
+                              disabled={!canEdit || state.saving || (!dirty && !(state.samePersonRequired && state.samePersonChecked))}
+                              loading={state.saving}
+                              loadingLabel="Saving"
+                              aria-label={`Save ${employee.first_name} ${employee.last_name}`}
+                              onClick={() => void saveRow(employee)}
+                            >
+                              <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                              Save
+                            </Button>
+                          </div>
+                          {state.saved && !dirty && (
+                            <span role="status" className="inline-flex items-center gap-1 text-xs font-semibold text-success-700">
+                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                              Saved
+                            </span>
+                          )}
+                          {state.error && !state.conflict && !state.samePersonRequired && !state.fieldErrors.email?.length && !state.fieldErrors.phone?.length && (
+                            <p role="alert" className="max-w-[180px] whitespace-normal text-right text-xs text-danger-700">
+                              {state.error}
+                            </p>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Card>
+
+          {/* Mobile & tablet cards */}
+          <div className="space-y-4 lg:hidden">
+            {companyEmployees.map((employee) => {
+              const draft = effectiveDraft(employee, drafts[employee.id]);
+              const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+              const dirty = hasAnyChangedField(employee, drafts[employee.id]);
+              const badge = contactStatusBadge(employee);
+
+              return (
+                <MobileRecordCard key={employee.id}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700">
+                        {getInitials(employee.first_name, employee.last_name)}
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="truncate font-semibold text-neutral-950">
+                          {employee.first_name} {employee.last_name}
+                        </h2>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          <Badge variant={badge.variant}>{badge.label}</Badge>
+                          {employee.email_verified_at && <Badge variant="success">Verified</Badge>}
+                        </div>
+                      </div>
+                    </div>
+                    {state.saved && !dirty && (
+                      <span role="status" className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-success-700">
+                        <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                        Saved
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    <div>
+                      <Input
+                        label="Email"
+                        type="email"
+                        value={draft.email}
+                        disabled={!canEdit || state.saving}
+                        placeholder="name@example.com"
+                        error={state.samePersonRequired ? undefined : state.fieldErrors.email?.[0]}
+                        onChange={(event) => updateDraftField(employee, 'email', event.target.value)}
+                        onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                      />
+                      <RowInlineFeedback
+                        employee={employee}
+                        state={state}
+                        field="email"
+                        hidePrimaryFieldError={!state.samePersonRequired}
+                        canEdit={canEdit}
+                        onToggleSamePerson={(checked) => toggleSamePersonCheck(employee.id, checked)}
+                        onConfirmAndSave={() => void saveRow(employee, { explicitConfirmSamePerson: true })}
+                      />
+                    </div>
+
+                    <Input
+                      label="Mobile number"
+                      type="tel"
+                      value={draft.phone}
+                      disabled={!canEdit || state.saving}
+                      placeholder="671-555-0100"
+                      error={state.fieldErrors.phone?.[0]}
+                      helperText={employee.phone_confirmed_by_employee_at && !dirty ? 'Confirmed by employee' : undefined}
+                      onChange={(event) => updateDraftField(employee, 'phone', event.target.value)}
+                      onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                    />
+
+                    <Input
+                      label="Street address"
+                      value={draft.address_line1}
+                      disabled={!canEdit || state.saving}
+                      placeholder="Street address"
+                      error={state.fieldErrors.address_line1?.[0]}
+                      onChange={(event) => updateDraftField(employee, 'address_line1', event.target.value)}
+                      onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                    />
+
+                    <Input
+                      label="Apt / Unit (optional)"
+                      value={draft.address_line2}
+                      disabled={!canEdit || state.saving}
+                      placeholder="Apt, suite, or box"
+                      onChange={(event) => updateDraftField(employee, 'address_line2', event.target.value)}
+                      onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                    />
+
+                    <div className="grid grid-cols-[minmax(0,1fr)_72px_104px] gap-2">
+                      <Input
+                        label="City"
+                        value={draft.city}
+                        disabled={!canEdit || state.saving}
+                        placeholder="Hagatna"
+                        error={state.fieldErrors.city?.[0]}
+                        onChange={(event) => updateDraftField(employee, 'city', event.target.value)}
+                        onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                      />
+                      <Input
+                        label="State"
+                        value={draft.state}
+                        maxLength={2}
+                        disabled={!canEdit || state.saving}
+                        placeholder="GU"
+                        error={state.fieldErrors.state?.[0]}
+                        onChange={(event) => updateDraftField(employee, 'state', event.target.value.toUpperCase())}
+                        onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                      />
+                      <Input
+                        label="ZIP"
+                        value={draft.zip}
+                        disabled={!canEdit || state.saving}
+                        placeholder="96910"
+                        error={state.fieldErrors.zip?.[0]}
+                        onChange={(event) => updateDraftField(employee, 'zip', event.target.value)}
+                        onKeyDown={(event) => handleRowKeyDown(event, employee)}
+                      />
+                    </div>
+
+                    {state.conflict && (
+                      <RowConflictBanner
+                        conflict={state.conflict}
+                        saving={state.saving}
+                        onKeep={() => handleKeepMyVersion(employee)}
+                        onDiscard={() => handleDiscardMyVersion(employee)}
+                      />
+                    )}
+
+                    {state.error && !state.conflict && !state.samePersonRequired && !state.fieldErrors.email?.length && !state.fieldErrors.phone?.length && (
+                      <Alert tone="error">{state.error}</Alert>
+                    )}
+                  </div>
+
+                  <MobileCardActions>
+                    <Button
+                      disabled={!canEdit || state.saving || (!dirty && !(state.samePersonRequired && state.samePersonChecked))}
+                      loading={state.saving}
+                      loadingLabel="Saving..."
+                      onClick={() => void saveRow(employee)}
+                      className="w-full sm:w-auto"
+                    >
+                      <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                      Save contact details
+                    </Button>
+                    {dirty && (
+                      <Button
+                        variant="outline"
+                        disabled={state.saving}
+                        onClick={() => resetRow(employee)}
+                        className="w-full sm:w-auto"
+                      >
+                        Reset changes
+                      </Button>
+                    )}
+                  </MobileCardActions>
+                </MobileRecordCard>
+              );
+            })}
+          </div>
+
+          {totalPages > 1 && (
+            <nav
+              aria-label="Contact details pagination"
+              className="flex flex-col items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 sm:flex-row"
+            >
+              <p className="text-sm text-neutral-600">
+                Page <strong className="tabular-nums text-neutral-900">{currentPage}</strong> of{' '}
+                <strong className="tabular-nums text-neutral-900">{totalPages}</strong>{' '}
+                <span className="text-neutral-500">({rangeStart}–{rangeEnd} of {totalCount})</span>
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage <= 1 || isLoading}
+                  onClick={() => setPage(currentPage - 1)}
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage >= totalPages || isLoading}
+                  onClick={() => setPage(currentPage + 1)}
+                >
+                  Next
+                  <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
+                </Button>
+              </div>
+            </nav>
+          )}
+        </>
+      )}
+    </>
+  );
+
+  if (embedded) {
+    return gridBody;
+  }
 
   return (
     <div>
@@ -455,525 +1125,53 @@ export function EmployeeContactDetails() {
       />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {canViewSharedInboxReport && (
-          <div role="tablist" aria-label="Contact details sections" className="flex flex-wrap gap-2 border-b border-neutral-200 pb-3">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'grid'}
-              onClick={() => setTab('grid')}
-              className={cn(
-                'inline-flex min-h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition',
-                activeTab === 'grid'
-                  ? 'bg-primary-700 text-white shadow-sm'
-                  : 'border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50',
-              )}
-            >
-              <Users className="h-4 w-4" aria-hidden="true" />
-              Contact details
-              {needsContactCount > 0 && (
-                <span className={cn(
-                  'rounded-full px-2 py-0.5 text-xs font-bold tabular-nums',
-                  activeTab === 'grid' ? 'bg-white/20 text-white' : 'bg-warning-100 text-warning-900',
-                )}>
-                  {needsContactCount} need details
-                </span>
-              )}
-            </button>
+        {gridBody}
+      </div>
+    </div>
+  );
+}
 
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'shared-emails'}
-              onClick={() => setTab('shared-emails')}
-              className={cn(
-                'inline-flex min-h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition',
-                activeTab === 'shared-emails'
-                  ? 'bg-primary-700 text-white shadow-sm'
-                  : 'border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50',
-              )}
-            >
-              <MailWarning className="h-4 w-4" aria-hidden="true" />
-              Shared & placeholder emails
-              {sharedReportSummary && sharedReportSummary.total_employee_records > 0 && (
-                <span className={cn(
-                  'rounded-full px-2 py-0.5 text-xs font-bold tabular-nums',
-                  activeTab === 'shared-emails' ? 'bg-white/20 text-white' : 'bg-danger-100 text-danger-800',
-                )}>
-                  {sharedReportSummary.total_employee_records}
-                </span>
-              )}
-            </button>
-          </div>
-        )}
+function RowConflictBanner({
+  conflict,
+  saving,
+  onKeep,
+  onDiscard,
+}: {
+  conflict: RowConflictState;
+  saving: boolean;
+  onKeep: () => void;
+  onDiscard: () => void;
+}) {
+  const fieldsToShow = conflict.conflictingFields.filter(
+    (field): field is ContactField => CONTACT_FIELDS.includes(field as ContactField),
+  );
+  const serverValues = baselineFromEmployee(conflict.serverEmployee);
 
-        {activeTab === 'shared-emails' && canViewSharedInboxReport ? (
-          <SharedInboxReportPanel
-            activeCompanyId={companyId}
-            readOnly={!canEdit}
-            onReportLoaded={(report) => setSharedReportSummary(report.summary)}
-            onCleared={(clearedCompanyId) => {
-              if (clearedCompanyId === companyId) {
-                void fetchEmployees();
-              }
-            }}
-          />
-        ) : (
-          <>
-            {!canEdit && (
-              <Alert tone="info">{companyReadOnlyMessage(activeCompany)}</Alert>
-            )}
-
-            {/* Summary strip + filter bar */}
-            <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    aria-pressed={needsContactOnly}
-                    onClick={() => updateFilter('needs_contact_details', needsContactOnly ? '' : 'true')}
-                    className={cn(
-                      'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold transition',
-                      needsContactOnly
-                        ? 'border-warning-400 bg-warning-100 text-warning-950 shadow-sm'
-                        : 'border-neutral-300 bg-white text-neutral-700 hover:border-warning-300 hover:bg-warning-50',
-                    )}
-                  >
-                    <AlertTriangle className="h-4 w-4 text-warning-700" aria-hidden="true" />
-                    Needs contact details
-                    <span className="rounded-full bg-white/90 px-2 py-0.5 text-xs font-bold tabular-nums text-warning-900">
-                      {needsContactCount}
-                    </span>
-                  </button>
-
-                  {needsContactOnly && (
-                    <button
-                      type="button"
-                      onClick={() => updateFilter('needs_contact_details', '')}
-                      className="text-sm font-semibold text-primary-700 underline-offset-2 hover:underline"
-                    >
-                      Show all
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-600">
-                  <span>
-                    Showing <strong className="tabular-nums text-neutral-900">{companyEmployees.length}</strong>{' '}
-                    {companyEmployees.length === 1 ? 'employee' : 'employees'}
-                  </span>
-                  {dirtyCount > 0 && (
-                    <Badge variant="info">{dirtyCount} unsaved {dirtyCount === 1 ? 'row' : 'rows'}</Badge>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <div className="relative w-full sm:w-72">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" aria-hidden="true" />
-                  <Input
-                    type="text"
-                    aria-label="Search employees"
-                    placeholder="Search by name or email..."
-                    value={search}
-                    onChange={(event) => updateFilter('search', event.target.value, true)}
-                    className="pl-10"
-                  />
-                </div>
-
-                <Select
-                  aria-label="Employee status"
-                  value={statusFilter}
-                  onChange={(event) => updateFilter('status', event.target.value)}
-                  className="w-full sm:w-40"
-                >
-                  <option value="active">Active</option>
-                  <option value="all">All status</option>
-                  <option value="inactive">Inactive</option>
-                  <option value="terminated">Terminated</option>
-                </Select>
-
-                <p className="text-xs text-neutral-500 sm:ml-auto">
-                  7-digit Guam numbers default to <span className="font-mono font-medium text-neutral-700">+1 671</span>. Press <kbd className="rounded border border-neutral-300 bg-neutral-50 px-1.5 py-0.5 font-mono text-[11px] text-neutral-700">Enter</kbd> in a row to save.
-                </p>
-              </div>
-            </div>
-
-            {loadError && (
-              <Alert tone="error" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <span>{loadError}</span>
-                <Button variant="outline" size="sm" onClick={() => void fetchEmployees()}>
-                  Retry
-                </Button>
-              </Alert>
-            )}
-
-            {isLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600" />
-              </div>
-            ) : companyEmployees.length === 0 ? (
-              <Card className="p-10 text-center">
-                <CheckCircle2 className="mx-auto h-10 w-10 text-success-600" aria-hidden="true" />
-                <h2 className="mt-3 text-base font-semibold text-neutral-900">
-                  {needsContactOnly ? 'Everyone in this view has contact details' : 'No employees match these filters'}
-                </h2>
-                <p className="mt-1 text-sm text-neutral-600">
-                  {needsContactOnly
-                    ? 'Switch off the Needs contact details filter to review or update all employees.'
-                    : 'Try clearing your search or changing the status filter.'}
-                </p>
-                {needsContactOnly && (
-                  <div className="mt-4">
-                    <Button variant="outline" size="sm" onClick={() => updateFilter('needs_contact_details', '')}>
-                      Show all employees
-                    </Button>
-                  </div>
-                )}
-              </Card>
-            ) : (
-              <>
-                {/* Desktop editable grid */}
-                <Card className="hidden overflow-hidden lg:block">
-                  <Table stickyHeader>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead stickyLeft className="w-[168px] px-3 uppercase tracking-wider">Employee</TableHead>
-                        <TableHead className="w-[205px] px-2 uppercase tracking-wider">Email</TableHead>
-                        <TableHead className="w-[144px] px-2 uppercase tracking-wider">Mobile</TableHead>
-                        <TableHead className="min-w-[235px] px-2 uppercase tracking-wider">Mailing address</TableHead>
-                        <TableHead className="w-[94px] px-2.5 text-right uppercase tracking-wider">Action</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {companyEmployees.map((employee, index) => {
-                        const draft = drafts[employee.id] ?? draftFromEmployee(employee);
-                        const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-                        const dirty = isDraftDirty(draft, employee);
-                        const badge = contactStatusBadge(employee);
-                        const rowBg = index % 2 === 0 ? 'bg-white' : 'bg-neutral-50/70';
-
-                        return (
-                          <TableRow key={employee.id} className={cn(rowBg, 'align-top')}>
-                            <TableCell stickyLeft className={cn(rowBg, 'whitespace-normal px-3 py-3')}>
-                              <div className="flex items-start gap-2">
-                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-[11px] font-semibold text-primary-700">
-                                  {getInitials(employee.first_name, employee.last_name)}
-                                </div>
-                                <div className="min-w-0 space-y-1">
-                                  <p className="text-sm font-semibold text-neutral-950 leading-snug">
-                                    {employee.first_name} {employee.last_name}
-                                  </p>
-                                  <div className="flex flex-wrap gap-1">
-                                    <Badge variant={badge.variant}>{badge.label}</Badge>
-                                    {employee.email_verified_at && (
-                                      <Badge variant="success">Verified</Badge>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </TableCell>
-
-                            <TableCell className="whitespace-normal px-2 py-3">
-                              <input
-                                type="email"
-                                aria-label={`Email for ${employee.first_name} ${employee.last_name}`}
-                                value={draft.email}
-                                disabled={!canEdit || state.saving}
-                                placeholder="name@example.com"
-                                onChange={(event) => updateDraftField(employee, 'email', event.target.value)}
-                                onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                                className={gridInputClass('px-2.5', Boolean(state.fieldErrors.email?.length))}
-                              />
-                              <RowInlineFeedback
-                                employee={employee}
-                                state={state}
-                                field="email"
-                                canEdit={canEdit}
-                                onToggleSamePerson={(checked) => toggleSamePersonCheck(employee.id, checked)}
-                                onConfirmAndSave={() => void saveRow(employee, true)}
-                              />
-                            </TableCell>
-
-                            <TableCell className="whitespace-normal px-2 py-3">
-                              <input
-                                type="tel"
-                                aria-label={`Mobile for ${employee.first_name} ${employee.last_name}`}
-                                value={draft.phone}
-                                disabled={!canEdit || state.saving}
-                                placeholder="671-555-0100"
-                                onChange={(event) => updateDraftField(employee, 'phone', event.target.value)}
-                                onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                                className={gridInputClass('px-2 tabular-nums', Boolean(state.fieldErrors.phone?.length))}
-                              />
-                              {state.fieldErrors.phone?.map((msg) => (
-                                <p key={msg} role="alert" className="mt-1 text-xs text-danger-700">{msg}</p>
-                              ))}
-                              {employee.phone_confirmed_by_employee_at && !dirty && (
-                                <p className="mt-1 text-[11px] font-medium text-success-700">Confirmed by employee</p>
-                              )}
-                            </TableCell>
-
-                            <TableCell className="whitespace-normal px-2 py-3">
-                              <div className="space-y-1.5">
-                                <div className="grid grid-cols-[minmax(0,1fr)_72px] gap-1.5">
-                                  <input
-                                    type="text"
-                                    aria-label={`Street address for ${employee.first_name} ${employee.last_name}`}
-                                    value={draft.address_line1}
-                                    disabled={!canEdit || state.saving}
-                                    placeholder="Street address"
-                                    onChange={(event) => updateDraftField(employee, 'address_line1', event.target.value)}
-                                    onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                                    className={gridInputClass('px-2', Boolean(state.fieldErrors.address_line1?.length))}
-                                  />
-                                  <input
-                                    type="text"
-                                    aria-label={`Apt or unit for ${employee.first_name} ${employee.last_name}`}
-                                    value={draft.address_line2}
-                                    disabled={!canEdit || state.saving}
-                                    placeholder="Apt / Unit"
-                                    onChange={(event) => updateDraftField(employee, 'address_line2', event.target.value)}
-                                    onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                                    className={gridInputClass('px-2')}
-                                  />
-                                </div>
-                                <div className="grid grid-cols-[minmax(0,1fr)_46px_70px] gap-1.5">
-                                  <input
-                                    type="text"
-                                    aria-label={`City for ${employee.first_name} ${employee.last_name}`}
-                                    value={draft.city}
-                                    disabled={!canEdit || state.saving}
-                                    placeholder="City"
-                                    onChange={(event) => updateDraftField(employee, 'city', event.target.value)}
-                                    onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                                    className={gridInputClass('px-2', Boolean(state.fieldErrors.city?.length))}
-                                  />
-                                  <input
-                                    type="text"
-                                    aria-label={`State for ${employee.first_name} ${employee.last_name}`}
-                                    value={draft.state}
-                                    disabled={!canEdit || state.saving}
-                                    placeholder="GU"
-                                    maxLength={2}
-                                    onChange={(event) => updateDraftField(employee, 'state', event.target.value.toUpperCase())}
-                                    onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                                    className={gridInputClass('px-1 text-center uppercase', Boolean(state.fieldErrors.state?.length))}
-                                  />
-                                  <input
-                                    type="text"
-                                    aria-label={`ZIP for ${employee.first_name} ${employee.last_name}`}
-                                    value={draft.zip}
-                                    disabled={!canEdit || state.saving}
-                                    placeholder="96910"
-                                    onChange={(event) => updateDraftField(employee, 'zip', event.target.value)}
-                                    onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                                    className={gridInputClass('px-2 tabular-nums', Boolean(state.fieldErrors.zip?.length))}
-                                  />
-                                </div>
-                              </div>
-                            </TableCell>
-
-                            <TableCell className="px-2.5 py-3 text-right">
-                              <div className="flex flex-col items-end gap-1.5">
-                                <div className="flex items-center gap-1.5">
-                                  {dirty && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      aria-label={`Reset ${employee.first_name} ${employee.last_name}`}
-                                      disabled={state.saving}
-                                      onClick={() => resetRow(employee)}
-                                    >
-                                      <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                                    </Button>
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant={dirty || (state.samePersonRequired && state.samePersonChecked) ? 'primary' : 'outline'}
-                                    disabled={!canEdit || state.saving || (!dirty && !(state.samePersonRequired && state.samePersonChecked))}
-                                    loading={state.saving}
-                                    loadingLabel="Saving"
-                                    aria-label={`Save ${employee.first_name} ${employee.last_name}`}
-                                    onClick={() => void saveRow(employee)}
-                                  >
-                                    <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                                    Save
-                                  </Button>
-                                </div>
-                                {state.saved && !dirty && (
-                                  <span role="status" className="inline-flex items-center gap-1 text-xs font-semibold text-success-700">
-                                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                                    Saved
-                                  </span>
-                                )}
-                                {state.error && !state.samePersonRequired && !state.fieldErrors.email?.length && !state.fieldErrors.phone?.length && (
-                                  <p role="alert" className="max-w-[180px] whitespace-normal text-right text-xs text-danger-700">
-                                    {state.error}
-                                  </p>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </Card>
-
-                {/* Mobile & tablet cards */}
-                <div className="space-y-4 lg:hidden">
-                  {companyEmployees.map((employee) => {
-                    const draft = drafts[employee.id] ?? draftFromEmployee(employee);
-                    const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-                    const dirty = isDraftDirty(draft, employee);
-                    const badge = contactStatusBadge(employee);
-
-                    return (
-                      <MobileRecordCard key={employee.id}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700">
-                              {getInitials(employee.first_name, employee.last_name)}
-                            </div>
-                            <div className="min-w-0">
-                              <h2 className="truncate font-semibold text-neutral-950">
-                                {employee.first_name} {employee.last_name}
-                              </h2>
-                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                <Badge variant={badge.variant}>{badge.label}</Badge>
-                                {employee.email_verified_at && <Badge variant="success">Verified</Badge>}
-                              </div>
-                            </div>
-                          </div>
-                          {state.saved && !dirty && (
-                            <span role="status" className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-success-700">
-                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                              Saved
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="mt-4 space-y-3">
-                          <div>
-                            <Input
-                              label="Email"
-                              type="email"
-                              value={draft.email}
-                              disabled={!canEdit || state.saving}
-                              placeholder="name@example.com"
-                              error={state.samePersonRequired ? undefined : state.fieldErrors.email?.[0]}
-                              onChange={(event) => updateDraftField(employee, 'email', event.target.value)}
-                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                            />
-                            <RowInlineFeedback
-                              employee={employee}
-                              state={state}
-                              field="email"
-                              hidePrimaryFieldError={!state.samePersonRequired}
-                              canEdit={canEdit}
-                              onToggleSamePerson={(checked) => toggleSamePersonCheck(employee.id, checked)}
-                              onConfirmAndSave={() => void saveRow(employee, true)}
-                            />
-                          </div>
-
-                          <Input
-                            label="Mobile number"
-                            type="tel"
-                            value={draft.phone}
-                            disabled={!canEdit || state.saving}
-                            placeholder="671-555-0100"
-                            error={state.fieldErrors.phone?.[0]}
-                            helperText={employee.phone_confirmed_by_employee_at && !dirty ? 'Confirmed by employee' : undefined}
-                            onChange={(event) => updateDraftField(employee, 'phone', event.target.value)}
-                            onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                          />
-
-                          <Input
-                            label="Street address"
-                            value={draft.address_line1}
-                            disabled={!canEdit || state.saving}
-                            placeholder="Street address"
-                            error={state.fieldErrors.address_line1?.[0]}
-                            onChange={(event) => updateDraftField(employee, 'address_line1', event.target.value)}
-                            onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                          />
-
-                          <Input
-                            label="Apt / Unit (optional)"
-                            value={draft.address_line2}
-                            disabled={!canEdit || state.saving}
-                            placeholder="Apt, suite, or box"
-                            onChange={(event) => updateDraftField(employee, 'address_line2', event.target.value)}
-                            onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                          />
-
-                          <div className="grid grid-cols-[minmax(0,1fr)_72px_104px] gap-2">
-                            <Input
-                              label="City"
-                              value={draft.city}
-                              disabled={!canEdit || state.saving}
-                              placeholder="Hagatna"
-                              error={state.fieldErrors.city?.[0]}
-                              onChange={(event) => updateDraftField(employee, 'city', event.target.value)}
-                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                            />
-                            <Input
-                              label="State"
-                              value={draft.state}
-                              maxLength={2}
-                              disabled={!canEdit || state.saving}
-                              placeholder="GU"
-                              error={state.fieldErrors.state?.[0]}
-                              onChange={(event) => updateDraftField(employee, 'state', event.target.value.toUpperCase())}
-                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                            />
-                            <Input
-                              label="ZIP"
-                              value={draft.zip}
-                              disabled={!canEdit || state.saving}
-                              placeholder="96910"
-                              error={state.fieldErrors.zip?.[0]}
-                              onChange={(event) => updateDraftField(employee, 'zip', event.target.value)}
-                              onKeyDown={(event) => handleRowKeyDown(event, employee)}
-                            />
-                          </div>
-
-                          {state.error && !state.samePersonRequired && !state.fieldErrors.email?.length && !state.fieldErrors.phone?.length && (
-                            <Alert tone="error">{state.error}</Alert>
-                          )}
-                        </div>
-
-                        <MobileCardActions>
-                          <Button
-                            disabled={!canEdit || state.saving || (!dirty && !(state.samePersonRequired && state.samePersonChecked))}
-                            loading={state.saving}
-                            loadingLabel="Saving..."
-                            onClick={() => void saveRow(employee)}
-                            className="w-full sm:w-auto"
-                          >
-                            <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                            Save contact details
-                          </Button>
-                          {dirty && (
-                            <Button
-                              variant="outline"
-                              disabled={state.saving}
-                              onClick={() => resetRow(employee)}
-                              className="w-full sm:w-auto"
-                            >
-                              Reset changes
-                            </Button>
-                          )}
-                        </MobileCardActions>
-                      </MobileRecordCard>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </>
-        )}
+  return (
+    <div role="alert" className="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-3 text-xs text-warning-950">
+      <p className="flex items-start gap-1.5 font-semibold">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" aria-hidden="true" />
+        <span>Conflict: someone else updated this row before you saved.</span>
+      </p>
+      <p className="mt-1 text-warning-900">{conflict.message}</p>
+      {fieldsToShow.length > 0 && (
+        <ul className="mt-2 space-y-1 rounded-md border border-warning-200 bg-white/80 p-2 text-neutral-800">
+          {fieldsToShow.map((field) => (
+            <li key={field}>
+              <strong>{FIELD_LABELS[field]}:</strong> current saved value is{' '}
+              <span className="font-mono">{serverValues[field] || '(blank)'}</span>; your draft is{' '}
+              <span className="font-mono">{conflict.userChanges[field] || '(blank)'}</span>.
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        <Button size="sm" variant="primary" disabled={saving} loading={saving} loadingLabel="Saving..." onClick={onKeep}>
+          Keep my changes
+        </Button>
+        <Button size="sm" variant="outline" disabled={saving} onClick={onDiscard}>
+          Discard my changes
+        </Button>
       </div>
     </div>
   );
