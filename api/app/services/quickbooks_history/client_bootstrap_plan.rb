@@ -11,8 +11,13 @@ module QuickbooksHistory
     end
 
     def call
+      flagged_emails = EmployeeContactValidator.marked_placeholder_emails(organization_id: batch.company.organization_id)
       @profiles = batch.historical_workers.order(:id).map do |worker|
-        WorkerProfileParser.new(worker: worker, pay_frequency: batch.company.pay_frequency).call
+        WorkerProfileParser.new(
+          worker: worker,
+          pay_frequency: batch.company.pay_frequency,
+          flagged_emails: flagged_emails
+        ).call
       end
       @errors = base_errors + profile_errors
       @warnings = aggregate_warnings
@@ -98,6 +103,8 @@ module QuickbooksHistory
           ].any? { |key| attrs.fetch(key).positive? }
         end,
         "employees_needing_review_count" => profiles.count { |profile| profile.review_items.any? },
+        "blanked_contact_email_count" => profiles.count { |profile| profile.blanked_contact_fields.include?("email") },
+        "blanked_contact_phone_count" => profiles.count { |profile| profile.blanked_contact_fields.include?("phone") },
         "error_count" => errors.size
       }
     end

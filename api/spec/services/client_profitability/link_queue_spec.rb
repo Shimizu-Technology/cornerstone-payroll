@@ -11,10 +11,13 @@ RSpec.describe ClientProfitability::LinkQueue do
     end
   end
 
-  let!(:unique_staff) { create(:employee, company: practice_company, first_name: "Benjo", last_name: "Cruz", email: "benjo@example.com") }
-  let!(:shared_staff_a) { create(:employee, company: practice_company, first_name: "Ana", last_name: "Reyes", email: "shared-office@example.com") }
-  let!(:shared_staff_b) { create(:employee, company: practice_company, first_name: "Carlos", last_name: "Santos", email: "shared-office@example.com") }
-  let!(:placeholder_staff) { create(:employee, company: practice_company, first_name: "Maria", last_name: "Flores", email: "noemail@example.com") }
+  let!(:unique_staff) { create(:employee, company: practice_company, first_name: "Benjo", last_name: "Cruz", email: "benjo@example.com", status: "active") }
+  let!(:inactive_only_staff) { create(:employee, company: practice_company, first_name: "Former", last_name: "Staff", email: "former.staff@example.com", status: "inactive") }
+  let!(:active_rehire) { create(:employee, company: practice_company, first_name: "Mark", last_name: "Active", email: "mark.rehire@example.com", status: "active") }
+  let!(:inactive_prior) { create(:employee, company: practice_company, first_name: "Mark", last_name: "Former", email: "mark.rehire@example.com", status: "terminated") }
+  let!(:shared_staff_a) { create(:employee, company: practice_company, first_name: "Ana", last_name: "Reyes", email: "shared-office@example.com", status: "active") }
+  let!(:shared_staff_b) { create(:employee, company: practice_company, first_name: "Carlos", last_name: "Santos", email: "shared-office@example.com", status: "active") }
+  let!(:placeholder_staff) { create(:employee, company: practice_company, first_name: "Maria", last_name: "Flores", email: "noemail@example.com", status: "active") }
 
   before do
     import = WorkHourImport.create!(
@@ -23,39 +26,27 @@ RSpec.describe ClientProfitability::LinkQueue do
       range_start: Date.new(2026, 11, 1),
       range_end: Date.new(2026, 11, 30)
     )
-    WorkHourRow.create!(
-      organization: organization,
-      work_hour_import: import,
-      tax_user_id: 101,
-      email: "benjo@example.com",
-      client_name: "Client A",
-      approval_state: "approved",
-      work_date: Date.new(2026, 11, 10),
-      hours: 2.0
-    )
-    WorkHourRow.create!(
-      organization: organization,
-      work_hour_import: import,
-      tax_user_id: 102,
-      email: "shared-office@example.com",
-      client_name: "Client A",
-      approval_state: "approved",
-      work_date: Date.new(2026, 11, 10),
-      hours: 3.0
-    )
-    WorkHourRow.create!(
-      organization: organization,
-      work_hour_import: import,
-      tax_user_id: 103,
-      email: "noemail@example.com",
-      client_name: "Client A",
-      approval_state: "approved",
-      work_date: Date.new(2026, 11, 10),
-      hours: 1.5
-    )
+    [
+      [ 101, "benjo@example.com", 2.0 ],
+      [ 102, "shared-office@example.com", 3.0 ],
+      [ 103, "noemail@example.com", 1.5 ],
+      [ 104, "former.staff@example.com", 2.5 ],
+      [ 105, "mark.rehire@example.com", 4.0 ]
+    ].each do |tax_user_id, email, hours|
+      WorkHourRow.create!(
+        organization: organization,
+        work_hour_import: import,
+        tax_user_id: tax_user_id,
+        email: email,
+        client_name: "Client A",
+        approval_state: "approved",
+        work_date: Date.new(2026, 11, 10),
+        hours: hours
+      )
+    end
   end
 
-  it "suggests an exact match for a unique real email and refuses exact matches for shared or placeholder emails" do
+  it "uses active employees only for exact email suggestions while keeping historical records in manual selection options" do
     result = described_class.new(organization: organization, settings: settings).call
     staff_by_id = result[:staff].index_by { |row| row[:tax_user_id] }
 
@@ -67,5 +58,20 @@ RSpec.describe ClientProfitability::LinkQueue do
     )
     expect(staff_by_id[102][:suggestion]).to be_nil
     expect(staff_by_id[103][:suggestion]).to be_nil
+
+    # Inactive-only email never gets an exact suggestion (falls back to similar or nil).
+    expect(staff_by_id[104][:suggestion]&.dig(:match)).not_to eq("exact")
+
+    # Active + terminated sharing an email matches the single active record by exact email.
+    expect(staff_by_id[105][:suggestion]).to eq(
+      disposition: "employee",
+      employee_id: active_rehire.id,
+      label: "Mark Active",
+      match: "exact"
+    )
+
+    # Historical/inactive records remain available in the manual selection list.
+    option_ids = result[:employees].map { |option| option[:id] }
+    expect(option_ids).to include(inactive_only_staff.id, inactive_prior.id)
   end
 end

@@ -21,12 +21,13 @@ module MigrationPromotion
       "correction_reason" => nil
     }.freeze
 
-    def initialize(rehearsal:, actor:, acknowledgement:, payment_dispositions:)
+    def initialize(rehearsal:, actor:, acknowledgement:, payment_dispositions:, replace_contact_employee_ids: [])
       @rehearsal = rehearsal
       @target_company = rehearsal.migration_source_company
       @actor = actor
       @acknowledgement = acknowledgement
       @payment_dispositions = payment_dispositions.to_h.stringify_keys
+      @replace_contact_employee_ids = Array(replace_contact_employee_ids)
     end
 
     def call
@@ -49,7 +50,8 @@ module MigrationPromotion
           rehearsal: rehearsal,
           target_company: target_company,
           actor: actor,
-          mapping: mapping
+          mapping: mapping,
+          replace_contact_employee_ids: replace_contact_employee_ids
         ).call
         promoted_periods = preview.source_periods.map do |source|
           copy_period!(source, maps, payment_disposition: payment_disposition_for(source))
@@ -79,7 +81,7 @@ module MigrationPromotion
 
     private
 
-    attr_reader :rehearsal, :target_company, :actor, :acknowledgement, :payment_dispositions
+    attr_reader :rehearsal, :target_company, :actor, :acknowledgement, :payment_dispositions, :replace_contact_employee_ids
 
     def authorize!
       allowed = actor&.organization_admin? && actor.can_access_company?(rehearsal.id) &&
