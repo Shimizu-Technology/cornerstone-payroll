@@ -24,11 +24,36 @@ RSpec.describe "Personal portal notification settings", :portal_notifications, t
     expect(data).not_to have_key("administration")
   end
 
-  it "shows client categories only to client users" do
+  it "hides profile request categories while the feature is off" do
     act_as(client)
     get path
     expect(response.parsed_body.dig("data", "categories").map { |category| category["key"] }).to eq(
       %w[portal_replies employee_change_decisions payroll_updates])
+    patch path, params: { preferences: { address_approvals: "off" } }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(PortalNotifications::Preferences.mode_for(client, "address_approvals")).to eq("immediate")
+  end
+
+  it "shows and saves profile request preferences when an assigned company enables them" do
+    enabled_company = create(:company, organization: company.organization)
+    ClientOperatingProfile.create!(company: enabled_company, effective_on: Date.new(2026, 1, 1),
+      version: 1, offering: "payroll_portals", hours_source: "manual", client_portal_enabled: true, employee_portal_enabled: true, options: { "employee_portal" => { "features" => { "profile_requests" => true } } })
+    act_as(client)
+
+    get path
+    expect(response.parsed_body.dig("data", "categories").pluck("key")).not_to include("address_approvals", "contact_changes")
+
+    create(:company_assignment, user: client, company: enabled_company)
+    client.reload
+    get path
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "categories").pluck("key")).to include("address_approvals", "contact_changes")
+
+    patch path, params: { preferences: { address_approvals: "off", contact_changes: "immediate" } }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "categories").to_h { |row| row.values_at("key", "delivery_mode") })
+      .to include("address_approvals" => "off", "contact_changes" => "immediate")
+    expect(PortalNotifications::Preferences.mode_for(client, "address_approvals")).to eq("off")
   end
 
   it "saves a preference with an audit record and rejects other audiences' categories or modes" do

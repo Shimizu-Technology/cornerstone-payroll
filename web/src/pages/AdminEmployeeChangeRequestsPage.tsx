@@ -4,6 +4,7 @@ import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedbac
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany } from '@/lib/company-write-access';
+import { ChangeComparison } from '@/components/employees/ChangeComparison';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,9 +21,10 @@ export function AdminEmployeeChangeRequestsPage() {
   const pendingDeepSelection = useRef(deepRequestId);
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
-  const canReview = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
+  const canWrite = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [requests, setRequests] = useState<EmployeeChangeRequest[]>([]);
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
+  const canReview = canWrite && selected?.can_review !== false;
   const [status, setStatus] = useState(() => deepRequestId ? '' : 'pending');
   const [reviewNotes, setReviewNotes] = useState('');
   const [effectiveOn, setEffectiveOn] = useState('');
@@ -163,7 +165,7 @@ export function AdminEmployeeChangeRequestsPage() {
                         <span className="min-w-0 break-words font-semibold text-neutral-950">{request.employee_name}</span>
                         <StatusBadge status={request.status} />
                       </span>
-                      <span className="mt-3 block text-sm text-neutral-600">{request.request_kind === 'create' ? 'New worker' : 'Update'} · {request.requested_by_name || 'Unknown requester'}</span>
+                      <span className="mt-3 block text-sm text-neutral-600">{requestLabel(request)} · {request.requested_by_name || 'Unknown requester'}</span>
                       <span className="mt-1 block text-xs text-neutral-500">Submitted {new Date(request.created_at).toLocaleString()}</span>
                       <span className="mt-3 block text-sm font-semibold text-primary-700">Review request</span>
                     </button>
@@ -185,7 +187,7 @@ export function AdminEmployeeChangeRequestsPage() {
                       <TableRow key={request.id} className="cursor-pointer hover:bg-primary-50/60" tabIndex={0} onClick={() => void selectRequest(request.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectRequest(request.id); } }}>
                         <TableCell className="font-medium text-gray-900">{request.employee_name}</TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
-                        <TableCell>{request.request_kind === 'create' ? 'New worker' : 'Update'}</TableCell>
+                        <TableCell>{requestLabel(request)}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
                         <TableCell>{new Date(request.created_at).toLocaleString()}</TableCell>
                       </TableRow>
@@ -212,10 +214,11 @@ export function AdminEmployeeChangeRequestsPage() {
                   <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
                     {selected.request_kind === 'create'
                       ? 'Approving this request activates the new worker after applying the reviewed payroll details.'
-                      : 'Approving this request applies the reviewed payroll-sensitive changes.'}
+                      : selected.profile_address
+                        ? 'Approving this request updates the employee’s address and adds it to Changes to confirm.'
+                        : 'Approving this request applies the reviewed payroll-sensitive changes.'}
                   </div>
-                  <JsonBlock title="Original Values" value={selected.original_values} />
-                  <JsonBlock title="Proposed Changes" value={selected.proposed_changes} />
+                  <ChangeComparison before={selected.original_values} after={selected.proposed_changes} requested={selected.status === 'pending'} />
                   <div>
                     <p className="mb-1 text-sm font-medium text-gray-900">Review Notes</p>
                     <Textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} rows={4} />
@@ -254,13 +257,7 @@ function StatusBadge({ status }: { status: EmployeeChangeRequest['status'] }) {
   return <Badge variant={variant}>{status.charAt(0).toUpperCase() + status.slice(1)}</Badge>;
 }
 
-function JsonBlock({ title, value }: { title: string; value?: Record<string, unknown> }) {
-  return (
-    <div>
-      <p className="text-sm font-medium text-gray-900">{title}</p>
-      <pre className="mt-2 overflow-auto rounded-xl bg-gray-950/95 p-3 text-xs text-gray-100">
-        {JSON.stringify(value || {}, null, 2)}
-      </pre>
-    </div>
-  );
+function requestLabel(request: EmployeeChangeRequest) {
+  if (request.profile_address) return 'Address change';
+  return request.request_kind === 'create' ? 'New worker' : 'Update';
 }

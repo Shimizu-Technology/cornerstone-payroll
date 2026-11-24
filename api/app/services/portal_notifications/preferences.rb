@@ -11,7 +11,13 @@ module PortalNotifications
 
       def categories_for(user)
         audience = audience_for(user)
-        CATEGORIES.select { |_key, category| category[:audience] == audience }
+        categories = CATEGORIES.select { |_key, category| category[:audience] == audience }
+        return categories unless audience == "client"
+
+        enabled = Company.where(id: user.accessible_company_ids).any? do |company|
+          CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
+        end
+        enabled ? categories : categories.except("address_approvals", "contact_changes")
       end
 
       def mode_for(user, category)
