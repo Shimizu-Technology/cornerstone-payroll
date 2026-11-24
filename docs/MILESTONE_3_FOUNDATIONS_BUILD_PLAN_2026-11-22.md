@@ -802,7 +802,7 @@ Per [Clerk's instance migration docs](https://clerk.com/docs/guides/development/
 Plan a **60–90 minute** maintenance window (allowing for Netlify build/publish, Render web + worker deploy, JWKS cache purge, full verification matrix, and rollback headroom):
 
 1. Put payroll operations on pause (announced 48 hours ahead; see §4.6).
-2. Run `APPLY=true CONFIRM_M3_1_DEPLOYED=true TARGET_CLERK_SECRET_KEY=<production secret key> OPERATOR=<operator id> bundle exec rails clerk:cutover:apply MANIFEST=/secure/path/prod_manifest.json` (updates `users.clerk_id`, clears `last_session_id_digest` and stale `clerk_invitation_id`, logs `users#clerk_production_relinked` audit events inside one atomic transaction).
+2. Run `APPLY=true CONFIRM_M3_1_DEPLOYED=true TARGET_CLERK_SECRET_KEY="$(cat <key file>)" OPERATOR=<operator id> bundle exec rails clerk:cutover:apply MANIFEST=/secure/path/prod_manifest.json` (updates `users.clerk_id`, clears `last_session_id_digest` and stale `clerk_invitation_id`, logs `users#clerk_production_relinked` audit events inside one atomic transaction).
    - **`CONFIRM_M3_1_DEPLOYED=true` is required here (Nov 24 finding).** At this step Render still uses the dev issuer (the env switch is step 3), and `apply` refuses to run while the configured issuer is a Clerk dev issuer (`*.clerk.accounts.dev`) or equals `SOURCE_CLERK_ISSUER`. The guard exists because, before `M3-1`, a sign-in could be matched to a user by email and overwrite a freshly re-linked `clerk_id`. Once `M3-1` is deployed (§4.1) that path is gone, so the operator confirms it with the flag. Check that `M3-1` is live on the same revision before setting it; without the flag the task aborts and writes nothing.
 3. Update **Render web and worker** env vars together:
    - `CLERK_PUBLISHABLE_KEY=pk_live_...`
@@ -874,7 +874,7 @@ Clerk secret keys are shown once, in a dialog. During the cutover an accessibili
 - **`production:readiness`:** 31 of 34. Production Clerk keys and authorized parties pass. The remaining failures are the two MFA-evidence checks (deferred to Milestone 4, as planned) and the 2027 tax tables (unrelated).
 - **Compromised passwords:** "Reject compromised passwords" stays on (§4.2); a user with a breached password gets a one-time email-code reset.
 
-**Remaining follow-up (needs Leon):** delete the unused September 14 `default` secret key in Clerk production → API keys. Deleting a production key needs the account owner's Clerk password (§4.8), so an agent cannot do it. The key is unused.
+**Remaining follow-up (needs the account owner):** delete the unused September 14 `default` secret key in Clerk production → API keys. Deleting a production key needs the account owner's Clerk password (§4.8), so an agent cannot do it. The key is unused.
 
 ---
 
