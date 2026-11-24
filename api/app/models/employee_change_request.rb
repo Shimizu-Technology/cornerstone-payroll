@@ -154,6 +154,7 @@ class EmployeeChangeRequest < ApplicationRecord
       safe_attrs = safe_attrs.except(*Employee::CONTRACTOR_ONLY_ATTRIBUTES)
     end
     validate_department_scope!(safe_attrs)
+    validate_and_normalize_contact_attrs!(safe_attrs, actor: actor)
 
     election_received = safe_attrs.delete(:w4_election_received)
     w4_attrs = safe_attrs.extract!(*EmployeeW4Election::PROFILE_ATTRIBUTES)
@@ -270,6 +271,29 @@ class EmployeeChangeRequest < ApplicationRecord
 
     errors.add(:proposed_changes, "contains unsupported fields: #{unsupported_keys.join(', ')}")
     raise ActiveRecord::RecordInvalid, self
+  end
+
+  def validate_and_normalize_contact_attrs!(safe_attrs, actor:)
+    return unless safe_attrs.key?(:email) || safe_attrs.key?(:phone)
+
+    result = EmployeeContactValidator.call(
+      employee: employee,
+      company: company,
+      email: safe_attrs.key?(:email) ? safe_attrs[:email] : :unchanged,
+      phone: safe_attrs.key?(:phone) ? safe_attrs[:phone] : :unchanged,
+      actor: actor,
+      source: "client"
+    )
+    unless result.valid?
+      result.errors.each do |field, messages|
+        messages.each { |message| errors.add(field, message) }
+      end
+      raise ActiveRecord::RecordInvalid, self
+    end
+
+    safe_attrs[:email] = result.normalized_email if safe_attrs.key?(:email)
+    safe_attrs[:phone] = result.normalized_phone if safe_attrs.key?(:phone)
+    safe_attrs[:contact_source] = "client"
   end
 
   def validate_department_scope!(attrs)

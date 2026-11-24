@@ -130,8 +130,8 @@ module ClientProfitability
       return nil if email.blank?
 
       normalized_email = email.to_s.strip.downcase
-      unless EmployeeContactValidator.placeholder_email?(normalized_email)
-        exact_matches = practice_employees.select { |employee| employee.email.to_s.strip.casecmp?(normalized_email) }
+      unless EmployeeContactValidator.placeholder_email?(normalized_email, organization_id: @organization.id)
+        exact_matches = practice_employees.select { |employee| employee.active? && employee.email.to_s.strip.casecmp?(normalized_email) }
         if exact_matches.one?
           exact = exact_matches.first
           return { disposition: "employee", employee_id: exact.id, label: exact.full_name, match: "exact" }

@@ -68,7 +68,8 @@ module TestWorkspace
           portal_pending_approval: false,
           test_workspace_source_employee: employee_lineage ? source : nil,
           created_by: actor,
-          skip_initial_compensation_history: true
+          skip_initial_compensation_history: true,
+          **(target_company.backup_snapshot? ? {} : { email_verified_at: nil, phone_confirmed_by_employee_at: nil })
         )
       end
 

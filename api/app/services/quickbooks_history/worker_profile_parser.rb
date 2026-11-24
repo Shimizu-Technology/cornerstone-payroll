@@ -11,7 +11,8 @@ module QuickbooksHistory
       :payroll_fields,
       :review_items,
       :warnings,
-      :errors
+      :errors,
+      :blanked_contact_fields
     ) do
       def active?
         employee_attributes.fetch(:status) == "active"
@@ -25,7 +26,8 @@ module QuickbooksHistory
           payroll_fields: payroll_fields,
           review_items: review_items,
           warnings: warnings,
-          errors: errors
+          errors: errors,
+          blanked_contact_fields: blanked_contact_fields
         }
       end
     end
@@ -36,9 +38,10 @@ module QuickbooksHistory
       DC AS GU MP PR VI
     ].freeze
 
-    def initialize(worker:, pay_frequency:)
+    def initialize(worker:, pay_frequency:, flagged_emails: nil)
       @worker = worker
       @pay_frequency = pay_frequency
+      @flagged_emails = flagged_emails
     end
 
     def call
@@ -59,6 +62,12 @@ module QuickbooksHistory
       tax = parse_tax(snapshot_section(details, "Tax info"))
       pay = parse_pay(snapshot_section(details, "Pay info"), active: worker.source_status == "active")
       address = parse_address(directory.fetch("Home address", ""))
+      contact = parse_contact_details(
+        directory: directory,
+        first_name: first_name,
+        last_name: last_name,
+        address: address
+      )
 
       review(
         code: "verify_hire_date",
@@ -71,7 +80,11 @@ module QuickbooksHistory
         first_name: first_name,
         middle_name: middle_name,
         last_name: last_name,
-        email: directory.fetch("Email", "").presence,
+        email: contact.fetch(:email),
+        phone: contact.fetch(:phone),
+        contact_source: contact.fetch(:contact_source),
+        email_verified_at: nil,
+        phone_confirmed_by_employee_at: nil,
         date_of_birth: parse_optional_date(directory.fetch("Birth date", ""), "birth date"),
         hire_date: nil,
         employment_type: pay.fetch(:employment_type),
@@ -110,13 +123,68 @@ module QuickbooksHistory
         payroll_fields: pay.fetch(:payroll_fields),
         review_items: review_items,
         warnings: warnings,
-        errors: errors
+        errors: errors,
+        blanked_contact_fields: contact.fetch(:blanked_fields)
       )
     end
 
     private
 
-    attr_reader :worker, :pay_frequency, :review_items, :warnings, :errors
+    attr_reader :worker, :pay_frequency, :review_items, :warnings, :errors, :flagged_emails
+
+    def parse_contact_details(directory:, first_name:, last_name:, address:)
+      raw_email = directory["Email"].to_s.strip.presence
+      raw_phone = (directory["Phone"].presence || directory["Mobile"].presence || directory["Phone number"].presence).to_s.strip.presence
+      blanked_fields = []
+
+      candidate = Employee.new(
+        company: worker.company,
+        first_name: first_name,
+        last_name: last_name
+      )
+      validation = EmployeeContactValidator.call(
+        employee: candidate,
+        company: worker.company,
+        email: raw_email.present? ? raw_email : :unchanged,
+        phone: raw_phone.present? ? raw_phone : :unchanged,
+        actor: nil,
+        source: "import",
+        flagged_emails: flagged_emails
+      )
+
+      email = if raw_email.blank?
+        nil
+      elsif validation.errors[:email].present?
+        blanked_fields << "email"
+        warnings << "QuickBooks placeholder, invalid, or login employee email was blanked during preparation"
+        review(
+          code: "quickbooks_contact_email_blanked",
+          message: "QuickBooks contained a placeholder, invalid, or payroll-login email that was blanked during preparation. Enter the employee's own email.",
+          fields: %w[email]
+        )
+        nil
+      else
+        validation.normalized_email
+      end
+
+      phone = if raw_phone.blank?
+        nil
+      elsif validation.errors[:phone].present?
+        blanked_fields << "phone"
+        warnings << "QuickBooks invalid employee phone number was blanked during preparation"
+        nil
+      else
+        validation.normalized_phone
+      end
+
+      has_contact = [ email, phone, address[:address_line1], address[:city], address[:state], address[:zip] ].any?(&:present?)
+      {
+        email: email,
+        phone: phone,
+        contact_source: has_contact ? "import" : nil,
+        blanked_fields: blanked_fields
+      }
+    end
 
     def snapshot_section(details, key)
       value = details.fetch(key, "")
