@@ -33,6 +33,7 @@ module EmployeeContactHygiene
       changed = false
 
       EmployeePlaceholderEmail.transaction(requires_new: true) do
+        EmployeePlaceholderEmail.lock_organization!(@organization.id)
         existing = EmployeePlaceholderEmail.lock.find_by(organization_id: @organization.id, email: normalized_email)
         if existing
           record = existing
@@ -81,6 +82,7 @@ module EmployeeContactHygiene
 
       changed = false
       EmployeePlaceholderEmail.transaction do
+        EmployeePlaceholderEmail.lock_organization!(@organization.id)
         existing = EmployeePlaceholderEmail.lock.find_by(organization_id: @organization.id, email: normalized_email)
         if existing
           record_id = existing.id
