@@ -232,6 +232,43 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       await expect(page.getByText('Pelican Row Bakery')).toHaveCount(0);
     });
 
+    test('a failed sign-out says so and can be retried, and a 401 never strands the person on loading', async ({ page }) => {
+      await signIn(page);
+      await mockApi(page, { links: (route) => route.fulfill({ status: 401 }) });
+      // The preview sign-out fails twice: once after the 401, once from the button.
+      await page.goto(`/?${tenant}&previewSignOutFails=2`);
+
+      await expect(page.getByRole('heading', { level: 1, name: 'Something went wrong' })).toBeVisible();
+      const notice = page.getByRole('alert').filter({ hasText: "Couldn't sign you out. Try again." });
+      await expect(notice).toBeVisible();
+      await snap(page, `${tag}-15-sign-out-failed`);
+      await page.getByRole('main').getByRole('button', { name: 'Sign out' }).click();
+      await expect(notice).toBeVisible();
+      await notice.getByRole('button', { name: 'Try again' }).click();
+      await expect(page.getByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeVisible();
+      expect(new URL(page.url()).pathname).toBe('/');
+      await expect(notice).toHaveCount(0);
+    });
+
+    test('opening the app gives up after 15 seconds with Try again and Sign out', async ({ page }) => {
+      await page.clock.install();
+      await signIn(page);
+      let answer = false;
+      await mockApi(page, { links: (route) => (answer ? activeLinks(route) : new Promise<void>(() => undefined)) });
+      await page.goto(`/?${tenant}`);
+      await expect(page.getByText('Loading your pay…')).toBeAttached();
+
+      // The installed clock also runs in real time, so the exact 15s boundary is
+      // checked in SessionProvider.test.tsx; here, jump past it.
+      await page.clock.fastForward(16_000);
+      await expect(page.getByRole('heading', { level: 1, name: 'Something went wrong' })).toBeVisible();
+      await expect(page.getByRole('main').getByRole('button', { name: 'Sign out' })).toBeVisible();
+
+      answer = true;
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await expect(page.getByRole('heading', { level: 1, name: 'Welcome' })).toBeVisible();
+    });
+
     test('signing out from My info lands on Welcome, not sign-in', async ({ page }) => {
       await signIn(page);
       await mockApi(page);

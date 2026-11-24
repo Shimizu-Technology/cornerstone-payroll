@@ -142,7 +142,7 @@ export function MyInfoTab(): ReactElement {
           </Placeholder>
         </Card>
       </div>
-      <EmpButton block variant="secondary" className="emp-narrow-button" onClick={signOut}>
+      <EmpButton block variant="secondary" className="emp-narrow-button" onClick={() => { void signOut(); }}>
         <LogOut aria-hidden="true" className="size-6" />
         Sign out
       </EmpButton>

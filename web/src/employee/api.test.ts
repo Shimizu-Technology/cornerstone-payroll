@@ -121,6 +121,18 @@ describe('employee API client', () => {
 });
 
 describe('parseLinks', () => {
+  it('accepts numeric ids only while they are safe integers', () => {
+    // 9007199254740993 parses as 9007199254740992, a different link.
+    const rounded = JSON.parse('[{"id": 9007199254740993}, {"id": 9007199254740991}]');
+    expect(parseLinks(rounded).map((link) => link.id)).toEqual(['9007199254740991']);
+  });
+
+  it('keeps large ids exactly when they arrive as decimal strings', () => {
+    expect(parseLinks([{ id: '9007199254740993' }]).map((link) => link.id)).toEqual(['9007199254740993']);
+    expect(parseLinks([{ id: '9223372036854775807' }]).map((link) => link.id)).toEqual(['9223372036854775807']);
+    expect(parseLinks([{ id: 1.5 }, { id: -3 }, { id: 0 }, { id: '007' }])).toEqual([]);
+  });
+
   it('accepts a bare array and drops entries without a usable id', () => {
     expect(parseLinks([{ id: '12', company_name: 'A' }, { id: 'abc' }, { company_name: 'no id' }, null])).toEqual([
       { id: '12', companyName: 'A', subdomainSlug: null, status: 'active', formerAccessUntil: null },

@@ -12,6 +12,7 @@ import { useSignOut } from './employee/hooks';
 import { isSigningOut, redirectTarget } from './employee/routing';
 import { EmployeeSessionProvider } from './employee/SessionProvider';
 import { EmployeeShell } from './employee/Shell';
+import { SignOutProvider } from './employee/SignOut';
 import {
   AccessEndedScreen, BootScreen, ErrorState, LoadingState, OfflineState, RateLimitedState, UnavailableScreen,
 } from './employee/StateScreens';
@@ -46,7 +47,8 @@ function useTenantBrand(): EmployeeBrand | null {
 
 function SignedInApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
   const { state, retry } = useEmployeeSession();
-  const signOut = useSignOut();
+  const signOutAsync = useSignOut();
+  const signOut = (): void => { void signOutAsync(); };
 
   if (state.status === 'problem' && state.problem === 'unavailable') return <UnavailableScreen onRetry={retry} onSignOut={signOut} />;
   if (state.status === 'problem' && state.problem === 'ended') return <AccessEndedScreen onSignOut={signOut} />;
@@ -118,9 +120,11 @@ export default function EmployeeApp({ viewAs }: { viewAs?: ViewOnlyGrant | null 
       <div className="employee-app" style={style}>
         <BrowserRouter>
           <AuthProvider brand={brand}>
-            <HideAmountsProvider>
-              <AppRoutes viewAs={grant} />
-            </HideAmountsProvider>
+            <SignOutProvider>
+              <HideAmountsProvider>
+                <AppRoutes viewAs={grant} />
+              </HideAmountsProvider>
+            </SignOutProvider>
           </AuthProvider>
         </BrowserRouter>
       </div>

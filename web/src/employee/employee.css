@@ -635,3 +635,33 @@ body {
   from { background-position: 100% 0; }
   to { background-position: -50% 0; }
 }
+
+/* "Couldn't sign you out": above the phone tabs, centered on wider screens. */
+.emp-notice {
+  position: fixed;
+  z-index: 40;
+  left: 16px;
+  right: 16px;
+  bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 16px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: 8px 8px 8px 16px;
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  color: #0f172a;
+}
+
+.employee-app .emp-notice-button {
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 1rem;
+}
+
+@media (min-width: 600px) {
+  .emp-notice { bottom: 24px; }
+}

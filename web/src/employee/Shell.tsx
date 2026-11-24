@@ -62,7 +62,7 @@ export function EmployeeShell({ viewAs, showNav = true, children }: EmployeeShel
             </span>
           </span>
           {showNav && <MainNav />}
-          <button type="button" className="emp-btn emp-btn-quiet emp-header-signout" onClick={signOut}>
+          <button type="button" className="emp-btn emp-btn-quiet emp-header-signout" onClick={() => { void signOut(); }}>
             Sign out
           </button>
         </div>

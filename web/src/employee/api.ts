@@ -72,13 +72,23 @@ function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null;
 }
 
+/**
+ * A JSON number above 2^53 has already been rounded by the time it's parsed,
+ * so it may name a different link. Numbers count only while they're safe
+ * integers; larger ids must arrive as decimal strings.
+ */
+function linkIdFrom(value: unknown): string {
+  if (typeof value === 'number') return Number.isSafeInteger(value) ? String(value) : '';
+  return typeof value === 'string' ? value : '';
+}
+
 /** Accepts `{ links: [...] }` or a bare array, and drops entries without a usable id. */
 export function parseLinks(data: unknown): EmployeeLink[] {
   const list = Array.isArray(data) ? data : record(data)?.links;
   if (!Array.isArray(list)) return [];
   return list.flatMap((item) => {
     const entry = record(item);
-    const id = entry && (typeof entry.id === 'number' || typeof entry.id === 'string') ? String(entry.id) : '';
+    const id = entry ? linkIdFrom(entry.id) : '';
     if (!entry || !isLinkId(id)) return [];
     return [{
       id,
