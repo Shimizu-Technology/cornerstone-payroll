@@ -369,14 +369,48 @@ RSpec.describe "Company RLS", :rls do
 
           TenantScope.with_company(company.id) do
             expect(EmployeeAccountLink.where(company_id: other_company.id).exists?).to be(false)
-            # Inside a company scope it reads within that scope and never
-            # leaves it, so the outer lease keeps working.
+            # Inside a company scope the other company's link is hidden, so
+            # the decision fails closed, and the outer lease keeps working.
             expect(EmployeeAccountLink.contact_email_link_decision(
               user_id: login_user.id, company_id: company.id, allowed_employee_ids: [ emp_a.id ]
-            )).to eq(:allowed)
+            )).to eq(:unknown)
             expect(settings).to eq([ company.id.to_s, "company" ])
             expect(connection.tenant_settings_active?).to be(true)
             expect(Employee.find_by(id: emp_b.id)).to be_nil
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
+    it "rejects a login linked only at another company when RLS hides that link" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          company = create(:company)
+          other_company = create(:company, organization: company.organization)
+          employee, login_user = TenantScope.as_system(reason: "Create other-company link RLS fixtures") do
+            target = create(:employee, company: company, first_name: "Emma", last_name: "Pleadwell", email: nil)
+            elsewhere = create(:employee, company: other_company)
+            user = create(:user, company: company, organization: company.organization, role: "client", name: "Emma Pleadwell")
+            EmployeeAccountLink.create!(company: other_company, employee: elsewhere, user: user, status: "active")
+            setup_step_three(connection, tables: %w[employee_account_links employees], read_tables: %w[users])
+            [ target, user ]
+          end
+
+          TenantScope.with_company(company.id) do
+            expect(EmployeeAccountLink.where(user_id: login_user.id).exists?).to be(false)
+            expect(EmployeeAccountLink.contact_email_link_decision(
+              user_id: login_user.id, company_id: company.id, allowed_employee_ids: [ employee.id ]
+            )).to eq(:unknown)
+
+            # Even the login's own "this is me" confirmation is refused.
+            result = EmployeeContactValidator.call(
+              employee: employee, company: company, email: login_user.email,
+              confirm_same_person_email: true, actor: login_user, flagged_emails: Set.new
+            )
+            expect(result).not_to be_valid
+            expect(result).to have_attributes(login_email_rejected: true, login_email_rejection_reason: "link_check_unavailable")
+            expect(settings).to eq([ company.id.to_s, "company" ])
           end
           raise ActiveRecord::Rollback
         end
@@ -423,9 +457,10 @@ RSpec.describe "Company RLS", :rls do
       }
     end
 
-    def setup_step_three(connection, tables: %w[departments], bypass: false, switch_privileges: "SELECT")
+    def setup_step_three(connection, tables: %w[departments], bypass: false, switch_privileges: "SELECT", read_tables: [])
       connection.execute("CREATE ROLE payroll_app NOSUPERUSER #{bypass ? 'BYPASSRLS' : 'NOBYPASSRLS'}")
       connection.execute("GRANT USAGE ON SCHEMA public, rls_admin TO payroll_app")
+      read_tables.each { |table| connection.execute("GRANT SELECT ON #{connection.quote_table_name(table)} TO payroll_app") }
       tables.each do |table|
         quoted = connection.quote_table_name(table)
         connection.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON #{quoted} TO payroll_app")

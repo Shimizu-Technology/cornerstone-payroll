@@ -180,6 +180,8 @@ module TimeTracking
       @employees = @company.employees.preload(:employee_wage_rates, :employee_wage_rate_versions, :employee_compensation_changes).order(:id).to_a
       @saved_mappings = @source.time_tracking_employee_mappings.order(:id).to_a
       @saved_mapping_fingerprint = checksum(@saved_mappings.map(&:attributes))
+      # A placeholder marked after capture must not slip past the approval locks.
+      @marked_placeholders = nil
     end
 
     def validate_context!
@@ -362,10 +364,13 @@ module TimeTracking
       email = EmployeeContactValidator.normalize_email(raw)
       return false if email.blank?
 
-      @marked_placeholders ||= EmployeeContactValidator.marked_placeholder_emails(organization_id: @company.organization_id)
-      return true if EmployeeContactValidator.unmatchable_placeholder_email?(email, marked_placeholders: @marked_placeholders)
+      return true if EmployeeContactValidator.unmatchable_placeholder_email?(email, marked_placeholders: marked_placeholders)
 
       @employees.count { |employee| employee.active? && EmployeeContactValidator.normalize_email(employee.email) == email } > 1
+    end
+
+    def marked_placeholders
+      @marked_placeholders ||= EmployeeContactValidator.marked_placeholder_emails(organization_id: @company.organization_id)
     end
 
     def exact_component_bindings(blockers)
@@ -462,6 +467,7 @@ module TimeTracking
         "category_configuration" => checksum(TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).map(&:attributes)),
         "company" => checksum(@company.attributes),
         "mappings" => @saved_mapping_fingerprint,
+        "placeholder_emails" => checksum(marked_placeholders.to_a.sort),
         "employees" => checksum(@employees.map { |employee| employee_fingerprint(employee) }),
         "runs" => @company.pay_periods.where(id: run_ids).order(:id).to_h do |run|
           items = run.payroll_items.includes(:payroll_item_earnings).order(:id)
