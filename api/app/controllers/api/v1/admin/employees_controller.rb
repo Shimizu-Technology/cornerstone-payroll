@@ -300,6 +300,7 @@ module Api
               include_classification_history: true
             ),
             previous_employee: employee_link_summary(result.previous_employee),
+            contact_notices: result.contact_notices,
             message: "New worker record created; historical payroll remains on the prior record"
           }, status: :created
         rescue EmployeeClassificationTransitionService::Error => e

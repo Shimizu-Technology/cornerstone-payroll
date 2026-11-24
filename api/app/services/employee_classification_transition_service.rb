@@ -3,7 +3,9 @@
 class EmployeeClassificationTransitionService
   class Error < StandardError; end
 
-  Result = Struct.new(:previous_employee, :new_employee, keyword_init: true)
+  Result = Struct.new(:previous_employee, :new_employee, :contact_notices, keyword_init: true)
+  BLANKED_EMAIL_NOTICE = "The email on the old record wasn't copied, because it can't be used for this worker. " \
+    "Enter the worker's own email on the new record."
 
   def initialize(employee:, attributes:, actor:)
     @employee = employee
@@ -59,7 +61,7 @@ class EmployeeClassificationTransitionService
         metadata: audit_metadata
       )
 
-      Result.new(previous_employee: employee.reload, new_employee: new_employee.reload)
+      Result.new(previous_employee: employee.reload, new_employee: new_employee.reload, contact_notices: @contact_notices || [])
     end
   end
 
@@ -157,27 +159,48 @@ class EmployeeClassificationTransitionService
     attrs
   end
 
-  # The prior record's email was already accepted for this person, so copying
-  # it unchanged skips the login-identity check (as promotion skips unchanged
-  # emails). Format and marked-placeholder checks still apply, and an edited
-  # email gets every check.
+  # A copied email skips the login-identity check only with evidence that this
+  # employee and address were accepted before: a verified email, or a recorded
+  # same-person confirmation for this employee and address. Otherwise it gets
+  # every check, and a rejected copy is left blank with a notice for the
+  # operator instead of blocking the change. An edited email gets every check.
   def validate_contact_details!(new_employee)
     email_unchanged = EmployeeContactValidator.normalize_email(new_employee.email) == EmployeeContactValidator.normalize_email(employee.email)
-    result = EmployeeContactValidator.call(
+    result = run_contact_validator(new_employee, check_login_identity: !(email_unchanged && previously_accepted_email?))
+    if !result.valid? && email_unchanged && result.errors[:email].present?
+      new_employee.email = nil
+      (@contact_notices ||= []) << BLANKED_EMAIL_NOTICE
+      result = run_contact_validator(new_employee, check_login_identity: true)
+    end
+    return result if result.valid?
+
+    result.apply_errors_to(new_employee)
+    raise EmployeeContactValidator::ValidationError.new(result: result, record: new_employee)
+  end
+
+  def run_contact_validator(new_employee, check_login_identity:)
+    EmployeeContactValidator.call(
       employee: new_employee,
       company: employee.company,
       email: new_employee.email,
       phone: new_employee.phone,
-      check_login_identity: !email_unchanged,
+      check_login_identity: check_login_identity,
       confirm_same_person_email: attributes[:confirm_same_person_email],
       actor: actor,
       source: "staff",
       exclude_employee_ids: [ employee.id ]
     )
-    return result if result.valid?
+  end
 
-    result.apply_errors_to(new_employee)
-    raise EmployeeContactValidator::ValidationError.new(result: result, record: new_employee)
+  def previously_accepted_email?
+    email = EmployeeContactValidator.normalize_email(employee.email)
+    return false if email.blank?
+    return true if employee.email_verified_at.present?
+
+    AuditLog.where(company_id: employee.company_id, record_type: "employees", record_id: employee.id,
+      action: "employees#confirm_same_person_email")
+      .where("LOWER(TRIM(metadata->>'email')) = ?", email)
+      .exists?
   end
 
   def apply_validated_contact_details!(new_employee, contact_result)
