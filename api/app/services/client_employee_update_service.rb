@@ -1,6 +1,15 @@
 # frozen_string_literal: true
 
 class ClientEmployeeUpdateService
+  class PendingAddressRequest < StandardError
+    attr_reader :request_id
+
+    def initialize(request_id)
+      @request_id = request_id
+      super("An address request is already being reviewed for this employee.")
+    end
+  end
+
   WAGE_RATES_KEY = :wage_rates
   DIRECT_FIELDS = %i[
     first_name
@@ -189,13 +198,16 @@ class ClientEmployeeUpdateService
 
       contact = apply_contact_changes!(direct_attrs, target: employee, creation: false)
       contact_result = contact.validation
+      track_profile_changes = profile_requests_enabled?
+      own_address = track_profile_changes ? extract_own_address!(direct_attrs, approval_attrs, contact_result) : {}
 
-      validate_candidate!(direct_attrs.merge(approval_attrs)) if direct_attrs.present? || approval_attrs.present?
+      validate_candidate!(direct_attrs.merge(approval_attrs, own_address)) if direct_attrs.present? || approval_attrs.present? || own_address.present?
       employee.require_ssn_confirmation = false
       employee.ssn_confirmation = nil
       direct_before = original_values_for(direct_attrs.keys)
+      approval_attrs = own_address if own_address.present?
       approval_before = original_values_for(approval_attrs.keys)
-      ensure_no_pending_request! if approval_attrs.present?
+      ensure_no_pending_request!(address_request: own_address.present?) if approval_attrs.present?
       if direct_attrs.present?
         update_attrs = direct_attrs.dup
         update_attrs[:contact_source] = contact.contact_source if contact.contact_source
@@ -206,12 +218,14 @@ class ClientEmployeeUpdateService
           actor: requested_by,
           company: company
         )
+        record_contact_changes!(direct_before, direct_attrs.keys) if track_profile_changes
       end
       change_request = create_change_request!(
         approval_attrs: approval_attrs,
         original_values: approval_before,
         direct_changes: serialized_values_for(direct_attrs.keys),
-        request_kind: request_kind
+        request_kind: own_address.present? ? "update" : request_kind,
+        own_record: own_address.present?
       ) if approval_attrs.present?
     end
 
@@ -404,38 +418,83 @@ class ClientEmployeeUpdateService
     raise ActiveRecord::RecordInvalid, employee
   end
 
-  def ensure_no_pending_request!
-    return unless EmployeeChangeRequest.where(employee: employee, status: :pending).exists?
+  def profile_requests_enabled?
+    CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
+  end
 
-    employee.errors.add(:base, "A payroll-sensitive change request is already pending for this employee")
+  def extract_own_address!(direct_attrs, approval_attrs, contact_result)
+    fields = EmployeeChangeRequest::ADDRESS_FIELDS.map(&:to_sym)
+    return {} if direct_attrs.slice(*fields).empty?
+
+    confirming_own_login = contact_result&.same_person_confirmed? && contact_result.matched_login_user&.id == requested_by.id
+    return {} unless confirming_own_login || EmployeeProfileIdentity.own_record?(employee, requested_by)
+
+    if approval_attrs.present?
+      ensure_no_pending_request!(address_request: true)
+      employee.errors.add(:base, "Submit your address separately from payroll-sensitive changes. Only one request can be reviewed at a time.")
+      raise ActiveRecord::RecordInvalid, employee
+    end
+    direct_attrs.extract!(*fields)
+  end
+
+  def record_contact_changes!(before_values, fields)
+    EmployeeContactChangeToConfirm.record!(
+      employee: employee, actor: requested_by, before_values: before_values, after_values: serialized_values_for(fields)
+    )
+  end
+
+  def ensure_no_pending_request!(address_request: false, collision: false)
+    pending = EmployeeChangeRequest.for_company(company.id).find_by(employee: employee, status: :pending)
+    return unless pending || collision
+
+    if pending&.profile_address? && (profile_requests_enabled? || pending.requested_by_id == requested_by.id)
+      raise PendingAddressRequest, pending.id
+    end
+
+    message = if address_request || pending&.profile_address?
+      "#{EmployeeChangeRequest::PENDING_PROFILE_REQUEST_MESSAGE} for this employee."
+    else
+      "A payroll-sensitive change request is already pending for this employee"
+    end
+    employee.errors.add(:base, message)
     raise ActiveRecord::RecordInvalid, employee
   end
 
-  def create_change_request!(approval_attrs:, original_values:, direct_changes:, request_kind:)
+  def create_change_request!(approval_attrs:, original_values:, direct_changes:, request_kind:, own_record: false)
     proposed_visible, proposed_protected = protect_identifiers(approval_attrs)
     original_visible, original_protected = protect_identifiers(original_values)
 
-    change_request = EmployeeChangeRequest.create!(
-      company: company,
-      employee: employee,
-      requested_by: requested_by,
-      request_kind: request_kind,
-      proposed_changes: serialize_payload(proposed_visible),
-      original_values: serialize_payload(original_visible),
-      direct_changes_applied: serialize_payload(direct_changes),
-      sensitive_payload: {
-        proposed: serialize_payload(proposed_protected),
-        original: serialize_payload(original_protected)
-      },
-      request_notes: request_kind == "create" ?
-        "Client submitted a new worker's payroll details for approval." :
-        "Client submitted payroll-sensitive employee changes for approval."
-    )
+    notes = if own_record
+      "Client submitted an address change for their own employee record."
+    elsif request_kind == "create"
+      "Client submitted a new worker's payroll details for approval."
+    else
+      "Client submitted payroll-sensitive employee changes for approval."
+    end
+
+    change_request = EmployeeChangeRequest.transaction(requires_new: true) do
+      EmployeeChangeRequest.create!(
+        company: company,
+        employee: employee,
+        requested_by: requested_by,
+        request_kind: request_kind,
+        own_record: own_record,
+        proposed_changes: serialize_payload(proposed_visible),
+        original_values: serialize_payload(original_visible),
+        direct_changes_applied: serialize_payload(direct_changes),
+        sensitive_payload: own_record ? nil : {
+          proposed: serialize_payload(proposed_protected),
+          original: serialize_payload(original_protected)
+        },
+        request_notes: notes
+      )
+    end
     PortalNotifications.employee_change_submitted!(change_request)
     change_request
-  rescue ActiveRecord::RecordNotUnique
-    employee.errors.add(:base, "A payroll-sensitive change request is already pending for this employee")
-    raise ActiveRecord::RecordInvalid, employee
+  rescue ActiveRecord::RecordNotUnique => error
+    raise unless error.cause&.result&.error_field(PG::Result::PG_DIAG_CONSTRAINT_NAME) == "idx_employee_change_requests_one_pending"
+
+    ensure_no_pending_request!(address_request: own_record, collision: true)
   end
 
   def protect_identifiers(values)

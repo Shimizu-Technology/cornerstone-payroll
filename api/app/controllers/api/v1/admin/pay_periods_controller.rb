@@ -166,7 +166,8 @@ module Api
           end
 
           if @pay_period.persisted?
-            render json: { pay_period: pay_period_json(@pay_period) }, status: :created
+            render json: { pay_period: pay_period_json(@pay_period),
+              unconfirmed_contact_changes: EmployeeContactChangeToConfirm.unconfirmed_count(current_company) }, status: :created
           end
         rescue ActiveRecord::RecordInvalid => e
           errors = e.record&.errors&.full_messages.presence || [ e.message ]
