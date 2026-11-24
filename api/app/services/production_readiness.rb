@@ -72,6 +72,11 @@ class ProductionReadiness
     tax_year_readiness: -> {
       TenantScope.as_system(reason: "Check tax table verification across open pay periods") { TaxYearReadiness.new.as_json }
     },
+    process_role: -> { ProcessRole.current },
+    route_paths: -> { Rails.application.routes.routes.map { |route| route.path.spec.to_s } },
+    cable_mount_path: -> { Rails.application.config.action_cable.mount_path },
+    primary_pool_size: -> { ActiveRecord::Base.connection_pool.db_config.pool },
+    rate_limit_store: -> { Rack::Attack.cache.store },
     http_get: nil
   )
     @env = env
@@ -91,6 +96,11 @@ class ProductionReadiness
     @encrypted_data_probe = encrypted_data_probe
     @tax_configuration_valid = tax_configuration_valid
     @tax_year_readiness = tax_year_readiness
+    @process_role = process_role
+    @route_paths = route_paths
+    @cable_mount_path = cable_mount_path
+    @primary_pool_size = primary_pool_size
+    @rate_limit_store = rate_limit_store
     @http_get = http_get || method(:default_http_get)
   end
 
@@ -109,9 +119,53 @@ class ProductionReadiness
 
   attr_reader :env, :environment, :config, :primary_record, :cache, :cache_record,
     :queue_record, :queue_process, :cable_record, :job_adapter, :cable_adapter,
-    :storage_factory, :time_sources, :encryption_credentials, :encrypted_data_probe, :tax_configuration_valid, :http_get
+    :storage_factory, :time_sources, :encryption_credentials, :encrypted_data_probe, :tax_configuration_valid, :http_get,
+    :process_role, :route_paths, :cable_mount_path, :primary_pool_size, :rate_limit_store
 
   def configuration_checks
+    base_configuration_checks + employee_web_checks
+  end
+
+  def employee_web?
+    env.fetch("APP_PROCESS_ROLE", ProcessRole::ALL) == ProcessRole::EMPLOYEE_WEB
+  end
+
+  # Applied only on the employee service. Payroll and `all` processes skip them.
+  def employee_web_checks
+    return [] unless employee_web?
+
+    [
+      check("employee_web: process role booted as employee_web without payroll routes or Cable") { employee_surface_isolated? },
+      check("employee_web: database pool is capped at #{ProcessRole::EMPLOYEE_WEB_DB_POOL_MAX} and matches DB_POOL_MAX") { employee_pool_capped? },
+      check("employee_web: rate-limit counters use the shared Redis store") do
+        RackAttackStore.shared_url?(env["RACK_ATTACK_REDIS_URL"]) && !rate_limit_store.call.equal?(RackAttackStore::MEMORY)
+      end,
+      check("employee_web: Clerk authorized parties are set") { env["CLERK_AUTHORIZED_PARTIES"].to_s.strip.present? }
+    ]
+  end
+
+  def employee_surface_isolated?
+    paths = route_paths.call
+    process_role.call == ProcessRole::EMPLOYEE_WEB &&
+      cable_mount_path.call.nil? &&
+      paths.present? &&
+      paths.all? { |path| ProcessRole::EMPLOYEE_WEB_ROUTE_PATTERN.match?(path) }
+  end
+
+  def employee_pool_setting
+    Integer(env["DB_POOL_MAX"].to_s.strip, 10)
+  rescue ArgumentError
+    nil
+  end
+
+  def employee_pool_capped?
+    configured = employee_pool_setting
+    configured.present? &&
+      configured.between?(1, ProcessRole::EMPLOYEE_WEB_DB_POOL_MAX) &&
+      primary_pool_size.call == configured
+  end
+
+  def base_configuration_checks
     [
       check("RAILS_ENV is production") { environment.production? },
       check("authentication is enabled") { env.fetch("AUTH_ENABLED", "true") == "true" },
