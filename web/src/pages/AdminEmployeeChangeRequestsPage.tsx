@@ -4,6 +4,7 @@ import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedbac
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany } from '@/lib/company-write-access';
+import { ChangeComparison } from '@/components/employees/ChangeComparison';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -212,10 +213,11 @@ export function AdminEmployeeChangeRequestsPage() {
                   <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
                     {selected.request_kind === 'create'
                       ? 'Approving this request activates the new worker after applying the reviewed payroll details.'
-                      : 'Approving this request applies the reviewed payroll-sensitive changes.'}
+                      : selected.profile_address
+                        ? 'Approving this request updates the employee’s address and adds it to Changes to confirm.'
+                        : 'Approving this request applies the reviewed payroll-sensitive changes.'}
                   </div>
-                  <JsonBlock title="Original Values" value={selected.original_values} />
-                  <JsonBlock title="Proposed Changes" value={selected.proposed_changes} />
+                  <ChangeComparison before={selected.original_values} after={selected.proposed_changes} requested={selected.status === 'pending'} />
                   <div>
                     <p className="mb-1 text-sm font-medium text-gray-900">Review Notes</p>
                     <Textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} rows={4} />
@@ -252,15 +254,4 @@ export function AdminEmployeeChangeRequestsPage() {
 function StatusBadge({ status }: { status: EmployeeChangeRequest['status'] }) {
   const variant = status === 'approved' ? 'success' : status === 'rejected' ? 'danger' : 'warning';
   return <Badge variant={variant}>{status.charAt(0).toUpperCase() + status.slice(1)}</Badge>;
-}
-
-function JsonBlock({ title, value }: { title: string; value?: Record<string, unknown> }) {
-  return (
-    <div>
-      <p className="text-sm font-medium text-gray-900">{title}</p>
-      <pre className="mt-2 overflow-auto rounded-xl bg-gray-950/95 p-3 text-xs text-gray-100">
-        {JSON.stringify(value || {}, null, 2)}
-      </pre>
-    </div>
-  );
 }
