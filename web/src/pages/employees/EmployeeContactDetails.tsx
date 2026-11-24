@@ -1,0 +1,1349 @@
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
+import { Link, useSearchParams } from 'react-router';
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  Pencil,
+  ChevronLeft,
+  ChevronRight,
+  Save,
+  Search,
+  ShieldCheck,
+} from 'lucide-react';
+import { Header } from '@/components/layout/Header';
+import { Alert } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { MobileRecordCard } from '@/components/ui/mobile-record';
+import { Select } from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { formatPhone, toContactRecord } from '@/lib/employee-contact';
+import { employeesPath } from '@/lib/routes';
+import { cn, getInitials } from '@/lib/utils';
+import { ApiError, clientEmployeesApi, employeesApi } from '@/services/api';
+import type {
+  ContactEmployee,
+  EmployeeContactConflictPayload,
+  EmployeeContactValidationPayload,
+  EmployeeContactWarning,
+  PaginationMeta,
+} from '@/types';
+
+const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
+const PER_PAGE = 50;
+
+const CONTACT_FIELDS = ['email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'zip'] as const;
+type ContactField = (typeof CONTACT_FIELDS)[number];
+
+const FIELD_LABELS: Record<ContactField, string> = {
+  email: 'Email',
+  phone: 'Mobile',
+  address_line1: 'Street address',
+  address_line2: 'Apt / Unit',
+  city: 'City',
+  state: 'State',
+  zip: 'ZIP',
+};
+
+function gridInputClass(extra = '', invalid = false): string {
+  return cn(
+    'block h-11 w-full rounded-lg border bg-white py-2 text-base text-neutral-900 lg:h-9 lg:text-sm shadow-xs transition-[border-color,background-color,color,box-shadow] duration-150 ease-out placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
+    invalid
+      ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200'
+      : 'border-neutral-300 focus-visible:border-primary-400 focus-visible:ring-primary-200',
+    extra,
+  );
+}
+
+interface ContactDraft {
+  email: string;
+  phone: string;
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  state: string;
+  zip: string;
+}
+
+type ContactDraftPatch = Partial<ContactDraft>;
+
+export interface ContactFieldDraft {
+  value: string;
+  baselineValue: string;
+  baselineRevision: string;
+}
+
+export type RowFieldDrafts = Partial<Record<ContactField, ContactFieldDraft>>;
+export type ContactDraftMap = Record<number, RowFieldDrafts>;
+
+interface RowConflictState {
+  message: string;
+  conflictingFields: string[];
+  serverEmployee: ContactEmployee;
+  userChanges: ContactDraftPatch;
+}
+
+export interface RowSaveState {
+  saving: boolean;
+  saved: boolean;
+  error: string | null;
+  fieldErrors: Record<string, string[]>;
+  warnings: EmployeeContactWarning[];
+  samePersonRequired: boolean;
+  samePersonChecked: boolean;
+  conflict: RowConflictState | null;
+}
+
+const INITIAL_ROW_STATE: RowSaveState = {
+  saving: false,
+  saved: false,
+  error: null,
+  fieldErrors: {},
+  warnings: [],
+  samePersonRequired: false,
+  samePersonChecked: false,
+  conflict: null,
+};
+
+function baselineFromEmployee(employee: ContactEmployee): ContactDraft {
+  return {
+    email: employee.email ?? '',
+    phone: employee.phone ?? '',
+    address_line1: employee.address_line1 ?? '',
+    address_line2: employee.address_line2 ?? '',
+    city: employee.city ?? '',
+    state: employee.state ?? '',
+    zip: employee.zip ?? '',
+  };
+}
+
+function effectiveDraft(employee: ContactEmployee, rowDraft: RowFieldDrafts | undefined): ContactDraft {
+  const serverValues = baselineFromEmployee(employee);
+  if (!rowDraft) return serverValues;
+  const merged: ContactDraft = { ...serverValues };
+  for (const field of CONTACT_FIELDS) {
+    const entry = rowDraft[field];
+    if (entry) merged[field] = entry.value;
+  }
+  return merged;
+}
+
+function changedEntriesForRow(rowDraft: RowFieldDrafts | undefined): Array<[ContactField, ContactFieldDraft]> {
+  if (!rowDraft) return [];
+  const changed: Array<[ContactField, ContactFieldDraft]> = [];
+  for (const field of CONTACT_FIELDS) {
+    const entry = rowDraft[field];
+    if (entry && entry.value.trim() !== entry.baselineValue.trim()) {
+      changed.push([field, entry]);
+    }
+  }
+  return changed;
+}
+
+function hasAnyChangedField(rowDraft: RowFieldDrafts | undefined): boolean {
+  return changedEntriesForRow(rowDraft).length > 0;
+}
+
+function extractConflictPayload(error: unknown): EmployeeContactConflictPayload | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null;
+  const raw = (error.data && typeof error.data === 'object') ? error.data as Record<string, unknown> : {};
+  if (raw.code !== 'contact_revision_conflict' || !raw.data || typeof raw.data !== 'object') return null;
+
+  return {
+    error: typeof raw.error === 'string' ? raw.error : error.message,
+    code: 'contact_revision_conflict',
+    conflicting_fields: Array.isArray(raw.conflicting_fields)
+      ? raw.conflicting_fields.filter((f): f is string => typeof f === 'string')
+      : [],
+    contact_revision: typeof raw.contact_revision === 'string' ? raw.contact_revision : '',
+    current_values: (raw.current_values && typeof raw.current_values === 'object')
+      ? raw.current_values as Record<string, string | null>
+      : {},
+    data: toContactRecord(raw.data as ContactEmployee),
+  };
+}
+
+function extractContactValidation(error: unknown): {
+  fieldErrors: Record<string, string[]>;
+  samePersonRequired: boolean;
+  warnings: EmployeeContactWarning[];
+  message: string;
+} {
+  if (error instanceof ApiError) {
+    const raw = (error.data && typeof error.data === 'object') ? error.data as Record<string, unknown> : {};
+    const contactValidation = (raw.contact_validation && typeof raw.contact_validation === 'object')
+      ? raw.contact_validation as EmployeeContactValidationPayload
+      : undefined;
+    const fieldErrors: Record<string, string[]> = {};
+    const rawErrors = (raw.errors && typeof raw.errors === 'object' && !Array.isArray(raw.errors))
+      ? raw.errors as Record<string, unknown>
+      : {};
+    const sources = [rawErrors, error.details && typeof error.details === 'object' ? error.details : {}];
+    for (const source of sources) {
+      for (const [key, value] of Object.entries(source)) {
+        if (Array.isArray(value)) {
+          const strings = value.filter((item): item is string => typeof item === 'string');
+          if (strings.length > 0) fieldErrors[key] = strings;
+        }
+      }
+    }
+    return {
+      fieldErrors,
+      samePersonRequired: Boolean(contactValidation?.same_person_confirmation_required),
+      warnings: Array.isArray(contactValidation?.warnings) ? contactValidation.warnings : [],
+      message: error.message,
+    };
+  }
+  return {
+    fieldErrors: {},
+    samePersonRequired: false,
+    warnings: [],
+    message: error instanceof Error ? error.message : 'Could not save contact details.',
+  };
+}
+
+function contactStatusBadge(employee: ContactEmployee): { label: string; variant: 'success' | 'warning' | 'danger' | 'info' } {
+  const status = employee.contact_details_status;
+  if (status?.email_issue === 'shared_inbox') {
+    return { label: 'Shared email', variant: 'danger' };
+  }
+  if (status?.email_issue === 'placeholder') {
+    return { label: 'Not a real email', variant: 'danger' };
+  }
+  if (status?.email_issue === 'placeholder_pattern') {
+    return { label: 'Check this email', variant: 'warning' };
+  }
+  if (status?.needs_contact_details) {
+    const missing = status.missing_fields;
+    if (missing.length === 1) {
+      const labelMap: Record<string, string> = {
+        email: 'Missing email',
+        phone: 'Missing mobile',
+        address_line1: 'Missing street',
+        city: 'Missing city',
+        state: 'Missing state',
+        zip: 'Missing ZIP',
+      };
+      return { label: labelMap[missing[0]] || 'Needs contact details', variant: 'warning' };
+    }
+    return { label: 'Missing details', variant: 'warning' };
+  }
+  if (status?.email_issue === 'shared_with_coworker') {
+    return { label: 'Shared with a coworker', variant: 'info' };
+  }
+  return { label: 'Complete', variant: 'success' };
+}
+
+export interface EmployeeContactDetailsProps {
+  /** Optional wrapper chrome (e.g. staff-only tabs) rendered above the grid. */
+  topSlot?: ReactNode;
+  /** Incrementing this triggers a reload of the current page while preserving pending edits. */
+  refreshKey?: number;
+  /** Callback notified when needs_contact_details_count updates. */
+  onNeedsContactCountChange?: (count: number) => void;
+  /** When true, omit the outer Header wrapper because a parent page renders it. */
+  embedded?: boolean;
+  /** Optional controlled per-field draft map lifted above tab switches. */
+  drafts?: ContactDraftMap;
+  onDraftsChange?: Dispatch<SetStateAction<ContactDraftMap>>;
+  /** Optional controlled row feedback state lifted above tab switches. */
+  rowStates?: Record<number, RowSaveState>;
+  onRowStatesChange?: Dispatch<SetStateAction<Record<number, RowSaveState>>>;
+}
+
+export function EmployeeContactDetails({
+  topSlot,
+  refreshKey = 0,
+  onNeedsContactCountChange,
+  embedded = false,
+  drafts: controlledDrafts,
+  onDraftsChange,
+  rowStates: controlledRowStates,
+  onRowStatesChange,
+}: EmployeeContactDetailsProps = {}): ReactElement {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { user, isClient } = useAuth();
+  const { activeCompanyId, activeCompany } = useCompany();
+  const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
+  const canEdit = isClient ? canWriteClientEmployeeProfile(activeCompany) : canWriteCompany(activeCompany);
+
+  const search = searchParams.get('search') || '';
+  const statusFilter = searchParams.get('status') ?? 'active';
+  const needsContactOnly = searchParams.get('needs_contact_details') === 'true';
+  const rawPage = parseInt(searchParams.get('page') || '1', 10);
+  const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
+
+  const [employees, setEmployees] = useState<ContactEmployee[]>([]);
+  const [meta, setMeta] = useState<PaginationMeta | null>(null);
+  const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Sparse per-field pending edits keyed by employee ID, storing each field's
+  // original baseline value and row revision from when editing started.
+  const [internalDrafts, setInternalDrafts] = useState<ContactDraftMap>({});
+  const [internalRowStates, setInternalRowStates] = useState<Record<number, RowSaveState>>({});
+  const drafts = controlledDrafts ?? internalDrafts;
+  const setDrafts = onDraftsChange ?? setInternalDrafts;
+  const rowStates = controlledRowStates ?? internalRowStates;
+  const setRowStates = onRowStatesChange ?? setInternalRowStates;
+  const isDraftsControlled = controlledDrafts !== undefined;
+  const isDesktop = useDesktopLayout();
+  // Rows opened with Edit. A row also stays open while it has unsaved edits
+  // or something to resolve, so drafts kept across pages and tabs reopen.
+  const [editingIds, setEditingIds] = useState<Set<number>>(() => new Set());
+  const requestIdRef = useRef(0);
+  const companyIdRef = useRef(companyId);
+  const prevCompanyIdRef = useRef(companyId);
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
+
+  useLayoutEffect(() => {
+    companyIdRef.current = companyId;
+    setIsLoading(true);
+    setLoadError(null);
+    if (prevCompanyIdRef.current !== companyId) {
+      prevCompanyIdRef.current = companyId;
+      if (!isDraftsControlled) {
+        setInternalDrafts({});
+        setInternalRowStates({});
+      }
+    }
+  }, [companyId, isDraftsControlled]);
+
+  const fetchEmployees = useCallback(async (): Promise<void> => {
+    const requestedCompanyId = companyId;
+    if (requestedCompanyId !== companyIdRef.current) return;
+    const requestId = ++requestIdRef.current;
+    let clampedPage = false;
+
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const listParams = {
+        search: search || undefined,
+        status: statusFilter === 'all' ? undefined : (statusFilter || undefined),
+        needs_contact_details: needsContactOnly ? true : undefined,
+        page,
+        per_page: PER_PAGE,
+        sort_by: 'name' as const,
+        sort_direction: 'asc' as const,
+        view: 'contact' as const,
+      };
+      const payload = isClient
+        ? await clientEmployeesApi.list(listParams)
+        : await employeesApi.list({ company_id: requestedCompanyId, ...listParams });
+
+      if (requestId !== requestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
+
+      const serverTotalCount = payload.meta.total_count;
+      const serverPerPage = payload.meta.per_page || PER_PAGE;
+      const lastPage = serverTotalCount > 0
+        ? Math.max(1, payload.meta.total_pages || Math.ceil(serverTotalCount / serverPerPage))
+        : 1;
+
+      if (page > lastPage) {
+        clampedPage = true;
+        const next = new URLSearchParams(searchParamsRef.current);
+        if (lastPage <= 1) next.delete('page');
+        else next.set('page', String(lastPage));
+        setSearchParams(next, { replace: true });
+        return;
+      }
+
+      // Refresh server data (updating untouched fields) without touching any
+      // edited field's captured baseline value or row revision.
+      setEmployees(payload.data.map(toContactRecord));
+      setMeta(payload.meta);
+      setLoadedCompanyId(requestedCompanyId);
+    } catch (caught) {
+      if (requestId !== requestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
+      setLoadError(caught instanceof Error ? caught.message : 'Could not load employee contact details.');
+    } finally {
+      if (!clampedPage && requestId === requestIdRef.current && requestedCompanyId === companyIdRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, [companyId, isClient, needsContactOnly, page, search, setSearchParams, statusFilter]);
+
+  useEffect(() => {
+    void fetchEmployees();
+  }, [fetchEmployees, refreshKey]);
+
+  const updateFilter = (key: string, value: string, replace = false): void => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    if (key !== 'page') next.delete('page');
+    setSearchParams(next, { replace });
+  };
+
+  const setPage = (nextPage: number): void => {
+    const clamped = Math.max(1, Math.min(nextPage, meta?.total_pages || nextPage));
+    updateFilter('page', clamped <= 1 ? '' : String(clamped));
+  };
+
+  const companyEmployees = useMemo(
+    () => (loadedCompanyId === companyId ? employees : []),
+    [companyId, employees, loadedCompanyId],
+  );
+
+  const dirtyCount = useMemo(() => {
+    let count = 0;
+    for (const rowDraft of Object.values(drafts)) {
+      if (hasAnyChangedField(rowDraft)) count += 1;
+    }
+    return count;
+  }, [drafts]);
+
+  const needsContactCount = meta?.needs_contact_details_count
+    ?? companyEmployees.filter((emp) => emp.contact_details_status?.needs_contact_details).length;
+
+  useEffect(() => {
+    onNeedsContactCountChange?.(needsContactCount);
+  }, [needsContactCount, onNeedsContactCountChange]);
+
+  const updateDraftField = (employee: ContactEmployee, field: ContactField, value: string): void => {
+    const serverBaseline = baselineFromEmployee(employee);
+    const serverRevision = employee.contact_revision || employee.updated_at;
+    setDrafts((prev) => {
+      const existingRow: RowFieldDrafts = { ...(prev[employee.id] ?? {}) };
+      const existingField = existingRow[field];
+      // Capture the original server value and row revision once when editing starts.
+      // Refetches never replace this baseline; only explicit conflict resolution does.
+      const baselineValue = existingField ? existingField.baselineValue : serverBaseline[field];
+      const baselineRevision = existingField ? existingField.baselineRevision : serverRevision;
+
+      if (value.trim() === baselineValue.trim()) {
+        delete existingRow[field];
+      } else {
+        existingRow[field] = { value, baselineValue, baselineRevision };
+      }
+
+      if (Object.keys(existingRow).length === 0) {
+        if (!prev[employee.id]) return prev;
+        const next = { ...prev };
+        delete next[employee.id];
+        return next;
+      }
+      return { ...prev, [employee.id]: existingRow };
+    });
+    setRowStates((prev) => {
+      const current = prev[employee.id];
+      if (!current) return prev;
+      return {
+        ...prev,
+        [employee.id]: {
+          ...current,
+          saved: false,
+          error: null,
+          conflict: null,
+          fieldErrors: { ...current.fieldErrors, [field]: [] },
+          ...(field === 'email' ? { samePersonRequired: false, samePersonChecked: false } : {}),
+        },
+      };
+    });
+  };
+
+  const isRowOpen = (employee: ContactEmployee): boolean => {
+    const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+    return editingIds.has(employee.id)
+      || hasAnyChangedField(drafts[employee.id])
+      || Boolean(state.conflict || state.samePersonRequired || state.error)
+      || Object.values(state.fieldErrors).some((messages) => messages.length > 0);
+  };
+
+  const setRowEditing = (employeeId: number, editing: boolean): void => {
+    setEditingIds((prev) => {
+      if (prev.has(employeeId) === editing) return prev;
+      const next = new Set(prev);
+      if (editing) next.add(employeeId);
+      else next.delete(employeeId);
+      return next;
+    });
+  };
+
+  const openRow = (employee: ContactEmployee): void => {
+    setRowEditing(employee.id, true);
+    setRowStates((prev) => (prev[employee.id]?.saved ? { ...prev, [employee.id]: { ...prev[employee.id], saved: false } } : prev));
+  };
+
+  const cancelRow = (employee: ContactEmployee): void => {
+    resetRow(employee);
+    setRowEditing(employee.id, false);
+  };
+
+  const resetRow = (employee: ContactEmployee): void => {
+    setDrafts((prev) => {
+      if (!prev[employee.id]) return prev;
+      const next = { ...prev };
+      delete next[employee.id];
+      return next;
+    });
+    setRowStates((prev) => ({ ...prev, [employee.id]: INITIAL_ROW_STATE }));
+  };
+
+  const toggleSamePersonCheck = (employeeId: number, checked: boolean): void => {
+    setRowStates((prev) => ({
+      ...prev,
+      [employeeId]: {
+        ...(prev[employeeId] ?? INITIAL_ROW_STATE),
+        samePersonChecked: checked,
+      },
+    }));
+  };
+
+  const saveRow = async (
+    employee: ContactEmployee,
+    options: { explicitConfirmSamePerson?: boolean; overrideBaselineEmployee?: ContactEmployee; overrideChanges?: ContactDraftPatch } = {},
+  ): Promise<void> => {
+    if (!canEdit) return;
+    const baseEmployee = options.overrideBaselineEmployee ?? employee;
+    const currentState = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+    const confirmSamePerson = Boolean(
+      options.explicitConfirmSamePerson || (currentState.samePersonRequired && currentState.samePersonChecked),
+    );
+
+    const changes: ContactDraftPatch = {};
+    const baselineValues: Record<string, string> = {};
+    let rowRevision = baseEmployee.contact_revision || baseEmployee.updated_at;
+
+    if (options.overrideChanges) {
+      const serverBaseline = baselineFromEmployee(baseEmployee);
+      for (const field of CONTACT_FIELDS) {
+        if (options.overrideChanges[field] !== undefined) {
+          changes[field] = options.overrideChanges[field];
+          baselineValues[field] = serverBaseline[field];
+        }
+      }
+    } else {
+      const changedEntries = changedEntriesForRow(drafts[employee.id]);
+      const currentServerRevision = employee.contact_revision || employee.updated_at;
+      let chosenRevision: string | null = null;
+      for (const [field, entry] of changedEntries) {
+        changes[field] = entry.value.trim();
+        baselineValues[field] = entry.baselineValue;
+        if (entry.baselineRevision && entry.baselineRevision !== currentServerRevision) {
+          chosenRevision ??= entry.baselineRevision;
+        }
+      }
+      rowRevision = chosenRevision ?? changedEntries[0]?.[1].baselineRevision ?? currentServerRevision;
+    }
+
+    const changedKeys = Object.keys(changes) as ContactField[];
+    if (changedKeys.length === 0 && !confirmSamePerson) return;
+
+    setRowStates((prev) => ({
+      ...prev,
+      [employee.id]: {
+        ...(prev[employee.id] ?? INITIAL_ROW_STATE),
+        saving: true,
+        saved: false,
+        error: null,
+        fieldErrors: {},
+        conflict: null,
+      },
+    }));
+
+    const payload = {
+      ...changes,
+      row_revision: rowRevision,
+      ...(changedKeys.length > 0 ? { baseline_values: baselineValues } : {}),
+      ...(confirmSamePerson ? { confirm_same_person_email: true } : {}),
+    };
+
+    try {
+      const contactPayload = { ...payload, response_view: 'contact' as const };
+      const response = isClient
+        ? await clientEmployeesApi.update(employee.id, contactPayload)
+        : await employeesApi.update(employee.id, contactPayload, companyId);
+
+      const updated = toContactRecord(response.data);
+      const warnings = response.contact_warnings ?? [];
+
+      setEmployees((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
+      setDrafts((prev) => {
+        if (!prev[updated.id]) return prev;
+        const next = { ...prev };
+        delete next[updated.id];
+        return next;
+      });
+      setRowEditing(updated.id, false);
+      setRowStates((prev) => ({
+        ...prev,
+        [updated.id]: {
+          saving: false,
+          saved: true,
+          error: null,
+          fieldErrors: {},
+          warnings,
+          samePersonRequired: false,
+          samePersonChecked: false,
+          conflict: null,
+        },
+      }));
+
+      const wasNeeding = baseEmployee.contact_details_status?.needs_contact_details ?? false;
+      const nowNeeding = updated.contact_details_status?.needs_contact_details ?? false;
+      if (wasNeeding !== nowNeeding) {
+        setMeta((prev) => prev && typeof prev.needs_contact_details_count === 'number'
+          ? { ...prev, needs_contact_details_count: Math.max(0, prev.needs_contact_details_count + (nowNeeding ? 1 : -1)) }
+          : prev);
+      }
+    } catch (caught) {
+      const conflictPayload = extractConflictPayload(caught);
+      if (conflictPayload) {
+        setRowStates((prev) => ({
+          ...prev,
+          [employee.id]: {
+            saving: false,
+            saved: false,
+            error: conflictPayload.error,
+            fieldErrors: {},
+            warnings: [],
+            samePersonRequired: false,
+            samePersonChecked: false,
+            conflict: {
+              message: conflictPayload.error,
+              conflictingFields: conflictPayload.conflicting_fields,
+              serverEmployee: conflictPayload.data,
+              userChanges: changes,
+            },
+          },
+        }));
+        return;
+      }
+
+      const parsed = extractContactValidation(caught);
+      setRowStates((prev) => ({
+        ...prev,
+        [employee.id]: {
+          saving: false,
+          saved: false,
+          error: parsed.message,
+          fieldErrors: parsed.fieldErrors,
+          warnings: parsed.warnings,
+          samePersonRequired: parsed.samePersonRequired,
+          samePersonChecked: parsed.samePersonRequired ? Boolean(prev[employee.id]?.samePersonChecked) : false,
+          conflict: null,
+        },
+      }));
+    }
+  };
+
+  const handleKeepMyVersion = (employee: ContactEmployee): void => {
+    const conflict = rowStates[employee.id]?.conflict;
+    if (!conflict) return;
+    // User explicitly chose to keep their version: rebase each edited field's
+    // baseline onto the latest server record, refresh untouched fields, and re-submit.
+    const serverBaseline = baselineFromEmployee(conflict.serverEmployee);
+    const serverRevision = conflict.serverEmployee.contact_revision || conflict.serverEmployee.updated_at;
+    setEmployees((prev) => prev.map((item) => (item.id === employee.id ? { ...item, ...conflict.serverEmployee } : item)));
+    setDrafts((prev) => {
+      const existingRow = prev[employee.id];
+      if (!existingRow) return prev;
+      const rebasedRow: RowFieldDrafts = {};
+      for (const field of CONTACT_FIELDS) {
+        const entry = existingRow[field];
+        if (!entry) continue;
+        rebasedRow[field] = {
+          value: entry.value,
+          baselineValue: serverBaseline[field],
+          baselineRevision: serverRevision,
+        };
+      }
+      return { ...prev, [employee.id]: rebasedRow };
+    });
+    void saveRow(employee, {
+      overrideBaselineEmployee: conflict.serverEmployee,
+      overrideChanges: conflict.userChanges,
+    });
+  };
+
+  // "Use theirs" drops only the drafts that conflicted. Other edits on the row,
+  // such as a phone typed alongside a conflicting email, stay ready to save
+  // with their original baselines.
+  const handleDiscardMyVersion = (employee: ContactEmployee): void => {
+    const conflict = rowStates[employee.id]?.conflict;
+    if (!conflict) return;
+    const named = conflict.conflictingFields.filter((field): field is ContactField => CONTACT_FIELDS.includes(field as ContactField));
+    const dropped = new Set<ContactField>(named.length > 0 ? named : (Object.keys(conflict.userChanges) as ContactField[]));
+    setEmployees((prev) => prev.map((item) => (item.id === employee.id ? { ...item, ...conflict.serverEmployee } : item)));
+    setDrafts((prev) => {
+      const existingRow = prev[employee.id];
+      if (!existingRow) return prev;
+      const keptRow: RowFieldDrafts = {};
+      for (const field of CONTACT_FIELDS) {
+        const entry = existingRow[field];
+        if (entry && !dropped.has(field)) keptRow[field] = entry;
+      }
+      const next = { ...prev };
+      if (Object.keys(keptRow).length > 0) next[employee.id] = keptRow;
+      else delete next[employee.id];
+      return next;
+    });
+    setRowStates((prev) => ({ ...prev, [employee.id]: INITIAL_ROW_STATE }));
+  };
+
+  const handleRowKeyDown = (event: KeyboardEvent<HTMLInputElement>, employee: ContactEmployee): void => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+      if (!state.saving && (hasAnyChangedField(drafts[employee.id]) || (state.samePersonRequired && state.samePersonChecked))) {
+        void saveRow(employee);
+      }
+    }
+  };
+
+  const totalCount = meta?.total_count ?? companyEmployees.length;
+  const currentPage = meta?.current_page ?? page;
+  const totalPages = meta?.total_pages ?? 1;
+  const perPage = meta?.per_page ?? PER_PAGE;
+  const rangeStart = totalCount === 0 ? 0 : (currentPage - 1) * perPage + 1;
+  const rangeEnd = totalCount === 0 ? 0 : Math.min(currentPage * perPage, totalCount);
+
+  const renderEditor = (employee: ContactEmployee): ReactElement => {
+    const draft = effectiveDraft(employee, drafts[employee.id]);
+    const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+    const dirty = hasAnyChangedField(drafts[employee.id]);
+    const name = `${employee.first_name} ${employee.last_name}`;
+    const disabled = !canEdit || state.saving;
+    const canSave = !disabled && (dirty || (state.samePersonRequired && state.samePersonChecked));
+    const fieldProps = (field: ContactField): Pick<EditorFieldProps, 'value' | 'disabled' | 'errors' | 'onChange' | 'onKeyDown'> => ({
+      value: draft[field],
+      disabled,
+      errors: state.fieldErrors[field] ?? [],
+      onChange: (value) => updateDraftField(employee, field, field === 'state' ? value.toUpperCase() : value),
+      onKeyDown: (event) => handleRowKeyDown(event, employee),
+    });
+
+    return (
+      <div className="space-y-4 bg-white lg:rounded-xl lg:border lg:border-primary-200 lg:p-4">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <div>
+            <EditorField label="Email" ariaLabel={`Email for ${name}`} type="email" placeholder="name@example.com"
+              {...fieldProps('email')} errors={state.samePersonRequired ? [] : state.fieldErrors.email ?? []} />
+            <RowInlineFeedback
+              employee={employee}
+              state={state}
+              field="email"
+              hidePrimaryFieldError
+              canEdit={canEdit}
+              onToggleSamePerson={(checked) => toggleSamePersonCheck(employee.id, checked)}
+              onConfirmAndSave={() => void saveRow(employee, { explicitConfirmSamePerson: true })}
+            />
+          </div>
+          <EditorField label="Mobile" ariaLabel={`Mobile for ${name}`} type="tel" placeholder="671-555-0100" inputClassName="tabular-nums"
+            hint="For a 7-digit Guam number, +1 671 is added for you." {...fieldProps('phone')} />
+        </div>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_72px_112px]">
+          <EditorField label="Street address" ariaLabel={`Street address for ${name}`} placeholder="Street address" className="col-span-2 lg:col-span-1" {...fieldProps('address_line1')} />
+          <EditorField label="Apt / Unit (optional)" ariaLabel={`Apt or unit for ${name}`} placeholder="Apt, suite, or box" className="col-span-2 lg:col-span-1" {...fieldProps('address_line2')} />
+          <EditorField label="City" ariaLabel={`City for ${name}`} placeholder="Hagatna" className="col-span-2 lg:col-span-1" {...fieldProps('city')} />
+          <EditorField label="State" ariaLabel={`State for ${name}`} placeholder="GU" maxLength={2} inputClassName="uppercase" {...fieldProps('state')} />
+          <EditorField label="ZIP" ariaLabel={`ZIP for ${name}`} placeholder="96910" inputClassName="tabular-nums" {...fieldProps('zip')} />
+        </div>
+
+        {state.conflict && (
+          <RowConflictBanner
+            conflict={state.conflict}
+            saving={state.saving}
+            onKeep={() => handleKeepMyVersion(employee)}
+            onDiscard={() => handleDiscardMyVersion(employee)}
+          />
+        )}
+        {state.error && !state.conflict && !state.samePersonRequired && !Object.values(state.fieldErrors).some((messages) => messages.length > 0) && (
+          <Alert tone="error">{state.error}</Alert>
+        )}
+
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <p className="mr-auto hidden text-xs text-neutral-500 [@media(hover:hover)_and_(pointer:fine)]:block">Press Enter to save.</p>
+          <Button variant="outline" size="sm" aria-label={`Cancel editing ${name}`} disabled={state.saving} onClick={() => cancelRow(employee)} className="min-h-11 flex-1 sm:flex-none lg:min-h-0">
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            aria-label={`Save ${name}`}
+            disabled={!canSave}
+            loading={state.saving}
+            loadingLabel="Saving"
+            onClick={() => void saveRow(employee)}
+            className="min-h-11 flex-1 sm:flex-none lg:min-h-0"
+          >
+            <Save className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+            Save
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const gridBody = (
+    <>
+      {topSlot}
+
+      {!canEdit && (
+        <Alert tone="info">{companyReadOnlyMessage(activeCompany)}</Alert>
+      )}
+
+      {/* Summary strip + filter bar */}
+      <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              aria-pressed={needsContactOnly}
+              onClick={() => updateFilter('needs_contact_details', needsContactOnly ? '' : 'true')}
+              className={cn(
+                'inline-flex min-h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition',
+                needsContactOnly
+                  ? 'border-warning-400 bg-warning-100 text-warning-950 shadow-sm'
+                  : 'border-neutral-300 bg-white text-neutral-700 hover:border-warning-300 hover:bg-warning-50',
+              )}
+            >
+              <AlertTriangle className="h-4 w-4 text-warning-700" aria-hidden="true" />
+              Needs contact details
+              <span className="rounded-full bg-white/90 px-2 py-0.5 text-xs font-bold tabular-nums text-warning-900">
+                {needsContactCount}
+              </span>
+            </button>
+
+            {needsContactOnly && (
+              <button
+                type="button"
+                onClick={() => updateFilter('needs_contact_details', '')}
+                className="text-sm font-semibold text-primary-700 underline-offset-2 hover:underline"
+              >
+                Show all
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-xs text-neutral-600">
+            <span>
+              {totalPages > 1 ? (
+                <>
+                  Showing <strong className="tabular-nums text-neutral-900">{rangeStart}–{rangeEnd}</strong> of{' '}
+                  <strong className="tabular-nums text-neutral-900">{totalCount}</strong> employees
+                </>
+              ) : (
+                <>
+                  Showing <strong className="tabular-nums text-neutral-900">{totalCount}</strong>{' '}
+                  {totalCount === 1 ? 'employee' : 'employees'}
+                </>
+              )}
+            </span>
+            {dirtyCount > 0 && (
+              <Badge variant="info">{dirtyCount} unsaved {dirtyCount === 1 ? 'row' : 'rows'}</Badge>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" aria-hidden="true" />
+            <Input
+              type="text"
+              aria-label="Search employees"
+              placeholder="Search by name or email..."
+              value={search}
+              onChange={(event) => updateFilter('search', event.target.value, true)}
+              className="pl-10"
+            />
+          </div>
+
+          <Select
+            aria-label="Employee status"
+            value={statusFilter}
+            onChange={(event) => updateFilter('status', event.target.value)}
+            className="w-full sm:w-40"
+          >
+            <option value="active">Active</option>
+            <option value="all">All status</option>
+            <option value="inactive">Inactive</option>
+            <option value="terminated">Terminated</option>
+          </Select>
+
+        </div>
+      </div>
+
+      {loadError && (
+        <Alert tone="error" className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <span>{loadError}</span>
+          <Button variant="outline" size="sm" onClick={() => void fetchEmployees()}>
+            Retry
+          </Button>
+        </Alert>
+      )}
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600" />
+        </div>
+      ) : companyEmployees.length === 0 ? (
+        <Card className="p-10 text-center">
+          <CheckCircle2 className="mx-auto h-10 w-10 text-success-600" aria-hidden="true" />
+          <h2 className="mt-4 text-base font-semibold text-neutral-900">
+            {needsContactOnly ? 'Everyone in this view has contact details' : 'No employees match these filters'}
+          </h2>
+          <p className="mt-1 text-sm text-neutral-600">
+            {needsContactOnly
+              ? 'Switch off the Needs contact details filter to review or update all employees.'
+              : 'Try clearing your search or changing the status filter.'}
+          </p>
+          {needsContactOnly && (
+            <div className="mt-4">
+              <Button variant="outline" size="sm" onClick={() => updateFilter('needs_contact_details', '')}>
+                Show all employees
+              </Button>
+            </div>
+          )}
+        </Card>
+      ) : (
+        <>
+          {isDesktop ? (
+            <Card className="overflow-hidden">
+              <Table stickyHeader>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead stickyLeft className="w-[200px] px-4">Employee</TableHead>
+                    <TableHead className="px-4">Email</TableHead>
+                    <TableHead className="w-[168px] px-4">Mobile</TableHead>
+                    <TableHead className="px-4">Mailing address</TableHead>
+                    <TableHead className="w-[112px] px-4 text-right"><span className="sr-only">Edit</span></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {companyEmployees.map((employee, index) => {
+                    const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+                    const open = isRowOpen(employee);
+                    const rowBg = index % 2 === 0 ? 'bg-white' : 'bg-neutral-50/70';
+                    const name = `${employee.first_name} ${employee.last_name}`;
+
+                    return (
+                      <Fragment key={employee.id}>
+                        <TableRow className={cn(rowBg, 'align-top')}>
+                          <TableCell stickyLeft className={cn(rowBg, 'whitespace-normal px-4 py-4')}>
+                            <EmployeeNameBlock employee={employee} />
+                          </TableCell>
+                          <TableCell className="whitespace-normal px-4 py-4 text-sm">
+                            <ContactValue value={employee.email} className="break-all" />
+                            {!open && <SharedEmailNote employee={employee} warnings={state.warnings} />}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap px-4 py-4 text-sm tabular-nums">
+                            <ContactValue value={formatPhone(employee.phone)} />
+                            {employee.phone_confirmed_by_employee_at && (
+                              <p className="mt-1 text-xs font-medium text-success-700">Confirmed by employee</p>
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-normal px-4 py-4 text-sm">
+                            <AddressValue employee={employee} />
+                          </TableCell>
+                          <TableCell className="px-4 py-4 text-right">
+                            {open ? (
+                              <span className="text-xs font-semibold text-primary-700">Editing</span>
+                            ) : (
+                              <div className="flex flex-col items-end gap-2">
+                                <Button variant="outline" size="sm" aria-label={`Edit ${name}`} disabled={!canEdit} onClick={() => openRow(employee)}>
+                                  <Pencil className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+                                  Edit
+                                </Button>
+                                {state.saved && (
+                                  <span role="status" className="inline-flex items-center gap-1 text-xs font-semibold text-success-700">
+                                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                                    Saved
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        {open && (
+                          <TableRow className={rowBg}>
+                            <TableCell colSpan={5} className="whitespace-normal border-t-0 px-4 pb-4 pt-0">
+                              {renderEditor(employee)}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {companyEmployees.map((employee) => {
+                const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
+                const open = isRowOpen(employee);
+                const name = `${employee.first_name} ${employee.last_name}`;
+
+                return (
+                  <MobileRecordCard key={employee.id}>
+                    <div className="flex items-start justify-between gap-4">
+                      <EmployeeNameBlock employee={employee} />
+                      {state.saved && !open && (
+                        <span role="status" className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-success-700">
+                          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                          Saved
+                        </span>
+                      )}
+                    </div>
+                    {open ? (
+                      <div className="mt-4">{renderEditor(employee)}</div>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Edit ${name}`}
+                        disabled={!canEdit}
+                        onClick={() => openRow(employee)}
+                        className="mt-4 block w-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 disabled:cursor-default"
+                      >
+                        <dl className="space-y-2 text-sm">
+                          <div>
+                            <dt className="text-xs font-medium text-neutral-500">Email</dt>
+                            <dd>
+                              <ContactValue value={employee.email} className="break-all" />
+                              <SharedEmailNote employee={employee} warnings={state.warnings} />
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs font-medium text-neutral-500">Mobile</dt>
+                            <dd className="tabular-nums"><ContactValue value={formatPhone(employee.phone)} /></dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs font-medium text-neutral-500">Mailing address</dt>
+                            <dd><AddressValue employee={employee} /></dd>
+                          </div>
+                        </dl>
+                        {canEdit && (
+                          <span className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-full border border-neutral-300 text-sm font-semibold text-neutral-800">
+                            <Pencil className="h-4 w-4" aria-hidden="true" />
+                            Edit contact details
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </MobileRecordCard>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {!isLoading && (totalPages > 1 || (currentPage > 1 && totalCount > 0)) && (
+        <nav
+          aria-label="Contact details pagination"
+          className="flex flex-col items-center justify-between gap-4 rounded-xl border border-neutral-200 bg-white px-4 py-4 sm:flex-row"
+        >
+          <p className="text-sm text-neutral-600">
+            Page <strong className="tabular-nums text-neutral-900">{currentPage}</strong> of{' '}
+            <strong className="tabular-nums text-neutral-900">{totalPages}</strong>{' '}
+            <span className="text-neutral-500">({rangeStart}–{rangeEnd} of {totalCount})</span>
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage <= 1 || isLoading}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage >= totalPages || isLoading}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              Next
+              <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        </nav>
+      )}
+    </>
+  );
+
+  if (embedded) {
+    return gridBody;
+  }
+
+  return (
+    <div>
+      <Header
+        title="Contact Details"
+        description="Set and update every employee's own email, mobile number, and mailing address in one place."
+        actions={
+          <Link
+            to={employeesPath(companyId)}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:bg-primary-50/60 hover:text-primary-800 sm:min-h-10"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            All employees
+          </Link>
+        }
+      />
+
+      <div className="space-y-8 p-4 sm:p-6 lg:p-8">
+        {gridBody}
+      </div>
+    </div>
+  );
+}
+
+const DESKTOP_QUERY = '(min-width: 1024px)';
+
+// One layout at a time, so each field exists once on the page.
+function useDesktopLayout(): boolean {
+  const query = (): MediaQueryList | null => (typeof window.matchMedia === 'function' ? window.matchMedia(DESKTOP_QUERY) : null);
+  const [desktop, setDesktop] = useState(() => query()?.matches ?? true);
+  useEffect(() => {
+    const list = query();
+    if (!list) return undefined;
+    const update = (): void => setDesktop(list.matches);
+    list.addEventListener('change', update);
+    return () => list.removeEventListener('change', update);
+  }, []);
+  return desktop;
+}
+
+function ContactValue({ value, className }: { value: string | null | undefined; className?: string }): ReactElement {
+  return value?.trim()
+    ? <span className={cn('text-neutral-900', className)}>{value}</span>
+    : <span className="text-neutral-400">Not added yet</span>;
+}
+
+function AddressValue({ employee }: { employee: ContactEmployee }): ReactElement {
+  const street = [employee.address_line1, employee.address_line2].map((part) => part?.trim()).filter(Boolean).join(', ');
+  const cityLine = [employee.city?.trim(), [employee.state?.trim(), employee.zip?.trim()].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  // A state on its own (every record defaults to GU) isn't an address yet.
+  if (!street && !employee.city?.trim() && !employee.zip?.trim()) return <span className="text-neutral-400">Not added yet</span>;
+  return (
+    <span className="block text-neutral-900">
+      {street && <span className="block">{street}</span>}
+      {cityLine && <span className="block">{cityLine}</span>}
+    </span>
+  );
+}
+
+// Email invites need a unique address, so keep saying so after the row
+// closes: from the save's warning, or the row's status after a reload.
+function SharedEmailNote({ employee, warnings }: { employee: ContactEmployee; warnings: EmployeeContactWarning[] }): ReactElement | null {
+  const warning = warnings.find((item) => item.code === 'shared_company_email');
+  if (!employee.email?.trim() || (!warning && employee.contact_details_status?.email_issue !== 'shared_with_coworker')) return null;
+  return (
+    <span role="status" className="mt-1 flex items-start gap-1 text-xs text-warning-800">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning-700" aria-hidden="true" />
+      <span>{warning?.message ?? 'Another employee uses this email. Email invites need a unique address.'}</span>
+    </span>
+  );
+}
+
+function EmployeeNameBlock({ employee }: { employee: ContactEmployee }): ReactElement {
+  const badge = contactStatusBadge(employee);
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary-700">
+        {getInitials(employee.first_name, employee.last_name)}
+      </div>
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-semibold leading-snug text-neutral-950">
+          {employee.first_name} {employee.last_name}
+        </p>
+        <div className="flex flex-wrap gap-1">
+          <Badge variant={badge.variant}>{badge.label}</Badge>
+          {employee.email_verified_at && <Badge variant="success">Email confirmed</Badge>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface EditorFieldProps {
+  label: string;
+  ariaLabel: string;
+  value: string;
+  disabled: boolean;
+  errors: string[];
+  onChange: (value: string) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  type?: 'text' | 'email' | 'tel';
+  placeholder?: string;
+  maxLength?: number;
+  hint?: string;
+  inputClassName?: string;
+  className?: string;
+}
+
+function EditorField({
+  label, ariaLabel, value, disabled, errors, onChange, onKeyDown, type = 'text', placeholder, maxLength, hint, inputClassName, className,
+}: EditorFieldProps): ReactElement {
+  return (
+    <label className={cn('block', className)}>
+      <span className="text-xs font-medium text-neutral-700">{label}</span>
+      <input
+        type={type}
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        className={gridInputClass(cn('mt-1 px-2', inputClassName), errors.length > 0)}
+      />
+      {errors.map((message) => (
+        <span key={message} role="alert" className="mt-1 block text-xs text-danger-700">{message}</span>
+      ))}
+      {hint && errors.length === 0 && <span className="mt-1 block text-xs text-neutral-500">{hint}</span>}
+    </label>
+  );
+}
+
+function RowConflictBanner({
+  conflict,
+  saving,
+  onKeep,
+  onDiscard,
+}: {
+  conflict: RowConflictState;
+  saving: boolean;
+  onKeep: () => void;
+  onDiscard: () => void;
+}): ReactElement {
+  const fieldsToShow = conflict.conflictingFields.filter(
+    (field): field is ContactField => CONTACT_FIELDS.includes(field as ContactField),
+  );
+  const serverValues = baselineFromEmployee(conflict.serverEmployee);
+
+  return (
+    <div role="alert" className="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-4 text-xs text-warning-950">
+      <p className="flex items-start gap-2 font-semibold">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" aria-hidden="true" />
+        <span>Someone else updated this employee while you were editing.</span>
+      </p>
+      {fieldsToShow.length > 0 ? (
+        <ul className="mt-2 space-y-2 rounded-md border border-warning-200 bg-white/80 p-2 text-neutral-800">
+          {fieldsToShow.map((field) => (
+            <li key={field} className="break-words leading-relaxed">
+              <strong>{FIELD_LABELS[field]}:</strong> Someone else changed this to{' '}
+              <span className="break-all font-mono font-medium text-neutral-950">{serverValues[field] || '(blank)'}</span>. Keep yours (
+              <span className="break-all font-mono font-medium text-neutral-950">{conflict.userChanges[field] || '(blank)'}</span>) or use theirs?
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-warning-900">Keep yours or use theirs?</p>
+      )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button size="sm" variant="primary" disabled={saving} loading={saving} loadingLabel="Saving..." onClick={onKeep}>
+          Keep yours
+        </Button>
+        <Button size="sm" variant="outline" disabled={saving} onClick={onDiscard}>
+          Use theirs
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RowInlineFeedback({
+  employee,
+  state,
+  field,
+  hidePrimaryFieldError = false,
+  canEdit,
+  onToggleSamePerson,
+  onConfirmAndSave,
+}: {
+  employee: ContactEmployee;
+  state: RowSaveState;
+  field: 'email' | 'phone';
+  hidePrimaryFieldError?: boolean;
+  canEdit: boolean;
+  onToggleSamePerson: (checked: boolean) => void;
+  onConfirmAndSave: () => void;
+}): ReactElement {
+  const fieldErrors = state.fieldErrors[field] ?? [];
+  const fieldWarnings = state.warnings.filter((warning) => warning.field === field);
+
+  return (
+    <div className="space-y-2">
+      {!hidePrimaryFieldError && !state.samePersonRequired && fieldErrors.map((msg) => (
+        <p key={msg} role="alert" className="mt-1 flex items-start gap-1 text-xs text-danger-700">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>{msg}</span>
+        </p>
+      ))}
+
+      {field === 'email' && state.samePersonRequired && (
+        <div role="alert" className="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-2 text-xs text-warning-950">
+          <p className="flex items-start gap-2 font-medium">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" aria-hidden="true" />
+            <span>{fieldErrors[0] || `This email belongs to an existing payroll login for ${employee.first_name} ${employee.last_name}.`}</span>
+          </p>
+          <label className="mt-2 flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              checked={state.samePersonChecked}
+              disabled={!canEdit || state.saving}
+              onChange={(event) => onToggleSamePerson(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-warning-400 text-primary-700 focus:ring-primary-500"
+            />
+            <span className="font-medium text-neutral-900">
+              Yes, this is {employee.first_name} {employee.last_name}&apos;s own email
+            </span>
+          </label>
+          <div className="mt-2">
+            <Button
+              size="sm"
+              disabled={!canEdit || !state.samePersonChecked || state.saving}
+              loading={state.saving}
+              loadingLabel="Saving..."
+              onClick={onConfirmAndSave}
+            >
+              Confirm and save
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {fieldWarnings.map((warning) => (
+        <p key={`${warning.code}-${warning.message}`} role="status" className="mt-1 flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 px-2 py-2 text-xs text-warning-900">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning-700" aria-hidden="true" />
+          <span>{warning.message}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
