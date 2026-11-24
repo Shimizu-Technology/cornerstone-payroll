@@ -2584,7 +2584,7 @@ module Api
             check_number: item.check_number,
             check_date: item.check_date,
             tip_components: tip_component_rows(item, fallback_components: fallback_tip_components),
-            earnings_breakdown: item.payroll_item_earnings.map { |earning| earning_row(earning) },
+            earnings_breakdown: item.earnings_in_entry_order.map { |earning| earning_row(earning) },
             deductions_breakdown: deductions_breakdown(item),
             employer_contributions_breakdown: employer_contributions_breakdown(item)
           }

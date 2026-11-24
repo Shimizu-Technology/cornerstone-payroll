@@ -517,6 +517,36 @@ RSpec.describe "Company RLS", :rls do
       { company: company, here: here, users: users }
     end
 
+    it "keeps each company's Help contacts to that company" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          company = create(:company)
+          other_company = create(:company)
+          own, foreign = TenantScope.as_system(reason: "Create Help contact policy fixtures") do
+            ids = [ company, other_company ].map do |owner|
+              CompanyHelpContact.create!(company: owner, position: 1, name: "Help #{owner.id}", phone: "671-555-0100").id
+            end
+            setup_step_three(connection, tables: %w[company_help_contacts])
+            ids
+          end
+
+          TenantScope.with_company(company.id) do
+            expect(CompanyHelpContact.pluck(:id)).to eq([ own ])
+            expect(CompanyHelpContact.where(id: foreign).update_all(name: "Changed")).to eq(0)
+            expect(CompanyHelpContact.where(id: foreign).delete_all).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                CompanyHelpContact.insert_all!([ { company_id: other_company.id, position: 2, name: "Planted", phone: "671-555-0199",
+                                                   created_at: Time.current, updated_at: Time.current } ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
+          TenantScope.as_system(reason: "Verify Help contacts") { expect(CompanyHelpContact.where(id: [ own, foreign ]).count).to eq(2) }
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
     [ [ true, "SELECT" ], [ false, "SELECT, UPDATE" ] ].each do |bypass, privileges|
       it "rejects runtime role capabilities bypass=#{bypass} and grants=#{privileges}" do
         pool.with_connection do |connection|
