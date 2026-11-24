@@ -11,7 +11,8 @@ RSpec.describe CableTicketService do
         remote_ip: "192.0.2.52", user_agent: "Cable issuance spec")
 
       expect do
-        described_class.issue!(user: user, company_id: user.company_id, clerk_token_payload: { "fva" => [ 5, -1 ] },
+        described_class.issue!(user: user, company_id: user.company_id,
+          clerk_token_payload: { "fva" => [ 5, -1 ], "two_factor_enabled" => true },
           request: request)
       end.to raise_error(MfaPolicy::VerificationRequired)
 
@@ -20,6 +21,21 @@ RSpec.describe CableTicketService do
         action: "authentication#mfa_required_denied", event_category: "security", metadata: { "source" => "cable_ticket" },
         request_id: "cable-issue", subject_name: user.name, ip_address: "192.0.2.52", user_agent: "Cable issuance spec"
       )
+    end
+
+    it "marks a ticket MFA verified only when the session has a second factor enrolled" do
+      user = create(:user, role: :admin)
+      allow(MfaPolicy).to receive(:enabled?).and_return(true)
+      payload = { "fva" => [ 1, 0 ] }
+
+      expect do
+        described_class.issue!(user: user, company_id: user.company_id, clerk_token_payload: payload)
+      end.to raise_error(MfaPolicy::VerificationRequired)
+      expect(CableConnectionTicket.count).to eq(0)
+
+      payload["two_factor_enabled"] = true
+      ticket = described_class.issue!(user: user, company_id: user.company_id, clerk_token_payload: payload)
+      expect(described_class.consume(ticket)).to include("mfa_verified" => true)
     end
 
     it "does not honor the development auth bypass in production" do
