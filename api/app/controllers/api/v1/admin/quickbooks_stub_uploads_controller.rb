@@ -26,29 +26,50 @@ module Api
         end
 
         def confirm
-          tokens = params[:review_tokens]
-          unless tokens.is_a?(Array) && tokens.size.between?(1, EmployeeDocuments::QuickbooksStubPdf::MAX_PAGES) &&
-              tokens.all? { |token| token.is_a?(String) && token.bytesize <= 2.kilobytes }
-            raise EmployeeDocuments::ReviewQuickbooksStubs::Invalid, "Select pages from the current preview."
+          tokens = token_list(:review_tokens)
+          image_tokens = token_list(:image_review_tokens)
+          count = tokens.size + image_tokens.size
+          if count > EmployeeDocuments::QuickbooksStubPdf::MAX_PAGES
+            raise EmployeeDocuments::ReviewQuickbooksStubs::Invalid, "Select up to 50 pages."
           end
 
           response.headers["Cache-Control"] = "no-store"
-          audit_step("confirm_requested", { page_count: tokens.size })
-          documents = EmployeeDocument.transaction do
+          audit_step("confirm_requested", { page_count: count })
+          confirmation = review
+          confirmation.prepare(tokens: tokens, image_tokens: image_tokens)
+          documents = persist_confirmation(confirmation)
+          render json: { data: documents.map { |document| { document_id: document.id, historical_paycheck_id: document.historical_paycheck_id } } }
+        end
+
+        private
+
+        def token_list(key)
+          tokens = params.fetch(key, [])
+          return tokens if tokens.is_a?(Array) && tokens.all? { |token| token.is_a?(String) && token.bytesize <= 2.kilobytes }
+
+          raise EmployeeDocuments::ReviewQuickbooksStubs::Invalid, "Select pages from the current preview."
+        end
+
+        def persist_confirmation(confirmation)
+          EmployeeDocument.transaction(requires_new: true) do
             current_company.lock!
             revalidate_current_company_write_access!
             unless CompanyFeatures.for(current_company).employee_portal_feature?(:stubs)
               raise CompanyWriteAccessChanged
             end
 
-            review.confirm(tokens).tap do |frozen|
-              audit_step("confirmed", { document_ids: frozen.map(&:id) })
+            documents = confirmation.confirm do |match, document|
+              if match.page.has_image
+                audit_step("image_reviewed", { page: match.page.number, document_id: document.id })
+              end
             end
+            audit_step("confirmed", { document_ids: documents.map(&:id) })
+            documents
           end
-          render json: { data: documents.map { |document| { document_id: document.id, historical_paycheck_id: document.historical_paycheck_id } } }
+        rescue StandardError
+          confirmation.cleanup!
+          raise
         end
-
-        private
 
         def require_employee_stubs!
           return if current_company && CompanyFeatures.for(current_company).employee_portal_feature?(:stubs)

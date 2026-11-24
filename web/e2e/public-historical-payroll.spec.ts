@@ -2038,19 +2038,22 @@ test('posts only reviewed QuickBooks originals', async ({ page }) => {
   await mockApplicationShell(page);
   await page.route('**/api/v1/admin/historical_imports?**', (route) => fulfillJson(route, {
     data: [],
-    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50, archive, original_stub_upload_enabled: true },
+    meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50, archive, original_stub_upload_enabled: true,
+      quickbooks_check_warnings: [{ employee_id: 1, employee_name: 'Jesse Example', row_count: 59, duplicate_groups: 1 }] },
   }));
   await page.route('**/api/v1/admin/quickbooks_stub_upload/preview', (route) => fulfillJson(route, {
     data: [
       { page: 1, status: 'matched', employee_name: 'Jesse Example', pay_date: '2026-01-20', net_pay: '900', review_token: 'first-page' },
       { page: 2, status: 'matched', employee_name: 'Sam Worker', pay_date: '2026-01-20', net_pay: '800', review_token: 'second-page' },
       { page: 3, status: 'full_ssn' },
+      { page: 4, status: 'image_review', employee_name: 'Pat Worker', pay_date: '2026-01-20', net_pay: '700', review_token: 'image-page' },
     ],
   }));
   await page.route('**/api/v1/admin/quickbooks_stub_upload/confirm', async (route) => {
     expect(route.request().headers()['x-company-id']).toBe('1');
     expect(route.request().postData()).toContain('first-page');
-    expect(route.request().postData()).not.toContain('second-page');
+    expect(route.request().postData()).toContain('second-page');
+    expect(route.request().postData()).toMatch(/name="image_review_tokens\[\]"[\s\S]*image-page/);
     await fulfillJson(route, { data: [{ document_id: 12, historical_paycheck_id: 10 }] });
   });
 
@@ -2059,13 +2062,18 @@ test('posts only reviewed QuickBooks originals', async ({ page }) => {
     name: 'quickbooks.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-test'),
   });
   await page.getByRole('button', { name: 'Preview matches' }).click();
-  await expect(page.getByText(/blocked because the page may show a full SSN/i)).toBeVisible();
+  await expect(page.getByText('Page 3 · Re-export without the full SSN.')).toBeVisible();
+  await expect(page.getByText(/Jesse Example has 59 rows/)).toBeVisible();
   const post = page.getByRole('button', { name: /Post selected stubs/ });
   await expect(post).toBeDisabled();
   await expect(page.getByRole('checkbox', { name: /^Page [123]/ })).toHaveCount(2);
-  await page.getByRole('checkbox', { name: /Jesse Example/ }).check();
+  const imageReview = page.getByRole('checkbox', { name: /I checked this page/ });
+  await page.getByRole('button', { name: 'Select all matched' }).click();
+  await expect(page.getByRole('checkbox', { name: /Jesse Example/ })).toBeChecked();
+  await expect(imageReview).not.toBeChecked();
+  await imageReview.check();
   await post.click();
   await expect(page.getByText('1 original stub posted.')).toBeVisible();
   await expect(page.getByRole('checkbox', { name: /Jesse Example/ })).toHaveCount(0);
-  await expect(page.getByRole('checkbox', { name: /Sam Worker/ })).toBeVisible();
+  await expect(imageReview).toHaveCount(0);
 });

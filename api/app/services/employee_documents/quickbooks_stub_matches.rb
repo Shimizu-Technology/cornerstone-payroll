@@ -8,8 +8,8 @@ module EmployeeDocuments
     CHECK_NUMBER = /^\s*(?:check\s*(?:no\.?|number|#))\s*:?\s*(\d+)\b/i
 
     def initialize(company_id, pages)
-      @company_id = company_id
       @pages = pages
+      @checks = QuickbooksHistory.scope(company_id)
     end
 
     def call
@@ -36,7 +36,7 @@ module EmployeeDocuments
 
       check_number = check_numbers.first
 
-      candidates = QuickbooksHistory.scope(@company_id).where(pay_date: date, net_pay: net)
+      candidates = @checks.where(pay_date: date, net_pay: net)
         .includes(:employee).select do |check|
           (names.include?(normalize(check.source_employee_name)) || names.include?(normalize(check.employee.full_name))) &&
             (check_number.nil? || check.check_number.to_s.sub(/\A0+(?=\d)/, "") == check_number.sub(/\A0+(?=\d)/, ""))
@@ -47,7 +47,7 @@ module EmployeeDocuments
       return Match.new(page:, check: nil, status: "unmatched") unless check
       return Match.new(page:, check: nil, status: "full_ssn") if employee_ssn?(page.text, check.employee)
 
-      Match.new(page:, check:, status: "matched")
+      Match.new(page:, check:, status: page.has_image ? "image_review" : "matched")
     end
 
     def extract(text, pattern)
@@ -72,7 +72,7 @@ module EmployeeDocuments
       digits = employee.ssn_digits
       return false unless digits&.size == 9
 
-      text.gsub(/[\p{Space}\p{Pd}.]/, "").include?(digits)
+      text.gsub(/[\p{Space}\p{Pd}.\/_]/, "").include?(digits)
     end
   end
 end

@@ -87,13 +87,22 @@ class PayStubGenerator
     }
   end
 
+  # Fingerprint the printed payroll values, independent of profile details and the PDF timestamp.
+  def employee_payroll_facts_sha256
+    facts = [
+      pay_period.start_date, pay_period.end_date, pay_period.pay_date, payroll_item.check_date,
+      self.class.employee_payment_line(payroll_item), format_currency(payroll_item.gross_pay),
+      format_currency(payroll_item.net_pay), format_currency(pay_ytd_total), format_currency(payroll_item.ytd_net),
+      printable_earning_rows, printable_deduction_rows, printable_addition_rows, printable_employer_rows
+    ]
+    Digest::SHA256.hexdigest(facts.to_json)
+  end
+
   def self.employee_payment_line(item)
     if !item.net_pay.to_d.positive?
       [ "Earnings statement only - no payment issued", item.check_number.presence ].compact.join(" · ")
     elsif item.effective_payment_delivery_method == "direct_deposit"
       "Direct deposit"
-    elsif item.voided?
-      "Check ##{item.check_number} (voided)"
     else
       "Check ##{item.check_number}"
     end
@@ -176,7 +185,7 @@ class PayStubGenerator
     pdf.move_down 3
 
     earnings_data = [ [ "Description", "Hours", "Rate", "Current", "YTD" ] ]
-    earnings_data.concat(itemized_earnings_rows&.map { |row| itemized_earnings_row(row) } || unitemized_earnings_rows)
+    earnings_data.concat(printable_earning_rows)
 
     # Gross total
     earnings_data << [
@@ -467,13 +476,12 @@ class PayStubGenerator
     earnings_data
   end
 
-  def render_deductions(pdf)
-    pdf.font_size(10) do
-      pdf.text "DEDUCTIONS", style: :bold
-    end
-    pdf.move_down 3
+  def printable_earning_rows
+    itemized_earnings_rows&.map { |row| itemized_earnings_row(row) } || unitemized_earnings_rows
+  end
 
-    deductions_data = [ [ "Description", "Current", "YTD" ] ]
+  def printable_deduction_rows
+    deductions_data = []
 
     taxes = tax_lines
     taxes.first(3).each { |label, amount, ytd| deductions_data << [ label, format_currency(amount), format_currency(ytd) ] }
@@ -497,6 +505,16 @@ class PayStubGenerator
     statement_ytd_breakdown.deductions.each do |row|
       deductions_data << [ pay_stub_deduction_label(row), format_currency(row.current), format_currency(row.ytd) ]
     end
+
+    deductions_data
+  end
+
+  def render_deductions(pdf)
+    pdf.font_size(10) do
+      pdf.text "DEDUCTIONS", style: :bold
+    end
+    pdf.move_down 3
+    deductions_data = [ [ "Description", "Current", "YTD" ], *printable_deduction_rows ]
 
     # Total deductions
     deductions_data << [
@@ -533,10 +551,16 @@ class PayStubGenerator
     lines
   end
 
+  def printable_addition_rows
+    statement_ytd_breakdown.other_pay.map { |row| [ row.label, format_currency(row.current), format_currency(row.ytd) ] }
+  end
+
+  def printable_employer_rows
+    statement_ytd_breakdown.employer_contributions.map { |row| [ row.label, format_currency(row.current), format_currency(row.ytd) ] }
+  end
+
   def render_non_taxable_additions(pdf)
-    additions = statement_ytd_breakdown.other_pay.map do |row|
-      [ row.label, format_currency(row.current), format_currency(row.ytd) ]
-    end
+    additions = printable_addition_rows
 
     return if additions.empty?
 
@@ -567,9 +591,7 @@ class PayStubGenerator
     end
     pdf.move_down 3
 
-    rows = [ [ "Description", "Current", "YTD" ] ] + entries.map do |entry|
-      [ entry.label, format_currency(entry.current), format_currency(entry.ytd) ]
-    end
+    rows = [ [ "Description", "Current", "YTD" ], *printable_employer_rows ]
     rows << [
       { content: "TOTAL EMPLOYER CONTRIBUTIONS", font_style: :bold },
       { content: format_currency(entries.sum(0.to_d) { |entry| entry.current.to_d }), font_style: :bold },

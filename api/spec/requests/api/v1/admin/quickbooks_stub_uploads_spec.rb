@@ -6,29 +6,47 @@ RSpec.describe "QuickBooks original stubs", type: :request do
   let(:company) { create(:company, historical_payroll_enabled: true) }
   let(:admin) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:employee) { create(:employee, company: company, first_name: "Jesse", last_name: "Example") }
-  let!(:check) { create(:historical_paycheck, employee: employee, source_employee_name: "Example, Jesse") }
-  let(:storage) { instance_double(R2StorageService, upload: true) }
+  let(:check) { create(:historical_paycheck, employee: employee, source_employee_name: "Example, Jesse") }
+  let(:storage) { instance_double(R2StorageService, upload: true, delete: true) }
   let(:root) { "/api/v1/admin/quickbooks_stub_upload" }
 
+  include ActiveSupport::Testing::TimeHelpers
+
   before do
+    create(:pay_period, :committed, company: company, start_date: Date.new(2026, 8, 24),
+      end_date: Date.new(2026, 9, 6), pay_date: Date.new(2026, 9, 10))
+    check
     allow_any_instance_of(Api::V1::Admin::QuickbooksStubUploadsController).to receive(:current_user).and_return(admin)
     allow(CompanyFeatures).to receive(:for).with(company).and_return(instance_double(CompanyFeatures, employee_portal_feature?: true))
     allow(R2StorageService).to receive(:new).and_return(storage)
   end
 
-  def pdf(*pages)
+  def pdf(*pages, image: false, nested: false)
     bytes = Prawn::Document.new do |pdf|
       pages.each_with_index do |lines, index|
         pdf.start_new_page if index.positive?
         pdf.text(lines)
+        add_image(pdf, nested: nested) if image
       end
     end.render
 
     Rack::Test::UploadedFile.new(StringIO.new(bytes), "application/pdf", original_filename: "source.pdf")
   end
 
-  def submit(action, upload:, tokens: [])
-    post "#{root}/#{action}", params: { upload: upload, review_tokens: tokens },
+  def add_image(pdf, nested:)
+    png = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aBakAAAAASUVORK5CYII=")
+    return pdf.image(StringIO.new(png), width: 10) unless nested
+
+    image, = pdf.build_image_object(StringIO.new(png))
+    form = pdf.state.store.ref(Type: :XObject, Subtype: :Form, BBox: [ 0, 0, 10, 10 ],
+      Resources: { XObject: { InlineLogo: image } })
+    form.stream << "q /InlineLogo Do Q"
+    pdf.state.page.xobjects[:Nested] = form
+    pdf.add_content("/Nested Do")
+  end
+
+  def submit(action, upload:, tokens: [], image_tokens: [])
+    post "#{root}/#{action}", params: { upload: upload, review_tokens: tokens, image_review_tokens: image_tokens },
       headers: { "X-Company-Id" => company.id.to_s }
   end
 
@@ -74,6 +92,58 @@ RSpec.describe "QuickBooks original stubs", type: :request do
     expect { submit("confirm", upload: pdf(with_ssn), tokens: [ token ]) }.not_to change(EmployeeDocument, :count)
     expect(response).to have_http_status(:unprocessable_entity)
     expect(storage).not_to have_received(:upload)
+  end
+
+  it "blocks spaced digits, slash and underscore separators, and flags possible routing numbers" do
+    variants = [ "1 1 1 - 2 2 - 3 3 3 3", "111/22/3333", "111_22_3333" ]
+    submit("preview", upload: pdf(*variants.map { |ssn| "#{page_text}\nSSN: #{ssn}" }, "#{page_text}\nBank: 111223333"))
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").pluck("status")).to eq(%w[full_ssn full_ssn full_ssn possible_ssn])
+    expect(storage).not_to have_received(:upload)
+  end
+
+  [ false, true ].each do |nested|
+    it "requires and audits visual review of an image #{nested ? 'inside a form' : 'on the page'}" do
+      upload = -> { pdf(page_text, image: true, nested: nested) }
+      submit("preview", upload: upload.call)
+      expect(response).to have_http_status(:ok), response.body
+      page = response.parsed_body.fetch("data").first
+      expect(page.fetch("status")).to eq("image_review")
+      token = page.fetch("review_token")
+
+      expect { submit("confirm", upload: upload.call, tokens: [ token ]) }.not_to change(EmployeeDocument, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect { submit("confirm", upload: upload.call, image_tokens: [ token ]) }.to change(EmployeeDocument, :count).by(1)
+      expect(response).to have_http_status(:ok), response.body
+      expect(AuditLog.find_by!(company: company, action: "quickbooks_stub_uploads#image_reviewed").metadata).to include("page" => 1)
+    end
+  end
+
+  it "identifies an already posted page and an expired preview" do
+    submit("preview", upload: pdf(page_text))
+    token = response.parsed_body.fetch("data").first.fetch("review_token")
+    submit("confirm", upload: pdf(page_text), tokens: [ token ])
+    expect(response).to have_http_status(:ok)
+    submit("preview", upload: pdf(page_text))
+    expect(response.parsed_body.fetch("data").first).to include("status" => "already_posted")
+    travel 31.minutes do
+      submit("confirm", upload: pdf(page_text), tokens: [ token ])
+      expect(response.parsed_body.fetch("error")).to eq("This preview expired. Upload the file again.")
+    end
+  end
+
+  it "cleans up newly uploaded objects when a later page conflicts" do
+    next_check = create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 1, 21))
+    next_text = page_text.sub("01/20/2026", "01/21/2026")
+    submit("preview", upload: pdf(page_text, next_text))
+    tokens = response.parsed_body.fetch("data").pluck("review_token")
+    EmployeeDocument.create!(company: company, historical_paycheck: next_check, revision: 1,
+      storage_key: "prior.pdf", sha256: "a" * 64, posted_at: Time.current)
+
+    expect { submit("confirm", upload: pdf(page_text, next_text), tokens: tokens) }.not_to change(EmployeeDocument, :count)
+    expect(response.parsed_body.fetch("error")).to start_with("Page 2 conflicts")
+    expect(storage).to have_received(:delete).with(include("/historical_paycheck_#{check.id}/")).once
+    expect(storage).not_to have_received(:delete).with("prior.pdf")
   end
 
   it "uses a supplied check number to resolve same-day same-amount checks" do
