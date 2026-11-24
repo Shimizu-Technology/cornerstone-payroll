@@ -10,6 +10,7 @@ module PortalNotifications
     MESSAGE_LINE = "You have a new message in the portal."
     UPDATE_LINE = "You have a new message or update in the portal."
     DIGEST_LINE = "You have updates waiting in Cornerstone Payroll."
+    EMPLOYEE_FOOTER_LINE = "Replies to this email are not monitored."
     SIGN_IN_LINE = "Sign in to view it."
     FOOTER_LINE = "Please reply in the portal. Replies to this email are not monitored. " \
       "You can change these alerts under Notifications in your account menu."
@@ -23,13 +24,20 @@ module PortalNotifications
 
     def initialize(audience:, delivery_mode:, events:, app_user: true)
       @subject = SUBJECT
-      @footer = app_user ? FOOTER_LINE : EXTRA_ADDRESS_FOOTER_LINE
+      @footer = if audience == "employee" then EMPLOYEE_FOOTER_LINE
+      elsif app_user then FOOTER_LINE
+      else EXTRA_ADDRESS_FOOTER_LINE
+      end
       headline = if delivery_mode == "digest" then DIGEST_LINE
       elsif events.all?(&:message_event?) then MESSAGE_LINE
       else UPDATE_LINE
       end
       @lines = [ headline, SIGN_IN_LINE ]
-      @link = "#{self.class.frontend_url}#{path_for(audience, events)}"
+      @link = if audience == "employee"
+        self.class.employee_portal_url(events.first.company)
+      else
+        "#{self.class.frontend_url}#{path_for(audience, events)}"
+      end
     end
 
     def payload(from:, to:)
@@ -73,9 +81,21 @@ module PortalNotifications
 
       case event.category
       when "payroll_submissions", "payroll_updates" then :payroll
-      when "employee_changes", "employee_change_decisions" then :changes
+      when "employee_changes", "employee_change_decisions", "address_approvals" then :changes
+      when "contact_changes" then :contact_changes
+      when "employee_address_decisions" then [ :employee, event.company_id ]
       else :general
       end
+    end
+
+    def self.employee_portal_url(company)
+      slug = company.subdomain_slug
+      if slug&.match?(TenantSubdomainRegistry::SLUG_PATTERN) && !TenantSubdomainRegistry::RESERVED_SLUGS.include?(slug) &&
+          CompanyFeatures.for(company).subdomain_enabled?
+        return "https://#{slug}.#{TenantSubdomainRegistry::ROOT_DOMAIN}"
+      end
+
+      ENV["EMPLOYEE_PORTAL_URL"].presence&.delete_suffix("/")
     end
 
     def self.frontend_url
@@ -93,6 +113,7 @@ module PortalNotifications
       when [ false, :file_requests ] then "/messages"
       when [ false, :payroll ] then "/payroll-files"
       when [ true, :changes ] then "/settings/client-change-requests"
+      when [ false, :contact_changes ] then "/change-requests?view=contact"
       when [ false, :changes ] then "/change-requests"
       when [ true, :general ] then "/settings/client-documents"
       else "/documents"

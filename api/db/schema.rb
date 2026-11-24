@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_25_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_25_140100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -943,6 +943,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_120000) do
     t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
     t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY (ARRAY[('invited'::character varying)::text, ('active'::character varying)::text]))"
     t.index [ "employee_id" ], name: "index_employee_account_links_on_employee_id"
+    t.index [ "id", "employee_id", "company_id" ], name: "idx_employee_account_links_employee_key", unique: true
     t.index [ "invite_code_digest" ], name: "index_employee_account_links_on_invite_code_digest", unique: true, where: "(invite_code_digest IS NOT NULL)"
     t.index [ "invite_token_digest" ], name: "index_employee_account_links_on_invite_token_digest", unique: true
     t.index [ "invited_by_id" ], name: "index_employee_account_links_on_invited_by_id"
@@ -961,10 +962,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_120000) do
     t.jsonb "direct_changes_applied", default: {}, null: false
     t.bigint "employee_id", null: false
     t.jsonb "original_values", default: {}, null: false
+    t.boolean "own_record", default: false, null: false
     t.jsonb "proposed_changes", default: {}, null: false
     t.string "request_kind", default: "update", null: false
     t.text "request_notes"
     t.bigint "requested_by_id"
+    t.bigint "requested_by_link_id"
     t.text "review_notes"
     t.datetime "reviewed_at"
     t.bigint "reviewed_by_id"
@@ -977,6 +980,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_120000) do
     t.index [ "employee_id" ], name: "idx_employee_change_requests_one_pending", unique: true, where: "(status = 0)"
     t.index [ "employee_id" ], name: "index_employee_change_requests_on_employee_id"
     t.index [ "requested_by_id" ], name: "index_employee_change_requests_on_requested_by_id"
+    t.index [ "requested_by_link_id" ], name: "index_employee_change_requests_on_requested_by_link_id"
     t.index [ "reviewed_by_id" ], name: "index_employee_change_requests_on_reviewed_by_id"
     t.check_constraint "request_kind::text = ANY (ARRAY['create'::character varying::text, 'update'::character varying::text])", name: "employee_change_requests_kind_check"
   end
@@ -1030,6 +1034,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_120000) do
     t.check_constraint "(item_code::text <> ALL (ARRAY['certify_employee_profile'::character varying::text, 'certify_variable_salary_pay'::character varying::text, 'certify_retirement_configuration'::character varying::text, 'certify_multiple_wage_rates'::character varying::text, 'certify_tipped_pay'::character varying::text, 'certify_contractor_setup'::character varying::text, 'loan_balance_not_transferred'::character varying::text])) OR source_reference IS NOT NULL AND btrim(source_reference::text) <> ''::text AND effective_on IS NOT NULL", name: "employee_config_review_certification_evidence"
     t.check_constraint "jsonb_typeof(item_fields) = 'array'::text", name: "employee_configuration_review_resolutions_fields_array"
     t.check_constraint "source_reference IS NULL OR char_length(source_reference::text) <= 255", name: "employee_config_review_source_reference_length"
+  end
+
+  create_table "employee_contact_changes_to_confirm", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "changed_by_id"
+    t.bigint "confirmed_by_id"
+    t.datetime "confirmed_at"
+    t.string "change_kind", null: false
+    t.jsonb "before_values", default: {}, null: false
+    t.jsonb "after_values", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "changed_by_id" ], name: "index_employee_contact_changes_to_confirm_on_changed_by_id"
+    t.index [ "company_id", "confirmed_at", "id" ], name: "idx_contact_changes_confirmation"
+    t.index [ "confirmed_by_id" ], name: "index_employee_contact_changes_to_confirm_on_confirmed_by_id"
+    t.index [ "employee_id", "company_id" ], name: "idx_contact_changes_employee"
+    t.check_constraint "change_kind::text = ANY (ARRAY['contact'::character varying, 'address'::character varying]::text[])", name: "employee_contact_changes_kind_check"
   end
 
   create_table "employee_deductions", force: :cascade do |t|
@@ -5156,6 +5178,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_120000) do
   add_foreign_key "employee_account_links", "users", column: "invited_by_id"
   add_foreign_key "employee_account_links", "users", column: "revoked_by_id"
   add_foreign_key "employee_change_requests", "companies"
+  add_foreign_key "employee_change_requests", "employee_account_links", column: [ "requested_by_link_id", "employee_id", "company_id" ], primary_key: [ "id", "employee_id", "company_id" ], name: "fk_employee_change_requests_requester_link"
   add_foreign_key "employee_change_requests", "employees"
   add_foreign_key "employee_change_requests", "users", column: "requested_by_id"
   add_foreign_key "employee_change_requests", "users", column: "reviewed_by_id"
@@ -5165,6 +5188,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_120000) do
   add_foreign_key "employee_configuration_review_resolutions", "companies", on_delete: :restrict
   add_foreign_key "employee_configuration_review_resolutions", "employees", on_delete: :restrict
   add_foreign_key "employee_configuration_review_resolutions", "users", column: "reviewed_by_id", on_delete: :nullify
+  add_foreign_key "employee_contact_changes_to_confirm", "companies"
+  add_foreign_key "employee_contact_changes_to_confirm", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_contact_changes_employee", on_delete: :cascade
+  add_foreign_key "employee_contact_changes_to_confirm", "users", column: "changed_by_id", on_delete: :nullify
+  add_foreign_key "employee_contact_changes_to_confirm", "users", column: "confirmed_by_id", on_delete: :nullify
   add_foreign_key "employee_deductions", "deduction_types"
   add_foreign_key "employee_deductions", "employees"
   add_foreign_key "employee_deductions", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_deductions_company_parent"

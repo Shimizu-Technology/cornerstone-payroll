@@ -34,6 +34,18 @@ module PortalNotifications
       audience: "client", default_mode: "digest", label: "Change request decisions",
       description: "Cornerstone approves or declines a change you requested."
     },
+    "address_approvals" => {
+      audience: "client", default_mode: "immediate", label: "Address requests to review",
+      description: "An employee submits an address request for approval."
+    },
+    "contact_changes" => {
+      audience: "client", default_mode: "digest", label: "Employee contact changes",
+      description: "An employee or client user updates employee contact details."
+    },
+    "employee_address_decisions" => {
+      audience: "employee", default_mode: "immediate", label: "Address request decisions",
+      description: "Your address request was approved or declined."
+    },
     "payroll_submissions" => {
       audience: "staff", default_mode: "immediate", label: "Pay period files and approvals",
       description: "A client sends a pay period's payroll files, approves a draft or asks for a change."
@@ -48,6 +60,9 @@ module PortalNotifications
     "client_message" => { category: "client_messages", message: true },
     "client_upload" => { category: "client_uploads" },
     "employee_change_submitted" => { category: "employee_changes" },
+    "address_approval_requested" => { category: "address_approvals" },
+    "employee_contact_changed" => { category: "contact_changes" },
+    "employee_address_decided" => { category: "employee_address_decisions" },
     "staff_reply" => { category: "portal_replies", message: true },
     "employee_change_decided" => { category: "employee_change_decisions" },
     "payroll_submission_sent" => { category: "payroll_submissions" },
@@ -105,6 +120,23 @@ module PortalNotifications
         actor: change_request.requested_by, subject: change_request,
         dedupe_key: "employee_change_submitted:#{change_request.id}",
         metadata: { change_request_id: change_request.id, request_kind: change_request.request_kind })
+      if change_request.profile_address?
+        record!(event_type: "address_approval_requested", company: change_request.company,
+          actor: change_request.requested_by, subject: change_request,
+          dedupe_key: "address_approval_requested:#{change_request.id}")
+      end
+    end
+
+    def employee_contact_changed!(entry, actor: entry.changed_by)
+      record!(event_type: "employee_contact_changed", company: entry.company, actor: actor,
+        subject: entry, dedupe_key: "employee_contact_changed:#{entry.id}")
+    end
+
+    # The employee submission slice opts in to this notice. Client request
+    # decisions continue to use their existing requester notification.
+    def employee_address_decided!(change_request, actor:)
+      record!(event_type: "employee_address_decided", company: change_request.company, actor: actor,
+        subject: change_request, dedupe_key: "employee_address_decided:#{change_request.id}:#{change_request.status}")
     end
 
     def employee_change_decided!(change_request, actor:)

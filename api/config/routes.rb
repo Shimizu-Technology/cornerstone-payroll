@@ -104,7 +104,11 @@ Rails.application.routes.draw do
         resources :portal_file_requests, only: [] do
           post :respond, on: :member
         end
-        resources :employee_change_requests, only: [ :index, :show ]
+        resources :employee_change_requests, only: [ :index, :show ] do
+          get :contact_changes, on: :collection
+          patch :approve, on: :member
+          patch :reject, on: :member
+        end
         resources :pay_periods, only: [ :index, :show ] do
           post :approve_review, on: :member
           post :request_changes, on: :member
@@ -332,6 +336,10 @@ Rails.application.routes.draw do
             get :xlsx
             get :pdf
           end
+        end
+        resources :employee_contact_changes_to_confirm, only: :index do
+          patch :confirm, on: :member
+          patch :confirm_all, on: :collection
         end
         resources :employee_change_requests, only: [ :index, :show ] do
           member do
