@@ -9,6 +9,7 @@ require "stringio"
 require "uri"
 
 class ProductionReadiness
+  MFA_SAMPLE_MAX_AGE = 15.minutes
   MAX_PROVIDER_RESPONSE_BYTES = 1.megabyte
   PRIVATE_PROXY_NETWORKS = [
     IPAddr.new("127.0.0.0/8"),
@@ -177,6 +178,7 @@ class ProductionReadiness
       check("R2 upload/read/delete round trip succeeds") { r2_round_trip },
       check("Resend API key and every application sender domain are ready") { resend_ready? },
       check("Clerk Backend API accepts the configured key and matches MFA evidence") { clerk_ready? },
+      check("Clerk session token includes the MFA enrollment claim") { clerk_mfa_sample_ready? },
       check("time tracking destinations resolve only to public addresses") { time_tracking_destinations_resolve? }
     ]
   end
@@ -319,6 +321,23 @@ class ProductionReadiness
     status == 200 &&
       body["id"].present? &&
       body["id"] == env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s.strip
+  end
+
+  def clerk_mfa_sample_ready?
+    return true unless MfaPolicy.enabled?(env: env)
+
+    path = env["CLERK_MFA_SAMPLE_TOKEN_FILE"].presence
+    return false unless path
+
+    verifier = ClerkTokenVerifier.new(env: env, cache: ActiveSupport::Cache::MemoryStore.new,
+      http_get: ->(uri) { http_get.call(uri, nil) })
+    # Clerk session tokens live about 60 seconds, which is shorter than the
+    # probes that run before this one. A recently issued, correctly signed
+    # token still proves what the template outputs, so allow a short window.
+    payload = verifier.verify(File.read(path, 16.kilobytes).strip, exp_leeway: MFA_SAMPLE_MAX_AGE.to_i)
+    payload && payload["sid"].present? &&
+      payload["iat"].is_a?(Integer) && payload["iat"] >= MFA_SAMPLE_MAX_AGE.ago.to_i &&
+      [ true, false ].include?(payload[MfaPolicy::ENROLLMENT_CLAIM])
   end
 
   def time_tracking_destinations_resolve?
