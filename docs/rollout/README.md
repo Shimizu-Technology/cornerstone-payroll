@@ -16,6 +16,7 @@
 | 04 | [04-MULTI-CLIENT-SEQUENCING-PLAN.md](04-MULTI-CLIENT-SEQUENCING-PLAN.md) | Rollout order + gate tracker for all 5 clients |
 | 05 | [05-ISSUE-REMEDIATION-LOG.md](05-ISSUE-REMEDIATION-LOG.md) | Issue log template + escalation rules |
 | 06 | [06-MANUAL-ENTRY-CYCLE-RUNBOOK.md](06-MANUAL-ENTRY-CYCLE-RUNBOOK.md) | Step-by-step runbook for ST / Cornerstone Internal / DDG / SPR manual-entry cycles |
+| M4 | [M4_EMPLOYEE_PLATFORM_RUNBOOK.md](M4_EMPLOYEE_PLATFORM_RUNBOOK.md) | Set up the employee Render service, Netlify site and client addresses (M4-10) |
 
 Operator identity, recovery exercises, and the final acceptance record are maintained in [Payroll operator and recovery acceptance](../OPERATOR_AND_RECOVERY_ACCEPTANCE.md).
 

@@ -1,4 +1,5 @@
 import { assertDeploymentFlags, assertStagingOrigin, stagingBrowserContainment } from './build/staging'
+import { employeeIndexHtml } from './build/employee-html'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -27,12 +28,14 @@ export default defineConfig(({ mode, command }) => {
     if (env.VITE_AUTH_ENABLED === 'false') throw new Error('Staging build requires authentication')
   }
   return {
+    // A separate dependency cache lets the employee dev server run beside the staff one.
+    ...(surface === 'employee' ? { cacheDir: 'node_modules/.vite-employee' } : {}),
     plugins: [
       surface === 'employee' && {
         name: 'employee-entry',
         transformIndexHtml: {
           order: 'pre',
-          handler: (html: string) => html.replace('/src/main.tsx', '/src/employee-main.tsx'),
+          handler: () => employeeIndexHtml(),
         },
       },
       stagingBrowserContainment(env.VITE_DEPLOYMENT_ENV === 'staging'),

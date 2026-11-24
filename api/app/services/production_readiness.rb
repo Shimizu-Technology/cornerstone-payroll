@@ -9,6 +9,7 @@ require "stringio"
 require "uri"
 
 class ProductionReadiness
+  MFA_SAMPLE_MAX_AGE = 15.minutes
   MAX_PROVIDER_RESPONSE_BYTES = 1.megabyte
   PRIVATE_PROXY_NETWORKS = [
     IPAddr.new("127.0.0.0/8"),
@@ -72,6 +73,12 @@ class ProductionReadiness
     tax_year_readiness: -> {
       TenantScope.as_system(reason: "Check tax table verification across open pay periods") { TaxYearReadiness.new.as_json }
     },
+    process_role: -> { ProcessRole.current },
+    route_paths: -> { Rails.application.routes.routes.map { |route| route.path.spec.to_s } },
+    cable_mount_path: -> { Rails.application.config.action_cable.mount_path },
+    primary_pool_size: -> { ActiveRecord::Base.connection_pool.db_config.max_connections },
+    rate_limit_store: -> { Rack::Attack.cache.store },
+    rate_limit_probe: -> { Rack::Attack.cache.store.shared_round_trip },
     http_get: nil
   )
     @env = env
@@ -91,6 +98,12 @@ class ProductionReadiness
     @encrypted_data_probe = encrypted_data_probe
     @tax_configuration_valid = tax_configuration_valid
     @tax_year_readiness = tax_year_readiness
+    @process_role = process_role
+    @route_paths = route_paths
+    @cable_mount_path = cable_mount_path
+    @primary_pool_size = primary_pool_size
+    @rate_limit_store = rate_limit_store
+    @rate_limit_probe = rate_limit_probe
     @http_get = http_get || method(:default_http_get)
   end
 
@@ -109,9 +122,64 @@ class ProductionReadiness
 
   attr_reader :env, :environment, :config, :primary_record, :cache, :cache_record,
     :queue_record, :queue_process, :cable_record, :job_adapter, :cable_adapter,
-    :storage_factory, :time_sources, :encryption_credentials, :encrypted_data_probe, :tax_configuration_valid, :http_get
+    :storage_factory, :time_sources, :encryption_credentials, :encrypted_data_probe, :tax_configuration_valid, :http_get,
+    :process_role, :route_paths, :cable_mount_path, :primary_pool_size, :rate_limit_store, :rate_limit_probe
 
   def configuration_checks
+    base_configuration_checks + employee_web_checks
+  end
+
+  def employee_web?
+    env.fetch("APP_PROCESS_ROLE", ProcessRole::ALL) == ProcessRole::EMPLOYEE_WEB
+  end
+
+  # Applied only on the employee service. Payroll and `all` processes skip them.
+  def employee_web_checks
+    return [] unless employee_web?
+
+    [
+      check("employee_web: process role booted as employee_web without payroll routes or Cable") { employee_surface_isolated? },
+      check("employee_web: database pool is capped at #{ProcessRole::EMPLOYEE_WEB_DB_POOL_MAX}, matches DB_POOL_MAX and runs one Puma process") { employee_pool_capped? },
+      check("employee_web: rate-limit counters use the shared Redis store") do
+        RackAttackStore.shared_url?(env["RACK_ATTACK_REDIS_URL"]) && rate_limit_store.call.is_a?(RackAttackStore::Failover)
+      end,
+      check("employee_web: Clerk authorized parties are explicit production HTTPS origins") { clerk_authorized_parties_valid? }
+    ]
+  end
+
+  def employee_surface_isolated?
+    paths = route_paths.call
+    process_role.call == ProcessRole::EMPLOYEE_WEB &&
+      cable_mount_path.call.nil? &&
+      paths.present? &&
+      paths.all? { |path| ProcessRole::EMPLOYEE_WEB_ROUTE_PATTERN.match?(path) }
+  end
+
+  def employee_pool_setting
+    Integer(env["DB_POOL_MAX"].to_s.strip, 10)
+  rescue ArgumentError
+    nil
+  end
+
+  # Puma (config/puma.rb) runs cluster mode only for WEB_CONCURRENCY >= 2, so a
+  # larger value multiplies the pool by that many processes. Solid Queue in Puma
+  # adds a supervisor, workers and dispatcher that also hold connections.
+  PUMA_TRUTHY = %w[1 true t yes y on].freeze
+
+  def employee_single_process?
+    env.fetch("WEB_CONCURRENCY", "0").to_s.strip.to_i < 2 &&
+      !PUMA_TRUTHY.include?(env.fetch("SOLID_QUEUE_IN_PUMA", "false").to_s.strip.downcase)
+  end
+
+  def employee_pool_capped?
+    configured = employee_pool_setting
+    configured.present? &&
+      configured.between?(1, ProcessRole::EMPLOYEE_WEB_DB_POOL_MAX) &&
+      primary_pool_size.call == configured &&
+      employee_single_process?
+  end
+
+  def base_configuration_checks
     [
       check("RAILS_ENV is production") { environment.production? },
       check("authentication is enabled") { env.fetch("AUTH_ENABLED", "true") == "true" },
@@ -180,8 +248,17 @@ class ProductionReadiness
       check("R2 upload/read/delete round trip succeeds") { r2_round_trip },
       check("Resend API key and every application sender domain are ready") { resend_ready? },
       check("Clerk Backend API accepts the configured key and matches MFA evidence") { clerk_ready? },
+      check("Clerk session token includes the MFA enrollment claim") { clerk_mfa_sample_ready? },
       check("time tracking destinations resolve only to public addresses") { time_tracking_destinations_resolve? }
-    ]
+    ] + shared_rate_limit_live_checks
+  end
+
+  # The Failover store falls back to process-local counters when Redis is down,
+  # so only a direct write and delete on the shared store proves it is reachable.
+  def shared_rate_limit_live_checks
+    return [] unless employee_web? || RackAttackStore.shared_url?(env["RACK_ATTACK_REDIS_URL"])
+
+    [ check("shared rate-limit store accepts a write and delete round trip") { rate_limit_probe.call } ]
   end
 
   def check(name)
@@ -322,6 +399,23 @@ class ProductionReadiness
     status == 200 &&
       body["id"].present? &&
       body["id"] == env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s.strip
+  end
+
+  def clerk_mfa_sample_ready?
+    return true unless MfaPolicy.enabled?(env: env)
+
+    path = env["CLERK_MFA_SAMPLE_TOKEN_FILE"].presence
+    return false unless path
+
+    verifier = ClerkTokenVerifier.new(env: env, cache: ActiveSupport::Cache::MemoryStore.new,
+      http_get: ->(uri) { http_get.call(uri, nil) })
+    # Clerk session tokens live about 60 seconds, which is shorter than the
+    # probes that run before this one. A recently issued, correctly signed
+    # token still proves what the template outputs, so allow a short window.
+    payload = verifier.verify(File.read(path, 16.kilobytes).strip, exp_leeway: MFA_SAMPLE_MAX_AGE.to_i)
+    payload && payload["sid"].present? &&
+      payload["iat"].is_a?(Integer) && payload["iat"] >= MFA_SAMPLE_MAX_AGE.ago.to_i &&
+      [ true, false ].include?(payload[MfaPolicy::ENROLLMENT_CLAIM])
   end
 
   def time_tracking_destinations_resolve?

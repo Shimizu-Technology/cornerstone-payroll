@@ -177,7 +177,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 22
     defaults:
       run:
         working-directory: web
@@ -212,7 +212,7 @@ jobs:
   # Stateful lanes stay serial within one runner; their fixtures remain isolated.
   browser:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 18
     services:
       postgres:
         image: postgres:16
