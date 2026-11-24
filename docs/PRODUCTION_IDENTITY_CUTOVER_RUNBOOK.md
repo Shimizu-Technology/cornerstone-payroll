@@ -162,7 +162,7 @@ Complete the following steps after the verification matrix passes.
 
 1. Confirm the exact provider instance ID and MFA evidence reference are configured, then set `REQUIRE_MFA=true` in the relevant backend environment.
 2. Deploy the attestation change.
-3. Run the complete deployed `production:readiness` task. For Payroll with MFA enabled, supply a fresh default Clerk session JWT from that deployment's configured instance and frontend origin using a private temporary file (mode `0600`). Set `CLERK_MFA_SAMPLE_TOKEN_FILE=/path/to/private-file` for this command only and delete the file immediately afterward. Use a dedicated test account and keep the token out of shell history, logs, and retained evidence.
+3. Run the complete deployed `production:readiness` task. For Payroll with MFA enabled, supply a fresh default Clerk session JWT from that deployment's configured instance and frontend origin using a private temporary file (mode `0600`). Set `CLERK_MFA_SAMPLE_TOKEN_FILE=/path/to/private-file` for this command only and delete the file immediately afterward. The check accepts a correctly signed token issued within the last 15 minutes, even if its 60-second lifetime has run out, so copy it shortly before running the task. Use a dedicated test account and keep the token out of shell history, logs, and retained evidence.
 4. Require all Cornerstone and AIRE readiness checks to pass.
 5. Keep production payroll paused until operator and recovery acceptance is complete.
 

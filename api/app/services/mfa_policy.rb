@@ -5,6 +5,7 @@ class MfaPolicy
 
   ERROR_MESSAGE = "Multi-factor authentication is required before accessing payroll."
   ERROR_CODE = "mfa_required"
+  ENROLLMENT_REQUIRED_CODE = "mfa_enrollment_required"
   STEP_UP_MAX_AGE_MINUTES = 10
   ENROLLMENT_CLAIM = "two_factor_enabled"
   TRUTHY_VALUES = %w[1 true t yes y on].freeze
@@ -14,7 +15,11 @@ class MfaPolicy
   end
 
   def self.required_for?(user:, env: ENV)
-    enabled?(env: env) && user.present? && !user.employee? && !user.portal_employee?
+    enabled?(env: env) && user.present? && !employee_only?(user)
+  end
+
+  def self.employee_only?(user)
+    user.employee? || user.portal_employee?
   end
 
   def self.verified_second_factor?(payload)
@@ -25,6 +30,9 @@ class MfaPolicy
     payload.is_a?(Hash) && payload[ENROLLMENT_CLAIM] == true
   end
 
+  # fva counts whole minutes, so an inclusive limit accepts a verification up to
+  # about a minute older than Clerk's own afterMinutes check. That only makes the
+  # server slightly more lenient than the prompt; it never asks for a factor twice.
   def self.recently_verified_second_factor?(payload, max_age_minutes: STEP_UP_MAX_AGE_MINUTES)
     return false unless max_age_minutes.is_a?(Integer) && max_age_minutes >= 0
 

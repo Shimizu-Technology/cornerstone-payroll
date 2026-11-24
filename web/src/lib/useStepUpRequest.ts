@@ -1,6 +1,11 @@
+import { useCallback } from 'react';
 import { useAuth, useReverification } from '@clerk/react';
 
-/** Pass a request factory so Clerk can retry it with a fresh session token. */
+/**
+ * Pass a request factory so Clerk can retry it with a fresh session token.
+ * If the person closes the prompt, the call throws; check it with
+ * `isReverificationCancelledError` from `@clerk/react/errors`.
+ */
 export function useStepUpRequest<Args extends unknown[]>(
   request: (token: string, ...args: Args) => Promise<Response>,
 ): (...args: Args) => Promise<Response> {
@@ -16,5 +21,5 @@ export function useStepUpRequest<Args extends unknown[]>(
     return { response, clerk_error: hint?.clerk_error };
   });
 
-  return async (...args) => (await send(...args)).response;
+  return useCallback(async (...args: Args) => (await send(...args)).response, [send]);
 }

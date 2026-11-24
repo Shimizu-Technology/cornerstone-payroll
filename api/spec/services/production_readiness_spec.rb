@@ -12,7 +12,7 @@ RSpec.describe ProductionReadiness do
   let(:jwk) { JWT::JWK.new(signing_key) }
   let(:sample_claims) do
     { iss: clerk_issuer, azp: "https://payroll.example.com", sid: "sess_readiness", sub: "user_readiness",
-      exp: 1.minute.from_now.to_i, two_factor_enabled: true }
+      iat: Time.current.to_i, exp: 1.minute.from_now.to_i, two_factor_enabled: true }
   end
   let(:encryption) do
     Struct.new(:primary_key, :deterministic_key, :key_derivation_salt).new("primary", "deterministic", "salt")
@@ -219,8 +219,22 @@ RSpec.describe ProductionReadiness do
       end
     end
 
-    it "does not accept an expired or incorrectly signed sample" do
-      with_sample_token(claims: sample_claims.merge(exp: 1.minute.ago.to_i)) do
+    it "accepts a recently issued sample that expired while earlier probes ran" do
+      with_sample_token(claims: sample_claims.merge(iat: 2.minutes.ago.to_i, exp: 1.minute.ago.to_i)) do
+        expect(readiness.run(live: true).failures.map(&:name)).not_to include(check_name)
+      end
+    end
+
+    it "does not accept an old, undated or incorrectly signed sample" do
+      with_sample_token(claims: sample_claims.merge(iat: 20.minutes.ago.to_i, exp: 19.minutes.ago.to_i)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
+      end
+
+      with_sample_token(claims: sample_claims.merge(iat: 20.minutes.ago.to_i)) do
+        expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
+      end
+
+      with_sample_token(claims: sample_claims.except(:iat)) do
         expect(readiness.run(live: true).failures.map(&:name)).to include(check_name)
       end
 
