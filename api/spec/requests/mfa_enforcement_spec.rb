@@ -34,9 +34,10 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
     expect(ClerkInvitationService).not_to receive(:new)
   end
 
-  def headers(fva: :missing)
+  def headers(fva: :missing, enrollment: :missing)
     claims = { sub: user.clerk_id, iss: issuer, azp: origin, exp: 5.minutes.from_now.to_i, sid: "sess_synthetic" }
     claims[:fva] = fva unless fva == :missing
+    claims[:two_factor_enabled] = enrollment unless enrollment == :missing
     token = JWT.encode(claims, signing_key, "RS256", kid: jwk.kid)
     {
       "Authorization" => "Bearer #{token}", "X-Company-Id" => user.company_id.to_s,
@@ -57,7 +58,7 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
       let(:role) { caller_role }
 
       it "denies an unverified session before normal endpoint processing" do
-        expect { public_send(verb, path, headers: headers(fva: [ 5, -1 ])) }.to change(denials, :count).by(1)
+        expect { public_send(verb, path, headers: headers(fva: [ 5, -1 ], enrollment: true)) }.to change(denials, :count).by(1)
         expect(response).to have_http_status(:forbidden)
         expect(response.parsed_body).to eq("code" => "mfa_required", "error" => MfaPolicy::ERROR_MESSAGE)
         expect(denials.last).to have_attributes(
@@ -70,7 +71,7 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
       end
 
       it "preserves the same outcome with MFA verified or the switch off and uses the same JWKS" do
-        public_send(verb, path, headers: headers(fva: [ 5, 2 ]))
+        public_send(verb, path, headers: headers(fva: [ 5, 2 ], enrollment: true))
         expect(response).to have_http_status(normal_status)
         verified_body = response.parsed_body
 
@@ -91,21 +92,30 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
 
   [ :missing, nil, [ 5, nil ], [ 5 ], [ 5, "0" ], [ 5, 0.5 ], [ -2, 0 ], [ "5", 0 ], "5,0" ].each do |claim|
     it "denies fva=#{claim.inspect} in a valid signed token" do
-      get "/api/v1/companies", headers: headers(fva: claim)
+      get "/api/v1/companies", headers: headers(fva: claim, enrollment: true)
 
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body.fetch("code")).to eq("mfa_required")
     end
   end
 
+  it "rejects a new-device email code without second-factor enrollment" do
+    get "/api/v1/companies", headers: headers(fva: [ 1, 0 ])
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("code")).to eq("mfa_required")
+
+    get "/api/v1/companies", headers: headers(fva: [ 1, 0 ], enrollment: true)
+    expect(response).to have_http_status(:ok)
+  end
+
   it "returns only recovery status from auth/me until a second factor has been verified" do
     expect do
-      get "/api/v1/auth/me", headers: headers(fva: [ 5, -1 ])
+      get "/api/v1/auth/me", headers: headers(fva: [ 5, -1 ], enrollment: true)
     end.to change(denials, :count).by(1)
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body).to eq("mfa_required" => true, "mfa_verified" => false)
 
-    get "/api/v1/auth/me", headers: headers(fva: [ 5, 0 ])
+    get "/api/v1/auth/me", headers: headers(fva: [ 5, 0 ], enrollment: true)
     verified_body = response.parsed_body
     expect(verified_body).to include("mfa_required" => true, "mfa_verified" => true)
     expect(verified_body.dig("user", "id")).to eq(user.id)
@@ -119,10 +129,10 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
 
   it "mirrors GET for HEAD auth/me, with the expected empty response body" do
     [ [ 5, -1 ], [ 5, 0 ] ].each do |ages|
-      get "/api/v1/auth/me", headers: headers(fva: ages)
+      get "/api/v1/auth/me", headers: headers(fva: ages, enrollment: true)
       get_status = response.status
 
-      head "/api/v1/auth/me", headers: headers(fva: ages)
+      head "/api/v1/auth/me", headers: headers(fva: ages, enrollment: true)
       expect(response).to have_http_status(get_status)
       expect(response).to have_http_status(:ok)
       expect(response.body).to be_empty
@@ -130,7 +140,7 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
   end
 
   it "accepts a previously verified second factor for global access even beyond the step-up window" do
-    get "/api/v1/companies", headers: headers(fva: [ 5, 15 ])
+    get "/api/v1/companies", headers: headers(fva: [ 5, 15 ], enrollment: true)
 
     expect(response).to have_http_status(:ok)
   end
@@ -146,8 +156,8 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
     let(:employee) { create(:employee, company: user.company) }
     let(:link) { EmployeeAccountLink.create!(user: user, company: user.company, employee: employee, status: :active) }
 
-    def employee_context(fva:)
-      get "/api/v1/employee/context", headers: headers(fva: fva).merge("X-Employee-Link-Id" => link.id.to_s)
+    def employee_context(fva:, enrollment: :missing)
+      get "/api/v1/employee/context", headers: headers(fva: fva, enrollment: enrollment).merge("X-Employee-Link-Id" => link.id.to_s)
     end
 
     it "denies MFA before looking up the employee link or opening company scope" do
@@ -156,7 +166,7 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
       allow(TenantScope).to receive(:as_system).and_call_original
       expect(TenantScope).not_to receive(:as_system).with(reason: "Resolve employee link for verified Clerk user")
 
-      employee_context(fva: [ 5, -1 ])
+      employee_context(fva: [ 5, -1 ], enrollment: true)
       expect(response).to have_http_status(:forbidden)
       expect(denials.count).to eq(1)
     end
@@ -166,7 +176,7 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
         let(:role) { caller_role }
 
         it "applies global MFA by role before the company feature and preserves existing behavior when off" do
-          employee_context(fva: [ 5, -1 ])
+          employee_context(fva: [ 5, -1 ], enrollment: caller_role != :portal_employee)
           if caller_role == :portal_employee
             expect(response).to have_http_status(:not_found)
             expect(denials).to be_empty
@@ -179,7 +189,7 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
           end
 
           allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true)
-          employee_context(fva: caller_role == :portal_employee ? [ 5, -1 ] : [ 5, 1 ])
+          employee_context(fva: caller_role == :portal_employee ? [ 5, -1 ] : [ 5, 1 ], enrollment: caller_role != :portal_employee)
           expect(response).to have_http_status(:no_content)
 
           ENV["REQUIRE_MFA"] = "false"

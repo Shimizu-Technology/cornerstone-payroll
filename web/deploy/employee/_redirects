@@ -1,0 +1,4 @@
+# Employee surface (VITE_APP_SURFACE=employee). Copied into dist by
+# scripts/finalize-surface-dist.mjs. Real files win over the rewrite, so only
+# client-side routes fall through to the app shell.
+/*    /index.html   200
