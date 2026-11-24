@@ -59,7 +59,14 @@ module TestWorkspace
 
     def copy_employees!(department_map)
       employee_map = {}
+      flagged_emails = target_company.backup_snapshot? ? nil : EmployeeContactValidator.marked_placeholder_emails(organization_id: target_company.organization_id)
       source_company.employees.order(:id).each do |source|
+        contact_overrides = if target_company.backup_snapshot?
+          {}
+        else
+          sanitized_clone_contact_attributes(source, flagged_emails: flagged_emails)
+        end
+
         employee_map[source.id] = copy_record!(
           source,
           company: target_company,
@@ -69,7 +76,7 @@ module TestWorkspace
           test_workspace_source_employee: employee_lineage ? source : nil,
           created_by: actor,
           skip_initial_compensation_history: true,
-          **(target_company.backup_snapshot? ? {} : { email_verified_at: nil, phone_confirmed_by_employee_at: nil })
+          **contact_overrides
         )
       end
 
@@ -86,6 +93,39 @@ module TestWorkspace
         )
       end
       employee_map
+    end
+
+    def sanitized_clone_contact_attributes(source, flagged_emails:)
+      raw_email = source.email.presence
+      raw_phone = source.phone.presence
+      email = raw_email
+      phone = raw_phone
+
+      if raw_email.present? || raw_phone.present?
+        candidate = Employee.new(
+          company: target_company,
+          first_name: source.first_name,
+          last_name: source.last_name
+        )
+        result = EmployeeContactValidator.call(
+          employee: candidate,
+          company: target_company,
+          email: raw_email.present? ? raw_email : :unchanged,
+          phone: raw_phone.present? ? raw_phone : :unchanged,
+          actor: nil,
+          source: "import",
+          flagged_emails: flagged_emails
+        )
+        email = result.errors[:email].present? ? nil : result.normalized_email if raw_email.present?
+        phone = result.errors[:phone].present? ? nil : result.normalized_phone if raw_phone.present?
+      end
+
+      {
+        email: email,
+        phone: phone,
+        email_verified_at: nil,
+        phone_confirmed_by_employee_at: nil
+      }
     end
 
     def copy_employee_setup!(employee_map, deduction_type_map)

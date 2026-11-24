@@ -8,17 +8,40 @@ require Rails.root.join("db/migrate/20261124120200_validate_employee_contact_sou
 require Rails.root.join("db/migrate/20261124120300_create_employee_placeholder_emails")
 
 RSpec.describe "M4-3 contact details split migrations" do
-  it "keeps nullable column additions + NOT VALID constraint, concurrent index, and constraint validation in separate migrations" do
+  it "keeps nullable column additions + NOT VALID constraint with lock_timeout, concurrent index with invalid-index repair, and constraint validation in separate migrations" do
     column_source = File.read(Rails.root.join("db/migrate/20261124120000_add_contact_details_tracking_to_employees.rb"))
+    expect(column_source).to include("SET LOCAL lock_timeout = '5s'")
     expect(column_source).to include("validate: false")
     expect(column_source).not_to include("add_index")
 
     expect(IndexEmployeesOnLowerEmail.disable_ddl_transaction).to be(true)
     index_source = File.read(Rails.root.join("db/migrate/20261124120100_index_employees_on_lower_email.rb"))
     expect(index_source).to include("algorithm: :concurrently")
+    expect(index_source).to include("indisvalid")
 
     validate_source = File.read(Rails.root.join("db/migrate/20261124120200_validate_employee_contact_source_constraint.rb"))
+    expect(validate_source).to include("SET LOCAL lock_timeout = '5s'")
     expect(validate_source).to include("validate_check_constraint :employees, name: \"employees_contact_source_check\"")
+  end
+
+  it "drops and rebuilds an invalid concurrent index on retry instead of skipping it" do
+    migration = IndexEmployeesOnLowerEmail.new
+    allow(migration).to receive(:invalid_index?).and_return(true)
+    expect(migration).to receive(:remove_index).with(
+      :employees,
+      name: IndexEmployeesOnLowerEmail::INDEX_NAME,
+      algorithm: :concurrently
+    ).ordered
+    expect(migration).to receive(:add_index).with(
+      :employees,
+      "LOWER(TRIM(email))",
+      name: IndexEmployeesOnLowerEmail::INDEX_NAME,
+      where: "email IS NOT NULL",
+      algorithm: :concurrently,
+      if_not_exists: true
+    ).ordered
+
+    migration.up
   end
 
   it "has the validated check constraint, functional email index, and employee_placeholder_emails table present in the database" do

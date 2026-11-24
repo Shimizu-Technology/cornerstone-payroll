@@ -22,4 +22,11 @@ RSpec.describe TestWorkspaceSafetyPolicy do
       .to eq(StaffRolePolicy.capability_for(controller_path: "api/v1/admin/reports", action_name: "w2_gu_mark_ready"))
     expect(StaffRolePolicy.capability_for(controller_path: "api/v1/admin/reports", action_name: "w2_gu_employee_copies")).to be_nil
   end
+
+  it "blocks organization-wide placeholder email changes in test workspaces while allowing company-local report/clear" do
+    expect(described_class.blocked?(controller_path: "api/v1/admin/employee_contact_hygiene", action_name: "mark_placeholder_email", request_method: "POST")).to be(true)
+    expect(described_class.blocked?(controller_path: "api/v1/admin/employee_contact_hygiene", action_name: "unmark_placeholder_email", request_method: "DELETE")).to be(true)
+    expect(described_class.blocked?(controller_path: "api/v1/admin/employee_contact_hygiene", action_name: "shared_emails", request_method: "GET")).to be(false)
+    expect(described_class.blocked?(controller_path: "api/v1/admin/employee_contact_hygiene", action_name: "clear_shared_emails", request_method: "POST")).to be(false)
+  end
 end

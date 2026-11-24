@@ -60,11 +60,11 @@ RSpec.describe EmployeeContactValidator do
       end
     end
 
-    it "blocks structural placeholder emails" do
+    it "warns on unmarked structural placeholder emails without blocking" do
       %w[noemail@example.com none@example.com noreply@example.com worker@noemail.com].each do |placeholder|
         result = described_class.call(employee: employee, company: company, email: placeholder)
-        expect(result).not_to be_valid
-        expect(result.errors[:email].first).to match(/placeholder/i)
+        expect(result).to be_valid
+        expect(result.warnings.map { |w| w[:code] }).to include("placeholder_email_pattern")
       end
     end
 
@@ -129,7 +129,60 @@ RSpec.describe EmployeeContactValidator do
       )
       expect(self_result).not_to be_valid
       expect(self_result.same_person_confirmation_required?).to be(false)
+      expect(self_result.login_email_rejected?).to be(true)
       expect(self_result.errors[:email]).to eq([ described_class::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
+    end
+
+    it "checks conflicting links first and rejects when a login is linked to both this employee and another employee (including across companies under company TenantScope)" do
+      other_company = create(:company, organization: organization)
+      other_company_employee = create(:employee, company: other_company, first_name: "Other", last_name: "TenantWorker")
+      login_user = create(:user, company: company, organization: organization, role: "client", name: "Elena Mercer", email: "emma.dual@example.com")
+      EmployeeAccountLink.create!(company: company, employee: employee, user: login_user, status: "active")
+      EmployeeAccountLink.create!(company: other_company, employee: other_company_employee, user: login_user, status: "active")
+
+      decision = TenantScope.with_company(company.id) do
+        EmployeeAccountLink.contact_email_link_decision(
+          user_id: login_user.id,
+          company_id: company.id,
+          allowed_employee_ids: [ employee.id ]
+        )
+      end
+      expect(decision).to eq(:conflict)
+
+      result = TenantScope.with_company(company.id) do
+        described_class.call(
+          employee: employee,
+          company: company,
+          email: "emma.dual@example.com",
+          confirm_same_person_email: true,
+          actor: login_user
+        )
+      end
+      expect(result).not_to be_valid
+      expect(result.login_email_rejected?).to be(true)
+      expect(result.errors[:email]).to eq([ described_class::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
+    end
+
+    it "detects a conflicting link in another company even inside TenantScope.with_company" do
+      other_company = create(:company, organization: organization)
+      other_company_employee = create(:employee, company: other_company, first_name: "Other", last_name: "Worker")
+      login_user = create(:user, company: other_company, organization: organization, role: "client", name: "Cross Co", email: "cross.co@example.com")
+      EmployeeAccountLink.create!(company: other_company, employee: other_company_employee, user: login_user, status: "active")
+      staff_actor = create(:user, company: company, organization: organization, role: "admin")
+
+      result = TenantScope.with_company(company.id) do
+        described_class.call(
+          employee: employee,
+          company: company,
+          email: "cross.co@example.com",
+          confirm_same_person_email: true,
+          actor: staff_actor
+        )
+      end
+
+      expect(result).not_to be_valid
+      expect(result.login_email_rejected?).to be(true)
+      expect(result.errors[:email].first).to match(/already linked to another employee/i)
     end
 
     it "rejects a client name-match attempt on another person's login with the generic client error" do

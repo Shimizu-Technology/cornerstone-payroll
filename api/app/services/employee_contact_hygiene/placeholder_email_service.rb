@@ -102,15 +102,17 @@ module EmployeeContactHygiene
     private
 
     def authorize!
+      if @company&.test_workspace?
+        raise Forbidden, "Placeholder email settings are organization-wide and cannot be changed from a test workspace."
+      end
+
       allowed = @actor.present? &&
         @organization.present? &&
         @actor.staff_member? &&
-        @actor.organization_id == @organization.id &&
-        (StaffRolePolicy.allowed?(@actor, :manage_client_configuration) ||
-          (@company.present? && @actor.can_access_company?(@company.id) &&
-            StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @company)))
+        (@actor.super_admin? || @actor.organization_id == @organization.id) &&
+        StaffRolePolicy.allowed?(@actor, :manage_organization)
 
-      raise Forbidden, StaffRolePolicy.error_message(:manage_client_configuration) unless allowed
+      raise Forbidden, StaffRolePolicy.error_message(:manage_organization) unless allowed
     end
   end
 end

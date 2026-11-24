@@ -5,6 +5,7 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/filing_submitters" => %w[update],
     # These records are shared across live companies, rather than copied into a workspace.
     "api/v1/admin/annual_retirement_limits" => %w[create update],
+    "api/v1/admin/employee_contact_hygiene" => %w[mark_placeholder_email unmark_placeholder_email],
     "api/v1/admin/tax_configs" => %w[
       create update destroy activate verify replace_withholding update_filing_status update_brackets
     ],

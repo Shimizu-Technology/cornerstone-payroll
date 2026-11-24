@@ -30,6 +30,8 @@ class EmployeeContactValidator
     :same_person_confirmed,
     :confirmation_basis,
     :matched_login_user,
+    :login_email_rejected,
+    :login_email_rejection_reason,
     keyword_init: true
   ) do
     def valid?
@@ -42,6 +44,10 @@ class EmployeeContactValidator
 
     def same_person_confirmed?
       same_person_confirmed == true
+    end
+
+    def login_email_rejected?
+      login_email_rejected == true
     end
 
     def apply_errors_to(record)
@@ -136,13 +142,26 @@ class EmployeeContactValidator
       PLACEHOLDER_LOCAL_PARTS.include?(local_part) || PLACEHOLDER_DOMAINS.include?(domain)
     end
 
+    # Blocking and bulk-clearing require an explicitly marked address (DB
+    # employee_placeholder_emails) or configured address (EMPLOYEE_PLACEHOLDER_EMAILS).
+    # Structural patterns alone only surface candidates and warn.
     def placeholder_email?(raw, organization_id: nil, marked_placeholders: nil)
       email = normalize_email(raw)
       return false if email.blank?
-      return true if structural_placeholder_email?(email) || configured_placeholder_emails.include?(email)
+      return true if configured_placeholder_emails.include?(email)
 
-      marked = marked_placeholders || db_marked_placeholder_emails(organization_id)
+      marked = marked_placeholders.nil? ? db_marked_placeholder_emails(organization_id) : marked_placeholders
       marked.include?(email)
+    end
+
+    # Email matchers (time tracking, cockpit, profitability) skip both explicitly
+    # marked/configured placeholders and structural placeholder patterns.
+    def unmatchable_placeholder_email?(raw, organization_id: nil, marked_placeholders: nil)
+      email = normalize_email(raw)
+      return false if email.blank?
+
+      structural_placeholder_email?(email) ||
+        placeholder_email?(email, organization_id: organization_id, marked_placeholders: marked_placeholders)
     end
 
     # Company-independent marked placeholder list for the organization.
@@ -183,11 +202,13 @@ class EmployeeContactValidator
         nil
       elsif placeholder_email?(normalized_email, organization_id: employee.company&.organization_id, marked_placeholders: flagged_emails)
         "placeholder"
+      elsif structural_placeholder_email?(normalized_email)
+        "placeholder_pattern"
       elsif shared_count >= 2
         "shared_with_coworker"
       end
 
-      needs_contact = missing_fields.any? || email_issue == "placeholder"
+      needs_contact = missing_fields.any? || email_issue == "placeholder" || email_issue == "placeholder_pattern"
 
       {
         "needs_contact_details" => needs_contact,
@@ -285,6 +306,8 @@ class EmployeeContactValidator
     same_person_confirmed = false
     confirmation_basis = nil
     matched_login_user = nil
+    login_email_rejected = false
+    login_email_rejection_reason = nil
 
     normalized_email = @raw_email == :unchanged ? self.class.normalize_email(@employee&.email) : self.class.normalize_email(@raw_email)
     normalized_phone = @raw_phone == :unchanged ? @employee&.phone : nil
@@ -300,11 +323,21 @@ class EmployeeContactValidator
       elsif self.class.placeholder_email?(normalized_email, organization_id: @company&.organization_id, marked_placeholders: @flagged_emails)
         add_error(errors, :email, "cannot be a placeholder or generic inbox address; enter the employee's own email")
       else
+        if self.class.structural_placeholder_email?(normalized_email)
+          warnings << {
+            code: "placeholder_email_pattern",
+            field: "email",
+            message: "This looks like a placeholder or generic email address. Enter the employee's own email if they have one."
+          }
+        end
+
         login_check = check_login_email(normalized_email)
         matched_login_user = login_check[:user]
         same_person_confirmation_required = login_check[:confirmation_required]
         same_person_confirmed = login_check[:confirmed]
         confirmation_basis = login_check[:confirmation_basis]
+        login_email_rejected = login_check[:rejected] == true
+        login_email_rejection_reason = login_check[:rejection_reason]
         add_error(errors, :email, login_check[:error]) if login_check[:error].present?
 
         if errors[:email].blank?
@@ -329,7 +362,9 @@ class EmployeeContactValidator
       same_person_confirmation_required: same_person_confirmation_required,
       same_person_confirmed: same_person_confirmed,
       confirmation_basis: confirmation_basis,
-      matched_login_user: matched_login_user
+      matched_login_user: matched_login_user,
+      login_email_rejected: login_email_rejected,
+      login_email_rejection_reason: login_email_rejection_reason
     )
   end
 
@@ -351,16 +386,25 @@ class EmployeeContactValidator
     login_user = User.where("LOWER(TRIM(email)) = ?", normalized_email).first
     return no_login_conflict unless login_user
 
-    # (a) Login is already linked to this employee (or predecessor in classification transition).
-    if linked_to_this_employee?(login_user)
-      return no_login_conflict(user: login_user)
+    # Check conflicting links FIRST via a narrow tenant-safe decision lookup
+    # that sees links in other companies without leaking records. A login with
+    # an active/non-revoked link to any other employee always rejects, even if
+    # an allowed link to this employee also exists.
+    link_decision = EmployeeAccountLink.contact_email_link_decision(
+      user_id: login_user.id,
+      company_id: @company&.id,
+      allowed_employee_ids: own_employee_ids
+    )
+
+    if link_decision == :conflict
+      return rejected_login_conflict(
+        staff_message: "belongs to a payroll login that is already linked to another employee",
+        rejection_reason: "linked_to_other_employee"
+      )
     end
 
-    # A login linked to a different employee always rejects.
-    if linked_to_other_employee?(login_user)
-      return rejected_login_conflict(
-        staff_message: "belongs to a payroll login that is already linked to another employee"
-      )
+    if link_decision == :allowed
+      return no_login_conflict(user: login_user)
     end
 
     # (b) The entered email is the signed-in user's own login email.
@@ -371,6 +415,8 @@ class EmployeeContactValidator
           confirmation_required: false,
           confirmed: true,
           confirmation_basis: "self_confirmed",
+          rejected: false,
+          rejection_reason: nil,
           error: nil
         }
       end
@@ -380,6 +426,8 @@ class EmployeeContactValidator
         confirmation_required: true,
         confirmed: false,
         confirmation_basis: nil,
+        rejected: false,
+        rejection_reason: nil,
         error: @actor.client? ?
           "This is your own payroll login email. Confirm \"this is me\" to assign it to this employee." :
           "is your own payroll login email; confirm \"this is me\" to assign it to this employee"
@@ -394,6 +442,8 @@ class EmployeeContactValidator
           confirmation_required: false,
           confirmed: true,
           confirmation_basis: "staff_confirmed",
+          rejected: false,
+          rejection_reason: nil,
           error: nil
         }
       end
@@ -403,12 +453,15 @@ class EmployeeContactValidator
         confirmation_required: true,
         confirmed: false,
         confirmation_basis: nil,
+        rejected: false,
+        rejection_reason: nil,
         error: "belongs to an existing payroll login for #{login_user.name} (#{login_user.role}); confirm this is the same person to use it"
       }
     end
 
     rejected_login_conflict(
-      staff_message: "belongs to another person's payroll login; ask a manager or admin with client configuration access to confirm it"
+      staff_message: "belongs to another person's payroll login; ask a manager or admin with client configuration access to confirm it",
+      rejection_reason: "other_user_login"
     )
   end
 
@@ -418,16 +471,20 @@ class EmployeeContactValidator
       confirmation_required: false,
       confirmed: false,
       confirmation_basis: nil,
+      rejected: false,
+      rejection_reason: nil,
       error: nil
     }
   end
 
-  def rejected_login_conflict(staff_message:)
+  def rejected_login_conflict(staff_message:, rejection_reason:)
     {
       user: nil,
       confirmation_required: false,
       confirmed: false,
       confirmation_basis: nil,
+      rejected: true,
+      rejection_reason: rejection_reason,
       error: @actor&.client? ? CLIENT_GENERIC_LOGIN_EMAIL_ERROR : staff_message
     }
   end
@@ -437,24 +494,6 @@ class EmployeeContactValidator
     ids << @employee.id if @employee&.persisted?
     ids << @employee.previous_employee_id if @employee&.previous_employee_id.present?
     ids.uniq
-  end
-
-  def linked_to_this_employee?(login_user)
-    candidate_ids = own_employee_ids
-    return false if candidate_ids.empty? || @company.blank?
-
-    EmployeeAccountLink
-      .where(company_id: @company.id, employee_id: candidate_ids, user_id: login_user.id)
-      .where.not(status: "revoked")
-      .exists?
-  end
-
-  def linked_to_other_employee?(login_user)
-    scope = EmployeeAccountLink.where(user_id: login_user.id).where.not(status: "revoked")
-    scope = scope.where(company_id: @company.id) if TenantScope.current&.mode == "company" && @company.present?
-    candidate_ids = own_employee_ids
-    scope = scope.where.not(employee_id: candidate_ids) if candidate_ids.any?
-    scope.exists?
   end
 
   def staff_can_confirm_login_email?(login_user)

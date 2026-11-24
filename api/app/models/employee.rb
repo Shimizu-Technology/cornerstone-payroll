@@ -830,12 +830,24 @@ class Employee < ApplicationRecord
   end
 
   def clear_verification_on_contact_change
-    if email.blank? || (will_save_change_to_email? && !will_save_change_to_email_verified_at?)
+    if email.blank?
       self.email_verified_at = nil
+    elsif will_save_change_to_email? && !will_save_change_to_email_verified_at?
+      old_email, new_email = changes_to_save["email"]
+      if EmployeeContactValidator.normalize_email(old_email) != EmployeeContactValidator.normalize_email(new_email)
+        self.email_verified_at = nil
+      end
     end
 
-    if phone.blank? || (will_save_change_to_phone? && !will_save_change_to_phone_confirmed_by_employee_at?)
+    if phone.blank?
       self.phone_confirmed_by_employee_at = nil
+    elsif will_save_change_to_phone? && !will_save_change_to_phone_confirmed_by_employee_at?
+      old_phone, new_phone = changes_to_save["phone"]
+      normalized_old, = EmployeeContactValidator.normalize_phone(old_phone)
+      normalized_new, new_error = EmployeeContactValidator.normalize_phone(new_phone)
+      if new_error.present? || (normalized_old || old_phone.to_s.strip.presence) != normalized_new
+        self.phone_confirmed_by_employee_at = nil
+      end
     end
   end
 

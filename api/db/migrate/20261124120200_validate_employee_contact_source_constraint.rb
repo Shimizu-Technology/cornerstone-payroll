@@ -2,6 +2,7 @@
 
 class ValidateEmployeeContactSourceConstraint < ActiveRecord::Migration[8.1]
   def up
+    execute "SET LOCAL lock_timeout = '5s'"
     validate_check_constraint :employees, name: "employees_contact_source_check"
   end
 

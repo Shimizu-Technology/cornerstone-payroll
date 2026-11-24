@@ -130,7 +130,7 @@ module ClientProfitability
       return nil if email.blank?
 
       normalized_email = email.to_s.strip.downcase
-      unless EmployeeContactValidator.placeholder_email?(normalized_email, organization_id: @organization.id)
+      unless EmployeeContactValidator.unmatchable_placeholder_email?(normalized_email, marked_placeholders: marked_placeholders)
         exact_matches = practice_employees.select { |employee| employee.active? && employee.email.to_s.strip.casecmp?(normalized_email) }
         if exact_matches.one?
           exact = exact_matches.first
@@ -143,6 +143,10 @@ module ClientProfitability
       return nil unless matches.one?
 
       { disposition: "employee", employee_id: matches.first.id, label: matches.first.full_name, match: "similar" }
+    end
+
+    def marked_placeholders
+      @marked_placeholders ||= EmployeeContactValidator.marked_placeholder_emails(organization_id: @organization.id)
     end
 
     def company_options

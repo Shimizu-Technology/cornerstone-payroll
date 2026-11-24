@@ -6,6 +6,7 @@ module Api
       class EmployeesController < BaseController
         include Auditable
         include RecurringPayItemSetupMutation
+        include EmployeeContactLoginRejectionGuard
         audit_actions :terminate, :reactivate, :deactivate
         before_action :set_employee, only: [
           :show, :update, :cancel_scheduled_compensation, :destroy, :terminate, :reactivate, :deactivate, :transition_tax_classification,
@@ -123,11 +124,7 @@ module Api
             contact_warnings: @contact_validation_result&.warnings || []
           }, status: :created
         rescue EmployeeContactValidator::ValidationError => e
-          render json: {
-            error: "Validation failed",
-            details: e.record.errors.messages,
-            contact_validation: e.result.contact_validation_payload
-          }, status: :unprocessable_entity
+          render_contact_validation_error!(e, employee: @employee)
         rescue ActiveRecord::RecordInvalid => e
           expired_incomplete_entry = @employee&.new_record? && EmployeeIntakePolicy.expired?(current_company) &&
             EmployeeIntakePolicy.missing_fields(@employee).any?
@@ -243,11 +240,7 @@ module Api
             data: serialize_employee(e.employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true, contact_context: contact_context)
           }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
-          render json: {
-            error: "Validation failed",
-            details: e.record.errors.messages,
-            contact_validation: e.result.contact_validation_payload
-          }, status: :unprocessable_entity
+          render_contact_validation_error!(e, employee: @employee)
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -310,11 +303,7 @@ module Api
         rescue EmployeeClassificationTransitionService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue EmployeeContactValidator::ValidationError => e
-          render json: {
-            error: "Validation failed",
-            details: e.record.errors.messages,
-            contact_validation: e.result.contact_validation_payload
-          }, status: :unprocessable_entity
+          render_contact_validation_error!(e, employee: @employee)
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -650,6 +639,11 @@ module Api
         end
 
         def apply_admin_contact_details!(attributes, contact_result, creation:)
+          unless creation
+            attributes.delete(:email) if attributes.key?(:email) && !admin_email_changed?(@employee, attributes)
+            attributes.delete(:phone) if attributes.key?(:phone) && !admin_phone_changed?(@employee, attributes)
+          end
+
           attributes[:email] = nil if attributes.key?(:email) && attributes[:email].blank?
           attributes[:phone] = nil if attributes.key?(:phone) && attributes[:phone].blank?
           if contact_result

@@ -328,6 +328,41 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
+    it "detects cross-company employee account link conflicts under enforced RLS without leaking records or losing company scope" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          company = create(:company)
+          other_company = create(:company, organization: company.organization)
+          emp_a, emp_b, login_user = TenantScope.as_system(reason: "Create cross-company link RLS fixtures") do
+            a = create(:employee, company: company)
+            b = create(:employee, company: other_company)
+            u = create(:user, company: company, organization: company.organization, role: "client")
+            EmployeeAccountLink.create!(company: company, employee: a, user: u, status: "active")
+            EmployeeAccountLink.create!(company: other_company, employee: b, user: u, status: "active")
+            setup_step_three(connection, tables: %w[employee_account_links employees])
+            [ a, b, u ]
+          end
+
+          TenantScope.with_company(company.id) do
+            # Direct query cannot see other_company's link under enforced RLS.
+            expect(EmployeeAccountLink.where(company_id: other_company.id).exists?).to be(false)
+            # Narrow decision lookup sees the cross-company link and checks conflict first.
+            decision = EmployeeAccountLink.contact_email_link_decision(
+              user_id: login_user.id,
+              company_id: company.id,
+              allowed_employee_ids: [ emp_a.id ]
+            )
+            expect(decision).to eq(:conflict)
+            # Company scope is fully restored afterward.
+            expect(settings).to eq([ company.id.to_s, "company" ])
+            expect(EmployeeAccountLink.where(company_id: other_company.id).exists?).to be(false)
+            expect(Employee.find_by(id: emp_b.id)).to be_nil
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
     [ [ true, "SELECT" ], [ false, "SELECT, UPDATE" ] ].each do |bypass, privileges|
       it "rejects runtime role capabilities bypass=#{bypass} and grants=#{privileges}" do
         pool.with_connection do |connection|

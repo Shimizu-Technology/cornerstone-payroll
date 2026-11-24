@@ -18,6 +18,43 @@ class EmployeeAccountLink < ApplicationRecord
     where(status: "active").or(where(status: "former").where("former_access_until > ?", Time.current))
   }
 
+  # Narrow, tenant-safe decision lookup across all companies so contact email
+  # validation sees links in other companies without leaking any records.
+  # Always checks conflicting links first: a login linked to any other employee
+  # always returns :conflict even if an allowed link also exists.
+  def self.contact_email_link_decision(user_id:, company_id:, allowed_employee_ids: [])
+    return :none if user_id.blank?
+
+    allowed_ids = Array(allowed_employee_ids).filter_map { |id| Integer(id, exception: false) }.uniq
+    target_company_id = Integer(company_id, exception: false)
+
+    with_system_decision_read do
+      scope = where(user_id: user_id).where.not(status: "revoked")
+      if target_company_id.present? && allowed_ids.any?
+        return :conflict if scope.where("company_id <> ? OR employee_id NOT IN (?)", target_company_id, allowed_ids).exists?
+        return :allowed if scope.where(company_id: target_company_id, employee_id: allowed_ids).exists?
+
+        return :none
+      end
+
+      scope.exists? ? :conflict : :none
+    end
+  end
+
+  def self.with_system_decision_read(&block)
+    return yield unless RlsContextGuard.enabled?
+
+    context = TenantScope.current
+    if context.nil?
+      TenantScope.as_system(reason: "Check cross-company employee account link decision", &block)
+    elsif context.mode == "system"
+      yield
+    else
+      connection.with_tenant_settings(nil, "system", &block)
+    end
+  end
+  private_class_method :with_system_decision_read
+
   def portal_enabled?
     company.active? && company.organization.active? && CompanyFeatures.for(company).employee_portal_enabled?
   end
