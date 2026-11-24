@@ -3,10 +3,10 @@
 require "rails_helper"
 
 # The contact endpoints under RLS phase 3: requests run as a non-bypass
-# payroll_app role with employees and employee_account_links enabled and
-# forced, and the login link decision function owned by a non-superuser role
-# that bypasses RLS, as in production. Everything is rolled back with the
-# example's transaction.
+# payroll_app role with every registered policy enabled and forced, the guard
+# in raise mode, and the login link decision function owned by a
+# non-superuser role that bypasses RLS, as in production. Everything is
+# rolled back with the example's transaction.
 RSpec.describe "Contact details under enforced RLS", type: :request do
   let(:organization) { create(:organization) }
   let(:company) { create(:company, organization: organization) }
@@ -41,9 +41,10 @@ RSpec.describe "Contact details under enforced RLS", type: :request do
     connection.execute("CREATE ROLE payroll_owner_sim NOLOGIN NOSUPERUSER BYPASSRLS")
     connection.execute("GRANT SELECT ON employees, employee_account_links TO payroll_owner_sim")
     connection.execute("ALTER FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION} OWNER TO payroll_owner_sim")
-    %w[employees employee_account_links].each do |table|
-      connection.execute("ALTER TABLE #{table} ENABLE ROW LEVEL SECURITY")
-      connection.execute("ALTER TABLE #{table} FORCE ROW LEVEL SECURITY")
+    RlsTables::PROTECTED_TABLES.each do |table|
+      quoted = connection.quote_table_name(table)
+      connection.execute("ALTER TABLE #{quoted} ENABLE ROW LEVEL SECURITY")
+      connection.execute("ALTER TABLE #{quoted} FORCE ROW LEVEL SECURITY")
     end
     connection.execute("SET LOCAL ROLE payroll_app")
   end
@@ -55,6 +56,41 @@ RSpec.describe "Contact details under enforced RLS", type: :request do
 
   def save_email(path, employee, email)
     patch "#{path}/#{employee.id}", headers: headers, params: { employee: { email: email }, confirm_same_person_email: true }
+  end
+
+  it "runs with the guard in raise mode" do
+    expect(RlsContextGuard.mode).to eq("raise")
+  end
+
+  it "saves Emma's own email and its audit when she confirms it is hers" do
+    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(emma_login)
+    enforce_rls_like_production!
+
+    save_email("/api/v1/client/employees", emma, emma_login.email)
+    expect(response).to have_http_status(:ok), response.body
+
+    as_owner do
+      expect(emma.reload.email).to eq(emma_login.email)
+      expect(AuditLog.where(action: "employees#confirm_same_person_email", record_id: emma.id).sole.metadata)
+        .to include("email" => emma_login.email, "confirmation_basis" => "self_confirmed")
+    end
+  end
+
+  it "refuses the same request when Emma's login is linked only to an employee at another client" do
+    elsewhere = create(:employee, company: other_company, first_name: "Emma", last_name: "Mercer")
+    EmployeeAccountLink.create!(company: other_company, employee: elsewhere, user: emma_login, status: "active")
+    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(emma_login)
+    enforce_rls_like_production!
+
+    save_email("/api/v1/client/employees", emma, emma_login.email)
+    expect(response).to have_http_status(:unprocessable_entity), response.body
+    expect(response.parsed_body.dig("details", "email")).to eq([ EmployeeContactValidator::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
+
+    as_owner do
+      expect(emma.reload.email).to be_nil
+      expect(AuditLog.where(action: "employees#confirm_same_person_email", record_id: emma.id)).to be_empty
+      expect(AuditLog.where(action: "employees#login_email_rejected").sole.metadata).to include("rejection_reason" => "linked_to_other_employee")
+    end
   end
 
   it "lets Emma confirm her own email in one step, and refuses a login linked at another client, on the client endpoint" do
