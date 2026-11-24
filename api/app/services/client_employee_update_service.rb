@@ -101,13 +101,8 @@ class ClientEmployeeUpdateService
     ActiveRecord::Base.transaction do
       company.lock!
       candidate = build_validated_candidate!(direct_attrs.merge(approval_attrs), creation: true)
-      contact_result = validate_contact_details!(
-        target: candidate,
-        email: direct_attrs.key?(:email) ? direct_attrs[:email] : :unchanged,
-        phone: direct_attrs.key?(:phone) ? direct_attrs[:phone] : :unchanged
-      )
-      direct_attrs[:email] = contact_result.normalized_email if direct_attrs.key?(:email)
-      direct_attrs[:phone] = contact_result.normalized_phone if direct_attrs.key?(:phone)
+      contact = apply_contact_changes!(direct_attrs, target: candidate, creation: true)
+      contact_result = contact.validation
 
       create_attrs = direct_attrs.merge(
         company: company,
@@ -117,9 +112,7 @@ class ClientEmployeeUpdateService
         initial_compensation_source: "client_portal",
         initial_compensation_actor: requested_by
       )
-      if contact_fields_present?(direct_attrs)
-        create_attrs[:contact_source] = "client"
-      end
+      create_attrs[:contact_source] = contact.contact_source if contact.contact_source
       @employee = Employee.new(create_attrs)
       employee.intake_exception = candidate.intake_exception
       validate_department_scope!(direct_attrs)
@@ -192,15 +185,8 @@ class ClientEmployeeUpdateService
         approval_attrs = approval_attrs.merge(status: "active", portal_pending_approval: false)
       end
 
-      if direct_attrs.key?(:email) || direct_attrs.key?(:phone)
-        contact_result = validate_contact_details!(
-          target: employee,
-          email: direct_attrs.key?(:email) ? direct_attrs[:email] : :unchanged,
-          phone: direct_attrs.key?(:phone) ? direct_attrs[:phone] : :unchanged
-        )
-        direct_attrs[:email] = contact_result.normalized_email if direct_attrs.key?(:email)
-        direct_attrs[:phone] = contact_result.normalized_phone if direct_attrs.key?(:phone)
-      end
+      contact = apply_contact_changes!(direct_attrs, target: employee, creation: false)
+      contact_result = contact.validation
 
       validate_candidate!(direct_attrs.merge(approval_attrs)) if direct_attrs.present? || approval_attrs.present?
       employee.require_ssn_confirmation = false
@@ -210,7 +196,7 @@ class ClientEmployeeUpdateService
       ensure_no_pending_request! if approval_attrs.present?
       if direct_attrs.present?
         update_attrs = direct_attrs.dup
-        update_attrs[:contact_source] = "client" if (direct_attrs.keys & EmployeeContactValidator::CONTACT_FIELDS).any?
+        update_attrs[:contact_source] = contact.contact_source if contact.contact_source
         employee.update!(update_attrs)
         EmployeeContactValidator.record_same_person_confirmation_audit!(
           employee: employee,
@@ -247,24 +233,11 @@ class ClientEmployeeUpdateService
 
   attr_reader :employee, :attrs, :requested_by, :company, :confirm_same_person_email, :row_revision, :baseline_values
 
-  def validate_contact_details!(target:, email:, phone:)
-    result = EmployeeContactValidator.call(
-      employee: target,
-      company: company,
-      email: email,
-      phone: phone,
-      confirm_same_person_email: confirm_same_person_email,
-      actor: requested_by,
-      source: "client"
-    )
-    return result if result.valid?
-
-    result.apply_errors_to(employee)
-    raise EmployeeContactValidator::ValidationError.new(result: result, record: employee)
-  end
-
-  def contact_fields_present?(hash)
-    EmployeeContactValidator::CONTACT_FIELDS.any? { |field| hash[field].present? }
+  def apply_contact_changes!(direct_attrs, target:, creation:)
+    EmployeeContactChanges.new(
+      employee: target, attributes: direct_attrs, company: company, actor: requested_by, source: "client",
+      confirm_same_person_email: confirm_same_person_email, creation: creation, error_record: employee
+    ).apply!
   end
 
   def prevent_legacy_retirement_change!(approval_attrs)
@@ -283,16 +256,8 @@ class ClientEmployeeUpdateService
 
   def attribute_changed?(key, value)
     current = key.to_sym == :w4_election_received ? false : current_employee_value(key)
-    if key.to_sym == :email
-      return EmployeeContactValidator.normalize_email(current) != EmployeeContactValidator.normalize_email(value)
-    end
-    if key.to_sym == :phone
-      normalized_new, error = EmployeeContactValidator.normalize_phone(value)
-      return true if error.present?
-
-      normalized_current, = EmployeeContactValidator.normalize_phone(current)
-      return (normalized_current || current.presence) != normalized_new
-    end
+    return EmployeeContactChanges.email_changed?(employee, value) if key.to_sym == :email
+    return EmployeeContactChanges.phone_changed?(employee, value) if key.to_sym == :phone
     type = employee.class.attribute_types[key.to_s]
     if type&.type == :date && value.present?
       cast_date = type.cast(value)

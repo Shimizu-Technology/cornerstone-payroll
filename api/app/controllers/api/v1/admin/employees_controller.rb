@@ -77,12 +77,7 @@ module Api
           Employee.transaction do
             current_company.lock!
             revalidate_current_company_write_access!
-            @contact_validation_result = validate_admin_contact_details!(
-              employee: @employee,
-              attributes: attributes,
-              creation: true
-            )
-            apply_admin_contact_details!(attributes, @contact_validation_result, creation: true)
+            apply_contact_changes!(attributes, creation: true)
             @employee.assign_attributes(attributes.slice(:email, :phone, :contact_source))
             EmployeeIntakePolicy.prepare!(@employee, actor: current_user)
             @employee.save!
@@ -183,12 +178,7 @@ module Api
             end
             requested_pay_rate = attributes.key?(:pay_rate) ? attributes.delete(:pay_rate) : EmployeeCompensationChangeService::UNCHANGED
             basis = attributes.extract!(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES.map(&:to_sym))
-            @contact_validation_result = validate_admin_contact_details!(
-              employee: @employee,
-              attributes: attributes,
-              creation: false
-            )
-            apply_admin_contact_details!(attributes, @contact_validation_result, creation: false)
+            apply_contact_changes!(attributes, creation: false)
             @employee.update!(attributes.merge(w4_attributes))
             EmployeeContactValidator.record_same_person_confirmation_audit!(
               employee: @employee,
@@ -626,69 +616,13 @@ module Api
             params[:contact_status] == "needs_contact_details"
         end
 
-        def validate_admin_contact_details!(employee:, attributes:, creation:)
-          email_changed = creation ? attributes.key?(:email) : admin_email_changed?(employee, attributes)
-          phone_changed = creation ? attributes.key?(:phone) : admin_phone_changed?(employee, attributes)
-          return nil unless email_changed || phone_changed
-
-          result = EmployeeContactValidator.call(
-            employee: employee,
-            company: current_company,
-            email: email_changed ? attributes[:email] : :unchanged,
-            phone: phone_changed ? attributes[:phone] : :unchanged,
-            confirm_same_person_email: confirm_same_person_email_param,
-            actor: current_user,
-            source: "staff"
-          )
-          return result if result.valid?
-
-          result.apply_errors_to(employee)
-          raise EmployeeContactValidator::ValidationError.new(result: result, record: employee)
-        end
-
-        def apply_admin_contact_details!(attributes, contact_result, creation:)
-          unless creation
-            attributes.delete(:email) if attributes.key?(:email) && !admin_email_changed?(@employee, attributes)
-            attributes.delete(:phone) if attributes.key?(:phone) && !admin_phone_changed?(@employee, attributes)
-          end
-
-          attributes[:email] = nil if attributes.key?(:email) && attributes[:email].blank?
-          attributes[:phone] = nil if attributes.key?(:phone) && attributes[:phone].blank?
-          if contact_result
-            if creation ? attributes.key?(:email) : admin_email_changed?(@employee, attributes)
-              attributes[:email] = contact_result.normalized_email
-            end
-            if creation ? attributes.key?(:phone) : admin_phone_changed?(@employee, attributes)
-              attributes[:phone] = contact_result.normalized_phone
-            end
-          end
-
-          contact_touched = if creation
-            EmployeeContactValidator::CONTACT_FIELDS.any? { |field| attributes[field].present? }
-          else
-            EmployeeContactValidator::CONTACT_FIELDS.any? do |field|
-              next false unless attributes.key?(field)
-
-              @employee.public_send(field).presence != attributes[field].presence
-            end
-          end
-          attributes[:contact_source] = "staff" if contact_touched
-        end
-
-        def admin_email_changed?(employee, attributes)
-          return false unless attributes.key?(:email)
-
-          EmployeeContactValidator.normalize_email(employee.email) != EmployeeContactValidator.normalize_email(attributes[:email])
-        end
-
-        def admin_phone_changed?(employee, attributes)
-          return false unless attributes.key?(:phone)
-
-          normalized_new, error = EmployeeContactValidator.normalize_phone(attributes[:phone])
-          return true if error.present?
-
-          normalized_current, = EmployeeContactValidator.normalize_phone(employee.phone)
-          (normalized_current || employee.phone.presence) != normalized_new
+        def apply_contact_changes!(attributes, creation:)
+          contact = EmployeeContactChanges.new(
+            employee: @employee, attributes: attributes, company: current_company, actor: current_user,
+            source: "staff", confirm_same_person_email: confirm_same_person_email_param, creation: creation
+          ).apply!
+          @contact_validation_result = contact.validation
+          attributes[:contact_source] = contact.contact_source if contact.contact_source
         end
 
         def termination_params
