@@ -24,6 +24,7 @@ const PayrollPeriodPage = lazy(() => import('@/pages/payroll-submissions/Payroll
 const Dashboard = lazy(() => import('@/pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const EmployeeList = lazy(() => import('@/pages/employees/EmployeeList').then((module) => ({ default: module.EmployeeList })));
 const EmployeeContactDetails = lazy(() => import('@/pages/employees/EmployeeContactDetails').then((module) => ({ default: module.EmployeeContactDetails })));
+const StaffEmployeeContactDetails = lazy(() => import('@/pages/employees/StaffEmployeeContactDetails').then((module) => ({ default: module.StaffEmployeeContactDetails })));
 const EmployeeForm = lazy(() => import('@/pages/employees/EmployeeForm').then((module) => ({ default: module.EmployeeForm })));
 const EmployeeWorkspace = lazy(() => import('@/pages/employees/EmployeeWorkspace').then((module) => ({ default: module.EmployeeWorkspace })));
 const ClientEmployeeOverview = lazy(() => import('@/pages/employees/ClientEmployeeOverview').then((module) => ({ default: module.ClientEmployeeOverview })));
@@ -379,7 +380,7 @@ function AppRoutes() {
           <Route path="payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
           <Route path="client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
           <Route path="employees" element={<EmployeeList />} />
-          <Route path="employees/contact-details" element={<EmployeeContactDetails />} />
+          <Route path="employees/contact-details" element={isClient ? <EmployeeContactDetails /> : <StaffEmployeeContactDetails />} />
           <Route path="employees/new" element={<EmployeeForm />} />
           <Route path="employees/:id/edit" element={<EmployeeForm />} />
           <Route path="employees/:id/:tab?" element={isClient ? <ClientEmployeeOverview /> : <EmployeeWorkspace />} />

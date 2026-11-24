@@ -569,7 +569,7 @@ export const employeesApi = {
   create: (data: EmployeeFormData & { company_id: number }) =>
     api.post<{ data: Employee; contact_warnings?: import('@/types').EmployeeContactWarning[] }>('/admin/employees', { employee: data }),
   update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) => {
-    const { confirm_same_person_email, ...employeePayload } = data;
+    const { confirm_same_person_email, row_revision, baseline_values, ...employeePayload } = data;
     return api.patch<{
       data: Employee;
       payment_method_review?: { reapproval_pay_period_ids: number[] };
@@ -580,6 +580,8 @@ export const employeesApi = {
       {
         employee: employeePayload,
         ...(confirm_same_person_email ? { confirm_same_person_email: true } : {}),
+        ...(row_revision ? { row_revision } : {}),
+        ...(baseline_values ? { baseline_values } : {}),
       },
       { companyId },
     );
@@ -787,54 +789,6 @@ export const departmentsApi = {
     api.patch<{ data: Department }>(`/admin/departments/${id}`, { department: data }),
 };
 
-export interface SharedEmailReportEntry {
-  email: string;
-  total_count: number;
-  active_count: number;
-  inactive_count: number;
-  companies_count: number;
-  organization_total_count: number;
-  reasons: string[];
-  classification: 'placeholder' | 'shared_inbox' | 'shared';
-}
-
-export interface SharedEmailCompanySummary {
-  company_id: number;
-  company_name: string;
-  total_flagged_records: number;
-  active_flagged_records: number;
-  emails: SharedEmailReportEntry[];
-}
-
-export interface SharedEmailReportResponse {
-  summary: {
-    companies_affected: number;
-    distinct_flagged_emails: number;
-    total_employee_records: number;
-    active_employee_records: number;
-  };
-  companies: SharedEmailCompanySummary[];
-}
-
-export interface ClearSharedEmailResponse {
-  data: {
-    company_id: number;
-    company_name: string;
-    email: string;
-    cleared_count: number;
-    active_cleared_count: number;
-    inactive_cleared_count: number;
-  };
-  message: string;
-}
-
-export const employeeContactHygieneApi = {
-  sharedEmails: (params?: { company_id?: number }) =>
-    api.get<SharedEmailReportResponse>('/admin/employee_contact_hygiene/shared_emails', params),
-  clearSharedEmails: (data: { company_id: number; email: string }) =>
-    api.post<ClearSharedEmailResponse>('/admin/employee_contact_hygiene/clear_shared_emails', data, { companyId: data.company_id }),
-};
-
 export const clientEmployeesApi = {
   list: (params?: {
     status?: string;
@@ -859,10 +813,12 @@ export const clientEmployeesApi = {
     });
   },
   update: (id: number, data: Partial<EmployeeFormData>) => {
-    const { confirm_same_person_email, ...employeePayload } = data;
+    const { confirm_same_person_email, row_revision, baseline_values, ...employeePayload } = data;
     return api.patch<ClientEmployeeUpdateResponse>(`/client/employees/${id}`, {
       employee: employeePayload,
       ...(confirm_same_person_email ? { confirm_same_person_email: true } : {}),
+      ...(row_revision ? { row_revision } : {}),
+      ...(baseline_values ? { baseline_values } : {}),
     });
   },
 };
