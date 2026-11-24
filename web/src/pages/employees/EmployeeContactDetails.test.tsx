@@ -226,6 +226,28 @@ describe('EmployeeContactDetails', () => {
     expect((field('Street address for Maria Cruz') as HTMLInputElement).value).toBe('100 Marine Corps Dr');
   });
 
+  it('keeps the shared-email warning on the closed row after saving', async () => {
+    const maria = buildEmployee({ id: 101, first_name: 'Maria', last_name: 'Cruz', email: '', contact_revision: 'rev-1' });
+    apiMocks.clientList.mockResolvedValue({
+      data: [maria],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 1 },
+    });
+    const warning = 'Another employee at this company already uses this email address. Family members may share one, but email invites require a unique address.';
+    apiMocks.clientUpdate.mockResolvedValue({
+      data: { ...maria, email: 'family@example.com', contact_revision: 'rev-2' },
+      contact_warnings: [{ code: 'shared_company_email', field: 'email', message: warning, matching_employee_count: 1 }],
+    });
+
+    renderClientPage();
+    expect((await screen.findAllByText('Maria Cruz')).length).toBeGreaterThan(0);
+    fireEvent.change(field('Email for Maria Cruz'), { target: { value: 'family@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Maria Cruz' }));
+
+    expect(await screen.findByText('family@example.com')).toBeTruthy();
+    expect(screen.queryByLabelText('Email for Maria Cruz')).toBeNull();
+    expect(screen.getByText(warning)).toBeTruthy();
+  });
+
   it('handles 409 conflict with clear Keep my changes and Discard my changes options', async () => {
     const maria = buildEmployee({
       id: 101,
