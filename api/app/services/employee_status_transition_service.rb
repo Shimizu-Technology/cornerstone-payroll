@@ -54,7 +54,7 @@ class EmployeeStatusTransitionService
       block_approved_runs!(effective_date)
       previous_status = @employee.status
       @employee.update!(status: "terminated", termination_date: effective_date)
-      @employee.employee_status_events.create!(
+      event = @employee.employee_status_events.create!(
         company: @employee.company,
         actor: @actor,
         event_type: "terminated",
@@ -66,6 +66,8 @@ class EmployeeStatusTransitionService
         internal_notes: data[:internal_notes].presence,
         source: data[:source].presence || "operator"
       )
+      EmployeeLinks::Retire.terminated!(@employee, termination_date: effective_date, actor: @actor)
+      event
     end
   end
 
@@ -85,7 +87,7 @@ class EmployeeStatusTransitionService
       block_approved_runs!(effective_date)
       previous_status = @employee.status
       @employee.update!(status: "inactive")
-      @employee.employee_status_events.create!(
+      event = @employee.employee_status_events.create!(
         company: @employee.company,
         actor: @actor,
         event_type: "deactivated",
@@ -97,6 +99,8 @@ class EmployeeStatusTransitionService
         internal_notes: data[:internal_notes].presence,
         source: data[:source].presence || "operator"
       )
+      EmployeeLinks::Retire.deactivated!(@employee, actor: @actor)
+      event
     end
   end
 

@@ -40,12 +40,12 @@ module EmployeeLinks
         link = @employee.employee_account_links.new(company: company, invited_by: @actor, status: "invited")
         raise Error, "The employee app isn't turned on for this company" unless link.portal_enabled?
 
-        claim_user = @delivery == "email" ? check_email! : nil
+        claim_user = route_login
         credentials = Credentials.issue(link, delivery: @delivery, email: @employee.email)
         link.claim_user = claim_user
         link.save!
 
-        path = claim_user ? "claim" : "sign_up"
+        path = EmployeeLinks.invite_path(claim_user)
         EmployeeLinks.audit!(link, "invited", user: @actor, request: @request,
           metadata: { delivery: @delivery, path: path, expires_at: link.invite_expires_at.iso8601 })
         Result.new(link: link, token: credentials.token, code: credentials.code, path: path, email_status: nil)
@@ -56,7 +56,33 @@ module EmployeeLinks
       result.with(email_status: InviteEmail.deliver(link: result.link, token: result.token, path: result.path))
     end
 
+    # The login this invite must go to, if any: for an email invite, a login
+    # confirmed as this person by the M4-3 guard; otherwise (or for a printed
+    # code) the person's own earlier employee app login, so a rehire never
+    # makes a second identity.
+    def route_login(current: nil)
+      (check_email! if @delivery == "email") || current || historical_login
+    end
+
     private
+
+    # A bound employee-only login that had a link to this employee record
+    # (or the record it replaced). Closed with its last link, it reactivates;
+    # still active, it claims. One an admin deactivated can't be reached by
+    # an invite, and a new login isn't made for the same person either.
+    def historical_login
+      employee_ids = [ @employee.id, @employee.previous_employee_id ].compact
+      earlier = EmployeeAccountLink.where(employee_id: employee_ids, status: %w[former revoked]).where.not(user_id: nil)
+      logins = User.portal_employee.where(id: earlier.select(:user_id), invitation_status: "accepted")
+        .where.not(clerk_id: nil).order(:id).to_a
+      return if logins.empty?
+
+      login = logins.find { |candidate| Reactivate.eligible_login?(candidate, @employee) } ||
+        logins.find(&:payroll_access_allowed?)
+      return login if login
+
+      raise Error, "This employee's earlier employee app login was deactivated by an admin. Reactivate it under Users first, then invite."
+    end
 
     # Runs the M4-3 invite guard and routes an address that belongs to a login
     # already confirmed as this person to the claim path.
@@ -72,7 +98,11 @@ module EmployeeLinks
         ip_address: @request&.remote_ip, user_agent: @request&.user_agent, request_id: @request&.request_id
       )
       login = validation.matched_login_user
-      login if login&.payroll_access_allowed? && login.clerk_id.present?
+      return unless login&.clerk_id.present?
+      return login if login.payroll_access_allowed?
+
+      # A rehired employee-only person whose login closed with their last link.
+      login if Reactivate.eligible_login?(login, @employee)
     end
   end
 end

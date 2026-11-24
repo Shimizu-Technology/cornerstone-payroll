@@ -60,13 +60,11 @@ module EmployeeLinks
         raise Error, CHANGED unless closed.fetch(:user_id) == pending&.id &&
           closed.fetch(:invitation_id) == pending&.clerk_invitation_id
 
-        if @delivery == "email"
-          @link.claim_user = check_email!(employee)
-        end
+        @link.claim_user = route_login(employee)
         credentials = Credentials.issue(@link, delivery: @delivery, email: employee.email)
         @link.save!
         retire_pending_sign_up!(pending) if pending
-        path = @link.claim_user_id ? "claim" : "sign_up"
+        path = EmployeeLinks.invite_path(@link.claim_user)
         EmployeeLinks.audit!(@link, audit_action, user: @actor, request: @request,
           metadata: audit_metadata(closed).merge(delivery: @delivery, path: path, expires_at: @link.invite_expires_at.iso8601))
         Invite::Result.new(link: @link, token: credentials.token, code: credentials.code, path: path, email_status: nil)
@@ -124,9 +122,12 @@ module EmployeeLinks
       {}
     end
 
-    def check_email!(employee)
-      Invite.new(employee: employee, actor: @actor, delivery: "email",
-        confirm_same_person_email: @confirm_same_person_email, request: @request).send(:check_email!)
+    # Same routing as a new invite (Invite#route_login); a code resend keeps
+    # the login the invite was already routed to.
+    def route_login(employee)
+      Invite.new(employee: employee, actor: @actor, delivery: @delivery,
+        confirm_same_person_email: @confirm_same_person_email, request: @request)
+        .route_login(current: (@link.claim_user if @delivery == "code"))
     end
   end
 end

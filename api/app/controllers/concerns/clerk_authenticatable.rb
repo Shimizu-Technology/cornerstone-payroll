@@ -74,7 +74,14 @@ module ClerkAuthenticatable
 
     unless @current_user.payroll_access_allowed?
       @current_user = nil
-      render json: { error: "Account inactive" }, status: :unauthorized
+      return render json: { error: "Account inactive" }, status: :unauthorized
+    end
+
+    # An employee-only login's sessions from before it was deactivated stay
+    # refused after it is reactivated (M4-2).
+    if EmployeeLinks::SessionFence.fenced?(@current_user, @clerk_token_payload)
+      @current_user = nil
+      render json: EmployeeLinks::SessionFence::SIGN_IN_AGAIN, status: :unauthorized
     end
   end
 

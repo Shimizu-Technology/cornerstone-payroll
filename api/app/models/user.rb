@@ -42,6 +42,11 @@ class User < ApplicationRecord
   validates :name, presence: true
   validates :role, presence: true
   validates :invitation_status, inclusion: { in: INVITATION_STATUSES }
+  # Why the login was last deactivated (M4-2). Only last_employee_link_closed
+  # lets a rehired employee reactivate it themselves; an admin's deactivation
+  # (any path that doesn't name a reason) never can.
+  DEACTIVATION_REASONS = %w[last_employee_link_closed pending_sign_up_closed deactivated].freeze
+  validates :deactivation_reason, inclusion: { in: DEACTIVATION_REASONS }, allow_nil: true
   validate :company_must_belong_to_organization
   validate :migration_rehearsal_company_requires_staff_role
   validate :practice_scope_is_isolated
@@ -49,6 +54,7 @@ class User < ApplicationRecord
   validate :platform_owner_identity_is_immutable, on: :update
 
   before_validation :default_organization_from_company
+  before_save :record_deactivation, if: :will_save_change_to_active?
   before_destroy :prevent_platform_owner_destroy
   after_update_commit :disconnect_cable_after_deactivation, if: :saved_change_to_active?
 
@@ -197,6 +203,17 @@ class User < ApplicationRecord
   end
 
   private
+
+  # deactivated_at stays after reactivation: sessions from before it remain
+  # refused (EmployeeLinks::SessionFence).
+  def record_deactivation
+    if active?
+      self.deactivation_reason = nil
+    elsif persisted?
+      self.deactivated_at = ApplicationRecord.database_now unless will_save_change_to_deactivated_at?
+      self.deactivation_reason = "deactivated" unless will_save_change_to_deactivation_reason?
+    end
+  end
 
   def practice_scope_is_isolated
     if practice_company_id_in_database.present? && will_save_change_to_practice_company_id?

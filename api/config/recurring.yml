@@ -15,6 +15,12 @@ production:
     queue: default
     schedule: every 5 minutes
 
+  # Employee app invites last 14 days; former-employee access ends on its date.
+  expire_employee_links:
+    class: ExpireEmployeeLinksJob
+    queue: default
+    schedule: "15 3 * * * Pacific/Guam"
+
   expire_practice_portal_access:
     class: ExpirePracticePortalAccessJob
     queue: default
