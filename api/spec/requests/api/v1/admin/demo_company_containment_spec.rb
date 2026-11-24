@@ -1,0 +1,166 @@
+# frozen_string_literal: true
+
+require "rails_helper"
+
+# A demo company behaves like a live client for staff, but its committed
+# payroll never reaches firm totals, official e-files, filing records,
+# payments or firm billing, and its refusals read like any unavailable step.
+RSpec.describe "Demo company containment", type: :request do
+  before { allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new) }
+
+  let!(:organization) { create(:organization, client_limit: 5) }
+  let!(:live) { create(:company, organization: organization, name: "Live Client", ein: "98-7654321") }
+  let!(:sandbox) do
+    create(:company, organization: organization, name: "Live Client practice", payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "sandbox", migration_source_company: live, migration_rehearsal_status: "ready",
+      test_workspace_expires_at: 30.days.from_now)
+  end
+  let!(:demo) { create_demo_company(organization: organization, ein: "98-7654322") }
+  let!(:admin) { create(:user, company: live, organization: organization, role: "admin", created_at: 1.year.ago) }
+  let(:live_employee) { create(:employee, company: live, department: create(:department, company: live)) }
+  let(:demo_employee) { create(:employee, company: demo, department: create(:department, company: demo), ssn_encrypted: "900-01-0002") }
+  let(:selected_company) { demo }
+
+  before do
+    allow_any_instance_of(ApplicationController).to receive(:current_user) { User.find(admin.id) }
+    allow_any_instance_of(ApplicationController).to receive(:current_user_id).and_return(admin.id)
+    allow_any_instance_of(ApplicationController).to receive(:current_company_id) { selected_company.id }
+    create_committed_demo_pay_period(company: live, pay_date: Date.new(2026, 3, 6), employee: live_employee)
+  end
+
+  def firm_totals
+    overview = YearEnd::ClientsOverview.new(user: User.find(admin.id), year: 2026).call
+    {
+      live_client_count: organization.companies.live_payroll.count,
+      year_end_clients: overview[:clients].map { |row| row[:name] }.sort,
+      year_end_counts: overview[:counts],
+      year_end_hidden: overview[:hidden],
+      profitability_companies: ClientProfitability::LinkQueue.new(organization: organization).send(:companies).map(&:id),
+      inbox_summary: ClientInboxQuery.new(user: admin).summary
+    }
+  end
+
+  # Demo client logins arrive with demo access (D5); bind a fixture author directly.
+  def demo_client_message!
+    author = create(:user, company: live, organization: organization, role: "client")
+    author.update_columns(company_id: demo.id)
+    thread = create(:client_portal_thread, company: demo, created_by: author)
+    create(:client_portal_message, company: demo, client_portal_thread: thread, author: author)
+  end
+
+  it "leaves firm-wide totals unchanged when a demo payroll is committed" do
+    before = firm_totals
+    create_committed_demo_pay_period(company: demo, pay_date: Date.new(2026, 3, 6), employee: demo_employee, gross_pay: 9_000)
+    demo_client_message!
+
+    expect(firm_totals).to eq(before)
+    expect(before[:year_end_clients]).to eq([ "Live Client" ])
+    expect(before[:year_end_hidden][:test_workspaces]).to eq(1)
+    expect(before[:profitability_companies]).to eq([ live.id ])
+  end
+
+  it "lists demo inbox activity like a live client's without counting it in the workload badge" do
+    demo_client_message!
+
+    get "/api/v1/admin/client_inbox"
+    expect(response.parsed_body.fetch("data").sole).to include("company_id" => demo.id, "practice_copy" => false)
+    get "/api/v1/admin/client_inbox/counts"
+    expect(response.parsed_body.values.grep(Integer).sum).to eq(0)
+  end
+
+  it "keeps a demo out of profitability, billing and firm books with a neutral reason" do
+    expect(ClientProfitabilitySetting.new(organization: organization, practice_company: demo)).not_to be_valid
+    expect(WorkHourClientLink.new(organization: organization, company: demo, tax_client_id: 1, disposition: "company")).not_to be_valid
+
+    recipient = InvoiceRecipient.new(organization: organization, company: demo, name: "Harbor Finch Kitchen")
+    expect(recipient).not_to be_valid
+    expect(recipient.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
+    invoice = Invoice.new(organization: organization, company: demo)
+    invoice.valid?
+    expect(invoice.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
+    book = FinanceBook.new(organization: organization, company: demo, name: "Demo", legal_name: "Demo", kind: "client")
+    book.valid?
+    expect(book.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
+  end
+
+  it "never records filing evidence for a demo, even through the service" do
+    expect do
+      PayrollFilingEvidenceRecorder.new(company: demo, actor: admin, evidence_document: nil, attributes: {
+        filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026, status: "submitted", confirmation_number: "CONF"
+      }).call
+    end.to raise_error(PayrollFilingEvidenceRecorder::Error, Company::DEMO_UNAVAILABLE_MESSAGE)
+    expect(PayrollFilingRecord.where(company: demo)).to be_empty
+  end
+
+  it "does not precompute a demo's e-file check" do
+    expect(YearEnd::Checklist).not_to receive(:new)
+    YearEndEfileCheckJob.perform_now(demo.id, 2026, YearEnd::InputRevision.for(demo.id, 2026)[demo.id])
+  end
+
+  describe "requests in the demo's context" do
+    let!(:period) { create_committed_demo_pay_period(company: demo, pay_date: Date.new(2026, 3, 6), employee: demo_employee) }
+    let(:draft) { create(:pay_period, company: demo, start_date: Date.new(2026, 3, 9), end_date: Date.new(2026, 3, 22), pay_date: Date.new(2026, 3, 27)) }
+
+    before do
+      PayrollFilingResponsibilityRecorder.new(company: demo, actor: admin, tax_year: 2026, filing_types: %w[w2_gu form_1099],
+        responsible_party: "cornerstone", imported_payroll_inclusion: "included", prior_provider_through: nil).call
+    end
+
+    def expect_neutral_refusal
+      expect(response).to have_http_status(:forbidden).or have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq(Company::DEMO_UNAVAILABLE_MESSAGE)
+    end
+
+    it "refuses e-files, filing records, commits, payments, shared config and billing" do
+      get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }
+      expect_neutral_refusal
+      get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "draft" }
+      expect_neutral_refusal
+      get "/api/v1/admin/reports/quarterly_compliance_packet_swica_ascii", params: { year: 2026, quarter: 1 }
+      expect_neutral_refusal
+      post "/api/v1/admin/payroll_filing_records/events", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
+      expect_neutral_refusal
+      post "/api/v1/admin/pay_periods/#{draft.id}/commit"
+      expect_neutral_refusal
+      post "/api/v1/admin/pay_periods/#{period.id}/void"
+      expect_neutral_refusal
+      post "/api/v1/admin/pay_periods/#{period.id}/checks/batch_pdf"
+      expect_neutral_refusal
+      post "/api/v1/admin/invoices", params: { invoice: { company_id: demo.id } }
+      expect_neutral_refusal
+      patch "/api/v1/admin/filing_submitter", params: { filing_submitter: { name: "Changed" } }
+      expect_neutral_refusal
+
+      expect(draft.reload.status).to eq("draft")
+      expect(period.reload.status).to eq("committed")
+      expect(PayrollFilingRecord.where(company: demo)).to be_empty
+      expect(Invoice.where(company: demo)).to be_empty
+    end
+
+    it "keeps the same e-files blocked for a practice copy with its existing message" do
+      allow_any_instance_of(ApplicationController).to receive(:current_company_id).and_return(sandbox.id)
+      get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to include("test workspace")
+      get "/api/v1/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" }
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it "lets review downloads and checklist steps through like a live client" do
+      get "/api/v1/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.media_type).to eq("application/pdf")
+
+      get "/api/v1/admin/reports/w2_gu_employee_copies", params: { year: 2026 }
+      expect(response).not_to have_http_status(:forbidden)
+
+      get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: period.id }
+      expect(response).to have_http_status(:ok), response.body
+      report = response.parsed_body.fetch("report")
+      expect(report.dig("meta", "provisional")).to be(false)
+      expect(report.dig("meta", "payroll_status_note")).to be_nil
+      expect(report.dig("source", "label")).to eq("Cornerstone")
+      expect(response.body).not_to match(/TEST ONLY|practice copy|test workspace/i)
+    end
+  end
+end

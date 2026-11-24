@@ -81,7 +81,7 @@ module YearEnd
           id: company.id,
           name: company.name,
           active: company.active?,
-          test_workspace: company.test_workspace?
+          test_workspace: company.practice_copy?
         },
         tax_year: year,
         status: status,
@@ -160,7 +160,11 @@ module YearEnd
     def efw2_problems
       return [] unless year == 2026 && files?("w2_gu") && w2_report
 
-      @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).structured_problems.reject { |problem| problem[:scope] == :submitter }
+      @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).structured_problems.reject do |problem|
+        # A demo never e-files, and its fictional people use SSNs from the
+        # reserved 900 area that the official validator rightly refuses.
+        problem[:scope] == :submitter || (company.demo? && problem[:code] == :ssn_invalid)
+      end
     end
 
     # What "mark 1099s ready" enforces: the 1099 decision, the employer
@@ -599,7 +603,7 @@ module YearEnd
       else
         "This records your sign-off on the payees and amounts below."
       end
-      reason = if company.test_workspace?
+      reason = if company.practice_copy?
         "Not available in a practice copy."
       elsif !permissions[:can_mark_ready]
         "A manager or admin marks the 1099s ready."
@@ -850,7 +854,7 @@ module YearEnd
         return not_needed_step(key, title, "Cornerstone files no #{year} forms for this client.")
       end
 
-      practice = company.test_workspace?
+      practice = company.practice_copy?
       groups = []
       if files?("w2_gu")
         readiness, fingerprint = w2_readiness
@@ -930,7 +934,7 @@ module YearEnd
           contains_full_ssn: false, contains_full_tin: true, path: "/admin/reports/form_1099_nec_payer_record"
         }
       ].map do |document|
-        restriction = if document[:contains_full_tin] && company.test_workspace?
+        restriction = if document[:contains_full_tin] && company.practice_copy?
           "Not available in a practice copy — it contains full TINs."
         elsif document[:contains_full_tin] && !permissions[:can_mark_ready]
           "Needs client-management access (contains full TINs)."
@@ -947,7 +951,7 @@ module YearEnd
     # on the same "1099s ready" sign-off as the copies (Form1099Readiness).
     # Built from the payees the sign-off covers, so with none there is no file.
     def form_1099_filing_documents(final, payee_count:, none_needed:)
-      restriction = if company.test_workspace?
+      restriction = if company.practice_copy?
         "Not available in a practice copy"
       elsif !permissions[:can_mark_ready]
         "Needs client-management access"
@@ -967,6 +971,7 @@ module YearEnd
       ].map do |path, title, format|
         efile = format == "txt"
         unavailable = reason || (restriction && (efile ? "#{restriction} — it contains full TINs." : "#{restriction}."))
+        unavailable ||= demo_efile_reason if efile
         {
           key: path, title: title, format: format, draft: !final,
           description: efile ? "Upload to GuamTax after the 1099s are marked ready." : "For your records — not for filing.",
@@ -1030,10 +1035,10 @@ module YearEnd
       ].map do |document|
         restriction = if document[:contains_full_ssn]
           drt_unavailable_reason
-        elsif company.test_workspace?
+        elsif company.practice_copy?
           "Not available in a practice copy."
         end
-        reason = unavailable || restriction
+        reason = unavailable || restriction || (demo_efile_reason if document[:key] == "w2_efile")
         document.except(:path).merge(
           draft: !final, draft_confirmation: final ? nil : document[:draft_confirmation],
           available: reason.nil?, unavailable_reason: reason,
@@ -1042,14 +1047,21 @@ module YearEnd
       end
     end
 
-    # Copy 1 carries full SSNs: never in a test or practice workspace, and
-    # only for staff who may sign off the W-2s.
+    # Copy 1 carries full SSNs: never in a practice workspace, and only for
+    # staff who may sign off the W-2s.
     def drt_unavailable_reason
-      if company.test_workspace?
+      if company.practice_copy?
         "Not available in a practice copy — it contains full SSNs."
       elsif !permissions[:can_mark_ready]
         "Needs client-management access (contains full SSNs)."
       end
+    end
+
+    # A demo company prepares, reviews and downloads every copy like a live
+    # client, but never produces an e-file. The reason reads like any other
+    # unavailable step.
+    def demo_efile_reason
+      Company::DEMO_UNAVAILABLE_MESSAGE if company.demo?
     end
 
     # January 31 of the next year, or the next business day after a weekend.

@@ -139,7 +139,7 @@ module Api
           )
 
           render json: {
-            error: "Your test workspace access does not allow this action"
+            error: current_company.demo? ? Company::DEMO_ACCESS_DENIED_MESSAGE : "Your test workspace access does not allow this action"
           }, status: :forbidden
         end
 
@@ -151,9 +151,12 @@ module Api
               error: "This test workspace is still being prepared. Try again after its verified copy is ready."
             }, status: :conflict
           end
-          return unless TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name, request_method: request.request_method)
+          return unless TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name,
+            request_method: request.request_method, demo: current_company.demo?)
 
-          message = if finance_request?
+          message = if current_company.demo?
+            Company::DEMO_UNAVAILABLE_MESSAGE
+          elsif finance_request?
             "You are in a payroll test workspace. This finance book contains live records, so changes are unavailable. Select a live client to continue."
           else
             "This action is unavailable in a test workspace. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."
