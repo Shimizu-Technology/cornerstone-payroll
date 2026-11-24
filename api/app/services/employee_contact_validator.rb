@@ -5,9 +5,8 @@ require "set"
 class EmployeeContactValidator
   CONTACT_FIELDS = %i[email phone address_line1 address_line2 city state zip].freeze
   ADDRESS_REQUIRED_FIELDS = %i[address_line1 city state zip].freeze
-  SHARED_INBOX_RECORD_THRESHOLD = 5
-  CROSS_COMPANY_SHARED_DISTINCT_NAMES_THRESHOLD = 3
   MAX_EMAIL_LENGTH = 254
+  CLIENT_GENERIC_LOGIN_EMAIL_ERROR = "This email can't be used here. Ask Cornerstone to set it."
 
   # Structural placeholder local parts and domains (never put real addresses here).
   PLACEHOLDER_LOCAL_PARTS = %w[
@@ -29,6 +28,7 @@ class EmployeeContactValidator
     :normalized_phone,
     :same_person_confirmation_required,
     :same_person_confirmed,
+    :confirmation_basis,
     :matched_login_user,
     keyword_init: true
   ) do
@@ -116,6 +116,16 @@ class EmployeeContactValidator
       entries.filter_map { |entry| normalize_email(entry) }.to_set
     end
 
+    def db_marked_placeholder_emails(organization_id)
+      return Set.new if organization_id.blank?
+
+      EmployeePlaceholderEmail.where(organization_id: organization_id).pluck(:email).filter_map { |entry| normalize_email(entry) }.to_set
+    end
+
+    def marked_placeholder_emails(organization_id:)
+      configured_placeholder_emails | db_marked_placeholder_emails(organization_id)
+    end
+
     def structural_placeholder_email?(raw)
       email = normalize_email(raw)
       return false if email.blank?
@@ -126,58 +136,24 @@ class EmployeeContactValidator
       PLACEHOLDER_LOCAL_PARTS.include?(local_part) || PLACEHOLDER_DOMAINS.include?(domain)
     end
 
-    def placeholder_email?(raw)
+    def placeholder_email?(raw, organization_id: nil, marked_placeholders: nil)
       email = normalize_email(raw)
       return false if email.blank?
+      return true if structural_placeholder_email?(email) || configured_placeholder_emails.include?(email)
 
-      configured_placeholder_emails.include?(email) || structural_placeholder_email?(email)
+      marked = marked_placeholders || db_marked_placeholder_emails(organization_id)
+      marked.include?(email)
     end
 
-    def data_detected_shared_inbox_emails(organization_id:, company_id: nil)
-      active_scope = TenantScope.current
-      if active_scope&.mode == "company"
-        scoped_company_id = active_scope.company_id.to_i
-        rows = Employee.where(company_id: scoped_company_id)
-          .where("COALESCE(TRIM(employees.email), '') <> ''")
-          .group(Arel.sql("LOWER(TRIM(employees.email))"))
-          .having("COUNT(*) >= ?", SHARED_INBOX_RECORD_THRESHOLD)
-          .pluck(Arel.sql("LOWER(TRIM(employees.email))"))
-        return rows.to_set
-      end
-
-      return Set.new if organization_id.blank? && company_id.blank?
-
-      rows = with_org_aggregate_scope do
-        scope = Employee.joins(:company)
-          .where("COALESCE(TRIM(employees.email), '') <> ''")
-        scope = if company_id.present?
-          scope.where(company_id: company_id)
-        else
-          scope.where(companies: { organization_id: organization_id, payroll_environment: "live" })
-        end
-        scope.group(Arel.sql("LOWER(TRIM(employees.email))"))
-          .pluck(
-            Arel.sql("LOWER(TRIM(employees.email))"),
-            Arel.sql("COUNT(*)"),
-            Arel.sql("COUNT(DISTINCT employees.company_id)"),
-            Arel.sql("COUNT(DISTINCT LOWER(TRIM(COALESCE(employees.first_name, '') || ' ' || COALESCE(employees.last_name, ''))))")
-          )
-      end
-
-      rows.each_with_object(Set.new) do |(email, total_count, companies_count, distinct_names), flagged|
-        if total_count.to_i >= SHARED_INBOX_RECORD_THRESHOLD ||
-            (companies_count.to_i >= 2 && distinct_names.to_i >= CROSS_COMPANY_SHARED_DISTINCT_NAMES_THRESHOLD)
-          flagged.add(email)
-        end
-      end
-    end
-
+    # Company-independent marked placeholder list for the organization.
+    # Unmarked same-company duplicates are never auto-flagged here so family
+    # members can share an address without being blocked or bulk-cleared.
     def flagged_emails_for_organization(organization_id:, company_id: nil)
-      configured_placeholder_emails | data_detected_shared_inbox_emails(organization_id: organization_id, company_id: company_id)
+      marked_placeholder_emails(organization_id: organization_id)
     end
 
     def contact_details_context(company:)
-      flagged = flagged_emails_for_organization(organization_id: company.organization_id, company_id: TenantScope.current&.mode == "company" ? company.id : nil)
+      flagged = marked_placeholder_emails(organization_id: company.organization_id)
       company_email_counts = Employee.where(company_id: company.id)
         .where("COALESCE(TRIM(email), '') <> ''")
         .group(Arel.sql("LOWER(TRIM(email))"))
@@ -205,15 +181,13 @@ class EmployeeContactValidator
       shared_count = normalized_email.present? ? company_email_counts.fetch(normalized_email, 0).to_i : 0
       email_issue = if normalized_email.blank?
         nil
-      elsif placeholder_email?(normalized_email)
+      elsif placeholder_email?(normalized_email, organization_id: employee.company&.organization_id, marked_placeholders: flagged_emails)
         "placeholder"
-      elsif flagged_emails.include?(normalized_email)
-        "shared_inbox"
       elsif shared_count >= 2
         "shared_with_coworker"
       end
 
-      needs_contact = missing_fields.any? || %w[placeholder shared_inbox].include?(email_issue)
+      needs_contact = missing_fields.any? || email_issue == "placeholder"
 
       {
         "needs_contact_details" => needs_contact,
@@ -227,14 +201,40 @@ class EmployeeContactValidator
       new(**kwargs).call
     end
 
-    def validate_for_invite(employee, company: employee.company, allow_same_person_login: false)
+    def record_same_person_confirmation_audit!(employee:, result:, actor:, company:, ip_address: nil, user_agent: nil, request_id: nil)
+      return unless result&.same_person_confirmed?
+
+      previous_recorded = Current.domain_audit_recorded
+      AuditLog.record!(
+        user: actor,
+        organization_id: company.organization_id,
+        company_id: company.id,
+        action: "employees#confirm_same_person_email",
+        record_type: "employees",
+        record_id: employee.id,
+        subject_name: employee.display_name,
+        metadata: {
+          email: employee.email,
+          same_person_email_confirmed: true,
+          confirmed_login_user_id: result.matched_login_user&.id,
+          confirmation_basis: result.confirmation_basis
+        },
+        ip_address: ip_address,
+        user_agent: user_agent,
+        request_id: request_id
+      )
+    ensure
+      Current.domain_audit_recorded = previous_recorded
+    end
+
+    def validate_for_invite(employee, company: employee.company, allow_same_person_login: false, actor: nil)
       result = new(
         employee: employee,
         company: company,
         email: employee.email,
         phone: :unchanged,
         confirm_same_person_email: allow_same_person_login,
-        actor: nil,
+        actor: actor,
         source: "staff"
       ).call
 
@@ -250,29 +250,6 @@ class EmployeeContactValidator
       end
 
       result
-    end
-
-    def names_match?(employee, user)
-      return false if employee.blank? || user.blank?
-
-      first_tokens = normalize_name_tokens(employee.first_name)
-      last_tokens = normalize_name_tokens(employee.last_name)
-      user_tokens = normalize_name_tokens(user.name)
-      return false if first_tokens.empty? || last_tokens.empty? || user_tokens.empty?
-
-      (first_tokens - user_tokens).empty? && (last_tokens - user_tokens).empty?
-    end
-
-    private
-
-    def normalize_name_tokens(value)
-      value.to_s.downcase.gsub(/[^a-z0-9\s]/, " ").split.uniq
-    end
-
-    def with_org_aggregate_scope(&block)
-      return yield if TenantScope.current&.mode == "system"
-
-      TenantScope.as_system(reason: "Detect mass-shared placeholder employee emails by aggregate count", &block)
     end
   end
 
@@ -306,6 +283,7 @@ class EmployeeContactValidator
     warnings = []
     same_person_confirmation_required = false
     same_person_confirmed = false
+    confirmation_basis = nil
     matched_login_user = nil
 
     normalized_email = @raw_email == :unchanged ? self.class.normalize_email(@employee&.email) : self.class.normalize_email(@raw_email)
@@ -319,15 +297,14 @@ class EmployeeContactValidator
     if @raw_email != :unchanged && normalized_email.present?
       if !valid_email_format?(normalized_email)
         add_error(errors, :email, "must be a valid email address")
-      elsif self.class.placeholder_email?(normalized_email)
+      elsif self.class.placeholder_email?(normalized_email, organization_id: @company&.organization_id, marked_placeholders: @flagged_emails)
         add_error(errors, :email, "cannot be a placeholder or generic inbox address; enter the employee's own email")
-      elsif data_detected_shared_inbox?(normalized_email)
-        add_error(errors, :email, "is a shared inbox used across multiple employee records; enter the employee's own email")
       else
         login_check = check_login_email(normalized_email)
         matched_login_user = login_check[:user]
         same_person_confirmation_required = login_check[:confirmation_required]
         same_person_confirmed = login_check[:confirmed]
+        confirmation_basis = login_check[:confirmation_basis]
         add_error(errors, :email, login_check[:error]) if login_check[:error].present?
 
         if errors[:email].blank?
@@ -351,6 +328,7 @@ class EmployeeContactValidator
       normalized_phone: normalized_phone,
       same_person_confirmation_required: same_person_confirmation_required,
       same_person_confirmed: same_person_confirmed,
+      confirmation_basis: confirmation_basis,
       matched_login_user: matched_login_user
     )
   end
@@ -369,44 +347,100 @@ class EmployeeContactValidator
     email.match?(URI::MailTo::EMAIL_REGEXP) && email.match?(EMAIL_FORMAT_PATTERN)
   end
 
-  def data_detected_shared_inbox?(normalized_email)
-    flagged = @flagged_emails || self.class.data_detected_shared_inbox_emails(organization_id: @company&.organization_id)
-    flagged.include?(normalized_email)
-  end
-
   def check_login_email(normalized_email)
     login_user = User.where("LOWER(TRIM(email)) = ?", normalized_email).first
-    return { user: nil, confirmation_required: false, confirmed: false, error: nil } unless login_user
+    return no_login_conflict unless login_user
 
+    # (a) Login is already linked to this employee (or predecessor in classification transition).
     if linked_to_this_employee?(login_user)
-      return { user: login_user, confirmation_required: false, confirmed: false, error: nil }
+      return no_login_conflict(user: login_user)
     end
 
-    if eligible_for_same_person_confirmation?(login_user)
+    # A login linked to a different employee always rejects.
+    if linked_to_other_employee?(login_user)
+      return rejected_login_conflict(
+        staff_message: "belongs to a payroll login that is already linked to another employee"
+      )
+    end
+
+    # (b) The entered email is the signed-in user's own login email.
+    if @actor.present? && login_user.id == @actor.id
       if @confirm_same_person_email
-        return { user: login_user, confirmation_required: false, confirmed: true, error: nil }
+        return {
+          user: login_user,
+          confirmation_required: false,
+          confirmed: true,
+          confirmation_basis: "self_confirmed",
+          error: nil
+        }
       end
 
       return {
         user: login_user,
         confirmation_required: true,
         confirmed: false,
-        error: "belongs to an existing payroll login for #{login_user.name}; confirm this is the same person to use it"
+        confirmation_basis: nil,
+        error: @actor.client? ?
+          "This is your own payroll login email. Confirm \"this is me\" to assign it to this employee." :
+          "is your own payroll login email; confirm \"this is me\" to assign it to this employee"
       }
     end
 
+    # (c) Cornerstone staff with manage_client_configuration confirm it on the admin side.
+    if staff_can_confirm_login_email?(login_user)
+      if @confirm_same_person_email
+        return {
+          user: login_user,
+          confirmation_required: false,
+          confirmed: true,
+          confirmation_basis: "staff_confirmed",
+          error: nil
+        }
+      end
+
+      return {
+        user: login_user,
+        confirmation_required: true,
+        confirmed: false,
+        confirmation_basis: nil,
+        error: "belongs to an existing payroll login for #{login_user.name} (#{login_user.role}); confirm this is the same person to use it"
+      }
+    end
+
+    rejected_login_conflict(
+      staff_message: "belongs to another person's payroll login; ask a manager or admin with client configuration access to confirm it"
+    )
+  end
+
+  def no_login_conflict(user: nil)
+    {
+      user: user,
+      confirmation_required: false,
+      confirmed: false,
+      confirmation_basis: nil,
+      error: nil
+    }
+  end
+
+  def rejected_login_conflict(staff_message:)
     {
       user: nil,
       confirmation_required: false,
       confirmed: false,
-      error: "belongs to another person's payroll login and cannot be assigned to this employee"
+      confirmation_basis: nil,
+      error: @actor&.client? ? CLIENT_GENERIC_LOGIN_EMAIL_ERROR : staff_message
     }
   end
 
+  def own_employee_ids
+    ids = []
+    ids << @employee.id if @employee&.persisted?
+    ids << @employee.previous_employee_id if @employee&.previous_employee_id.present?
+    ids.uniq
+  end
+
   def linked_to_this_employee?(login_user)
-    candidate_ids = []
-    candidate_ids << @employee.id if @employee&.persisted?
-    candidate_ids << @employee.previous_employee_id if @employee&.previous_employee_id.present?
+    candidate_ids = own_employee_ids
     return false if candidate_ids.empty? || @company.blank?
 
     EmployeeAccountLink
@@ -415,19 +449,20 @@ class EmployeeContactValidator
       .exists?
   end
 
-  def eligible_for_same_person_confirmation?(login_user)
-    return false unless login_user.staff_member? || login_user.client?
-    return false unless self.class.names_match?(@employee, login_user)
-    return false if @company.blank?
+  def linked_to_other_employee?(login_user)
+    scope = EmployeeAccountLink.where(user_id: login_user.id).where.not(status: "revoked")
+    scope = scope.where(company_id: @company.id) if TenantScope.current&.mode == "company" && @company.present?
+    candidate_ids = own_employee_ids
+    scope = scope.where.not(employee_id: candidate_ids) if candidate_ids.any?
+    scope.exists?
+  end
 
-    if @actor&.client?
-      # Client users may only confirm logins that belong to their own company.
-      login_user.client? && login_user.can_access_company?(@company.id)
-    elsif @actor&.staff_member?
-      login_user.organization_id == @company.organization_id || login_user.super_admin?
-    else
-      login_user.organization_id == @company.organization_id && login_user.can_access_company?(@company.id)
-    end
+  def staff_can_confirm_login_email?(login_user)
+    return false unless @actor&.staff_member? && @company.present?
+    return false unless @actor.can_access_company?(@company.id)
+    return false unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @company)
+
+    login_user.organization_id == @company.organization_id || login_user.super_admin?
   end
 
   def same_company_coworker_email_count(normalized_email)

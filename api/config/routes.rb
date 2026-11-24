@@ -405,8 +405,10 @@ Rails.application.routes.draw do
         post "employee_bulk_imports/apply_json", to: "employee_bulk_imports#apply_json"
 
         # Employee Contact Hygiene (shared & placeholder email cleanup)
-        get  "employee_contact_hygiene/shared_emails", to: "employee_contact_hygiene#shared_emails"
-        post "employee_contact_hygiene/clear_shared_emails", to: "employee_contact_hygiene#clear_shared_emails"
+        get    "employee_contact_hygiene/shared_emails", to: "employee_contact_hygiene#shared_emails"
+        post   "employee_contact_hygiene/placeholder_emails", to: "employee_contact_hygiene#mark_placeholder_email"
+        delete "employee_contact_hygiene/placeholder_emails", to: "employee_contact_hygiene#unmark_placeholder_email"
+        post   "employee_contact_hygiene/clear_shared_emails", to: "employee_contact_hygiene#clear_shared_emails"
         resources :departments, only: [ :index, :create, :update ]
 
         get "time_tracking_sources/:source_id/health", to: "time_tracking_source_health#show"

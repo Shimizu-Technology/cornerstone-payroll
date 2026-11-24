@@ -208,6 +208,10 @@ class Employee < ApplicationRecord
   }
 
   scope :active, -> { where(status: "active") }
+
+  def contact_revision
+    updated_at&.iso8601(6)
+  end
   scope :needs_contact_details, ->(flagged_emails: []) {
     clauses = [
       "COALESCE(TRIM(employees.email), '') = ''",

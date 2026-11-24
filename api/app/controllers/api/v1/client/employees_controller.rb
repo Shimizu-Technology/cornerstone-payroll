@@ -86,7 +86,9 @@ module Api
               attrs: employee_params.to_h,
               requested_by: current_user,
               company: current_company,
-              confirm_same_person_email: confirm_same_person_email_param
+              confirm_same_person_email: confirm_same_person_email_param,
+              row_revision: row_revision_param,
+              baseline_values: baseline_values_param
             ).update!
           end
 
@@ -100,6 +102,16 @@ module Api
               "Profile updates saved. Payroll-sensitive changes were submitted for approval as request ##{result.change_request.id}." :
               "Employee profile updated successfully."
           }
+        rescue EmployeeContactRevisionGuard::ConflictError => e
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+          render json: {
+            error: e.message,
+            code: "contact_revision_conflict",
+            conflicting_fields: e.conflicting_fields,
+            contact_revision: e.employee.contact_revision,
+            current_values: e.current_values,
+            data: serialize_employee(e.employee, contact_context: contact_context)
+          }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
           render json: {
             error: "Validation failed",
@@ -271,6 +283,7 @@ module Api
           data = employee.as_json(
             except: [ :intake_exception, :ssn_encrypted, :contractor_ein, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
+          data["contact_revision"] = employee.contact_revision
           data["contact_details_status"] = EmployeeContactValidator.contact_details_status(employee, context: contact_context)
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: false)
           data["ssn_last_four"] = employee.ssn_last_four
@@ -353,6 +366,22 @@ module Api
         def confirm_same_person_email_param
           raw = params.key?(:confirm_same_person_email) ? params[:confirm_same_person_email] : params.dig(:employee, :confirm_same_person_email)
           ActiveModel::Type::Boolean.new.cast(raw) == true
+        end
+
+        def row_revision_param
+          params[:row_revision].presence ||
+            params[:contact_revision].presence ||
+            params[:expected_updated_at].presence ||
+            params.dig(:employee, :row_revision).presence ||
+            params.dig(:employee, :contact_revision).presence ||
+            params.dig(:employee, :expected_updated_at).presence
+        end
+
+        def baseline_values_param
+          raw = params[:baseline_values] || params.dig(:employee, :baseline_values)
+          return nil unless raw.respond_to?(:permit)
+
+          raw.permit(*ClientEmployeeUpdateService::DIRECT_FIELDS).to_h
         end
 
         def needs_contact_details_filter_active?

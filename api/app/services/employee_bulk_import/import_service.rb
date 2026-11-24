@@ -122,6 +122,12 @@ module EmployeeBulkImport
           employee.initial_compensation_actor = actor || Current.user || Current.actor || AuditActor.operator("Employee bulk import")
           EmployeeIntakePolicy.prepare!(employee, actor: actor)
           if employee.save
+            EmployeeContactValidator.record_same_person_confirmation_audit!(
+              employee: employee,
+              result: contact_result,
+              actor: actor,
+              company: company
+            )
             create_w4_election!(employee)
             EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)
             results[:created] += 1

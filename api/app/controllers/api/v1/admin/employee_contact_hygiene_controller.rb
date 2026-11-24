@@ -22,6 +22,74 @@ module Api
           render json: report
         end
 
+        # POST /api/v1/admin/employee_contact_hygiene/placeholder_emails
+        def mark_placeholder_email
+          organization = resolve_organization
+          return render json: { error: "Organization not found" }, status: :not_found unless organization
+
+          result = EmployeeContactHygiene::PlaceholderEmailService.new(
+            organization: organization,
+            email: params[:email],
+            reason: params[:reason],
+            actor: current_user,
+            company: current_company,
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent,
+            request_id: request.request_id
+          ).mark!
+
+          skip_default_audit_log! unless result.changed
+
+          render json: {
+            data: {
+              email: result.email,
+              reason: result.reason,
+              marked: result.marked,
+              changed: result.changed
+            },
+            message: result.changed ?
+              "Marked #{result.email} as a placeholder email." :
+              "#{result.email} is already marked as a placeholder email."
+          }
+        rescue EmployeeContactHygiene::PlaceholderEmailService::Forbidden => e
+          render json: { error: e.message }, status: :forbidden
+        rescue EmployeeContactHygiene::PlaceholderEmailService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # DELETE /api/v1/admin/employee_contact_hygiene/placeholder_emails
+        def unmark_placeholder_email
+          organization = resolve_organization
+          return render json: { error: "Organization not found" }, status: :not_found unless organization
+
+          result = EmployeeContactHygiene::PlaceholderEmailService.new(
+            organization: organization,
+            email: params[:email],
+            actor: current_user,
+            company: current_company,
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent,
+            request_id: request.request_id
+          ).unmark!
+
+          skip_default_audit_log! unless result.changed
+
+          render json: {
+            data: {
+              email: result.email,
+              marked: result.marked,
+              changed: result.changed
+            },
+            message: result.changed ?
+              "Removed #{result.email} from the placeholder email list." :
+              "#{result.email} was not on the placeholder email list."
+          }
+        rescue EmployeeContactHygiene::PlaceholderEmailService::Forbidden => e
+          render json: { error: e.message }, status: :forbidden
+        rescue EmployeeContactHygiene::PlaceholderEmailService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         # POST /api/v1/admin/employee_contact_hygiene/clear_shared_emails
         def clear_shared_emails
           target_company = resolve_target_company
@@ -48,6 +116,14 @@ module Api
             end
           end
 
+          skip_default_audit_log! if result.cleared_count.zero?
+
+          message = if result.cleared_count.zero?
+            "No employee records at #{result.company_name} currently have #{result.email} (0 records changed)."
+          else
+            "Cleared #{result.email} from #{result.cleared_count} employee #{'record'.pluralize(result.cleared_count)} at #{result.company_name}."
+          end
+
           render json: {
             data: {
               company_id: result.company_id,
@@ -57,7 +133,7 @@ module Api
               active_cleared_count: result.active_cleared_count,
               inactive_cleared_count: result.inactive_cleared_count
             },
-            message: "Cleared #{result.email} from #{result.cleared_count} employee #{'record'.pluralize(result.cleared_count)} at #{result.company_name}."
+            message: message
           }
         rescue EmployeeContactHygiene::ClearSharedEmailService::Forbidden => e
           render json: { error: e.message }, status: :forbidden
@@ -68,15 +144,23 @@ module Api
         private
 
         def rls_system_reason
-          return "Staff shared and placeholder email hygiene summary across accessible companies" if action_name == "shared_emails"
-
-          nil
+          case action_name
+          when "shared_emails"
+            "Staff shared and placeholder email hygiene summary across accessible companies"
+          when "mark_placeholder_email", "unmark_placeholder_email"
+            "Staff organization-level placeholder email list update and audit"
+          end
         end
 
         def rls_company_id
           return params[:company_id].to_i if action_name == "clear_shared_emails" && params[:company_id].to_s.match?(/\A[1-9]\d*\z/)
 
           current_company_id
+        end
+
+        def resolve_organization
+          org_id = current_company&.organization_id || current_user.organization_id
+          Organization.find_by(id: org_id)
         end
 
         def resolve_target_company
