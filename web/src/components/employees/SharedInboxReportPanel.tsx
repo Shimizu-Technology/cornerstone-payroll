@@ -22,6 +22,7 @@ import {
 interface SharedInboxReportPanelProps {
   activeCompanyId?: number;
   readOnly?: boolean;
+  canManagePlaceholders?: boolean;
   onCleared?: (companyId: number, email: string, clearedCount: number) => void;
   onReportLoaded?: (report: SharedEmailReportResponse) => void;
 }
@@ -48,6 +49,7 @@ const REASON_LABELS: Record<string, string> = {
 export function SharedInboxReportPanel({
   activeCompanyId,
   readOnly = false,
+  canManagePlaceholders = true,
   onCleared,
   onReportLoaded,
 }: SharedInboxReportPanelProps) {
@@ -95,8 +97,10 @@ export function SharedInboxReportPanel({
     setClearError(null);
   };
 
+  const allowPlaceholderToggle = !readOnly && canManagePlaceholders && report?.can_manage_placeholders !== false;
+
   const handleMarkPlaceholder = async (email: string) => {
-    if (readOnly || markingEmail) return;
+    if (!allowPlaceholderToggle || markingEmail) return;
     setMarkingEmail(email);
     setError(null);
     try {
@@ -111,7 +115,7 @@ export function SharedInboxReportPanel({
   };
 
   const handleUnmarkPlaceholder = async (email: string) => {
-    if (readOnly || markingEmail) return;
+    if (!allowPlaceholderToggle || markingEmail) return;
     setMarkingEmail(email);
     setError(null);
     try {
@@ -271,11 +275,11 @@ export function SharedInboxReportPanel({
                             <div className="flex shrink-0 flex-wrap items-center gap-2">
                               {entry.clearable ? (
                                 <>
-                                  {entry.unmarkable && (
+                                  {entry.unmarkable && allowPlaceholderToggle && (
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      disabled={readOnly || Boolean(markingEmail)}
+                                      disabled={Boolean(markingEmail)}
                                       loading={isMarking}
                                       loadingLabel="Updating..."
                                       onClick={() => void handleUnmarkPlaceholder(entry.email)}
@@ -295,11 +299,11 @@ export function SharedInboxReportPanel({
                                     Clear to blank
                                   </Button>
                                 </>
-                              ) : (
+                              ) : allowPlaceholderToggle ? (
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  disabled={readOnly || Boolean(markingEmail)}
+                                  disabled={Boolean(markingEmail)}
                                   loading={isMarking}
                                   loadingLabel="Marking..."
                                   onClick={() => void handleMarkPlaceholder(entry.email)}
@@ -308,6 +312,10 @@ export function SharedInboxReportPanel({
                                   <Flag className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
                                   Mark as placeholder
                                 </Button>
+                              ) : (
+                                <span className="text-xs text-neutral-500">
+                                  Org admin needed on a live client to mark
+                                </span>
                               )}
                             </div>
                           </div>

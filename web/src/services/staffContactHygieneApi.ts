@@ -29,6 +29,7 @@ export interface SharedEmailReportResponse {
     total_employee_records: number;
     active_employee_records: number;
   };
+  can_manage_placeholders?: boolean;
   marked_placeholders?: string[];
   companies: SharedEmailCompanySummary[];
 }

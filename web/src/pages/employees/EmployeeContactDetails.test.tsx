@@ -270,11 +270,13 @@ describe('EmployeeContactDetails', () => {
     fireEvent.change(screen.getByLabelText('Email for Maria Cruz'), { target: { value: 'my.version@example.com' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Maria Cruz' }));
 
-    expect((await screen.findAllByText(/Conflict: someone else updated this row before you saved/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Someone else updated this employee while you were editing/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Someone else changed this to/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/coworker@example\.com/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/my\.version@example\.com/i).length).toBeGreaterThan(0);
 
-    // Choose "Keep my changes" -> retries with latest revision rev-2 and keeps coworker's address change.
-    fireEvent.click(screen.getAllByRole('button', { name: 'Keep my changes' })[0]);
+    // Choose "Keep yours" -> retries with latest revision rev-2 and keeps coworker's address change.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Keep yours' })[0]);
 
     await waitFor(() => {
       expect(apiMocks.clientUpdate).toHaveBeenLastCalledWith(101, {
@@ -346,6 +348,148 @@ describe('EmployeeContactDetails', () => {
     expect((await screen.findAllByText('Alice Adams')).length).toBeGreaterThan(0);
     expect((screen.getByLabelText('Mobile for Alice Adams') as HTMLInputElement).value).toBe('555-0142');
     expect((screen.getByLabelText('Street address for Alice Adams') as HTMLInputElement).value).toBe('99 Updated By Coworker Rd');
+  });
+
+  it('keeps the original field baseline and row revision after paging away and back so a coworker edit triggers 409 instead of silent overwrite', async () => {
+    const page1Initial = buildEmployee({
+      id: 101,
+      first_name: 'Alice',
+      last_name: 'Adams',
+      email: 'alice.old@example.com',
+      address_line1: '10 First St',
+      contact_revision: 'rev-1',
+    });
+    const page2Emp = buildEmployee({
+      id: 201,
+      first_name: 'Zoe',
+      last_name: 'Zeta',
+      email: 'zoe@example.com',
+    });
+    const page1AfterCoworker = {
+      ...page1Initial,
+      email: 'coworker.new@example.com',
+      address_line1: '88 Coworker Ave',
+      contact_revision: 'rev-2',
+    };
+
+    apiMocks.clientList
+      .mockResolvedValueOnce({
+        data: [page1Initial],
+        meta: { current_page: 1, total_pages: 2, total_count: 60, per_page: 50, needs_contact_details_count: 2 },
+      })
+      .mockResolvedValueOnce({
+        data: [page2Emp],
+        meta: { current_page: 2, total_pages: 2, total_count: 60, per_page: 50, needs_contact_details_count: 2 },
+      })
+      .mockResolvedValueOnce({
+        data: [page1AfterCoworker],
+        meta: { current_page: 1, total_pages: 2, total_count: 60, per_page: 50, needs_contact_details_count: 2 },
+      });
+
+    apiMocks.clientUpdate.mockRejectedValueOnce(
+      new ApiError('Someone else updated this employee while you were editing.', 409, undefined, {
+        error: 'Someone else updated this employee while you were editing.',
+        code: 'contact_revision_conflict',
+        conflicting_fields: ['email'],
+        contact_revision: 'rev-2',
+        current_values: { email: 'coworker.new@example.com' },
+        data: page1AfterCoworker,
+      }),
+    );
+
+    renderClientPage();
+    expect((await screen.findAllByText('Alice Adams')).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Email for Alice Adams'), { target: { value: 'my.edit@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    expect((await screen.findAllByText('Zoe Zeta')).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /Previous/i }));
+    expect((await screen.findAllByText('Alice Adams')).length).toBeGreaterThan(0);
+    // Untouched field refreshed, edited field stayed my.edit@example.com.
+    expect((screen.getByLabelText('Street address for Alice Adams') as HTMLInputElement).value).toBe('88 Coworker Ave');
+    expect((screen.getByLabelText('Email for Alice Adams') as HTMLInputElement).value).toBe('my.edit@example.com');
+
+    // Saving must send original rev-1 and baseline alice.old@example.com, NOT coworker's rev-2!
+    fireEvent.click(screen.getByRole('button', { name: 'Save Alice Adams' }));
+    await waitFor(() => {
+      expect(apiMocks.clientUpdate).toHaveBeenCalledWith(101, {
+        email: 'my.edit@example.com',
+        row_revision: 'rev-1',
+        baseline_values: { email: 'alice.old@example.com' },
+      });
+    });
+    expect((await screen.findAllByText(/coworker\.new@example\.com/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Use theirs' }).length).toBeGreaterThan(0);
+  });
+
+  it('clamps an out-of-range page URL to the last page with results while keeping filters and pagination visible', async () => {
+    const page2Emp = buildEmployee({
+      id: 205,
+      first_name: 'Zoe',
+      last_name: 'Zeta',
+      email: '',
+    });
+
+    apiMocks.clientList
+      .mockResolvedValueOnce({
+        data: [],
+        meta: { current_page: 5, total_pages: 2, total_count: 60, per_page: 50, needs_contact_details_count: 60 },
+      })
+      .mockResolvedValueOnce({
+        data: [page2Emp],
+        meta: { current_page: 2, total_pages: 2, total_count: 60, per_page: 50, needs_contact_details_count: 60 },
+      });
+
+    renderClientPage('/companies/7/employees/contact-details?needs_contact_details=true&page=5');
+
+    expect((await screen.findAllByText('Zoe Zeta')).length).toBeGreaterThan(0);
+    expect(apiMocks.clientList).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ page: 2, needs_contact_details: true }),
+    );
+    expect(screen.getByText(/Page/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Previous/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Needs contact details/i }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('preserves pending drafts across switching to the Shared & placeholder emails tab and back', async () => {
+    authState.isClient = false;
+    authState.user = { id: 2, company_id: 7, role: 'org_admin', name: 'Cornerstone Admin', email: 'staff@example.com' };
+    capabilityState.manageClientConfiguration = true;
+
+    const ana = buildEmployee({
+      id: 201,
+      first_name: 'Ana',
+      last_name: 'Reyes',
+      email: 'ana.old@example.com',
+      contact_revision: 'rev-10',
+    });
+
+    apiMocks.adminList.mockResolvedValue({
+      data: [ana],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 0 },
+    });
+    apiMocks.sharedEmails.mockResolvedValue({
+      summary: { companies_affected: 0, distinct_flagged_emails: 0, total_employee_records: 0, active_employee_records: 0 },
+      can_manage_placeholders: true,
+      marked_placeholders: [],
+      companies: [],
+    });
+
+    renderStaffPage();
+    expect((await screen.findAllByText('Ana Reyes')).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Email for Ana Reyes'), { target: { value: 'ana.draft@example.com' } });
+    expect(screen.getByText(/1 unsaved row/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Shared & placeholder emails/i }));
+    expect(await screen.findByText('Shared and placeholder emails')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Contact details/i }));
+    expect((await screen.findAllByText('Ana Reyes')).length).toBeGreaterThan(0);
+    expect((screen.getByLabelText('Email for Ana Reyes') as HTMLInputElement).value).toBe('ana.draft@example.com');
+    expect(screen.getByText(/1 unsaved row/i)).toBeTruthy();
   });
 
   it('offers inline same-person confirmation when saving an employee login email and retries with confirm_same_person_email', async () => {

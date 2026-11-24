@@ -86,7 +86,7 @@ export type EmployeeContactSource = 'client' | 'staff' | 'employee' | 'import';
 export interface EmployeeContactDetailsStatus {
   needs_contact_details: boolean;
   missing_fields: string[];
-  email_issue: 'placeholder' | 'shared_inbox' | 'shared_with_coworker' | null;
+  email_issue: 'placeholder' | 'placeholder_pattern' | 'shared_inbox' | 'shared_with_coworker' | null;
   shared_email_count?: number;
 }
 
