@@ -583,6 +583,14 @@ class PayrollItem < ApplicationRecord
     {}
   end
 
+  # Earnings rows in the order the calculator wrote them. The association has
+  # no ORDER BY, and PostgreSQL can return rewritten rows in any order, so a
+  # stub could otherwise list Tips above Regular Pay. Unsaved rows keep their
+  # build order after the saved ones.
+  def earnings_in_entry_order
+    payroll_item_earnings.each_with_index.sort_by { |earning, index| [ earning.id ? 0 : 1, earning.id.to_i, index ] }.map(&:first)
+  end
+
   def overtime_pay
     if signed_correction_components?
       return payroll_item_earnings.select { |earning| earning.category == "overtime" }.sum { |earning| earning.amount.to_d }

@@ -347,7 +347,7 @@ class PayStubGenerator
 
     # Non-taxable earnings are printed in their own section because they increase
     # net pay but are intentionally excluded from gross pay.
-    item_earnings = payroll_item.payroll_item_earnings.reject { |earning| earning.category.to_s == "non_taxable" }
+    item_earnings = payroll_item.earnings_in_entry_order.reject { |earning| earning.category.to_s == "non_taxable" }
     correction_earnings = SignedCorrectionEarnings.call(payroll_item)
     # Calculators materialize each taxable field as an `other` earning. Prefer
     # the field row below, which also carries its field-specific YTD. Consume
