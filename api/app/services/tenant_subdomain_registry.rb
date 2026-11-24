@@ -10,7 +10,10 @@ class TenantSubdomainRegistry
   BRANDING_PATH = %r{\A/api/v1/public/tenant_branding/?\z}
   PORTAL_PATH = %r{\A/api/v1/(?:auth|employee)/}
   BRANDING_METHODS = %w[GET HEAD OPTIONS].freeze
-  BRANDING_KEYS = %w[logo_url primary_color accent_color].freeze
+  BRANDING_KEYS = %w[logo_url primary_color accent_color display_name app_name show_main_phone].freeze
+  DISPLAY_NAME_MAX = 60
+  APP_NAME_MAX = 30
+  LOGO_PATH = %r{\A/api/v1/public/tenant_branding/logo/}
   CACHE_TTL = 45.seconds
 
   PUBLIC_LOGO_HOST = /\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]*\z/i
@@ -38,7 +41,7 @@ class TenantSubdomainRegistry
     enabled_company_id(origin.match(ORIGIN_PATTERN)&.[](1))
   end
 
-  def self.branding_for(host: nil, slug: nil)
+  def self.branding_for(host: nil, slug: nil, logo_base_url: nil)
     slug = host.match(HOST_PATTERN)&.[](1) if host.is_a?(String) && slug.nil?
     company_id = enabled_company_id(slug)
     return unless company_id
@@ -47,12 +50,39 @@ class TenantSubdomainRegistry
     return unless company
 
     branding = company.branding.is_a?(Hash) ? company.branding : {}
+    # Only public values: never Help contacts, emails or storage keys. Named
+    # Help contacts are served to signed-in employees only.
     {
-      name: company.name,
-      logo_url: https_url(branding["logo_url"]),
+      name: display_text(branding["display_name"], DISPLAY_NAME_MAX) || company.name,
+      app_name: display_text(branding["app_name"], APP_NAME_MAX),
+      logo_url: uploaded_logo_url(company, slug, logo_base_url) || https_url(branding["logo_url"]),
       primary_color: hex_color(branding["primary_color"]),
-      accent_color: hex_color(branding["accent_color"])
+      accent_color: hex_color(branding["accent_color"]),
+      main_phone: (company.phone.to_s.strip.presence unless branding["show_main_phone"] == false)
     }
+  end
+
+  # The company whose uploaded logo a public logo request may read, or nil
+  # when the subdomain isn't enabled or the fingerprint is stale.
+  def self.logo_company_for(slug:, digest:)
+    company_id = enabled_company_id(slug)
+    return unless company_id && digest.is_a?(String) && digest.match?(/\A[0-9a-f]{16}\z/)
+
+    company = live_companies.find_by(id: company_id, subdomain_slug: slug)
+    company if company&.brand_logo_digest == digest
+  end
+
+  # A content-addressed URL, so a new upload changes the address and the old
+  # one can be cached forever.
+  def self.uploaded_logo_url(company, slug, base_url)
+    return unless base_url.present? && company.brand_logo_digest
+
+    "#{base_url.delete_suffix('/')}/api/v1/public/tenant_branding/logo/#{slug}/#{company.brand_logo_digest}.#{company.brand_logo_extension}"
+  end
+
+  def self.display_text(value, max)
+    text = value.to_s.squish if value.is_a?(String)
+    text if text.present? && text.length <= max && !text.match?(/[[:cntrl:]<>]/)
   end
 
   def self.invalidate!
