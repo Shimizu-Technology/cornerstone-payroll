@@ -42,19 +42,31 @@ class EmployeeAccountLink < ApplicationRecord
 
   DECISION_FUNCTION = "payroll_employee_login_link_decision(bigint, bigint, bigint[])"
   DECISIONS = { "allowed" => :allowed, "conflict" => :conflict, "none" => :none }.freeze
+  BIGINT = ActiveRecord::Type::Integer.new(limit: 8)
+  BIGINT_ARRAY = ActiveRecord::ConnectionAdapters::PostgreSQL::OID::Array.new(BIGINT)
 
+  # Any error from the function, including PostgreSQL refusing to read past
+  # RLS when the owner no longer bypasses it (row_security = off), is
+  # :unknown, which callers reject. The savepoint keeps the caller's
+  # transaction usable after such an error.
   def self.function_link_decision(user_id, company_id, allowed_ids)
-    sql = sanitize_sql_array([
-      "SELECT payroll_employee_login_link_decision(?::bigint, ?::bigint, ?::bigint[])",
-      Integer(user_id), company_id, PG::TextEncoder::Array.new.encode(allowed_ids)
-    ])
-    DECISIONS.fetch(connection.select_value(sql), :unknown)
+    binds = [
+      ActiveRecord::Relation::QueryAttribute.new("login_user_id", Integer(user_id), BIGINT),
+      ActiveRecord::Relation::QueryAttribute.new("company_id", company_id, BIGINT),
+      ActiveRecord::Relation::QueryAttribute.new("employee_ids", allowed_ids, BIGINT_ARRAY)
+    ]
+    answer = transaction(requires_new: true) do
+      connection.select_value("SELECT payroll_employee_login_link_decision($1, $2, $3)", "Login link decision", binds)
+    end
+    DECISIONS.fetch(answer, :unknown)
+  rescue ActiveRecord::StatementInvalid => e
+    Rails.logger.warn("[EmployeeAccountLink] Login link decision failed closed: #{e.class}")
+    :unknown
   end
 
   def self.decision_function_available?
-    connection.select_value(
-      sanitize_sql_array([ "SELECT has_function_privilege(to_regprocedure(?), 'EXECUTE')", DECISION_FUNCTION ])
-    ) == true
+    bind = ActiveRecord::Relation::QueryAttribute.new("function", DECISION_FUNCTION, ActiveRecord::Type::String.new)
+    connection.select_value("SELECT has_function_privilege(to_regprocedure($1), 'EXECUTE')", "Login link decision check", [ bind ]) == true
   end
 
   def self.link_decision_for(user_id, company_id, allowed_ids)
