@@ -24,7 +24,11 @@ RSpec.describe DemoCompany::Create do
     expect(company.test_workspace_manifest).to include("demo_fixture_key" => "harbor-finch-kitchen")
     expect(company.employees).to be_empty
     expect(company.pay_periods).to be_empty
-    expect(AuditLog.find_by(action: "demo_company#create", record_id: company.id)).to be_present
+    log = AuditLog.find_by(action: "companies#create", record_id: company.id)
+    expect(log).to be_present
+    expect(log.metadata.to_json).not_to match(/demo|fixture|harbor-finch/i)
+    expect(AuditLog.where("action LIKE ?", "%demo%")).to be_empty
+    expect(RecordCreator.call(company)&.dig(:name)).to eq(admin.name)
   end
 
   it "does not count against the organization's live client cap" do

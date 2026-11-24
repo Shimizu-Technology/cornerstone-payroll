@@ -51,15 +51,17 @@ module DemoCompany
             created_by: actor
           )
         )
+        # Staff history shows an ordinary client creation; the fixture key
+        # stays on the company row, which only organization admins can see.
         AuditLog.record!(
           user: actor,
           organization_id: organization.id,
           company_id: company.id,
-          action: "demo_company#create",
-          record_type: "companies",
+          action: "companies#create",
+          record_type: "Company",
           record_id: company.id,
           subject_name: company.name,
-          metadata: { fixture_key: fixture_key }
+          metadata: {}
         )
         company
       end
