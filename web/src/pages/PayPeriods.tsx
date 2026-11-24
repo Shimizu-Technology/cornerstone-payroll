@@ -4,7 +4,7 @@ import { PayrollCommitDialog } from '@/components/payroll/PayrollCommitDialog';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useFeedback, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, LockKeyhole, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -184,6 +184,8 @@ export function PayPeriods() {
   const [years, setYears] = useState<number[]>([]);
   const [historyAvailable, setHistoryAvailable] = useState(false);
   const [recordedHistoryCount, setRecordedHistoryCount] = useState<number | null>(null);
+  const [unconfirmedChanges, setUnconfirmedChanges] = useState<number | null>(null);
+  const confirmationPath = `/companies/${activeCompanyId}/contact-changes-to-confirm`;
   const [goLiveGate, setGoLiveGate] = useState<PayrollGoLiveGateState | null>(null);
   const requestedSort = searchParams.get('sort');
   const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status', 'source'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
@@ -225,6 +227,7 @@ export function PayPeriods() {
     setTotalPages(0);
     setYears([]);
     setGoLiveGate(null);
+    setUnconfirmedChanges(null);
     setHistoryAvailable(false);
     setPayPeriodCompanyId(null);
   }, [payPeriodViewKey]);
@@ -336,6 +339,7 @@ export function PayPeriods() {
       setTotalPages(response.meta.total_pages);
       setYears(response.meta.years);
       setGoLiveGate(response.meta.payroll_go_live ?? null);
+      setUnconfirmedChanges(response.meta.unconfirmed_contact_changes ?? null);
       setHistoryAvailable(response.meta.prior_provider_history_available ?? false);
       setRecordedHistoryCount(response.meta.prior_provider_history_recorded?.period_count ?? null);
       payPeriodCompanyIdRef.current = requestedCompanyId;
@@ -407,12 +411,13 @@ export function PayPeriods() {
       setIsSubmitting(true);
       setCreateError(null);
       setError(null);
-      await payPeriodsApi.create({
+      const created = await payPeriodsApi.create({
         ...formData,
         starting_check_number: startingCheckNumber,
       });
       if (!isCurrentMutation()) return;
       setIsCreateOpen(false);
+      if (created?.unconfirmed_contact_changes != null) setUnconfirmedChanges(created.unconfirmed_contact_changes);
       setCurrentNextCheckNumber(null);
       setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true });
       void loadPayPeriodsRef.current(true);
@@ -842,6 +847,12 @@ export function PayPeriods() {
             <TrainingWorkflowGuide />
           </div>
         )}
+        {unconfirmedChanges !== null && activeCompanyId && (
+          <div className="rounded-lg border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
+            {unconfirmedChanges > 0 && <span className="mr-2">{contactChangeWarning(unconfirmedChanges)}</span>}
+            <Link className="font-medium text-primary-700 underline" to={confirmationPath}>Changes to confirm</Link>
+          </div>
+        )}
         {goLiveGate?.comparison_only && (
           <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
             <div className="flex items-start gap-3">
@@ -1269,6 +1280,11 @@ export function PayPeriods() {
                   : 'Create a payroll run with an explicit purpose and verified dates.'}
               </DialogDescription>
             </DialogHeader>
+            {unconfirmedChanges != null && unconfirmedChanges > 0 && (
+              <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                {contactChangeWarning(unconfirmedChanges)} You can still create this run.
+              </p>
+            )}
             {createError && <ActionFeedback retryKey={createErrorFeedbackAttempt} tone="error" message={createError} />}
             <div className="grid gap-4 py-4">
               <div className="rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-xs font-medium leading-5 text-primary-800">{scheduleContext}</div>
@@ -1517,4 +1533,8 @@ export function PayPeriods() {
       </Dialog>
     </div>
   );
+}
+
+function contactChangeWarning(count: number) {
+  return `${count} employee contact ${count === 1 ? 'change needs' : 'changes need'} confirmation on payroll.`;
 }

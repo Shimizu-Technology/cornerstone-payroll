@@ -252,6 +252,7 @@ export function EmployeeForm() {
   const canReactivateLoadedWorker = canChangeEmployeeStatus && (employeeStatus !== 'terminated' || canManageClientConfiguration);
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
+  const [pendingAddressRequestId, setPendingAddressRequestId] = useState<number | null>(null);
   const [generalError, setGeneralError, generalErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -916,6 +917,7 @@ export function EmployeeForm() {
       requestedCompanyId === companyIdRef.current
       && submissionGeneration === submissionGenerationRef.current
     );
+    setPendingAddressRequestId(null);
     setIsSaving(true);
     setGeneralError(null);
 
@@ -1150,7 +1152,10 @@ export function EmployeeForm() {
     } catch (err) {
       if (!isCurrentSubmission()) return;
       if (err instanceof ApiError) {
-        const data = err.data as { locked_through?: string | null } | undefined;
+        const data = err.data as { locked_through?: string | null; code?: string; pending_request_id?: number } | undefined;
+        if (data?.code === 'address_request_pending' && data.pending_request_id) {
+          setPendingAddressRequestId(data.pending_request_id);
+        }
         if (data?.locked_through !== undefined) {
           const lockedThrough = data.locked_through;
           setLoadedEmployee((current) => current?.compensation_history ? {
@@ -1281,7 +1286,11 @@ export function EmployeeForm() {
       <form id="employee-form" noValidate onSubmit={handleSubmit} className="max-w-4xl p-4 pb-32 sm:p-6 sm:pb-32 lg:p-8 lg:pb-32">
         {generalError && (
           <ActionFeedback retryKey={generalErrorFeedbackAttempt} tone="error" message={generalError}><AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
-            <p className="text-danger-700">{generalError}</p></ActionFeedback>
+            <p className="text-danger-700">
+              {generalError}{pendingAddressRequestId && (
+                <> <Link className="font-medium underline" to={`/change-requests?request_id=${pendingAddressRequestId}`}>View address request</Link></>
+              )}
+            </p></ActionFeedback>
         )}
 
         {isEditing && !isClient && loadedEmployee?.configuration_review_status === 'needs_review' && (
