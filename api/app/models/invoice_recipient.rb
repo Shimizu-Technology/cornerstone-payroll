@@ -24,7 +24,11 @@ class InvoiceRecipient < ApplicationRecord
   private
 
   def source_company_is_live
-    errors.add(:company, "practice copies cannot be real billing recipients") if company&.test_workspace?
+    if company&.demo?
+      errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE)
+    elsif company&.test_workspace?
+      errors.add(:company, "practice copies cannot be real billing recipients")
+    end
   end
 
   def normalize_blanks

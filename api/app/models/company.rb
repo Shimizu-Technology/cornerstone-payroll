@@ -25,6 +25,7 @@ class Company < ApplicationRecord
   # (filing transmission, payments, firm billing). It reads like an ordinary
   # unavailable state so the demo never announces itself to clients or staff.
   DEMO_UNAVAILABLE_MESSAGE = "This option isn't available for this client yet."
+  DEMO_ACCESS_DENIED_MESSAGE = "Your access does not allow this action for this client."
 
   before_destroy :protect_retained_portal_documents, prepend: true
 

@@ -39,7 +39,9 @@ module YearEnd
         },
         filing_reminder_count: Date.current >= Date.new(year + 1, 1, 1) ? rows.count { |row| row[:filing_progress].any? { |filing| filing[:status].in?(%w[not_filed rejected needs_correction accepted_with_errors]) } } : nil,
         hidden: {
-          test_workspaces: accessible_companies.count(&:test_workspace?),
+          # A demo company is left out silently: it is not a filing client and
+          # must not show up as a hidden test workspace either.
+          test_workspaces: accessible_companies.count(&:practice_copy?),
           inactive_without_payroll: accessible_companies.count { |company| !company.test_workspace? && !company.active? && !relevant_inactive?(company) }
         }
       }
@@ -61,7 +63,7 @@ module YearEnd
       @company_ids ||= accessible_companies.map(&:id)
     end
 
-    # Test workspaces never file. An inactive record is listed only while it
+    # Test workspaces, demo companies included, never file. An inactive record is listed only while it
     # still has this year's payroll, reportable one-off contractor checks or a
     # year-end decision, so staff can say it files no forms instead of
     # leaving it unanswered.

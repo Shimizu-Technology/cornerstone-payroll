@@ -425,6 +425,9 @@ module Api
         end
 
         def quarterly_compliance_packet_swica_ascii
+          # The ASCII wage file is an electronic filing; a demo never produces one.
+          return render json: { error: Company::DEMO_UNAVAILABLE_MESSAGE }, status: :forbidden if current_company&.demo?
+
           report_data, error_response = build_quarterly_compliance_packet_data
           return error_response if error_response
 
@@ -599,21 +602,22 @@ module Api
 
         # GET /api/v1/admin/reports/w2_gu_copy_1_drt
         # Official IRS W-2GU Copy 1 for Guam DRT, with full SSNs. Blocked in
-        # test and practice workspaces by TestWorkspaceSafetyPolicy.
+        # practice workspaces by TestWorkspaceSafetyPolicy; a demo downloads it
+        # for review like a live client.
         def w2_gu_copy_1_drt
           send_w2_gu_official_copies("drt")
         end
 
         # GET /api/v1/admin/reports/form_1099_nec_recipient_copies
         # Official IRS 1099-NEC Copy B for each contractor, TIN shown as its
-        # last four digits. Always a draft in a test or practice workspace.
+        # last four digits. Always a draft in a practice workspace.
         def form_1099_nec_recipient_copies
           send_form_1099_official_copies("recipient")
         end
 
         # GET /api/v1/admin/reports/form_1099_nec_payer_record
         # The payer's record on the IRS Copy 1 page, with full TINs. Blocked in
-        # test and practice workspaces by TestWorkspaceSafetyPolicy.
+        # practice workspaces by TestWorkspaceSafetyPolicy; allowed for a demo.
         def form_1099_nec_payer_record
           send_form_1099_official_copies("payer")
         end
@@ -1578,9 +1582,9 @@ module Api
             meta: report_meta(company, :payroll_register),
             source: {
               system: "cornerstone",
-              label: company.test_workspace? ? "Cornerstone test payroll" : "Cornerstone",
+              label: company.practice_copy? ? "Cornerstone test payroll" : "Cornerstone",
               locked: pay_period.committed?,
-              statement: company.test_workspace? ?
+              statement: company.practice_copy? ?
                 "TEST ONLY — calculated rehearsal payroll, not committed or paid. Values may change if recalculated." :
                 "This payroll was calculated in Cornerstone. Committed payroll is an immutable payroll record."
             },
@@ -1966,7 +1970,9 @@ module Api
           company = Company.find(current_company_id)
           company.with_lock do
             revalidate_current_company_write_access!(company: company, capability: :manage_client_administration)
-            raise ArgumentError, "Not available in a practice copy" if company.test_workspace?
+            raise ArgumentError, "Not available in a practice copy" if company.practice_copy?
+            # The Pub 1220 file is the GuamTax e-file; a demo never produces one.
+            raise ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf
 
             final = params[:mode] == "final"
             decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "form_1099")
@@ -2015,6 +2021,8 @@ module Api
           company = Company.find(current_company_id)
           company.with_lock do
             revalidate_current_company_write_access!(company: company, capability: pdf ? nil : :manage_client_administration)
+            # The EFW2 file is the SSA/GuamTax e-file; a demo never produces one.
+            raise ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf
             final = params[:mode] == "final"
             gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:filings, "w2_gu")
             decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
@@ -2028,7 +2036,9 @@ module Api
 
             submitter = FilingSubmitter.find_by(organization_id: company.organization_id)
             generator = Efw2W2GuGenerator.new(company: company, year: year, submitter: submitter, report: report)
-            wage_file = generator.generate
+            # The W-3SS shares the e-file's validation, except at a demo, which
+            # never e-files and whose fictional SSNs the official validator refuses.
+            wage_file = generator.generate unless company.demo?
             content = pdf ? W3ssPdfGenerator.new(company: company, report: report, draft: !final).generate : wage_file
             current = ActiveRecord::Base.uncached { W2FilingInputsFingerprint.new(company: company.reload, year: year).call }
             raise ArgumentError, "Filing inputs changed during generation; refresh and try again" unless current == fingerprint
@@ -3110,7 +3120,7 @@ module Api
         end
 
         def preview_download?
-          @download_pay_period && !@download_pay_period.committed? && !@download_pay_period.company.test_workspace?
+          @download_pay_period && !@download_pay_period.committed? && !@download_pay_period.company.practice_copy?
         end
 
         def send_data(data, options = {})
@@ -3168,8 +3178,8 @@ module Api
             company_name: company&.name,
             generated_at: Time.current.iso8601,
             report_description: REPORT_DESCRIPTIONS.fetch(report_key, nil),
-            provisional: company&.test_workspace? || false,
-            payroll_status_note: company&.test_workspace? ? "TEST ONLY — calculated test payroll, not committed or paid" : nil
+            provisional: company&.practice_copy? || false,
+            payroll_status_note: company&.practice_copy? ? "TEST ONLY — calculated test payroll, not committed or paid" : nil
           }
         end
 
@@ -4829,7 +4839,7 @@ module Api
 
             readiness = snapshot[:readiness]
             final = snapshot[:final]
-            copies = W2GuOfficialCopies.new(company: company, report: snapshot[:report], kind: kind, draft: !final, practice: company.test_workspace?)
+            copies = W2GuOfficialCopies.new(company: company, report: snapshot[:report], kind: kind, draft: !final, practice: company.practice_copy?)
             [ copies, {
               tax_year: year,
               document_kind: kind == "drt" ? "w2_gu_copy_1_drt" : "w2_gu_employee_copies_b_c",
@@ -4886,7 +4896,7 @@ module Api
             # Covers what the fingerprint doesn't, such as the employer's
             # name and address and middle names.
             input_revision: YearEnd::InputRevision.for(company.id, year)[company.id],
-            final: report.present? && !company.test_workspace? &&
+            final: report.present? && !company.practice_copy? &&
               W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
           }
         end
@@ -4955,7 +4965,7 @@ module Api
               return render json: { error: "The #{year} 1099 payees could not be loaded: #{state.report_error.to_s.delete_suffix('.')}." }, status: :unprocessable_entity
             end
 
-            copies = Form1099NecOfficialCopies.new(company: company, report: state.report, kind: kind, draft: !state.final, practice: company.test_workspace?)
+            copies = Form1099NecOfficialCopies.new(company: company, report: state.report, kind: kind, draft: !state.final, practice: company.practice_copy?)
             [ copies, {
               tax_year: year,
               document_kind: kind == "payer" ? "form_1099_nec_payer_record" : "form_1099_nec_recipient_copies_b",

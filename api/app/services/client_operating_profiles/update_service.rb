@@ -66,7 +66,7 @@ module ClientOperatingProfiles
 
       unless TestWorkspaceAccessPolicy.allowed?(user: @actor, company: @company, request_method: "PATCH",
           capability: :payroll_operations)
-        raise Forbidden, "Your test workspace access does not allow this action."
+        raise Forbidden, @company.demo? ? Company::DEMO_ACCESS_DENIED_MESSAGE : "Your test workspace access does not allow this action."
       end
       if @company.test_workspace? && !@company.test_workspace_ready?
         raise Conflict, "This test workspace is still being prepared."
