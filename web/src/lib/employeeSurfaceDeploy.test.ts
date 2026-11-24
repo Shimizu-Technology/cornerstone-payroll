@@ -16,14 +16,14 @@ import {
 
 const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const deployDir = path.join(webDir, 'deploy', 'employee');
-const read = (...parts: string[]) => readFileSync(path.join(webDir, ...parts), 'utf8');
-const publishableKey = (host: string, prefix = 'pk_live_') => `${prefix}${Buffer.from(`${host}$`).toString('base64')}`;
+const read = (...parts: string[]): string => readFileSync(path.join(webDir, ...parts), 'utf8');
+const publishableKey = (host: string, prefix = 'pk_live_'): string => `${prefix}${Buffer.from(`${host}$`).toString('base64')}`;
 const env = {
   VITE_API_URL: 'https://employee-api.example.test/api/v1',
   VITE_CLERK_PUBLISHABLE_KEY: publishableKey('clerk.shimizu-technology.com'),
 };
 const tempDirs: string[] = [];
-const tempDir = () => {
+const tempDir = (): string => {
   const dir = mkdtempSync(path.join(tmpdir(), 'employee-dist-'));
   tempDirs.push(dir);
   return dir;
@@ -41,6 +41,31 @@ describe('employee site deploy files', () => {
     expect(clerkFrontendOrigin(publishableKey('Quiet-Cat-1.clerk.accounts.dev', 'pk_test_'))).toBe('https://quiet-cat-1.clerk.accounts.dev');
   });
 
+  it('refuses a development key for a production build but allows it elsewhere', () => {
+    const devKey = publishableKey('quiet-cat-1.clerk.accounts.dev', 'pk_test_');
+    expect(() => clerkFrontendOrigin(devKey, { production: true })).toThrow(/pk_live_/);
+    expect(clerkFrontendOrigin(devKey, { production: false })).toBe('https://quiet-cat-1.clerk.accounts.dev');
+    expect(clerkFrontendOrigin(env.VITE_CLERK_PUBLISHABLE_KEY, { production: true })).toBe('https://clerk.shimizu-technology.com');
+
+    const dist = tempDir();
+    writeFileSync(path.join(dist, 'index.html'), '<html></html>');
+    expect(() => finalizeEmployeeDist({ distDir: dist, deployDir, env: { ...env, VITE_DEPLOYMENT_ENV: 'production', VITE_CLERK_PUBLISHABLE_KEY: devKey } }))
+      .toThrow(/pk_live_/);
+  });
+
+  // Hosts the API's ClerkTokenVerifier::HOSTNAME_PATTERN rejects must not reach the CSP either.
+  it.each([
+    'clerk.shimizu-technology.com/path', 'clerk.shimizu-technology.com:8443', 'localhost', '-bad.example.com', 'bad-.example.com',
+    'a b.example.com', 'clerk..example.com', 'clerk.example.com;script-src *', '*.example.com', `${'a'.repeat(64)}.example.com`,
+  ])('refuses decoded Clerk host %j', (host) => {
+    expect(() => clerkFrontendOrigin(publishableKey(host))).toThrow(/VITE_CLERK_PUBLISHABLE_KEY/);
+  });
+
+  it('refuses a decoded host with extra text after the trailing $', () => {
+    expect(() => clerkFrontendOrigin(`pk_live_${Buffer.from('clerk.example.com$extra').toString('base64')}`)).toThrow(/VITE_CLERK_PUBLISHABLE_KEY/);
+    expect(() => clerkFrontendOrigin(`pk_live_${Buffer.from('clerk.example.com$$').toString('base64')}`)).toThrow(/VITE_CLERK_PUBLISHABLE_KEY/);
+  });
+
   it.each([undefined, '', 'http://employee-api.example.test', '/api/v1', 'https://user:pw@employee-api.example.test'])(
     'refuses API URL %j',
     (value) => expect(() => apiOrigin(value)).toThrow(/VITE_API_URL/),
@@ -55,12 +80,34 @@ describe('employee site deploy files', () => {
     const csp = contentSecurityPolicy({ apiOrigin: 'https://employee-api.example.test', clerkOrigin: 'https://clerk.shimizu-technology.com' });
     const directive = (name: string) => csp.split('; ').find((part) => part.startsWith(`${name} `)) ?? '';
 
-    expect(directive('script-src')).toBe("script-src 'self' https://clerk.shimizu-technology.com https://challenges.cloudflare.com");
+    expect(directive('script-src')).toBe(
+      "script-src 'self' https://clerk.shimizu-technology.com https://challenges.cloudflare.com https://*.protect.clerk.com",
+    );
     expect(directive('connect-src')).toContain('https://employee-api.example.test');
     expect(directive('connect-src')).toContain('https://clerk.shimizu-technology.com');
     expect(directive('frame-ancestors')).toBe("frame-ancestors 'none'");
     expect(directive('object-src')).toBe("object-src 'none'");
-    expect(csp).not.toMatch(/unsafe-eval|\*|script-src[^;]*unsafe-inline/);
+    expect(csp).not.toMatch(/unsafe-eval|script-src[^;]*unsafe-inline/);
+  });
+
+  // https://clerk.com/docs/guides/secure/best-practices/csp-headers
+  it('allows the hosts Clerk documents for bot and fraud protection, and nothing broader', () => {
+    const csp = contentSecurityPolicy({ apiOrigin: 'https://employee-api.example.test', clerkOrigin: 'https://clerk.shimizu-technology.com' });
+    const directive = (name: string): string[] => (csp.split('; ').find((part) => part.startsWith(`${name} `)) ?? '').split(' ').slice(1);
+
+    expect(directive('script-src')).toEqual(expect.arrayContaining(['https://challenges.cloudflare.com', 'https://*.protect.clerk.com']));
+    expect(directive('frame-src')).toEqual(expect.arrayContaining(['https://challenges.cloudflare.com', 'https://*.protect.clerk.com']));
+    expect(directive('connect-src')).toContain('https://*.protect.clerk.com:*');
+    expect(directive('img-src')).toContain('https://img.clerk.com');
+    expect(directive('worker-src')).toEqual(["'self'", 'blob:']);
+    expect(directive('form-action')).toEqual(["'self'"]);
+
+    // A bare `*` or any wildcard outside Clerk's own documented hosts would widen the policy.
+    const documentedWildcards = ['https://*.protect.clerk.com', 'https://*.protect.clerk.com:*', 'https://*.clerk-telemetry.com'];
+    const wildcards = csp.split(/[\s;]+/).filter((source) => source.includes('*'));
+    expect(wildcards.length).toBeGreaterThan(0);
+    for (const source of wildcards) expect(documentedWildcards).toContain(source);
+    expect(csp).not.toMatch(/(^|[\s;])\*($|[\s;])|https?:\/\/\*(?!\.protect\.clerk\.com|\.clerk-telemetry\.com)/);
   });
 
   it('keeps the headers template to one block that sets no-store and the security headers', () => {
