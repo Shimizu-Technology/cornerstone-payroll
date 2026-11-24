@@ -45,6 +45,41 @@ RSpec.describe Company, "demo purpose", type: :model do
       .to raise_error(ActiveRecord::StatementInvalid, /companies_test_workspace_shape_check/)
   end
 
+  def raw_insert(columns)
+    names = columns.keys.join(", ")
+    values = columns.values.map { |value| ActiveRecord::Base.connection.quote(value) }.join(", ")
+    ActiveRecord::Base.transaction(requires_new: true) do
+      ActiveRecord::Base.connection.execute(<<~SQL)
+        INSERT INTO companies (#{names}, created_at, updated_at) VALUES (#{values}, NOW(), NOW())
+      SQL
+    end
+  end
+
+  def company_columns(**overrides)
+    { organization_id: organization.id, name: "Raw", pay_frequency: "biweekly", kind_of_employer: "N", employment_code: "R",
+      check_stock_type: "top_check", payroll_environment: "migration_rehearsal", migration_rehearsal_status: "ready" }.merge(overrides)
+  end
+
+  it "rejects a source-free, null-purpose workspace in the database, with or without a slug" do
+    expect { raw_update(live, "payroll_environment = 'migration_rehearsal', migration_rehearsal_status = 'ready', subdomain_slug = 'moved-live'") }
+      .to raise_error(ActiveRecord::StatementInvalid, /check constraint/)
+    expect { raw_update(live, "payroll_environment = 'migration_rehearsal', migration_rehearsal_status = 'ready'") }
+      .to raise_error(ActiveRecord::StatementInvalid, /companies_test_workspace_shape_check/)
+    expect { raw_insert(company_columns(subdomain_slug: "raw-slug")) }
+      .to raise_error(ActiveRecord::StatementInvalid, /check constraint/)
+    expect(live.reload).to be_live_payroll
+  end
+
+  it "requires a non-blank fixture key in the database" do
+    [ {}, { "demo_fixture_key" => "" }, { "demo_fixture_key" => "   " }, { "purpose" => "demo" } ].each do |manifest|
+      expect { raw_insert(company_columns(test_workspace_purpose: "demo", test_workspace_manifest: manifest.to_json)) }
+        .to raise_error(ActiveRecord::StatementInvalid, /companies_test_workspace_shape_check/), "accepted #{manifest.inspect}"
+    end
+    expect { raw_insert(company_columns(test_workspace_purpose: "demo", test_workspace_manifest: { "demo_fixture_key" => "raw-demo" }.to_json)) }
+      .not_to raise_error
+    expect(Company.demo.where("test_workspace_manifest ->> 'demo_fixture_key' = 'raw-demo'")).to exist
+  end
+
   it "requires a fixture key and keeps it immutable" do
     expect(build(:company, organization: organization, payroll_environment: "migration_rehearsal",
       test_workspace_purpose: "demo", migration_rehearsal_status: "ready")).not_to be_valid

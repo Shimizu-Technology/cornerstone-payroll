@@ -26,18 +26,19 @@ class AddDemoTestWorkspacePurpose < ActiveRecord::Migration[8.1]
       OR
       (
         payroll_environment = 'migration_rehearsal'
-        AND test_workspace_purpose = 'demo'
+        AND COALESCE(test_workspace_purpose, '') = 'demo'
         AND migration_source_company_id IS NULL
         AND migration_source_batch_id IS NULL
         AND migration_rehearsal_status IS NOT NULL
         AND test_workspace_expires_at IS NULL
         AND test_workspace_archived_at IS NULL
         AND test_workspace_sealed_at IS NULL
+        AND COALESCE(btrim(test_workspace_manifest ->> 'demo_fixture_key'), '') <> ''
       )
       OR
       (
         payroll_environment = 'migration_rehearsal'
-        AND test_workspace_purpose <> 'demo'
+        AND COALESCE(test_workspace_purpose, '') <> 'demo'
         AND migration_source_company_id IS NOT NULL
         AND migration_rehearsal_status IS NOT NULL
         AND test_workspace_purpose IS NOT NULL
@@ -51,18 +52,18 @@ class AddDemoTestWorkspacePurpose < ActiveRecord::Migration[8.1]
     remove_check_constraint :companies, name: "company_subdomain_requires_live_payroll"
     add_check_constraint :companies,
                          "subdomain_slug IS NULL OR payroll_environment = 'live' OR " \
-                         "(payroll_environment = 'migration_rehearsal' AND test_workspace_purpose = 'demo')",
+                         "(payroll_environment = 'migration_rehearsal' AND COALESCE(test_workspace_purpose, '') = 'demo')",
                          name: "company_subdomain_requires_live_payroll"
     # The live-only index stays; this one also reserves a demo's slug against
     # every live client and every other demo.
     add_index :companies, "lower(subdomain_slug)",
               unique: true,
-              where: "subdomain_slug IS NOT NULL AND (payroll_environment = 'live' OR test_workspace_purpose = 'demo')",
+              where: "subdomain_slug IS NOT NULL AND (payroll_environment = 'live' OR COALESCE(test_workspace_purpose, '') = 'demo')",
               name: "index_live_and_demo_companies_on_lower_subdomain_slug"
 
     add_index :companies, "organization_id, (test_workspace_manifest ->> 'demo_fixture_key')",
               unique: true,
-              where: "test_workspace_purpose = 'demo'",
+              where: "COALESCE(test_workspace_purpose, '') = 'demo'",
               name: "index_demo_companies_on_organization_fixture_key"
 
     execute <<~SQL
