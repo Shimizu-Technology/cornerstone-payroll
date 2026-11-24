@@ -134,8 +134,8 @@ RSpec.describe "QuickBooks original stubs", type: :request do
     expect(response.parsed_body.fetch("data").first).to include("status" => "image_review")
   end
 
-  it "rejects a page containing the PDF reader's unknown-glyph box" do
-    upload = pdf(page_text) do |document|
+  def pdf_with_unknown_glyph
+    pdf(page_text) do |document|
       document.font("Courier") { document.text("Z") }
       font = document.state.page.fonts.values.find { |entry| entry.data[:BaseFont] == :Courier }
       map = document.state.store.ref({})
@@ -150,6 +150,24 @@ RSpec.describe "QuickBooks original stubs", type: :request do
         endcmap
       CMAP
       font.data[:ToUnicode] = map
+    end
+  end
+
+  it "rejects a page containing the PDF reader's unknown-glyph box in the original text" do
+    submit("preview", upload: pdf_with_unknown_glyph)
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("data")).to eq([ { "page" => 1, "status" => "unreadable" } ])
+  end
+
+  it "rejects the unknown-glyph box when it appears only in the archived text" do
+    upload = pdf(page_text)
+    original = upload.read
+    upload.rewind
+    archived = pdf_with_unknown_glyph.read
+    expect(PDF::Reader.new(StringIO.new(original)).page(1).text).not_to include("\u25AF")
+    expect(PDF::Reader.new(StringIO.new(archived)).page(1).text).to include("\u25AF")
+    allow(CombinePDF).to receive(:new).and_wrap_original do |new_pdf|
+      new_pdf.call.tap { |split| allow(split).to receive(:to_pdf).and_return(archived) }
     end
 
     submit("preview", upload: upload)

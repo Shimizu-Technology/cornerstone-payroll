@@ -18,6 +18,12 @@ const PAGE_MESSAGES = {
   conflicting_original: 'A different original is already posted. Compare the two versions.',
 };
 
+const PENDING_MESSAGES = {
+  preview: 'Checking the file…',
+  viewPage: 'Opening page…',
+  confirm: 'Posting…',
+};
+
 function selectable(page: QuickbooksStubPreviewPage): page is Extract<QuickbooksStubPreviewPage, { review_token: string }> {
   return 'review_token' in page;
 }
@@ -29,14 +35,15 @@ export function QuickbooksStubUpload({ companyId, warnings, enabled }: { company
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const [attested, setAttested] = useState<Set<string>>(new Set());
   const [pagePreview, setPagePreview] = useState<{ page: number; token: string; blob: Blob } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [pendingAction, setPendingAction] = useState<keyof typeof PENDING_MESSAGES | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const busy = pendingAction !== null;
 
   async function submit(action: 'preview' | 'confirm') {
     if (!file) return;
 
-    setBusy(true);
+    setPendingAction(action);
     setError('');
     setNotice('');
     try {
@@ -60,7 +67,7 @@ export function QuickbooksStubUpload({ companyId, warnings, enabled }: { company
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'The request failed. Try again.');
     } finally {
-      setBusy(false);
+      setPendingAction(null);
     }
   }
 
@@ -76,7 +83,7 @@ export function QuickbooksStubUpload({ companyId, warnings, enabled }: { company
   async function viewPage(page: number, token: string) {
     if (!file) return;
 
-    setBusy(true);
+    setPendingAction('viewPage');
     setError('');
     try {
       const { blob } = await quickbooksStubUploadsApi.viewPage(companyId, file, token);
@@ -84,7 +91,7 @@ export function QuickbooksStubUpload({ companyId, warnings, enabled }: { company
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not open this page. Try again.');
     } finally {
-      setBusy(false);
+      setPendingAction(null);
     }
   }
 
@@ -144,6 +151,9 @@ export function QuickbooksStubUpload({ companyId, warnings, enabled }: { company
           <Button variant="outline" disabled={!file || busy} onClick={() => void submit('preview')}>
             Preview matches
           </Button>
+        </div>}
+        {enabled && <div role="status" className={busy ? 'text-sm text-muted-foreground' : 'sr-only'}>
+          {pendingAction && PENDING_MESSAGES[pendingAction]}
         </div>}
         {enabled && error && <ActionFeedback tone="error" message={error} />}
         {enabled && notice && <ActionFeedback tone="success" message={notice} />}
