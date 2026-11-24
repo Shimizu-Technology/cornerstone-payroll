@@ -59,3 +59,10 @@ export function useEmployeeSession(): EmployeeSessionValue {
   if (!value) throw new Error('useEmployeeSession needs EmployeeSessionProvider');
   return value;
 }
+
+export interface SignOutValue {
+  /** Signs out and resolves true, or shows "Couldn't sign you out" and resolves false. */
+  signOut: () => Promise<boolean>;
+}
+
+export const SignOutContext = createContext<SignOutValue | null>(null);

@@ -1,7 +1,6 @@
-import { useCallback, useEffect } from 'react';
+import { useContext, useEffect } from 'react';
 import { pageTitle } from './brand';
-import { useBrand, useEmployeeAuth } from './contexts';
-import { markSigningOut } from './routing';
+import { SignOutContext, useBrand } from './contexts';
 
 /** Sets the browser tab title, e.g. "Pay stubs · MoSa's employee app". */
 export function useDocumentTitle(title: string): void {
@@ -12,13 +11,11 @@ export function useDocumentTitle(title: string): void {
 }
 
 /**
- * Signs out and lands on the Welcome screen. The page the person signed out
- * from never becomes the "return here after sign-in" target (AppRoutes).
+ * Signs out and lands on the Welcome screen (see SignOutProvider). Resolves
+ * false, with a message and a retry on screen, when sign-out fails.
  */
-export function useSignOut(): () => void {
-  const { signOut } = useEmployeeAuth();
-  return useCallback((): void => {
-    markSigningOut();
-    void signOut();
-  }, [signOut]);
+export function useSignOut(): () => Promise<boolean> {
+  const value = useContext(SignOutContext);
+  if (!value) throw new Error('useSignOut needs SignOutProvider');
+  return value.signOut;
 }

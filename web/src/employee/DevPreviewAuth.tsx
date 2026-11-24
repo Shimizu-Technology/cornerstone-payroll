@@ -1,11 +1,19 @@
 // Local development without a Clerk key, and the public Playwright suite.
 // EmployeeApp only mounts this when import.meta.env.DEV is true, so it is
 // tree-shaken out of every production build (appSurfaceBuild.test.ts checks).
-import { useMemo, useState, type ReactNode, type ReactElement } from 'react';
+import { useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
 import { EmployeeAuthContext, useEmployeeAuth, type EmployeeAuthValue } from './contexts';
 import { EmpButton } from './ui';
 
 const STORAGE_KEY = 'employee-dev-preview-signed-in';
+
+// `?previewSignOutFails=N` makes the next N sign-outs fail, to exercise the
+// "Couldn't sign you out" path the way a Clerk rejection would. Read when the
+// provider mounts (the router later drops the query string), not when this
+// module loads: load-time code would keep the module in production bundles.
+function readSignOutFailures(): number {
+  return Number(new URLSearchParams(window.location.search).get('previewSignOutFails')) || 0;
+}
 
 function readSignedIn(): boolean {
   try {
@@ -40,11 +48,17 @@ function DevPreviewSignInForm(): ReactElement {
 
 export function DevPreviewAuthProvider({ children }: { children: ReactNode }): ReactElement {
   const [signedIn, setSignedIn] = useState(readSignedIn);
+  const signOutFailuresLeft = useRef<number | null>(null);
+  signOutFailuresLeft.current ??= readSignOutFailures();
   const value = useMemo<EmployeeAuthValue>(() => ({
     isLoaded: true,
     isSignedIn: signedIn,
     getToken: async () => (signedIn ? 'dev-preview-token' : null),
-    signOut: async () => {
+    signOut: async (): Promise<void> => {
+      if ((signOutFailuresLeft.current ?? 0) > 0) {
+        signOutFailuresLeft.current = (signOutFailuresLeft.current ?? 0) - 1;
+        throw new Error('Preview sign-out failed');
+      }
       writeSignedIn(false);
       setSignedIn(false);
     },

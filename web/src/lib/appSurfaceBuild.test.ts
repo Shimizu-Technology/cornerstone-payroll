@@ -71,7 +71,7 @@ describe('application surface build', () => {
     const bundled = code.join('\n');
     expect(bundled).not.toMatch(/posthog/i);
     expect(bundled).not.toMatch(/serviceWorker/);
-    expect(bundled).not.toMatch(/dev-preview|previewViewAs/);
+    expect(bundled).not.toMatch(/dev-preview|previewViewAs|previewSignOutFails/);
 
     // Its own Tailwind root: employee styles in, staff-only styles out.
     expect(css).toContain('.emp-shell');
