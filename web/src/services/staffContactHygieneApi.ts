@@ -30,6 +30,8 @@ export interface SharedEmailReportResponse {
     active_employee_records: number;
   };
   can_manage_placeholders?: boolean;
+  /** False when the selected company is a test workspace. */
+  can_clear?: boolean;
   marked_placeholders?: string[];
   /** Every marked address, even one no employee uses any more. */
   placeholder_marks?: PlaceholderMark[];
@@ -71,6 +73,8 @@ export const staffContactHygieneApi = {
     api.post<PlaceholderEmailMutationResponse>('/admin/employee_contact_hygiene/placeholder_emails', data),
   unmarkPlaceholderEmail: (data: { email: string }) =>
     api.delete<PlaceholderEmailMutationResponse>('/admin/employee_contact_hygiene/placeholder_emails', { data }),
-  clearSharedEmails: (data: { company_id: number; email: string }) =>
-    api.post<ClearSharedEmailResponse>('/admin/employee_contact_hygiene/clear_shared_emails', data, { companyId: data.company_id }),
+  // Sent as the selected company, which the server requires to be the live
+  // clear target, so a test workspace can't clear its live source.
+  clearSharedEmails: (data: { company_id: number; email: string }, selectedCompanyId: number) =>
+    api.post<ClearSharedEmailResponse>('/admin/employee_contact_hygiene/clear_shared_emails', data, { companyId: selectedCompanyId }),
 };

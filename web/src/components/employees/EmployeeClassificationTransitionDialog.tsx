@@ -96,13 +96,22 @@ export function EmployeeClassificationTransitionDialog({
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [saving, setSaving] = useState(false);
+  // Set when the record was created but the operator needs to know something
+  // first, such as an old email that couldn't be copied.
+  const [created, setCreated] = useState<{ employee: Employee; notices: string[] } | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setForm(initialTransitionForm(employee));
     setError(null);
     setFieldErrors({});
+    setCreated(null);
   }, [employee, open, setError]);
+
+  const finish = (newEmployee: Employee): void => {
+    onTransitioned(newEmployee);
+    onOpenChange(false);
+  };
 
   const movingToW2 = form.employment_type !== 'contractor';
   const targetLabel = movingToW2
@@ -167,8 +176,12 @@ export function EmployeeClassificationTransitionDialog({
 
     try {
       const response = await employeesApi.transitionTaxClassification(employee.id, payload);
-      onTransitioned(response.data);
-      onOpenChange(false);
+      const notices = response.contact_notices ?? [];
+      if (notices.length > 0) {
+        setCreated({ employee: response.data, notices });
+      } else {
+        finish(response.data);
+      }
     } catch (err) {
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setFieldErrors(err.fieldErrors);
@@ -198,6 +211,28 @@ export function EmployeeClassificationTransitionDialog({
           </DialogHeader>
         </div>
 
+        {created ? (
+          <>
+            <div className="space-y-4 px-6 py-6">
+              <p className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+                <CheckCircle2 className="h-5 w-5 shrink-0 text-success-600" aria-hidden="true" />
+                The new {targetLabel} record was created.
+              </p>
+              {created.notices.map((notice) => (
+                <p key={notice} role="status" className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950">
+                  {notice}
+                </p>
+              ))}
+            </div>
+            <DialogFooter className="sticky bottom-0 z-10 border-t border-neutral-200 bg-neutral-50/95 px-6 py-4 backdrop-blur-md sm:rounded-b-3xl">
+              <Button type="button" onClick={() => finish(created.employee)}>
+                Open the new record
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
         <div className="space-y-5 px-6 py-6">
           <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
             <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
@@ -412,6 +447,8 @@ export function EmployeeClassificationTransitionDialog({
             {!saving && <ArrowRight className="ml-2 h-4 w-4" />}
           </Button>
         </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
