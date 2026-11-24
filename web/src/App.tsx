@@ -42,6 +42,7 @@ const ClientPayPeriods = lazy(() => import('@/pages/client/ClientPayPeriods').th
 const ClientPayPeriodDetail = lazy(() => import('@/pages/client/ClientPayPeriodDetail').then((module) => ({ default: module.ClientPayPeriodDetail })));
 const ClientReports = lazy(() => import('@/pages/client/ClientReports').then((module) => ({ default: module.ClientReports })));
 const ClientDocuments = lazy(() => import('@/pages/client/ClientDocuments').then((module) => ({ default: module.ClientDocuments })));
+const EmployeeContactChangesToConfirm = lazy(() => import('@/pages/EmployeeContactChangesToConfirm').then((module) => ({ default: module.EmployeeContactChangesToConfirm })));
 const ClientChangeRequests = lazy(() => import('@/pages/client/ClientChangeRequests').then((module) => ({ default: module.ClientChangeRequests })));
 const Form500Page = lazy(() => import('@/pages/Form500Page').then((module) => ({ default: module.Form500Page })));
 const AdminClientDocumentsPage = lazy(() => import('@/pages/AdminClientDocumentsPage').then((module) => ({ default: module.AdminClientDocumentsPage })));
@@ -380,6 +381,7 @@ function AppRoutes() {
           <Route path="client-messages" element={<StaffOnlyRoute><AdminClientMessagesPage /></StaffOnlyRoute>} />
           <Route path="payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />
           <Route path="payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
+          <Route path="contact-changes-to-confirm" element={<StaffOnlyRoute><CapabilityRoute capability="payroll_operations"><EmployeeContactChangesToConfirm /></CapabilityRoute></StaffOnlyRoute>} />
           <Route path="client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
           <Route path="employees" element={<EmployeeList />} />
           <Route path="employees/contact-details" element={isClient ? <EmployeeContactDetails /> : <StaffEmployeeContactDetails />} />
