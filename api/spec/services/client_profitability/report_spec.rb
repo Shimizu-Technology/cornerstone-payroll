@@ -311,6 +311,53 @@ RSpec.describe ClientProfitability::Report do
       expect(queue[:clients].find { |client| client[:tax_client_id] == 346 }[:link]).to be_nil
       expect(queue[:companies].map { |company| company[:id] }).not_to include(demo.id)
     end
+
+    describe "a Tax link to an invoice customer" do
+      let(:customer) { Invoice.find_by!(organization_id: organization.id, company_id: nil).invoice_recipient }
+      before { WorkHourClientLink.create!(organization: organization, tax_client_id: 999, disposition: "recipient", invoice_recipient: customer) }
+
+      it "drops the customer's hours, cost and fees once the customer is stale-linked to the demo" do
+        expect(report[:clients].find { |client| client[:kind] == "recipient" }).to include(hours: "3.00")
+        customer.update_columns(company_id: demo.id)
+        result = report
+
+        expect(result[:clients].map { |client| client[:kind] }).not_to include("recipient")
+        expect(result[:clients].map { |client| client[:company_id] }).not_to include(demo.id)
+        expect(result[:unassigned].map { |entry| entry[:name] }).to include("Gamma LLC")
+        queue = ClientProfitability::LinkQueue.new(organization: organization, settings: settings.reload).call
+        expect(queue[:clients].find { |client| client[:tax_client_id] == 999 }[:link]).to be_nil
+      end
+
+      it "still rolls the customer up to a live client it is later linked to" do
+        customer.update!(company: acme)
+        expect(client(report, "Acme Bakery")).to include(hours: "13.00")
+      end
+    end
+
+    it "never reads a finance book whose company became the demo, saved or fallback" do
+      book = FinanceBook.find_by!(organization: organization, is_default: true)
+      settings.update!(finance_book: book)
+      expect(settings.reload.effective_finance_book).to eq(book)
+
+      book.update_columns(company_id: demo.id)
+      expect(settings.reload.effective_finance_book).to be_nil
+      settings.update_columns(finance_book_id: nil)
+      expect(settings.reload.effective_finance_book).to be_nil
+      expect(report[:finance_book]).to be_nil
+    end
+
+    it "drops a live-client invoice whose customer is stale-linked to the demo and keeps legitimate unallocated fees" do
+      baseline = report
+      extra = issued_invoice(company: acme, lines: [ [ "Payroll services", 300 ] ])
+      expect(client(report, "Acme Bakery")[:fees].to_d).to eq(client(baseline, "Acme Bakery")[:fees].to_d + 300)
+
+      extra.invoice_recipient.update_columns(company_id: demo.id)
+      result = report
+      expect(client(result, "Acme Bakery")).to include(fees: client(baseline, "Acme Bakery")[:fees])
+      expect(result[:unlinked_fees]).to eq(baseline[:unlinked_fees])
+      expect(result.dig(:totals, :fees)).to eq(baseline.dig(:totals, :fees))
+      expect(result[:unlinked_fees][:fees]).to eq("300.00")
+    end
   end
 end
 

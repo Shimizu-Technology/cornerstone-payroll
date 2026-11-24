@@ -49,7 +49,7 @@ module ClientProfitability
       @client_links = WorkHourClientLink.active.where(organization_id: @organization.id).includes(:invoice_recipient)
                                         .where("company_id IS NULL OR company_id IN (?)", eligible_companies.select(:id))
                                         .where("invoice_recipient_id IS NULL OR invoice_recipient_id IN (?)",
-                                               InvoiceRecipient.where(organization_id: @organization.id, finance_book_id: finance_book&.id).select(:id))
+                                               InvoiceRecipient.eligible_for_firm_reports(@organization).where(finance_book_id: finance_book&.id).select(:id))
                                         .index_by(&:tax_client_id)
       @staff_links = WorkHourStaffLink.active.where(organization_id: @organization.id).includes(:employee)
                                       .select { |link| link.disposition == "no_payroll" || link.employee&.company_id == @practice_company&.id }
@@ -271,16 +271,14 @@ module ClientProfitability
       recipient_keys = @client_links.values.select { |link| link.disposition == "recipient" }
                                     .to_h { |link| [ link.invoice_recipient_id, recipient_bucket(link).key ] }
       linked_companies = @client_links.values.filter_map { |link| link.company_id if link.disposition == "company" }.to_set
+      # Fees billed to a non-live company, directly or through a stale
+      # customer link, are dropped before grouping (live_clients_only).
       rows = InvoiceServiceFeeRevenue.call(finance_book: finance_book, service_month_from: @period.start_date,
                                            service_month_through: @period.end_date,
-                                           tax_prep_service_names: @settings.tax_prep_service_names, by_recipient: true)
+                                           tax_prep_service_names: @settings.tax_prep_service_names, by_recipient: true,
+                                           live_clients_only: true)
       recipient_companies = InvoiceRecipient.where(id: rows.filter_map { |row| row[:invoice_recipient_id] }).pluck(:id, :company_id).to_h
-      # Fees billed to a non-live company (a stale demo or practice-copy link)
-      # are firm noise, not client revenue: they never reach a line or total.
-      workspace_ids = Company.test_workspace.where(id: rows.filter_map { |row| row[:company_id] } + recipient_companies.values.compact).pluck(:id).to_set
       rows.each_with_object({}) do |row, totals|
-        next if workspace_ids.include?(row[:company_id]) || workspace_ids.include?(recipient_companies[row[:invoice_recipient_id]])
-
         key = if row[:company_id]
           "company:#{row[:company_id]}"
         elsif recipient_keys.key?(row[:invoice_recipient_id])

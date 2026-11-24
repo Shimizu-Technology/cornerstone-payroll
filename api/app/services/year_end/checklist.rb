@@ -61,7 +61,7 @@ module YearEnd
       revision = InputRevision.for(company.id, year)[company.id]
       readiness = EfileCheck.current_readiness_stamp(company.id, year)
       steps = build_steps
-      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(steps), readiness: readiness) if year == 2026 && files?("w2_gu")
+      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(steps), readiness: readiness) if efile_preflight?
       status = overall_status(steps)
       # Lets the clients list keep showing Ready until any input changes, and
       # stops it showing Ready once a run finds something. The list checks
@@ -112,7 +112,7 @@ module YearEnd
       revision = InputRevision.for(company.id, year)[company.id]
       readiness = EfileCheck.current_readiness_stamp(company.id, year)
       blockers = w2_blockers_from(w2_steps_before_ready)
-      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(w2_steps_before_ready + [ w2_mark_ready ]), readiness: readiness) if year == 2026 && files?("w2_gu")
+      EfileCheck.record(company.id, year, revision, efw2_people_issues, sign_off_needed: sign_off_needed?(w2_steps_before_ready + [ w2_mark_ready ]), readiness: readiness) if efile_preflight?
       blockers
     end
 
@@ -123,7 +123,7 @@ module YearEnd
     end
 
     def efw2_employer_issues
-      return [] unless year == 2026 && files?("w2_gu")
+      return [] unless efile_preflight?
 
       Efw2Formatting.employer_problems(company, structured: true).reject do |problem|
         case problem[:code]
@@ -157,13 +157,17 @@ module YearEnd
       end
     end
 
+    # A demo never e-files, so it runs no e-file preflight and records no
+    # e-file check. Its paper-form checks (missing W-2 details) still run.
+    def efile_preflight?
+      year == 2026 && files?("w2_gu") && !company.demo?
+    end
+
     def efw2_problems
-      return [] unless year == 2026 && files?("w2_gu") && w2_report
+      return [] unless efile_preflight? && w2_report
 
       @efw2_problems ||= Efw2W2GuGenerator.new(company: company, year: year, submitter: nil, report: w2_report).structured_problems.reject do |problem|
-        # A demo never e-files, and its fictional people use SSNs from the
-        # reserved 900 area that the official validator rightly refuses.
-        problem[:scope] == :submitter || (company.demo? && problem[:code] == :ssn_invalid)
+        problem[:scope] == :submitter
       end
     end
 

@@ -28,7 +28,8 @@ class Form1096TotalsPdfGenerator
       pdf.text "Box 1 nonemployee compensation: $#{money(box1)}"
       pdf.text "Box 4 federal income tax withheld: $#{money(box4)}"
       pdf.move_down 16
-      pdf.text "These totals match the GuamTax e-file. Keep this sheet with your records."
+      # A client without an e-file gets the records-only footer.
+      pdf.text @company.demo? ? "Keep this sheet with your records." : "These totals match the GuamTax e-file. Keep this sheet with your records."
     end.render
   end
   private

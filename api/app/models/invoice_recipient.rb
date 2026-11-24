@@ -1,6 +1,14 @@
 # frozen_string_literal: true
 
 class InvoiceRecipient < ApplicationRecord
+  # Customers that may carry firm hours, cost or fees: no payroll client, or
+  # a live client in the organization. A stale demo or practice-copy link
+  # leaves the customer out of firm reports.
+  scope :eligible_for_firm_reports, lambda { |organization|
+    where(organization_id: organization.id)
+      .where("invoice_recipients.company_id IS NULL OR invoice_recipients.company_id IN (?)",
+             Company.where(organization_id: organization.id).live_payroll.select(:id))
+  }
   belongs_to :organization
   belongs_to :company, optional: true
   has_many :invoices, dependent: :restrict_with_error

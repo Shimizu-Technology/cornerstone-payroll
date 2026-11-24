@@ -26,6 +26,8 @@ class Company < ApplicationRecord
   # unavailable state so the demo never announces itself to clients or staff.
   DEMO_UNAVAILABLE_MESSAGE = "This option isn't available for this client yet."
   DEMO_ACCESS_DENIED_MESSAGE = "Your access does not allow this action for this client."
+  # Mirrors the database check on a demo's fixture key.
+  DEMO_FIXTURE_KEY_PATTERN = /\A[a-z0-9][a-z0-9-]{2,62}\z/
 
   before_destroy :protect_retained_portal_documents, prepend: true
 
@@ -445,7 +447,7 @@ class Company < ApplicationRecord
     errors.add(:test_workspace_expires_at, "must be blank for a demo company") if test_workspace_expires_at.present?
     errors.add(:test_workspace_archived_at, "must be blank for a demo company") if test_workspace_archived_at.present?
     errors.add(:test_workspace_sealed_at, "must be blank for a demo company") if test_workspace_sealed_at.present?
-    if test_workspace_manifest.to_h["demo_fixture_key"].blank?
+    unless test_workspace_manifest.to_h["demo_fixture_key"].to_s.match?(DEMO_FIXTURE_KEY_PATTERN)
       errors.add(:test_workspace_manifest, "must name the demo fixture")
     end
   end
