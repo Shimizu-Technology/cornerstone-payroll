@@ -257,6 +257,22 @@ RSpec.describe EmployeeContactValidator do
       expect(confirmed.matched_login_user).to eq(client_actor)
     end
 
+    it "matches a login name with a recognized suffix against the employee's stored suffix" do
+      jose = create(:employee, company: company, first_name: "José", middle_name: "Manuel", last_name: "de la Cruz", name_suffix: "JR", email: nil)
+      confirm = lambda do |name, target = jose|
+        login = create(:user, company: company, organization: organization, role: "client", name: name, email: "#{SecureRandom.hex(4)}@example.com")
+        described_class.call(employee: target, company: company, email: login.email, confirm_same_person_email: true, actor: login)
+      end
+
+      expect(confirm.call("José Manuel de la Cruz Jr.")).to be_valid
+      expect(confirm.call("jose de la cruz")).to be_valid
+      expect(confirm.call("José Manuel de la Cruz III")).not_to be_valid
+      senior = create(:employee, company: company, first_name: "José", last_name: "de la Cruz", name_suffix: nil, email: nil)
+      expect(confirm.call("José de la Cruz Sr.", senior)).not_to be_valid
+      # A name with nothing comparable left (users always have some name) fails.
+      expect(confirm.call("...")).not_to be_valid
+    end
+
     it "refuses a same-person confirmation when the login's name doesn't match the employee, on both paths" do
       self_actor = create(:user, company: company, organization: organization, role: "client", name: "Sloane Owner", email: "sara.self@example.com")
       self_result = described_class.call(employee: employee, company: company, email: self_actor.email, confirm_same_person_email: true, actor: self_actor)
