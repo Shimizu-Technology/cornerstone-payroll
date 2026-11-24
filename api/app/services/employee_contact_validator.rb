@@ -429,6 +429,7 @@ class EmployeeContactValidator
 
     if link_decision == :conflict
       return rejected_login_conflict(
+        login_user: login_user,
         staff_message: "belongs to a payroll login that is already linked to another employee",
         rejection_reason: "linked_to_other_employee"
       )
@@ -437,6 +438,7 @@ class EmployeeContactValidator
     # Fail closed: links at other clients can't be checked from here.
     if link_decision == :unknown
       return rejected_login_conflict(
+        login_user: login_user,
         staff_message: "belongs to a payroll login, and its links at other clients can't be checked here; ask Cornerstone to set it",
         rejection_reason: "link_check_unavailable"
       )
@@ -450,7 +452,7 @@ class EmployeeContactValidator
     # A same-person confirmation needs the login's name to match this
     # employee's, so nobody can attach their login to someone else's record.
     if (own_login || staff_can_confirm_login_email?(login_user)) && !login_name_matches_employee?(login_user)
-      return rejected_login_conflict(staff_message: LOGIN_NAME_MISMATCH_ERROR, rejection_reason: "login_name_mismatch")
+      return rejected_login_conflict(staff_message: LOGIN_NAME_MISMATCH_ERROR, rejection_reason: "login_name_mismatch", login_user: login_user)
     end
 
     # (b) The entered email is the signed-in user's own login email.
@@ -506,6 +508,7 @@ class EmployeeContactValidator
     end
 
     rejected_login_conflict(
+      login_user: login_user,
       staff_message: "belongs to another person's payroll login; ask a manager or admin with client configuration access to confirm it",
       rejection_reason: "other_user_login"
     )
@@ -523,7 +526,11 @@ class EmployeeContactValidator
     }
   end
 
-  def rejected_login_conflict(staff_message:, rejection_reason:)
+  # Only staff allowed to confirm this login's identity see why it was
+  # refused. Everyone else, clients included, gets the generic message; the
+  # reason is kept in the security audit (employees#login_email_rejected).
+  def rejected_login_conflict(staff_message:, rejection_reason:, login_user:)
+    detailed = @actor&.staff_member? && staff_can_confirm_login_email?(login_user)
     {
       user: nil,
       confirmation_required: false,
@@ -531,7 +538,7 @@ class EmployeeContactValidator
       confirmation_basis: nil,
       rejected: true,
       rejection_reason: rejection_reason,
-      error: @actor&.client? ? CLIENT_GENERIC_LOGIN_EMAIL_ERROR : staff_message
+      error: detailed ? staff_message : CLIENT_GENERIC_LOGIN_EMAIL_ERROR
     }
   end
 
