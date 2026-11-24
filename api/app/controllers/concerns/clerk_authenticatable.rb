@@ -54,7 +54,7 @@ module ClerkAuthenticatable
 
     unless @current_user
       denied_user = nil
-      @current_user = PayrollInvitation.new.bind_from_metadata(clerk_id, request: request) do |candidate|
+      @current_user = PayrollInvitation.new.bind_from_metadata(clerk_id, request: request, azp: @clerk_token_payload["azp"]) do |candidate|
         denied_user = candidate if mfa_verification_required_for?(candidate)
         !denied_user
       end
