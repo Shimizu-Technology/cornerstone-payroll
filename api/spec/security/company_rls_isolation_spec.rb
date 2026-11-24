@@ -345,8 +345,8 @@ RSpec.describe "Company RLS", :rls do
 
     # Mirrors production: the function's owner is a non-superuser role that
     # bypasses RLS (like the migration owner), not the test superuser.
-    def own_decision_function_like_production(connection)
-      connection.execute("CREATE ROLE payroll_owner_sim NOLOGIN NOSUPERUSER BYPASSRLS")
+    def own_decision_function_like_production(connection, bypass: true)
+      connection.execute("CREATE ROLE payroll_owner_sim NOLOGIN NOSUPERUSER #{bypass ? 'BYPASSRLS' : 'NOBYPASSRLS'}")
       connection.execute("GRANT SELECT ON employees, employee_account_links TO payroll_owner_sim")
       connection.execute("ALTER FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION} OWNER TO payroll_owner_sim")
     end
@@ -355,7 +355,7 @@ RSpec.describe "Company RLS", :rls do
       EmployeeAccountLink.contact_email_link_decision(user_id: user.id, company_id: company.id, allowed_employee_ids: employees.map(&:id))
     end
 
-    def create_link_decision_fixtures(connection)
+    def create_link_decision_fixtures(connection, owner_bypass: true)
       company = create(:company)
       other_company = create(:company, organization: company.organization)
       TenantScope.as_system(reason: "Create login link decision RLS fixtures") do
@@ -370,7 +370,7 @@ RSpec.describe "Company RLS", :rls do
           former_at: 2.months.ago, former_access_until: 1.month.ago)
         EmployeeAccountLink.create!(company: company, employee: here_other, user: users["both"], status: "active")
         EmployeeAccountLink.create!(company: other_company, employee: there_invited, user: users["both"], status: "invited")
-        own_decision_function_like_production(connection)
+        own_decision_function_like_production(connection, bypass: owner_bypass)
         setup_step_three(connection, tables: %w[employee_account_links employees], read_tables: %w[users])
         { company: company, other_company: other_company, here: here, here_other: here_other, there: there, users: users }
       end
@@ -414,6 +414,37 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
+    it "fails closed, never 'none', when the function's owner no longer bypasses RLS" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          f = create_link_decision_fixtures(connection, owner_bypass: false)
+          users = f[:users]
+
+          TenantScope.with_company(f[:company].id) do
+            # row_security = off makes PostgreSQL refuse instead of hiding rows.
+            expect do
+              connection.transaction(requires_new: true) do
+                connection.select_value("SELECT payroll_employee_login_link_decision(#{users['elsewhere'].id}, #{f[:company].id}, '{#{f[:here].id}}')")
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid, /row-level security/)
+
+            expect(decide(users["elsewhere"], f[:company], [ f[:here] ])).to eq(:unknown)
+            expect(decide(users["none"], f[:company], [ f[:here] ])).to eq(:unknown)
+            result = EmployeeContactValidator.call(
+              employee: f[:here], company: f[:company], email: users["elsewhere"].email,
+              confirm_same_person_email: true, actor: users["elsewhere"], flagged_emails: Set.new
+            )
+            expect(result).to have_attributes(login_email_rejected: true, login_email_rejection_reason: "link_check_unavailable")
+            # The caller's transaction is still usable.
+            expect(Employee.where(id: f[:here].id).exists?).to be(true)
+          end
+          connection.execute("RESET ROLE")
+          expect(RlsDatabase.login_link_decision_ready?(connection)).to be(false)
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
     it "returns only the three decision strings, and only payroll_app may execute it" do
       pool.with_connection do |connection|
         connection.transaction do
@@ -436,9 +467,19 @@ RSpec.describe "Company RLS", :rls do
           expect(connection.select_value("SELECT has_function_privilege('payroll_probe', '#{RlsDatabase::LOGIN_LINK_DECISION}', 'EXECUTE')")).to be(false)
           expect(RlsDatabase.login_link_decision_status(connection)).to include(
             "installed" => true, "security_definer" => true, "stable" => true, "search_path_pinned" => true,
-            "owner_bypasses_rls" => true, "public_can_execute" => false, "runtime_can_execute" => true
+            "row_security_off" => true, "owner" => "payroll_owner_sim", "owner_bypasses_rls" => true,
+            "execute_grantees" => %w[payroll_app payroll_owner_sim], "public_can_execute" => false,
+            "grant_option_granted" => false, "runtime_can_execute" => true
           )
           expect(RlsDatabase.login_link_decision_ready?(connection)).to be(true)
+
+          # Any extra grantee, or a grant option for the runtime role, fails readiness.
+          connection.execute("GRANT EXECUTE ON FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION} TO payroll_probe")
+          expect(RlsDatabase.login_link_decision_ready?(connection)).to be(false)
+          connection.execute("REVOKE EXECUTE ON FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION} FROM payroll_probe")
+          expect(RlsDatabase.login_link_decision_ready?(connection)).to be(true)
+          connection.execute("GRANT EXECUTE ON FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION} TO payroll_app WITH GRANT OPTION")
+          expect(RlsDatabase.login_link_decision_ready?(connection)).to be(false)
           raise ActiveRecord::Rollback
         end
       end
