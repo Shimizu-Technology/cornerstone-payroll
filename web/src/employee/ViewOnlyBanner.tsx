@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { Eye } from 'lucide-react';
 
 export interface ViewOnlyGrant {
@@ -11,7 +12,7 @@ export interface ViewOnlyGrant {
  * Shown the whole time a Cornerstone admin uses the view-only "Sign in as"
  * (M4-9). It sits above the header and takes the top safe area.
  */
-export function ViewOnlyBanner({ name, minutesLeft, onEnd }: ViewOnlyGrant) {
+export function ViewOnlyBanner({ name, minutesLeft, onEnd }: ViewOnlyGrant): ReactElement {
   const remaining = typeof minutesLeft === 'number' && minutesLeft >= 0
     ? ` · ${minutesLeft} min left` : '';
   return (

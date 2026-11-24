@@ -1,8 +1,10 @@
+import { useEffect, type ReactElement } from 'react';
 import { Banknote, CalendarDays, ChevronLeft, CircleHelp, FileText, House, LogOut, UserRound } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
 import { askManager } from './brand';
 import { useBrand, useEmployeeAuth } from './contexts';
-import { redirectTarget } from './routing';
+import { useDocumentTitle, useSignOut } from './hooks';
+import { clearSigningOut, redirectTarget } from './routing';
 import { focusHeadingOnNextScreen } from './focus';
 import { HideAmountsToggle } from './HideAmounts';
 import { BrandMark, Card, EmpButton, EmpButtonLink, Page, Placeholder } from './ui';
@@ -11,8 +13,10 @@ function firstTimeLine(name: string | null): string {
   return `First time here? Your manager${name ? ` at ${name}` : ''} will send you a link to set up your account.`;
 }
 
-export function WelcomeScreen() {
+export function WelcomeScreen(): ReactElement {
   const brand = useBrand();
+  useDocumentTitle('Welcome');
+  useEffect(() => clearSigningOut(), []);
   return (
     <main className="emp-auth">
       <div className="emp-auth-grow">
@@ -22,7 +26,7 @@ export function WelcomeScreen() {
           {brand.isFallback ? 'See your pay stubs and tax forms any time.' : `See your pay stubs and tax forms from ${brand.name} any time.`}
         </p>
       </div>
-      <div className="space-y-3">
+      <div className="space-y-4">
         <EmpButtonLink to="/sign-in" block>Sign in</EmpButtonLink>
         <p className="text-center text-[0.88rem] text-neutral-600">{firstTimeLine(brand.isFallback ? null : brand.name)}</p>
       </div>
@@ -30,8 +34,9 @@ export function WelcomeScreen() {
   );
 }
 
-export function SignInScreen() {
+export function SignInScreen(): ReactElement {
   const brand = useBrand();
+  useDocumentTitle('Sign in');
   const { SignInForm } = useEmployeeAuth();
   const location = useLocation();
   return (
@@ -41,7 +46,7 @@ export function SignInScreen() {
           <ChevronLeft aria-hidden="true" className="size-[26px]" />
           Back
         </Link>
-        <span className="flex min-w-0 items-center gap-2.5">
+        <span className="flex min-w-0 items-center gap-2">
           <BrandMark />
           <span className="min-w-0 break-words font-display text-[1.06rem] font-bold leading-tight">{brand.name}</span>
         </span>
@@ -52,7 +57,7 @@ export function SignInScreen() {
   );
 }
 
-function QuestionsCard() {
+function QuestionsCard(): ReactElement {
   const brand = useBrand();
   return (
     <Card title="Questions about your pay?">
@@ -63,7 +68,7 @@ function QuestionsCard() {
 }
 
 /** Desktop: latest pay and recent pay on the left, the rest on the right. Phone: one column. */
-export function HomeTab() {
+export function HomeTab(): ReactElement {
   return (
     <Page title="Welcome">
       <div className="emp-home-grid">
@@ -93,7 +98,7 @@ export function HomeTab() {
 }
 
 /** Desktop: the list on the left and the selected stub on the right. Phone: the list. */
-export function PayTab() {
+export function PayTab(): ReactElement {
   return (
     <Page title="Pay stubs" actions={<HideAmountsToggle />}>
       <div className="emp-pay-grid">
@@ -112,7 +117,7 @@ export function PayTab() {
   );
 }
 
-export function TaxesTab() {
+export function TaxesTab(): ReactElement {
   return (
     <Page title="Tax forms">
       <div className="emp-cards-grid">
@@ -126,8 +131,8 @@ export function TaxesTab() {
   );
 }
 
-export function MyInfoTab() {
-  const { signOut } = useEmployeeAuth();
+export function MyInfoTab(): ReactElement {
+  const signOut = useSignOut();
   return (
     <Page title="My info">
       <div className="emp-cards-grid">
@@ -137,8 +142,8 @@ export function MyInfoTab() {
           </Placeholder>
         </Card>
       </div>
-      <EmpButton block variant="secondary" className="emp-narrow-button" onClick={() => { void signOut(); }}>
-        <LogOut aria-hidden="true" className="size-[22px]" />
+      <EmpButton block variant="secondary" className="emp-narrow-button" onClick={signOut}>
+        <LogOut aria-hidden="true" className="size-6" />
         Sign out
       </EmpButton>
     </Page>
@@ -149,7 +154,7 @@ export function MyInfoTab() {
  * Each client's managers answer their employees first, so with no contacts set
  * up yet this points to the manager and never to Cornerstone (UX audit, Help).
  */
-export function HelpTab() {
+export function HelpTab(): ReactElement {
   const brand = useBrand();
   return (
     <Page title="Help">

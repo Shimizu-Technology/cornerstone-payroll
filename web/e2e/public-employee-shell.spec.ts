@@ -66,6 +66,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       await page.goto(`/?${tenant}`);
 
       await expect(page.getByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeVisible();
+      await expect(page).toHaveTitle("Welcome · MoSa's employee app");
       await expect(page.getByText("See your pay stubs and tax forms from MoSa's any time.")).toBeVisible();
       await expect(page.getByText("First time here? Your manager at MoSa's will send you a link")).toBeVisible();
       await expectNoHorizontalScroll(page);
@@ -78,6 +79,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       await signInLink.click();
       await expect(page).toHaveURL(/\/sign-in$/);
       await expect(page.getByTestId('dev-preview-sign-in')).toBeVisible();
+      await expect(page).toHaveTitle("Sign in · MoSa's employee app");
       await expect(page.getByRole('link', { name: 'Back' })).toBeVisible();
       await snap(page, `${tag}-02-sign-in`);
 
@@ -174,7 +176,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
 
     test('a former employee past their access date sees "access ended" and can sign out', async ({ page }) => {
       await signIn(page);
-      await mockApi(page, { links: (route) => json(route, [{ id: 9, company_name: "MoSa's", status: 'former', former_access_until: '2020-01-01' }]) });
+      await mockApi(page, { links: (route) => json(route, [{ id: 9, company_name: "MoSa's", subdomain_slug: 'mosas', status: 'former', former_access_until: '2020-01-01' }]) });
       await page.goto(`/?${tenant}`);
 
       await expect(page.getByRole('heading', { level: 1, name: 'Your access has ended' })).toBeVisible();
@@ -193,12 +195,16 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
 
       await expect(page.getByRole('heading', { level: 1, name: 'Something went wrong' })).toBeVisible();
       await expect(page.getByText("Still not working? Ask your manager at MoSa's.")).toBeVisible();
+      // No tabs that change the address without changing the screen, and a way out on a phone.
+      await expect(page.getByRole('navigation', { name: 'Main' })).toHaveCount(0);
+      await expect(page.getByRole('main').getByRole('button', { name: 'Sign out' })).toBeVisible();
       await expectNoHorizontalScroll(page);
       await snap(page, `${tag}-08-error`);
 
       linksStatus = 429;
       await page.getByRole('button', { name: 'Try again' }).click();
       await expect(page.getByRole('heading', { level: 1, name: 'Too many tries, wait a minute' })).toBeVisible();
+      await expect(page.getByRole('main').getByRole('button', { name: 'Sign out' })).toBeVisible();
       await snap(page, `${tag}-09-too-many-tries`);
 
       await context.setOffline(true);
@@ -214,6 +220,31 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       await context.setOffline(false);
       await expect(page.getByRole('heading', { level: 1, name: 'Welcome' })).toBeVisible();
       await expect(page.getByRole('status').filter({ hasText: "You're offline" })).toHaveCount(0);
+      await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
+    });
+
+    test('on a client subdomain, another company\'s link is never opened', async ({ page }) => {
+      await signIn(page);
+      await mockApi(page, { links: (route) => json(route, { links: [{ id: 77, company_name: 'Pelican Row Bakery (demo)', subdomain_slug: 'pelican', status: 'active', former_access_until: null }] }) });
+      await page.goto(`/?${tenant}`);
+
+      await expect(page.getByRole('heading', { level: 1, name: "The employee app isn't available right now" })).toBeVisible();
+      await expect(page.getByText('Pelican Row Bakery')).toHaveCount(0);
+    });
+
+    test('signing out from My info lands on Welcome, not sign-in', async ({ page }) => {
+      await signIn(page);
+      await mockApi(page);
+      await page.goto(`/my-info?${tenant}`);
+      await expect(page.getByRole('heading', { level: 1, name: 'My info' })).toBeVisible();
+
+      await page.getByRole('main').getByRole('button', { name: 'Sign out' }).click();
+      await expect(page.getByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeVisible();
+      await expect(page).toHaveURL(/\/$/);
+      // Signing back in opens Home, not the page signed out from.
+      await page.getByRole('link', { name: 'Sign in' }).click();
+      await page.getByRole('button', { name: 'Continue as preview employee' }).click();
+      await expect(page.getByRole('heading', { level: 1, name: 'Welcome' })).toBeVisible();
     });
 
     test('the loading skeleton shows while the link is checked', async ({ page }) => {
@@ -265,6 +296,9 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       const signOut = page.getByRole('banner').getByRole('button', { name: 'Sign out' });
       if (viewport.width < 600) {
         expect(Math.round(navBox.y + navBox.height)).toBe(viewport.height);
+        const home = nav.getByRole('link', { name: 'Home' });
+        await home.hover();
+        expect(await home.evaluate((node) => getComputedStyle(node).color)).toBe('rgb(19, 122, 167)');
         await expect(year).toBeHidden();
         await expect(signOut).toBeHidden();
       } else {
@@ -273,7 +307,9 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
         const [left, right] = [(await latest.boundingBox())!, (await year.boundingBox())!];
         expect(right.x).toBeGreaterThan(left.x + left.width);
         expect(Math.abs(right.y - left.y)).toBeLessThan(2);
-        // The current tab is underlined in the logo blue, which passes 3:1 against white.
+        // The current tab is underlined in the logo blue, which passes 3:1 against white,
+        // and keeps its color under the mouse.
+        await nav.getByRole('link', { name: 'Home' }).hover();
         expect(await nav.getByRole('link', { name: 'Home' }).evaluate((node) => getComputedStyle(node).borderBottomColor)).toBe('rgb(24, 152, 207)');
 
         await nav.getByRole('link', { name: 'Pay' }).click();

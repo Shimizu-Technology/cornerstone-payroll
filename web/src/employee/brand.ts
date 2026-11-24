@@ -134,12 +134,15 @@ function httpsUrl(value: unknown): string | null {
   }
 }
 
-function hexOrNull(value: string | null | undefined): string | null {
-  return value && HEX_COLOR.test(value) ? value.toLowerCase() : null;
+function hexOrNull(value: unknown): string | null {
+  return typeof value === 'string' && HEX_COLOR.test(value) ? value.toLowerCase() : null;
 }
 
 export function brandFrom(branding: TenantBranding | null): EmployeeBrand {
-  const name = branding?.name?.trim() || FALLBACK_BRAND_NAME;
+  const tenantName = typeof branding?.name === 'string' ? branding.name.trim() : '';
+  // Without a name there's no employer to show, so the whole brand falls back.
+  if (!tenantName) branding = null;
+  const name = tenantName || FALLBACK_BRAND_NAME;
   const primary = hexOrNull(branding?.primary_color) ?? FALLBACK_BRAND_COLOR;
   const { color: action, adjusted } = actionColorFor(primary);
   const accentSource = hexOrNull(branding?.accent_color) ?? (isLightColor(primary) ? primary : DEFAULT_ACCENT);
@@ -171,9 +174,15 @@ export function brandStyle(brand: EmployeeBrand): Record<string, string> {
   };
 }
 
+function stringOrNull(value: unknown): boolean {
+  return value === null || value === undefined || typeof value === 'string';
+}
+
 function isTenantBranding(value: unknown): value is TenantBranding {
-  return value !== null && typeof value === 'object' && typeof (value as TenantBranding).name === 'string'
-    && (value as TenantBranding).name.trim() !== '';
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const branding = value as Record<string, unknown>;
+  return typeof branding.name === 'string' && branding.name.trim() !== ''
+    && stringOrNull(branding.logo_url) && stringOrNull(branding.primary_color) && stringOrNull(branding.accent_color);
 }
 
 /** Returns null on 404, a network failure or a malformed response, so the caller falls back. */

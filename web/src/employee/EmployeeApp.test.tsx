@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// config.ts reads the Clerk key once, when it loads. Clear it before the app
+// is imported, so a key in a developer's web/.env can't switch these tests to Clerk.
+vi.hoisted(() => {
+  vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', '');
+});
+
 import EmployeeApp from '../EmployeeApp';
 import { ViewOnlyBanner } from './ViewOnlyBanner';
 
-function respond(routes: Record<string, () => Response>) {
+function respond(routes: Record<string, () => Response>): ReturnType<typeof vi.fn<typeof fetch>> {
   return vi.fn<typeof fetch>(async (input) => {
     const path = new URL(String(input), 'http://localhost').pathname.replace(/^\/api\/v1/, '');
     const handler = routes[path];
@@ -13,10 +20,14 @@ function respond(routes: Record<string, () => Response>) {
   });
 }
 
-const signedIn = () => sessionStorage.setItem('employee-dev-preview-signed-in', 'true');
+const signedIn = (): void => sessionStorage.setItem('employee-dev-preview-signed-in', 'true');
 
 beforeEach(() => {
   window.history.pushState({}, '', '/');
+});
+
+afterAll(() => {
+  vi.unstubAllEnvs();
 });
 
 afterEach(() => {
@@ -32,6 +43,7 @@ describe('employee app shell', () => {
     render(<EmployeeApp />);
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeTruthy();
+    expect(document.title).toBe('Welcome · Cornerstone Payroll');
     expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe('/sign-in');
     expect(screen.getByText('See your pay stubs and tax forms any time.')).toBeTruthy();
   });
@@ -113,13 +125,32 @@ describe('employee app shell', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeTruthy();
   });
 
-  it('asks the person to wait after a 429', async () => {
+  it('asks the person to wait after a 429, with no dead-end tabs and a way to sign out', async () => {
     signedIn();
     vi.stubGlobal('fetch', respond({ '/employee/links': () => new Response(null, { status: 429 }) }));
     render(<EmployeeApp />);
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Too many tries, wait a minute' })).toBeTruthy();
-    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy();
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
+    expect(screen.getByText('Still not working? Ask your manager.')).toBeTruthy();
+    const main = screen.getByRole('main');
+    await userEvent.click(within(main).getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeTruthy();
+  });
+
+  it('signs out from My info to the Welcome screen, not to sign-in', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => new Response(null, { status: 204 }),
+    }));
+    render(<EmployeeApp />);
+
+    await userEvent.click(await within(await screen.findByRole('main')).findByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/');
+    expect(document.title).toBe('Welcome · Cornerstone Payroll');
   });
 
   it('shows the error screen and recovers on Try again', async () => {
@@ -145,7 +176,9 @@ describe('employee app shell', () => {
     }));
     render(<EmployeeApp />);
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Continue as preview employee' }));
+    expect(await screen.findByRole('button', { name: 'Continue as preview employee' })).toBeTruthy();
+    expect(document.title).toBe('Sign in · Cornerstone Payroll');
+    await userEvent.click(screen.getByRole('button', { name: 'Continue as preview employee' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Tax forms' })).toBeTruthy();
     expect(window.location.pathname).toBe('/taxes');
   });

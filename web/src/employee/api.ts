@@ -90,29 +90,68 @@ export function parseLinks(data: unknown): EmployeeLink[] {
   });
 }
 
+/** The API base, parsed once: its origin and its path without a trailing slash. */
+export interface EmployeeApiBase {
+  origin: string;
+  path: string;
+}
+
+export function parseApiBase(baseUrl: string, pageOrigin: string = globalThis.location?.origin ?? 'http://localhost'): EmployeeApiBase {
+  const base = new URL(baseUrl, pageOrigin);
+  return { origin: base.origin, path: base.pathname.replace(/\/+$/, '') };
+}
+
+// `..` and `.` segments (also percent-encoded) and backslashes could walk the
+// URL out of /employee/, so they're refused before the URL is built.
+const UNSAFE_PATH = /\\|%5c|(?:^|\/)(?:\.|%2e){1,2}(?:\/|$)/i;
+
+/** Resolves an /employee/ path against the API base, or throws if it would leave it. */
+export function employeeUrl(base: EmployeeApiBase, path: string): URL {
+  const [pathname] = path.split('?');
+  if (UNSAFE_PATH.test(pathname)) throw new Error('The employee API client refuses unsafe paths');
+  const url = new URL(`${base.path}${path}`, base.origin);
+  if (url.origin !== base.origin || !url.pathname.startsWith(`${base.path}/employee/`)) {
+    throw new Error('The employee API client only calls /employee/ routes on the API origin');
+  }
+  return url;
+}
+
 export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => fetch(...args), isOnline = () => navigator.onLine }: EmployeeApiOptions) {
+  const base = parseApiBase(baseUrl);
+
+  async function sessionToken(): Promise<string> {
+    let token: string | null;
+    try {
+      token = await getToken();
+    } catch {
+      // Clerk rejects (ClerkOfflineError) when the connection drops mid-refresh.
+      throw new EmployeeApiError(isOnline() ? 'server' : 'offline');
+    }
+    if (!token) throw new EmployeeApiError('unauthorized');
+    return token;
+  }
+
   async function request<T>(path: string, { linkId, method = 'GET', body, signal }: RequestOptions = {}): Promise<T | null> {
-    if (!path.startsWith('/employee/')) throw new Error('The employee API client only calls /employee/ routes');
+    const url = employeeUrl(base, path);
     if (linkId !== undefined && !isLinkId(linkId)) throw new EmployeeApiError('not_found');
     if (!isOnline()) throw new EmployeeApiError('offline');
 
-    const token = await getToken();
-    if (!token) throw new EmployeeApiError('unauthorized');
-
+    const token = await sessionToken();
     const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${token}` };
     if (linkId !== undefined) headers['X-Employee-Link-Id'] = linkId;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
 
     let response: Response;
     try {
-      response = await fetchImpl(`${baseUrl}${path}`, {
+      response = await fetchImpl(url.toString(), {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
         signal,
         credentials: 'omit',
-        // Pay data never goes into the HTTP cache.
+        // Pay data never goes into the HTTP cache, and a redirect never carries the token elsewhere.
         cache: 'no-store',
+        redirect: 'error',
       });
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -158,13 +197,16 @@ export function problemFor(error: unknown, { opened }: { opened: boolean }): Emp
 }
 
 /**
- * Picks the link to open. On a client subdomain the API returns only that
- * client's link, so the employer picker waits for a shared host (M4-8 plan
+ * Picks the link to open. On a client subdomain (`tenantSlug`) only that
+ * client's link counts, even if the API returns others, and with none the app
+ * is "unavailable" there: it never opens another company's pay under this
+ * company's branding. The employer picker waits for a shared host (M4-8 plan
  * change 9). Former links stay usable until their access date passes.
  */
-export function chooseLink(links: EmployeeLink[], today: string): EmployeeLink | EmployeeProblem {
-  if (links.length === 0) return 'unavailable';
-  const usable = links.filter((link) => link.status !== 'former' || !link.formerAccessUntil || link.formerAccessUntil >= today);
+export function chooseLink(links: EmployeeLink[], today: string, tenantSlug: string | null): EmployeeLink | EmployeeProblem {
+  const here = tenantSlug ? links.filter((link) => link.subdomainSlug === tenantSlug) : links;
+  if (here.length === 0) return 'unavailable';
+  const usable = here.filter((link) => link.status !== 'former' || !link.formerAccessUntil || link.formerAccessUntil >= today);
   if (usable.length === 0) return 'ended';
   return usable.find((link) => link.status === 'active') ?? usable[0];
 }

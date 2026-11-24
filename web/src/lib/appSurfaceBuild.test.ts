@@ -27,6 +27,9 @@ describe('application surface build', () => {
     vi.stubEnv('VITE_APP_SURFACE', 'employee');
     vi.stubEnv('DEPLOYMENT_ENV', 'production');
     vi.stubEnv('VITE_DEPLOYMENT_ENV', 'production');
+    // A synthetic live key (base64 of "clerk.example.com$"), so this is the bundle a
+    // real employee site ships, with Clerk in it, and not the no-key fallback.
+    vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_live_Y2xlcmsuZXhhbXBsZS5jb20k');
 
     const modules: string[] = [];
     const code: string[] = [];
@@ -56,6 +59,8 @@ describe('application surface build', () => {
 
     expect(modules).toContainEqual(expect.stringMatching(/\/src\/EmployeeApp\.tsx$/));
     expect(modules).toContainEqual(expect.stringMatching(/\/src\/employee\/api\.ts$/));
+    expect(modules).toContainEqual(expect.stringMatching(/\/src\/employee\/ClerkAuth\.tsx$/));
+    expect(modules).toContainEqual(expect.stringMatching(/node_modules\/@clerk\/react\//));
     // Staff entry, pages, API client, contexts, layout and analytics stay out.
     expect(modules).not.toContainEqual(expect.stringMatching(
       /\/src\/(?:main\.tsx|App\.tsx|pages\/|services\/|contexts\/|providers\/|components\/(?:layout|routing|auth)\/)/,

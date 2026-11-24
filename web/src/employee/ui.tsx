@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactElement, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { pageTitle } from './brand';
 import { useBrand } from './contexts';
 import { takeHeadingFocusRequest } from './focus';
+import { useDocumentTitle } from './hooks';
 
 type Variant = 'primary' | 'secondary' | 'quiet';
 
@@ -19,19 +19,19 @@ interface EmpButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   block?: boolean;
 }
 
-export function EmpButton({ variant = 'primary', block, className, type = 'button', ...props }: EmpButtonProps) {
+export function EmpButton({ variant = 'primary', block, className, type = 'button', ...props }: EmpButtonProps): ReactElement {
   return <button type={type} className={cn('emp-btn', variants[variant], block && 'emp-btn-block', className)} {...props} />;
 }
 
-export function EmpButtonLink({ to, variant = 'primary', block, children }: { to: string; variant?: Variant; block?: boolean; children: ReactNode }) {
+export function EmpButtonLink({ to, variant = 'primary', block, children }: { to: string; variant?: Variant; block?: boolean; children: ReactNode }): ReactElement {
   return <Link to={to} className={cn('emp-btn', variants[variant], block && 'emp-btn-block')}>{children}</Link>;
 }
 
 /** The client's logo, or a monogram in the brand color when there's no logo or it fails to load. */
-export function BrandMark({ size = 'md' }: { size?: 'md' | 'lg' }) {
+export function BrandMark({ size = 'md' }: { size?: 'md' | 'lg' }): ReactElement {
   const brand = useBrand();
   const [failed, setFailed] = useState(false);
-  const box = size === 'lg' ? 'size-16 rounded-[18px] text-[2rem]' : 'size-10 rounded-[11px] text-lg';
+  const box = size === 'lg' ? 'size-16 rounded-[18px] text-[2rem]' : 'size-10 rounded-xl text-lg';
   if (brand.logoUrl && !failed) {
     return (
       <img
@@ -51,13 +51,9 @@ export function BrandMark({ size = 'md' }: { size?: 'md' | 'lg' }) {
 }
 
 /** One screen with one h1. Sets the tab title and resets scroll. `actions` sit beside the heading. */
-export function Page({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
+export function Page({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }): ReactElement {
   const heading = useRef<HTMLHeadingElement>(null);
-  const brand = useBrand();
-
-  useEffect(() => {
-    document.title = pageTitle(title, brand);
-  }, [title, brand]);
+  useDocumentTitle(title);
 
   useEffect(() => {
     document.getElementById('emp-main')?.scrollTo?.(0, 0);
@@ -76,13 +72,13 @@ export function Page({ title, actions, children }: { title: string; actions?: Re
 }
 
 /** A friendly "this will show here" card for screens that aren't built yet. */
-export function Placeholder({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }) {
+export function Placeholder({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }): ReactElement {
   return (
-    <div className="flex gap-3.5">
+    <div className="flex gap-4">
       <span aria-hidden="true" className="grid size-11 shrink-0 place-items-center rounded-xl bg-[var(--action-tint)] text-[var(--action)]">
         <Icon className="size-6" />
       </span>
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0 space-y-2">
         <h2 className="font-display text-[1.06rem] font-bold leading-snug text-neutral-900">{title}</h2>
         <div className="text-neutral-600">{children}</div>
       </div>
@@ -91,7 +87,7 @@ export function Placeholder({ icon: Icon, title, children }: { icon: LucideIcon;
 }
 
 /** A white card. `title` adds a small heading at the top, and `action` sits to its right. */
-export function Card({ title, action, className, children }: { title?: string; action?: ReactNode; className?: string; children: ReactNode }) {
+export function Card({ title, action, className, children }: { title?: string; action?: ReactNode; className?: string; children: ReactNode }): ReactElement {
   return (
     <section className={cn('emp-card', className)} aria-label={title}>
       {(title || action) && (

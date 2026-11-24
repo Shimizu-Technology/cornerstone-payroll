@@ -1,7 +1,7 @@
 // Local development without a Clerk key, and the public Playwright suite.
 // EmployeeApp only mounts this when import.meta.env.DEV is true, so it is
 // tree-shaken out of every production build (appSurfaceBuild.test.ts checks).
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode, type ReactElement } from 'react';
 import { EmployeeAuthContext, useEmployeeAuth, type EmployeeAuthValue } from './contexts';
 import { EmpButton } from './ui';
 
@@ -25,7 +25,7 @@ function writeSignedIn(signedIn: boolean): void {
 }
 
 // Signing in re-renders the routes, which then open `redirectTo` (see AppRoutes).
-function DevPreviewSignInForm() {
+function DevPreviewSignInForm(): ReactElement {
   const { previewSignIn } = useEmployeeAuth();
   return (
     <div className="space-y-4 rounded-[18px] border border-dashed border-neutral-300 bg-neutral-50 p-4" data-testid="dev-preview-sign-in">
@@ -38,7 +38,7 @@ function DevPreviewSignInForm() {
   );
 }
 
-export function DevPreviewAuthProvider({ children }: { children: ReactNode }) {
+export function DevPreviewAuthProvider({ children }: { children: ReactNode }): ReactElement {
   const [signedIn, setSignedIn] = useState(readSignedIn);
   const value = useMemo<EmployeeAuthValue>(() => ({
     isLoaded: true,

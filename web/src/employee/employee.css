@@ -142,7 +142,7 @@ body {
  * 1024px and up: two-column Home and list-and-detail Pay.
  */
 .emp-shell {
-  --emp-tabbar-height: 58px;
+  --emp-tabbar-height: 56px;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -158,6 +158,11 @@ body {
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
 }
 
+/* No tabs while the app can't load, so no space is kept for them. */
+.emp-shell[data-nav="hidden"] {
+  --emp-tabbar-height: 0px;
+}
+
 /* The view-only banner takes the top safe area instead. */
 .emp-shell[data-banner] .emp-header {
   padding-top: 0;
@@ -166,15 +171,15 @@ body {
 .emp-header-inner {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 56px;
-  padding: 6px 16px;
+  padding: 8px 16px;
 }
 
 .emp-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -231,9 +236,9 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 4px;
   min-height: var(--emp-tabbar-height);
-  padding: 6px 2px;
+  padding: 8px 4px;
   color: #475569;
   font-size: 0.8rem;
   font-weight: 600;
@@ -262,7 +267,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 20px 16px 32px;
+  padding: 24px 16px 32px;
 }
 
 .emp-page-head {
@@ -301,15 +306,15 @@ body {
   justify-content: space-between;
   gap: 8px;
   min-height: 44px;
-  padding: 10px 16px 0;
+  padding: 16px 16px 0;
 }
 
 .emp-card-body {
-  padding: 12px 16px 16px;
+  padding: 16px;
 }
 
 .emp-card-head + .emp-card-body {
-  padding-top: 4px;
+  padding-top: 8px;
 }
 
 .emp-h2 {
@@ -323,7 +328,7 @@ body {
 .emp-eye {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-height: 44px;
   padding: 0 8px;
   margin-right: -8px;
@@ -352,7 +357,7 @@ body {
     min-height: 68px;
     margin: 0 auto;
     padding: 0 24px;
-    gap: 20px;
+    gap: 24px;
   }
 
   .emp-brand-sub {
@@ -373,7 +378,7 @@ body {
     position: static;
     display: flex;
     align-self: stretch;
-    gap: 2px;
+    gap: 0;
     padding: 0;
     border: 0;
     background: none;
@@ -382,7 +387,7 @@ body {
   .emp-tab {
     flex-direction: row;
     min-height: 44px;
-    padding: 0 12px;
+    padding: 0 16px;
     border-bottom: 3px solid transparent;
     border-top: 3px solid transparent;
     color: #334155;
@@ -403,8 +408,8 @@ body {
   }
 
   .emp-page {
-    gap: 20px;
-    padding: 28px 24px 48px;
+    gap: 24px;
+    padding: 32px 24px 48px;
   }
 
   .emp-page .emp-h1 {
@@ -438,25 +443,25 @@ body {
 
   .emp-home-grid {
     grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-    gap: 20px;
+    gap: 24px;
   }
 
   .emp-pay-grid {
     grid-template-columns: 360px minmax(0, 1fr);
-    gap: 20px;
+    gap: 24px;
   }
 
   .emp-cards-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 20px;
+    gap: 24px;
   }
 
   .emp-column {
-    gap: 20px;
+    gap: 24px;
   }
 
   .emp-card-head { padding: 16px 24px 0; }
-  .emp-card-body { padding: 16px 24px 20px; }
+  .emp-card-body { padding: 16px 24px 24px; }
   .emp-card-head + .emp-card-body { padding-top: 8px; }
 }
 
@@ -465,7 +470,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
   background: #1e293b;
   color: #fff;
   font-weight: 600;
@@ -476,7 +481,7 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: calc(env(safe-area-inset-top, 0px) + 8px) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
   background: #111827;
   color: #fff;
@@ -484,7 +489,7 @@ body {
 
 .emp-viewas-end {
   min-height: 44px;
-  padding: 8px 18px;
+  padding: 8px 16px;
   background: #fcd34d;
   color: #111827;
   font-size: 0.95rem;
@@ -497,7 +502,7 @@ body {
   justify-content: center;
   gap: 8px;
   min-height: 52px;
-  padding: 12px 22px;
+  padding: 0 24px;
   border: 1px solid transparent;
   border-radius: 999px;
   font-weight: 700;
@@ -541,8 +546,8 @@ body {
   gap: 2px;
   min-height: 44px;
   min-width: 44px;
-  padding: 0 10px 0 2px;
-  margin-left: -6px;
+  padding: 0 8px 0 0;
+  margin-left: -8px;
   border-radius: 10px;
   color: var(--action);
   font-weight: 600;
@@ -550,11 +555,15 @@ body {
   text-decoration: none;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .emp-btn:active { transform: none; }
+}
+
 @media (hover: hover) and (pointer: fine) {
   .emp-btn-primary:hover { filter: brightness(0.94); }
   .emp-btn-secondary:hover { background: #f8fafc; }
   .emp-btn-quiet:hover { background: #f1f5f9; }
-  .emp-tab:hover { color: #0f172a; }
+  .emp-tab:not([aria-current="page"]):hover { color: #0f172a; }
   .emp-eye:hover { background: #f1f5f9; color: #0f172a; }
 }
 
@@ -585,7 +594,7 @@ body {
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
-  gap: 14px;
+  gap: 16px;
   padding-block: 24px;
 }
 
@@ -593,7 +602,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   min-height: 52px;
   margin-bottom: 8px;
 }
@@ -602,7 +611,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   padding: 48px 24px;
   text-align: center;
 }

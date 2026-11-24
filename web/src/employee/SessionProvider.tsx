@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { chooseLink, createEmployeeApi, problemFor } from './api';
-import { API_BASE_URL, today } from './config';
+import { API_BASE_URL, TENANT_SLUG, today } from './config';
 import { EmployeeSessionContext, useEmployeeAuth, type EmployeeSessionState, type EmployeeSessionValue } from './contexts';
 
 /**
- * Opens the signed-in employee's pay: finds their link (GET /employee/links),
- * then checks it (GET /employee/context). Data screens use the same client,
- * which sends the link in X-Employee-Link-Id. Nothing is stored on the device.
+ * Opens the signed-in employee's pay: finds their link for this client
+ * (GET /employee/links), then checks it (GET /employee/context). Data screens
+ * use the same client, which sends the link in X-Employee-Link-Id. Nothing is
+ * stored on the device.
  */
-export function EmployeeSessionProvider({ children }: { children: ReactNode }) {
+export function EmployeeSessionProvider({ children }: { children: ReactNode }): ReactElement {
   const { getToken, signOut } = useEmployeeAuth();
   const api = useMemo(() => createEmployeeApi({ baseUrl: API_BASE_URL, getToken }), [getToken]);
   const [state, setState] = useState<EmployeeSessionState>({ status: 'loading' });
@@ -18,9 +19,10 @@ export function EmployeeSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const controller = new AbortController();
     setState({ status: 'loading' });
-    void (async () => {
+    void (async (): Promise<void> => {
       try {
-        const choice = chooseLink(await api.links(controller.signal), today());
+        const choice = chooseLink(await api.links(controller.signal), today(), TENANT_SLUG);
+        if (controller.signal.aborted) return;
         if (typeof choice === 'string') {
           setState({ status: 'problem', problem: choice });
           return;
@@ -43,16 +45,22 @@ export function EmployeeSessionProvider({ children }: { children: ReactNode }) {
     if (problem === 'signed_out') void signOut();
   }, [problem, signOut]);
 
-  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const retry = useCallback((): void => setAttempt((n) => n + 1), []);
 
-  // Come back on its own when the connection returns.
+  // Come back on its own when the connection returns. If it came back before
+  // this listener was added, retry once now. A load that then fails while
+  // online shows the error screen, not offline, so this can't loop.
   useEffect(() => {
     if (problem !== 'offline') return;
+    if (navigator.onLine) {
+      retry();
+      return;
+    }
     window.addEventListener('online', retry);
     return () => window.removeEventListener('online', retry);
   }, [problem, retry]);
 
-  const reportError = useCallback((error: unknown) => {
+  const reportError = useCallback((error: unknown): void => {
     setState({ status: 'problem', problem: problemFor(error, { opened: opened.current }) });
   }, []);
 
