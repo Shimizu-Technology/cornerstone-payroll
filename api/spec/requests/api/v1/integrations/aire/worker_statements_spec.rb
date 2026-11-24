@@ -38,6 +38,11 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
     response.parsed_body
   end
 
+  def expect_golden_response(name)
+    fixture = Rails.root.join("spec/fixtures/aire/worker_statements/#{name}.json")
+    expect(response.body.b).to eq(File.binread(fixture))
+  end
+
   # The cells PayStubGenerator draws in its EARNINGS table, without the header
   # and GROSS PAY rows.
   def printed_earnings(item)
@@ -128,21 +133,22 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
 
   describe "GET statements" do
     it "lists every committed paycheck newest first, with voided history and payment status from recorded evidence" do
-      oldest = paycheck(worker, Date.new(2025, 3, 7), check_number: "100431", check_printed_at: 1.year.ago)
-      issued = paycheck(worker, Date.new(2026, 9, 25), check_number: "103155", check_printed_at: 1.month.ago)
+      oldest = paycheck(worker, Date.new(2025, 3, 7), id: 400001, check_number: "100431", check_printed_at: 1.year.ago)
+      issued = paycheck(worker, Date.new(2026, 9, 25), id: 400002, check_number: "103155", check_printed_at: 1.month.ago)
       CheckEvent.new(payroll_item: issued, user: actor, event_type: "delivered", check_number: "103155",
         effective_on: Date.new(2026, 9, 26)).save!(validate: false)
-      deposit = paycheck(worker, Date.new(2026, 10, 9), payment_delivery_method: "direct_deposit")
+      deposit = paycheck(worker, Date.new(2026, 10, 9), id: 400003, payment_delivery_method: "direct_deposit")
       DirectDepositPaymentConfirmation.new(payroll_item: deposit, user: actor, settled_on: Date.new(2026, 10, 9), bank_reference: "ACH-123456789")
         .save!(validate: false)
-      voided = paycheck(worker, Date.new(2026, 8, 28), check_number: "102001", voided: true, voided_at: 2.months.ago)
-      reversed = paycheck(worker, Date.new(2026, 8, 14), check_number: "101999")
+      voided = paycheck(worker, Date.new(2026, 8, 28), id: 400004, check_number: "102001", voided: true, voided_at: 2.months.ago)
+      reversed = paycheck(worker, Date.new(2026, 8, 14), id: 400005, check_number: "101999")
       reversed.update_columns(payroll_reversed_at: 2.months.ago, payroll_reversed_by_id: actor.id, payroll_reversal_reason: "Entered twice")
-      pending = paycheck(worker, Date.new(2026, 10, 23), check_number: "103300", check_prepared_at: nil)
+      pending = paycheck(worker, Date.new(2026, 10, 23), id: 400006, check_number: "103300", check_prepared_at: nil)
       paycheck(worker, Date.new(2026, 11, 6), status: "calculated")
       roster = paycheck(worker, Date.new(2026, 7, 31), gross: 0, net: 0, hours_worked: 0) # roster row, no activity
 
       body = get_json(path)
+      expect_golden_response("list")
 
       expect(response).to have_http_status(:ok)
       expect(body.fetch("worker")).to eq("employment_type" => "hourly", "contractor" => false, "display_name" => "Pat Pilot")
@@ -184,7 +190,7 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
         earn!(prior, current_label, 40, 30, 1200)
         earn!(prior, "#{current_label} OT", 1.33, 45, 60, category: "overtime")
       end
-      item = paycheck(worker, Date.new(2026, 10, 9), gross: 1372.5, net: 1200, hours_worked: 44.25, overtime_hours: 1,
+      item = paycheck(worker, Date.new(2026, 10, 9), id: 400007, gross: 1372.5, net: 1200, hours_worked: 44.25, overtime_hours: 1,
         withholding_tax: 90, social_security_tax: 45, medicare_tax: 10, ytd_gross: 2632.5, ytd_net: 2300,
         ytd_withholding_tax: 190, ytd_social_security_tax: 85, ytd_medicare_tax: 30)
       earn!(item, current_label, 40, 30, 1200)
@@ -197,6 +203,7 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
         total_hours: "8.51", regular_hours: "7.37", overtime_hours: "1.14", category_snapshot: { "name" => "Admin Duties" }).save!(validate: false)
 
       body = get_json(path("/#{item.id}"))
+      expect_golden_response("detail")
       stub = PayStubGenerator.new(item.reload).statement
       pdf_text = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item).generate)).pages.map(&:text).join("\n")
 
