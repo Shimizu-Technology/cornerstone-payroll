@@ -36,6 +36,13 @@ class PayrollStatementYtdBreakdown
     rows_for(:employer_contribution)
   end
 
+  def current_rows(kind)
+    current_components(kind).map do |component|
+      Row.new(label: display_label(component, kind), current: component.amount.to_d.round(2),
+        ytd: 0.to_d, semantic: component.semantic)
+    end
+  end
+
   # Legacy cached PDFs may still show these accountant-only warnings.
   # Downloads use this to regenerate affected employee statements.
   def review_warnings

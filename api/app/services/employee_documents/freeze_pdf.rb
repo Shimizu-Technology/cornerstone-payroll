@@ -20,5 +20,12 @@ module EmployeeDocuments
       R2StorageService.new.upload(key, bytes, content_type: "application/pdf")
       document
     end
+
+    def self.remove_uncommitted_object(key)
+      R2StorageService.new.delete(key)
+    rescue StandardError => error
+      Rails.logger.error("Employee document rollback cleanup failed (#{error.class})")
+      Rails.error.report(error, handled: true)
+    end
   end
 end

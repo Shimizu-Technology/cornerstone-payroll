@@ -5,7 +5,7 @@ require "rails_helper"
 RSpec.describe "QuickBooks original stubs", type: :request do
   let(:company) { create(:company, historical_payroll_enabled: true) }
   let(:admin) { create(:user, company: company, organization: company.organization, role: "admin") }
-  let(:employee) { create(:employee, company: company, first_name: "Jesse", last_name: "Example") }
+  let(:employee) { create(:employee, company: company, first_name: "Jesse", last_name: "Example", ssn_encrypted: "111-22-3333") }
   let(:check) { create(:historical_paycheck, employee: employee, source_employee_name: "Example, Jesse") }
   let(:storage) { instance_double(R2StorageService, upload: true, delete: true) }
   let(:root) { "/api/v1/admin/quickbooks_stub_upload" }
@@ -21,12 +21,15 @@ RSpec.describe "QuickBooks original stubs", type: :request do
     allow(R2StorageService).to receive(:new).and_return(storage)
   end
 
-  def pdf(*pages, image: false, nested: false)
+  def pdf(*pages, image: false, nested: false, inline: false)
     bytes = Prawn::Document.new do |pdf|
       pages.each_with_index do |lines, index|
         pdf.start_new_page if index.positive?
         pdf.text(lines)
         add_image(pdf, nested: nested) if image
+        if inline
+          pdf.add_content("q 10 0 0 10 0 0 cm BI /W 1 /H 1 /CS /G /BPC 8 ID x EI Q")
+        end
       end
     end.render
 
@@ -45,8 +48,9 @@ RSpec.describe "QuickBooks original stubs", type: :request do
     pdf.add_content("/Nested Do")
   end
 
-  def submit(action, upload:, tokens: [], image_tokens: [])
-    post "#{root}/#{action}", params: { upload: upload, review_tokens: tokens, image_review_tokens: image_tokens },
+  def submit(action, upload:, tokens: [], image_tokens: [], number_tokens: [], review_token: nil)
+    post "#{root}/#{action}", params: { upload: upload, review_tokens: tokens, image_review_tokens: image_tokens,
+      number_review_tokens: number_tokens, review_token: review_token },
       headers: { "X-Company-Id" => company.id.to_s }
   end
 
@@ -94,11 +98,11 @@ RSpec.describe "QuickBooks original stubs", type: :request do
     expect(storage).not_to have_received(:upload)
   end
 
-  it "blocks spaced digits, slash and underscore separators, and flags possible routing numbers" do
+  it "blocks spaced digits, slash and underscore separators, and excludes labeled routing numbers" do
     variants = [ "1 1 1 - 2 2 - 3 3 3 3", "111/22/3333", "111_22_3333" ]
-    submit("preview", upload: pdf(*variants.map { |ssn| "#{page_text}\nSSN: #{ssn}" }, "#{page_text}\nBank: 111223333"))
+    submit("preview", upload: pdf(*variants.map { |ssn| "#{page_text}\nSSN: #{ssn}" }, "#{page_text}\nRouting 121000358"))
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body.fetch("data").pluck("status")).to eq(%w[full_ssn full_ssn full_ssn possible_ssn])
+    expect(response.parsed_body.fetch("data").pluck("status")).to eq(%w[full_ssn full_ssn full_ssn matched])
     expect(storage).not_to have_received(:upload)
   end
 
@@ -113,10 +117,47 @@ RSpec.describe "QuickBooks original stubs", type: :request do
 
       expect { submit("confirm", upload: upload.call, tokens: [ token ]) }.not_to change(EmployeeDocument, :count)
       expect(response).to have_http_status(:unprocessable_entity)
+      expect { submit("confirm", upload: upload.call, image_tokens: [ token ]) }.not_to change(EmployeeDocument, :count)
+      submit("view_page", upload: upload.call, review_token: token)
+      expect(response).to have_http_status(:ok), response.body
+      expect(PDF::Reader.new(StringIO.new(response.body)).page_count).to eq(1)
       expect { submit("confirm", upload: upload.call, image_tokens: [ token ]) }.to change(EmployeeDocument, :count).by(1)
       expect(response).to have_http_status(:ok), response.body
       expect(AuditLog.find_by!(company: company, action: "quickbooks_stub_uploads#image_reviewed").metadata).to include("page" => 1)
     end
+  end
+
+  it "marks an inline image for visual review" do
+    submit("preview", upload: pdf(page_text, inline: true))
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("data").first).to include("status" => "image_review")
+  end
+
+  it "requires its own attestation and an audited view before posting a possible SSN" do
+    text = "#{page_text}\nSSN: 123 / 45 / 6789"
+    submit("preview", upload: pdf(text))
+    page = response.parsed_body.fetch("data").first
+    expect(page.fetch("status")).to eq("possible_ssn")
+    token = page.fetch("review_token")
+    submit("confirm", upload: pdf(text), number_tokens: [ token ])
+    expect(response).to have_http_status(:unprocessable_entity)
+
+    submit("view_page", upload: pdf(text), review_token: token)
+    expect(response).to have_http_status(:ok)
+    expect(response.headers["Cache-Control"]).to include("no-store")
+    submit("confirm", upload: pdf(text), image_tokens: [ token ])
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect { submit("confirm", upload: pdf(text), number_tokens: [ token ]) }.to change(EmployeeDocument, :count).by(1)
+    expect(AuditLog.find_by!(company: company, action: "quickbooks_stub_uploads#possible_ssn_reviewed").metadata).to include("page" => 1)
+  end
+
+  it "keeps the page preview staff-scoped" do
+    text = "#{page_text}\nSSN: 123-45-6789"
+    submit("preview", upload: pdf(text))
+    token = response.parsed_body.fetch("data").first.fetch("review_token")
+    admin.update!(role: "accountant")
+    submit("view_page", upload: pdf(text), review_token: token)
+    expect(response).to have_http_status(:forbidden)
   end
 
   it "identifies an already posted page and an expired preview" do

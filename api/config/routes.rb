@@ -287,6 +287,7 @@ Rails.application.routes.draw do
         end
         resource :quickbooks_stub_upload, only: [] do
           post :preview
+          post :view_page
           post :confirm
         end
         resources :historical_imports, only: %i[index show] do

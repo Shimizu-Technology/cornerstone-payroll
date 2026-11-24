@@ -30,12 +30,23 @@ RSpec.describe EmployeeDocuments::QuickbooksHistory do
     create(:historical_paycheck)
 
     expect(described_class.review_warnings(employee.company_id)).to eq([
-      { employee_id: employee.id, employee_name: employee.full_name, row_count: 2, duplicate_groups: 1 }
+      { employee_id: employee.id, employee_name: employee.full_name, row_count: 2, payday_count: 1, duplicate_groups: 1 }
     ])
     september = create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 9, 1))
     rows = described_class.for(employee)
     expect(rows.pluck(:historical_paycheck_id)).to eq([ september.id, second.id, first.id ])
     expect(rows.second).to include(hours_total: 1, net_pay: 900, adjustment_note: nil)
     expect(rows.last).to include(hours_total: 37, net_pay: 930, adjustment_note: "Includes recorded payroll adjustments.")
+  end
+
+  it "ignores test copies and record-only promotions when finding the first native payday" do
+    native = PayPeriod.find_by!(company: employee.company)
+    baseline = create(:pay_period, :committed, company: employee.company, pay_date: Date.new(2026, 7, 15))
+    baseline.update_columns(test_workspace_role: "baseline", test_workspace_source_pay_period_id: native.id)
+    archive = create(:pay_period, :committed, company: employee.company, pay_date: Date.new(2026, 8, 15))
+    archive.update_columns(promotion_source_pay_period_id: native.id, promotion_payment_disposition: "record_only")
+    history = create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 9, 1))
+
+    expect(described_class.for(employee).pluck(:historical_paycheck_id)).to eq([ history.id ])
   end
 end

@@ -25,10 +25,18 @@ module Api
           render json: { data: pages }
         end
 
+        def view_page
+          response.headers["Cache-Control"] = "no-store"
+          page = review.view_page(params[:review_token].to_s)
+          audit_step("review_page_viewed", { page: page.number, sha256: Digest::SHA256.hexdigest(page.bytes) })
+          send_data page.bytes, type: "application/pdf", disposition: "attachment", filename: "quickbooks-page-#{page.number}.pdf"
+        end
+
         def confirm
           tokens = token_list(:review_tokens)
           image_tokens = token_list(:image_review_tokens)
-          count = tokens.size + image_tokens.size
+          number_tokens = token_list(:number_review_tokens)
+          count = tokens.size + image_tokens.size + number_tokens.size
           if count > EmployeeDocuments::QuickbooksStubPdf::MAX_PAGES
             raise EmployeeDocuments::ReviewQuickbooksStubs::Invalid, "Select up to 50 pages."
           end
@@ -36,7 +44,7 @@ module Api
           response.headers["Cache-Control"] = "no-store"
           audit_step("confirm_requested", { page_count: count })
           confirmation = review
-          confirmation.prepare(tokens: tokens, image_tokens: image_tokens)
+          confirmation.prepare(tokens: tokens, image_tokens: image_tokens, number_tokens: number_tokens)
           documents = persist_confirmation(confirmation)
           render json: { data: documents.map { |document| { document_id: document.id, historical_paycheck_id: document.historical_paycheck_id } } }
         end
@@ -61,6 +69,9 @@ module Api
             documents = confirmation.confirm do |match, document|
               if match.page.has_image
                 audit_step("image_reviewed", { page: match.page.number, document_id: document.id })
+              end
+              if match.page.possible_ssn
+                audit_step("possible_ssn_reviewed", { page: match.page.number, document_id: document.id })
               end
             end
             audit_step("confirmed", { document_ids: documents.map(&:id) })
