@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "securerandom"
 require "uri"
 
 module RackAttackStore
@@ -39,6 +40,16 @@ module RackAttackStore
       @local = local
       @retry_at = 0
       @lock = Mutex.new
+    end
+
+    # Direct write, read and delete on the shared store, bypassing the local
+    # fallback. Production readiness uses it to prove Redis is reachable.
+    def shared_round_trip
+      key = "readiness/#{SecureRandom.uuid}"
+      value = SecureRandom.hex(8)
+      @shared.write(key, value, expires_in: 60) && @shared.read(key) == value
+    ensure
+      @shared.delete(key) if key
     end
 
     def increment(key, amount, **options)

@@ -4,6 +4,14 @@
 # Fail open so missing or invalid build metadata never suppresses a deployment.
 set -u
 
+# The employee site (VITE_APP_SURFACE=employee) never builds previews or
+# branch deploys: it serves pay data and every build spends shared credits.
+# Payroll's site keeps building them, so this never changes its behavior.
+if [[ "${VITE_APP_SURFACE:-}" == "employee" && "${CONTEXT:-}" != "production" ]]; then
+  echo "Employee site: previews and branch deploys are off; skipping the build."
+  exit 0
+fi
+
 # Only production is eligible for skipping. Unknown contexts build too.
 if [[ "${CONTEXT:-}" != "production" ]]; then
   echo "Non-production context; running the build."

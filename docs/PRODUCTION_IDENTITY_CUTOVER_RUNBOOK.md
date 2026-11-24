@@ -2,6 +2,8 @@
 
 Last reviewed: `2026-09-14T14:32:45+10:00`
 
+> **Status update, November 24, 2026:** the Cornerstone Payroll cutover was executed under the revised procedure in [Milestone 3 build plan §4](MILESTONE_3_FOUNDATIONS_BUILD_PLAN_2026-11-22.md) (Step `M3-0b`) and is live; see §4.9 there for the result. The Cornerstone sections below describe the September 14 starting point and are kept for history. The AIRE sections still apply. The lessons from the Payroll cutover are collected in "Lessons from the Payroll cutover" at the end of this document; apply them to AIRE.
+
 This runbook moves Cornerstone Payroll and AIRE from Clerk development identities to separate production identity environments without performing a production payroll. It is the operating procedure for the identity control in [Payroll operator and recovery acceptance](OPERATOR_AND_RECOVERY_ACCEPTANCE.md); it does not replace the production-readiness gate or authorize a live payroll.
 
 ## Verified starting point
@@ -143,13 +145,28 @@ Use non-payroll actions wherever possible. Record result, timestamp in ChST, ope
 | WebSocket/Cable authentication works where applicable | Pending | Pending |
 | Public health endpoint remains healthy with HSTS | Pending | Pending |
 
-Only after the matrix passes:
+### Payroll session claims and reverification
 
-1. confirm the exact provider instance ID and MFA evidence reference are configured, then set `REQUIRE_MFA=true` in the relevant backend environment;
-2. deploy the attestation change;
-3. run the complete deployed `production:readiness` task;
-4. require Cornerstone to pass 29 of 29 and AIRE to pass 23 of 23; and
-5. keep production payroll paused until operator and recovery acceptance is complete.
+The release lead configures and tests these settings on the separate Clerk development instance first. Apply the reviewed settings on the production instance during the authorized cutover.
+
+1. In the Clerk Dashboard, open **Sessions → Customize session token**. In the Claims editor, add the following entry alongside the existing claims and save. [Clerk session token documentation](https://clerk.com/docs/guides/sessions/customize-session-tokens)
+
+   ```json
+   {
+     "two_factor_enabled": "{{user.two_factor_enabled}}"
+   }
+   ```
+
+2. Open **User & authentication → Email → Sign-in with email**. Enable **Email verification code** and save. Google-only users need email code as a first factor for reverification. [Clerk sign-in options](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options)
+3. Refresh the default session tokens for enrolled and unenrolled test users. Confirm the claim is the JSON boolean `true` for the enrolled user and `false` for the unenrolled user. On a new device, verify that the email code alone does not grant staff access. Verify first-factor reverification by password and by email code after Google sign-in, and verify second-factor reverification for enrolled users.
+
+Complete the following steps after the verification matrix passes.
+
+1. Confirm the exact provider instance ID and MFA evidence reference are configured, then set `REQUIRE_MFA=true` in the relevant backend environment.
+2. Deploy the attestation change.
+3. Run the complete deployed `production:readiness` task. For Payroll with MFA enabled, supply a fresh default Clerk session JWT from that deployment's configured instance and frontend origin using a private temporary file (mode `0600`). Set `CLERK_MFA_SAMPLE_TOKEN_FILE=/path/to/private-file` for this command only and delete the file immediately afterward. The check accepts a correctly signed token issued within the last 15 minutes, even if its 60-second lifetime has run out, so copy it shortly before running the task. Use a dedicated test account and keep the token out of shell history, logs, and retained evidence.
+4. Require all Cornerstone and AIRE readiness checks to pass.
+5. Keep production payroll paused until operator and recovery acceptance is complete.
 
 ## Rollback
 
@@ -185,3 +202,15 @@ Rollback immediately if both recovery administrators cannot sign in, a valid loc
 | Final disposition | Go / No-go |
 
 Any missing decision, unreconciled identity, untested recovery path, failed verification row, or incomplete readiness gate is a no-go. The cutover closes identity readiness only; the remaining database, document, queue, monitoring, Chels operator, MoSa parallel-cycle, and AIRE shadow/live-cycle controls remain separate requirements.
+
+## Lessons from the Payroll cutover
+
+Found by the November 24, 2026 practice run and live switch. Details, commands and the code references are in [Milestone 3 build plan §4](MILESTONE_3_FOUNDATIONS_BUILD_PLAN_2026-11-22.md); the points that change this runbook are:
+
+- **The account owner must be present.** The dev Dashboard **Export users** step and the deletion of any production secret key both ask for the owner's Clerk password. Neither can be done by an agent or delegate.
+- **Import format.** `npx clerk@4.3.0 migrate import <file> --source clerk` reads the Dashboard export's column names (`id`, `primary_email_address`, `password_digest`, `password_hasher`, and so on) and turns `id` into `external_id`. `clerk:cutover:build_import` writes that format directly.
+- **`clerk:cutover:apply` needs `CONFIRM_M3_1_DEPLOYED=true`** while the application still uses the development issuer, which is the case at the re-link step.
+- **`migrate undo --yes` does not delete users who have signed in.** Add `--include-signed-in`, and only with the owner's approval against production.
+- **"Reject compromised passwords" applies to imported passwords at sign-in.** A user with a breached password gets a one-time reset by email code. The Payroll decision was to keep the setting on.
+- **Netlify CLI:** use `netlify-cli@27.16.2`. Version `27.17.0` fails `deploy` with "Project not found". This applies to the AIRE frontend publish if it is done from the command line.
+- **Key handling:** never read, inspect or screenshot a key dialog; copy with the copy button straight into a `600` file with `pbpaste`, then clear the clipboard; shred the files afterwards.
