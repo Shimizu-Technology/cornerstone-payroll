@@ -117,9 +117,13 @@ class ClerkInvitationService
     end
     return { success: false, error: "Too many Clerk sessions for one pass", revoked: revoked } unless listing[:complete]
 
+    # The confirming pass must see every page too, or a targeted session
+    # past the cap could still be active.
     recheck = active_sessions(subject)
-    return { success: false, error: recheck[:error] || "Sessions were still active after revocation", revoked: revoked } if
-      recheck[:error] || targeted(recheck[:sessions], cutoff).any?
+    return { success: false, error: recheck[:error], revoked: revoked } if recheck[:error]
+    return { success: false, error: "Too many Clerk sessions to confirm in one pass", revoked: revoked } unless recheck[:complete]
+    return { success: false, error: "Sessions were still active after revocation", revoked: revoked } if
+      targeted(recheck[:sessions], cutoff).any?
 
     { success: true, revoked: revoked }
   rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e

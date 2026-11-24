@@ -38,7 +38,8 @@ RSpec.describe "Employee link retirement hardening", type: :request do
     as_staff_in(company) { EmployeeLinks::Revoke.call(link: link, actor: staff, reason: "Seasonal layoff") }
     expect(worker.reload).to have_attributes(active: false, deactivation_reason: "last_employee_link_closed")
     clerk_session!("sess_before_closure", user_id: "user_riley", created_at: worker.deactivated_at - 30.minutes)
-    clerk_session!("sess_user_riley", user_id: "user_riley", created_at: worker.deactivated_at + 1.second)
+    clerk_session!("sess_user_riley", user_id: "user_riley",
+      created_at: worker.deactivated_at + EmployeeLinks::SessionFence::SESSION_SKEW_ALLOWANCE + 1.second)
   end
 
   # Jobs run in a system scope (rls_mode :system); calling a step directly does too.
@@ -66,6 +67,16 @@ RSpec.describe "Employee link retirement hardening", type: :request do
   describe "rehire reactivation" do
     before { close_last_link! }
 
+    it "doesn't ask Clerk about the session on routes that refuse an inactive login anyway" do
+      get "/api/v1/employee/links", headers: bearer("user_riley")
+      expect(response).to have_http_status(:not_found)
+      get "/api/v1/auth/me", headers: bearer("user_riley")
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body["error"]).to eq("Account inactive")
+
+      expect(clerk).not_to have_received(:fetch_session)
+    end
+
     it "can't lift an admin's deactivation" do
       invite = invite!(employee, actor: staff, delivery: "code")
       expect(invite).to have_attributes(path: "reactivate")
@@ -88,7 +99,8 @@ RSpec.describe "Employee link retirement hardening", type: :request do
 
       # A session created before the closure, though it stepped up just now.
       reactivate(activation_params(employee, code: invite.code), fva: [ 0, 0 ], sid: "sess_before_closure")
-      expect(response).to have_http_status(:not_found)
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body).to eq("error" => "Sign in again to continue", "code" => "session_predates_reactivation")
       expect(worker.reload).not_to be_active
 
       reactivate(activation_params(employee, code: invite.code))
@@ -98,7 +110,8 @@ RSpec.describe "Employee link retirement hardening", type: :request do
 
       old_session = bearer("user_riley", sid: "sess_before_closure")
       get "/api/v1/employee/context", headers: old_session.merge("X-Employee-Link-Id" => invite.link.id.to_s)
-      expect(response).to have_http_status(:not_found)
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body["code"]).to eq("session_predates_reactivation")
       get "/api/v1/auth/me", headers: old_session
       expect(response).to have_http_status(:unauthorized)
       expect(response.parsed_body["code"]).to eq("session_predates_reactivation")

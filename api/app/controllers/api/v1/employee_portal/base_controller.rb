@@ -29,6 +29,9 @@ module Api
 
         def authenticate_employee_user!
           user = verified_employee_portal_user
+          if employee_session_fenced?
+            return render json: EmployeeLinks::SessionFence::SIGN_IN_AGAIN, status: :unauthorized
+          end
           return head :not_found unless user
 
           @current_user = user

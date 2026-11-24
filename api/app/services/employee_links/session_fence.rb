@@ -14,10 +14,24 @@ module EmployeeLinks
   #
   # Recent verification (step-up) is a separate requirement, checked by the
   # callers that need it (MfaPolicy).
+  #
+  # Clerk's clock and the database's can disagree, so a session Clerk says
+  # began up to SESSION_SKEW_ALLOWANCE after the closure counts as from
+  # before it: RevokeEmployeeSessionsJob ends those sessions too, and the
+  # fence refuses them. Someone who signed in within that window signs in
+  # again; reactivation comes long after a closure, so that costs nothing.
+  #
+  # Only a successful lookup is cached for long. A failed one is remembered
+  # for NEGATIVE_CACHE_TTL, so a token that keeps failing doesn't call Clerk
+  # on every request; it stays refused meanwhile.
   module SessionFence
+    SESSION_SKEW_ALLOWANCE = 5.minutes
     CACHE_PREFIX = "employee_links/session_created_at/v1"
+    FAILED_PREFIX = "employee_links/session_created_at_failed/v1"
     # Longer than any Clerk session lives; the value never changes.
     CACHE_TTL = 90.days
+    NEGATIVE_CACHE_TTL = 30.seconds
+    SIGN_IN_AGAIN = { error: "Sign in again to continue", code: "session_predates_reactivation" }.freeze
 
     module_function
 
@@ -25,7 +39,13 @@ module EmployeeLinks
       return false unless user&.portal_employee? && user.deactivated_at
 
       created_at = session_created_at(payload, clerk: clerk)
-      created_at.nil? || created_at <= user.deactivated_at
+      created_at.nil? || created_at <= cutoff(user.deactivated_at)
+    end
+
+    # Sessions Clerk created at or before this time predate a closure at
+    # closed_at (the fence and the revocation job share it).
+    def cutoff(closed_at)
+      closed_at + SESSION_SKEW_ALLOWANCE
     end
 
     # When Clerk created the token's session, or nil.
@@ -39,8 +59,16 @@ module EmployeeLinks
       key = "#{CACHE_PREFIX}/#{sid}"
       cached = Rails.cache.read(key)
       millis = cached["created_at"] if cached.is_a?(Hash) && cached["user_id"] == subject
-      millis ||= fetch_created_at(sid, subject, key, clerk || ClerkInvitationService.new)
-      Time.zone.at(Rational(millis, 1000)) if millis
+      return Time.zone.at(Rational(millis, 1000)) if millis
+
+      failed_key = "#{FAILED_PREFIX}/#{sid}/#{Digest::SHA256.hexdigest(subject)}"
+      return if Rails.cache.read(failed_key)
+
+      millis = fetch_created_at(sid, subject, key, clerk || ClerkInvitationService.new)
+      return Time.zone.at(Rational(millis, 1000)) if millis
+
+      remember_failure(failed_key)
+      nil
     end
 
     def fetch_created_at(sid, subject, key, clerk)
@@ -54,6 +82,12 @@ module EmployeeLinks
       Rails.logger.warn("[EmployeeLinks::SessionFence] Could not read session #{sid}: #{error.class}")
       nil
     end
-    private_class_method :fetch_created_at
+
+    def remember_failure(failed_key)
+      Rails.cache.write(failed_key, true, expires_in: NEGATIVE_CACHE_TTL)
+    rescue StandardError => error
+      Rails.logger.warn("[EmployeeLinks::SessionFence] Could not cache a failed session lookup: #{error.class}")
+    end
+    private_class_method :fetch_created_at, :remember_failure
   end
 end
