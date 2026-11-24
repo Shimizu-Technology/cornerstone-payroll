@@ -20,7 +20,7 @@ function downloadPdf(artifact: PdfArtifact, url: string) {
   link.remove();
 }
 
-export function PdfDocumentView({ blob, className }: { blob: Blob | null; className?: string }) {
+export function PdfDocumentView({ blob, className, onPageRendered }: { blob: Blob | null; className?: string; onPageRendered?: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [documentState, setDocumentState] = useState<{ blob: Blob; document: PDFDocumentProxy } | null>(null);
   const pdfDocument = documentState?.blob === blob ? documentState.document : null;
@@ -81,6 +81,7 @@ export function PdfDocumentView({ blob, className }: { blob: Blob | null; classN
     }).then(() => {
       if (!cancelled) {
         setPaintedPage({ document: pdfDocument, pageNumber });
+        onPageRendered?.();
         setRendering(false);
       }
     }).catch(() => {
@@ -93,7 +94,7 @@ export function PdfDocumentView({ blob, className }: { blob: Blob | null; classN
       cancelled = true;
       task?.cancel();
     };
-  }, [pdfDocument, pageNumber]);
+  }, [pdfDocument, pageNumber, onPageRendered]);
 
   return (
     <div className={`flex min-h-0 flex-col bg-slate-100 ${className || 'flex-1'}`}>

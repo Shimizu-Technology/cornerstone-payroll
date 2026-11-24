@@ -504,6 +504,16 @@ RSpec.describe PayStubGenerator do
     end
 
     context "when the database returns saved earnings out of entry order" do
+      it "keeps the employee stub fingerprint stable when the association is loaded in reverse order" do
+        item = calculated_item(hourly_worker, "hourly", Date.new(2026, 4, 15), hours_worked: 80, reported_tips: 80)
+        fingerprint = described_class.new(item, employee_copy: true).employee_payroll_facts_sha256
+        reversed = item.earnings_in_entry_order.reverse
+        expect(reversed.size).to be > 1
+        allow(item).to receive(:payroll_item_earnings).and_return(reversed)
+
+        expect(described_class.new(item, employee_copy: true).employee_payroll_facts_sha256).to eq(fingerprint)
+      end
+
       it "still prints them in entry order on the row-level and fallback paths" do
         worker = hourly_worker
         apply_historical_ytd_balance(company: company, employee: worker,

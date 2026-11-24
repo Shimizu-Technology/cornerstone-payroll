@@ -118,6 +118,20 @@ class CompanyFeatures
     option("employee_portal.features.#{key}") == true
   end
 
+  def employee_stubs_enabled_since
+    return unless employee_portal_feature?(:stubs) && persisted?
+
+    enabled_since = effective_on
+    ClientOperatingProfile.where(company_id: company.id, effective_on: ...enabled_since)
+      .order(effective_on: :desc).each do |previous|
+        break unless previous.ends_on == enabled_since - 1.day && previous.employee_portal_enabled &&
+          previous.option_value("employee_portal.features.stubs") == true
+
+        enabled_since = previous.effective_on
+      end
+    enabled_since
+  end
+
   def former_access_years
     option("employee_portal.former_access_years")
   end

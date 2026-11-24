@@ -343,8 +343,8 @@ class ApiClient {
   }
 
   // POST multipart form data returning a Blob (for previews built from an unsaved upload)
-  async postFormBlob(endpoint: string, formData: FormData): Promise<BlobDownload> {
-    const initiatingCompanyId = this.activeCompanyId;
+  async postFormBlob(endpoint: string, formData: FormData, options: Pick<RequestOptions, 'companyId'> = {}): Promise<BlobDownload> {
+    const initiatingCompanyId = options.companyId !== undefined ? options.companyId : this.activeCompanyId;
     // Scope headers are read before waiting for the token, so a switch made
     // while it resolves can't redirect this request to another organization.
     const headers: Record<string, string> = this.financeHeaders(endpoint);
@@ -6674,8 +6674,53 @@ export interface HistoricalReportResponse {
   meta: PaginationMeta;
 }
 
+export type QuickbooksStubPreviewPage =
+  | {
+      page: number;
+      status: 'matched' | 'image_review' | 'possible_ssn';
+      has_image?: boolean;
+      employee_name: string;
+      pay_date: string;
+      net_pay: string;
+      check_number: string | null;
+      review_token: string;
+    }
+  | { page: number; status: 'full_ssn' | 'unreadable' | 'ambiguous' | 'duplicate_page' | 'unmatched' | 'already_posted' | 'conflicting_original' };
+
+export interface QuickbooksCheckWarning {
+  employee_id: number;
+  employee_name: string;
+  row_count: number;
+  payday_count: number;
+  duplicate_groups: number;
+}
+
+export const quickbooksStubUploadsApi = {
+  preview(companyId: number, file: File) {
+    const form = new FormData();
+    form.append('upload', file);
+    return api.postForm<{ data: QuickbooksStubPreviewPage[] }>('/admin/quickbooks_stub_upload/preview', form, { companyId });
+  },
+  viewPage(companyId: number, file: File, token: string) {
+    const form = new FormData();
+    form.append('upload', file);
+    form.append('review_token', token);
+    return api.postFormBlob('/admin/quickbooks_stub_upload/view_page', form, { companyId });
+  },
+  confirm(companyId: number, file: File, tokens: string[], imageTokens: string[], numberTokens: string[]) {
+    const form = new FormData();
+    form.append('upload', file);
+    tokens.forEach((token) => form.append('review_tokens[]', token));
+    imageTokens.forEach((token) => form.append('image_review_tokens[]', token));
+    numberTokens.forEach((token) => form.append('number_review_tokens[]', token));
+    return api.postForm<{ data: Array<{ document_id: number; historical_paycheck_id: number }> }>(
+      '/admin/quickbooks_stub_upload/confirm', form, { companyId },
+    );
+  },
+};
+
 export const historicalImportsApi = {
-  list: (params?: { page?: number; per_page?: number; exclude_source_system?: string }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }> =>
+  list: (params?: { page?: number; per_page?: number; exclude_source_system?: string }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; original_stub_upload_enabled?: boolean; quickbooks_check_warnings?: QuickbooksCheckWarning[]; import_providers: HistoricalImportProvider[] } }> =>
     api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }>('/admin/historical_imports', params),
   show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }): Promise<{ data: HistoricalImportDetail; meta: PaginationMeta }> =>
     api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),

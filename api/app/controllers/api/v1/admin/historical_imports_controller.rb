@@ -41,6 +41,8 @@ module Api
           archive = archive_summary
           page_batches = batches.offset((page - 1) * per_page).limit(per_page).to_a
           mapping_counts = worker_mapping_counts(page_batches)
+          can_review_original_stubs = StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: current_company)
+          original_stub_upload_enabled = can_review_original_stubs && CompanyFeatures.for(current_company).employee_portal_feature?(:stubs)
           render json: {
             data: page_batches.map do |batch|
               batch_json(
@@ -57,6 +59,8 @@ module Api
               total_count: total,
               total_pages: (total.to_f / per_page).ceil,
               archive: archive,
+              original_stub_upload_enabled: original_stub_upload_enabled,
+              quickbooks_check_warnings: can_review_original_stubs ? EmployeeDocuments::QuickbooksHistory.review_warnings(current_company_id) : [],
               import_providers: import_registry.contracts
             }
           }
