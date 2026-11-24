@@ -25,8 +25,9 @@ class PayStubGenerator
 
   attr_reader :payroll_item, :employee, :pay_period, :company
 
-  def initialize(payroll_item, preview: false)
+  def initialize(payroll_item, preview: false, employee_copy: false)
     @preview = preview
+    @employee_copy = employee_copy
     @payroll_item = payroll_item
     @employee = payroll_item.employee
     @pay_period = payroll_item.pay_period
@@ -137,7 +138,9 @@ class PayStubGenerator
         if !payroll_item.net_pay.to_d.positive?
           [ "Payment:", @preview ? "Earnings statement only" : "Earnings statement only - no payment issued" ]
         elsif payroll_item.effective_payment_delivery_method == "direct_deposit"
-          [ "Payment:", @preview ? "Direct deposit" : "Direct deposit (stub only; transfer not confirmed)" ]
+          [ "Payment:", (@preview || @employee_copy) ? "Direct deposit" : "Direct deposit (stub only; transfer not confirmed)" ]
+        elsif @employee_copy && !@preview && payroll_item.check_number.present?
+          [ "Payment:", "Check ##{payroll_item.check_number}" ]
         else
           [ "Check #:", @preview ? "" : payroll_item.check_number.presence || "No check issued" ]
         end
