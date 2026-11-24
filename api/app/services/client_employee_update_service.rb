@@ -134,7 +134,6 @@ class ClientEmployeeUpdateService
         actor: requested_by,
         company: company
       )
-      record_contact_changes!({}, direct_attrs.keys) if profile_requests_enabled?
       EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: requested_by)
 
       approval_attrs = approval_attrs.merge(status: "active", portal_pending_approval: false)

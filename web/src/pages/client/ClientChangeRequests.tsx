@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { MobileRecordCard } from '@/components/ui/mobile-record';
 import { LoadMoreFooter } from '@/components/ui/load-more';
 import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
-import { clientEmployeeChangeRequestsApi } from '@/services/api';
+import { ApiError, clientEmployeeChangeRequestsApi } from '@/services/api';
 import type { BoundedListMeta, EmployeeChangeRequest } from '@/services/api';
 
 export function ClientChangeRequests() {
@@ -33,9 +33,9 @@ export function ClientChangeRequests() {
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
   const [notice, setNotice] = useState<string | null>(routeState?.portalNotice || null);
-  const [initialSelection] = useState<number | null>(routeState?.selectedRequestId ?? null);
   const query = new URLSearchParams(location.search);
-  const requestedSelection = Number(query.get('request_id')) || initialSelection;
+  const requestedSelection = Number(query.get('request_id')) || routeState?.selectedRequestId || null;
+  const pendingSelection = useRef<number | null>(null);
   const showingContactChanges = query.get('view') === 'contact';
   const [profileRequestsEnabled, setProfileRequestsEnabled] = useState(false);
   const [decision, setDecision] = useState<'approve' | 'reject' | null>(null);
@@ -44,6 +44,10 @@ export function ClientChangeRequests() {
   const detailGeneration = useRef(0);
   const detailsRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (requestedSelection !== null) pendingSelection.current = requestedSelection;
+  }, [requestedSelection]);
+
   const load = useCallback(async () => {
     const generation = ++listGeneration.current;
     const details = ++detailGeneration.current;
@@ -51,20 +55,28 @@ export function ClientChangeRequests() {
       setLoading(true);
       setError(null);
       const response = await clientEmployeeChangeRequestsApi.list({
-        search: search || undefined,
+        search: search.trim() || undefined,
         status: status || undefined,
       });
       if (generation !== listGeneration.current) return;
-      setProfileRequestsEnabled(response.meta.profile_requests_enabled === true);
+      setProfileRequestsEnabled(response.meta?.profile_requests_enabled === true);
       setRequests(response.data);
-      setRequestsMeta(response.meta);
+      setRequestsMeta(response.meta ?? null);
       setLoadMoreError(null);
-      const nextSelection = requestedSelection || response.data[0]?.id;
       setSelected(null);
-      if (nextSelection) {
-        const detail = await clientEmployeeChangeRequestsApi.get(nextSelection);
-        if (details === detailGeneration.current) setSelected(detail.data);
+      if (showingContactChanges && response.meta?.profile_requests_enabled) return;
+
+      const fallbackId = response.data[0]?.id;
+      const nextSelection = pendingSelection.current ?? fallbackId;
+      pendingSelection.current = null;
+      if (!nextSelection) return;
+
+      let detail = await getRequestIfVisible(nextSelection);
+      if (details !== detailGeneration.current) return;
+      if (!detail && fallbackId && fallbackId !== nextSelection) {
+        detail = await getRequestIfVisible(fallbackId);
       }
+      if (details === detailGeneration.current) setSelected(detail?.data ?? null);
     } catch (err) {
       if (generation === listGeneration.current) {
         setError(err instanceof Error ? err.message : 'Failed to load change requests');
@@ -72,12 +84,12 @@ export function ClientChangeRequests() {
     } finally {
       if (generation === listGeneration.current) setLoading(false);
     }
-  }, [requestedSelection, search, setError, status]);
+  }, [search, setError, showingContactChanges, status]);
 
   useEffect(() => {
     void load();
     return () => { listGeneration.current += 1; detailGeneration.current += 1; };
-  }, [load]);
+  }, [load, requestedSelection]);
 
   const loadMore = async () => {
     if (!requestsMeta) return;
@@ -86,13 +98,13 @@ export function ClientChangeRequests() {
       setLoadingMore(true);
       setLoadMoreError(null);
       const response = await clientEmployeeChangeRequestsApi.list({
-        search: search || undefined,
+        search: search.trim() || undefined,
         status: status || undefined,
         page: requestsMeta.current_page + 1,
       });
       if (generation !== listGeneration.current) return;
       setRequests((current) => appendUniqueById(current, response.data));
-      setRequestsMeta(response.meta);
+      setRequestsMeta(response.meta ?? null);
     } catch (err) {
       if (generation !== listGeneration.current) return;
       setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more change requests');
@@ -169,8 +181,8 @@ export function ClientChangeRequests() {
         )}
         {showingContactChanges && profileRequestsEnabled ? <ContactChangeActivity /> : <>
         <div className="flex flex-col gap-4 md:flex-row">
-          <Input aria-label="Search employees" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employees..." className="max-w-md" />
-          <Select aria-label="Request status" value={status} onChange={(e) => setStatus(e.target.value)} className="w-full md:w-44">
+          <Input aria-label="Search employees" value={search} onChange={(e) => { pendingSelection.current = null; setSearch(e.target.value); }} placeholder="Search employees..." className="max-w-md" />
+          <Select aria-label="Request status" value={status} onChange={(e) => { pendingSelection.current = null; setStatus(e.target.value); }} className="w-full md:w-44">
             <option value="">All Statuses</option>
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
@@ -322,4 +334,13 @@ function requestLabel(request: EmployeeChangeRequest) {
 
 function tabClass(active: boolean) {
   return `rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-primary-600 ${active ? 'bg-primary-100 text-primary-800' : 'text-neutral-700 hover:bg-neutral-100'}`;
+}
+
+async function getRequestIfVisible(id: number) {
+  try {
+    return await clientEmployeeChangeRequestsApi.get(id);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
 }

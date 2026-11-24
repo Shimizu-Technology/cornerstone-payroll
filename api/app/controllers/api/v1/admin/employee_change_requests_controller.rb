@@ -102,6 +102,9 @@ module Api
           }
 
           if include_payloads
+            payload[:can_review] = change_request.pending? &&
+              StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: current_company) &&
+              (!change_request.profile_address_origin? || !change_request.same_person_reviewer?(current_user))
             payload[:proposed_compensation_effective_on] = change_request.proposed_compensation_effective_on
             payload[:proposed_changes] = sanitize_payload(change_request.proposed_changes)
             payload[:original_values] = sanitize_payload(change_request.original_values)

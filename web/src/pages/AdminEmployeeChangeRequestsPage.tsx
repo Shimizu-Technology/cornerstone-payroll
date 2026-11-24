@@ -21,9 +21,10 @@ export function AdminEmployeeChangeRequestsPage() {
   const pendingDeepSelection = useRef(deepRequestId);
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
-  const canReview = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
+  const canWrite = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [requests, setRequests] = useState<EmployeeChangeRequest[]>([]);
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
+  const canReview = canWrite && selected?.can_review !== false;
   const [status, setStatus] = useState(() => deepRequestId ? '' : 'pending');
   const [reviewNotes, setReviewNotes] = useState('');
   const [effectiveOn, setEffectiveOn] = useState('');
@@ -164,7 +165,7 @@ export function AdminEmployeeChangeRequestsPage() {
                         <span className="min-w-0 break-words font-semibold text-neutral-950">{request.employee_name}</span>
                         <StatusBadge status={request.status} />
                       </span>
-                      <span className="mt-3 block text-sm text-neutral-600">{request.request_kind === 'create' ? 'New worker' : 'Update'} · {request.requested_by_name || 'Unknown requester'}</span>
+                      <span className="mt-3 block text-sm text-neutral-600">{requestLabel(request)} · {request.requested_by_name || 'Unknown requester'}</span>
                       <span className="mt-1 block text-xs text-neutral-500">Submitted {new Date(request.created_at).toLocaleString()}</span>
                       <span className="mt-3 block text-sm font-semibold text-primary-700">Review request</span>
                     </button>
@@ -186,7 +187,7 @@ export function AdminEmployeeChangeRequestsPage() {
                       <TableRow key={request.id} className="cursor-pointer hover:bg-primary-50/60" tabIndex={0} onClick={() => void selectRequest(request.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectRequest(request.id); } }}>
                         <TableCell className="font-medium text-gray-900">{request.employee_name}</TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
-                        <TableCell>{request.request_kind === 'create' ? 'New worker' : 'Update'}</TableCell>
+                        <TableCell>{requestLabel(request)}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
                         <TableCell>{new Date(request.created_at).toLocaleString()}</TableCell>
                       </TableRow>
@@ -254,4 +255,9 @@ export function AdminEmployeeChangeRequestsPage() {
 function StatusBadge({ status }: { status: EmployeeChangeRequest['status'] }) {
   const variant = status === 'approved' ? 'success' : status === 'rejected' ? 'danger' : 'warning';
   return <Badge variant={variant}>{status.charAt(0).toUpperCase() + status.slice(1)}</Badge>;
+}
+
+function requestLabel(request: EmployeeChangeRequest) {
+  if (request.profile_address) return 'Address change';
+  return request.request_kind === 'create' ? 'New worker' : 'Update';
 }

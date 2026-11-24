@@ -127,11 +127,14 @@ class EmployeeChangeRequest < ApplicationRecord
       actor = authorized_review_actor!(actor)
       verify_original_values!
       if profile_address?
-        apply_profile_address!
+        apply_profile_address!(reviewer: actor)
       else
         apply_proposed_changes!(actor: actor, effective_on: effective_on.presence || proposed_compensation_effective_on)
       end
-      EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor) if request_kind == "create"
+      if request_kind == "create"
+        record_new_hire_contact_changes!(reviewer: actor)
+        EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)
+      end
       update!(
         status: :approved,
         reviewed_by: actor,
@@ -194,12 +197,22 @@ class EmployeeChangeRequest < ApplicationRecord
     end
   end
 
-  def apply_profile_address!
+  def apply_profile_address!(reviewer:)
     before_values = employee.slice(*proposed_changes.keys)
     employee.update!(proposed_changes)
     EmployeeContactChangeToConfirm.record!(
       employee: employee, actor: requested_by, before_values: before_values,
-      after_values: employee.slice(*proposed_changes.keys)
+      after_values: employee.slice(*proposed_changes.keys), reviewer: reviewer
+    )
+  end
+
+  def record_new_hire_contact_changes!(reviewer:)
+    return unless CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
+
+    fields = direct_changes_applied.keys & EmployeeContactChangeToConfirm::FIELDS.values.flatten
+    EmployeeContactChangeToConfirm.record!(
+      employee: employee, actor: requested_by, before_values: {},
+      after_values: employee.slice(*fields), reviewer: reviewer
     )
   end
 
