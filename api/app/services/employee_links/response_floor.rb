@@ -3,8 +3,9 @@
 module EmployeeLinks
   # A short minimum time, with a little jitter, for the generic answers of
   # sign-up, claim and reactivation, so how long a refusal takes says little
-  # about why. Controllers apply it after the service returned, so no lock is
-  # held while waiting. It is bounded (at most MINIMUM + JITTER) and those
+  # about why. It is applied after the action finished and its database
+  # connection went back to the pool (EmployeeLinkCheckParams), so no lock or
+  # connection is held while waiting. It is bounded (at most MINIMUM + JITTER) and those
   # routes are rate limited per IP, token and session, so it can't tie up
   # many threads.
   module ResponseFloor
