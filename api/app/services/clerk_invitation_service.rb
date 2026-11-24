@@ -80,6 +80,79 @@ class ClerkInvitationService
     }
   end
 
+  SESSION_PATTERN = /\Asess_[a-zA-Z0-9_-]+\z/
+  SESSION_PAGE_LIMIT = 100
+  # 20 pages of 100. A user with more active sessions than that is listed and
+  # revoked a page cap at a time: the pass reports failure, so the caller
+  # retries until a pass finds nothing left.
+  SESSION_PAGE_CAP = 20
+
+  # Ends a user's active Clerk sessions (D12): every one, or with
+  # created_before only those Clerk reports as created at or before that time
+  # (a session without a creation time is ended too).
+  #
+  # Every page of the user's active sessions is listed before any is revoked.
+  # A session that already ended (or is gone, 404) counts as revoked. Success
+  # means one full pass: the whole list was read, every targeted session was
+  # revoked, and a fresh listing finds none of them still active. Returns
+  # { success:, revoked: } and never raises for a Clerk or network failure.
+  #
+  # email: in staging, the named tester address this user was made for (an
+  # unbound sign-up has no tester binding yet).
+  def revoke_user_sessions(subject, created_before: nil, email: nil)
+    return { success: false, error: "Invalid Clerk user ID" } unless valid_subject?(subject)
+
+    staging_target!(subject, email)
+    return { success: false, error: "CLERK_SECRET_KEY not configured" } unless configured?
+
+    cutoff = created_before && (created_before.to_f * 1000).floor
+    listing = active_sessions(subject)
+    return { success: false, error: listing[:error] } if listing[:error]
+
+    revoked = 0
+    targeted(listing[:sessions], cutoff).each do |session|
+      return { success: false, error: "Clerk refused a session revocation", revoked: revoked } unless end_session(session["id"])
+
+      revoked += 1
+    end
+    return { success: false, error: "Too many Clerk sessions for one pass", revoked: revoked } unless listing[:complete]
+
+    recheck = active_sessions(subject)
+    return { success: false, error: recheck[:error] || "Sessions were still active after revocation", revoked: revoked } if
+      recheck[:error] || targeted(recheck[:sessions], cutoff).any?
+
+    { success: true, revoked: revoked }
+  rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
+    { success: false, error: e.class.name }
+  end
+
+  # The Clerk users that have this address, or nil when Clerk can't be asked.
+  def users_with_email(email)
+    return unless configured? && email.is_a?(String) && email.present?
+
+    data = get_json("/users?#{URI.encode_www_form(email_address: email, limit: 100)}")
+    data = data["data"] if data.is_a?(Hash)
+    return unless data.is_a?(Array) && data.all? { |user| user.is_a?(Hash) && valid_subject?(user["id"]) }
+
+    data
+  end
+
+  # Deletes a Clerk user (one already gone counts as deleted). email: the
+  # address it was made for, for the staging tester gate.
+  def delete_user(subject, email:)
+    return { success: false, error: "Invalid Clerk user ID" } unless valid_subject?(subject)
+
+    StagingOutboundPolicy.clerk_target!(email: email)
+    return { success: false, error: "CLERK_SECRET_KEY not configured" } unless configured?
+
+    response = request_json("/users/#{subject}", Net::HTTP::Delete)
+    return { success: true } if response.is_a?(Net::HTTPSuccess) || response.code.to_i == 404
+
+    { success: false, error: extract_error_message(response), status: response.code.to_i }
+  rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
+    { success: false, error: e.class.name }
+  end
+
   def invitation_status(invitation_id)
     return if invitation_id.blank?
 
@@ -107,6 +180,49 @@ class ClerkInvitationService
   end
 
   private
+
+  def valid_subject?(subject)
+    subject.is_a?(String) && SUBJECT_PATTERN.match?(subject)
+  end
+
+  def staging_target!(subject, email)
+    return unless StagingOutboundPolicy.staging?
+
+    email ? StagingOutboundPolicy.clerk_target!(email: email) : StagingOutboundPolicy.clerk_target!(id: subject)
+  end
+
+  def targeted(sessions, cutoff)
+    sessions.reject { |session| cutoff && session["created_at"].is_a?(Integer) && session["created_at"] > cutoff }
+  end
+
+  # Every page of the user's active sessions, up to SESSION_PAGE_CAP pages.
+  # { sessions:, complete: } or { error: }.
+  def active_sessions(subject)
+    sessions = []
+    SESSION_PAGE_CAP.times do |page|
+      query = { user_id: subject, status: "active", limit: SESSION_PAGE_LIMIT }
+      query[:offset] = page * SESSION_PAGE_LIMIT if page.positive?
+      data = get_json("/sessions?#{URI.encode_www_form(query)}")
+      data = data["data"] if data.is_a?(Hash)
+      return { error: "Could not list Clerk sessions" } unless data.is_a?(Array)
+
+      sessions.concat(data.select { |session| session.is_a?(Hash) && SESSION_PATTERN.match?(session["id"].to_s) })
+      return { sessions: sessions.uniq { |session| session["id"] }, complete: true } if data.length < SESSION_PAGE_LIMIT
+    end
+    Rails.logger.error("[ClerkInvitation] SESSION PAGE CAP HIT: Clerk user #{subject} has more than " \
+      "#{SESSION_PAGE_CAP * SESSION_PAGE_LIMIT} active sessions; revoking these and retrying")
+    { sessions: sessions.uniq { |session| session["id"] }, complete: false }
+  end
+
+  # True once the session is no longer active: revoked now, already ended,
+  # or gone.
+  def end_session(session_id)
+    response = post_json("/sessions/#{session_id}/revoke", {})
+    return true if response.is_a?(Net::HTTPSuccess) || response.code.to_i == 404
+
+    session = get_json("/sessions/#{session_id}")
+    session.is_a?(Hash) && session["id"] == session_id && session["status"].is_a?(String) && session["status"] != "active"
+  end
 
   def request_revocation(invitation_id, email:)
     previous = Thread.current[:staging_clerk_revoke_target]

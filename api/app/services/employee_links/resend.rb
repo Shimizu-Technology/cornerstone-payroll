@@ -6,10 +6,19 @@ module EmployeeLinks
   # place until staff unlock it.
   #
   # The rotation is a new invite generation: a Clerk sign-up already started
-  # for the old one can't bind. Its pending login's nonce is cleared here, and
-  # its Clerk invitation is revoked after commit (best effort; a later sign-up
-  # confirms it closed before making a new one).
+  # for the old one can't bind, and its pending login's nonce is cleared. So
+  # before rotating, and outside any transaction, Clerk must confirm that
+  # sign-up's invitation is closed (revoking it if it is still pending). If
+  # the person already accepted it (a Clerk account exists but isn't bound
+  # yet), nothing rotates: they finish by signing in, which binds it
+  # (SignUpAccepted). Staff can start over with ResetSignUp.
   class Resend
+    ACCEPTED = "This person already created their account. Ask them to sign in to finish."
+    ACCEPTED_STALE = "This person already created their account, but that sign-up can no longer finish. " \
+      "Reset their sign-up to send a new invite."
+    UNCONFIRMED = "Couldn't confirm with Clerk that the earlier sign-up is closed. Nothing was changed. Try again."
+    CHANGED = "This invite changed while it was being resent. Try again."
+
     def self.call(...)
       new(...).call
     end
@@ -29,30 +38,35 @@ module EmployeeLinks
 
       EmployeeLinks.require_staff!(@actor, @link.company)
       employee = @link.employee
-      superseded_invitation = nil
+      # Clerk first, outside the transaction; the locked block re-checks that
+      # the login and its invitation are still the ones Clerk closed.
+      closed = prepare_clerk!(current_pending_login)
       result = ApplicationRecord.transaction do
         # EmployeeLinks lock order: employee, then the link's login, then the link.
         employee.lock!
         pending_id = EmployeeAccountLink.where(id: @link.id).pick(:user_id)
         EmployeeLinks.lock_users!([ pending_id ])
         @link.lock!
-        raise Error, "This invite changed while it was being resent. Try again." unless @link.user_id == pending_id
+        raise Error, CHANGED unless @link.user_id == pending_id
         raise Error, "Only an open invite can be resent" unless @link.invited?
         raise Error, "Only active employees can be invited" unless employee.active?
         raise Error, "The employee app isn't turned on for this company" unless @link.portal_enabled?
+
+        pending = @link.user if pending_sign_up?(@link.user)
+        raise Error, CHANGED unless closed.fetch(:user_id) == pending&.id &&
+          closed.fetch(:invitation_id) == pending&.clerk_invitation_id
 
         if @delivery == "email"
           @link.claim_user = check_email!(employee)
         end
         credentials = Credentials.issue(@link, delivery: @delivery, email: employee.email)
         @link.save!
-        superseded_invitation = retire_pending_sign_up!(@link.user)
+        retire_pending_sign_up!(pending) if pending
         path = @link.claim_user_id ? "claim" : "sign_up"
-        EmployeeLinks.audit!(@link, "invite_resent", user: @actor, request: @request,
-          metadata: { delivery: @delivery, path: path, expires_at: @link.invite_expires_at.iso8601 })
+        EmployeeLinks.audit!(@link, audit_action, user: @actor, request: @request,
+          metadata: audit_metadata(closed).merge(delivery: @delivery, path: path, expires_at: @link.invite_expires_at.iso8601))
         Invite::Result.new(link: @link, token: credentials.token, code: credentials.code, path: path, email_status: nil)
       end
-      revoke_best_effort(superseded_invitation) if superseded_invitation
       return result unless @delivery == "email"
 
       result.with(email_status: InviteEmail.deliver(link: result.link, token: result.token, path: result.path))
@@ -60,20 +74,50 @@ module EmployeeLinks
 
     private
 
+    def current_pending_login
+      user = User.find_by(id: EmployeeAccountLink.where(id: @link.id).pick(:user_id))
+      user if pending_sign_up?(user)
+    end
+
+    def pending_sign_up?(user)
+      user&.portal_employee? && user.awaiting_clerk_binding?
+    end
+
+    # Confirms the pending login's Clerk invitation can't be accepted any
+    # more. Returns what was confirmed, for the locked re-check.
+    def prepare_clerk!(pending)
+      invitation_id = pending&.clerk_invitation_id
+      if invitation_id.present?
+        case PayrollInvitation.new(clerk: @clerk).close_invitation(invitation_id)
+        when :accepted
+          raise SignUpAccepted, bindable?(pending) ? ACCEPTED : ACCEPTED_STALE
+        when :unconfirmed
+          raise Error, UNCONFIRMED
+        end
+      end
+      { user_id: pending&.id, invitation_id: invitation_id }
+    end
+
+    # An accepted, unbound sign-up still binds at the person's next sign-in
+    # while its nonce and its link's invite are both open.
+    def bindable?(pending)
+      now = Time.current
+      pending.active? && pending.invite_nonce_digest.present? && pending.invite_nonce_expires_at&.>(now) &&
+        @link.reload.invite_open?(now) && !@link.activation_locked?(now)
+    end
+
     # The pending login stays on the link (a later sign-up reuses it), but
     # nothing started for the old generation can bind it.
     def retire_pending_sign_up!(user)
-      return unless user&.portal_employee? && user.awaiting_clerk_binding? && user.invite_nonce_digest.present?
-
       user.update!(invite_nonce_digest: nil, invite_nonce_expires_at: nil)
-      user.clerk_invitation_id
     end
 
-    def revoke_best_effort(invitation_id)
-      result = @clerk.revoke_invitation(invitation_id)
-      Rails.logger.warn("[EmployeeLinks::Resend] Could not revoke invitation #{invitation_id}") unless result[:success]
-    rescue StandardError => error
-      Rails.logger.warn("[EmployeeLinks::Resend] Could not revoke invitation #{invitation_id}: #{error.class}")
+    def audit_action
+      "invite_resent"
+    end
+
+    def audit_metadata(_closed)
+      {}
     end
 
     def check_email!(employee)
