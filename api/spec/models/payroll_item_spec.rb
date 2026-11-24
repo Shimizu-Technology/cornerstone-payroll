@@ -54,4 +54,17 @@ RSpec.describe PayrollItem, type: :model do
       expect(corrective).to be_valid
     end
   end
+
+  describe "#earnings_in_entry_order" do
+    it "lists saved earnings by id whatever order the database returns, then unsaved ones in build order" do
+      tips = PayrollItemEarning.new(id: 12, category: "tips", label: "Tips", amount: 80)
+      regular = PayrollItemEarning.new(id: 11, category: "regular", label: "Regular Pay", amount: 1_149.60)
+      bonus = PayrollItemEarning.new(category: "other", label: "Bonus", amount: 20)
+      pto = PayrollItemEarning.new(category: "pto", label: "PTO", amount: 40)
+      item = PayrollItem.new
+      allow(item).to receive(:payroll_item_earnings).and_return([ bonus, tips, pto, regular ])
+
+      expect(item.earnings_in_entry_order.map(&:label)).to eq([ "Regular Pay", "Tips", "Bonus", "PTO" ])
+    end
+  end
 end
