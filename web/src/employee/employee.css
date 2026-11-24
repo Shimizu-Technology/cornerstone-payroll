@@ -302,6 +302,7 @@ body {
 
 .emp-card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -534,6 +535,22 @@ body {
   border-color: #cbd5e1;
 }
 
+/* Danger-700: 6.5:1 under white text. */
+.emp-btn-danger {
+  background: #b91c1c;
+  color: #fff;
+}
+
+/* "Remove Ana from your emergency contacts?", in the row it removes. */
+.emp-confirm {
+  padding: 12px;
+  border-radius: 14px;
+  background: #fef2f2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .emp-btn-quiet {
   min-height: 44px;
   background: none;
@@ -747,6 +764,14 @@ body {
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* A link that stands on its own line (not inside a sentence): a full 44px tap target. */
+.emp-link-standalone {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 4px;
 }
 
 .emp-inline-icon {
@@ -1287,16 +1312,16 @@ select.emp-input {
   .emp-details > summary:hover { text-decoration: underline; }
 }
 
+/* The button sits beside the title; the one-time note takes its own row
+   under both, so it never squeezes "Latest pay" on a phone. */
 .emp-eye-wrap {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-  max-width: 15rem;
+  display: contents;
 }
 
 .emp-eye-note {
-  font-size: 0.85rem;
-  line-height: 1.3;
+  flex-basis: 100%;
+  order: 3;
+  font-size: 0.9rem;
+  line-height: 1.35;
   color: #475569;
-  text-align: right;
 }

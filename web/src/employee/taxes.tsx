@@ -14,9 +14,9 @@ import { useEmployeeData } from './useEmployeeData';
  * employees always get theirs by mail, at the last address on file.
  */
 function PaperCopyLine(): ReactElement {
-  const { state, readOnly } = useReadySession();
+  const { state, isFormer } = useReadySession();
   const brand = useBrand();
-  const delivery = readOnly === 'former' ? 'mailed_last' : state.info.w2Delivery;
+  const delivery = isFormer ? 'mailed_last' : state.info.w2Delivery;
   if (delivery === 'mailed_last') {
     return (
       <p className="emp-inline-icon"><Mail aria-hidden="true" className="size-5 shrink-0" />Your paper copy is mailed to your last address on file.</p>

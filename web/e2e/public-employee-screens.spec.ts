@@ -60,7 +60,7 @@ test.describe('employee screens on a desktop', () => {
     await snap(page, '02-pay', true);
 
     await stub.getByRole('link', { name: /^Previous/ }).click();
-    await expect(page).toHaveURL(/\/pay\/905$/);
+    await expect(page).toHaveURL(/\/pay\/905\?year=2026$/);
     await expect(stub.getByRole('heading', { name: 'Nov 6, 2026' })).toBeVisible();
     await expect(list.getByRole('link', { name: /Nov 6/ })).toHaveAttribute('aria-current', 'page');
     await stub.getByRole('link', { name: /^Next/ }).click();
@@ -72,6 +72,14 @@ test.describe('employee screens on a desktop', () => {
 
     await list.getByRole('button', { name: '2025' }).click();
     await expect(list.getByRole('link', { name: /Dec 19/ })).toBeVisible();
+    // The year is in the address, so a reload keeps it.
+    await expect(page).toHaveURL(/\/pay\?year=2025$/);
+    await page.reload();
+    await expect(list.getByRole('link', { name: /Dec 19/ })).toHaveAttribute('aria-current', 'page');
+    // A stub opened from elsewhere (Home, an email) shows its own year's list.
+    await page.goto(`/pay/801?${tenantQuery}`);
+    await expect(list.getByRole('link', { name: /Dec 19/ })).toHaveAttribute('aria-current', 'page');
+    await expect(list.getByRole('button', { name: '2025' })).toHaveAttribute('aria-pressed', 'true');
     expect(log.requests.some((r) => r.path === '/employee/statements' && r.headers['x-employee-link-id'] === '42')).toBe(true);
   });
 

@@ -110,6 +110,9 @@ export interface EmployeeMock {
   taxForms?: unknown[];
   activation?: (body: Record<string, unknown>) => { status: number; body?: unknown };
   claim?: (body: Record<string, unknown>) => { status: number; body?: unknown };
+  reactivate?: (body: Record<string, unknown>) => { status: number; body?: unknown };
+  /** Pages of one year's checks, for "Show more". */
+  pages?: (year: string | null, page: number) => { statements: unknown[]; next_page: number | null } | null;
 }
 
 export interface EmployeeMockLog {
@@ -133,12 +136,18 @@ export async function mockEmployeeApi(page: Page, mock: EmployeeMock = {}): Prom
     log.requests.push({ method, path, headers: request.headers(), body });
     const verified = request.headers().authorization === 'Bearer dev-preview-token-verified';
     const needsStepUp = method !== 'GET' && path !== '/employee/activation';
+    // Like EmployeeLinkCheckParams: the invite check is read from the body only.
+    if (['/employee/activation', '/employee/links/claim', '/employee/links/reactivate'].includes(path) && ['token', 'code', 'date_of_birth', 'ssn_last4'].some((field) => url.searchParams.has(field))) {
+      return json(route, { error: 'Invalid activation request' }, 400);
+    }
     if (needsStepUp && !verified) return json(route, REVERIFY, 403);
 
     if (path === '/employee/links') return json(route, mock.links ?? { links: [coralLink] });
     if (path === '/employee/context') return json(route, mock.context ?? context);
     if (path === '/employee/statements') {
       const year = url.searchParams.get('year');
+      const paged = mock.pages?.(year, Number(url.searchParams.get('page')) || 1);
+      if (paged) return json(route, { ...paged, years: [2026, 2025] });
       const rows = mock.statements ? mock.statements(year) : year === '2025' ? statements2025 : statements2026;
       return json(route, { statements: rows, years: [2026, 2025], next_page: null });
     }
@@ -180,14 +189,17 @@ export async function mockEmployeeApi(page: Page, mock: EmployeeMock = {}): Prom
       log.profile = { ...log.profile, address_request: { ...(log.profile.address_request as object), requested: body.address } };
       return json(route, log.profile);
     }
+    // ActivationsController: one check, both outcomes 200; the sign-up URL lands on /sign-up like Clerk's redirect_url.
     if (path === '/employee/activation') {
-      const result = mock.activation?.(body) ?? (body.email
-        ? { status: 200, body: { status: 'ready', sign_up_url: '/sign-up/account?__clerk_ticket=preview' } }
-        : { status: 200, body: { status: 'verified', company_name: 'Coral Kitchen', record_email_hint: 't•••@example.com' } });
+      const result = mock.activation?.(body) ?? { status: 200, body: { next: 'sign_up', sign_up_url: '/sign-up?__clerk_ticket=preview', message: null } };
       return json(route, result.body ?? {}, result.status);
     }
     if (path === '/employee/links/claim') {
-      const result = mock.claim?.(body) ?? { status: 200, body: { link: coralLink } };
+      const result = mock.claim?.(body) ?? { status: 201, body: { link: coralLink } };
+      return json(route, result.body ?? {}, result.status);
+    }
+    if (path === '/employee/links/reactivate') {
+      const result = mock.reactivate?.(body) ?? { status: 201, body: { link: coralLink } };
       return json(route, result.body ?? {}, result.status);
     }
     return route.fulfill({ status: 404 });

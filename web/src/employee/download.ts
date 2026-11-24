@@ -1,4 +1,6 @@
 import { useCallback, useState } from 'react';
+import { useReadySession } from './contexts';
+import { isSessionError } from './useEmployeeData';
 
 /**
  * Hands a PDF held in memory to the browser as a download. The PDF came from
@@ -19,8 +21,12 @@ export function savePdf(blob: Blob, filename: string): void {
 
 export type DownloadState = 'idle' | 'working' | 'failed' | 'offline';
 
-/** One download button's state: "Downloading…", then done, or a short message with Try again. */
+/**
+ * One download button's state: "Downloading…", then done, or a short message
+ * with Try again. A 401 or 404 goes to the session instead.
+ */
 export function useDownload(fetchPdf: () => Promise<Blob>, filename: string): { state: DownloadState; start: () => void } {
+  const { reportError } = useReadySession();
   const [state, setState] = useState<DownloadState>('idle');
   const start = useCallback(() => {
     setState('working');
@@ -28,8 +34,14 @@ export function useDownload(fetchPdf: () => Promise<Blob>, filename: string): { 
       savePdf(blob, filename);
       setState('idle');
     }, (error: unknown) => {
-      setState((error as { kind?: string } | null)?.kind === 'offline' ? 'offline' : 'failed');
+      // Signed out or access ended: the session's own screen, as for any other load.
+      if (isSessionError(error)) {
+        setState('idle');
+        reportError(error);
+      } else {
+        setState((error as { kind?: string } | null)?.kind === 'offline' ? 'offline' : 'failed');
+      }
     });
-  }, [fetchPdf, filename]);
+  }, [fetchPdf, filename, reportError]);
   return { state, start };
 }

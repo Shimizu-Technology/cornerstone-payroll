@@ -1,22 +1,27 @@
-// Client for /api/v1/employee/*. Every call carries the Clerk session token;
-// every call except GET /employee/links also carries X-Employee-Link-Id.
+// Client for /api/v1/employee/*. Every call carries the Clerk session token
+// (except sign-up's activation, made before any session); every call except
+// links, claim and reactivate also carries X-Employee-Link-Id.
 // The API answers every employee failure with a bare 404 so it never reveals
 // whether a person or record exists, and this client keeps it that way: a 404
-// only ever becomes "unavailable" or "access ended", never a reason.
+// only ever becomes "unavailable" or "access ended", never a reason. The one
+// 403 it reads is two-step sign-in (MfaEnforceable, RecentVerification).
 // Response shapes live in contracts.ts.
 import {
-  addressBody, identityBody, parseActivationVerified, parseContext, parseHelpContacts, parseProfile, parseStatementDetail,
-  parseStatementPage, parseTaxForms, signUpUrlFrom, verificationIdFrom,
-  type ActivationVerified, type Address, type EmployeeContextInfo, type EmployeeProfile, type HelpContact, type IdentityCheck,
+  accessDay, addressBody, identityBody, parseActivation, parseContext, parseHelpContacts, parseProfile, parseStatementDetail,
+  parseStatementPage, parseTaxForms, verificationIdFrom,
+  type ActivationOutcome, type Address, type EmployeeContextInfo, type EmployeeProfile, type HelpContact, type IdentityCheck,
   type StatementDetail, type StatementPage, type TaxForm,
 } from './contracts';
 
 /**
- * - invalid: a 422. For sign-up and claim it is the one generic "couldn't match" answer.
- * - locked: 423, sign-up locked after too many failed checks.
+ * - invalid: a 422 or 400. For sign-up it is the one generic "couldn't match" answer (claim's is a 404).
  * - conflict: 409, for example another change is already being reviewed.
+ * - mfa_enrollment_required: 403, this login must set up two-step sign-in first (staff and client logins).
+ * - mfa_required: 403, this session didn't finish two-step sign-in.
  */
-export type EmployeeApiErrorKind = 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'locked' | 'conflict';
+export type EmployeeApiErrorKind =
+  | 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
+  | 'mfa_enrollment_required' | 'mfa_required';
 
 export class EmployeeApiError extends Error {
   readonly kind: EmployeeApiErrorKind;
@@ -104,14 +109,16 @@ function retryAfter(header: string | null): number | null {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
 }
 
-export function errorForStatus(status: number, retryAfterHeader: string | null = null): EmployeeApiError {
+/** `code` is the JSON body's `code`, read only for a 403. */
+export function errorForStatus(status: number, retryAfterHeader: string | null = null, code: unknown = null): EmployeeApiError {
   if (status === 401) return new EmployeeApiError('unauthorized', status);
-  // 403 is not expected from employee routes; treat it like 404 so nothing leaks.
+  if (status === 403 && code === 'mfa_enrollment_required') return new EmployeeApiError('mfa_enrollment_required', status);
+  if (status === 403 && code === 'mfa_required') return new EmployeeApiError('mfa_required', status);
+  // Any other 403 is treated like 404 so nothing leaks.
   if (status === 403 || status === 404) return new EmployeeApiError('not_found', status);
   if (status === 429) return new EmployeeApiError('rate_limited', status, retryAfter(retryAfterHeader));
   if (status === 409) return new EmployeeApiError('conflict', status);
   if (status === 422 || status === 400) return new EmployeeApiError('invalid', status);
-  if (status === 423) return new EmployeeApiError('locked', status);
   return new EmployeeApiError('server', status);
 }
 
@@ -133,7 +140,11 @@ function linkIdFrom(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-/** Accepts `{ links: [...] }` or a bare array, and drops entries without a usable id. */
+/**
+ * GET /employee/links (AccountController#links, served):
+ * { links: [{ id, company_name, subdomain_slug, status, former_access_until }] }.
+ * Also accepts a bare array, and drops entries without a usable id.
+ */
 export function parseLinks(data: unknown): EmployeeLink[] {
   const list = Array.isArray(data) ? data : record(data)?.links;
   if (!Array.isArray(list)) return [];
@@ -146,7 +157,8 @@ export function parseLinks(data: unknown): EmployeeLink[] {
       companyName: text(entry.company_name) ?? '',
       subdomainSlug: text(entry.subdomain_slug),
       status: text(entry.status) ?? 'active',
-      formerAccessUntil: text(entry.former_access_until),
+      // An instant at the end of the last Guam day; kept as that day.
+      formerAccessUntil: accessDay(entry.former_access_until),
     }];
   });
 }
@@ -235,11 +247,14 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
     }
 
     if (!response.ok) {
-      if (stepUp && response.status === 403) {
-        const hint = reverificationHint(await response.clone().json().catch(() => null));
+      let code: unknown = null;
+      if (response.status === 403) {
+        const body: unknown = await response.json().catch(() => null);
+        const hint = stepUp ? reverificationHint(body) : null;
         if (hint) throw new StepUpRequiredError(hint);
+        code = record(body)?.code ?? null;
       }
-      throw errorForStatus(response.status, response.headers.get('Retry-After'));
+      throw errorForStatus(response.status, response.headers.get('Retry-After'), code);
     }
     return response;
   }
@@ -320,21 +335,31 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
     async cancelAddressRequest(linkId: string, requestId: string): Promise<EmployeeProfile> {
       return parseProfile(await request<unknown>(`/employee/address_requests/${pathId(requestId)}`, { linkId, method: 'DELETE', stepUp: true }));
     },
-    /** Sign-up step 1, before any session: checks the invite and the person. */
-    async verifyActivation(check: IdentityCheck): Promise<ActivationVerified> {
-      return parseActivationVerified(await request<unknown>('/employee/activation', { method: 'POST', body: identityBody(check), anonymous: true }));
+    /**
+     * Sign-up, before any session: the invite check and the email in one call.
+     * `sign_up` opens Clerk's sign-up; `sign_in` means this email can't start
+     * a new account here (it may already have one).
+     */
+    async activate(check: IdentityCheck, account: { email: string; useForNotices: boolean; termsVersion: string | null }, pageOrigin: string): Promise<ActivationOutcome> {
+      const body = {
+        ...identityBody(check),
+        email: account.email.trim(),
+        use_for_notices: account.useForNotices,
+        ...(account.termsVersion ? { terms_version: account.termsVersion } : {}),
+      };
+      const outcome = parseActivation(await request<unknown>('/employee/activation', { method: 'POST', body, anonymous: true }), pageOrigin);
+      if (!outcome) throw new EmployeeApiError('server');
+      return outcome;
     },
-    /** Sign-up step 2: returns the Clerk sign-up URL to open. */
-    async startActivation(check: IdentityCheck, account: { email: string; noticeEmail: 'sign_in' | 'record'; termsVersion: string | null }, pageOrigin: string): Promise<string> {
-      const body = { ...identityBody(check), email: account.email.trim(), notice_email: account.noticeEmail, ...(account.termsVersion ? { terms_version: account.termsVersion } : {}) };
-      const url = signUpUrlFrom(await request<unknown>('/employee/activation', { method: 'POST', body, anonymous: true }), pageOrigin);
-      if (!url) throw new EmployeeApiError('server');
-      return url;
-    },
-    /** Adds employee access to a login the person already has. Behind step-up. */
-    async claimLink(check: IdentityCheck, termsVersion: string | null): Promise<void> {
+    /** Adds employee access to the login the person is signed in with. Behind step-up. */
+    async claimLink(check: IdentityCheck, termsVersion: string | null): Promise<EmployeeLink | null> {
       const body = { ...identityBody(check), ...(termsVersion ? { terms_version: termsVersion } : {}) };
-      await request<unknown>('/employee/links/claim', { method: 'POST', body, stepUp: true });
+      return parseLinks([record(await request<unknown>('/employee/links/claim', { method: 'POST', body, stepUp: true }))?.link])[0] ?? null;
+    },
+    /** A rehired employee's login, turned off when their last job ended, opened again for the new invite. Behind step-up. */
+    async reactivate(check: IdentityCheck, termsVersion: string | null): Promise<EmployeeLink | null> {
+      const body = { ...identityBody(check), ...(termsVersion ? { terms_version: termsVersion } : {}) };
+      return parseLinks([record(await request<unknown>('/employee/links/reactivate', { method: 'POST', body, stepUp: true }))?.link])[0] ?? null;
     },
     /** After Clerk sign-up: /auth/me runs the invitation bind (M4-2 step 3). */
     async bindAccount(): Promise<void> {
@@ -346,7 +371,7 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
 export type EmployeeApi = ReturnType<typeof createEmployeeApi>;
 
 /** What the signed-in shell shows when it can't open the employee's pay. */
-export type EmployeeProblem = 'unavailable' | 'ended' | 'signed_out' | 'rate_limited' | 'offline' | 'error';
+export type EmployeeProblem = 'unavailable' | 'ended' | 'signed_out' | 'rate_limited' | 'offline' | 'error' | 'mfa_setup' | 'mfa_required';
 
 /**
  * A 404 before the shell has opened means the app is off for this employer or
@@ -358,6 +383,8 @@ export function problemFor(error: unknown, { opened }: { opened: boolean }): Emp
   switch (error.kind) {
     case 'not_found': return opened ? 'ended' : 'unavailable';
     case 'unauthorized': return 'signed_out';
+    case 'mfa_enrollment_required': return 'mfa_setup';
+    case 'mfa_required': return 'mfa_required';
     case 'rate_limited': return 'rate_limited';
     case 'offline': return 'offline';
     default: return 'error';

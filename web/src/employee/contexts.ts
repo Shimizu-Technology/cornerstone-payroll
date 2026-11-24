@@ -26,6 +26,8 @@ export interface EmployeeAuthValue {
    * StepUpCancelledError if they close the prompt.
    */
   stepUp: <T>(attempt: () => Promise<T>) => Promise<T>;
+  /** Opens the account settings where two-step sign-in is set up (Clerk's user profile). */
+  openAccountSettings: () => void;
   /** Development preview only: signs in without Clerk. */
   previewSignIn?: () => void;
 }
@@ -65,13 +67,15 @@ export interface EmployeeSessionValue {
   reportError: (error: unknown) => void;
   /** Opens one employer's pay (the picker, or "Switch employer"). Null goes back to the picker. */
   chooseLink: (linkId: string | null) => void;
-  /** Read-only: a former employee, or a Cornerstone admin's view-only "Sign in as". */
-  readOnly: ReadOnlyReason | null;
+  /** The open link is a former job: past pay only, no next payday, nothing can change. */
+  isFormer: boolean;
+  /** A Cornerstone admin's view-only "Sign in as" (M4-9): nothing can change, whatever the job's status. */
+  isViewOnly: boolean;
+  /** Either of the two: changes are off. */
+  readOnly: boolean;
   /** Session memory for data screens. Cleared on sign-out, reload and employer switch; never stored on the device. */
   memory: Map<string, unknown>;
 }
-
-export type ReadOnlyReason = 'former' | 'view_only';
 
 /** The open session. Only screens inside the ready shell use this. */
 export function useReadySession(): EmployeeSessionValue & { state: Extract<EmployeeSessionState, { status: 'ready' }> } {

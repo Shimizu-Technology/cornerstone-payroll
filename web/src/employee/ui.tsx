@@ -6,12 +6,13 @@ import { useBrand } from './contexts';
 import { takeHeadingFocusRequest } from './focus';
 import { useDocumentTitle } from './hooks';
 
-type Variant = 'primary' | 'secondary' | 'quiet';
+type Variant = 'primary' | 'secondary' | 'quiet' | 'danger';
 
 const variants: Record<Variant, string> = {
   primary: 'emp-btn-primary',
   secondary: 'emp-btn-secondary',
   quiet: 'emp-btn-quiet',
+  danger: 'emp-btn-danger',
 };
 
 interface EmpButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { chooseLink, createEmployeeApi, problemFor, usableLinks } from './api';
 import { API_BASE_URL, TENANT_SLUG, today } from './config';
-import { EmployeeSessionContext, useEmployeeAuth, type EmployeeSessionState, type EmployeeSessionValue, type ReadOnlyReason } from './contexts';
+import { EmployeeSessionContext, useEmployeeAuth, type EmployeeSessionState, type EmployeeSessionValue } from './contexts';
 import { useSignOut } from './hooks';
 
 /** How long opening the app may take before it shows the error screen with Try again. */
@@ -119,12 +119,13 @@ export function EmployeeSessionProvider({ viewOnly = false, children }: { viewOn
     setAttempt((n) => n + 1);
   }, []);
 
-  const readOnly: ReadOnlyReason | null = viewOnly ? 'view_only'
-    : state.status === 'ready' && (state.link.status === 'former' || state.info.status === 'former') ? 'former' : null;
+  // Tracked apart, so a view-only look at a former employee shows exactly what that employee sees.
+  const isFormer = state.status === 'ready' && (state.link.status === 'former' || state.info.status === 'former');
+  const isViewOnly = viewOnly;
 
   const value = useMemo<EmployeeSessionValue>(
-    () => ({ state, api, retry, reportError, chooseLink: chooseLinkId, readOnly, memory }),
-    [state, api, retry, reportError, chooseLinkId, readOnly, memory],
+    () => ({ state, api, retry, reportError, chooseLink: chooseLinkId, isFormer, isViewOnly, readOnly: isFormer || isViewOnly, memory }),
+    [state, api, retry, reportError, chooseLinkId, isFormer, isViewOnly, memory],
   );
   return <EmployeeSessionContext.Provider value={value}>{children}</EmployeeSessionContext.Provider>;
 }

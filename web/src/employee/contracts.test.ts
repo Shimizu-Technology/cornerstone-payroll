@@ -72,6 +72,15 @@ describe('employee API contracts', () => {
       .toEqual([{ id: '3', taxYear: 2026, status: 'withdrawn', corrected: false }]);
     expect(parseHelpContacts({ help_contacts: [{ name: 'Rina Calvo', role: 'Manager', phone: '671-555-0100', email: null, text_ok: true }, { name: 'No way to reach', phone: null, email: null }] }))
       .toEqual([{ name: 'Rina Calvo', role: 'Manager', phone: '671-555-0100', email: null, textOk: true }]);
+    // Phones and emails become tel:, sms: and mailto: links, so anything else is dropped first.
+    expect(parseHelpContacts({ help_contacts: [
+      { name: 'Joe', phone: '671-555-0111?body=hi', email: 'joe@example.com?cc=x@example.com', text_ok: true },
+      { name: 'Ana', phone: '12', email: 'ana@example.com', text_ok: true },
+      { name: 'Lee', phone: '+1 (671) 555-0112', email: 'lee@@example.com' },
+    ] })).toEqual([
+      { name: 'Ana', role: null, phone: null, email: 'ana@example.com', textOk: false },
+      { name: 'Lee', role: null, phone: '+1 (671) 555-0112', email: null, textOk: false },
+    ]);
     const profile = parseProfile({
       email: 'tala@example.com', email_verified: true, phone: '6715550100',
       address: { address_line1: '100 Example Rd', city: 'Tamuning', state: 'GU', zip: '96913' },
@@ -86,7 +95,7 @@ describe('employee API contracts', () => {
 
   it('follows only https or same-site sign-up URLs', () => {
     expect(signUpUrlFrom({ sign_up_url: 'https://accounts.example.test/x' }, 'https://app.example.test')).toBe('https://accounts.example.test/x');
-    expect(signUpUrlFrom({ sign_up_url: '/sign-up/account?__clerk_ticket=t' }, 'http://127.0.0.1:4175')).toBe('http://127.0.0.1:4175/sign-up/account?__clerk_ticket=t');
+    expect(signUpUrlFrom({ sign_up_url: '/sign-up?__clerk_ticket=t' }, 'http://127.0.0.1:4175')).toBe('http://127.0.0.1:4175/sign-up?__clerk_ticket=t');
     expect(signUpUrlFrom({ sign_up_url: 'data:text/html,hi' }, 'https://app.example.test')).toBeNull();
   });
 });
