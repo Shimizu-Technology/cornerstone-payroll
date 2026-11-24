@@ -129,6 +129,22 @@ RSpec.describe "Admin Employee Contact Hygiene", type: :request do
       expect(company_a.employees.where("LOWER(email) = ?", "cruz.family@example.com").count).to eq(5)
     end
 
+    it "lists every placeholder mark, including one no employee uses any more, and which ones staff can unmark" do
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
+      allow(EmployeeContactValidator).to receive(:configured_placeholder_emails).and_return(Set["configured@example.com"])
+      EmployeePlaceholderEmail.create!(organization: organization, email: "retired-inbox@example.com", marked_by: admin_user)
+
+      get "/api/v1/admin/employee_contact_hygiene/shared_emails", headers: { "X-Company-Id" => company_a.id.to_s }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body["companies"].flat_map { |company| company["emails"].map { |entry| entry["email"] } })
+        .not_to include("retired-inbox@example.com")
+      expect(response.parsed_body["placeholder_marks"]).to eq([
+        { "email" => "configured@example.com", "unmarkable" => false },
+        { "email" => "retired-inbox@example.com", "unmarkable" => true }
+      ])
+    end
+
     it "rejects a placeholder reason over the limit with 422, not a server error" do
       allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
 
