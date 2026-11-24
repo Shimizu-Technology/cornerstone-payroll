@@ -70,7 +70,7 @@ export function apiErrorMessage(
       : 'The server could not complete this request. Check whether your changes were saved before retrying. If it keeps failing, contact support with the page and action.')
     : `The request could not be completed (HTTP ${status}). Refresh the page and try again.`);
   const message = explanations.join('; ');
-  if (status === 403 && payload.code === 'mfa_required') return message;
+  if (status === 403 && isMfaRequiredCode(payload.code)) return message;
   // These outcomes have a definite recovery step regardless of the endpoint.
   const recovery: Record<number, string> = {
     401: 'Sign in again, then retry.',
@@ -90,6 +90,11 @@ import type { ConnectorHealth } from '@/lib/connector-health';
 import { WRITE_MAINTENANCE_EVENT } from './write-maintenance';
 
 export const MFA_REQUIRED_EVENT = 'payroll:mfa-required';
+export const MFA_REQUIRED_CODES = new Set(['mfa_required', 'mfa_enrollment_required']);
+
+export function isMfaRequiredCode(code: unknown): code is 'mfa_required' | 'mfa_enrollment_required' {
+  return typeof code === 'string' && MFA_REQUIRED_CODES.has(code);
+}
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
@@ -156,8 +161,8 @@ async function readApiError(response: Response, options?: { readOnly?: boolean; 
   const retryAfterSeconds = [headerSeconds, payloadSeconds].find((value) => Number.isSafeInteger(value) && value > 0);
   const message = apiErrorMessage(data, response.status, { ...options, retryAfterSeconds });
   const error = new ApiError(message, response.status, payload.details as ApiError['details'], data);
-  if (response.status === 403 && payload.code === 'mfa_required') {
-    globalThis.window?.dispatchEvent(new CustomEvent(MFA_REQUIRED_EVENT, { detail: message }));
+  if (response.status === 403 && isMfaRequiredCode(payload.code)) {
+    globalThis.window?.dispatchEvent(new CustomEvent(MFA_REQUIRED_EVENT, { detail: { code: payload.code, message } }));
   }
   if (error.isWriteMaintenance) {
     const seconds = Number(response.headers.get('Retry-After'));
