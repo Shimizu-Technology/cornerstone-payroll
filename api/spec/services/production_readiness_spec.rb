@@ -451,21 +451,31 @@ RSpec.describe ProductionReadiness do
         route_paths: -> { employee_paths },
         cable_mount_path: -> { nil },
         primary_pool_size: -> { 3 },
-        rate_limit_store: -> { Object.new }
+        rate_limit_store: -> { shared_store },
+        rate_limit_probe: -> { true }
       }
     end
 
-    def employee_report(env_values = employee_env, **overrides)
+    let(:shared_store) { RackAttackStore::Failover.new(ActiveSupport::Cache::MemoryStore.new, RackAttackStore::MEMORY) }
+
+    def employee_report(env_values = employee_env, live: false, **overrides)
       described_class.new(
         env: env_values, environment: environment, config: config, time_sources: -> { [] },
         job_adapter: FakeSolidQueueAdapter.new, cable_adapter: "solid_cable",
         tax_configuration_valid: -> { true }, tax_year_readiness: -> { { warnings: [] } },
         **probes, **overrides
-      ).run(live: false)
+      ).run(live: live)
     end
 
     def employee_failures(...)
       employee_report(...).failures.map(&:name).grep(/\Aemployee_web:/)
+    end
+
+    let(:rate_limit_probe_name) { "shared rate-limit store accepts a write and delete round trip" }
+    let(:live_probes) do
+      { primary_record: record_class, cache: cache, cache_record: record_class, queue_record: record_class,
+        queue_process: queue_process, cable_record: record_class, storage_factory: -> { storage }, http_get: http_get,
+        encrypted_data_probe: -> { true } }
     end
 
     it "adds four employee checks and passes with the planned settings" do
@@ -504,17 +514,62 @@ RSpec.describe ProductionReadiness do
       expect(employee_failures(employee_env.merge("DB_POOL_MAX" => "2"), primary_pool_size: -> { 2 })).to be_empty
     end
 
-    it "requires a Redis URL and an effective store that is not the process-local memory store" do
+    it "requires a single Puma process and no Solid Queue supervisor inside Puma" do
+      [ "2", "4" ].each do |workers|
+        expect(employee_failures(employee_env.merge("WEB_CONCURRENCY" => workers))).to contain_exactly(/database pool/)
+      end
+      %w[true 1 on yes].each do |value|
+        expect(employee_failures(employee_env.merge("SOLID_QUEUE_IN_PUMA" => value))).to contain_exactly(/database pool/)
+      end
+      [ {}, { "WEB_CONCURRENCY" => "1" }, { "WEB_CONCURRENCY" => "0" }, { "SOLID_QUEUE_IN_PUMA" => "false" } ].each do |settings|
+        expect(employee_failures(employee_env.merge(settings))).to be_empty
+      end
+    end
+
+    it "reads the primary pool size from the effective connection pool" do
+      expect(ActiveRecord::Base.connection_pool.db_config.max_connections).to be_a(Integer)
+    end
+
+    it "requires a Redis URL and the effective shared Failover store" do
       expect(employee_failures(employee_env.except("RACK_ATTACK_REDIS_URL"))).to contain_exactly(/rate-limit counters/)
       expect(employee_failures(employee_env.merge("RACK_ATTACK_REDIS_URL" => "http://wrong-scheme.example")))
         .to contain_exactly(/rate-limit counters/)
-      expect(employee_failures(employee_env, rate_limit_store: -> { RackAttackStore::MEMORY }))
-        .to contain_exactly(/rate-limit counters/)
+      [ -> { RackAttackStore::MEMORY }, -> { Object.new }, -> { nil }, -> { ActiveSupport::Cache::MemoryStore.new } ].each do |store|
+        expect(employee_failures(employee_env, rate_limit_store: store)).to contain_exactly(/rate-limit counters/)
+      end
     end
 
-    it "requires CLERK_AUTHORIZED_PARTIES" do
+    it "probes the shared store with a live round trip for employee_web" do
+      expect(employee_report(live: true, **live_probes).checks.map(&:name)).to include(rate_limit_probe_name)
+      failed = employee_report(live: true, **live_probes, rate_limit_probe: -> { false })
+      expect(failed.failures.map(&:name)).to include(rate_limit_probe_name)
+      raised = employee_report(live: true, **live_probes, rate_limit_probe: -> { raise "redis down sk_live_hidden" })
+      expect(raised.failures.find { |check| check.name == rate_limit_probe_name }.detail).to eq("RuntimeError while verifying")
+    end
+
+    it "probes the shared store for any role once a shared URL is configured, and skips it otherwise" do
+      payroll_env = employee_env.merge("APP_PROCESS_ROLE" => "payroll_web")
+      expect(employee_report(payroll_env, live: true, **live_probes).checks.map(&:name)).to include(rate_limit_probe_name)
+      expect(employee_report(payroll_env.except("RACK_ATTACK_REDIS_URL"), live: true, **live_probes).checks.map(&:name))
+        .not_to include(rate_limit_probe_name)
+    end
+
+    it "round-trips the real Failover store through its shared side only" do
+      shared = ActiveSupport::Cache::MemoryStore.new
+      expect(RackAttackStore::Failover.new(shared, RackAttackStore::MEMORY).shared_round_trip).to be(true)
+      expect(shared.instance_variable_get(:@data)).to be_empty
+
+      down = instance_double(ActiveSupport::Cache::RedisCacheStore, write: nil, read: nil, delete: nil)
+      expect(RackAttackStore::Failover.new(down, RackAttackStore::MEMORY).shared_round_trip).to be_falsey
+      expect(down).to have_received(:delete)
+    end
+
+    it "requires CLERK_AUTHORIZED_PARTIES to be explicit production HTTPS origins" do
       expect(employee_failures(employee_env.merge("CLERK_AUTHORIZED_PARTIES" => " "))).to contain_exactly(/Clerk authorized parties/)
       expect(employee_failures(employee_env.except("CLERK_AUTHORIZED_PARTIES"))).to contain_exactly(/Clerk authorized parties/)
+      [ "*", "http://payroll.example.com", "https://payroll.example.com,*", "https://payroll.example.com/path" ].each do |value|
+        expect(employee_failures(employee_env.merge("CLERK_AUTHORIZED_PARTIES" => value))).to contain_exactly(/Clerk authorized parties/)
+      end
     end
 
     it "reports probe errors as failures without leaking the error text" do
