@@ -1,4 +1,4 @@
-import { useMemo, type ComponentProps, type ReactNode } from 'react';
+import { useMemo, type ComponentProps, type ReactNode, type ReactElement } from 'react';
 import { ClerkProvider, SignIn, useAuth } from '@clerk/react';
 // Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
 import { ui as clerkUi } from '@clerk/ui';
@@ -46,11 +46,11 @@ function appearanceFor(brand: EmployeeBrand): ClerkProviderProps['appearance'] {
   };
 }
 
-function ClerkSignInForm({ redirectTo }: { redirectTo: string }) {
+function ClerkSignInForm({ redirectTo }: { redirectTo: string }): ReactElement {
   return <SignIn routing="hash" withSignUp={false} forceRedirectUrl={redirectTo} fallbackRedirectUrl="/" />;
 }
 
-function ClerkAuthBridge({ children }: { children: ReactNode }) {
+function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
   const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
   const value = useMemo<EmployeeAuthValue>(() => ({
     isLoaded,
@@ -62,7 +62,7 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
   return <EmployeeAuthContext.Provider value={value}>{children}</EmployeeAuthContext.Provider>;
 }
 
-export function ClerkAuthProvider({ publishableKey, brand, children }: { publishableKey: string; brand: EmployeeBrand; children: ReactNode }) {
+export function ClerkAuthProvider({ publishableKey, brand, children }: { publishableKey: string; brand: EmployeeBrand; children: ReactNode }): ReactElement {
   const appearance = useMemo(() => appearanceFor(brand), [brand]);
   const localization = useMemo<ClerkProviderProps['localization']>(() => ({
     signIn: {

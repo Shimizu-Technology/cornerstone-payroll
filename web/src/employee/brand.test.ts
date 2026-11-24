@@ -69,6 +69,11 @@ describe('brandFrom', () => {
     expect(brand.logoUrl).toBeNull();
   });
 
+  it('treats a blank name as no branding at all', () => {
+    const brand = brandFrom({ name: '   ', logo_url: 'https://cdn.example.com/logo.png', primary_color: '#b3261e', accent_color: null });
+    expect(brand).toMatchObject({ name: FALLBACK_BRAND_NAME, isFallback: true, logoUrl: null, action: FALLBACK_BRAND_COLOR });
+  });
+
   it('exposes every role as a CSS variable', () => {
     expect(Object.keys(brandStyle(brandFrom(null)))).toEqual(['--action', '--action-tint', '--brand', '--indicator', '--accent', '--accent-ink']);
   });
@@ -115,6 +120,9 @@ describe('fetchTenantBranding', () => {
     ['a server error', async () => new Response(null, { status: 500 })],
     ['a network failure', async () => { throw new TypeError('Failed to fetch'); }],
     ['a body without a name', async () => Response.json({ logo_url: null })],
+    ['a color that isn\'t a string', async () => Response.json({ name: 'Acme', logo_url: null, primary_color: ['#1898cf'], accent_color: null })],
+    ['a logo that isn\'t a string', async () => Response.json({ name: 'Acme', logo_url: { href: 'https://x' }, primary_color: null, accent_color: null })],
+    ['an array body', async () => Response.json([{ name: 'Acme' }])],
   ])('returns null for %s, so the app uses the fallback', async (_label, impl) => {
     expect(await fetchTenantBranding('mosas.shimizu-technology.com', { baseUrl, fetchImpl: vi.fn<typeof fetch>(impl) })).toBeNull();
   });

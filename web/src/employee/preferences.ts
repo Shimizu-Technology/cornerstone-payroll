@@ -1,20 +1,27 @@
 // The only thing the employee app keeps in browser storage: whether this
 // device hides amounts. Never pay data. Storage can be blocked (private mode,
-// cleared site data), so every read and write fails quietly to "show amounts".
+// cleared site data, a browser policy that makes even reading
+// `window.localStorage` throw), so storage is looked up inside each try and
+// every failure quietly means "show amounts".
 export const HIDE_AMOUNTS_KEY = 'employee-app:hide-amounts';
 
-export function readHideAmounts(storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage): boolean {
+type StorageLookup = () => Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined;
+
+const browserStorage: StorageLookup = () => globalThis.localStorage;
+
+export function readHideAmounts(storage: StorageLookup = browserStorage): boolean {
   try {
-    return storage?.getItem(HIDE_AMOUNTS_KEY) === 'true';
+    return storage()?.getItem(HIDE_AMOUNTS_KEY) === 'true';
   } catch {
     return false;
   }
 }
 
-export function writeHideAmounts(hidden: boolean, storage: Pick<Storage, 'setItem' | 'removeItem'> | undefined = globalThis.localStorage): void {
+export function writeHideAmounts(hidden: boolean, storage: StorageLookup = browserStorage): void {
   try {
-    if (hidden) storage?.setItem(HIDE_AMOUNTS_KEY, 'true');
-    else storage?.removeItem(HIDE_AMOUNTS_KEY);
+    const store = storage();
+    if (hidden) store?.setItem(HIDE_AMOUNTS_KEY, 'true');
+    else store?.removeItem(HIDE_AMOUNTS_KEY);
   } catch {
     // The choice then lasts until the page reloads.
   }

@@ -1,9 +1,9 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type ReactNode, type ReactElement } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { HideAmountsContext, useHideAmounts } from './contexts';
 import { readHideAmounts, writeHideAmounts } from './preferences';
 
-export function HideAmountsProvider({ children }: { children: ReactNode }) {
+export function HideAmountsProvider({ children }: { children: ReactNode }): ReactElement {
   // Off by default: it would add a tap to the one thing people open the app for.
   const [hidden, setHiddenState] = useState(() => readHideAmounts());
   const setHidden = useCallback((next: boolean) => {
@@ -15,7 +15,7 @@ export function HideAmountsProvider({ children }: { children: ReactNode }) {
 }
 
 /** The eye button. Its label says what tapping it will do. */
-export function HideAmountsToggle() {
+export function HideAmountsToggle(): ReactElement {
   const { hidden, setHidden } = useHideAmounts();
   const Icon = hidden ? EyeOff : Eye;
   return (
@@ -27,7 +27,7 @@ export function HideAmountsToggle() {
 }
 
 /** Any amount on screen. Shows "$•••" while amounts are hidden, and says so to screen readers. */
-export function Amount({ children }: { children: ReactNode }) {
+export function Amount({ children }: { children: ReactNode }): ReactElement {
   const { hidden } = useHideAmounts();
   if (!hidden) return <span className="tabular-nums">{children}</span>;
   return (

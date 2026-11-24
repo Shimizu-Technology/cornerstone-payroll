@@ -1,12 +1,14 @@
 /** @vitest-environment node */
 import { describe, expect, it, vi } from 'vitest';
-import { chooseLink, createEmployeeApi, EmployeeApiError, errorForStatus, parseLinks, problemFor, type EmployeeLink } from './api';
+import {
+  chooseLink, createEmployeeApi, EmployeeApiError, employeeUrl, errorForStatus, parseApiBase, parseLinks, problemFor, type EmployeeApi, type EmployeeLink,
+} from './api';
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
 }
 
-function client(fetchImpl: typeof fetch, { token = 'tok_123', online = true }: { token?: string | null; online?: boolean } = {}) {
+function client(fetchImpl: typeof fetch, { token = 'tok_123', online = true }: { token?: string | null; online?: boolean } = {}): EmployeeApi {
   return createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1', getToken: async () => token, fetchImpl, isOnline: () => online });
 }
 
@@ -31,15 +33,51 @@ describe('employee API client', () => {
     expect(links).toEqual([{ id: '7', companyName: "MoSa's", subdomainSlug: 'mosas', status: 'active', formerAccessUntil: null }]);
   });
 
+  it('builds URLs from a base with or without a trailing slash', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    const api = createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1/', getToken: async () => 't', fetchImpl, isOnline: () => true });
+    await api.context('42');
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.example.test/api/v1/employee/context');
+    expect(fetchImpl.mock.calls[0][1]?.redirect).toBe('error');
+  });
+
+  it.each([
+    '/employee/../admin/users',
+    '/employee/%2e%2e/admin/users',
+    '/employee/./links',
+    '/employee\\..\\admin',
+    '/admin/users',
+    'employee/links',
+  ])('refuses to leave /employee/: %s', async (path) => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(client(fetchImpl).request(path)).rejects.toThrow(/refuses unsafe paths|only calls \/employee\//);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('refuses a path that resolves to another origin', () => {
+    expect(() => employeeUrl(parseApiBase('https://api.example.test'), '//evil.example/employee/links')).toThrow(/API origin/);
+    expect(() => employeeUrl(parseApiBase('https://api.example.test/api/v1'), '//evil.example/employee/links')).toThrow(/API origin/);
+    expect(employeeUrl(parseApiBase('/api/v1', 'https://mosas.example.test'), '/employee/links').toString())
+      .toBe('https://mosas.example.test/api/v1/employee/links');
+  });
+
+  it('treats a token failure while offline as offline, and otherwise as a server problem', async () => {
+    let online = true;
+    const offlineToken = createEmployeeApi({
+      baseUrl: '', fetchImpl: vi.fn<typeof fetch>(), isOnline: () => online,
+      getToken: async () => { online = false; throw new Error('ClerkOfflineError'); },
+    });
+    await expect(offlineToken.links()).rejects.toMatchObject({ kind: 'offline' });
+
+    const brokenToken = createEmployeeApi({ baseUrl: '', fetchImpl: vi.fn<typeof fetch>(), isOnline: () => true, getToken: async () => { throw new Error('boom'); } });
+    await expect(brokenToken.links()).rejects.toMatchObject({ kind: 'server' });
+  });
+
   it('refuses to send a malformed link id', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     await expect(client(fetchImpl).context('0')).rejects.toMatchObject({ kind: 'not_found' });
     await expect(client(fetchImpl).context('9223372036854775808')).rejects.toMatchObject({ kind: 'not_found' });
     expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it('only calls /employee/ routes', async () => {
-    await expect(client(vi.fn<typeof fetch>()).request('/admin/users')).rejects.toThrow(/only calls \/employee\//);
   });
 
   it('treats a missing session token as signed out without calling the API', async () => {
@@ -115,18 +153,27 @@ describe('chooseLink', () => {
   const link = (overrides: Partial<EmployeeLink>): EmployeeLink => ({ id: '1', companyName: 'A', subdomainSlug: null, status: 'active', formerAccessUntil: null, ...overrides });
 
   it('shows "unavailable" when there are no links', () => {
-    expect(chooseLink([], '2026-11-24')).toBe('unavailable');
+    expect(chooseLink([], '2026-11-24', null)).toBe('unavailable');
   });
 
   it('keeps former employees in until their access date, then shows "ended"', () => {
     const former = link({ status: 'former', formerAccessUntil: '2026-11-24' });
-    expect(chooseLink([former], '2026-11-24')).toBe(former);
-    expect(chooseLink([former], '2026-11-25')).toBe('ended');
+    expect(chooseLink([former], '2026-11-24', null)).toBe(former);
+    expect(chooseLink([former], '2026-11-25', null)).toBe('ended');
+  });
+
+  it('on a client subdomain, opens only that client\'s link', () => {
+    const mosas = link({ id: '1', subdomainSlug: 'mosas' });
+    const other = link({ id: '2', subdomainSlug: 'pelican' });
+    expect(chooseLink([other, mosas], '2026-11-24', 'mosas')).toBe(mosas);
+    // Never falls back to another company's link under this company's branding.
+    expect(chooseLink([other], '2026-11-24', 'mosas')).toBe('unavailable');
+    expect(chooseLink([link({ subdomainSlug: null })], '2026-11-24', 'mosas')).toBe('unavailable');
   });
 
   it('prefers an active link', () => {
     const former = link({ id: '1', status: 'former', formerAccessUntil: '2027-01-01' });
     const active = link({ id: '2' });
-    expect(chooseLink([former, active], '2026-11-24')).toBe(active);
+    expect(chooseLink([former, active], '2026-11-24', null)).toBe(active);
   });
 });

@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { NavLink } from 'react-router';
 import { Banknote, CircleHelp, FileText, House, UserRound, WifiOff, type LucideIcon } from 'lucide-react';
-import { useBrand, useEmployeeAuth } from './contexts';
+import { useBrand } from './contexts';
 import { focusHeadingOnNextScreen } from './focus';
+import { useSignOut } from './hooks';
 import { useMediaQuery } from './useMediaQuery';
 import { useOnline } from './useOnline';
 import { BrandMark } from './ui';
@@ -19,7 +20,7 @@ const TABS: ReadonlyArray<{ to: string; label: string; wideLabel?: string; icon:
   { to: '/help', label: 'Help', icon: CircleHelp },
 ];
 
-function MainNav() {
+function MainNav(): ReactElement {
   const wide = useMediaQuery(TOP_NAV_QUERY);
   return (
     <nav className="emp-nav" aria-label="Main">
@@ -33,16 +34,23 @@ function MainNav() {
   );
 }
 
+interface EmployeeShellProps {
+  viewAs?: ViewOnlyGrant | null;
+  /** False while the whole app can't load (error, offline, too many tries): the tabs would lead nowhere. */
+  showNav?: boolean;
+  children: ReactNode;
+}
+
 /**
  * The signed-in frame. Phone: header, content, and five tabs at the bottom.
  * From 600px: a top bar with the tabs and Sign out, and centered content.
  */
-export function EmployeeShell({ viewAs, children }: { viewAs?: ViewOnlyGrant | null; children: ReactNode }) {
+export function EmployeeShell({ viewAs, showNav = true, children }: EmployeeShellProps): ReactElement {
   const brand = useBrand();
   const online = useOnline();
-  const { signOut } = useEmployeeAuth();
+  const signOut = useSignOut();
   return (
-    <div className="emp-shell" data-banner={viewAs ? 'true' : undefined}>
+    <div className="emp-shell" data-banner={viewAs ? 'true' : undefined} data-nav={showNav ? undefined : 'hidden'}>
       {viewAs && <ViewOnlyBanner {...viewAs} />}
       <header className="emp-header">
         <div className="emp-header-inner">
@@ -53,8 +61,8 @@ export function EmployeeShell({ viewAs, children }: { viewAs?: ViewOnlyGrant | n
               <span className="emp-brand-sub">Employee pay</span>
             </span>
           </span>
-          <MainNav />
-          <button type="button" className="emp-btn emp-btn-quiet emp-header-signout" onClick={() => { void signOut(); }}>
+          {showNav && <MainNav />}
+          <button type="button" className="emp-btn emp-btn-quiet emp-header-signout" onClick={signOut}>
             Sign out
           </button>
         </div>
