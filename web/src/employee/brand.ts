@@ -1,6 +1,6 @@
 // Tenant branding for the employee app. GET /api/v1/public/tenant_branding
-// returns { name, logo_url, primary_color, accent_color } for an enabled client
-// subdomain, or 404. Anything else falls back to a neutral Cornerstone brand.
+// returns { name, app_name, logo_url, primary_color, accent_color, main_phone }
+// for an enabled client subdomain, or 404 (TenantSubdomainRegistry.branding_for). Anything else falls back to a neutral Cornerstone brand.
 //
 // A client's colors become roles, never raw paint:
 // - action: buttons, links and the active tab. Always passes 4.5:1 under white text.
@@ -13,15 +13,22 @@
 
 export interface TenantBranding {
   name: string;
+  app_name?: string | null;
   logo_url: string | null;
   primary_color: string | null;
   accent_color: string | null;
+  /** The company's main phone, unless the client turned it off. Public, so it can show before sign-in. */
+  main_phone?: string | null;
 }
 
 export interface EmployeeBrand {
   name: string;
+  /** The client's own name for the app ("MoSa's Team"), if set. */
+  appName: string | null;
   logoUrl: string | null;
   monogram: string;
+  /** The company's main phone, for "Can't sign in?" and Help. Never a named person before sign-in. */
+  mainPhone: string | null;
   /** True when no client branding was found; copy then avoids naming an employer. */
   isFallback: boolean;
   action: string;
@@ -134,6 +141,12 @@ function httpsUrl(value: unknown): string | null {
   }
 }
 
+function dialable(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const digits = value.replace(/\D/g, '');
+  return /^\+?[\d\s().-]+$/.test(value.trim()) && digits.length >= 7 && digits.length <= 15 ? value.trim() : null;
+}
+
 function hexOrNull(value: unknown): string | null {
   return typeof value === 'string' && HEX_COLOR.test(value) ? value.toLowerCase() : null;
 }
@@ -149,8 +162,10 @@ export function brandFrom(branding: TenantBranding | null): EmployeeBrand {
   const { accent, ink } = accentPair(accentSource);
   return {
     name,
+    appName: branding && typeof branding.app_name === 'string' && branding.app_name.trim() ? branding.app_name.trim() : null,
     logoUrl: branding ? httpsUrl(branding.logo_url) : null,
     monogram: monogramOf(name),
+    mainPhone: branding ? dialable(branding.main_phone) : null,
     isFallback: !branding,
     action,
     actionAdjusted: adjusted,
@@ -160,6 +175,18 @@ export function brandFrom(branding: TenantBranding | null): EmployeeBrand {
     accent,
     accentInk: ink,
   };
+}
+
+/**
+ * On the shared host there's no client branding, but once the person picks an
+ * employer (or has only one) its name is known: the header and copy then name
+ * it ("Ask your manager at Coral Kitchen"). Colors, logo and main phone stay
+ * neutral, since only a client subdomain's branding sets those.
+ */
+export function employerBrand(brand: EmployeeBrand, companyName: string | null | undefined): EmployeeBrand {
+  const name = companyName?.trim();
+  if (!brand.isFallback || !name) return brand;
+  return { ...brand, name, monogram: monogramOf(name), isFallback: false };
 }
 
 /** CSS custom properties for the brand roles. */
@@ -182,7 +209,8 @@ function isTenantBranding(value: unknown): value is TenantBranding {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const branding = value as Record<string, unknown>;
   return typeof branding.name === 'string' && branding.name.trim() !== ''
-    && stringOrNull(branding.logo_url) && stringOrNull(branding.primary_color) && stringOrNull(branding.accent_color);
+    && stringOrNull(branding.logo_url) && stringOrNull(branding.primary_color) && stringOrNull(branding.accent_color)
+    && stringOrNull(branding.app_name) && stringOrNull(branding.main_phone);
 }
 
 /** Returns null on 404, a network failure or a malformed response, so the caller falls back. */
@@ -218,7 +246,13 @@ export function askManager(brand: EmployeeBrand, prefix = 'Ask your manager'): s
   return brand.isFallback ? `${prefix}.` : `${prefix} at ${brand.name}.`;
 }
 
+/** The name of the app itself: the client's own ("MoSa's Team"), or "MoSa's employee app". */
+export function appTitle(brand: EmployeeBrand): string {
+  if (brand.appName) return brand.appName;
+  return brand.isFallback ? FALLBACK_BRAND_NAME : `${possessive(brand.name)} employee app`;
+}
+
 /** The browser tab and Home Screen title: "Pay stubs · MoSa's employee app". */
 export function pageTitle(title: string, brand: EmployeeBrand): string {
-  return brand.isFallback ? `${title} · ${FALLBACK_BRAND_NAME}` : `${title} · ${possessive(brand.name)} employee app`;
+  return `${title} · ${appTitle(brand)}`;
 }

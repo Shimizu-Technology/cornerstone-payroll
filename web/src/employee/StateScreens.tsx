@@ -1,8 +1,8 @@
 import type { ReactElement, ReactNode } from 'react';
-import { CircleAlert, LoaderCircle, Lock, Power, RefreshCw, Timer, WifiOff, type LucideIcon } from 'lucide-react';
+import { CircleAlert, LoaderCircle, Lock, Power, RefreshCw, ShieldCheck, Timer, WifiOff, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { askManager } from './brand';
-import { useBrand } from './contexts';
+import { useBrand, useEmployeeAuth } from './contexts';
 import { useDocumentTitle } from './hooks';
 import { EmpButton } from './ui';
 
@@ -153,6 +153,38 @@ export function AccessEndedScreen({ onSignOut }: { onSignOut: () => void }): Rea
       <p className="text-neutral-600">
         {brand.isFallback ? 'Need a copy of an old pay stub or tax form? Ask your employer.' : `Need a copy of an old pay stub or tax form? Ask ${brand.name}.`}
       </p>
+    </FullScreenState>
+  );
+}
+
+/**
+ * The API wants two-step sign-in before it shows pay: a staff or client login
+ * that is also an employee (MfaEnforceable). Never "access ended".
+ * - setup: the login has no second step yet; set it up, then try again.
+ * - verify: it has one, but this sign-in didn't use it; sign in again.
+ */
+export function TwoStepScreen({ kind, onRetry, onSignOut }: { kind: 'setup' | 'verify'; onRetry: () => void; onSignOut: () => void }): ReactElement {
+  const brand = useBrand();
+  const { openAccountSettings } = useEmployeeAuth();
+  if (kind === 'setup') {
+    return (
+      <FullScreenState icon={ShieldCheck} title="Set up two-step sign-in" actions={<>
+        <EmpButton block onClick={openAccountSettings}>Set up two-step sign-in</EmpButton>
+        <EmpButton block variant="secondary" onClick={onRetry}>I've set it up, try again</EmpButton>
+        <EmpButton block variant="quiet" onClick={onSignOut}>Sign out</EmpButton>
+      </>}>
+        <p className="emp-lead">Your account needs a second sign-in step, like a code from an app, before it can show pay.</p>
+        <p className="text-neutral-600">{askManager(brand, 'Need help? Ask your manager')}</p>
+      </FullScreenState>
+    );
+  }
+  return (
+    <FullScreenState icon={ShieldCheck} title="Complete two-step sign-in" actions={<>
+      <EmpButton block onClick={onSignOut}>Sign out and sign in again</EmpButton>
+      <EmpButton block variant="quiet" onClick={onRetry}>Try again</EmpButton>
+    </>}>
+      <p className="emp-lead">This account uses two-step sign-in. Sign in again and finish the second step to see your pay.</p>
+      <p className="text-neutral-600">{askManager(brand, 'Need help? Ask your manager')}</p>
     </FullScreenState>
   );
 }
