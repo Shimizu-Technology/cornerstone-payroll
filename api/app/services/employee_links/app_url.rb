@@ -28,7 +28,8 @@ module EmployeeLinks
       origin = origin_for(company)
       return unless origin
 
-      "#{origin}/#{path == 'claim' ? 'claim' : 'activate'}#token=#{CGI.escape(secret)}"
+      page = { "claim" => "claim", "reactivate" => "reactivate" }.fetch(path, "activate")
+      "#{origin}/#{page}#token=#{CGI.escape(secret)}"
     end
 
     def sign_up_redirect_url(company)

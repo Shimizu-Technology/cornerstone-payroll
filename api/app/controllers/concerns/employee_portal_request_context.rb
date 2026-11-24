@@ -39,6 +39,15 @@ module EmployeePortalRequestContext
     user = User.find_by(clerk_id: subject)
     return unless user && StagingOutboundPolicy.tester?(user_id: user.id, email: user.email, id: subject)
 
-    user if user.payroll_access_allowed?
+    return user if user.payroll_access_allowed?
+
+    user if allow_deactivated_employee_login? && user.portal_employee? && !user.active? &&
+      user.invitation_status == "accepted" && user.organization&.active?
+  end
+
+  # Only the rehire reactivation route accepts a deactivated employee-only
+  # login, and only to run its one check (EmployeeLinks::Reactivate).
+  def allow_deactivated_employee_login?
+    false
   end
 end

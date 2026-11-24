@@ -29,7 +29,7 @@ module EmployeeLinks
 
     def payload(link, url, path, to)
       employer = link.company.name
-      action = path == "claim" ? "Sign in to add your employee access" : "Set up your account"
+      action = path == "sign_up" ? "Set up your account" : "Sign in to add your employee access"
       lines = [
         "#{employer} invited you to see your pay stubs and update your contact details in the employee app.",
         "#{action}: #{url}",

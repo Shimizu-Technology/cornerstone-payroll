@@ -45,7 +45,7 @@ module EmployeeLinks
         link.claim_user = claim_user
         link.save!
 
-        path = claim_user ? "claim" : "sign_up"
+        path = EmployeeLinks.invite_path(claim_user)
         EmployeeLinks.audit!(link, "invited", user: @actor, request: @request,
           metadata: { delivery: @delivery, path: path, expires_at: link.invite_expires_at.iso8601 })
         Result.new(link: link, token: credentials.token, code: credentials.code, path: path, email_status: nil)
@@ -72,7 +72,11 @@ module EmployeeLinks
         ip_address: @request&.remote_ip, user_agent: @request&.user_agent, request_id: @request&.request_id
       )
       login = validation.matched_login_user
-      login if login&.payroll_access_allowed? && login.clerk_id.present?
+      return unless login&.clerk_id.present?
+      return login if login.payroll_access_allowed?
+
+      # A rehired employee-only person whose login closed with their last link.
+      login if Reactivate.eligible_login?(login, @employee)
     end
   end
 end

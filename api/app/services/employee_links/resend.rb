@@ -34,7 +34,7 @@ module EmployeeLinks
         end
         credentials = Credentials.issue(@link, delivery: @delivery, email: employee.email)
         @link.save!
-        path = @link.claim_user_id ? "claim" : "sign_up"
+        path = EmployeeLinks.invite_path(@link.claim_user)
         EmployeeLinks.audit!(@link, "invite_resent", user: @actor, request: @request,
           metadata: { delivery: @delivery, path: path, expires_at: @link.invite_expires_at.iso8601 })
         Invite::Result.new(link: @link, token: credentials.token, code: credentials.code, path: path, email_status: nil)
