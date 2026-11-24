@@ -44,7 +44,7 @@ module ClientProfitability
 
     def clients
       links = WorkHourClientLink.active.where(organization_id: @organization.id).includes(:invoice_recipient)
-                                .where("company_id IS NULL OR company_id IN (?)", Company.where(organization_id: @organization.id).select(:id))
+                                .where("company_id IS NULL OR company_id IN (?)", Company.where(organization_id: @organization.id).live_payroll.select(:id))
                                 .where("invoice_recipient_id IS NULL OR invoice_recipient_id IN (?)",
                                        InvoiceRecipient.where(organization_id: @organization.id,
                                                               finance_book_id: @settings.effective_finance_book&.id).select(:id))

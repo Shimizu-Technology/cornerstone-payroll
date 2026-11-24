@@ -17,7 +17,10 @@ class ClientInboxQuery
   def companies
     scope = Company.active.joins(:organization).where(organizations: { status: "active" }).where(organization_id: @user.organization_id, test_workspace_archived_at: nil, test_workspace_sealed_at: nil)
     scope = scope.where("companies.test_workspace_expires_at IS NULL OR companies.test_workspace_expires_at > ?", Time.current)
-    scope = scope.where("companies.payroll_environment = ? OR (companies.test_workspace_purpose IN (?) AND companies.migration_rehearsal_status = ?)", "live", %w[sandbox demo], "ready")
+    # A demo company's activity shows only when that client is selected, so it
+    # never mixes into the firm-wide "All clients" list or the badge.
+    purposes = Company.demo.where(id: @params[:company_id]).exists? ? %w[sandbox demo] : %w[sandbox]
+    scope = scope.where("companies.payroll_environment = ? OR (companies.test_workspace_purpose IN (?) AND companies.migration_rehearsal_status = ?)", "live", purposes, "ready")
     scope = scope.where(id: accessible_ids) unless @user.organization_admin?
     scope
   end

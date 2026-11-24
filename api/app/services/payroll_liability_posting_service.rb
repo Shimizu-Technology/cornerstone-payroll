@@ -91,6 +91,9 @@ class PayrollLiabilityPostingService
   end
 
   def post!
+    # Demo payroll is simulated and never reaches the firm's liability ledger.
+    return nil if pay_period.company.demo?
+
     PayPeriod.transaction do
       locked = PayPeriod.lock("FOR UPDATE").find(pay_period.id)
       validate_postable!(locked)

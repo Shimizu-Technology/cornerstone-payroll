@@ -1985,12 +1985,21 @@ module Api
               return render json: { error: "Mark the 1099s ready first" }, status: :conflict
             end
 
+            # A demo has no e-file, so its 1096 totals come straight from the
+            # signed-off payees rather than from Pub 1220 bytes.
             generate_file = lambda do
-              Form1099Pub1220Generator.new(company: company.reload, year: year,
-                submitter: FilingSubmitter.find_by(organization_id: company.organization_id), draft: !final).generate
+              generator = Form1099Pub1220Generator.new(company: company.reload, year: year,
+                submitter: FilingSubmitter.find_by(organization_id: company.organization_id), draft: !final)
+              company.demo? ? generator.payee_totals : generator.generate
             end
             file = generate_file.call
-            content = pdf ? Form1096TotalsPdfGenerator.new(company: company, file: file, draft: !final).generate : file
+            content = if company.demo?
+              Form1096TotalsPdfGenerator.new(company: company, totals: file, draft: !final).generate
+            elsif pdf
+              Form1096TotalsPdfGenerator.new(company: company, file: file, draft: !final).generate
+            else
+              file
+            end
             current = ActiveRecord::Base.uncached { generate_file.call }
             raise ArgumentError, "Filing inputs changed during generation; refresh and try again" unless current == file
 

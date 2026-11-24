@@ -6,7 +6,7 @@ import { invoiceBusinessDate } from '@/lib/invoice-defaults';
 import { defaultInvoiceEmail } from '@/lib/invoice-email';
 import { formatGuamDate } from '@/lib/utils';
 import { INVOICE_THEMES } from '@/lib/invoiceStyle';
-import { isTestWorkspaceCompany } from '@/lib/company-write-access';
+import { isBillingClient, isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
 import { PdfTextWarning } from '@/components/finance/PdfTextWarning';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -289,7 +289,7 @@ function invoicePayloadSignature(payload: InvoicePayload) {
 
 export function InvoiceMaker() {
   const location = useLocation();
-  const { activeCompanyId, activeCompany, activeOrganizationId, companies } = useCompany();
+  const { activeCompanyId, activeCompany, activeOrganizationId, companies, billingCompanyIds } = useCompany();
   const financeScopeId = activeOrganizationId ?? activeCompanyId;
   const financeReadOnly = isTestWorkspaceCompany(activeCompany);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -1552,7 +1552,7 @@ export function InvoiceMaker() {
 
         {showRecipientForm && (
           <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
-            <label className="block text-sm font-medium text-neutral-700">Payroll client (optional)<select aria-label="Customer payroll client" className={controlClassName('mt-1')} value={recipientForm.company_id} onChange={(e) => setRecipientForm({ ...recipientForm, company_id: e.target.value })}><option value="">Unallocated</option>{companies.filter((c) => c.organization_id === activeOrganizationId && !isTestWorkspaceCompany(c)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+            <label className="block text-sm font-medium text-neutral-700">Payroll client (optional)<select aria-label="Customer payroll client" className={controlClassName('mt-1')} value={recipientForm.company_id} onChange={(e) => setRecipientForm({ ...recipientForm, company_id: e.target.value })}><option value="">Unallocated</option>{companies.filter((c) => c.organization_id === activeOrganizationId && isBillingClient(c, billingCompanyIds)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             <Input value={recipientForm.name} onChange={(event) => setRecipientForm((current) => ({ ...current, name: event.target.value }))} placeholder="Recipient name" />
             <Input value={recipientForm.email} onChange={(event) => setRecipientForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
             <Textarea value={recipientForm.address} onChange={(event) => setRecipientForm((current) => ({ ...current, address: event.target.value }))} placeholder="Address" rows={2} />

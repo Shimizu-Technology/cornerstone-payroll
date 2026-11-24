@@ -53,7 +53,10 @@ class TestWorkspaceSafetyPolicy
   # Electronic filing files a demo never produces. A practice copy keeps its
   # existing access to these; the e-files above are blocked for every workspace.
   DEMO_BLOCKED_ACTIONS = {
-    "api/v1/admin/reports" => %w[quarterly_compliance_packet_swica_ascii]
+    "api/v1/admin/reports" => %w[quarterly_compliance_packet_swica_ascii],
+    "api/v1/admin/checks" => %w[show],
+    # A refresh pulls the whole organization's Cornerstone Tax hours.
+    "api/v1/admin/client_profitability" => %w[refresh]
   }.freeze
 
   # Firm books are shared live records even while a copied payroll client is

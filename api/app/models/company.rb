@@ -152,6 +152,7 @@ class Company < ApplicationRecord
   validates :migration_rehearsal_status, presence: true, if: :test_workspace?
   validate :test_workspace_source_is_valid
   validate :demo_shape_is_permanent, if: :demo?
+  validate :demo_outputs_stay_simulated, if: :demo?
   validate :company_type_is_unchanged, on: :update
   validates :check_stock_type, inclusion: { in: CHECK_STOCK_TYPES }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
@@ -447,6 +448,12 @@ class Company < ApplicationRecord
     if test_workspace_manifest.to_h["demo_fixture_key"].blank?
       errors.add(:test_workspace_manifest, "must name the demo fixture")
     end
+  end
+
+  # A demo never creates FIT deposit checks or prints on preprinted bank stock.
+  def demo_outputs_stay_simulated
+    errors.add(:auto_create_fit_check, "isn't available for this client") if auto_create_fit_check?
+    errors.add(:check_stock_type, "isn't available for this client") if first_hawaiian_4up_checks?
   end
 
   def company_type_is_unchanged

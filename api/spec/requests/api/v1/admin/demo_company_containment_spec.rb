@@ -59,12 +59,16 @@ RSpec.describe "Demo company containment", type: :request do
     expect(before[:profitability_companies]).to eq([ live.id ])
   end
 
-  it "lists demo inbox activity like a live client's without counting it in the workload badge" do
+  it "shows demo inbox activity only when the demo client is selected, and never in the badge" do
     demo_client_message!
 
     get "/api/v1/admin/client_inbox"
+    expect(response.parsed_body.fetch("data")).to be_empty
+    get "/api/v1/admin/client_inbox", params: { company_id: demo.id }
     expect(response.parsed_body.fetch("data").sole).to include("company_id" => demo.id, "practice_copy" => false)
     get "/api/v1/admin/client_inbox/counts"
+    expect(response.parsed_body.values.grep(Integer).sum).to eq(0)
+    get "/api/v1/admin/client_inbox/counts", params: { company_id: demo.id }
     expect(response.parsed_body.values.grep(Integer).sum).to eq(0)
   end
 
@@ -137,6 +141,36 @@ RSpec.describe "Demo company containment", type: :request do
       expect(Invoice.where(company: demo)).to be_empty
     end
 
+    it "refuses demo check output, the rehearsal preview, an org-wide Tax refresh and shared-email clearing" do
+      item = period.payroll_items.first
+      item.update_columns(check_number: "1001")
+      get "/api/v1/admin/payroll_items/#{item.id}/check"
+      expect_neutral_refusal
+      draft.update_columns(status: "calculated")
+      get "/api/v1/admin/pay_periods/#{draft.id}/checks/rehearsal_preview_pdf"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.body).not_to match(/%PDF/)
+      expect { post "/api/v1/admin/client_profitability/refresh" }.not_to have_enqueued_job(TaxWorkHoursImportJob)
+      expect_neutral_refusal
+      post "/api/v1/admin/employee_contact_hygiene/clear_shared_emails", headers: { "X-Company-Id" => demo.id.to_s }
+      expect_neutral_refusal
+    end
+
+    it "renders a demo's 1096 totals from the signed-off payees without a firm transmitter" do
+      create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000)
+      expect(FilingSubmitter.where(organization_id: organization.id)).to be_empty
+      get "/api/v1/admin/reports/form_1096_totals", params: { year: 2026, mode: "draft" }
+      expect(response.media_type).to eq("application/pdf"), response.body
+      expect(response.body).to start_with("%PDF")
+    end
+
+    it "lists only live clients as billing choices while navigation stays neutral" do
+      get "/api/v1/companies"
+      body = response.parsed_body
+      expect(body.fetch("billing_company_ids")).to contain_exactly(live.id)
+      expect(body.fetch("companies").map { |company| company["id"] }).to include(demo.id)
+    end
+
     it "keeps the same e-files blocked for a practice copy with its existing message" do
       allow_any_instance_of(ApplicationController).to receive(:current_company_id).and_return(sandbox.id)
       get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }
@@ -161,6 +195,40 @@ RSpec.describe "Demo company containment", type: :request do
       expect(report.dig("meta", "payroll_status_note")).to be_nil
       expect(report.dig("source", "label")).to eq("Cornerstone")
       expect(response.body).not_to match(/TEST ONLY|practice copy|test workspace/i)
+    end
+  end
+
+  describe "Form 500 for a demo" do
+    let!(:period) { create_committed_demo_pay_period(company: demo, pay_date: Date.new(2026, 3, 6), employee: demo_employee) }
+    let(:reviewer) { create(:user, company: live, organization: organization, role: "accountant") }
+    let(:operator) { create(:user, company: live, organization: organization, role: "accountant") }
+
+    before do
+      CompanyAssignment.create!(user: reviewer, company: demo, workspace_access_level: "reviewer")
+      CompanyAssignment.create!(user: operator, company: demo, workspace_access_level: "operator")
+    end
+
+    def act_as(user)
+      allow_any_instance_of(ApplicationController).to receive(:current_user) { User.find(user.id) }
+      allow_any_instance_of(ApplicationController).to receive(:current_user_id).and_return(user.id)
+    end
+
+    it "lets a reviewer download but not save, and never records a filing or payment" do
+      act_as(reviewer)
+      post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: period.id, status: "prepared" } }
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq(Company::DEMO_ACCESS_DENIED_MESSAGE)
+      post "/api/v1/form_500s/download", params: { form_500: { pay_period_id: period.id } }
+      expect(response).not_to have_http_status(:forbidden)
+
+      act_as(operator)
+      post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: period.id, status: "filed", payment_amount: "125.00",
+        confirmation_number: "DRT-123", receipt_attached: true } }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
+      post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: period.id, status: "prepared" } }
+      expect(response).to have_http_status(:ok), response.body
+      expect(Form500Filing.find_by!(pay_period: period)).to have_attributes(status: "prepared", payment_amount: nil, confirmation_number: nil)
     end
   end
 end

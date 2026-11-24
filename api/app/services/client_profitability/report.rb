@@ -47,7 +47,7 @@ module ClientProfitability
       # Links to an invoice customer count only for customers in the book the
       # report reads fees from; any other is treated as not linked.
       @client_links = WorkHourClientLink.active.where(organization_id: @organization.id).includes(:invoice_recipient)
-                                        .where("company_id IS NULL OR company_id IN (?)", Company.where(organization_id: @organization.id).select(:id))
+                                        .where("company_id IS NULL OR company_id IN (?)", eligible_companies.select(:id))
                                         .where("invoice_recipient_id IS NULL OR invoice_recipient_id IN (?)",
                                                InvoiceRecipient.where(organization_id: @organization.id, finance_book_id: finance_book&.id).select(:id))
                                         .index_by(&:tax_client_id)
@@ -244,9 +244,15 @@ module ClientProfitability
       end
     end
 
+    # Only live clients carry payroll cost, mappings or fees. A stored link or
+    # setting that points at a demo or practice copy is ignored at read time.
+    def eligible_companies
+      Company.where(organization_id: @organization.id).live_payroll
+    end
+
     def recipient_company_id(recipient)
       company_id = recipient&.company_id
-      company_id if company_id && Company.where(id: company_id, organization_id: @organization.id).exists?
+      company_id if company_id && eligible_companies.where(id: company_id).exists?
     end
 
     # Fees keyed by report line. Every invoice lands on exactly one key:
@@ -269,7 +275,12 @@ module ClientProfitability
                                            service_month_through: @period.end_date,
                                            tax_prep_service_names: @settings.tax_prep_service_names, by_recipient: true)
       recipient_companies = InvoiceRecipient.where(id: rows.filter_map { |row| row[:invoice_recipient_id] }).pluck(:id, :company_id).to_h
+      # Fees billed to a non-live company (a stale demo or practice-copy link)
+      # are firm noise, not client revenue: they never reach a line or total.
+      workspace_ids = Company.test_workspace.where(id: rows.filter_map { |row| row[:company_id] } + recipient_companies.values.compact).pluck(:id).to_set
       rows.each_with_object({}) do |row, totals|
+        next if workspace_ids.include?(row[:company_id]) || workspace_ids.include?(recipient_companies[row[:invoice_recipient_id]])
+
         key = if row[:company_id]
           "company:#{row[:company_id]}"
         elsif recipient_keys.key?(row[:invoice_recipient_id])
