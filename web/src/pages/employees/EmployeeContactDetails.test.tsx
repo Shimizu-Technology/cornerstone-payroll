@@ -492,6 +492,37 @@ describe('EmployeeContactDetails', () => {
     expect(screen.getByText(/1 unsaved row/i)).toBeTruthy();
   });
 
+  it('asks the admin API for a contact-only record and shows the saved values', async () => {
+    authState.isClient = false;
+    authState.user = { id: 2, company_id: 7, role: 'org_admin', name: 'Cornerstone Admin', email: 'staff@example.com' };
+
+    const ana = buildEmployee({ id: 201, first_name: 'Ana', last_name: 'Reyes', phone: '+16715550100', contact_revision: 'rev-1' });
+    apiMocks.adminList.mockResolvedValue({
+      data: [ana],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 1 },
+    });
+    apiMocks.adminUpdate.mockResolvedValue({
+      data: { ...ana, phone: '+16715550199', contact_revision: 'rev-2', ssn: '123-45-6789' },
+      contact_warnings: [],
+    });
+
+    renderClientPage();
+    expect((await screen.findAllByText('Ana Reyes')).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText('Mobile for Ana Reyes'), { target: { value: '555-0199' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Ana Reyes' }));
+
+    await waitFor(() => {
+      expect(apiMocks.adminUpdate).toHaveBeenCalledWith(
+        201,
+        expect.objectContaining({ phone: '555-0199', row_revision: 'rev-1', response_view: 'contact' }),
+        7,
+      );
+    });
+    expect((screen.getByLabelText('Mobile for Ana Reyes') as HTMLInputElement).value).toBe('+16715550199');
+    expect(document.body.textContent).not.toContain('123-45-6789');
+  });
+
   it('offers inline same-person confirmation when saving an employee login email and retries with confirm_same_person_email', async () => {
     const emma = buildEmployee({ id: 105, first_name: 'Emma', last_name: 'Pleadwell' });
 
@@ -686,6 +717,50 @@ describe('EmployeeContactDetails', () => {
     });
 
     expect(await screen.findByText(/Cleared shared-inbox@example.com from 5 employee records/i)).toBeTruthy();
+  });
+
+  it('lists marked placeholders with Unmark even after every use of the address was cleared', async () => {
+    authState.isClient = false;
+    authState.user = { id: 2, company_id: 7, role: 'org_admin', name: 'Cornerstone Admin', email: 'staff@example.com' };
+    capabilityState.manageClientConfiguration = true;
+
+    apiMocks.adminList.mockResolvedValue({
+      data: [buildEmployee({ id: 201, first_name: 'Ana', last_name: 'Reyes', email: '' })],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 1 },
+    });
+    const clearedReport = {
+      summary: { companies_affected: 0, distinct_flagged_emails: 0, total_employee_records: 0, active_employee_records: 0 },
+      can_manage_placeholders: true,
+      marked_placeholders: ['old-inbox@example.com', 'configured@example.com'],
+      placeholder_marks: [
+        { email: 'configured@example.com', unmarkable: false },
+        { email: 'old-inbox@example.com', unmarkable: true },
+      ],
+      companies: [],
+    };
+    apiMocks.sharedEmails.mockResolvedValue(clearedReport);
+    apiMocks.unmarkPlaceholderEmail.mockResolvedValue({
+      data: { email: 'old-inbox@example.com', marked: false, changed: true },
+      message: 'Removed old-inbox@example.com from the placeholder list.',
+    });
+
+    renderStaffPage('/companies/7/employees/contact-details?tab=shared-emails');
+
+    expect(await screen.findByText('No shared or placeholder emails found')).toBeTruthy();
+    expect(screen.getByText('Marked as placeholders')).toBeTruthy();
+    expect(screen.getByText('Set in server configuration')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Unmark configured@example.com' })).toBeNull();
+
+    apiMocks.sharedEmails.mockResolvedValue({ ...clearedReport, marked_placeholders: ['configured@example.com'], placeholder_marks: [clearedReport.placeholder_marks[0]] });
+    fireEvent.click(screen.getByRole('button', { name: 'Unmark old-inbox@example.com' }));
+
+    await waitFor(() => {
+      expect(apiMocks.unmarkPlaceholderEmail).toHaveBeenCalledWith({ email: 'old-inbox@example.com' });
+    });
+    expect(await screen.findByText('Removed old-inbox@example.com from the placeholder list.')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Unmark old-inbox@example.com' })).toBeNull();
+    });
   });
 
   it('hides the shared-inbox report tab from staff without manage_client_configuration', async () => {

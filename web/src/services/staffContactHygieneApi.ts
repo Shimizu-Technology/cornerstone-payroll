@@ -31,7 +31,15 @@ export interface SharedEmailReportResponse {
   };
   can_manage_placeholders?: boolean;
   marked_placeholders?: string[];
+  /** Every marked address, even one no employee uses any more. */
+  placeholder_marks?: PlaceholderMark[];
   companies: SharedEmailCompanySummary[];
+}
+
+export interface PlaceholderMark {
+  email: string;
+  /** False for an address set in server configuration, which staff can't unmark here. */
+  unmarkable: boolean;
 }
 
 export interface ClearSharedEmailResponse {

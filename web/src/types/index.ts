@@ -663,6 +663,8 @@ export interface EmployeeFormData {
   confirm_same_person_email?: boolean;
   row_revision?: string;
   baseline_values?: Record<string, string | null | undefined>;
+  /** "contact" asks the admin API for a record without the full SSN. */
+  response_view?: 'contact';
   ssn?: string;
   ssn_confirmation?: string;
   date_of_birth?: string;

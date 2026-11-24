@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { AlertTriangle, Building2, CheckCircle2, Flag, FlagOff, MailWarning, RefreshCw, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -52,7 +52,7 @@ export function SharedInboxReportPanel({
   canManagePlaceholders = true,
   onCleared,
   onReportLoaded,
-}: SharedInboxReportPanelProps) {
+}: SharedInboxReportPanelProps): ReactElement {
   const [report, setReport] = useState<SharedEmailReportResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export function SharedInboxReportPanel({
   const onReportLoadedRef = useRef(onReportLoaded);
   onReportLoadedRef.current = onReportLoaded;
 
-  const loadReport = useCallback(async () => {
+  const loadReport = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
     try {
@@ -83,14 +83,14 @@ export function SharedInboxReportPanel({
     void loadReport();
   }, [loadReport]);
 
-  const openConfirmDialog = (company: SharedEmailCompanySummary, entry: SharedEmailReportEntry) => {
+  const openConfirmDialog = (company: SharedEmailCompanySummary, entry: SharedEmailReportEntry): void => {
     if (!entry.clearable) return;
     setPendingTarget({ company, entry });
     setConfirmed(false);
     setClearError(null);
   };
 
-  const closeConfirmDialog = () => {
+  const closeConfirmDialog = (): void => {
     if (clearing) return;
     setPendingTarget(null);
     setConfirmed(false);
@@ -99,7 +99,7 @@ export function SharedInboxReportPanel({
 
   const allowPlaceholderToggle = !readOnly && canManagePlaceholders && report?.can_manage_placeholders !== false;
 
-  const handleMarkPlaceholder = async (email: string) => {
+  const handleMarkPlaceholder = async (email: string): Promise<void> => {
     if (!allowPlaceholderToggle || markingEmail) return;
     setMarkingEmail(email);
     setError(null);
@@ -114,7 +114,7 @@ export function SharedInboxReportPanel({
     }
   };
 
-  const handleUnmarkPlaceholder = async (email: string) => {
+  const handleUnmarkPlaceholder = async (email: string): Promise<void> => {
     if (!allowPlaceholderToggle || markingEmail) return;
     setMarkingEmail(email);
     setError(null);
@@ -129,7 +129,7 @@ export function SharedInboxReportPanel({
     }
   };
 
-  const handleConfirmClear = async () => {
+  const handleConfirmClear = async (): Promise<void> => {
     if (!pendingTarget || !confirmed || clearing) return;
     setClearing(true);
     setClearError(null);
@@ -154,8 +154,8 @@ export function SharedInboxReportPanel({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="font-display text-xl font-bold tracking-tight text-neutral-950">Shared and placeholder emails</h2>
           <p className="mt-1 text-sm text-neutral-600">
@@ -163,14 +163,14 @@ export function SharedInboxReportPanel({
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void loadReport()} loading={loading} loadingLabel="Refreshing">
-          <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+          <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
           Refresh report
         </Button>
       </div>
 
       {successMessage && (
-        <Alert tone="success" className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-2.5">
+        <Alert tone="success" className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-2">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success-700" aria-hidden="true" />
             <span>{successMessage}</span>
           </div>
@@ -185,7 +185,7 @@ export function SharedInboxReportPanel({
       )}
 
       {error && (
-        <Alert tone="error" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Alert tone="error" className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <span>{error}</span>
           <Button variant="outline" size="sm" onClick={() => void loadReport()}>
             Try again
@@ -199,7 +199,7 @@ export function SharedInboxReportPanel({
         </div>
       ) : report ? (
         <>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <SummaryStat label="Companies affected" value={report.summary.companies_affected} />
             <SummaryStat label="Flagged addresses" value={report.summary.distinct_flagged_emails} />
             <SummaryStat label="Employee records" value={report.summary.total_employee_records} />
@@ -210,7 +210,7 @@ export function SharedInboxReportPanel({
             <Card>
               <CardContent className="py-12 text-center">
                 <CheckCircle2 className="mx-auto h-10 w-10 text-success-600" aria-hidden="true" />
-                <h3 className="mt-3 text-base font-semibold text-neutral-900">No shared or placeholder emails found</h3>
+                <h3 className="mt-4 text-base font-semibold text-neutral-900">No shared or placeholder emails found</h3>
                 <p className="mt-1 text-sm text-neutral-600">
                   Every employee email across your configurable companies is unique and passes placeholder checks.
                 </p>
@@ -241,9 +241,9 @@ export function SharedInboxReportPanel({
                         return (
                           <div
                             key={`${company.company_id}-${entry.email}`}
-                            className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+                            className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
                           >
-                            <div className="min-w-0 space-y-1.5">
+                            <div className="min-w-0 space-y-2">
                               <div className="flex flex-wrap items-center gap-2">
                                 <MailWarning className="h-4 w-4 shrink-0 text-warning-700" aria-hidden="true" />
                                 <span className="break-all font-mono text-sm font-semibold text-neutral-950">{entry.email}</span>
@@ -261,7 +261,7 @@ export function SharedInboxReportPanel({
                                   </span>
                                 )}
                               </p>
-                              <div className="flex flex-wrap gap-1.5">
+                              <div className="flex flex-wrap gap-2">
                                 {entry.reasons.map((reason) => (
                                   <span
                                     key={reason}
@@ -284,7 +284,7 @@ export function SharedInboxReportPanel({
                                       loadingLabel="Updating..."
                                       onClick={() => void handleUnmarkPlaceholder(entry.email)}
                                     >
-                                      <FlagOff className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                      <FlagOff className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
                                       Unmark
                                     </Button>
                                   )}
@@ -295,7 +295,7 @@ export function SharedInboxReportPanel({
                                     onClick={() => openConfirmDialog(company, entry)}
                                     className="w-full border-danger-200 text-danger-700 hover:border-danger-300 hover:bg-danger-50 hover:text-danger-800 sm:w-auto"
                                   >
-                                    <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                    <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
                                     Clear to blank
                                   </Button>
                                 </>
@@ -309,7 +309,7 @@ export function SharedInboxReportPanel({
                                   onClick={() => void handleMarkPlaceholder(entry.email)}
                                   className="w-full sm:w-auto"
                                 >
-                                  <Flag className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                  <Flag className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
                                   Mark as placeholder
                                 </Button>
                               ) : (
@@ -330,6 +330,45 @@ export function SharedInboxReportPanel({
         </>
       ) : null}
 
+      {report && (report.placeholder_marks?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Marked as placeholders</CardTitle>
+            <CardDescription className="mt-1">
+              These addresses can&apos;t be saved on an employee. Unmark one to allow it again, even after every use was cleared.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="divide-y divide-neutral-200 p-0">
+            {report.placeholder_marks?.map((mark) => (
+              <div
+                key={mark.email}
+                className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+              >
+                <span className="break-all font-mono text-sm font-semibold text-neutral-950">{mark.email}</span>
+                {mark.unmarkable && allowPlaceholderToggle ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={Boolean(markingEmail)}
+                    loading={markingEmail === mark.email}
+                    loadingLabel="Updating..."
+                    onClick={() => void handleUnmarkPlaceholder(mark.email)}
+                    aria-label={`Unmark ${mark.email}`}
+                  >
+                    <FlagOff className="mr-2 h-4 w-4" aria-hidden="true" />
+                    Unmark
+                  </Button>
+                ) : (
+                  <span className="text-xs text-neutral-500">
+                    {mark.unmarkable ? 'Org admin needed on a live client to unmark' : 'Set in server configuration'}
+                  </span>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <Dialog open={Boolean(pendingTarget)} onOpenChange={(open) => { if (!open) closeConfirmDialog(); }}>
         <DialogContent>
           <DialogHeader>
@@ -346,15 +385,15 @@ export function SharedInboxReportPanel({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="mt-4 space-y-3 text-sm text-neutral-700">
-            <ul className="list-disc space-y-1 pl-5 text-neutral-600">
+          <div className="mt-4 space-y-4 text-sm text-neutral-700">
+            <ul className="list-disc space-y-1 pl-4 text-neutral-600">
               <li>Email verification timestamps on those records are cleared.</li>
               <li>Cleared employees appear under Needs contact details so real addresses can be entered.</li>
               <li>Other companies with this address are not changed.</li>
               <li>This bulk clear is recorded in the company and employee activity logs.</li>
             </ul>
 
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+            <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
               <input
                 type="checkbox"
                 checked={confirmed}
@@ -389,7 +428,7 @@ export function SharedInboxReportPanel({
   );
 }
 
-function SummaryStat({ label, value, highlight = false }: { label: string; value: number; highlight?: boolean }) {
+function SummaryStat({ label, value, highlight = false }: { label: string; value: number; highlight?: boolean }): ReactElement {
   return (
     <div className={`rounded-xl border p-4 ${highlight ? 'border-warning-200 bg-warning-50/70' : 'border-neutral-200 bg-white'}`}>
       <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">{label}</p>
