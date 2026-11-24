@@ -31,7 +31,10 @@ module EmployeeLinks
       return unless user_allowed?
 
       replaced_invitation = nil
-      link = Verify.call(**@check, request: @request) do |candidate|
+      # The claimant (and an abandoned pending sign-up on the link) are locked
+      # before the link, so two claims by one login serialize and the second
+      # sees the first's link as open (EmployeeLinks lock order).
+      link = Verify.call(**@check, request: @request, lock_users: ->(first_read) { lock_targets(first_read) }) do |candidate|
         next unless claimable?(candidate)
 
         replaced_invitation = retire_pending_user!(candidate)
@@ -59,6 +62,10 @@ module EmployeeLinks
       "claimed"
     end
 
+    def lock_targets(link)
+      [ @user, (link.user if link.user && link.user.id != @user.id && pending_sign_up?(link.user)) ].compact
+    end
+
     def claimable?(link)
       return false if link.claim_user_id.present? && link.claim_user_id != @user.id
       return false unless link.company.organization_id == @user.organization_id
@@ -84,7 +91,7 @@ module EmployeeLinks
       pending = link.user
       return unless pending && pending.id != @user.id
 
-      pending.lock!
+      # Already locked by Verify (lock_targets).
       invitation_id = pending.clerk_invitation_id
       pending.update!(active: false, invite_nonce_digest: nil, invite_nonce_expires_at: nil)
       invitation_id

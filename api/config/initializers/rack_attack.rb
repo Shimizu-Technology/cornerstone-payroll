@@ -137,20 +137,18 @@ class Rack::Attack
 
       params = JSON.parse(body)
       return 400 unless params.is_a?(Hash)
+      # The check reads the JSON body only; naming its fields in the query
+      # string too could make layers disagree, so it is refused outright.
+      return 400 if EmployeeLinks::Credentials.conflicting_query?(request.GET)
 
-      # A sign-up names its invite by the emailed token or the printed code.
-      token = params["token"]
-      code = params["code"]
-      secret = if token.is_a?(String) && !token.empty?
-        "token:#{token}"
-      elsif code.is_a?(String) && !code.empty?
-        "code:#{code.upcase.gsub(/[\s-]/, "")}"
-      end
-      return 400 unless secret
+      # The emailed token or the printed code, chosen by the very rule the
+      # check uses, so this limit always counts the credential it verifies.
+      credential = EmployeeLinks::Credentials.select(token: params["token"], code: params["code"])
+      return 400 unless credential
 
-      request.env["payroll.activation_token_digest"] = Digest::SHA256.hexdigest(secret)
+      request.env["payroll.activation_token_digest"] = credential.throttle_key
       nil
-    rescue JSON::ParserError
+    rescue JSON::ParserError, Rack::QueryParser::ParameterTypeError, Rack::QueryParser::InvalidParameterError
       400
     ensure
       input.rewind

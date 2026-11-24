@@ -135,12 +135,18 @@ RSpec.describe "Employee link isolation", type: :request do
     expect(clerk_invitations.sole[:redirect_url]).to eq("#{bravo_origin}/sign-up")
     accept_clerk_invitation!("user_casey")
 
+    pending_user = invite.link.reload.user
+    binding_fields = %w[clerk_id invitation_status invite_nonce_digest invite_nonce_expires_at clerk_invitation_id active]
+    before = pending_user.attributes.slice(*binding_fields)
+
     get "/api/v1/auth/me", headers: bearer("user_casey", azp: alpha_origin)
     expect(response).to have_http_status(:unauthorized)
     expect(invite.link.reload).to be_invited
+    expect(pending_user.reload.attributes.slice(*binding_fields)).to eq(before)
 
     get "/api/v1/auth/me", headers: bearer("user_casey", azp: bravo_origin)
     expect(response).to have_http_status(:ok)
-    expect(invite.link.reload).to be_active
+    expect(invite.link.reload).to have_attributes(status: "active", user_id: pending_user.id)
+    expect(invite.link.user).to have_attributes(clerk_id: "user_casey", invitation_status: "accepted")
   end
 end

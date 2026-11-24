@@ -3,6 +3,21 @@
 # The employee app link lifecycle (M4-2): invite, sign-up, claim, bind and
 # their audits. Staff-facing errors are EmployeeLinks::Error; everything an
 # employee sees before they are signed in is one generic answer.
+#
+# Lock order, the same on every path that changes links or their logins
+# (invite, resend, sign-up, bind, claim, and later retire, revoke and the
+# expiry sweep):
+#
+#   1. the employee row, by staff actions that change the employee;
+#   2. logins (users), lowest id first, FOR NO KEY UPDATE, so a link's
+#      foreign-key check on its login never waits behind them;
+#   3. links.
+#
+# A path that starts from a link reads it first without a lock, locks its
+# login, then locks the link and re-checks that its login didn't change.
+# Binding writes the employee's contact email last, without waiting: if a
+# staff action holds the employee row, the contact email isn't changed (the
+# login still binds). Clerk calls always happen outside transactions.
 module EmployeeLinks
   class Error < StandardError; end
   class Forbidden < Error; end
@@ -46,6 +61,13 @@ module EmployeeLinks
     yield
   ensure
     Current.domain_audit_recorded = previous
+  end
+
+  def self.lock_users!(ids)
+    ids = Array(ids).compact.uniq.sort
+    return [] if ids.empty?
+
+    User.where(id: ids).order(:id).lock("FOR NO KEY UPDATE").to_a
   end
 
   def self.verifier_actor

@@ -8,19 +8,29 @@ class PayrollInvitation
     invitation_status clerk_invitation_id invite_nonce_digest invite_nonce_expires_at].freeze
   ADMIN_ROLES = %w[admin org_admin super_admin].freeze
   NONCE_PATTERN = /\A[0-9a-f]{64}\z/
+  # Doesn't block a foreign-key check from a row that references the user
+  # (see the lock order in EmployeeLinks).
+  LOGIN_LOCK = "FOR NO KEY UPDATE"
+  BIND_ATTEMPTS = 3
   ACCEPTED_MESSAGE = "Clerk already accepted this invitation. Ask the recipient to sign in. If they still cannot sign in, an organization or platform admin can verify and bind their Clerk user ID."
 
   def initialize(clerk: ClerkInvitationService.new)
     @clerk = clerk
   end
 
-  def send_invite(user, redirect_url:, ignore_existing: false, metadata: {})
+  # attributes: changes to the user (an employee sign-up's new email or
+  # name) that are saved only together with the replacement invitation, after
+  # Clerk confirmed the previous one closed. The block, if given, runs under
+  # the user's lock just before that save; a false answer saves nothing and
+  # revokes the new invitation.
+  def send_invite(user, redirect_url:, ignore_existing: false, metadata: {}, attributes: {}, &commit)
     return { success: false, error: "Clerk API not configured" } unless @clerk.configured?
 
     user.reload
     return invitation_changed unless user.awaiting_clerk_binding?
 
     snapshot = user.attributes.slice(*INVITATION_FIELDS)
+    email = attributes.fetch(:email, snapshot.fetch("email"))
     if user.clerk_invitation_id.present?
       failure = close_previous_invitation(user.clerk_invitation_id)
       return failure if failure
@@ -28,7 +38,7 @@ class PayrollInvitation
 
     nonce = SecureRandom.hex(32)
     result = @clerk.create_invitation(
-      email: snapshot.fetch("email"),
+      email: email,
       redirect_url: redirect_url,
       public_metadata: metadata.merge(
         role: snapshot.fetch("role"),
@@ -41,32 +51,35 @@ class PayrollInvitation
     return result unless result[:success]
 
     invitation_id = result.fetch(:invitation_id)
-    saved = user.with_lock do
+    saved = user.with_lock(LOGIN_LOCK) do
       next false unless user.attributes.slice(*INVITATION_FIELDS) == snapshot
+      next false if commit && !commit.call(user)
 
-      user.update!(
+      user.update!(attributes.merge(
         clerk_invitation_id: invitation_id,
         invite_nonce_digest: Digest::SHA256.hexdigest(nonce),
         invite_nonce_expires_at: NONCE_LIFETIME.from_now
-      )
+      ))
       true
     end
     saved ? result : invitation_changed
+  rescue ActiveRecord::RecordNotUnique
+    { success: false, error: "That email address already has a login", conflict: :email_taken }
   rescue ActiveRecord::RecordInvalid
     { success: false, error: "Invitation could not be saved locally" }
   rescue ActiveRecord::RecordNotFound
     invitation_changed
   ensure
-    revoke_best_effort(invitation_id, email: snapshot.fetch("email")) if invitation_id && !saved
+    revoke_best_effort(invitation_id, email: email) if invitation_id && !saved
   end
 
-  def bind_from_metadata(subject, request:, azp: nil)
-    metadata = @clerk.fetch_user(subject)&.fetch("public_metadata", nil)
+  def bind_from_metadata(subject, request:, azp: nil, &mfa_check)
+    clerk_user = @clerk.fetch_user(subject)
+    metadata = clerk_user&.fetch("public_metadata", nil)
     return unless metadata.is_a?(Hash)
 
     id = metadata["payroll_user_id"]
     nonce = metadata["payroll_invite_nonce"]
-    link_id = metadata["payroll_employee_link_id"]
     return unless id.is_a?(Integer) && id.between?(1, 2**63 - 1)
     return unless nonce.is_a?(String) && NONCE_PATTERN.match?(nonce)
 
@@ -82,27 +95,17 @@ class PayrollInvitation
     invitation_id = user.clerk_invitation_id
     return unless @clerk.invitation_status(invitation_id) == "accepted"
 
-    user.with_lock do
-      # A simultaneous request can complete this exact binding first.
-      next user if user.clerk_id == subject
-      next unless user.clerk_invitation_id == invitation_id && nonce_matches?(user, digest)
-      next unless user.active? && (user.super_admin? || user.organization&.active?)
-      next if user.practice_company_id? && !user.practice_portal_open?
-
-      # Check MFA against the locked invitation owner before binding or writing its audit.
-      next if block_given? && !yield(user)
-
-      # An employee app login binds only together with its still-open link,
-      # in this one transaction (EmployeeLinks::Bind).
-      bound = TenantScope.as_system(reason: "Bind authorized Clerk invitation") do
-        link = EmployeeLinks::Bind.lock_link(user, link_id, azp: azp) if user.portal_employee?
-        next false if user.portal_employee? && !link
-
-        bind!(user, subject, actor: user, request: request, source: "invitation_metadata")
-        EmployeeLinks::Bind.activate!(link, user, request: request) if link
-        true
-      end
-      user if bound
+    binding = { subject: subject, digest: digest, invitation_id: invitation_id, metadata: metadata,
+                identity: ClerkInvitationService.email_summary(clerk_user), azp: azp, request: request }
+    # The lock order is shared with every employee link path, so a deadlock
+    # is only a backstop; the locked block re-checks everything on a retry.
+    attempts = 0
+    begin
+      locked_bind(user, binding, &mfa_check)
+    rescue ActiveRecord::Deadlocked
+      attempts += 1
+      retry if attempts < BIND_ATTEMPTS && retry_after_deadlock?
+      nil
     end
   rescue ActiveRecord::RecordNotUnique
     # Only resume the exact same binding if it won the race.
@@ -142,6 +145,46 @@ class PayrollInvitation
   end
 
   private
+
+  def locked_bind(user, binding)
+    subject = binding.fetch(:subject)
+    request = binding.fetch(:request)
+    user.with_lock(LOGIN_LOCK) do
+      # A simultaneous request can complete this exact binding first.
+      next user if user.clerk_id == subject
+      next unless user.clerk_invitation_id == binding.fetch(:invitation_id) && nonce_matches?(user, binding.fetch(:digest))
+      next unless user.active? && (user.super_admin? || user.organization&.active?)
+      next if user.practice_company_id? && !user.practice_portal_open?
+      next if user.portal_employee? && !invited_identity?(user, binding.fetch(:identity))
+
+      # Check MFA against the locked invitation owner before binding or writing its audit.
+      next if block_given? && !yield(user)
+
+      # An employee app login binds only together with its still-open link,
+      # in this one transaction (EmployeeLinks::Bind).
+      bound = TenantScope.as_system(reason: "Bind authorized Clerk invitation") do
+        link = EmployeeLinks::Bind.lock_link(user, binding.fetch(:metadata), azp: binding.fetch(:azp)) if user.portal_employee?
+        next false if user.portal_employee? && !link
+
+        bind!(user, subject, actor: user, request: request, source: "invitation_metadata")
+        EmployeeLinks::Bind.activate!(link, user, request: request, identity: binding.fetch(:identity)) if link
+        true
+      end
+      user if bound
+    end
+  end
+
+  # A deadlock rolled back the whole transaction, which is safe to run again
+  # only when this method owns it (an /auth/me request does).
+  def retry_after_deadlock?
+    !ApplicationRecord.connection.transaction_open?
+  end
+
+  # An employee sign-up binds only the Clerk account made for its invited
+  # address: the login's email must be that account's verified primary.
+  def invited_identity?(user, identity)
+    identity[:primary_verified] && EmployeeLinks.same_email?(identity[:primary_email], user.email)
+  end
 
   def invitation_changed
     { success: false, error: "This account changed while preparing the invitation. Refresh and try again if it is still pending." }

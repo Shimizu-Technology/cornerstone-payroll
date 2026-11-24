@@ -20,7 +20,7 @@ RSpec.describe "Employee link lifecycle", type: :request do
 
   def sign_up_and_bind!(employee, token: nil, code: nil, email: "riley.own@example.net", subject: "user_riley")
     post_activation(activation_params(employee, token: token, code: code, email: email).compact)
-    expect(response).to have_http_status(:created)
+    expect_sign_up_started
     accept_clerk_invitation!(subject)
     get "/api/v1/auth/me", headers: bearer(subject)
     expect(response).to have_http_status(:ok)
@@ -40,8 +40,8 @@ RSpec.describe "Employee link lifecycle", type: :request do
 
       post_activation(activation_params(employee, token: invite.token, email: "Riley.Own@Example.net "))
 
-      expect(response).to have_http_status(:created)
-      expect(response.parsed_body).to eq("next" => "sign_up", "sign_up_url" => "https://accounts.example.test/accept/1")
+      expect_sign_up_started
+      expect(response.parsed_body).to eq("next" => "sign_up", "sign_up_url" => "https://accounts.example.test/accept/1", "message" => nil)
       pending_user = link.reload.user
       expect(pending_user).to have_attributes(role: "portal_employee", email: "riley.own@example.net", company_id: company.id,
         invitation_status: "pending", clerk_id: nil, active: true, name: employee.display_name)
@@ -118,7 +118,7 @@ RSpec.describe "Employee link lifecycle", type: :request do
         post_activation(activation_params(employee, token: invite.token, email: "second.try@example.net"))
       end.not_to change(User, :count)
 
-      expect(response).to have_http_status(:created)
+      expect_sign_up_started
       expect(pending_user.reload.email).to eq("second.try@example.net")
       expect(invite.link.reload.user_id).to eq(pending_user.id)
       expect(clerk_invitations.map { |options| options[:email] }).to eq(%w[first.try@example.net second.try@example.net])
@@ -139,7 +139,8 @@ RSpec.describe "Employee link lifecycle", type: :request do
       post_activation(activation_params(employee, token: invite.token, email: "clerk.has.it@example.net"))
       answers << [ response.status, response.parsed_body ]
 
-      expect(answers.uniq).to eq([ [ 200, { "next" => "sign_in", "message" => Api::V1::EmployeePortal::ActivationsController::SIGN_IN } ] ])
+      expect(answers.uniq).to eq([ [ 200, { "next" => "sign_in", "sign_up_url" => nil,
+        "message" => Api::V1::EmployeePortal::ActivationsController::SIGN_IN } ] ])
       expect(answers.first.last.to_s).not_to include("taken@example.net")
     end
 
@@ -232,14 +233,14 @@ RSpec.describe "Employee link lifecycle", type: :request do
       as_staff_in(company) { EmployeeLinks::Unlock.call(link: link, actor: staff) }
       expect(link_audits(link, "activation_unlocked").sole.user_id).to eq(staff.id)
       post_activation(activation_params(employee, token: invite.token))
-      expect(response).to have_http_status(:created)
+      expect_sign_up_started
     end
 
     it "clears an expired lock and counts afresh" do
       5.times { attempt(ssn_last4: "0000") }
       travel_to(25.hours.from_now) do
         post_activation(activation_params(employee, token: invite.token))
-        expect(response).to have_http_status(:created)
+        expect_sign_up_started
         expect(invite.link.reload.failed_activation_attempts).to eq(0)
       end
     end
@@ -258,7 +259,9 @@ RSpec.describe "Employee link lifecycle", type: :request do
 
       alert = AuditLog.where(action: "employee_links#activation_lock_alert").sole
       expect(alert).to have_attributes(company_id: company.id, event_category: "security", actor_type: "system_job")
-      expect(PayrollTelemetry).to have_received(:log).with(:warn, "employee_links.activation_lock_alert", hash_including(company_id: company.id)).once
+      # Staff watch error-level events (M4 runbook, Alerts); every lock is logged too.
+      expect(PayrollTelemetry).to have_received(:log).with(:error, "employee_links.activation_lock_alert", hash_including(company_id: company.id)).once
+      expect(PayrollTelemetry).to have_received(:log).with(:warn, "employee_links.activation_locked", hash_including(company_id: company.id)).exactly(4).times
     end
   end
 
