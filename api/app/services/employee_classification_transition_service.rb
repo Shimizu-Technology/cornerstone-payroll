@@ -159,18 +159,26 @@ class EmployeeClassificationTransitionService
     attrs
   end
 
-  # A copied email skips the login-identity check only with evidence that this
-  # employee and address were accepted before: a verified email, or a recorded
-  # same-person confirmation for this employee and address. Otherwise it gets
-  # every check, and a rejected copy is left blank with a notice for the
+  # Current account links always come first. Evidence that this employee and
+  # address were accepted before (a verified email, or a recorded same-person
+  # confirmation) can only waive asking for that confirmation again; a login
+  # now linked to another worker, or links that can't be checked, still win.
+  # A copied email that can't be used is left blank with a notice for the
   # operator instead of blocking the change. An edited email gets every check.
+  CURRENT_LINK_REJECTIONS = %w[linked_to_other_employee link_check_unavailable].freeze
+
   def validate_contact_details!(new_employee)
     email_unchanged = EmployeeContactValidator.normalize_email(new_employee.email) == EmployeeContactValidator.normalize_email(employee.email)
-    result = run_contact_validator(new_employee, check_login_identity: !(email_unchanged && previously_accepted_email?))
-    if !result.valid? && email_unchanged && result.errors[:email].present?
-      new_employee.email = nil
-      (@contact_notices ||= []) << BLANKED_EMAIL_NOTICE
-      result = run_contact_validator(new_employee, check_login_identity: true)
+    result = run_contact_validator(new_employee, check_login_identity: true)
+    if email_unchanged && result.errors[:email].present?
+      if previously_accepted_email? && !CURRENT_LINK_REJECTIONS.include?(result.login_email_rejection_reason)
+        result = run_contact_validator(new_employee, check_login_identity: false)
+      end
+      if result.errors[:email].present?
+        new_employee.email = nil
+        (@contact_notices ||= []) << BLANKED_EMAIL_NOTICE
+        result = run_contact_validator(new_employee, check_login_identity: true)
+      end
     end
     return result if result.valid?
 

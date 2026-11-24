@@ -205,6 +205,17 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     expect(result.contact_notices).to eq([])
   end
 
+  it "copies a verified address blank when its login is now linked to another worker" do
+    login = create(:user, company: company, organization: company.organization, role: "client", email: "asia.login@example.com", name: "Asia Taylor")
+    other_worker = create(:employee, company: company, first_name: "Other", last_name: "Worker")
+    EmployeeAccountLink.create!(company: company, employee: other_worker, user: login, status: "active")
+    contractor.update_columns(email: "asia.login@example.com", email_verified_at: 1.day.ago)
+
+    result = described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+    expect(result.new_employee.email).to be_nil
+    expect(result.contact_notices).to eq([ described_class::BLANKED_EMAIL_NOTICE ])
+  end
+
   it "copies an unchanged login email with a recorded same-person confirmation for this employee and address" do
     create(:user, company: company, organization: company.organization, role: "client", email: "asia.login@example.com", name: "Asia Taylor")
     contractor.update_columns(email: "asia.login@example.com", email_verified_at: nil)
