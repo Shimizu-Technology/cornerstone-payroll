@@ -59,7 +59,7 @@ class Rack::Attack
   end
 
   EMPLOYEE_PATH = %r{\A/api/v1/employee(?:/|\.[^/]+\z|\z)}
-  EMPLOYEE_ACTIVATION_PATH = %r{\A/api/v1/employee/(?:activate|activation|invites|invitations)(?:[/.]|\z)}
+  EMPLOYEE_ACTIVATION_PATH = %r{\A/api/v1/employee/(?:activate|activation|invites|invitations|links/claim)(?:[/.]|\z)}
   EMPLOYEE_PDF_PATH = %r{\A/api/v1/employee/(?:.*/)?(?:pdf(?:[/.]|\z)|[^/]+\.pdf\z)}
   EMPLOYEE_DOCUMENT_DOWNLOAD_PATH = %r{\A/api/v1/employee/(?:pay_stubs|w[-_]?2s?)(?:/[^/]+)*/download(?:\.[^/]+)?\z}
   KIOSK_PATH = %r{\A/api/v1/kiosk(?:/|\.[^/]+\z|\z)}
@@ -81,10 +81,19 @@ class Rack::Attack
       return 413 if body.bytesize > ACTIVATION_BODY_LIMIT
 
       params = JSON.parse(body)
-      token = params["token"] if params.is_a?(Hash)
-      return 400 unless token.is_a?(String) && !token.empty?
+      return 400 unless params.is_a?(Hash)
 
-      request.env["payroll.activation_token_digest"] = Digest::SHA256.hexdigest(token)
+      # A sign-up names its invite by the emailed token or the printed code.
+      token = params["token"]
+      code = params["code"]
+      secret = if token.is_a?(String) && !token.empty?
+        "token:#{token}"
+      elsif code.is_a?(String) && !code.empty?
+        "code:#{code.upcase.gsub(/[\s-]/, "")}"
+      end
+      return 400 unless secret
+
+      request.env["payroll.activation_token_digest"] = Digest::SHA256.hexdigest(secret)
       nil
     rescue JSON::ParserError
       400

@@ -211,6 +211,18 @@ RSpec.describe Rack::Attack do
       end
     end
 
+    it "accepts a printed code in place of a token and limits each code across addresses" do
+      post = ->(path, body, i) {
+        client.post(path, "REMOTE_ADDR" => "203.0.113.#{i + 1}", "CONTENT_TYPE" => "application/json", input: body.to_json)
+      }
+      5.times { |i| expect(post.call("/api/v1/employee/activation", { code: "ACDEF-GHJKM" }, i).status).to eq(200) }
+      # The same code, typed differently, on the claim route shares the limit.
+      expect(post.call("/api/v1/employee/links/claim", { code: "acdefghjkm" }, 9).status).to eq(429)
+      # A token with the same text is a different secret.
+      expect(post.call("/api/v1/employee/activation", { token: "ACDEFGHJKM" }, 10).status).to eq(200)
+      expect(post.call("/api/v1/employee/links/claim", { code: "", token: "" }, 11).status).to eq(400)
+    end
+
     it "leaves the activation body intact for downstream handlers" do
       downstream = ->(env) { [ 200, { "content-type" => "application/json" }, [ env["rack.input"].read ] ] }
       payload = { token: "secret-activation-token" }.to_json

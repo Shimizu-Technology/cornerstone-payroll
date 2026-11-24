@@ -211,6 +211,10 @@ module Api
           unless @user.invitation_pending?
             return render json: { error: "User has already accepted their invitation" }, status: :unprocessable_entity
           end
+          # An employee app sign-up binds only through its link (EmployeeLinks).
+          if @user.portal_employee?
+            return render json: { error: "Employee app sign-ups are resent from the employee's record" }, status: :unprocessable_entity
+          end
 
           before_values = user_audit_snapshot(@user)
           clerk_result = create_clerk_invitation(@user, ignore_existing: true)

@@ -6,12 +6,24 @@ class EmployeeAccountLink < ApplicationRecord
   belongs_to :employee
   belongs_to :invited_by, class_name: "User", optional: true
   belongs_to :revoked_by, class_name: "User", optional: true
+  belongs_to :claim_user, class_name: "User", optional: true
+
+  INVITE_LIFETIME = 14.days
+  MAX_FAILED_ATTEMPTS = 5
+  LOCK_DURATION = 24.hours
+  # No 0/O, 1/I/L, 2/Z, 5/S or 8/B, so a printed code reads back unambiguously.
+  CODE_ALPHABET = "ACDEFGHJKMNPQRTUVWXY34679".chars.freeze
+  CODE_LENGTH = 10
+  DIGEST_PATTERN = /\A[0-9a-f]{64}\z/
 
   enum :status, { invited: "invited", active: "active", former: "former", revoked: "revoked" }, validate: true
 
   validates :payroll_environment, inclusion: { in: %w[live] }
   validates :user, presence: true, if: -> { active? || former? }
-  validates :invite_token_digest, format: { with: /\A[0-9a-f]{64}\z/ }, allow_nil: true
+  validates :invite_token_digest, format: { with: DIGEST_PATTERN }, allow_nil: true
+  validates :invite_code_digest, format: { with: DIGEST_PATTERN }, allow_nil: true
+  validates :invite_delivery, inclusion: { in: %w[email code] }, allow_nil: true
+  validates :failed_activation_attempts, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate :employee_belongs_to_live_company
 
   scope :portal_eligible, -> {
@@ -104,6 +116,40 @@ class EmployeeAccountLink < ApplicationRecord
   end
   private_class_method :function_link_decision, :decision_function_available?, :link_decision_for,
     :with_system_decision_read, :other_company_links_hidden?
+
+  def self.generate_token
+    SecureRandom.urlsafe_base64(32)
+  end
+
+  def self.generate_code
+    Array.new(CODE_LENGTH) { CODE_ALPHABET[SecureRandom.random_number(CODE_ALPHABET.length)] }.join
+  end
+
+  def self.token_digest(token)
+    Digest::SHA256.hexdigest(token.to_s)
+  end
+
+  # Codes are short enough to brute-force from a plain hash, so they are keyed.
+  def self.code_digest(code)
+    OpenSSL::HMAC.hexdigest("SHA256", code_digest_key, normalize_code(code))
+  end
+
+  def self.normalize_code(code)
+    code.to_s.upcase.gsub(/[\s-]/, "")
+  end
+
+  def self.code_digest_key
+    Rails.application.key_generator.generate_key("employee_account_links/invite_code", 32)
+  end
+  private_class_method :code_digest_key
+
+  def invite_open?(now = Time.current)
+    invited? && invite_expires_at.present? && invite_expires_at > now
+  end
+
+  def activation_locked?(now = Time.current)
+    activation_locked_until.present? && activation_locked_until > now
+  end
 
   def portal_enabled?
     company.active? && company.organization.active? && CompanyFeatures.for(company).employee_portal_enabled?

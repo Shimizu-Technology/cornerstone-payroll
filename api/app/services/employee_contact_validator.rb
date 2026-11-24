@@ -277,6 +277,11 @@ class EmployeeContactValidator
       end
     end
 
+    # The same first-and-last-name rule a same-person email confirmation uses.
+    def login_name_matches?(login_user, employee)
+      new(employee: employee, company: employee.company).send(:login_name_matches_employee?, login_user)
+    end
+
     def validate_for_invite(employee, company: employee.company, allow_same_person_login: false, actor: nil)
       result = new(
         employee: employee,

@@ -14,7 +14,7 @@ class PayrollInvitation
     @clerk = clerk
   end
 
-  def send_invite(user, redirect_url:, ignore_existing: false)
+  def send_invite(user, redirect_url:, ignore_existing: false, metadata: {})
     return { success: false, error: "Clerk API not configured" } unless @clerk.configured?
 
     user.reload
@@ -30,12 +30,12 @@ class PayrollInvitation
     result = @clerk.create_invitation(
       email: snapshot.fetch("email"),
       redirect_url: redirect_url,
-      public_metadata: {
+      public_metadata: metadata.merge(
         role: snapshot.fetch("role"),
         organization_id: snapshot.fetch("organization_id"),
         payroll_user_id: user.id,
         payroll_invite_nonce: nonce
-      },
+      ),
       ignore_existing: ignore_existing
     )
     return result unless result[:success]
@@ -60,12 +60,13 @@ class PayrollInvitation
     revoke_best_effort(invitation_id, email: snapshot.fetch("email")) if invitation_id && !saved
   end
 
-  def bind_from_metadata(subject, request:)
+  def bind_from_metadata(subject, request:, azp: nil)
     metadata = @clerk.fetch_user(subject)&.fetch("public_metadata", nil)
     return unless metadata.is_a?(Hash)
 
     id = metadata["payroll_user_id"]
     nonce = metadata["payroll_invite_nonce"]
+    link_id = metadata["payroll_employee_link_id"]
     return unless id.is_a?(Integer) && id.between?(1, 2**63 - 1)
     return unless nonce.is_a?(String) && NONCE_PATTERN.match?(nonce)
 
@@ -91,10 +92,17 @@ class PayrollInvitation
       # Check MFA against the locked invitation owner before binding or writing its audit.
       next if block_given? && !yield(user)
 
-      TenantScope.as_system(reason: "Bind authorized Clerk invitation") do
+      # An employee app login binds only together with its still-open link,
+      # in this one transaction (EmployeeLinks::Bind).
+      bound = TenantScope.as_system(reason: "Bind authorized Clerk invitation") do
+        link = EmployeeLinks::Bind.lock_link(user, link_id, azp: azp) if user.portal_employee?
+        next false if user.portal_employee? && !link
+
         bind!(user, subject, actor: user, request: request, source: "invitation_metadata")
+        EmployeeLinks::Bind.activate!(link, user, request: request) if link
+        true
       end
-      user
+      user if bound
     end
   rescue ActiveRecord::RecordNotUnique
     # Only resume the exact same binding if it won the race.
@@ -104,7 +112,8 @@ class PayrollInvitation
   end
 
   def self.recoverable_by?(user, actor)
-    user.awaiting_clerk_binding? && !user.platform_owner? &&
+    # Employee app logins bind only through their link (EmployeeLinks::Bind).
+    user.awaiting_clerk_binding? && !user.platform_owner? && !user.portal_employee? &&
       (actor.super_admin? || (actor.org_admin? && user.organization_id == actor.organization_id && ADMIN_ROLES.exclude?(user.role)))
   end
 
