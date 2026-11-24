@@ -155,7 +155,7 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     )
   end
 
-  it "blocks transition when copied email is an explicitly marked placeholder unless staff supplies a valid replacement, while warning on unmarked structural patterns" do
+  it "never copies an explicitly marked placeholder, accepts a valid replacement, and only warns on unmarked structural patterns" do
     contractor.update_columns(email: "noemail@example.com")
 
     # Unmarked structural pattern warns without blocking.
@@ -163,12 +163,16 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     expect(unmarked_result).to be_valid
     expect(unmarked_result.warnings.map { |w| w[:code] }).to include("placeholder_email_pattern")
 
-    # Explicitly marked placeholder blocks transition until replaced.
+    # An explicitly marked placeholder is left blank on the new record, with a notice.
     EmployeePlaceholderEmail.create!(organization: company.organization, email: "noemail@example.com")
-    expect {
-      described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
-    }.to raise_error(EmployeeContactValidator::ValidationError)
+    blanked = described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+    expect(blanked.new_employee.email).to be_nil
+    expect(blanked.contact_notices).to eq([ described_class::BLANKED_EMAIL_NOTICE ])
+  end
 
+  it "accepts a valid replacement for a marked placeholder" do
+    contractor.update_columns(email: "noemail@example.com")
+    EmployeePlaceholderEmail.create!(organization: company.organization, email: "noemail@example.com")
     result = described_class.new(
       employee: contractor,
       attributes: attributes.merge(email: "asia.real@example.com", phone: "555-0144"),
@@ -182,17 +186,45 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     )
   end
 
-  it "copies an unchanged, already-accepted login email without asking again, but checks an edited one" do
-    login = create(:user, company: company, organization: company.organization, role: "client", email: "asia.login@example.com", name: "Asia Taylor")
-    contractor.update_columns(email: "asia.login@example.com")
+  it "copies an unchanged login email only with evidence it was accepted, and otherwise copies it blank with a notice" do
+    create(:user, company: company, organization: company.organization, role: "client", email: "asia.login@example.com", name: "Asia Taylor")
+
+    # No evidence: the full check runs, the copy is left blank and the operator is told.
+    contractor.update_columns(email: "asia.login@example.com", email_verified_at: nil)
+    result = described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+    expect(result.new_employee.email).to be_nil
+    expect(result.contact_notices).to eq([ described_class::BLANKED_EMAIL_NOTICE ])
+  end
+
+  it "copies an unchanged login email the employee verified" do
+    create(:user, company: company, organization: company.organization, role: "client", email: "asia.login@example.com", name: "Asia Taylor")
+    contractor.update_columns(email: "asia.login@example.com", email_verified_at: 1.day.ago)
 
     result = described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
     expect(result.new_employee.email).to eq("asia.login@example.com")
+    expect(result.contact_notices).to eq([])
+  end
 
+  it "copies an unchanged login email with a recorded same-person confirmation for this employee and address" do
+    create(:user, company: company, organization: company.organization, role: "client", email: "asia.login@example.com", name: "Asia Taylor")
+    contractor.update_columns(email: "asia.login@example.com", email_verified_at: nil)
+    AuditLog.record!(user: super_admin, organization_id: company.organization_id, company_id: company.id,
+      action: "employees#confirm_same_person_email", record_type: "employees", record_id: contractor.id,
+      subject_name: contractor.display_name, metadata: { email: "asia.login@example.com", same_person_email_confirmed: true })
+
+    result = described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+    expect(result.new_employee.email).to eq("asia.login@example.com")
+    expect(result.contact_notices).to eq([])
+  end
+
+  it "checks an edited email in full and refuses another person's login" do
+    login = create(:user, company: company, organization: company.organization, role: "client", email: "asia.login@example.com", name: "Asia Taylor")
     other = create(:employee, :contractor, company: company, first_name: "Ben", last_name: "Cruz", email: "ben@example.com",
       ssn_encrypted: "123-45-6780", hire_date: Date.new(2024, 1, 1), address_line1: "1 Main St", city: "Hagatna", state: "GU", zip: "96910")
     expect {
       described_class.new(employee: other, attributes: attributes.merge(email: login.email, ssn: "123-45-6780", ssn_confirmation: "123-45-6780"), actor: super_admin).call
-    }.to raise_error(EmployeeContactValidator::ValidationError) { |error| expect(error.result.same_person_confirmation_required?).to be(true) }
+    }.to raise_error(EmployeeContactValidator::ValidationError) { |error|
+      expect(error.result.errors[:email]).to eq([ EmployeeContactValidator::LOGIN_NAME_MISMATCH_ERROR ])
+    }
   end
 end
