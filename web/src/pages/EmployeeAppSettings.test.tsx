@@ -135,6 +135,43 @@ describe('EmployeeAppSettings', () => {
     expect(mocks.uploadLogo).not.toHaveBeenCalled();
   });
 
+  it('trusts the file name only when the browser gives no specific type', async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    mocks.uploadLogo.mockResolvedValue({ data: settings() });
+    renderPage();
+    await screen.findByText('Help contacts not set up');
+    const input = screen.getByLabelText('Logo file');
+
+    await user.upload(input, new File(['<svg/>'], 'logo.png', { type: 'image/svg+xml' }));
+    expect(await screen.findByText("Upload a PNG or WebP image. SVG isn't supported.")).toBeTruthy();
+    expect(mocks.uploadLogo).not.toHaveBeenCalled();
+
+    await user.upload(input, new File(['png'], 'logo.png', { type: '' }));
+    await waitFor(() => expect(mocks.uploadLogo).toHaveBeenCalledTimes(1));
+    await user.upload(input, new File(['webp'], 'logo.webp', { type: 'application/octet-stream' }));
+    await waitFor(() => expect(mocks.uploadLogo).toHaveBeenCalledTimes(2));
+  });
+
+  it('locks the branding fields while a save is in flight so later typing is not lost', async () => {
+    const user = userEvent.setup();
+    let finish: (value: { data: Settings }) => void = () => {};
+    mocks.updateBranding.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    renderPage();
+    await screen.findByText('Help contacts not set up');
+    const name = screen.getByLabelText('Name employees see') as HTMLInputElement;
+
+    await user.type(name, 'Example Grill');
+    await user.click(screen.getByRole('button', { name: /Save changes|Saving/ }));
+
+    expect(await screen.findByText(/Saving… Fields unlock when it's done./)).toBeTruthy();
+    expect(name.disabled).toBe(true);
+    expect((screen.getByLabelText('Brand color') as HTMLInputElement).disabled).toBe(true);
+
+    finish({ data: settings({ branding: { ...settings().branding, display_name: 'Example Grill' } }) });
+    await waitFor(() => expect(name.disabled).toBe(false));
+    expect(name.value).toBe('Example Grill');
+  });
+
   it('fetches the saved logo for the shown company and lets admins remove a legacy logo', async () => {
     const user = userEvent.setup();
     mocks.get.mockResolvedValue({ data: settings({ branding: { ...settings().branding, external_logo_url: 'https://images.example.test/grill.png' } }) });
