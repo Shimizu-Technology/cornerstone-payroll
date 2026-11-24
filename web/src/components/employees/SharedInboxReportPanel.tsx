@@ -162,8 +162,13 @@ export function SharedInboxReportPanel({
         <div>
           <h2 className="font-display text-xl font-bold tracking-tight text-neutral-950">Shared and placeholder emails</h2>
           <p className="mt-1 text-sm text-neutral-600">
-            Summary counts by company across clients you configure. No employee names or other personal data are listed here. Unmarked duplicates stay warning-only so families can share; mark confirmed shared inboxes as placeholders before bulk-clearing one company at a time.
+            Emails used on more than one employee record, counted by client. No names are shown here.
           </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-6 text-sm text-neutral-700">
+            <li>Check each address. A family can share one email, so a shared address isn&apos;t always a mistake.</li>
+            <li>Mark an address that isn&apos;t anyone&apos;s own (like a front-desk inbox) as a placeholder.</li>
+            <li>Clear it one client at a time. Those employees then show under Needs contact details.</li>
+          </ol>
         </div>
         <Button variant="outline" size="sm" onClick={() => void loadReport()} loading={loading} loadingLabel="Refreshing">
           <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
