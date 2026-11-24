@@ -90,6 +90,15 @@ export interface EmployeeContactDetailsStatus {
   shared_email_count?: number;
 }
 
+export interface EmployeeContactConflictPayload {
+  error: string;
+  code: 'contact_revision_conflict';
+  conflicting_fields: string[];
+  contact_revision: string;
+  current_values: Record<string, string | null>;
+  data: Employee;
+}
+
 export interface EmployeeContactWarning {
   code: string;
   field: string;
@@ -392,6 +401,7 @@ export interface Employee {
   email_verified_at?: string | null;
   phone_confirmed_by_employee_at?: string | null;
   contact_source?: EmployeeContactSource | null;
+  contact_revision?: string;
   contact_details_status?: EmployeeContactDetailsStatus;
   wage_rates?: EmployeeWageRate[];
   default_custom_earnings?: CustomEarning[];
@@ -651,6 +661,8 @@ export interface EmployeeFormData {
   email?: string;
   phone?: string;
   confirm_same_person_email?: boolean;
+  row_revision?: string;
+  baseline_values?: Record<string, string | null | undefined>;
   ssn?: string;
   ssn_confirmation?: string;
   date_of_birth?: string;
