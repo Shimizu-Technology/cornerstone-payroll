@@ -253,7 +253,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   - On a client subdomain, both are limited to that subdomain's company (`TenantSubdomainRegistry`, as at `base_controller.rb:44-46`), so a worker's other employers never show up there.
   - `links/claim` gets the same throttles as activation: it's added to the activation path match and body check (`api/config/initializers/rack_attack.rb:56`).
 - **Termination:** both status-transition services call `EmployeeLinks::Retire` (§1.1).
-  - Terminate makes the link *former*, with `former_access_until = termination date + former_access_years`.
+  - Terminate makes the link *former*, with `former_access_until = termination date + former_access_years` (default 2 years, configurable per company; see §8a).
   - Deactivating without a termination date revokes the link with a reason. It doesn't start a former window.
   - Reactivation and rehire issue a new invite.
   - **A rehired employee-only person keeps their login.** If their `portal_employee` user was deactivated when their last link closed, the new invite goes through activation, not the claim path. The claim path refuses deactivated users. Activation re-checks the token or code plus DOB and SSN-4. The person then signs in to their existing Clerk account, and that fresh sign-in is the M4-1 step-up (`fva[0]` within 10 minutes). It's handled by a restricted reactivation endpoint that accepts a deactivated `portal_employee` only for this one step. Only then does it reactivate the same user and bind the new link, in one transaction. A spec proves that any failed check leaves both the user and the new link inactive. The old link stays closed, and the Clerk sessions revoked at deactivation stay revoked, so the person signs in fresh. If they're a staff or client user too, their login was never deactivated and they use the claim path as usual.
@@ -629,6 +629,51 @@ Milestone 4 is done when:
 5. Emma, Sara and Mo have used the rollout page and request list as admins.
 
 ---
+
+## 8a. Ease-of-use decisions (UX audit and ADP study, November 24)
+
+Leon's priority for this milestone is that the app is clean, welcoming and easy to use on both phones and desktops. On November 24 we audited the clickable prototype and the current HR screens, and compared them with ADP's employee self-service, signed in and read-only, with no personal data recorded. The full notes live outside the repo. The decisions below are binding for the slices named. Leon's answers from the same evening are included.
+
+**Employee app (M4-4, M4-5, M4-7, M4-8)**
+- **Home** leads with the latest take-home pay, its payment status and "View pay stub". "Next payday" shows only when a real upcoming pay period or a confirmed pay schedule gives the date. Otherwise it's hidden. Former employees never see it, and it never shows an amount. ADP doesn't show a next payday, so this is something we add.
+- **Pay stubs:**
+  - Show hours on every list row and on every stub.
+  - Give each earning line its hours × rate.
+  - Put tips on their own line.
+  - Add a one-line comparison with the previous check, such as "$36.45 less than Nov 5. You worked 3.5 fewer hours." Hide it when it can't be worked out.
+  - Use plain labels with the technical term in small print, such as "Take-home pay (net pay)". Never use "Federal" for Guam tax.
+- **Desktop:** a top navigation bar and a two-column Home. Pay shows the list on the left and the stub on the right, with Previous and Next. **Phone:** bottom tabs. Pay shows the latest check first, then the three most recent, then "View all".
+- **QuickBooks months (D6):** list the checks. Offer "View original stub" only where a PDF exists, and say nothing where it doesn't.
+- **W-2GU (M4-5):** a per-company setting says whether W-2s are mailed to the home address or handed out at work, or it's left unset. The W-2 card says which, in plain words. Former employees always see "mailed to your last address". The address field is labeled "Used for paychecks, W-2s and other tax and work documents".
+- **Contact changes (M4-7):**
+  - A verified badge on confirmed contact details.
+  - Emergency contacts get "Save & add another".
+  - An address request shows the current and requested address side by side, with Edit request and Cancel request, until it's decided.
+- **Help:** contacts start blank, and the client's admins set them. Until then the screen says "Ask your manager at {company}", plus the company's main phone if one is set, plus common questions. There's no Cornerstone fallback. The sign-in screen has a "Can't sign in?" note with the same wording, and never shows named contacts before sign-in.
+- **Sessions** last about 30 days, with Clerk's new-device code.
+- **Former-employee access defaults to 2 years** (Leon, November 24). The per-company `former_access_years` option stays configurable from 1 to 10, and M4-2 keeps the formula `former_access_until = termination date + former_access_years`. Its default drops from 6 to 2.
+  - **M4-2 owns the change:** it updates the catalog default, and it resets the seeded value on existing companies to 2 wherever it's still the untouched default of 6.
+  - No link is moved to former before M4-2, so nothing in use is affected.
+- **Hide amounts** is a per-device eye toggle, off by default. The first time someone uses it, one line explains what it does.
+
+**Consent and terms (M4-6, M4-8)**
+- **Sign-up and claim** have an unticked clickwrap checkbox for the Employee App Terms and Privacy Notice. It records the version, a hash of the text shown, the time, the IP address, the user agent and the method.
+- **When the Terms change,** an "Action required" card appears on Home, unless counsel says the change is material. A material change asks again at the next sign-in.
+- **Electronic delivery consent is separate for each document type,** pay statements and W-2GU. Each consent has labeled text: purpose, the right to withdraw, technical requirements, paper copies, keeping contact details current, and how long the consent lasts. The W-2 email notice is on and locked while paperless is on. Withdrawing takes one tap, and the consent can be printed. Counsel supplies the final wording (G1).
+
+**Client admins and the HR side (M4-3, M4-9, HR module)**
+- **Contact details grid:** values are never cut off. Show them as full text at rest, with an inline row editor and formatted phone numbers.
+- **Change requests:** a readable before-and-after table with Approve and Reject, instead of raw data.
+- **One employee page** with contact details, emergency contacts, app status, pay and changes.
+- **Client navigation** grouped into five sections, plus a "To do" list for approvals, missing contact details, invites to send and locked sign-ups.
+- **Help setup:** admins see a "Help contacts not set up" warning, with a preview of what employees see.
+
+**Brand (M4-8, M4-10)**
+- Each tenant's brand color is checked for contrast: buttons use a shade that passes 4.5:1 with white text, and a light color is only ever used with dark text.
+- For MoSa's, from its official site and social pages: logo blue `#1898CF` is used for decoration, buttons use a darker shade of it, and the yellow `#FADF06` only ever appears with dark text.
+- Ask MoSa's for a vector logo, a square app icon, and which badge to use.
+
+**App alerts** go by email.
 
 ## 9. Review log
 
