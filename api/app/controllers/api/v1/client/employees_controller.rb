@@ -29,7 +29,7 @@ module Api
           employees = employees.page(params[:page]).per(bounded_per_page(default: DEFAULT_PER_PAGE, max: MAX_PER_PAGE))
 
           render json: {
-            data: employees.map { |employee| serialize_employee(employee, contact_context: contact_context) },
+            data: employees.map { |employee| contact_page_or_full(employee, contact_context) },
             meta: pagination_meta(employees).merge(needs_contact_details_count: needs_contact_details_count)
           }
         end
@@ -95,7 +95,7 @@ module Api
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
-            data: serialize_employee(result.employee, contact_context: contact_context),
+            data: contact_page_or_full(result.employee, contact_context),
             change_request: serialize_change_request(result.change_request),
             applied_direct_fields: result.applied_direct_fields,
             contact_warnings: result.contact_warnings || [],
@@ -111,7 +111,7 @@ module Api
             conflicting_fields: e.conflicting_fields,
             contact_revision: e.employee.contact_revision,
             current_values: e.current_values,
-            data: serialize_employee(e.employee, contact_context: contact_context)
+            data: contact_page_or_full(e.employee, contact_context)
           }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee || e.record)
@@ -276,6 +276,13 @@ module Api
             total_count: collection.total_count,
             per_page: collection.limit_value
           }
+        end
+
+        # The Contact details page asks for contact fields only.
+        def contact_page_or_full(employee, contact_context)
+          return EmployeeContactProjection.call(employee, context: contact_context) if EmployeeContactProjection.requested?(params)
+
+          serialize_employee(employee, contact_context: contact_context)
         end
 
         def serialize_employee(employee, include_department: false, include_document_readiness: false, contact_context: nil)

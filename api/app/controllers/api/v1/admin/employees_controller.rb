@@ -41,7 +41,11 @@ module Api
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
-            data: employees.map { |e| serialize_employee(e, include_department: true, contact_context: contact_context) },
+            data: employees.map do |e|
+              next EmployeeContactProjection.call(e, context: contact_context) if EmployeeContactProjection.requested?(params)
+
+              serialize_employee(e, include_department: true, contact_context: contact_context)
+            end,
             meta: pagination_meta(employees).merge(needs_contact_details_count: needs_contact_details_count)
           }
         end
@@ -217,8 +221,8 @@ module Api
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           # The Contact details grid asks for a contact-only record so the full
           # SSN never reaches its state. The full edit form keeps the full record.
-          data = if params[:response_view].to_s == "contact"
-            serialize_employee(@employee, contact_context: contact_context)
+          data = if EmployeeContactProjection.requested?(params)
+            EmployeeContactProjection.call(@employee, context: contact_context)
           else
             serialize_employee(@employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true, contact_context: contact_context)
           end
@@ -237,7 +241,11 @@ module Api
             contact_revision: e.employee.contact_revision,
             current_values: e.current_values,
             # Conflict recovery needs contact values and the revision, never the full SSN.
-            data: serialize_employee(e.employee, contact_context: contact_context)
+            data: if EmployeeContactProjection.requested?(params)
+                    EmployeeContactProjection.call(e.employee, context: contact_context)
+                  else
+                    serialize_employee(e.employee, contact_context: contact_context)
+                  end
           }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee)

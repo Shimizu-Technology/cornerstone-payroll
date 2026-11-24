@@ -302,6 +302,39 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
     end
   end
 
+  describe "contact-only records for the Contact details page" do
+    let(:projection_keys) do
+      EmployeeContactProjection::FIELDS + %w[contact_revision contact_details_status]
+    end
+
+    it "returns only contact fields from the list, save and conflict responses on both endpoints" do
+      [ [ admin_user, "/api/v1/admin/employees" ], [ client_user, "/api/v1/client/employees" ] ].each_with_index do |(user, path), index|
+        allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
+        headers = { "X-Company-Id" => company.id.to_s }
+
+        get path, headers: headers, params: { view: "contact" }
+        expect(response).to have_http_status(:ok), response.body
+        expect(response.parsed_body["data"].map(&:keys)).to all(match_array(projection_keys))
+
+        stale_revision = complete_employee.reload.contact_revision
+        patch "#{path}/#{complete_employee.id}", headers: headers,
+              params: { employee: { phone: "555-017#{index}" }, row_revision: stale_revision, response_view: "contact" }
+        expect(response).to have_http_status(:ok), response.body
+        expect(response.parsed_body["data"].keys).to match_array(projection_keys)
+
+        patch "#{path}/#{complete_employee.id}", headers: headers,
+              params: { employee: { phone: "555-0182" }, row_revision: stale_revision, baseline_values: { phone: "+1671555999#{index}" }, response_view: "contact" }
+        expect(response).to have_http_status(:conflict), response.body
+        expect(response.parsed_body["data"].keys).to match_array(projection_keys)
+        expect(response.body).not_to include(complete_employee.ssn_encrypted)
+
+        # Other pages keep the full record.
+        get path, headers: headers
+        expect(response.parsed_body["data"].first.keys).to include("pay_rate")
+      end
+    end
+  end
+
   describe "partial saves, verification clearing, and stale row revision 409 conflicts" do
     it "keeps the address untouched on a phone-only save" do
       allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(client_user)
