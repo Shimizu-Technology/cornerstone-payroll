@@ -144,6 +144,27 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("$310.00")
   end
 
+  it "prints plain direct deposit wording only on the employee copy" do
+    payroll_item.update!(payment_delivery_method: "direct_deposit")
+    employee_pdf = described_class.new(payroll_item, employee_copy: true).generate
+    staff_pdf = described_class.new(payroll_item).generate
+    employee_text = PDF::Reader.new(StringIO.new(employee_pdf)).pages.map(&:text).join(" ").squish
+    staff_text = PDF::Reader.new(StringIO.new(staff_pdf)).pages.map(&:text).join(" ").squish
+
+    expect(employee_text).to include("Payment: Direct deposit")
+    expect(employee_text).not_to include("transfer not confirmed")
+    expect(staff_text).to include("Payment: Direct deposit (stub only; transfer not confirmed)")
+  end
+
+  it "prints the assigned check number on the employee copy" do
+    payroll_item.update!(payment_delivery_method: "paper_check", check_number: "1234")
+    employee_pdf = described_class.new(payroll_item, employee_copy: true).generate
+    staff_pdf = described_class.new(payroll_item).generate
+
+    expect(PDF::Reader.new(StringIO.new(employee_pdf)).pages.map(&:text).join(" ").squish).to include("Payment: Check #1234")
+    expect(PDF::Reader.new(StringIO.new(staff_pdf)).pages.map(&:text).join(" ").squish).to include("Check #: 1234")
+  end
+
   it "identifies a zero-net earnings statement without implying a deposit or missing check" do
     payroll_item.update!(payment_delivery_method: "direct_deposit", net_pay: 0)
 

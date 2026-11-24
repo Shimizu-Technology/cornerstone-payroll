@@ -383,6 +383,16 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
       expect(AuditLog.find_by!(action: "worker_statement#pdf_downloaded")).to have_attributes(record_id: item.id, company_id: company.id)
     end
 
+    it "keeps the default direct deposit wording on the AIRE PDF" do
+      item = paycheck(worker, Date.new(2026, 10, 9), payment_delivery_method: "direct_deposit")
+
+      get path("/#{item.id}/pdf"), headers: headers
+
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
+      expect(text).to include("Payment: Direct deposit (stub only; transfer not confirmed)")
+    end
+
     it "lists reversed payroll as voided history but has no current statement PDF for it" do
       item = paycheck(worker, Date.new(2026, 10, 9), check_number: "103155")
       item.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: actor.id, payroll_reversal_reason: "Entered twice")
