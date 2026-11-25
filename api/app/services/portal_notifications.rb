@@ -137,6 +137,11 @@ module PortalNotifications
       end
     end
 
+    def delivery_consent_withdrawn!(entry, actor: entry.changed_by)
+      record!(event_type: "employee_contact_confirmation_requested", company: entry.company, actor: actor,
+        subject: entry, dedupe_key: "employee_contact_confirmation_requested:#{entry.id}")
+    end
+
     def employee_address_decided!(change_request, actor:)
       record!(event_type: "employee_address_decided", company: change_request.company, actor: actor,
         subject: change_request, dedupe_key: "employee_address_decided:#{change_request.id}:#{change_request.status}")
