@@ -28,6 +28,9 @@ module Api
           # managers and accountants can find the client edit page.
           can_view_client_management: current_user.organization_admin? || current_user.manager? || current_user.accountant?,
           can_switch_company: current_user.accessible_company_ids.size > 1,
+          # Firm finance (books, invoices, customer links) may target live
+          # clients only; navigation keeps every accessible company.
+          billing_company_ids: companies.select(&:live_payroll?).map(&:id),
           current_company_id: company_ids.include?(current_company_id) ? current_company_id : company_ids.first
         }
       end

@@ -4,6 +4,14 @@ export function isTestWorkspaceCompany(company: CompanyListItem | null | undefin
   return company?.test_workspace ?? company?.payroll_environment === 'migration_rehearsal';
 }
 
+// Finance books, invoices and customer links take only the server's list of
+// billable live clients. Ordinary navigation keeps the neutral company payload.
+export function isBillingClient(company: CompanyListItem | null | undefined, billingCompanyIds?: number[] | null): boolean {
+  if (!company) return false;
+  if (billingCompanyIds) return billingCompanyIds.includes(company.id);
+  return !isTestWorkspaceCompany(company);
+}
+
 // The practice-portal flag is scoped by the server to the client's own copy.
 // Client profile changes use client endpoints and their approval flow, not the
 // staff payroll permission represented by workspace_can_write.
