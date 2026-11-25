@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { Header } from '@/components/layout/Header';
 import { PortalMessagesPanel } from '@/components/client-portal/PortalMessagesPanel';
 import { clientPortalThreadsApi, clientDocumentsApi } from '@/services/api';
+import { clientPayrollSubmissionsApi } from '@/services/payrollSubmissions';
 
 export function ClientMessages(): ReactElement {
   return (
@@ -13,6 +14,7 @@ export function ClientMessages(): ReactElement {
       <div className="p-4 sm:p-6 lg:p-8">
         <PortalMessagesPanel
           api={clientPortalThreadsApi}
+          periodApi={clientPayrollSubmissionsApi}
           documents={[]}
           documentsApi={clientDocumentsApi}
           audience="client"

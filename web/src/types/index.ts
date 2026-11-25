@@ -1782,6 +1782,7 @@ export interface PayrollItem {
     notes?: string | null;
   } | null;
   non_taxable_pay?: number;
+  non_taxable_additions_total?: number | string;
   // Calculated pay
   gross_pay?: number;
   net_pay?: number;

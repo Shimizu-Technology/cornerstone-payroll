@@ -20,7 +20,6 @@ module Api
               gross_pay: check[:gross_pay],
               net_pay: check[:net_pay],
               hours_total: check[:hours_total],
-              payment_method: check[:payment_method],
               source_label: check[:source_label],
               adjustment_note: check[:adjustment_note]
             }

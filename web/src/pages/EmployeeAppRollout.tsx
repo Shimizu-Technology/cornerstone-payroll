@@ -132,7 +132,9 @@ function EmployeeTasks<Row extends { id: number; name: string }>({ title, rows, 
 }) {
   return (
     <details className="rounded-xl border border-neutral-200 bg-white px-3">
-      <summary className="flex min-h-11 cursor-pointer items-center py-3 text-sm font-semibold text-neutral-800">{title} ({rows.length})</summary>
+      <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold text-neutral-800">
+        <span className="inline-flex items-center">{title} ({rows.length})</span>
+      </summary>
       {rows.length === 0 ? <p className="pb-3 text-sm text-neutral-600">No employees to review.</p> : (
         <ul className="max-h-64 divide-y divide-neutral-100 overflow-y-auto pb-1">
           {rows.map((row) => (

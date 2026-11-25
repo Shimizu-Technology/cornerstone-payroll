@@ -486,6 +486,7 @@ export function EmployeeList() {
                                 direction={sortDirection}
                                 onToggle={toggleSort}
                                 stickyLeft
+                                sentenceCase={isClient}
                                 className="bg-gray-50"
                               />
                               <SortableHead
@@ -494,14 +495,16 @@ export function EmployeeList() {
                                 activeColumn={sortBy}
                                 direction={sortDirection}
                                 onToggle={toggleSort}
+                                sentenceCase={isClient}
                                 className="bg-gray-50"
                               />
                               <SortableHead
-                                label="Pay rate"
+                                label={isClient ? 'Pay rate' : 'Pay Rate'}
                                 column="rate"
                                 activeColumn={sortBy}
                                 direction={sortDirection}
                                 onToggle={toggleSort}
+                                sentenceCase={isClient}
                                 className="bg-gray-50"
                               />
                               <TableHead className="bg-gray-50">Paid by</TableHead>
@@ -511,6 +514,7 @@ export function EmployeeList() {
                                 activeColumn={sortBy}
                                 direction={sortDirection}
                                 onToggle={toggleSort}
+                                sentenceCase={isClient}
                                 className="bg-gray-50"
                               />
                               <TableHead className="text-right">Actions</TableHead>
@@ -780,6 +784,7 @@ function SortableHead({
   onToggle,
   className,
   stickyLeft = false,
+  sentenceCase = false,
 }: {
   label: string;
   column: 'name' | 'department' | 'rate' | 'status';
@@ -788,6 +793,7 @@ function SortableHead({
   onToggle: (column: 'name' | 'department' | 'rate' | 'status') => void;
   className?: string;
   stickyLeft?: boolean;
+  sentenceCase?: boolean;
 }) {
   const Icon = activeColumn !== column ? ArrowUpDown : direction === 'asc' ? ArrowUp : ArrowDown;
 
@@ -796,7 +802,9 @@ function SortableHead({
       <button
         type="button"
         onClick={() => onToggle(column)}
-        className="inline-flex min-h-11 items-center gap-1.5 rounded text-left text-xs font-medium text-neutral-600 transition-colors hover:text-neutral-900"
+        className={sentenceCase
+          ? 'inline-flex min-h-11 items-center gap-1.5 rounded text-left text-xs font-medium text-neutral-600 transition-colors hover:text-neutral-900'
+          : 'inline-flex items-center gap-1.5 rounded text-left text-xs font-medium uppercase tracking-wider text-gray-500 transition-colors hover:text-gray-700'}
       >
         <span>{label}</span>
         <Icon className="h-3.5 w-3.5" />

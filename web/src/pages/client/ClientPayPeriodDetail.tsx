@@ -164,6 +164,7 @@ export function ClientPayPeriodDetail(): ReactElement {
                       <TableHead>Hours</TableHead>
                       <TableHead>Rate</TableHead>
                       <TableHead>Gross</TableHead>
+                      <TableHead>Non-taxable additions</TableHead>
                       <TableHead>Taxes</TableHead>
                       <TableHead>Retirement</TableHead>
                       <TableHead>Loans</TableHead>
@@ -216,6 +217,13 @@ function numericAmount(value: number | string | null | undefined): number {
   return value == null || !Number.isFinite(parsed) ? 0 : parsed;
 }
 
+function itemNonTaxableAdditions(item: PayrollItem): number {
+  if (item.non_taxable_additions_total != null && Number.isFinite(Number(item.non_taxable_additions_total))) {
+    return numericAmount(item.non_taxable_additions_total);
+  }
+  return numericAmount(item.non_taxable_pay);
+}
+
 function itemTaxes(item: PayrollItem): number {
   return numericAmount(item.withholding_tax) + numericAmount(item.additional_withholding)
     + numericAmount(item.social_security_tax) + numericAmount(item.medicare_tax)
@@ -227,7 +235,10 @@ function itemRetirement(item: PayrollItem): number {
 }
 
 function itemLoans(item: PayrollItem): number {
-  return numericAmount(item.loan_payment) || numericAmount(item.loan_deduction);
+  if (item.loan_payment != null && Number.isFinite(Number(item.loan_payment))) {
+    return numericAmount(item.loan_payment);
+  }
+  return numericAmount(item.loan_deduction);
 }
 
 function itemInsurance(item: PayrollItem): number {
@@ -236,11 +247,12 @@ function itemInsurance(item: PayrollItem): number {
 
 function itemOtherDeductions(item: PayrollItem): number {
   if (item.other_deductions != null && Number.isFinite(Number(item.other_deductions))) {
-    return numericAmount(item.other_deductions);
+    const value = numericAmount(item.other_deductions);
+    return value === 0 ? 0 : value;
   }
   const total = numericAmount(item.total_deductions);
   const diff = Math.round((total - (itemTaxes(item) + itemRetirement(item) + itemLoans(item) + itemInsurance(item))) * 100) / 100;
-  return total >= 0 ? Math.max(0, diff) : diff;
+  return diff === 0 ? 0 : diff;
 }
 
 function formatWholeOrCents(amount: number): string {
@@ -270,12 +282,15 @@ function formatItemRate(item: PayrollItem): string {
   const rate = numericAmount(item.pay_rate);
   if (item.employment_type === 'hourly') return `${formatCurrency(rate)}/hr`;
   if (item.employment_type === 'contractor') {
-    return item.contractor_pay_type === 'hourly' ? `${formatCurrency(rate)}/hr` : `${formatCurrency(rate)}/period`;
+    if (item.contractor_pay_type === 'hourly') return `${formatCurrency(rate)}/hr`;
+    if (item.contractor_pay_type === 'flat_fee') return `${formatCurrency(rate)}/period`;
+    return formatCurrency(rate);
   }
   if (item.employment_type === 'salary') {
     if (item.salary_type === 'variable' && rate === 0) return 'Variable';
     if (item.salary_type === 'per_period') return `${formatCurrency(rate)}/period`;
-    return `${formatWholeOrCents(rate)}/yr`;
+    if (item.salary_type === 'annual') return `${formatWholeOrCents(rate)}/yr`;
+    return formatCurrency(rate);
   }
   return formatCurrency(rate);
 }
@@ -298,6 +313,7 @@ function PayrollItemMobileCard({ item }: PayrollItemRowProps): ReactElement {
         <MobileField label="Hours" value={formatItemHours(item)} />
         <MobileField label="Rate" value={formatItemRate(item)} />
         <MobileField label="Gross" value={formatCurrency(numericAmount(item.gross_pay))} />
+        <MobileField label="Non-taxable additions" value={formatCurrency(itemNonTaxableAdditions(item))} />
         <MobileField label="Taxes" value={formatCurrency(itemTaxes(item))} />
         <MobileField label="Retirement" value={formatCurrency(itemRetirement(item))} />
         <MobileField label="Loans" value={formatCurrency(itemLoans(item))} />
@@ -322,6 +338,7 @@ function PayrollItemRow({ item }: PayrollItemRowProps): ReactElement {
       <TableCell>{formatItemHours(item)}</TableCell>
       <TableCell>{formatItemRate(item)}</TableCell>
       <TableCell>{formatCurrency(item.gross_pay ?? 0)}</TableCell>
+      <TableCell>{formatCurrency(itemNonTaxableAdditions(item))}</TableCell>
       <TableCell>{formatCurrency(itemTaxes(item))}</TableCell>
       <TableCell>{formatCurrency(itemRetirement(item))}</TableCell>
       <TableCell>{formatCurrency(itemLoans(item))}</TableCell>

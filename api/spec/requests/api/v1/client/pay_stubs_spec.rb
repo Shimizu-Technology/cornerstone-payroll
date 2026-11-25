@@ -275,7 +275,8 @@ RSpec.describe "Client pay stubs", type: :request do
       "source_label" => "From QuickBooks records"
     )
     expect(qb_rows.first["net_pay"].to_d).to eq(1320.50.to_d)
-    expect(response.body).not_to include("QB-9991", "internal only")
+    expect(qb_rows.first).not_to have_key("payment_method")
+    expect(response.body).not_to include("QB-9991", "internal only", "Direct deposit")
 
     get "/api/v1/client/pay_stubs/employee/#{other_employee.id}", headers: headers
     expect(response).to have_http_status(:not_found)
