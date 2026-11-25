@@ -261,6 +261,16 @@ RSpec.describe PostEmployeePayStubsJob do
     end
 
     context "for a stub posted under the earlier fingerprint" do
+      let(:stored) { {} }
+
+      before do
+        allow(storage).to receive(:upload) do |key, bytes, **|
+          stored[key] = bytes
+          true
+        end
+        allow(storage).to receive(:download) { |key| stored[key] }
+      end
+
       def post_with_legacy_fingerprint(ytd_net:)
         item.update_columns(ytd_net: ytd_net, ytd_withholding_tax: 0, ytd_social_security_tax: 0, ytd_medicare_tax: 0)
         run_at(cutoff)
@@ -277,6 +287,42 @@ RSpec.describe PostEmployeePayStubsJob do
         expect(documents.sole.payroll_facts_checked_at).to be >= cutoff + 5.minutes
       end
 
+      it "revises it once when an earlier check moves pay between the earnings rows it printed" do
+        earlier_period = create(:pay_period, :committed, company: company, committed_at: Time.utc(2026, 7, 20),
+          start_date: Date.new(2026, 7, 18), end_date: Date.new(2026, 7, 31), pay_date: Date.new(2026, 8, 6))
+        earlier = create(:payroll_item, pay_period: earlier_period, employee: employee, hours_worked: 70, bonus: 150,
+          gross_pay: 1_200, net_pay: 960, payment_delivery_method: "direct_deposit")
+        post_with_legacy_fingerprint(ytd_net: 1_920)
+        expect(posted_text(documents.sole)).to include("Bonus", "$150.00")
+        earlier.update_columns(hours_worked: 80, bonus: 0)
+
+        expect { run_at(cutoff + 5.minutes) }.to change { documents.count }.by(1)
+        expect(posted_text(documents.last)).not_to include("Bonus")
+        item.update_columns(updated_at: cutoff + 6.minutes)
+        expect { run_at(cutoff + 10.minutes) }.not_to change { documents.count }
+      end
+
+      it "keeps it current when its frozen PDF differs only in how amounts were formatted" do
+        # A rate whose half cent Float rounds down and decimal rounding rounds up.
+        item.update_columns(pay_rate: 15.125, hours_worked: 80, gross_pay: 1_210, net_pay: 1_210)
+        # The formatter the earlier statements printed with: Float rounding, sign after "$".
+        allow_any_instance_of(PayStubGenerator).to receive(:format_currency) do |_generator, amount|
+          "$#{format('%.2f', amount.to_f).reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+        end
+        post_with_legacy_fingerprint(ytd_net: 1_210)
+        expect(posted_text(documents.sole)).to include("$15.12")
+        allow_any_instance_of(PayStubGenerator).to receive(:format_currency).and_call_original
+
+        expect { run_at(cutoff + 5.minutes) }.not_to change(EmployeeDocument, :count)
+      end
+
+      it "posts a revision when its frozen PDF cannot be read back" do
+        post_with_legacy_fingerprint(ytd_net: 960)
+        stored.clear
+
+        expect { run_at(cutoff + 5.minutes) }.to change(EmployeeDocument, :count).by(1)
+      end
+
       it "posts a revision when the statement now prints a different YTD than the stale snapshot it showed" do
         post_with_legacy_fingerprint(ytd_net: 900)
 
@@ -284,6 +330,37 @@ RSpec.describe PostEmployeePayStubsJob do
         expect(documents.last.payroll_facts_sha256).to eq(PayStubGenerator.new(item, employee_copy: true).employee_payroll_facts_sha256)
       end
     end
+  end
+
+  def sql_statements
+    count = 0
+    counter = lambda do |*, payload|
+      next if payload[:cached] || payload[:name].in?(%w[SCHEMA TRANSACTION])
+      next if payload[:sql].match?(/\A\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)/i)
+
+      count += 1
+    end
+    ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }
+    count
+  end
+
+  it "rechecks an unchanged stub in no more queries than before it checked printed YTD" do
+    (1..6).each do |index|
+      earlier_period = create(:pay_period, :committed, company: company, committed_at: Time.utc(2026, 1, 1),
+        start_date: Date.new(2026, 1, 1) + (14 * index), end_date: Date.new(2026, 1, 13) + (14 * index),
+        pay_date: Date.new(2026, 1, 16) + (14 * index))
+      create(:payroll_item, pay_period: earlier_period, employee: employee, gross_pay: 1_200, net_pay: 960,
+        payment_delivery_method: "direct_deposit")
+    end
+    item
+    run_at(cutoff)
+    item.update_columns(updated_at: cutoff + 1.minute)
+
+    # Measured on the earlier fingerprint, which read only this check: 11.
+    due = item.reload
+    statements = travel_to(cutoff + 5.minutes) { sql_statements { EmployeeDocuments::PostPayStub.new(due).call } }
+    expect(documents.sole.payroll_facts_checked_at).to eq(cutoff + 5.minutes)
+    expect(statements).to be <= 11
   end
 
   it "leaves a reversed item withdrawn when there is no successor" do

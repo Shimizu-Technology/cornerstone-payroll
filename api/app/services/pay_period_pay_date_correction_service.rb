@@ -33,6 +33,9 @@ class PayPeriodPayDateCorrectionService
     result = nil
 
     ActiveRecord::Base.transaction do
+      # Company, then period, then paychecks, as every payroll change and the
+      # employee stub posting take them.
+      Company.lock.find(pay_period.company_id)
       locked = PayPeriod.lock("FOR UPDATE").find(pay_period.id)
       old_pay_date = locked.pay_date
 

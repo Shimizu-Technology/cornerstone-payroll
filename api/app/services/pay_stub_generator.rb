@@ -99,19 +99,27 @@ class PayStubGenerator
   # printed YTD amount. Current rows use their own labels, so a relabelled YTD
   # attribution alone does not.
   def employee_payroll_facts_sha256
-    @employee_payroll_facts_sha256 ||= Digest::SHA256.hexdigest([ *employee_payroll_current_facts, printed_ytd_facts ].to_json)
+    @employee_payroll_facts_sha256 ||= begin
+      # This check's components load in the same batch as the earlier checks'.
+      ytd_source_items
+      Digest::SHA256.hexdigest([ *employee_payroll_current_facts, printed_ytd_facts ].to_json)
+    end
   end
 
-  # A stub posted under the earlier fingerprint, which held the saved tax and
-  # net YTD snapshots in place of the printed YTD, stays current while those
-  # facts hold and this statement would print the same tax and net YTD.
-  def employee_payroll_facts_current?(sha256)
+  # A stub posted under the earlier fingerprint held the saved tax and net YTD
+  # snapshots in place of the printed YTD, so the fingerprint alone cannot
+  # show which earnings or other YTD rows it printed. It stays current only
+  # while those facts hold, this statement would print the same tax and net
+  # YTD, and its frozen PDF prints the same amounts this statement would.
+  def employee_payroll_facts_current?(document)
+    sha256 = document.payroll_facts_sha256
     return true if sha256 == employee_payroll_facts_sha256
     return false unless sha256 == Digest::SHA256.hexdigest(employee_payroll_current_facts(LEGACY_YTD_SNAPSHOT_FACTS).to_json)
-
-    LEGACY_YTD_SNAPSHOT_FACTS.zip(%i[net withholding_tax social_security_tax medicare_tax]).all? do |column, key|
+    return false unless LEGACY_YTD_SNAPSHOT_FACTS.zip(%i[net withholding_tax social_security_tax medicare_tax]).all? do |column, key|
       payroll_item.public_send(column).to_d.round(2) == statement_ytd_totals.fetch(key)
     end
+
+    frozen_pdf_prints_same_amounts?(document)
   end
 
   def self.employee_payment_line(item)
@@ -125,6 +133,30 @@ class PayStubGenerator
   end
 
   private
+
+  # Money amounts in print order. Zero amounts are left out, since the earlier
+  # layout printed a contractor's zero tax rows; amounts within a cent agree,
+  # since the earlier formatter rounded through Float.
+  def frozen_pdf_prints_same_amounts?(document)
+    bytes = R2StorageService.new.download(document.storage_key)
+    return false unless bytes && Digest::SHA256.hexdigest(bytes) == document.sha256
+
+    frozen = printed_amounts(bytes)
+    current = printed_amounts(generate)
+    frozen.size == current.size && frozen.zip(current).all? { |old, new| (old - new).abs <= BigDecimal("0.01") }
+  rescue PDF::Reader::MalformedPDFError, PDF::Reader::UnsupportedFeatureError
+    false
+  end
+
+  def printed_amounts(bytes)
+    text = PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join("\n")
+    text.scan(/(-?)\$(-?)([\d,]+\.\d{2})/).filter_map do |sign, inner_sign, digits|
+      amount = BigDecimal(digits.delete(","))
+      next if amount.zero?
+
+      sign.present? || inner_sign.present? ? -amount : amount
+    end
+  end
 
   def employee_payroll_current_facts(snapshot_columns = [])
     earnings = unitemized_earning_lines(source_labels: PayrollSourceEarningLabel.new(payroll_item), include_ytd: false)
@@ -146,7 +178,7 @@ class PayStubGenerator
     fact = ->(amount) { amount&.to_d&.round(2)&.to_s("F") }
     rows = ->(list) { list.map { |row| [ row.label, fact.call(row.ytd) ] } }
     {
-      earnings: statement_earnings.map { |line| fact.call(line[:ytd]) },
+      earnings: printed_earning_ytds.map { |ytd| fact.call(ytd) },
       taxes: tax_lines.map { |label, _amount, ytd| [ label, fact.call(ytd) ] },
       deductions: rows.call(statement_ytd_breakdown.deductions),
       other_pay: rows.call(statement_ytd_breakdown.other_pay),
@@ -154,6 +186,15 @@ class PayStubGenerator
       gross: fact.call(pay_ytd_total),
       net: fact.call(statement_ytd_totals[:net])
     }
+  end
+
+  # The earnings YTD column as statement_earnings prints it, without resolving
+  # the display labels, which the YTD amounts never depend on.
+  def printed_earning_ytds
+    rows = itemized_earnings_rows
+    return rows.map(&:ytd) if rows
+
+    unitemized_earning_lines(source_labels: ->(_label) { }).map { |line| line[:ytd] }
   end
 
   def render_header(pdf)
@@ -585,9 +626,10 @@ class PayStubGenerator
 
   # Employee taxes as printed: income tax, Social Security and Medicare always,
   # then W-4 4c additional withholding when it has a current or YTD amount.
-  # Contractors have no employee taxes, on paper or in the employee app.
+  # A contractor paycheck has no employee taxes, on paper or in the employee
+  # app. The paycheck's saved type decides, not the worker's current one.
   def tax_lines
-    return [] if employee.contractor?
+    return [] if payroll_item.contractor?
 
     lines = [
       [ "Federal/Guam Income Tax", payroll_item.withholding_tax, statement_ytd_totals[:withholding_tax] ],
@@ -705,7 +747,7 @@ class PayStubGenerator
       [ "Net Pay", format_currency(statement_ytd_totals[:net]) ]
     ]
 
-    if employee.contractor?
+    if payroll_item.contractor?
       ytd_data.reject! { |label, _amount| label.in?([ "Federal/Guam Tax", "Social Security", "Medicare" ]) }
     elsif statement_ytd_totals[:additional_withholding].nonzero?
       ytd_data.insert(3, [ "Additional Withholding", format_currency(statement_ytd_totals[:additional_withholding]) ])
@@ -728,30 +770,28 @@ class PayStubGenerator
     @pay_ytd_total ||= earnings_ytd_breakdown.pay_ytd_total(statement_ytd_totals[:gross])
   end
 
-  # Every YTD total the statement prints, from one reporting query: earlier
-  # paychecks and the dated opening balance, plus this check exactly when the
-  # YTD breakdown rows count it, so the totals and rows always agree.
+  # Every YTD total the statement prints: the dated opening balance plus the
+  # same earlier and current paychecks the YTD rows add up, so the totals and
+  # rows always agree.
   def statement_ytd_totals
     @statement_ytd_totals ||= begin
-      before = employee.ytd_totals_before(
-        year: pay_period.pay_date.year,
-        pay_date: pay_period.pay_date,
-        pay_period_id: pay_period.id,
-        for_reporting: true
-      )
-      current = earnings_ytd_breakdown.source_items.include?(payroll_item)
+      opening = ytd_sources.historical_balance&.ytd_aggregate_totals || {}
       STATEMENT_YTD_FIELDS.transform_values do |field|
-        (before.fetch(field).to_d + (current ? payroll_item.public_send(field).to_d : 0)).round(2)
+        (opening.fetch(field, 0).to_d + ytd_source_items.sum(0.to_d) { |item| item.public_send(field).to_d }).round(2)
       end
     end
   end
 
+  def ytd_sources
+    @ytd_sources ||= PayrollStatementYtdSources.new(payroll_item)
+  end
+
   def earnings_ytd_breakdown
-    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item)
+    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item, sources: ytd_sources)
   end
 
   def source_earning_labels
-    @source_earning_labels ||= PayrollSourceEarningLabel.new(payroll_item, source_items: earnings_ytd_breakdown.source_items)
+    @source_earning_labels ||= PayrollSourceEarningLabel.new(payroll_item, source_items: ytd_source_items)
   end
 
   def payroll_field_entries_for(*treatments)
@@ -773,7 +813,7 @@ class PayStubGenerator
   end
 
   def statement_ytd_breakdown
-    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item)
+    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item, sources: ytd_sources)
   end
 
   def pay_stub_deduction_label(row)
@@ -789,7 +829,7 @@ class PayStubGenerator
 
   # The same earlier and current paychecks as the statement's YTD rows.
   def ytd_source_items
-    statement_ytd_breakdown.source_items
+    ytd_sources.items
   end
 
   def ytd_payroll_field_totals
