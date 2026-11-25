@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "webmock/rspec"
 
 RSpec.describe UserInviteEmailService do
   let(:user) { create(:user, role: "client", email: "owner+invite@client.example") }
@@ -50,5 +51,18 @@ RSpec.describe UserInviteEmailService do
 
     expect(logged.join).to include("***@client.example")
     expect(logged.join).not_to include("owner+invite")
+  end
+
+  it "logs the Resend message id returned by Resend::Emails.send" do
+    saved_key = Resend.api_key
+    Resend.api_key = "re_test_synthetic"
+    stub_request(:post, "https://api.resend.com/emails")
+      .to_return(status: 200, body: { id: "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794" }.to_json,
+        headers: { "Content-Type" => "application/json" })
+
+    expect(described_class.send_invite(user: user, invited_by: nil, invitation_url: invitation_url)).to be(true)
+    expect(logged.join).to include("id=49a3999c-0ce1-4ea6-ab68-afcd6dc2e794")
+  ensure
+    Resend.api_key = saved_key
   end
 end

@@ -52,8 +52,68 @@ if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$OUTPUT_DIR"
-OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+# Reject symlink, non-owned, or world-writable output directories before writing
+# server logs or scan reports there (an earlier harness version left 0777 dirs).
+validate_output_dir() {
+  local dir="$1"
+  if [[ -L "$dir" ]]; then
+    echo "Refusing symlink --output-dir: ${dir}" >&2
+    exit 1
+  fi
+  mkdir -p -m 0755 "$dir"
+  if [[ ! -d "$dir" || -L "$dir" ]]; then
+    echo "Invalid --output-dir: ${dir}" >&2
+    exit 1
+  fi
+  if [[ ! -O "$dir" ]]; then
+    echo "Refusing --output-dir not owned by current user: ${dir}" >&2
+    exit 1
+  fi
+  local perm
+  if stat -c '%a' "$dir" >/dev/null 2>&1; then
+    perm="$(stat -c '%a' "$dir")"
+  else
+    perm="$(stat -f '%Lp' "$dir")"
+  fi
+  if (( (8#$perm & 8#0002) != 0 )); then
+    echo "Refusing world-writable --output-dir (mode ${perm}): ${dir}" >&2
+    exit 1
+  fi
+}
+
+# Copy a regular file into OUTPUT_DIR without following source or destination
+# symlinks (stages via mktemp in OUTPUT_DIR and atomically renames into place).
+safe_copy_file() {
+  local src="$1"
+  local dest="$2"
+  if [[ ! -f "$src" || -L "$src" ]]; then
+    echo "Refusing to copy non-regular or symlink source: ${src}" >&2
+    return 1
+  fi
+  if [[ -L "$dest" || -d "$dest" ]]; then
+    echo "Refusing to overwrite destination symlink or directory: ${dest}" >&2
+    return 1
+  fi
+  local tmp_dest
+  tmp_dest="$(mktemp "${OUTPUT_DIR}/.$(basename "$dest").XXXXXX")"
+  chmod 0644 "$tmp_dest"
+  if ! cat "$src" >"$tmp_dest" || ! mv -f "$tmp_dest" "$dest"; then
+    rm -f "$tmp_dest"
+    return 1
+  fi
+}
+
+require_non_symlink_path() {
+  local path="$1"
+  if [[ -L "$path" ]]; then
+    echo "Refusing symlink destination: ${path}" >&2
+    exit 1
+  fi
+}
+
+validate_output_dir "$OUTPUT_DIR"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd -P)"
+validate_output_dir "$OUTPUT_DIR"
 
 # The ZAP container runs as the `zap` user (UID 1000), while CI runners (e.g.
 # GitHub Actions ubuntu-24.04) run as UID 1001, so the directory mounted at
@@ -176,10 +236,11 @@ run_zap_baseline() {
       -I || status=$?
 
   # Copy whatever reports exist (also after a failure) so CI uploads them.
-  cp "${ZAP_WRK}/${prefix}.conf" "${OUTPUT_DIR}/${prefix}.conf"
+  safe_copy_file "${ZAP_WRK}/${prefix}.conf" "${OUTPUT_DIR}/${prefix}.conf"
   local report
   for report in "${ZAP_WRK}/${prefix}"-report.*; do
-    [[ -f "$report" ]] && cp "$report" "${OUTPUT_DIR}/"
+    [[ -e "$report" || -L "$report" ]] || continue
+    safe_copy_file "$report" "${OUTPUT_DIR}/$(basename "$report")"
   done
 
   # ZAP baseline exit codes: 0 = pass, 2 = warn only (ignored with -I), 1/3 = fail/error.
@@ -218,6 +279,7 @@ if [[ "$MODE" == "local" ]]; then
   require_free_port "$API_PORT" "employee API server"
 
   echo "==> Starting employee static server with _headers on 127.0.0.1:${WEB_PORT}"
+  require_non_symlink_path "${OUTPUT_DIR}/web-server.log"
   python3 "${ROOT_DIR}/scripts/security/serve_employee_dist.py" \
     --dir "${ROOT_DIR}/web/dist" \
     --host "127.0.0.1" \
@@ -248,6 +310,7 @@ if [[ "$MODE" == "local" ]]; then
   # and 404 handling. RLS_CONTEXT_GUARD_MODE=off avoids requiring a dedicated
   # payroll_app role for this HTTP-header scan (RLS is verified by RSpec under raise).
   echo "==> Starting employee API (APP_PROCESS_ROLE=employee_web, RAILS_ENV=production, FORCE_SSL=false) on 127.0.0.1:${API_PORT}"
+  require_non_symlink_path "${OUTPUT_DIR}/api-server.log"
   (
     cd "${ROOT_DIR}/api"
     exec env APP_PROCESS_ROLE=employee_web \
