@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/api';
 import type { EmployeeChangeRequest } from '@/services/api';
 import { ClientChangeRequests } from './ClientChangeRequests';
 
-const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), contactChanges: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), contactChanges: vi.fn(), decide: vi.fn() }));
 
 vi.mock('@/services/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/api')>()),
@@ -65,4 +65,21 @@ it('loads contact activity without fetching request details', async () => {
   open('/change-requests?view=contact&request_id=8');
   await screen.findByText('No contact changes found.');
   expect(api.get).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['Approve', 'Approve address', 'approve'],
+  ['Reject', 'Reject request', 'reject'],
+])('explains who sees the optional note when the client clicks %s', async (action, confirmation, decision) => {
+  const pendingAddress = { ...request, profile_address: true, can_review: true };
+  api.list.mockResolvedValue({ data: [pendingAddress], meta });
+  api.get.mockResolvedValue({ data: pendingAddress });
+  api.decide.mockResolvedValue({ data: { ...pendingAddress, status: decision === 'approve' ? 'approved' : 'rejected' } });
+
+  open('/change-requests');
+  fireEvent.click(await screen.findByRole('button', { name: action }));
+  const note = screen.getByRole<HTMLInputElement>('textbox', { name: "Note to the employee (they'll see this)" });
+  expect(note.required).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: confirmation }));
+  await waitFor(() => expect(api.decide).toHaveBeenCalledWith(pendingAddress.id, decision, undefined));
 });

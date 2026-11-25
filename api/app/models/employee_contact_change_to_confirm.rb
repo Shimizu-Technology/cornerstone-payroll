@@ -13,17 +13,18 @@ class EmployeeContactChangeToConfirm < ApplicationRecord
   belongs_to :changed_by, class_name: "User", optional: true
   belongs_to :confirmed_by, class_name: "User", optional: true
 
+  scope :payroll_changes, -> { where.not("employee_contact_changes_to_confirm.after_values ? 'emergency_contacts'") }
   scope :unconfirmed, -> { where(confirmed_at: nil) }
   scope :recent_first, -> { order(id: :desc) }
 
   def self.unconfirmed_count(company)
     return unless CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
 
-    where(company_id: company.id).unconfirmed.count
+    payroll_changes.where(company_id: company.id).unconfirmed.count
   end
 
   # Called in the transaction that applies the employee change. The same entry
-  # powers the client activity view and the payroll confirmation queue.
+  # powers client activity and, for payroll changes, the confirmation queue.
   def self.record!(employee:, actor:, before_values:, after_values:, reviewer: nil, notify_staff: false)
     return if employee.portal_pending_approval?
 

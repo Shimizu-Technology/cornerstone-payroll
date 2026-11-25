@@ -35,6 +35,9 @@ function changeMessage(error: unknown, what: string): string {
   if (error instanceof StepUpCancelledError) return `Not saved. To save your ${what}, confirm it's you.`;
   if (error instanceof EmployeeApiError) {
     switch (error.kind) {
+      case 'email_code_daily_limit': return 'Too many verification tries today. Try again tomorrow.';
+      case 'emergency_contact_limit': return 'You can save up to five emergency contacts.';
+      case 'personal_email_required': return 'Use a personal email address that only you can access.';
       case 'invalid': return `Check your ${what} and try again.`;
       case 'conflict': return 'A change is already being reviewed. Try again after it is decided.';
       case 'offline': return "You're offline. Connect to Wi-Fi or data, then try again.";
@@ -378,7 +381,8 @@ function AddressCard({ profile, onSaved, editable, notice }: ProfileProps): Reac
               <AddressBlock address={profile.address} />
               {request?.status === 'approved' && (
                 <FormMessage tone="good">
-                  {request.decidedAt ? `Your new address was approved on ${longDate(request.decidedAt)}.` : 'Your new address was approved.'} Your W-2 will be mailed here.
+                  {request.decidedAt ? `Your new address was approved on ${longDate(request.decidedAt)}.` : 'Your new address was approved.'} {state.info.w2Delivery === 'mailed' ? 'Your W-2 will be mailed here.' : 'This is the address on file for your W-2.'}
+                  {request.decisionNote && <p className="mt-1 whitespace-pre-wrap break-words">{request.decisionNote}</p>}
                 </FormMessage>
               )}
               {request?.status === 'rejected' && (
@@ -513,6 +517,7 @@ function LegalCard({ profile }: { profile: EmployeeProfile }): ReactElement {
     <Card title="Name and Social Security number">
       <div className="space-y-4">
         <DetailRow label="Legal name" value={profile.legalName} />
+        <DetailRow label="Social Security number" value="Contact Cornerstone" />
         <div className="emp-notice-inline" role="note">
           <p className="font-bold">To change these, ask your manager</p>
           <p className="text-neutral-700">

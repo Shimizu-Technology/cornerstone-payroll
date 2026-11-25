@@ -12,7 +12,7 @@ module EmployeeProfiles
       own_pending = pending if pending&.requested_by_link_id == @link.id && pending.profile_address?
       last_decision = own_requests.where(status: %i[approved rejected]).order(reviewed_at: :desc, id: :desc).first unless own_pending
       {
-        legal_name: @employee.full_name, ssn_last4: @employee.ssn_last_four,
+        legal_name: @employee.full_name,
         email: @employee.email, email_verified: @employee.email_verified_at?,
         phone: @employee.phone, phone_confirmed: @employee.phone_confirmed_by_employee_at?,
         address: @employee.slice(*EmployeeChangeRequest::ADDRESS_FIELDS), payment_method: @employee.payment_delivery_method,
