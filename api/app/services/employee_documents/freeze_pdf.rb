@@ -2,18 +2,20 @@
 
 module EmployeeDocuments
   class FreezePdf
-    # The caller owns the source lock and transaction.
-    def self.call(bytes:, source:, posted_at:, revision:, predecessor: nil, payment_line: nil, payroll_facts: nil)
+    # The caller owns the source lock and transaction. A W-2GU copy's source
+    # is the employee, with its tax_year (M4-5).
+    def self.call(bytes:, source:, posted_at:, revision:, predecessor: nil, payment_line: nil, payroll_facts: nil, tax_year: nil)
       source_name = source.model_name.singular
       digest = Digest::SHA256.hexdigest(bytes)
-      path = "employee_documents/company_#{source.company_id}/#{source_name}_#{source.id}/#{revision}-#{digest}.pdf"
+      folder = "#{source_name}_#{source.id}#{"/w2gu_#{tax_year}" if tax_year}"
+      path = "employee_documents/company_#{source.company_id}/#{folder}/#{revision}-#{digest}.pdf"
       key = StagingStoragePolicy.new_key(path)
       if block_given?
         key = key.sub(/\.pdf\z/, "-#{SecureRandom.uuid}.pdf")
         yield key
       end
       document = EmployeeDocument.create!(
-        source_name => source, company_id: source.company_id, revision: revision,
+        source_name => source, company_id: source.company_id, revision: revision, tax_year: tax_year,
         storage_key: key, sha256: digest, posted_at: posted_at,
         **(payroll_facts || {}), payment_line: payment_line, corrected: predecessor.present?, replaces_document: predecessor
       )

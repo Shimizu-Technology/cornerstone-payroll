@@ -49,6 +49,8 @@ module EmployeeLinks
 
       years = former_access_years(link.company)
       access_until = (termination_date + years.years).in_time_zone(PayrollBusinessClock::TIME_ZONE).end_of_day
+      # A posted W-2GU copy stays available through October 15 of the next year (M4-5).
+      access_until = [ access_until, EmployeeDocuments::TaxFormRetention.floor_for(link.employee) ].compact.max
       link.update!(status: "former", former_at: now, former_access_until: access_until)
       EmployeeLinks.side_effect_audit do
         EmployeeLinks.audit!(link, "made_former", user: actor, actor: audit_actor, request: request,
