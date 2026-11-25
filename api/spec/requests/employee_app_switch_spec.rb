@@ -653,6 +653,43 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(response.parsed_body["error"]).to include("already enforces row-level security")
     end
 
+    it "pauses through the enforcement window, resumes once enforced, and reopens after a rollback only with a new owner window" do
+      open_window!
+      turn_on_directly!(demo, %w[employee_portal_enabled])
+      first = EmployeeAppEarlyAccessWindow.sole
+
+      # Mid-window (partial) and under the kill switch the waiver closes the
+      # app at read time, but the window and the stored switches survive.
+      [ shadow_state.merge(phase: "partial"), shadow_state.merge(phase: "bypassed", kill_switch_bypass: true) ].each do |state|
+        allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(state)
+        EmployeeAppSwitch::Enforcement.reset_cache!
+        CloseExpiredDemoEarlyAccessJob.perform_now
+        expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(false), state.inspect
+        expect(stored(demo)["employee_portal_enabled"]).to be(true), state.inspect
+        expect(first.reload.status).to eq("in_effect")
+      end
+
+      # Verified enforcement needs no waiver: access resumes and the window retires.
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(enforced_state)
+      EmployeeAppSwitch::Enforcement.reset_cache!
+      expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
+      expect(first.reload.status).to eq("retired")
+
+      # Rolled back to shadow: the sweep closes the demo, and a new owner window
+      # plus turning the switch back on restores it.
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state)
+      EmployeeAppSwitch::Enforcement.reset_cache!
+      CloseExpiredDemoEarlyAccessJob.perform_now
+      expect(stored(demo)["employee_portal_enabled"]).to be(false)
+
+      open_window!(reason: "Owner reopened after the RLS rollback")
+      expect(response).to have_http_status(:ok), response.body
+      expect(EmployeeAppEarlyAccessWindow.current_for(organization.id)).to have_attributes(set_by_id: owner.id)
+      expect(first.reload.status).to eq("retired")
+      turn_on_directly!(demo, %w[employee_portal_enabled])
+      expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
+    end
+
     it "ends a window with a reason, and the row can't be edited afterwards" do
       open_window!
       delete "#{path}/early_access", params: { reason: "Rehearsal finished" }, as: :json, headers: auth(recent: false, target: demo)

@@ -28,6 +28,49 @@ RSpec.describe RlsEnforcement do
     )
   end
 
+  describe "policy definitions" do
+    let(:parent_table) { RlsTables::RLS_PARENT_PROTECTED_TABLES.keys.first }
+    let(:shared_table) { RlsTables::RLS_SHARED_READ_TABLES.first }
+
+    before { allow(described_class).to receive(:runtime_role_ready?).and_return(true) }
+
+    def failure
+      described_class.preflight_failures(connection).grep(/policy definitions differ/).sole
+    end
+
+    it "match what rls:install would create on every protected table" do
+      expect(RlsDatabase.policy_mismatches(connection)).to eq([])
+      expect(RlsDatabase.policy_definitions(connection, "employee_notes").sole)
+        .to include("name" => "company_isolation", "cmd" => "*", "roles" => "public", "permissive" => true)
+      expect(connection.select_value("SELECT to_regclass('pg_temp.employee_notes')::text")).to be_nil
+    end
+
+    it "refuses a tampered predicate, naming the table" do
+      connection.execute("ALTER POLICY company_isolation ON employee_notes USING (true)")
+      # A stale parent-derived predicate that would deny every company request.
+      connection.execute("ALTER POLICY company_isolation ON #{parent_table} USING (current_setting('app.rls_mode', true) = 'system')")
+      connection.execute("ALTER POLICY company_select ON #{shared_table} USING (true)")
+      expect(failure).to eq(
+        "policy definitions differ from db/rls_policies.sql on: #{[ "employee_notes", parent_table, shared_table ].sort.join(', ')}; " \
+        "re-run rls:install to reinstall them"
+      )
+    end
+
+    it "refuses policies granted to the wrong roles" do
+      connection.execute("ALTER POLICY company_isolation ON departments TO CURRENT_USER")
+      expect(failure).to include("on: departments;")
+      expect(RlsDatabase.policy_mismatches(connection, %w[departments employee_notes])).to eq(%w[departments])
+    end
+
+    it "is clean again once rls:install reinstalls the table" do
+      connection.execute("ALTER POLICY company_isolation ON departments WITH CHECK (true)")
+      expect(RlsDatabase.policy_mismatches(connection, %w[departments])).to eq(%w[departments])
+      connection.execute(File.read(RlsDatabase::POLICY_FILE))
+      connection.execute(RlsDatabase.install_policy_sql(connection, "public", "departments"))
+      expect(RlsDatabase.policy_mismatches(connection, %w[departments])).to eq([])
+    end
+  end
+
   it "accepts only a non-bypass runtime role with SELECT-only kill switch access" do
     connection.execute(<<~SQL)
       DO $$ BEGIN
