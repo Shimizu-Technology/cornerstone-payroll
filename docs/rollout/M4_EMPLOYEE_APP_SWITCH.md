@@ -55,12 +55,16 @@ The screen shows the observed guard state and the database state side by side, a
 
 Sign-up and claim use the current server-published Terms. Publish each immutable version with the exact served Terms file so the API can return its SHA-256 digest.
 
+The employee site's Netlify rules serve the versioned HTML directly at `/terms` and `/privacy`. Publish root-relative versioned URLs so every client subdomain resolves them on its own employee host and recorded versions keep pointing to the same bytes after the friendly routes change. These paths pass `safeDocumentUrl`. After deploying the employee site, verify that the SHA-256 of the versioned Terms response matches the checked-in Terms HTML. From `api/` in the matching checkout, publish the draft:
+
 ```bash
-VERSION=2026-12-01-draft STATUS=draft TERMS_URL=https://... PRIVACY_URL=https://... \
-  TERMS_FILE=terms.html bin/rails employee_terms:publish
+VERSION=2026-12-01-draft STATUS=draft TERMS_URL=/legal/employee-terms-2026-12-01-draft.html \
+  PRIVACY_URL=/legal/employee-privacy-2026-12-01-draft.html \
+  TERMS_FILE=../web/deploy/employee/legal/employee-terms-2026-12-01-draft.html \
+  bin/rails employee_terms:publish
 ```
 
-Rows can't be edited or deleted. Counsel's approval is a new row with `STATUS=approved`.
+Rows can't be edited or deleted. For counsel's approved release, add new versioned HTML files, set their version and effective date, set `data-status="approved"` on each document, and point the employee redirects at the new files. Keep the draft files at their original locations for audit. Deploy the approved pages before publishing a new row with `STATUS=approved` and the matching approved Terms file. Counsel must review both documents before any real employee is invited.
 
 ## Demo early access before database enforcement
 
