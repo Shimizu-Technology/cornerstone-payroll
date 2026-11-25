@@ -52,7 +52,7 @@ class User < ApplicationRecord
   validate :practice_scope_is_isolated
   validate :platform_owner_requirements
   validate :platform_owner_identity_is_immutable, on: :update
-  validate :demo_client_identity_is_fixed, on: :update
+  validate :demo_identity_is_fixed, on: :update
 
   before_validation :default_organization_from_company
   before_save :record_deactivation, if: :will_save_change_to_active?
@@ -313,22 +313,28 @@ class User < ApplicationRecord
     return if company.blank? || !company.test_workspace? || staff_member? || (client? && practice_company_id == company_id)
     # A demo company's client and employee-app logins are its own: only
     # allow-listed addresses (private configuration), never a practice login.
-    # Deactivating one is always allowed, even after its address left the
-    # allow-list.
     return if (client? || portal_employee?) && company.demo? && practice_company_id.nil? &&
-      ((persisted? && !active?) || DemoOutbound.allowed?(email))
+      (closing_demo_login? || DemoOutbound.allowed?(email))
 
     errors.add(:company, "requires a practice-only client login or payroll staff")
   end
 
-  # A demo client identity stays a client of a demo: a role edit can't turn
-  # its Clerk identity into firm staff, and its home can't move to a live
-  # client.
-  def demo_client_identity_is_fixed
-    return unless role_in_database == "client" && practice_company_id_in_database.nil? &&
+  # Saving an existing demo login without changing who it is or turning it
+  # on works even after its address left the allow-list: deactivating it, or
+  # clearing a pending sign-up's invitation and nonce.
+  def closing_demo_login?
+    persisted? && !will_save_change_to_email? && !will_save_change_to_role? && !will_save_change_to_company_id? &&
+      !will_save_change_to_clerk_id? && !(will_save_change_to_active? && active?)
+  end
+
+  # A demo client or employee-app identity stays what it is, on a demo: a
+  # role edit can't turn its Clerk identity into firm staff (or a client into
+  # an employee login), and its home can't move to a live client.
+  def demo_identity_is_fixed
+    return unless %w[client portal_employee].include?(role_in_database) && practice_company_id_in_database.nil? &&
       Company.find_by(id: company_id_in_database)&.demo?
 
-    errors.add(:role, "can't be changed for this login. Create a separate login for staff access.") unless client?
+    errors.add(:role, "can't be changed for this login. Create a separate login for staff access.") if will_save_change_to_role?
     errors.add(:company, "can't be changed for this login") unless company&.demo?
   end
 

@@ -120,9 +120,11 @@ module Api
           nil
         end
 
+        # A practice copy never opens the employee app; a demo company reports
+        # its real switches, like a live client (CompanyFeatures).
         def serialize_profile(profile)
           payload = profile.serialize_payload
-          return payload unless @target_company.test_workspace?
+          return payload unless @target_company.practice_copy?
 
           payload.merge(
             employee_portal_enabled: false,

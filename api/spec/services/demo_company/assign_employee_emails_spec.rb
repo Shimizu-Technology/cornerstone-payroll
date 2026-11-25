@@ -8,6 +8,11 @@ RSpec.describe DemoCompany::AssignEmployeeEmails do
   let!(:kitchen) { create_demo_company(organization: organization) }
   let!(:catering) { create_demo_company(organization: organization, name: "Harbor Finch Catering", fixture_key: DemoCompany::Roster::CATERING) }
   let(:aliases) { (1..6).map { |index| "reviewer+hf-emp#{index}@demo-mail.example" } }
+  let(:admin) { create(:user, company: create(:company, organization: organization), organization: organization, role: "admin") }
+
+  def assign(emails, actor: admin, target: organization)
+    described_class.new(organization: target, actor: actor, emails: emails).call
+  end
 
   around do |example|
     saved = ENV[DemoOutbound::ENV_KEY]
@@ -29,7 +34,7 @@ RSpec.describe DemoCompany::AssignEmployeeEmails do
   end
 
   it "gives the roster's people their aliases in order, the same one at both employers, and is safe to rerun" do
-    outcomes = described_class.new(organization: organization, emails: aliases.join(", ")).call
+    outcomes = assign(aliases.join(", "))
     people = DemoCompany::Roster::PEOPLE.map { |person| person[:first] }.uniq.first(6)
     expect(emails_by_name(kitchen)).to eq(people.zip(aliases).to_h)
     # Kit Wren is the sixth person and works at both employers.
@@ -38,31 +43,59 @@ RSpec.describe DemoCompany::AssignEmployeeEmails do
     expect(outcomes.size).to eq(7)
     expect(AuditLog.where(action: "employees#demo_email_assigned").count).to eq(7)
 
-    expect(described_class.new(organization: organization, emails: aliases).call.map(&:status).uniq).to eq([ "unchanged" ])
+    expect(assign(aliases).map(&:status).uniq).to eq([ "unchanged" ])
     expect(AuditLog.where(action: "employees#demo_email_assigned").count).to eq(7)
   end
 
   it "refuses addresses off the allow-list, repeats and missing employers, changing nothing" do
-    expect { described_class.new(organization: organization, emails: [ aliases[0], "someone@client.example" ]).call }
-      .to raise_error(described_class::Refused, /allow-list/)
-    expect { described_class.new(organization: organization, emails: [ aliases[0], aliases[0] ]).call }
-      .to raise_error(described_class::Refused, /once/)
-    expect { described_class.new(organization: organization, emails: "").call }.to raise_error(described_class::Refused)
+    expect { assign([ aliases[0], "someone@client.example" ]) }.to raise_error(described_class::Refused, /allow-list/)
+    expect { assign([ aliases[0], aliases[0] ]) }.to raise_error(described_class::Refused, /once/)
+    expect { assign("") }.to raise_error(described_class::Refused)
+    ENV[DemoOutbound::ENV_KEY] = (aliases + [ "not an address" ]).join(",")
+    expect { assign([ aliases[0], "not an address" ]) }.to raise_error(described_class::Refused, /valid email/)
     expect(Employee.where.not(email: nil)).to be_empty
-    expect { described_class.new(organization: create(:organization), emails: aliases).call }
+    other = create(:organization)
+    expect { assign(aliases, target: other, actor: create(:user, company: create(:company, organization: other), organization: other, role: "admin")) }
       .to raise_error(described_class::Refused, /Seed the demo employers/)
+  end
+
+  it "checks every target employee before writing any" do
+    Employee.find_by!(company: catering, first_name: "Kit").update_columns(first_name: "Kitt")
+    expect { assign(aliases) }.to raise_error(described_class::Refused, /nothing was changed/)
+    expect(Employee.where.not(email: nil)).to be_empty
+    expect(AuditLog.where(action: "employees#demo_email_assigned")).to be_empty
+  end
+
+  it "requires an organization administrator and records the change as that person" do
+    accountant = create(:user, company: admin.company, organization: organization, role: "accountant")
+    expect { assign(aliases, actor: accountant) }.to raise_error(described_class::Refused, /administrator/)
+    expect { assign(aliases, actor: nil) }.to raise_error(described_class::Refused, /administrator/)
+    expect(Employee.where.not(email: nil)).to be_empty
+
+    assign(aliases.first(1))
+    expect(AuditLog.find_by!(action: "employees#demo_email_assigned").user_id).to eq(admin.id)
+  end
+
+  it "keeps the email and its audit row together" do
+    allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid)
+    expect { assign(aliases.first(1)) }.to raise_error(ActiveRecord::RecordInvalid)
+    expect(Employee.where.not(email: nil)).to be_empty
   end
 
   it "runs as a rake task that prints domains, not addresses" do
     Rails.application.load_tasks unless Rake::Task.task_defined?("demo:assign_employee_emails")
     task = Rake::Task["demo:assign_employee_emails"]
     task.reenable
-    saved = ENV.to_h.slice("ORGANIZATION_ID", "EMAILS")
-    ENV.update("ORGANIZATION_ID" => organization.id.to_s, "EMAILS" => aliases.first(2).join(","))
+    saved = ENV.to_h.slice("ORGANIZATION_ID", "ACTOR_ID", "EMAILS")
+    ENV.update("ORGANIZATION_ID" => organization.id.to_s, "ACTOR_ID" => admin.id.to_s, "EMAILS" => aliases.first(2).join(","))
     expect { task.invoke }.to output(/OK    demo:assign_employee_emails Robin Lantern demo-mail\.example assigned/).to_stdout
     task.reenable
     expect { task.invoke }.not_to output(/reviewer\+/).to_stdout
+
+    task.reenable
+    ENV["ACTOR_ID"] = "999999999"
+    expect { task.invoke }.to raise_error(SystemExit).and output(/FAIL  demo:assign_employee_emails/).to_stderr
   ensure
-    %w[ORGANIZATION_ID EMAILS].each { |key| ENV[key] = saved&.dig(key) }
+    %w[ORGANIZATION_ID ACTOR_ID EMAILS].each { |key| ENV[key] = saved&.dig(key) }
   end
 end
