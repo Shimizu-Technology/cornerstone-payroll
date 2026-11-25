@@ -300,7 +300,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       emergency_contacts: EmployeeEmergencyContact.where(employee_id: employee.id).order(:id).map { |c| c.attributes.except("updated_at") },
       change_requests: EmployeeChangeRequest.where(employee_id: employee.id).order(:id).map { |r| r.attributes.except("updated_at") },
       delivery_consents: DeliveryConsent.where(employee_id: employee.id).order(:id).map { |c| c.attributes.except("updated_at") },
-      changes_to_confirm: EmployeeContactChangeToConfirm.where(employee_id: employee.id).order(:id).pluck(:id)
+      changes_to_confirm: EmployeeContactChangeToConfirm.where(employee_id: employee.id).order(:id).map { |c| c.attributes.except("updated_at") }
     }
   end
 
@@ -562,8 +562,14 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     a_before = employee_write_snapshot(emp_a, link_a)
     b_before = employee_write_snapshot(emp_b, link_b)
     consent_audits = ->(link, event) { AuditLog.where(action: "employee_delivery_consents##{event}", record_id: link.id) }
+    delivered_emails = []
+    allow(PortalNotifications::Transport).to receive(:deliver) do |payload, **|
+      delivered_emails << payload
+      { "id" => "msg_iso_#{delivered_emails.size}" }
+    end
+    issued_email_verification = {}
 
-    # Ordered: consent is given before it is withdrawn.
+    # Ordered: email code is issued before it is confirmed; consent is given before it is withdrawn.
     effects = {
       [ "PATCH", "/api/v1/employee/profile/phone" ] => lambda {
         expect(emp_a.reload.phone).not_to eq(a_before[:employee]["phone"])
@@ -572,10 +578,16 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       [ "POST", "/api/v1/employee/profile/email" ] => lambda {
         expect(link_a.reload.profile_email_challenge).to be_present
         expect(a_before[:link]["profile_email_challenge"]).to be_nil
+        verification_id = response.parsed_body.fetch("verification_id")
+        code = delivered_emails.last.fetch(:text)[/\b(\d{6})\b/, 1]
+        expect(verification_id).to be_present
+        expect(code).to match(/\A\d{6}\z/)
+        issued_email_verification.replace(verification_id: verification_id, code: code)
       },
       [ "POST", "/api/v1/employee/profile/email/confirm" ] => lambda {
-        expect(response.parsed_body).to eq("error" => "The verification code is invalid or expired.")
-        expect(emp_a.reload.email).to eq(a_before[:employee]["email"])
+        expect(emp_a.reload.email).to eq("verified.new@example.net")
+        expect(emp_a.email).not_to eq(a_before[:employee]["email"])
+        expect(emp_a.email_verified_at).to be_present
       },
       [ "POST", "/api/v1/employee/emergency_contacts" ] => lambda {
         expect(EmployeeEmergencyContact.where(employee_id: emp_a.id, name: "Sam Santos").count).to eq(1)
@@ -601,10 +613,10 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
     effects.each do |route, expect_effect_on_a|
       # None of these routes takes a target selector; the body names B anyway.
-      body = payload_for(route).merge(employee_id: emp_b.id, employee_account_link_id: link_b.id)
+      base_payload = route.last == "/api/v1/employee/profile/email/confirm" ? issued_email_verification : payload_for(route)
+      body = base_payload.merge(employee_id: emp_b.id, employee_account_link_id: link_b.id)
       send_employee_request(route, path: route.last, headers: headers_a, body: body)
-      expected = route.last == "/api/v1/employee/profile/email/confirm" ? [ 422 ] : [ 200, 201, 202 ]
-      expect(expected).to include(response.status), "#{route.join(' ')} returned #{response.status} (#{response.body})"
+      expect([ 200, 201, 202 ]).to include(response.status), "#{route.join(' ')} returned #{response.status} (#{response.body})"
       expect_effect_on_a.call
       expect(employee_write_snapshot(emp_b, link_b)).to eq(b_before), "#{route.join(' ')} with A's link changed Employee B"
     end
@@ -1021,6 +1033,8 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     require_all_non_link_routes_exercised!(:view_only) do
     resources_a = seed_employee_resources(emp_a, link_a)
     resources_b = seed_employee_resources(emp_b, link_b)
+    # Seed an active consent so a regression that withdraws before returning 403 is caught.
+    active_consent = seed_active_consent!(emp_a, link_a)
 
     post "/api/v1/auth/view_as",
       params: { target_type: "employee", target_id: emp_a.id, reason: "Verify isolation matrix" }, as: :json,
@@ -1073,7 +1087,8 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       end
     end
 
-    expect(DeliveryConsent.count).to eq(0)
+    expect(DeliveryConsent.count).to eq(1)
+    expect(active_consent.reload.withdrawn_at).to be_nil
     expect(PortalNotificationEvent.count).to eq(0)
     expect(AuditLog.where(user_id: worker_a.id)).to be_empty
     expect(AuditLog.where(view_as_grant_id: grant.id).distinct.pluck(:user_id, :real_user_id)).to eq([ [ staff.id, staff.id ] ])
