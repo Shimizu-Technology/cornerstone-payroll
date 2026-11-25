@@ -21,3 +21,20 @@ namespace :demo do
     puts "OK    demo:quickbooks_sample files=#{result.files.size} stub_pdfs=#{result.stub_pdfs.size}"
   end
 end
+
+namespace :demo do
+  desc "Invite the demo employer's client manager and client user (ORGANIZATION_ID, ACTOR_ID, MANAGER_EMAIL, USER_EMAIL). Safe to rerun."
+  task invite_clients: :environment do
+    organization, actor = TenantScope.as_system(reason: "Find the demo invitation organization and actor") do
+      [ Organization.find(ENV.fetch("ORGANIZATION_ID")), User.find(ENV.fetch("ACTOR_ID")) ]
+    end
+    outcomes = Current.set(user: actor) do
+      DemoCompany::InviteClients.new(organization: organization, actor: actor,
+        manager_email: ENV.fetch("MANAGER_EMAIL"), user_email: ENV.fetch("USER_EMAIL")).call
+    end
+    # Addresses are printed by domain only.
+    outcomes.each { |outcome| puts "OK    demo:invite_clients #{outcome.email.split('@').last} #{outcome.status}" }
+  rescue DemoCompany::InviteClients::Refused, ActiveRecord::RecordInvalid, KeyError => e
+    abort "FAIL  demo:invite_clients #{e.message}"
+  end
+end

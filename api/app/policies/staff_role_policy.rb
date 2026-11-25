@@ -277,7 +277,7 @@ class StaffRolePolicy
       actor = User.find_by(id: user&.id)
       target = Company.includes(:organization).find_by(id: company&.id)
       next false unless actor&.accountant? && actor.payroll_access_allowed? &&
-        target&.active? && target.organization&.active? && target.live_payroll? &&
+        target&.active? && target.organization&.active? && (target.live_payroll? || target.demo?) &&
         target.test_workspace_archived_at.nil? && actor.organization_id == target.organization_id
 
       CompanyAssignment.active_access.exists?(user_id: actor.id, company_id: target.id, client_management: true)
