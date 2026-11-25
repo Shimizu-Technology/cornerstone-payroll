@@ -49,6 +49,21 @@ RSpec.describe PdfUnicodeFont do
     expect(unicode_pdf_text(pdf.render)).to include("Wiśniewska", "Nguyễn", "Mañibusan", "Żółć")
   end
 
+  it "never opens the CJK font for repeated multiline Latin PDFs" do
+    allow(TTFunk::File).to receive(:open).and_call_original
+    expect(TTFunk::File).not_to receive(:open).with(described_class::CJK_FILE)
+    expect(described_class::CjkTTF).not_to receive(:new)
+
+    10.times do
+      document = described_class.document
+      document.text "Payroll register\nAna Cruz"
+      document.text_box "Check address\nHagåtña, GU", at: [ 0, 100 ], width: 200
+      document.draw_text "Ana Cruz — Guam", at: [ 0, 40 ]
+      expect(described_class.unprintable_characters("Hagåtña, GU")).to be_empty
+      document.render
+    end
+  end
+
   it "embeds CJK glyphs in regular, bold, table and positioned text" do
     pdf.text "王小明 𠮷", style: :bold
     pdf.table([ [ "さくら" ] ], cell_style: { font_style: :italic })
