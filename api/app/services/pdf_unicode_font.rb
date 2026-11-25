@@ -13,6 +13,7 @@ module PdfUnicodeFont
   FAMILY = "LiberationSans"
   CJK_FAMILY = "PayrollCJK"
   CJK_FILE = Rails.root.join("vendor/fonts/cjk/PayrollCJK-Regular.ttf").to_s
+  CJK_FONT_LOAD_LOCK = Mutex.new
   FONT_DIR = Rails.root.join("vendor/fonts/liberation-sans")
   FILES = {
     normal: FONT_DIR.join("LiberationSans-Regular.ttf").to_s,
@@ -39,6 +40,10 @@ module PdfUnicodeFont
 
   class CjkTTF < Prawn::Fonts::TTF
     private
+
+    def read_ttf_file
+      PdfUnicodeFont.parse_cjk_font
+    end
 
     # Prawn 2.4 writes supplementary characters as five-digit code points.
     # PDF ToUnicode maps require UTF-16BE, including both surrogate units.
@@ -197,11 +202,21 @@ module PdfUnicodeFont
   end
 
   def cjk_codepoints
-    @cjk_codepoints ||= codepoints_for(CJK_FILE).freeze
+    @cjk_codepoints ||= codepoints_from(parse_cjk_font)
+  end
+
+  def parse_cjk_font
+    bytes = CJK_FONT_LOAD_LOCK.synchronize { @cjk_font_bytes ||= File.binread(CJK_FILE).freeze }
+    # TTFunk wraps these bytes in a new StringIO for each parser.
+    TTFunk::File.new(bytes)
   end
 
   def codepoints_for(file)
-    TTFunk::File.open(file).cmap.unicode.max_by { |table| table.code_map.size }.code_map
+    codepoints_from(TTFunk::File.open(file))
+  end
+
+  def codepoints_from(font)
+    font.cmap.unicode.max_by { |table| table.code_map.size }.code_map
       .select { |_code, glyph| glyph.positive? }.keys.to_set.freeze
   end
 end
