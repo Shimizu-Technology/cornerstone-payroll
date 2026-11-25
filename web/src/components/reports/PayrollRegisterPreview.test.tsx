@@ -35,6 +35,7 @@ const report = {
     total_employer_contributions: 75,
     total_employer_payroll_cost: 2_325,
     total_withholding: 200,
+    total_additional_withholding: 25,
     total_social_security: 130.2,
     total_medicare: 30.45,
     total_retirement: 84,
@@ -52,7 +53,7 @@ const report = {
     bonus: 100,
     gross_pay: 2_100,
     withholding_tax: 200,
-    additional_withholding: 0,
+    additional_withholding: 25,
     social_security_tax: 130.2,
     medicare_tax: 30.45,
     straight_loan_deduction: 25,
@@ -83,6 +84,16 @@ describe('PayrollRegisterPreviewContent', () => {
     expect(screen.getByText('Employer cost').nextElementSibling?.textContent).toBe('$2,325.00');
     expect(screen.getAllByText('Straight Loan').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Installment Loan').length).toBeGreaterThan(0);
+  });
+
+  it('shows combined withholding, additional FIT, and a total FIT column', () => {
+    render(<PayrollRegisterPreviewContent report={report} />);
+
+    expect(screen.getAllByText('Withholding')[0].nextElementSibling?.textContent).toBe('$225.00');
+    const table = screen.getByRole('columnheader', { name: 'Total FIT (Base + Additional)' }).closest('table')!;
+    expect(table.tBodies[0].rows[1].lastElementChild?.textContent).toBe('$225.00');
+    expect(table.tFoot?.rows[0].lastElementChild?.textContent).toBe('$225.00');
+    expect(screen.getAllByText('Additional FIT')[0].nextElementSibling?.textContent).toBe('$25.00');
   });
 
   it('makes rehearsal registers visibly test-only without labeling locked imports that way', () => {

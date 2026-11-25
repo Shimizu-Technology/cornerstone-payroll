@@ -36,6 +36,8 @@ export function ClientReports() {
   const [employeeId, setEmployeeId] = useState('');
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
   const [quarter, setQuarter] = useState(String(Math.floor(new Date().getMonth() / 3) + 1));
+  const [taxScope, setTaxScope] = useState<{ year: number; quarter: string; statement: string | null }>();
+  const taxScopeNote = taxScope?.year === reportYear && taxScope.quarter === quarter ? taxScope.statement : null;
   const currentYear = new Date().getFullYear();
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,6 +152,18 @@ export function ClientReports() {
   useEffect(() => {
     void loadAnnualSummary();
   }, [loadAnnualSummary]);
+
+  useEffect(() => {
+    let current = true;
+    void clientReportsApi.taxSummary({ year: reportYear, quarter })
+      .then(({ report }) => {
+        if (current) setTaxScope({ year: reportYear, quarter, statement: report?.source?.statement ?? null });
+      })
+      .catch(() => {
+        if (current) setTaxScope(undefined);
+      });
+    return () => { current = false; };
+  }, [reportYear, quarter]);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -328,7 +342,12 @@ export function ClientReports() {
                 <div className="grid gap-3 md:grid-cols-2">
                   {clientReportCatalog.filter(report => report.group === group).map(report => <Card key={report.key}>
                     <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                      <p className="min-w-0 font-medium">{report.title}</p>
+                      <div className="min-w-0">
+                        <p className="font-medium">{report.title}</p>
+                        {taxScopeNote && (report.key === 'tax_summary' || report.key === 'employer_liability') && (
+                          <p className="mt-1 text-sm text-gray-600">{taxScopeNote}</p>
+                        )}
+                      </div>
                       <ReportDownloadMenu ariaLabel={`Export ${report.title}`} disabled={exporting !== null || (report.scope === 'period' && !selectedPayPeriodId) || (report.scope === 'employee' && !employeeId)} formats={('pdfOnly' in report ? ['pdf'] : ['pdf', 'xlsx']).map(format => ({
                         key: `${report.key}-${format}`, label: format === 'pdf' ? 'PDF' : 'Excel workbook',
                         description: report.title, kind: format === 'pdf' ? 'pdf' as const : 'spreadsheet' as const,
@@ -502,6 +521,7 @@ export function ClientReports() {
                   <Metric label="Health Insurance (payroll fields + historical)" value={formatCurrency(ytdSummary.company_totals.health_insurance_deductions ?? 0)} />
                   <Metric label="Historical Loans (type unclassified)" value={formatCurrency(ytdSummary.company_totals.historical_loan_deductions_unclassified ?? 0)} />
                   <Metric label="401(k) After Tax label in source pre-tax bucket" value={formatCurrency(ytdSummary.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0)} />
+                  <Metric label="Combined hours" value={finiteAmount(ytdSummary.company_totals.combined_hours).toFixed(2)} />
                 </div>
               )}
               {ytdSummary?.employee_visibility && !ytdSummary.employee_visibility.include_zero_pay && (
@@ -528,6 +548,7 @@ export function ClientReports() {
                       <MobileField label="Employer contributions" value={formatCurrency(employee.payroll_field_employer_contributions_total ?? 0)} />
                       <MobileField label="Total deductions" value={formatCurrency(employee.total_deductions ?? 0)} />
                       <MobileField label="FIT" value={formatCurrency(employee.withholding_tax)} />
+                      <MobileField label="Combined hours" value={finiteAmount(employee.combined_hours).toFixed(2)} />
                     </div>
                   </MobileRecordCard>
                 ))}
@@ -550,6 +571,7 @@ export function ClientReports() {
                     <TableHead>Total ded.</TableHead>
                     <TableHead>FIT</TableHead>
                     <TableHead>Net pay</TableHead>
+                    <TableHead>Combined hours</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody striped>
@@ -568,6 +590,7 @@ export function ClientReports() {
                       <TableCell>{formatCurrency(employee.total_deductions ?? 0)}</TableCell>
                       <TableCell>{formatCurrency(employee.withholding_tax)}</TableCell>
                       <TableCell>{formatCurrency(employee.net_pay)}</TableCell>
+                      <TableCell>{finiteAmount(employee.combined_hours).toFixed(2)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

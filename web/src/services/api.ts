@@ -2805,6 +2805,8 @@ export interface EmployeePayrollSummary {
   payroll_count: number;
   imported_payroll_count: number;
   imported_opening_summary_count: number;
+  total_hours?: number;
+  combined_hours?: number;
   gross_pay: number;
   custom_earnings_total: number;
   payroll_field_taxable_additions_total: number;
@@ -2850,9 +2852,12 @@ export interface TaxSummaryReport {
   report: {
     type: string;
     period: PayrollReportPeriod;
+    source?: { label: string; statement?: string | null };
     totals: {
       gross_wages: number;
       withholding_tax: number;
+      base_withholding_tax?: number;
+      additional_withholding?: number;
       social_security_employee: number;
       social_security_employer: number;
       medicare_employee: number;
@@ -2890,6 +2895,7 @@ export interface YtdSummaryReport {
       status: string;
       payroll_count?: number;
       total_hours?: number;
+      combined_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;
       non_taxable_additions_total?: number;
@@ -2928,6 +2934,7 @@ export interface YtdSummaryReport {
     company_totals: null | {
       year: number;
       total_hours?: number;
+      combined_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;
       non_taxable_additions_total?: number;
@@ -3776,6 +3783,8 @@ export const clientReportsApi = {
     api.getBlobWithParams('/client/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
   payrollRegisterXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/client/reports/payroll_register_xlsx', { pay_period_id: payPeriodId }),
+  taxSummary: (params: { year: number; quarter: string }) =>
+    api.get<TaxSummaryReport>('/client/reports/tax_summary', params),
   ytdSummary: (params: PayrollReportPeriodParams = {}) =>
     api.get<YtdSummaryReport>('/client/reports/ytd_summary', params),
   ytdSummaryCsv: (params: PayrollReportPeriodParams = {}) =>

@@ -15,12 +15,16 @@ module Api
           @payroll_items = @pay_period.payroll_items.includes(:payroll_item_field_entries, :employee)
           @payroll_items = @payroll_items.reportable if @pay_period.committed?
           reportable_items = @payroll_items.financially_reportable
+          base_withholding = reportable_items.sum(:withholding_tax)
+          additional_withholding = reportable_items.sum(:additional_withholding)
 
           render json: {
             payroll_items: @payroll_items.map { |item| payroll_item_json(item) },
             summary: {
               total_gross: reportable_items.sum(:gross_pay),
-              total_withholding: reportable_items.sum(:withholding_tax),
+              total_withholding: base_withholding,
+              total_additional_withholding: additional_withholding,
+              total_income_tax_withheld: base_withholding + additional_withholding,
               total_social_security: reportable_items.sum(:social_security_tax),
               total_medicare: reportable_items.sum(:medicare_tax),
               total_deductions: reportable_items.sum(:total_deductions),
