@@ -68,13 +68,23 @@ for (const width of [390, 1280]) {
           readLog = true;
           return json(route, { events: [{ id: '1', description: `Support Example viewed as ${client}`, viewed_at: '2026-11-25T10:00:00Z' }] });
         }
+        if (path === '/client/pay_periods') {
+          expect(grant).toBe(token);
+          expect(request.headers()['x-company-id']).toBe('9');
+          return json(route, {
+            pay_periods: [],
+            meta: { current_page: 1, per_page: 100, total_count: 0, total_pages: 0, statuses: {}, sources: {}, years: [] },
+          });
+        }
         if (path === '/client/reports/dashboard') return json(route, { stats: {} });
         if (path === '/client/documents') return json(route, { data: [], meta: { total_count: 0 } });
         return json(route, {});
       });
 
       await page.goto(`/app${handoff}`);
-      await expect(page.getByRole('heading', { name: 'Client Portal', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Client Portal', exact: true, level: 1 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Needs your attention', exact: true, level: 2 })).toBeVisible();
+      await expect(page.getByText('No payroll needs your approval right now.')).toBeVisible();
       await expect(page).toHaveURL(/\/app$/);
       await expect(page.getByRole('button', { name: 'Add Employee' })).toHaveCount(0);
       await checkBanner(page, client);
