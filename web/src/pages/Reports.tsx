@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { formatDate, formatDateRange } from '@/lib/display-date';
 import { FilingEmployeeWarnings } from '@/components/reports/FilingEmployeeWarnings';
 import type { FilingEmployeeCompleteness } from '@/types';
@@ -1008,12 +1009,12 @@ export function W2GuPanel() {
             )}
             {filing.preflight_run_at && (
               <p className="text-xs text-neutral-600">
-                Last explicit preflight: {new Date(filing.preflight_run_at).toLocaleString()}
+                Last explicit preflight: {formatGuamDateTime(filing.preflight_run_at)}
               </p>
             )}
             {filing.marked_ready_at && (
               <p className="text-xs text-neutral-600">
-                {filing.status === 'filing_ready' ? 'Marked ready' : 'Previous review'}: {new Date(filing.marked_ready_at).toLocaleString()}
+                {filing.status === 'filing_ready' ? 'Marked ready' : 'Previous review'}: {formatGuamDateTime(filing.marked_ready_at)}
                 {typeof filing.marked_ready_by_id === 'number' ? ` (user #${filing.marked_ready_by_id})` : ''}
               </p>
             )}
@@ -1024,7 +1025,7 @@ export function W2GuPanel() {
                 <ul className="mt-2 space-y-2">
                   {filing.attestation_history.map((review, index) => (
                     <li key={`${review.marked_ready_at}-${index}`} className="rounded-lg border border-neutral-200 p-3">
-                      <p>{new Date(review.marked_ready_at).toLocaleString()} — user #{review.marked_ready_by_id ?? 'unknown'}{review.legacy ? ' (before source verification)' : ''}</p>
+                      <p>{formatGuamDateTime(review.marked_ready_at)} — user #{review.marked_ready_by_id ?? 'unknown'}{review.legacy ? ' (before source verification)' : ''}</p>
                       {review.notes && <p className="break-words">{review.notes}</p>}
                     </li>
                   ))}
@@ -1080,7 +1081,7 @@ export function W2GuPanel() {
                     {report.meta.company_name} — {report.meta.year} W-2GU Summary
                   </CardTitle>
                   <CardDescription className="mt-1">
-                    {report.meta.employee_count} employee{report.meta.employee_count !== 1 ? 's' : ''} &bull; Generated {new Date(report.meta.generated_at).toLocaleString()}
+                    {report.meta.employee_count} employee{report.meta.employee_count !== 1 ? 's' : ''} &bull; Generated {formatGuamDateTime(report.meta.generated_at)}
                   </CardDescription>
                 </div>
                 {report.compliance_issues.length > 0 && (
@@ -3797,7 +3798,7 @@ function Form1099NecPanel() {
             <CardDescription>
               {report.meta.contractor_count} contractor{report.meta.contractor_count !== 1 ? 's' : ''} &bull;{' '}
               {report.meta.reportable_count} reportable (&ge; ${report.meta.filing_threshold} or tax withheld) &bull;{' '}
-              Generated {new Date(report.meta.generated_at).toLocaleString()}
+              Generated {formatGuamDateTime(report.meta.generated_at)}
             </CardDescription>
           </CardHeader>
           <CardContent>

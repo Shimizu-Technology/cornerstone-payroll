@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { formatDate } from '@/lib/display-date';
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import { isReverificationCancelledError } from '@clerk/react/errors';
@@ -22,7 +23,7 @@ const MASTER = 'employee_portal_enabled';
 
 function formatDateTime(value: string | null): string {
   if (!value) return 'Never';
-  return new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return formatGuamDateTime(value, { second: undefined });
 }
 
 type Mutation = { method: 'PATCH' | 'PUT' | 'DELETE' | 'POST'; suffix: string; body: unknown };

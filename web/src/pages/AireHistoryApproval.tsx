@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { formatDate } from '@/lib/display-date';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
@@ -116,7 +117,7 @@ function HistorySummary({ companyId }: { companyId: number }) {
           <div className="mt-3 overflow-x-auto"><table className="w-full text-sm"><thead><tr>{['Employee', 'Run', 'Source category', 'Source h', 'Paid component', 'Attributed paid h', 'Signed difference h'].map((label) => <th key={label} className={cell}>{label}</th>)}</tr></thead>
             <tbody>{summary.attributed_categories.flatMap((group) => group.rows.map((row, index) => <tr key={`${group.run_id}:${group.employee}:${index}`}><td className={cell}>{group.employee}</td><td className={cell}>{group.run_id}</td><td className={cell}>{row.source_category?.name || 'Uncategorized (retained)'}</td><td className={cell}>{hours(row.source_hours)}</td><td className={cell}>{row.paid_component}</td><td className={cell}>{hours(row.attributed_paid_hours)}</td><td className={cell}>{Number(row.rounding_difference) > 0 ? '+' : ''}{hours(row.rounding_difference)}</td></tr>))}</tbody>
           </table></div>
-          <p className="mt-2 text-sm">{summary.approved_at ? `Attested by ${summary.approved_by} at ${new Date(summary.approved_at).toLocaleString()}.` : 'The approving accountant’s name, time, evidence and summary reference will be recorded.'}</p>
+          <p className="mt-2 text-sm">{summary.approved_at ? `Attested by ${summary.approved_by} at ${formatGuamDateTime(summary.approved_at)}.` : 'The approving accountant’s name, time, evidence and summary reference will be recorded.'}</p>
         </section>}
         {!!summary.historical_policies?.length && <section className={panel} aria-labelledby="prior-policy-title">
           <h2 id="prior-policy-title" className="text-lg font-semibold">History under the prior overtime policy</h2>
@@ -149,7 +150,7 @@ function HistorySummary({ companyId }: { companyId: number }) {
         </section>
         {summary.blockers.length > 0 && <section role="alert" className={`${panel} border-danger-200`}><h2 className="font-semibold">Resolve these evidence changes before history can be approved</h2><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{summary.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></section>}
         <section className={panel}>
-          {summary.approved_at ? <div role="status"><h2 className="font-semibold text-success-700">History approved</h2><p className="mt-2 text-sm">Approved by {summary.approved_by} at {new Date(summary.approved_at).toLocaleString()}. This approval did not change connected mode; no calendar was published.</p></div> : <>
+          {summary.approved_at ? <div role="status"><h2 className="font-semibold text-success-700">History approved</h2><p className="mt-2 text-sm">Approved by {summary.approved_by} at {formatGuamDateTime(summary.approved_at)}. This approval did not change connected mode; no calendar was published.</p></div> : <>
             <label className="flex items-start gap-3 text-sm leading-6"><input className="mt-1.5" type="checkbox" checked={attested} onChange={(event) => setAttested(event.target.checked)} disabled={busy || dirty || stale || !summary.history_coverage_verified} />{summary.attestation}</label>
             <div className="mt-4 flex flex-wrap gap-3"><Button onClick={approve} disabled={busy || !attested || dirty || stale || !summary.history_coverage_verified || missingConfirmations}>Approve history</Button><Button variant="outline" onClick={refresh} disabled={busy}>Refresh summary</Button></div>
             <p className="mt-3 break-all text-xs text-neutral-500">Summary reference: {summary.digest}</p>

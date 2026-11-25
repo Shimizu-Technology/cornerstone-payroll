@@ -160,12 +160,17 @@ function effectiveDraft(employee: ContactEmployee, rowDraft: RowFieldDrafts | un
   return merged;
 }
 
+function isFieldChanged(field: ContactField, value: string, baseline: string): boolean {
+  if (field === 'phone') return formatPhone(value).trim() !== formatPhone(baseline).trim();
+  return value.trim() !== baseline.trim();
+}
+
 function changedEntriesForRow(rowDraft: RowFieldDrafts | undefined): Array<[ContactField, ContactFieldDraft]> {
   if (!rowDraft) return [];
   const changed: Array<[ContactField, ContactFieldDraft]> = [];
   for (const field of CONTACT_FIELDS) {
     const entry = rowDraft[field];
-    if (entry && entry.value.trim() !== entry.baselineValue.trim()) {
+    if (entry && isFieldChanged(field, entry.value, entry.baselineValue)) {
       changed.push([field, entry]);
     }
   }
@@ -450,7 +455,8 @@ export function EmployeeContactDetails({
       const baselineValue = existingField ? existingField.baselineValue : serverBaseline[field];
       const baselineRevision = existingField ? existingField.baselineRevision : serverRevision;
 
-      if (value.trim() === baselineValue.trim()) {
+      // Keep the typed phone text even when it matches the saved number.
+      if (field !== 'phone' && !isFieldChanged(field, value, baselineValue)) {
         delete existingRow[field];
       } else {
         existingRow[field] = { value, baselineValue, baselineRevision };
@@ -687,6 +693,11 @@ export function EmployeeContactDetails({
       for (const field of CONTACT_FIELDS) {
         const entry = existingRow[field];
         if (!entry) continue;
+        if (conflict.userChanges[field] === undefined) {
+          // A formatting-only phone draft was never sent in the conflicting save.
+          rebasedRow[field] = entry;
+          continue;
+        }
         rebasedRow[field] = {
           value: entry.value,
           baselineValue: serverBaseline[field],

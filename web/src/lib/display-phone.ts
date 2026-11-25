@@ -1,10 +1,11 @@
 import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
 
-/** Format US and Guam phone numbers for display, including local 7-digit Guam numbers. */
+/** Format US, Guam, and CNMI phone numbers for display, including local 7-digit Guam numbers. */
 export function formatPhone(value?: string | null): string {
   if (value == null) return '';
 
   const phone = value.trim();
+  if (!phone) return '';
   if (!/^\+?[\d().\s-]+$/.test(phone)) return value;
   const digits = phone.replace(/\D/g, '');
 
@@ -19,9 +20,9 @@ export function formatPhone(value?: string | null): string {
   const match = /^([2-9]\d{2})([2-9]\d{2})(\d{4})$/.exec(national);
   if (!match) return value;
 
-  // Several countries share +1, so the calling code alone cannot identify a US or Guam number.
+  // Several countries share +1, so the calling code alone cannot identify the number’s country.
   const country = parsePhoneNumberFromString(`+1${national}`)?.country;
-  if (country && country !== 'US' && country !== 'GU') return value;
+  if (country && country !== 'US' && country !== 'GU' && country !== 'MP') return value;
 
   return `(${match[1]}) ${match[2]}-${match[3]}`;
 }

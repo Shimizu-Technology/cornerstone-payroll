@@ -406,6 +406,28 @@ describe('employee app shell', () => {
     expect(within(contact).queryByText('Confirmed by you')).toBeNull();
   });
 
+  it('keeps the entered emergency contact phone when it matches the saved number', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3, company_name: 'Harbor Finch Kitchen', status: 'active' }]),
+      '/employee/context': () => Response.json({ features: { profile_requests: true } }),
+      '/employee/profile': () => Response.json({
+        emergency_contacts: [{ id: 1, name: 'Avery Example', relationship: 'Sibling', phone: '+16715550142' }],
+      }),
+    }));
+    render(<EmployeeApp />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Edit Avery Example' }));
+    const phone = screen.getByLabelText<HTMLInputElement>('Phone', { exact: true });
+    expect(phone.value).toBe('(671) 555-0142');
+
+    await user.clear(phone);
+    await user.type(phone, '+16715550142');
+    expect(phone.value).toBe('+16715550142');
+  });
+
   it('opens Pay directly on the full list by year, titles stubs with the pay period, and uses Older/Newer', async () => {
     signedIn();
     window.history.pushState({}, '', '/pay');

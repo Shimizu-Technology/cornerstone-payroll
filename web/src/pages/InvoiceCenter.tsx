@@ -1,4 +1,5 @@
-import { formatDate as formatCalendarDate } from '@/lib/display-date';
+import { formatGuamDateTime } from '@/lib/utils';
+import { formatDate as formatCalendarDate, formatDateRange } from '@/lib/display-date';
 import { invoiceBusinessDate, customerDefaults, invoiceIsOverdue, invoiceDraftDueDate as withDueDate } from '@/lib/invoice-defaults';
 import { isBillingClient, isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
@@ -213,7 +214,7 @@ const money = (value?: number | null, currency = 'USD') => new Intl.NumberFormat
 
 const formatDate = (value?: string | null) => formatCalendarDate(value) || '—';
 
-const formatDateTime = (value?: string | null) => value ? new Date(value).toLocaleString() : '—';
+const formatDateTime = (value?: string | null) => value ? formatGuamDateTime(value) : '—';
 const localTimeToIso = (value: string) => {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) throw new Error('Enter a valid date and time');
@@ -1192,7 +1193,7 @@ export function InvoiceCenter() {
           </div>}
 
           <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="min-w-0 space-y-4"><div className="rounded-xl border border-neutral-200 p-4"><h3 className="font-semibold">Invoice details</h3><dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm [&>div]:min-w-0 [&_dd]:break-words"><div><dt className="text-neutral-400">From</dt><dd className="font-medium">{selected.billing_profile_name}</dd></div><div><dt className="text-neutral-400">Customer</dt><dd className="font-medium">{selected.recipient_name}</dd></div><div><dt className="text-neutral-400">Invoice date</dt><dd>{formatDate(selected.invoice_date)}</dd></div><div><dt className="text-neutral-400">Due date</dt><dd>{formatDate(selected.due_date)}</dd></div><div><dt className="text-neutral-400">Reference</dt><dd>{selected.customer_reference || '—'}</dd></div><div><dt className="text-neutral-400">Payroll client</dt><dd>{selected.company_name || 'Unallocated'}</dd></div><div><dt className="text-neutral-400">Service period</dt><dd>{formatDate(selected.service_period_start)} – {formatDate(selected.service_period_end)}</dd></div><div><dt className="text-neutral-400">Source</dt><dd className="capitalize">{selected.origin}</dd></div></dl></div>
+            <div className="min-w-0 space-y-4"><div className="rounded-xl border border-neutral-200 p-4"><h3 className="font-semibold">Invoice details</h3><dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm [&>div]:min-w-0 [&_dd]:break-words"><div><dt className="text-neutral-400">From</dt><dd className="font-medium">{selected.billing_profile_name}</dd></div><div><dt className="text-neutral-400">Customer</dt><dd className="font-medium">{selected.recipient_name}</dd></div><div><dt className="text-neutral-400">Invoice date</dt><dd>{formatDate(selected.invoice_date)}</dd></div><div><dt className="text-neutral-400">Due date</dt><dd>{formatDate(selected.due_date)}</dd></div><div><dt className="text-neutral-400">Reference</dt><dd>{selected.customer_reference || '—'}</dd></div><div><dt className="text-neutral-400">Payroll client</dt><dd>{selected.company_name || 'Unallocated'}</dd></div><div><dt className="text-neutral-400">Service period</dt><dd>{formatDateRange(selected.service_period_start, selected.service_period_end) || '—'}</dd></div><div><dt className="text-neutral-400">Source</dt><dd className="capitalize">{selected.origin}</dd></div></dl></div>
               {!!selected.line_items?.length && <div className="rounded-xl border border-neutral-200 p-4"><h3 className="font-semibold">Line items</h3><div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-neutral-500"><th className="p-2">#</th><th className="p-2">Product or service</th><th className="p-2">Description</th><th className="p-2 text-right">Qty</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Amount</th></tr></thead><tbody>{selected.line_items.map((line, index) => <tr key={line.id || index} className="border-b border-neutral-100"><td className="p-2">{index + 1}</td><td className="p-2 font-medium">{line.item_name || '—'}</td><td className="min-w-40 p-2">{line.description}{line.reimbursement_review_required && !line.amount && <p className="mt-1 text-xs text-amber-800">Set this month's reimbursement amount or remove this line before issuing.</p>}</td><td className="p-2 text-right">{line.quantity}</td><td className="whitespace-nowrap p-2 text-right">{money(line.rate, selected.currency)}</td><td className="whitespace-nowrap p-2 text-right font-semibold">{money(line.amount, selected.currency)}</td></tr>)}</tbody></table></div></div>}
             </div>
             <div className="space-y-4">

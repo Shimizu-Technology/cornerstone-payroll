@@ -1,4 +1,4 @@
-import { formatGuamDate } from '@/lib/utils';
+import { formatGuamDateTime } from '@/lib/utils';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useCallback, useEffect, useRef, useId, type RefObject } from 'react';
 import { useNavigate } from 'react-router';
@@ -182,7 +182,7 @@ function SignoffEditorModal({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <span className="text-green-800">
-                Last generated: {formatGuamDate(savedState.generated_at)}
+                Last generated: {formatGuamDateTime(savedState.generated_at, { second: undefined })}
               </span>
             </div>
           )}
@@ -598,7 +598,7 @@ export function TransmittalEditorModal({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <span className="text-green-800">
-                Last generated: {formatGuamDate(savedState.generated_at)}
+                Last generated: {formatGuamDateTime(savedState.generated_at, { second: undefined })}
               </span>
             </div>
           )}
@@ -1519,7 +1519,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
                       {report.description}
                       {hasSaved && savedTransmittal?.generated_at && (
                         <span className="text-green-600 ml-1">
-                          · Last: {formatGuamDate(savedTransmittal.generated_at)}
+                          · Last: {formatGuamDateTime(savedTransmittal.generated_at, { second: undefined })}
                         </span>
                       )}
                     </p>
@@ -1582,7 +1582,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, re
               Employee sign-off sheet for check pickup
               {signoffSavedAt && (
                 <span className="text-green-600 ml-1">
-                  · Last: {formatGuamDate(signoffSavedAt)}
+                  · Last: {formatGuamDateTime(signoffSavedAt, { second: undefined })}
                 </span>
               )}
             </p>

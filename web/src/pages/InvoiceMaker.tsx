@@ -6,7 +6,7 @@ import { InvoiceNumberWidthField } from '@/components/invoices/InvoiceNumberWidt
 import { invoiceDraftDueDate } from '@/lib/invoice-defaults';
 import { invoiceBusinessDate } from '@/lib/invoice-defaults';
 import { defaultInvoiceEmail } from '@/lib/invoice-email';
-import { formatGuamDate } from '@/lib/utils';
+import { formatGuamDateTime } from '@/lib/utils';
 import { INVOICE_THEMES } from '@/lib/invoiceStyle';
 import { isBillingClient, isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
@@ -233,13 +233,7 @@ function previewTotal(preview?: InvoiceAiPreview | Record<string, never> | null)
 
 function formatDateTime(value?: string | null) {
   if (!value) return '';
-  return new Date(value).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  return formatGuamDateTime(value, { second: undefined });
 }
 
 function invoiceStatusLabel(status: InvoiceStatus) {
@@ -1508,8 +1502,8 @@ export function InvoiceMaker() {
                   <span className="font-medium text-neutral-700">{currency(invoice.total_amount)}</span>
                 </div>
                 <div className="mt-1 text-xs text-neutral-600">
-                  {invoice.generated_at ? `Issued ${formatGuamDate(invoice.generated_at)}` : 'Draft not issued'}
-                  {invoice.archived_at ? ` · Archived ${formatGuamDate(invoice.archived_at)}` : ''}
+                  {invoice.generated_at ? `Issued ${formatDateTime(invoice.generated_at)}` : 'Draft not issued'}
+                  {invoice.archived_at ? ` · Archived ${formatDateTime(invoice.archived_at)}` : ''}
                 </div>
               </button>
             ))}
@@ -1820,7 +1814,7 @@ export function InvoiceMaker() {
                   </h2>
                   <p className="text-sm text-neutral-500">
                     {activeLineItems.length} items · {currency(invoiceTotal)}
-                    {invoiceForm.generated_at && ` · Generated ${formatGuamDate(invoiceForm.generated_at)}`}
+                    {invoiceForm.generated_at && ` · Generated ${formatDateTime(invoiceForm.generated_at)}`}
                   </p>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap [&>button]:w-full sm:[&>button]:w-auto">
@@ -2492,7 +2486,7 @@ export function InvoiceMaker() {
                           </div>
                         </button>
                         <div className="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-600">
-                          <span>{formatGuamDate(session.updated_at)}</span>
+                          <span>{formatDateTime(session.updated_at)}</span>
                           {session.archived ? (
                             <button
                               type="button"

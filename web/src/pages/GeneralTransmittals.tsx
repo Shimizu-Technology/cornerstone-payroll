@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
@@ -622,7 +623,7 @@ export function GeneralTransmittals() {
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-semibold text-neutral-900">Version {artifact.version_number}</p>
-                          <p className="text-xs text-neutral-600">{new Date(artifact.created_at).toLocaleString()} · {formatBytes(artifact.byte_size)}</p>
+                          <p className="text-xs text-neutral-600">{formatGuamDateTime(artifact.created_at)} · {formatBytes(artifact.byte_size)}</p>
                         </div>
                         <FileClock className="h-4 w-4 text-primary-600" />
                       </div>

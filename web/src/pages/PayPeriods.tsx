@@ -91,7 +91,7 @@ function PayPeriodMobileCard({
         <div>
           <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
           <p className="mt-1 text-sm text-neutral-500">
-            Pay date {formatDate(period.pay_date)}
+            Pay date {formatDate(period.pay_date, { includeWeekday: true })}
           </p>
         </div>
         <Badge
@@ -1037,7 +1037,7 @@ export function PayPeriods() {
                       </TableCell>
                       <TableCell className={rowTone}>
                         <span className="text-sm text-neutral-700">
-                          {formatDate(period.pay_date)}
+                          {formatDate(period.pay_date, { includeWeekday: true })}
                         </span>
                       </TableCell>
                       <TableCell className={rowTone}>

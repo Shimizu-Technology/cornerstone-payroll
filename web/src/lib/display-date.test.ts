@@ -13,6 +13,10 @@ describe('formatDate', () => {
     expect(formatDate('2026-11-27T23:30:00-08:00')).toBe('Nov 27, 2026');
   });
 
+  it('can include an abbreviated weekday', () => {
+    expect(formatDate('2026-11-20', { includeWeekday: true })).toBe('Fri, Nov 20, 2026');
+  });
+
   it('accepts a valid leap day', () => {
     expect(formatDate('2028-02-29')).toBe('Feb 29, 2028');
   });
@@ -25,6 +29,7 @@ describe('formatDate', () => {
 
 describe('formatDateRange', () => {
   it.each([
+    ['2026-11-21', '2026-11-21', 'Nov 21, 2026'],
     ['2026-11-08', '2026-11-21', 'Nov 8 – 21, 2026'],
     ['2026-10-25', '2026-11-07', 'Oct 25 – Nov 7, 2026'],
     ['2026-12-27', '2027-01-09', 'Dec 27, 2026 – Jan 9, 2027'],

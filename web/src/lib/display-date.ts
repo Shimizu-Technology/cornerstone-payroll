@@ -11,11 +11,13 @@ export function parseDay(value?: string | null): Date | null {
 
 const MONTH_DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' });
 const FULL_DATE = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
+const FULL_DATE_WITH_WEEKDAY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 const WEEKDAY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long', month: 'short', day: 'numeric' });
 
-export function formatDate(value?: string | null): string {
+export function formatDate(value?: string | null, { includeWeekday = false } = {}): string {
   const date = parseDay(value);
-  return date ? FULL_DATE.format(date) : '';
+  const formatter = includeWeekday ? FULL_DATE_WITH_WEEKDAY : FULL_DATE;
+  return date ? formatter.format(date) : '';
 }
 
 export function shortDate(value?: string | null): string {
@@ -32,6 +34,7 @@ export function formatDateRange(start?: string | null, end?: string | null): str
   const first = parseDay(start);
   const last = parseDay(end);
   if (!first || !last) return '';
+  if (first.getTime() === last.getTime()) return FULL_DATE.format(first);
 
   const year = last.getUTCFullYear();
   if (first.getUTCFullYear() !== year) {
